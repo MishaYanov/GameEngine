@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "apps/editor-host/src-tauri",
+    "apps/game",
+    "compiler",
+    "crates/bridge",
+    "crates/renderer",
+    "crates/runtime",
+]
