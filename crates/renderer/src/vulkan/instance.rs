@@ -3,13 +3,15 @@ use std::{
 	ffi::{c_void, CStr},
 	fmt::{Display, Formatter},
 };
-
+use std::ffi::c_char;
 use ash::{
 	ext::debug_utils,
 	vk,
 	Entry,
 	Instance,
 };
+
+use raw_window_handle::RawDisplayHandle;
 
 const APPLICATION_NAME: &CStr = c"Game Engine";
 const ENGINE_NAME: &CStr = c"Game Engine";
@@ -111,7 +113,26 @@ impl From<vk::Result> for VulkanInitError {
 
 impl VulkanInstance {
 	pub fn new() -> Result<Self, VulkanInitError> {
-		let entry = unsafe { Entry::load()? };
+		Self::with_extensions(&[])
+	}
+
+	pub fn for_display(
+		display_handle: RawDisplayHandle,
+	) -> Result<Self, VulkanInitError> {
+		let extensions =
+			ash_window::enumerate_required_extensions(
+				display_handle,
+			)?;
+
+		Self::with_extensions(extensions)
+	}
+
+	fn with_extensions(
+		required_extensions: &[*const c_char],
+	) -> Result<Self, VulkanInitError> {
+		let entry = unsafe {
+			Entry::load()?
+		};
 
 		let loader_version = unsafe {
 			entry.try_enumerate_instance_version()?
@@ -123,43 +144,63 @@ impl VulkanInstance {
 				VulkanInitError::UnsupportedApiVersion {
 					required: TARGET_API_VERSION,
 					available: loader_version,
-				}
+				},
 			);
 		}
 
-		if VALIDATION_ENABLED && !validation_layer_available(&entry)? {
-			return Err(VulkanInitError::ValidationLayerUnavailable);
+		if VALIDATION_ENABLED
+			&& !validation_layer_available(&entry)?
+		{
+			return Err(
+				VulkanInitError::ValidationLayerUnavailable,
+			);
 		}
 
-		let application_info = vk::ApplicationInfo::default()
-			.application_name(APPLICATION_NAME)
-			.application_version(vk::make_api_version(0, 0, 1, 0))
-			.engine_name(ENGINE_NAME)
-			.engine_version(vk::make_api_version(0, 0, 1, 0))
-			.api_version(TARGET_API_VERSION);
+		let application_info =
+			vk::ApplicationInfo::default()
+				.application_name(APPLICATION_NAME)
+				.application_version(
+					vk::make_api_version(0, 0, 1, 0),
+				)
+				.engine_name(ENGINE_NAME)
+				.engine_version(
+					vk::make_api_version(0, 0, 1, 0),
+				)
+				.api_version(TARGET_API_VERSION);
 
 		let validation_layers = [
 			VALIDATION_LAYER.as_ptr(),
 		];
 
-		let mut extensions = Vec::new();
+		let mut extensions =
+			required_extensions.to_vec();
 
 		if VALIDATION_ENABLED {
-			extensions.push(debug_utils::NAME.as_ptr());
+			extensions.push(
+				debug_utils::NAME.as_ptr(),
+			);
 		}
 
-		let mut debug_create_info = create_debug_messenger_info();
+		let mut debug_create_info =
+			create_debug_messenger_info();
 
-		let mut instance_create_info = vk::InstanceCreateInfo::default()
-			.application_info(&application_info)
-			.enabled_extension_names(&extensions);
+		let mut instance_create_info =
+			vk::InstanceCreateInfo::default()
+				.application_info(&application_info)
+				.enabled_extension_names(&extensions);
 
 		if VALIDATION_ENABLED {
 			instance_create_info =
-				instance_create_info.enabled_layer_names(&validation_layers);
+				instance_create_info
+					.enabled_layer_names(
+						&validation_layers,
+					);
 
 			instance_create_info =
-				instance_create_info.push_next(&mut debug_create_info);
+				instance_create_info
+					.push_next(
+						&mut debug_create_info,
+					);
 		}
 
 		let instance = unsafe {
@@ -169,14 +210,17 @@ impl VulkanInstance {
 			)?
 		};
 
-		let debug_messenger = if VALIDATION_ENABLED {
-			Some(create_debug_messenger(
-				&entry,
-				&instance,
-			)?)
-		} else {
-			None
-		};
+		let debug_messenger =
+			if VALIDATION_ENABLED {
+				Some(
+					create_debug_messenger(
+						&entry,
+						&instance,
+					)?,
+				)
+			} else {
+				None
+			};
 
 		Ok(Self {
 			entry,

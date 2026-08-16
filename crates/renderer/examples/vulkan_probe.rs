@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!("Logical Vulkan device created.");
 	println!(
 		"Graphics queue family: {}",
-		device.graphics_queue_family()
+		device.queue_families().graphics
 	);
 
 	Ok(())

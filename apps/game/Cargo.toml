@@ -4,3 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+renderer = { version = "0.1.0", path = "../../crates/renderer" }
+winit = "0.30.13"

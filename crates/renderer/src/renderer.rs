@@ -4,8 +4,6 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
-use ash::vk;
-
 use crate::vulkan::{
 	format_api_version,
 	VulkanDevice,
