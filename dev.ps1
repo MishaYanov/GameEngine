@@ -1,16 +1,17 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet(
-        "editor",
-        "game",
-        "vulkan-probe"
+            "editor",
+            "game",
+            "vulkan-probe"
     )]
     [string]$Project = "editor"
 )
 
 $Root = $PSScriptRoot
 
-function Run-InDirectory {
+function Run-InDirectory
+{
     param(
         [string]$Path,
         [scriptblock]$Command
@@ -18,25 +19,34 @@ function Run-InDirectory {
 
     Push-Location $Path
 
-    try {
+    try
+    {
         & $Command
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -ne 0)
+        {
             throw "Command failed with exit code $LASTEXITCODE"
         }
     }
-    finally {
+    finally
+    {
         Pop-Location
     }
 }
 
-switch ($Project) {
+switch ($Project)
+{
 
     "editor" {
         Write-Host "Starting Game Engine Editor..."
 
-        Run-InDirectory "$Root\apps\editor" {
-            npx tauri dev
+        $TauriCli =
+        Join-Path `
+                $Root `
+                "apps\editor\node_modules\.bin\tauri.cmd"
+
+        Run-InDirectory "$Root\apps\editor-host" {
+            & $TauriCli dev
         }
     }
 
@@ -52,7 +62,9 @@ switch ($Project) {
         Write-Host "Starting Vulkan probe..."
 
         Run-InDirectory $Root {
-            cargo run -p renderer --example vulkan_probe
+            cargo run `
+                -p renderer `
+                --example vulkan_probe
         }
     }
 }

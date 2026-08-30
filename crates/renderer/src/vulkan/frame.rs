@@ -1,519 +1,431 @@
 use std::{
-	error::Error,
-	fmt::{
-		Display,
-		Formatter,
-	},
+    error::Error,
+    fmt::{Display, Formatter},
 };
 
-use ash::{
-	vk,
-	Device,
-};
+use ash::{Device, vk};
 
 use super::{
-	VulkanDevice,
-	VulkanSwapchain,
+    ModelPushConstants,
+    VulkanDevice,
+    VulkanGraphicsPipeline,
+    VulkanMesh,
+    VulkanSwapchain,
 };
 
 pub struct VulkanFrame {
-	device: Device,
+    device: Device,
 
-	command_pool: vk::CommandPool,
-	command_buffer: vk::CommandBuffer,
+    command_pool: vk::CommandPool,
+    command_buffer: vk::CommandBuffer,
 
-	image_available: vk::Semaphore,
+    image_available: vk::Semaphore,
+    render_finished: Vec<vk::Semaphore>,
 
-	/*
-	 * One presentation semaphore per swapchain image.
-	 *
-	 * This avoids reusing a semaphore while an earlier
-	 * presentation operation may still be using it.
-	 */
-	render_finished: Vec<vk::Semaphore>,
-
-	in_flight: vk::Fence,
+    in_flight: vk::Fence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameStatus {
-	Rendered,
-	SwapchainNeedsRebuild,
+    Rendered,
+    SwapchainNeedsRebuild,
 }
 
 #[derive(Debug)]
 pub enum VulkanFrameError {
-	Vulkan(vk::Result),
+    Vulkan(vk::Result),
 }
 
 impl Display for VulkanFrameError {
-	fn fmt(
-		&self,
-		formatter: &mut Formatter<'_>,
-	) -> std::fmt::Result {
-		match self {
-			Self::Vulkan(error) => {
-				write!(
-					formatter,
-					"Vulkan frame error: {error:?}",
-				)
-			}
-		}
-	}
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Vulkan(error) => {
+                write!(formatter, "Vulkan frame error: {error:?}",)
+            }
+        }
+    }
 }
 
 impl Error for VulkanFrameError {}
 
 impl From<vk::Result> for VulkanFrameError {
-	fn from(value: vk::Result) -> Self {
-		Self::Vulkan(value)
-	}
+    fn from(value: vk::Result) -> Self {
+        Self::Vulkan(value)
+    }
 }
 
 impl VulkanFrame {
-	pub fn new(
-		device: &VulkanDevice,
-		swapchain: &VulkanSwapchain,
-	) -> Result<Self, VulkanFrameError> {
-		let ash_device =
-			device.raw().clone();
+    pub fn new(
+        device: &VulkanDevice,
+        swapchain: &VulkanSwapchain,
+    ) -> Result<Self, VulkanFrameError> {
+        let ash_device = device.raw().clone();
 
-		let pool_create_info =
-			vk::CommandPoolCreateInfo::default()
-				.flags(
-					vk::CommandPoolCreateFlags::
-					RESET_COMMAND_BUFFER,
-				)
-				.queue_family_index(
-					device
-						.queue_families()
-						.graphics,
-				);
+        let pool_create_info = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(device.queue_families().graphics);
 
-		let command_pool = unsafe {
-			ash_device.create_command_pool(
-				&pool_create_info,
-				None,
-			)?
-		};
+        let command_pool = unsafe { ash_device.create_command_pool(&pool_create_info, None)? };
 
-		let allocate_info =
-			vk::CommandBufferAllocateInfo::default()
-				.command_pool(
-					command_pool,
-				)
-				.level(
-					vk::CommandBufferLevel::PRIMARY,
-				)
-				.command_buffer_count(1);
+        let allocate_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
 
-		let command_buffers = unsafe {
-			ash_device.allocate_command_buffers(
-				&allocate_info,
-			)?
-		};
+        let command_buffers = unsafe { ash_device.allocate_command_buffers(&allocate_info)? };
 
-		let command_buffer =
-			command_buffers[0];
+        let command_buffer = command_buffers[0];
 
-		let semaphore_info =
-			vk::SemaphoreCreateInfo::default();
+        let semaphore_info = vk::SemaphoreCreateInfo::default();
 
-		let image_available = unsafe {
-			ash_device.create_semaphore(
-				&semaphore_info,
-				None,
-			)?
-		};
+        let image_available = unsafe { ash_device.create_semaphore(&semaphore_info, None)? };
 
-		let mut render_finished =
-			Vec::with_capacity(
-				swapchain.images().len(),
-			);
+        let mut render_finished = Vec::with_capacity(swapchain.images().len());
 
-		for _ in swapchain.images() {
-			let semaphore = unsafe {
-				ash_device.create_semaphore(
-					&semaphore_info,
-					None,
-				)?
-			};
+        for _ in swapchain.images() {
+            let semaphore = unsafe { ash_device.create_semaphore(&semaphore_info, None)? };
 
-			render_finished.push(
-				semaphore,
-			);
-		}
+            render_finished.push(semaphore);
+        }
 
-		/*
-		 * Start signaled so our very first frame
-		 * doesn't block waiting for work that
-		 * never existed.
-		 */
-		let fence_info =
-			vk::FenceCreateInfo::default()
-				.flags(
-					vk::FenceCreateFlags::SIGNALED,
-				);
+        let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-		let in_flight = unsafe {
-			ash_device.create_fence(
-				&fence_info,
-				None,
-			)?
-		};
+        let in_flight = unsafe { ash_device.create_fence(&fence_info, None)? };
 
-		Ok(Self {
-			device: ash_device,
+        Ok(Self {
+            device: ash_device,
 
-			command_pool,
-			command_buffer,
+            command_pool,
+            command_buffer,
 
-			image_available,
-			render_finished,
+            image_available,
+            render_finished,
 
-			in_flight,
-		})
-	}
+            in_flight,
+        })
+    }
 
-	pub fn draw_clear(
-		&mut self,
-		device: &VulkanDevice,
-		swapchain: &VulkanSwapchain,
-	) -> Result<
-		FrameStatus,
-		VulkanFrameError,
-	> {
-		unsafe {
-			self.device.wait_for_fences(
-				&[self.in_flight],
-				true,
-				u64::MAX,
-			)?;
-		}
+    pub fn draw(
+        &mut self,
+        device: &VulkanDevice,
+        swapchain: &VulkanSwapchain,
+        pipeline: &VulkanGraphicsPipeline,
+        mesh: &VulkanMesh,
+        models: &[ModelPushConstants],
+    ) -> Result<
+        FrameStatus,
+        VulkanFrameError,
+    > {
+        unsafe {
+            self.device
+                .wait_for_fences(&[self.in_flight], true, u64::MAX)?;
+        }
 
-		let (
-			image_index,
-			acquire_suboptimal,
-		) = match swapchain
-			.acquire_next_image(
-				u64::MAX,
-				self.image_available,
-				vk::Fence::null(),
-			)
-		{
-			// TODO: extract error handling
-			Ok(result) => result,
+        let (image_index, acquire_suboptimal) =
+            match swapchain.acquire_next_image(u64::MAX, self.image_available, vk::Fence::null()) {
+                Ok(result) => result,
 
-			Err(
-				vk::Result::ERROR_OUT_OF_DATE_KHR,
-			) => {
-				return Ok(
-					FrameStatus::
-					SwapchainNeedsRebuild,
-				);
-			}
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    return Ok(FrameStatus::SwapchainNeedsRebuild);
+                }
 
-			Err(error) => {
-				return Err(error.into());
-			}
-		};
+                Err(error) => {
+                    return Err(error.into());
+                }
+            };
 
-		/*
-		 * Previous GPU work is finished, so the
-		 * command pool can be reused.
-		 */
-		unsafe {
-			self.device.reset_command_pool(
-				self.command_pool,
-				vk::CommandPoolResetFlags::empty(),
-			)?;
-		}
+        unsafe {
+            self.device
+                .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())?;
+        }
 
-		self.record_clear_commands(
-			swapchain.images()[
-				image_index as usize
-				],
-		)?;
+        self.record_draw_commands(
+            swapchain.images()[
+                image_index as usize
+                ],
 
-		/*
-		 * Only reset after acquisition and command
-		 * recording succeeded.
-		 *
-		 * Otherwise we'd leave an unsignaled fence
-		 * with nothing scheduled to signal it.
-		 */
-		unsafe {
-			self.device.reset_fences(
-				&[self.in_flight],
-			)?;
-		}
+            swapchain.image_views()[
+                image_index as usize
+                ],
 
-		let wait_semaphores = [
-			self.image_available,
-		];
+            swapchain.extent(),
 
-		/*
-		 * The first operation touching the image is
-		 * our transfer/layout-transition path.
-		 */
-		let wait_stages = [
-			vk::PipelineStageFlags::TRANSFER,
-		];
+            pipeline.raw(),
+            pipeline.layout(),
 
-		let command_buffers = [
-			self.command_buffer,
-		];
+            mesh.vertex_buffer().raw(),
+            mesh.index_buffer().raw(),
+            mesh.index_count(),
 
-		let render_finished =
-			self.render_finished[
-				image_index as usize
-				];
+            models,
+        )?;
 
-		let signal_semaphores = [
-			render_finished,
-		];
+        unsafe {
+            self.device.reset_fences(&[self.in_flight])?;
+        }
 
-		let submit_info =
-			vk::SubmitInfo::default()
-				.wait_semaphores(
-					&wait_semaphores,
-				)
-				.wait_dst_stage_mask(
-					&wait_stages,
-				)
-				.command_buffers(
-					&command_buffers,
-				)
-				.signal_semaphores(
-					&signal_semaphores,
-				);
+        let wait_semaphores = [self.image_available];
 
-		unsafe {
-			self.device.queue_submit(
-				device.graphics_queue(),
-				&[submit_info],
-				self.in_flight,
-			)?;
-		}
+        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
 
-		let present_suboptimal =
-			match swapchain.present(
-				device.present_queue(),
-				&signal_semaphores,
-				image_index,
-			) {
-				Ok(suboptimal) => suboptimal,
+        let command_buffers = [self.command_buffer];
 
-				Err(
-					vk::Result::
-					ERROR_OUT_OF_DATE_KHR,
-				) => {
-					return Ok(
-						FrameStatus::
-						SwapchainNeedsRebuild,
-					);
-				}
+        let render_finished = self.render_finished[image_index as usize];
 
-				Err(error) => {
-					return Err(error.into());
-				}
-			};
+        let signal_semaphores = [render_finished];
 
-		if acquire_suboptimal
-			|| present_suboptimal
-		{
-			return Ok(
-				FrameStatus::
-				SwapchainNeedsRebuild,
-			);
-		}
+        let submit_info = vk::SubmitInfo::default()
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(&command_buffers)
+            .signal_semaphores(&signal_semaphores);
 
-		Ok(FrameStatus::Rendered)
-	}
+        unsafe {
+            self.device
+                .queue_submit(device.graphics_queue(), &[submit_info], self.in_flight)?;
+        }
 
-	fn record_clear_commands(
-		&self,
-		image: vk::Image,
-	) -> Result<(), VulkanFrameError> {
-		let begin_info =
-			vk::CommandBufferBeginInfo::default()
-				.flags(
-					vk::CommandBufferUsageFlags::
-					ONE_TIME_SUBMIT,
-				);
+        let present_suboptimal =
+            match swapchain.present(device.present_queue(), &signal_semaphores, image_index) {
+                Ok(suboptimal) => suboptimal,
 
-		unsafe {
-			self.device.begin_command_buffer(
-				self.command_buffer,
-				&begin_info,
-			)?;
-		}
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    return Ok(FrameStatus::SwapchainNeedsRebuild);
+                }
 
-		let range =
-			vk::ImageSubresourceRange::default()
-				.aspect_mask(
-					vk::ImageAspectFlags::COLOR,
-				)
-				.base_mip_level(0)
-				.level_count(1)
-				.base_array_layer(0)
-				.layer_count(1);
+                Err(error) => {
+                    return Err(error.into());
+                }
+            };
 
-		/*
-		 * We clear the entire image, so preserving
-		 * previous presentation contents serves no
-		 * purpose.
-		 *
-		 * Vulkan permits UNDEFINED here when the
-		 * previous image contents can be discarded.
-		 */
-		let to_transfer =
-			vk::ImageMemoryBarrier::default()
-				.src_access_mask(
-					vk::AccessFlags::empty(),
-				)
-				.dst_access_mask(
-					vk::AccessFlags::
-					TRANSFER_WRITE,
-				)
-				.old_layout(
-					vk::ImageLayout::UNDEFINED,
-				)
-				.new_layout(
-					vk::ImageLayout::
-					TRANSFER_DST_OPTIMAL,
-				)
-				.src_queue_family_index(
-					vk::QUEUE_FAMILY_IGNORED,
-				)
-				.dst_queue_family_index(
-					vk::QUEUE_FAMILY_IGNORED,
-				)
-				.image(image)
-				.subresource_range(range);
+        if acquire_suboptimal || present_suboptimal {
+            return Ok(FrameStatus::SwapchainNeedsRebuild);
+        }
 
-		unsafe {
-			self.device.cmd_pipeline_barrier(
-				self.command_buffer,
+        Ok(FrameStatus::Rendered)
+    }
 
-				vk::PipelineStageFlags::TRANSFER,
-				vk::PipelineStageFlags::TRANSFER,
+    fn record_draw_commands(
+        &self,
+        image: vk::Image,
+        image_view: vk::ImageView,
+        extent: vk::Extent2D,
 
-				vk::DependencyFlags::empty(),
+        pipeline: vk::Pipeline,
+        pipeline_layout: vk::PipelineLayout,
 
-				&[],
-				&[],
-				&[to_transfer],
-			);
-		}
+        vertex_buffer: vk::Buffer,
+        index_buffer: vk::Buffer,
+        index_count: u32,
 
-		/*
-		 * This is our first actual rendered output.
-		 *
-		 * No shaders, render pass or pipeline yet:
-		 * simply clear the swapchain image.
-		 */
-		let clear_color =
-			vk::ClearColorValue {
-				float32: [
-					0.04,
-					0.08,
-					0.16,
-					1.0,
-				],
-			};
+        models: &[ModelPushConstants],
+    ) -> Result<
+        (),
+        VulkanFrameError,
+    > {
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-		unsafe {
-			self.device.cmd_clear_color_image(
-				self.command_buffer,
-				image,
-				vk::ImageLayout::
-				TRANSFER_DST_OPTIMAL,
-				&clear_color,
-				&[range],
-			);
-		}
+        unsafe {
+            self.device
+                .begin_command_buffer(self.command_buffer, &begin_info)?;
+        }
 
-		let to_present =
-			vk::ImageMemoryBarrier::default()
-				.src_access_mask(
-					vk::AccessFlags::
-					TRANSFER_WRITE,
-				)
-				.dst_access_mask(
-					vk::AccessFlags::empty(),
-				)
-				.old_layout(
-					vk::ImageLayout::
-					TRANSFER_DST_OPTIMAL,
-				)
-				.new_layout(
-					vk::ImageLayout::
-					PRESENT_SRC_KHR,
-				)
-				.src_queue_family_index(
-					vk::QUEUE_FAMILY_IGNORED,
-				)
-				.dst_queue_family_index(
-					vk::QUEUE_FAMILY_IGNORED,
-				)
-				.image(image)
-				.subresource_range(range);
+        let range = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_mip_level(0)
+            .level_count(1)
+            .base_array_layer(0)
+            .layer_count(1);
 
-		unsafe {
-			self.device.cmd_pipeline_barrier(
-				self.command_buffer,
+        let to_color_attachment = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(range);
 
-				vk::PipelineStageFlags::TRANSFER,
-				vk::PipelineStageFlags::
-				BOTTOM_OF_PIPE,
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffer,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[to_color_attachment],
+            );
+        }
 
-				vk::DependencyFlags::empty(),
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.04, 0.08, 0.16, 1.0],
+            },
+        };
 
-				&[],
-				&[],
-				&[to_present],
-			);
+        let color_attachment = vk::RenderingAttachmentInfo::default()
+            .image_view(image_view)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(clear_value);
 
-			self.device.end_command_buffer(
-				self.command_buffer,
-			)?;
-		}
+        let color_attachments = [color_attachment];
 
-		Ok(())
-	}
+        let render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+
+            extent,
+        };
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(render_area)
+            .layer_count(1)
+            .color_attachments(&color_attachments);
+
+        unsafe {
+            self.device
+                .cmd_begin_rendering(self.command_buffer, &rendering_info);
+        }
+
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+
+            width: extent.width as f32,
+
+            height: extent.height as f32,
+
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+
+        let scissor = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+
+            extent,
+        };
+
+        unsafe {
+            self.device
+                .cmd_set_viewport(self.command_buffer, 0, &[viewport]);
+
+            self.device
+                .cmd_set_scissor(self.command_buffer, 0, &[scissor]);
+
+            /*
+			* The pipeline and mesh are shared by
+			* every object in this draw batch.
+			*/
+            self.device
+                .cmd_bind_pipeline(
+                    self.command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline,
+                );
+
+            let vertex_buffers = [
+                vertex_buffer,
+            ];
+
+            let vertex_offsets = [
+                0,
+            ];
+
+            self.device
+                .cmd_bind_vertex_buffers(
+                    self.command_buffer,
+                    0,
+                    &vertex_buffers,
+                    &vertex_offsets,
+                );
+
+            self.device
+                .cmd_bind_index_buffer(
+                    self.command_buffer,
+                    index_buffer,
+                    0,
+                    vk::IndexType::UINT16,
+                );
+
+            /*
+			 * Each object gets different per-draw
+			 * state while reusing the same mesh.
+			 */
+            for model in models {
+                self.device
+                    .cmd_push_constants(
+                        self.command_buffer,
+
+                        pipeline_layout,
+
+                        vk::ShaderStageFlags::
+                        VERTEX,
+
+                        0,
+
+                        model.as_bytes(),
+                    );
+
+                self.device
+                    .cmd_draw_indexed(
+                        self.command_buffer,
+
+                        index_count,
+                        1,
+
+                        0,
+                        0,
+                        0,
+                    );
+            }
+
+            self.device.cmd_end_rendering(self.command_buffer);
+        }
+
+        let to_present = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_access_mask(vk::AccessFlags::empty())
+            .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(range);
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffer,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[to_present],
+            );
+
+            self.device.end_command_buffer(self.command_buffer)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanFrame {
-	fn drop(&mut self) {
-		unsafe {
-			for semaphore in
-				self.render_finished.drain(..)
-			{
-				self.device.destroy_semaphore(
-					semaphore,
-					None,
-				);
-			}
+    fn drop(&mut self) {
+        unsafe {
+            for semaphore in self.render_finished.drain(..) {
+                self.device.destroy_semaphore(semaphore, None);
+            }
 
-			self.device.destroy_semaphore(
-				self.image_available,
-				None,
-			);
+            self.device.destroy_semaphore(self.image_available, None);
 
-			self.device.destroy_fence(
-				self.in_flight,
-				None,
-			);
+            self.device.destroy_fence(self.in_flight, None);
 
-			/*
-			 * Destroying the pool also releases
-			 * its command buffers.
-			 */
-			self.device.destroy_command_pool(
-				self.command_pool,
-				None,
-			);
-		}
-	}
+            self.device.destroy_command_pool(self.command_pool, None);
+        }
+    }
 }

@@ -1,11 +1,16 @@
 use renderer::vulkan::{
     FrameStatus,
+    ModelPushConstants,
+    Vertex,
     VulkanDevice,
     VulkanFrame,
+    VulkanGraphicsPipeline,
     VulkanInstance,
+    VulkanMesh,
     VulkanSurface,
     VulkanSwapchain,
 };
+
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -27,11 +32,14 @@ use winit::{
 #[derive(Default)]
 struct GameApp {
     frame: Option<VulkanFrame>,
+    mesh: Option<VulkanMesh>,
+    pipeline: Option<VulkanGraphicsPipeline>,
     swapchain: Option<VulkanSwapchain>,
     device: Option<VulkanDevice>,
     surface: Option<VulkanSurface>,
     instance: Option<VulkanInstance>,
     window: Option<Window>,
+
     swapchain_dirty: bool,
 }
 
@@ -90,11 +98,13 @@ impl GameApp {
             device
                 .raw()
                 .device_wait_idle()
-                .map_err(|error| {
-                    format!(
-                        "failed waiting for Vulkan device: {error:?}"
-                    )
-                })?;
+                .map_err(
+                    |error| {
+                        format!(
+                            "failed waiting for Vulkan device: {error:?}"
+                        )
+                    },
+                )?;
         }
 
         println!(
@@ -112,33 +122,56 @@ impl GameApp {
                 size.height,
                 old_swapchain,
             )
-                .map_err(|error| {
-                    format!(
-                        "failed recreating swapchain: {error}"
-                    )
-                })?;
+                .map_err(
+                    |error| {
+                        format!(
+                            "failed recreating swapchain: {error}"
+                        )
+                    },
+                )?;
+
+        let new_pipeline =
+            VulkanGraphicsPipeline::new(
+                device.raw(),
+                new_swapchain.format(),
+            )
+                .map_err(
+                    |error| {
+                        format!(
+                            "failed recreating graphics pipeline: {error}"
+                        )
+                    },
+                )?;
 
         let new_frame =
             VulkanFrame::new(
                 device,
                 &new_swapchain,
             )
-                .map_err(|error| {
-                    format!(
-                        "failed recreating frame resources: {error}"
-                    )
-                })?;
+                .map_err(
+                    |error| {
+                        format!(
+                            "failed recreating frame resources: {error}"
+                        )
+                    },
+                )?;
 
         /*
-         * Drop old frame first, then old swapchain.
-         */
+		 * Replace resources in dependency order:
+		 *
+		 * frame -> pipeline -> swapchain
+		 */
         self.frame =
             Some(new_frame);
+
+        self.pipeline =
+            Some(new_pipeline);
 
         self.swapchain =
             Some(new_swapchain);
 
-        self.swapchain_dirty = false;
+        self.swapchain_dirty =
+            false;
 
         println!(
             "Swapchain recreated."
@@ -159,33 +192,41 @@ impl ApplicationHandler for GameApp {
 
         let attributes =
             Window::default_attributes()
-                .with_title("Game Engine")
+                .with_title(
+                    "Game Engine",
+                )
                 .with_inner_size(
-                    winit::dpi::LogicalSize::new(
+                    winit::dpi::
+                    LogicalSize::new(
                         1280,
                         720,
                     ),
                 );
 
-        let window = event_loop
-            .create_window(attributes)
-            .expect(
-                "failed to create game window",
-            );
+        let window =
+            event_loop
+                .create_window(
+                    attributes,
+                )
+                .expect(
+                    "failed to create game window",
+                );
 
-        let display_handle = window
-            .display_handle()
-            .expect(
-                "failed to get display handle",
-            )
-            .as_raw();
+        let display_handle =
+            window
+                .display_handle()
+                .expect(
+                    "failed to get display handle",
+                )
+                .as_raw();
 
-        let window_handle = window
-            .window_handle()
-            .expect(
-                "failed to get window handle",
-            )
-            .as_raw();
+        let window_handle =
+            window
+                .window_handle()
+                .expect(
+                    "failed to get window handle",
+                )
+                .as_raw();
 
         println!(
             "Creating Vulkan instance..."
@@ -270,18 +311,111 @@ impl ApplicationHandler for GameApp {
 
         println!(
             "Swapchain images: {}",
-            swapchain.images().len(),
+            swapchain
+                .images()
+                .len(),
         );
 
         println!(
             "Swapchain extent: {}x{}",
-            swapchain.extent().width,
-            swapchain.extent().height,
+            swapchain
+                .extent()
+                .width,
+
+            swapchain
+                .extent()
+                .height,
         );
 
         println!(
             "Swapchain format: {:?}",
             swapchain.format(),
+        );
+
+        /*
+		 * Static mesh geometry.
+		 *
+		 * VulkanMesh uploads these through staging
+		 * buffers into DEVICE_LOCAL GPU memory.
+		 */
+        let vertices = [
+            Vertex::new(
+                [
+                    0.0,
+                    -0.5,
+                ],
+                [
+                    1.0,
+                    0.0,
+                    0.0,
+                ],
+            ),
+
+            Vertex::new(
+                [
+                    0.5,
+                    0.5,
+                ],
+                [
+                    0.0,
+                    1.0,
+                    0.0,
+                ],
+            ),
+
+            Vertex::new(
+                [
+                    -0.5,
+                    0.5,
+                ],
+                [
+                    0.0,
+                    0.0,
+                    1.0,
+                ],
+            ),
+        ];
+
+        let indices: [u16; 3] = [
+            0,
+            1,
+            2,
+        ];
+
+        println!(
+            "Creating mesh..."
+        );
+
+        let mesh =
+            VulkanMesh::new(
+                instance.raw(),
+                &device,
+                &vertices,
+                &indices,
+            )
+                .expect(
+                    "failed to create Vulkan mesh",
+                );
+
+        println!(
+            "Mesh created."
+        );
+
+        println!(
+            "Creating graphics pipeline..."
+        );
+
+        let pipeline =
+            VulkanGraphicsPipeline::new(
+                device.raw(),
+                swapchain.format(),
+            )
+                .expect(
+                    "failed to create Vulkan graphics pipeline",
+                );
+
+        println!(
+            "Graphics pipeline created."
         );
 
         println!(
@@ -301,29 +435,51 @@ impl ApplicationHandler for GameApp {
             "Frame resources created."
         );
 
-        self.frame = Some(frame);
-        self.swapchain = Some(swapchain);
-        self.device = Some(device);
-        self.surface = Some(surface);
-        self.instance = Some(instance);
-        self.window = Some(window);
+        self.frame =
+            Some(frame);
+
+        self.mesh =
+            Some(mesh);
+
+        self.pipeline =
+            Some(pipeline);
+
+        self.swapchain =
+            Some(swapchain);
+
+        self.device =
+            Some(device);
+
+        self.surface =
+            Some(surface);
+
+        self.instance =
+            Some(instance);
+
+        self.window =
+            Some(window);
 
         self.window
             .as_ref()
             .unwrap()
             .request_redraw();
     }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = &self.window else {
+        let Some(window) =
+            &self.window
+        else {
             return;
         };
 
-        if window.id() != window_id {
+        if window.id()
+            != window_id
+        {
             return;
         }
 
@@ -333,7 +489,8 @@ impl ApplicationHandler for GameApp {
             }
 
             WindowEvent::Resized(size) => {
-                self.swapchain_dirty = true;
+                self.swapchain_dirty =
+                    true;
 
                 if size.width == 0
                     || size.height == 0
@@ -344,20 +501,26 @@ impl ApplicationHandler for GameApp {
                 if let Some(window) =
                     self.window.as_ref()
                 {
-                    window.request_redraw();
+                    window
+                        .request_redraw();
                 }
             }
 
             WindowEvent::RedrawRequested => {
-                let size = match self.window.as_ref() {
-                    Some(window) => {
-                        window.inner_size()
-                    }
+                let size =
+                    match self
+                        .window
+                        .as_ref()
+                    {
+                        Some(window) => {
+                            window.inner_size()
+                        }
 
-                    None => {
-                        return;
-                    }
-                };
+                        None => {
+                            return;
+                        }
+                    };
+
                 if size.width == 0
                     || size.height == 0
                 {
@@ -365,7 +528,9 @@ impl ApplicationHandler for GameApp {
                 }
 
                 if self.swapchain_dirty {
-                    match self.recreate_swapchain() {
+                    match self
+                        .recreate_swapchain()
+                    {
                         Ok(true) => {}
 
                         Ok(false) => {
@@ -377,42 +542,125 @@ impl ApplicationHandler for GameApp {
                                 "{error}"
                             );
 
-                            event_loop.exit();
+                            event_loop
+                                .exit();
 
                             return;
                         }
                     }
                 }
 
-                let result = match (
-                    self.frame.as_mut(),
-                    self.device.as_ref(),
-                    self.swapchain.as_ref(),
-                ) {
-                    (
-                        Some(frame),
-                        Some(device),
-                        Some(swapchain),
-                    ) => {
-                        frame.draw_clear(
-                            device,
-                            swapchain,
-                        )
-                    }
+                /*
+				 * Per-draw model transform.
+				 *
+				 * Mesh data remains unchanged.
+				 *
+				 * This matrix:
+				 * - moves right
+				 * - rotates 20 degrees
+				 * - scales to 75%
+				 */
 
-                    _ => {
-                        return;
-                    }
-                };
+                let models = [
+                    ModelPushConstants::from_2d(
+                        [
+                            -0.55,
+                            0.0,
+                        ],
+
+                        ModelPushConstants::
+                        degrees_to_radians(
+                            -20.0,
+                        ),
+
+                        [
+                            0.45,
+                            0.45,
+                        ],
+                    ),
+
+                    ModelPushConstants::from_2d(
+                        [
+                            0.0,
+                            0.0,
+                        ],
+
+                        0.0,
+
+                        [
+                            0.55,
+                            0.55,
+                        ],
+                    ),
+
+                    ModelPushConstants::from_2d(
+                        [
+                            0.55,
+                            0.0,
+                        ],
+
+                        ModelPushConstants::
+                        degrees_to_radians(
+                            20.0,
+                        ),
+
+                        [
+                            0.45,
+                            0.45,
+                        ],
+                    ),
+                ];
+
+                let result =
+                    match (
+                        self.frame
+                            .as_mut(),
+
+                        self.device
+                            .as_ref(),
+
+                        self.swapchain
+                            .as_ref(),
+
+                        self.pipeline
+                            .as_ref(),
+
+                        self.mesh
+                            .as_ref(),
+                    ) {
+                        (
+                            Some(frame),
+                            Some(device),
+                            Some(swapchain),
+                            Some(pipeline),
+                            Some(mesh),
+                        ) => {
+                            frame.draw(
+                                device,
+                                swapchain,
+                                pipeline,
+                                mesh,
+                                &models,
+                            )
+                        }
+
+                        _ => {
+                            return;
+                        }
+                    };
 
                 match result {
-                    Ok(FrameStatus::Rendered) => {}
+                    Ok(
+                        FrameStatus::
+                        Rendered,
+                    ) => {}
 
                     Ok(
                         FrameStatus::
                         SwapchainNeedsRebuild,
                     ) => {
-                        self.swapchain_dirty = true;
+                        self.swapchain_dirty =
+                            true;
                     }
 
                     Err(error) => {
@@ -420,7 +668,8 @@ impl ApplicationHandler for GameApp {
                             "Rendering failed: {error}"
                         );
 
-                        event_loop.exit();
+                        event_loop
+                            .exit();
 
                         return;
                     }
@@ -429,10 +678,11 @@ impl ApplicationHandler for GameApp {
                 if let Some(window) =
                     self.window.as_ref()
                 {
-                    window.request_redraw();
+                    window
+                        .request_redraw();
                 }
             }
-            
+
             _ => {}
         }
     }
@@ -449,10 +699,13 @@ fn main() {
         ControlFlow::Poll,
     );
 
-    let mut app = GameApp::default();
+    let mut app =
+        GameApp::default();
 
     event_loop
-        .run_app(&mut app)
+        .run_app(
+            &mut app,
+        )
         .expect(
             "game event loop failed",
         );
