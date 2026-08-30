@@ -9,7 +9,15 @@ pub struct VulkanGraphicsPipeline {
 }
 
 impl VulkanGraphicsPipeline {
-    pub fn new(device: &Device, color_format: vk::Format) -> Result<Self, String> {
+    pub fn new(
+        device: &Device,
+        color_format: vk::Format,
+        depth_format: vk::Format,
+
+        camera_layout: vk::DescriptorSetLayout,
+
+        texture_layout: vk::DescriptorSetLayout,
+    ) -> Result<Self, String> {
         let vertex_shader = create_shader_module(
             device,
             include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv")),
@@ -32,11 +40,14 @@ impl VulkanGraphicsPipeline {
 
         let push_constant_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .offset(0)
-            .size(ModelPushConstants::size())];
+            .offset(ModelPushConstants::OFFSET)
+            .size(ModelPushConstants::SIZE)];
 
-        let layout_info =
-            vk::PipelineLayoutCreateInfo::default().push_constant_ranges(&push_constant_ranges);
+        let descriptor_set_layouts = [camera_layout, texture_layout];
+
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
+            .set_layouts(&descriptor_set_layouts)
+            .push_constant_ranges(&push_constant_ranges);
 
         let layout = match unsafe { device.create_pipeline_layout(&layout_info, None) } {
             Ok(layout) => layout,
@@ -77,10 +88,6 @@ impl VulkanGraphicsPipeline {
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
             .primitive_restart_enable(false);
 
-        /*
-         * Viewport and scissor will be supplied
-         * dynamically when recording the command buffer.
-         */
         let viewport_state = vk::PipelineViewportStateCreateInfo::default()
             .viewport_count(1)
             .scissor_count(1);
@@ -89,12 +96,19 @@ impl VulkanGraphicsPipeline {
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+            .cull_mode(vk::CullModeFlags::BACK)
+            .front_face(vk::FrontFace::CLOCKWISE)
             .line_width(1.0);
 
         let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(true)
+            .depth_write_enable(true)
+            .depth_compare_op(vk::CompareOp::LESS)
+            .depth_bounds_test_enable(false)
+            .stencil_test_enable(false);
 
         let color_blend_attachment = [vk::PipelineColorBlendAttachmentState {
             blend_enable: vk::FALSE,
@@ -112,18 +126,11 @@ impl VulkanGraphicsPipeline {
         let dynamic_state =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        /*
-         * Dynamic rendering replaces the old:
-         *
-         * RenderPass
-         * Framebuffer
-         *
-         * dependency during pipeline creation.
-         */
         let color_formats = [color_format];
 
-        let mut rendering_info =
-            vk::PipelineRenderingCreateInfo::default().color_attachment_formats(&color_formats);
+        let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
+            .color_attachment_formats(&color_formats)
+            .depth_attachment_format(depth_format);
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .push_next(&mut rendering_info)
@@ -133,6 +140,7 @@ impl VulkanGraphicsPipeline {
             .viewport_state(&viewport_state)
             .rasterization_state(&rasterization)
             .multisample_state(&multisampling)
+            .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blending)
             .dynamic_state(&dynamic_state)
             .layout(layout)
@@ -142,10 +150,6 @@ impl VulkanGraphicsPipeline {
             device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
         };
 
-        /*
-         * Shader modules are only needed while creating
-         * the pipeline.
-         */
         unsafe {
             device.destroy_shader_module(vertex_shader, None);
 

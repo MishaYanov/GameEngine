@@ -6,11 +6,8 @@ use std::{
 use ash::{Device, vk};
 
 use super::{
-    ModelPushConstants,
-    VulkanDevice,
-    VulkanGraphicsPipeline,
-    VulkanMesh,
-    VulkanSwapchain,
+    CameraUniform, ModelPushConstants, RenderObject, VulkanCamera, VulkanCameraError,
+    VulkanDepthBuffer, VulkanDevice, VulkanGraphicsPipeline, VulkanSwapchain,
 };
 
 pub struct VulkanFrame {
@@ -34,6 +31,7 @@ pub enum FrameStatus {
 #[derive(Debug)]
 pub enum VulkanFrameError {
     Vulkan(vk::Result),
+    Camera(VulkanCameraError),
 }
 
 impl Display for VulkanFrameError {
@@ -41,6 +39,10 @@ impl Display for VulkanFrameError {
         match self {
             Self::Vulkan(error) => {
                 write!(formatter, "Vulkan frame error: {error:?}",)
+            }
+
+            Self::Camera(error) => {
+                write!(formatter, "Vulkan camera update error: {error}",)
             }
         }
     }
@@ -51,6 +53,12 @@ impl Error for VulkanFrameError {}
 impl From<vk::Result> for VulkanFrameError {
     fn from(value: vk::Result) -> Self {
         Self::Vulkan(value)
+    }
+}
+
+impl From<VulkanCameraError> for VulkanFrameError {
+    fn from(value: VulkanCameraError) -> Self {
+        Self::Camera(value)
     }
 }
 
@@ -109,17 +117,20 @@ impl VulkanFrame {
         &mut self,
         device: &VulkanDevice,
         swapchain: &VulkanSwapchain,
+        depth_buffer: &VulkanDepthBuffer,
         pipeline: &VulkanGraphicsPipeline,
-        mesh: &VulkanMesh,
-        models: &[ModelPushConstants],
-    ) -> Result<
-        FrameStatus,
-        VulkanFrameError,
-    > {
+
+        camera: &VulkanCamera,
+        camera_uniform: &CameraUniform,
+
+        objects: &[RenderObject<'_>],
+    ) -> Result<FrameStatus, VulkanFrameError> {
         unsafe {
             self.device
                 .wait_for_fences(&[self.in_flight], true, u64::MAX)?;
         }
+
+        camera.update(camera_uniform)?;
 
         let (image_index, acquire_suboptimal) =
             match swapchain.acquire_next_image(u64::MAX, self.image_available, vk::Fence::null()) {
@@ -140,24 +151,15 @@ impl VulkanFrame {
         }
 
         self.record_draw_commands(
-            swapchain.images()[
-                image_index as usize
-                ],
-
-            swapchain.image_views()[
-                image_index as usize
-                ],
-
+            swapchain.images()[image_index as usize],
+            swapchain.image_views()[image_index as usize],
             swapchain.extent(),
-
+            depth_buffer.image(),
+            depth_buffer.view(),
             pipeline.raw(),
             pipeline.layout(),
-
-            mesh.vertex_buffer().raw(),
-            mesh.index_buffer().raw(),
-            mesh.index_count(),
-
-            models,
+            camera.descriptor_set(),
+            objects,
         )?;
 
         unsafe {
@@ -210,19 +212,13 @@ impl VulkanFrame {
         image: vk::Image,
         image_view: vk::ImageView,
         extent: vk::Extent2D,
-
+        depth_image: vk::Image,
+        depth_view: vk::ImageView,
         pipeline: vk::Pipeline,
         pipeline_layout: vk::PipelineLayout,
-
-        vertex_buffer: vk::Buffer,
-        index_buffer: vk::Buffer,
-        index_count: u32,
-
-        models: &[ModelPushConstants],
-    ) -> Result<
-        (),
-        VulkanFrameError,
-    > {
+        camera_descriptor_set: vk::DescriptorSet,
+        objects: &[RenderObject<'_>],
+    ) -> Result<(), VulkanFrameError> {
         let begin_info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
@@ -260,6 +256,36 @@ impl VulkanFrame {
             );
         }
 
+        let depth_range = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::DEPTH)
+            .base_mip_level(0)
+            .level_count(1)
+            .base_array_layer(0)
+            .layer_count(1);
+
+        let to_depth_attachment = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(depth_image)
+            .subresource_range(depth_range);
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffer,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[to_depth_attachment],
+            );
+        }
+
         let clear_value = vk::ClearValue {
             color: vk::ClearColorValue {
                 float32: [0.04, 0.08, 0.16, 1.0],
@@ -275,6 +301,20 @@ impl VulkanFrame {
 
         let color_attachments = [color_attachment];
 
+        let depth_clear_value = vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 1.0,
+                stencil: 0,
+            },
+        };
+
+        let depth_attachment = vk::RenderingAttachmentInfo::default()
+            .image_view(depth_view)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .clear_value(depth_clear_value);
+
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
 
@@ -284,7 +324,8 @@ impl VulkanFrame {
         let rendering_info = vk::RenderingInfo::default()
             .render_area(render_area)
             .layer_count(1)
-            .color_attachments(&color_attachments);
+            .color_attachments(&color_attachments)
+            .depth_attachment(&depth_attachment);
 
         unsafe {
             self.device
@@ -317,70 +358,77 @@ impl VulkanFrame {
                 .cmd_set_scissor(self.command_buffer, 0, &[scissor]);
 
             /*
-			* The pipeline and mesh are shared by
-			* every object in this draw batch.
-			*/
-            self.device
-                .cmd_bind_pipeline(
+             * For now every object uses the
+             * same graphics pipeline.
+             */
+            self.device.cmd_bind_pipeline(
+                self.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline,
+            );
+
+            let camera_sets = [camera_descriptor_set];
+
+            self.device.cmd_bind_descriptor_sets(
+                self.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline_layout,
+                0,
+                &camera_sets,
+                &[],
+            );
+
+            /*
+             * Each render object may reference
+             * a completely different mesh.
+             */
+            for object in objects {
+                let mesh = object.mesh();
+
+                let material = object.material();
+
+                /*
+                 * Set 1 contains this object's material.
+                 */
+                let material_sets = [material.descriptor_set()];
+
+                self.device.cmd_bind_descriptor_sets(
                     self.command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    pipeline,
+                    pipeline_layout,
+                    1,
+                    &material_sets,
+                    &[],
                 );
 
-            let vertex_buffers = [
-                vertex_buffer,
-            ];
+                let vertex_buffers = [mesh.vertex_buffer().raw()];
 
-            let vertex_offsets = [
-                0,
-            ];
+                let vertex_offsets = [0];
 
-            self.device
-                .cmd_bind_vertex_buffers(
+                self.device.cmd_bind_vertex_buffers(
                     self.command_buffer,
                     0,
                     &vertex_buffers,
                     &vertex_offsets,
                 );
 
-            self.device
-                .cmd_bind_index_buffer(
+                self.device.cmd_bind_index_buffer(
                     self.command_buffer,
-                    index_buffer,
+                    mesh.index_buffer().raw(),
                     0,
                     vk::IndexType::UINT16,
                 );
 
-            /*
-			 * Each object gets different per-draw
-			 * state while reusing the same mesh.
-			 */
-            for model in models {
-                self.device
-                    .cmd_push_constants(
-                        self.command_buffer,
-
-                        pipeline_layout,
-
-                        vk::ShaderStageFlags::
-                        VERTEX,
-
-                        0,
-
-                        model.as_bytes(),
-                    );
+                self.device.cmd_push_constants(
+                    self.command_buffer,
+                    pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    ModelPushConstants::OFFSET,
+                    object.transform().as_bytes(),
+                );
 
                 self.device
-                    .cmd_draw_indexed(
-                        self.command_buffer,
-
-                        index_count,
-                        1,
-
-                        0,
-                        0,
-                        0,
-                    );
+                    .cmd_draw_indexed(self.command_buffer, mesh.index_count(), 1, 0, 0, 0);
             }
 
             self.device.cmd_end_rendering(self.command_buffer);

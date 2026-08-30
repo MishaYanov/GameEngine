@@ -1,56 +1,31 @@
+pub mod buffer;
+pub mod camera;
+pub mod depth_buffer;
 mod device;
+pub mod frame;
 mod instance;
+pub mod mesh;
+pub mod pipeline;
+pub mod push_constants;
+pub mod render_object;
 mod surface;
 mod swapchain;
-pub mod frame;
-pub mod pipeline;
-pub mod buffer;
 pub mod vertex;
-pub mod mesh;
-pub mod push_constants;
+pub mod texture;
+pub mod material;
 
-pub use device::{
-	QueueFamilies,
-	VulkanDevice,
-	VulkanDeviceError,
-};
-
-pub use instance::{
-	format_api_version,
-	PhysicalDeviceInfo,
-	VulkanInitError,
-	VulkanInstance,
-};
-
-pub use surface::{
-	VulkanSurface,
-	VulkanSurfaceError,
-};
-
-pub use swapchain::{
-	VulkanSwapchain,
-	VulkanSwapchainError,
-};
-
-pub use frame::{
-	FrameStatus,
-	VulkanFrame,
-	VulkanFrameError,
-};
-
+pub use device::{QueueFamilies, VulkanDevice, VulkanDeviceError};
+pub use instance::{PhysicalDeviceInfo, VulkanInitError, VulkanInstance, format_api_version};
+pub use surface::{VulkanSurface, VulkanSurfaceError};
+pub use swapchain::{VulkanSwapchain, VulkanSwapchainError};
+pub use frame::{FrameStatus, VulkanFrame, VulkanFrameError};
 pub use pipeline::VulkanGraphicsPipeline;
-
-pub use buffer::{
-	VulkanBuffer,
-	VulkanBufferError,
-};
-
+pub use buffer::{VulkanBuffer, VulkanBufferError};
 pub use vertex::Vertex;
-
-pub use mesh::{
-	VulkanMesh,
-	VulkanMeshError,
-};
-
-pub use push_constants::
-ModelPushConstants;
+pub use mesh::{VulkanMesh, VulkanMeshError};
+pub use push_constants::ModelPushConstants;
+pub use render_object::RenderObject;
+pub use depth_buffer::{VulkanDepthBuffer, VulkanDepthBufferError};
+pub use camera::{CameraUniform, VulkanCamera, VulkanCameraError};
+pub use texture::{VulkanTexture, VulkanTextureError};
+pub use material::VulkanMaterial;

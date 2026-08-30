@@ -1,4 +1,6 @@
-use std::{f32::consts::PI, mem::size_of, slice};
+use std::{mem::size_of, slice};
+
+use glam::{EulerRot, Mat4, Quat, Vec3};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -7,6 +9,10 @@ pub struct ModelPushConstants {
 }
 
 impl ModelPushConstants {
+    pub const OFFSET: u32 = 0;
+
+    pub const SIZE: u32 = size_of::<Self>() as u32;
+
     pub const fn identity() -> Self {
         Self {
             model: [
@@ -15,34 +21,22 @@ impl ModelPushConstants {
         }
     }
 
-    pub fn from_2d(translation: [f32; 2], rotation_radians: f32, scale: [f32; 2]) -> Self {
-        let cosine = rotation_radians.cos();
+    pub fn from_3d(translation: [f32; 3], rotation_radians: [f32; 3], scale: [f32; 3]) -> Self {
+        let translation = Vec3::from_array(translation);
 
-        let sine = rotation_radians.sin();
+        let scale = Vec3::from_array(scale);
 
-        let [translation_x, translation_y] = translation;
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            rotation_radians[0],
+            rotation_radians[1],
+            rotation_radians[2],
+        );
 
-        let [scale_x, scale_y] = scale;
+        let model = Mat4::from_scale_rotation_translation(scale, rotation, translation);
 
         Self {
-            model: [
-                cosine * scale_x,
-                sine * scale_x,
-                0.0,
-                0.0,
-                -sine * scale_y,
-                cosine * scale_y,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                0.0,
-                translation_x,
-                translation_y,
-                0.0,
-                1.0,
-            ],
+            model: model.to_cols_array(),
         }
     }
 
@@ -50,11 +44,7 @@ impl ModelPushConstants {
         unsafe { slice::from_raw_parts((self as *const Self).cast::<u8>(), size_of::<Self>()) }
     }
 
-    pub const fn size() -> u32 {
-        size_of::<Self>() as u32
-    }
-
     pub fn degrees_to_radians(degrees: f32) -> f32 {
-        degrees * PI / 180.0
+        degrees.to_radians()
     }
 }
