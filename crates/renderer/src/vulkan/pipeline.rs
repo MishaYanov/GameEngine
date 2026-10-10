@@ -17,6 +17,7 @@ impl VulkanGraphicsPipeline {
         camera_layout: vk::DescriptorSetLayout,
 
         texture_layout: vk::DescriptorSetLayout,
+        double_sided: bool,
     ) -> Result<Self, String> {
         let vertex_shader = create_shader_module(
             device,
@@ -96,7 +97,11 @@ impl VulkanGraphicsPipeline {
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(vk::CullModeFlags::BACK)
+            .cull_mode(if double_sided {
+                vk::CullModeFlags::NONE
+            } else {
+                vk::CullModeFlags::BACK
+            })
             .front_face(vk::FrontFace::CLOCKWISE)
             .line_width(1.0);
 

@@ -1,0 +1,10 @@
+{
+  "last_checked_commit": "babb1fc3e473cc06d09d6fe3303fdd78f2c40c17",
+  "last_checked_date": "2026-10-10",
+  "last_documentation_update_commit": null,
+  "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+  "pending_documentation_changes": [
+    "glTF/GLB first-primitive loader and robot.glb added in working tree; current docs still describe an unfinished importer."
+  ],
+  "working_tree_at_check": []
+}

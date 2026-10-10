@@ -6,11 +6,12 @@ use super::VulkanTexture;
 
 pub struct VulkanMaterial {
     texture: Arc<VulkanTexture>,
+    double_sided: bool,
 }
 
 impl VulkanMaterial {
-    pub fn new(texture: Arc<VulkanTexture>) -> Self {
-        Self { texture }
+    pub fn new(texture: Arc<VulkanTexture>, double_sided: bool) -> Self {
+        Self { texture, double_sided }
     }
 
     pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
@@ -27,5 +28,9 @@ impl VulkanMaterial {
 
     pub fn texture_arc(&self) -> &Arc<VulkanTexture> {
         &self.texture
+    }
+
+    pub fn double_sided(&self) -> bool {
+        self.double_sided
     }
 }

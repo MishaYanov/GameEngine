@@ -1,16 +1,14 @@
 mod assets;
 
-use assets::{AssetManager, MeshData};
+use assets::AssetManager;
 use engine_logger::ResultLogExt;
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use renderer::vulkan::{
-    CameraUniform, FrameStatus, ModelPushConstants, RenderObject, Vertex, VulkanCamera,
-    VulkanDepthBuffer, VulkanDevice, VulkanFrame, VulkanGraphicsPipeline, VulkanInstance,
-    VulkanMaterial, VulkanMesh, VulkanSurface, VulkanSwapchain, VulkanTexture,
+    CameraUniform, FrameStatus, ModelPushConstants, RenderObject, VulkanCamera, VulkanDepthBuffer,
+    VulkanDevice, VulkanFrame, VulkanGraphicsPipeline, VulkanInstance, VulkanMaterial, VulkanMesh,
+    VulkanSurface, VulkanSwapchain, VulkanTexture,
 };
 
 use winit::{
@@ -20,7 +18,6 @@ use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::{Window, WindowId},
 };
-use crate::assets::load_first_primitive;
 
 #[derive(Default)]
 struct GameApp {
@@ -86,7 +83,7 @@ impl GameApp {
                 .map_err(|error| format!("failed waiting for Vulkan device: {error:?}"))?;
         }
 
-        engine_logger::info!("Recreating swapchain: {}x{}", size.width, size.height,);
+        engine_logger::info!("Recreating swapchain: {}x{}", size.width, size.height);
 
         let new_swapchain = VulkanSwapchain::recreate(
             instance.raw(),
@@ -113,6 +110,7 @@ impl GameApp {
             new_depth_buffer.format(),
             camera.descriptor_set_layout(),
             material.descriptor_set_layout(),
+            true
         )
         .map_err(|error| format!("failed recreating graphics pipeline: {error}"))?;
 
@@ -120,13 +118,9 @@ impl GameApp {
             .map_err(|error| format!("failed recreating frame resources: {error}"))?;
 
         self.frame = Some(new_frame);
-
         self.pipeline = Some(new_pipeline);
-
         self.depth_buffer = Some(new_depth_buffer);
-
         self.swapchain = Some(new_swapchain);
-
         self.swapchain_dirty = false;
 
         engine_logger::info!("Swapchain recreated.");
@@ -170,7 +164,6 @@ impl ApplicationHandler for GameApp {
             .expect("failed to create Vulkan surface");
 
         engine_logger::info!("Vulkan surface created.");
-
         engine_logger::info!("Selecting presentation-capable GPU...");
 
         let device = VulkanDevice::for_surface(instance.raw(), &surface)
@@ -185,13 +178,12 @@ impl ApplicationHandler for GameApp {
 
         let queues = device.queue_families();
 
-        engine_logger::info!("Graphics queue family: {}", queues.graphics,);
-
-        engine_logger::info!("Present queue family: {}", queues.present,);
+        engine_logger::info!("Graphics queue family: {}", queues.graphics);
+        engine_logger::info!("Present queue family: {}", queues.present);
 
         let size = window.inner_size();
 
-        engine_logger::info!("Creating swapchain {}x{}...", size.width, size.height,);
+        engine_logger::info!("Creating swapchain {}x{}...", size.width, size.height);
 
         let swapchain = VulkanSwapchain::new(
             instance.raw(),
@@ -203,16 +195,13 @@ impl ApplicationHandler for GameApp {
         .expect("failed to create Vulkan swapchain");
 
         engine_logger::info!("Swapchain created.");
-
-        engine_logger::info!("Swapchain images: {}", swapchain.images().len(),);
-
+        engine_logger::info!("Swapchain images: {}", swapchain.images().len());
         engine_logger::info!(
             "Swapchain extent: {}x{}",
             swapchain.extent().width,
-            swapchain.extent().height,
+            swapchain.extent().height
         );
-
-        engine_logger::info!("Swapchain format: {:?}", swapchain.format(),);
+        engine_logger::info!("Swapchain format: {:?}", swapchain.format());
 
         engine_logger::info!("Creating depth buffer...");
 
@@ -221,65 +210,118 @@ impl ApplicationHandler for GameApp {
 
         engine_logger::info!("Depth buffer created.");
 
-        engine_logger::info!("Creating materials...");
-
         let asset_root = if self.project_name.is_some() {
-            std::env::current_exe().expect("failed to locate executable").parent().unwrap().join("assets")
+            std::env::current_exe()
+                .expect("failed to locate executable")
+                .parent()
+                .expect("executable has no parent directory")
+                .join("assets")
         } else {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
         };
 
+        let model_path = asset_root.join("props/robot.glb");
+
         let mut asset_manager =
             AssetManager::new(asset_root).expect("failed to create asset manager");
 
-        let cube_data = if self.project_name.is_some() { MeshData::triangle() } else { MeshData::cube() };
+        // The loader now returns geometry and material data together.
+        let imported = match assets::load_first_primitive(&model_path) {
+            Ok(data) => data,
+            Err(error) => {
+                engine_logger::error!("Failed to import {}: {}", model_path.display(), error);
 
-        engine_logger::info!("Loading cube mesh...");
-
-        let mesh = asset_manager
-            .load_mesh(&instance, &device, "builtin:cube", &cube_data)
-            .expect("failed to load cube mesh");
-
-        engine_logger::info!("Cube mesh loaded.");
-
-        let cached_mesh = asset_manager
-            .load_mesh(&instance, &device, "builtin:cube", &cube_data)
-            .expect("failed to retrieve cached cube mesh");
-
-        assert!(Arc::ptr_eq(&mesh, &cached_mesh,));
-
-        engine_logger::info!("Loaded GPU meshes: {}", asset_manager.loaded_mesh_count(),);
-
-        engine_logger::info!("Loading crate texture...");
-
-        let texture_a = asset_manager
-            .load_texture(&instance, &device, "textures/crate.png")
-            .expect("failed to load crate texture");
-
-        let material_a = VulkanMaterial::new(texture_a);
-
-        engine_logger::info!("Loading bricks texture...");
-
-        let texture_b = asset_manager
-            .load_texture(&instance, &device, "textures/bricks.jpg")
-            .expect("failed to load bricks texture");
-
-        let material_b = VulkanMaterial::new(texture_b);
-
-        engine_logger::info!("Materials created.");
-
-        let cached_texture = asset_manager
-            .load_texture(&instance, &device, "textures/crate.png")
-            .expect("failed loading cached texture");
+                event_loop.exit();
+                return;
+            }
+        };
 
         engine_logger::info!(
-            "crate texture reused: {}",
-            Arc::ptr_eq(&cached_texture, material_a.texture_arc(),),
+            "Import verified: {} vertices, {} indices",
+            imported.mesh.vertices().len(),
+            imported.mesh.indices().len()
         );
 
         engine_logger::info!(
-            "Loaded texture assets: {}",
-            asset_manager.loaded_texture_count(),
+            "Imported base-color factor: {:?}",
+            imported.base_color_factor
+        );
+
+        // Borrow the image to inspect it without moving it out of imported.
+        if let Some(image) = imported.base_color_image.as_ref() {
+            engine_logger::info!(
+                "Imported RGBA image: {}x{}, {} bytes",
+                image.width(),
+                image.height(),
+                image.pixels().len()
+            );
+        } else {
+            engine_logger::info!("Imported material has no base-color image");
+        }
+
+        let mesh_key = "props/robot.glb#mesh:0#primitive:0";
+
+        engine_logger::info!("Uploading robot mesh...");
+
+        // load_mesh expects MeshData, so borrow imported.mesh.
+        let mesh = match asset_manager.load_mesh(&instance, &device, mesh_key, &imported.mesh) {
+            Ok(mesh) => mesh,
+            Err(error) => {
+                engine_logger::error!("Failed to upload robot mesh: {}", error);
+
+                event_loop.exit();
+                return;
+            }
+        };
+
+        engine_logger::info!("Robot mesh uploaded.");
+
+        let cached_mesh = asset_manager
+            .load_mesh(&instance, &device, mesh_key, &imported.mesh)
+            .expect("failed to retrieve cached robot mesh");
+
+        assert!(Arc::ptr_eq(&mesh, &cached_mesh));
+
+        engine_logger::info!("Loaded GPU meshes: {}", asset_manager.loaded_mesh_count());
+
+        engine_logger::info!("Creating materials...");
+        engine_logger::info!("Creating graphics pipeline...");
+
+        let image = match imported.base_color_image.as_ref() {
+            Some(image) => image,
+            None => {
+                engine_logger::error!("Imported material has no base-color image");
+                event_loop.exit();
+                return;
+            }
+        };
+
+        let texture = match VulkanTexture::from_rgba8(
+            instance.raw(),
+            &device,
+            image.width(),
+            image.height(),
+            image.pixels(),
+        ) {
+            Ok(texture) => texture,
+            Err(error) => {
+                engine_logger::error!("Failed to upload robot texture: {}", error);
+
+                event_loop.exit();
+                return;
+            }
+        };
+
+        let robot_texture = Arc::new(texture);
+
+        let material_a = VulkanMaterial::new(
+            Arc::clone(&robot_texture),
+            imported.double_sided,
+        );
+
+        let material_b = VulkanMaterial::new(
+            Arc::clone(&robot_texture),
+            imported.double_sided,
         );
 
         engine_logger::info!("Creating graphics pipeline...");
@@ -290,11 +332,11 @@ impl ApplicationHandler for GameApp {
             depth_buffer.format(),
             camera.descriptor_set_layout(),
             material_a.descriptor_set_layout(),
+            material_a.double_sided(),
         )
         .expect("failed to create Vulkan graphics pipeline");
 
         engine_logger::info!("Graphics pipeline created.");
-
         engine_logger::info!("Creating frame resources...");
 
         let frame =
@@ -303,30 +345,19 @@ impl ApplicationHandler for GameApp {
         engine_logger::info!("Frame resources created.");
 
         self.frame = Some(frame);
-
         self.mesh = Some(mesh);
-
         self.pipeline = Some(pipeline);
-
         self.camera = Some(camera);
-
         self.materials = vec![material_a, material_b];
-
         self.asset_manager = Some(asset_manager);
-
         self.depth_buffer = Some(depth_buffer);
-
         self.swapchain = Some(swapchain);
-
         self.device = Some(device);
-
         self.surface = Some(surface);
-
         self.instance = Some(instance);
-
         self.window = Some(window);
-
         self.start_time = Some(Instant::now());
+
         engine_logger::component_health(
             "renderer",
             "HEALTHY",
@@ -364,12 +395,10 @@ impl ApplicationHandler for GameApp {
                     engine_logger::heartbeat("game");
                     self.last_heartbeat = Some(Instant::now());
                 }
+
                 let size = match self.window.as_ref() {
                     Some(window) => window.inner_size(),
-
-                    None => {
-                        return;
-                    }
+                    None => return,
                 };
 
                 if size.width == 0 || size.height == 0 {
@@ -379,23 +408,16 @@ impl ApplicationHandler for GameApp {
                 if self.swapchain_dirty {
                     match self.recreate_swapchain() {
                         Ok(true) => {}
-
-                        Ok(false) => {
-                            return;
-                        }
-
+                        Ok(false) => return,
                         Err(error) => {
                             engine_logger::error!("{error}");
-
                             event_loop.exit();
-
                             return;
                         }
                     }
                 }
 
                 let extent = self.swapchain.as_ref().unwrap().extent();
-
                 let aspect_ratio = extent.width as f32 / extent.height as f32;
 
                 let camera_uniform = CameraUniform::perspective(
@@ -414,7 +436,7 @@ impl ApplicationHandler for GameApp {
                     .map(|start| start.elapsed().as_secs_f32())
                     .unwrap_or(0.0);
 
-                let Some(material_a) = self.materials.get(0) else {
+                let Some(material_a) = self.materials.first() else {
                     return;
                 };
 
@@ -446,7 +468,11 @@ impl ApplicationHandler for GameApp {
                                 material_a,
                                 ModelPushConstants::from_3d(
                                     [-0.8, 0.0, 0.0],
-                                    if self.project_name.is_some() { [0.0; 3] } else { [elapsed * 0.6, elapsed * 0.9, 0.0] },
+                                    if self.project_name.is_some() {
+                                        [0.0; 3]
+                                    } else {
+                                        [elapsed * 0.6, elapsed * 0.9, 0.0]
+                                    },
                                     [0.7, 0.7, 0.7],
                                 ),
                             ),
@@ -455,7 +481,11 @@ impl ApplicationHandler for GameApp {
                                 material_b,
                                 ModelPushConstants::from_3d(
                                     [0.8, 0.0, 0.0],
-                                    if self.project_name.is_some() { [0.0; 3] } else { [elapsed * -0.5, elapsed * 0.75, elapsed * 0.2] },
+                                    if self.project_name.is_some() {
+                                        [0.0; 3]
+                                    } else {
+                                        [elapsed * -0.5, elapsed * 0.75, elapsed * 0.2]
+                                    },
                                     [0.7, 0.7, 0.7],
                                 ),
                             ),
@@ -466,15 +496,13 @@ impl ApplicationHandler for GameApp {
                             swapchain,
                             depth_buffer,
                             pipeline,
-                            &camera,
+                            camera,
                             &camera_uniform,
                             &objects,
                         )
                     }
 
-                    _ => {
-                        return;
-                    }
+                    _ => return,
                 };
 
                 match result.log_error_for("game::renderer", "render frame") {
@@ -486,7 +514,6 @@ impl ApplicationHandler for GameApp {
 
                     Err(_) => {
                         event_loop.exit();
-
                         return;
                     }
                 }
@@ -514,38 +541,26 @@ impl ApplicationHandler for GameApp {
 }
 
 fn main() {
-    let _logging = engine_logger::init_application("game").expect("failed to initialize game logger");
+    let _logging =
+        engine_logger::init_application("game").expect("failed to initialize game logger");
 
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/props/robot.glb");
-    match assets::load_first_primitive(&path) {
-        Ok(mesh_data) => {
-            engine_logger::info!(
-            "Import verified: {} vertices, {} indices",
-            mesh_data.vertices().len(),
-            mesh_data.indices().len()
-        );
-        }
-        Err(error) => {
-            engine_logger::error!(
-            "Failed to import {}: {}",
-            path.display(),
-            error
-        );
-        }
-    }
-
+    // Importing happens once in GameApp::resumed.
     let event_loop = EventLoop::new().expect("failed to create event loop");
 
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = GameApp::default();
-    app.project_name = std::env::current_exe().ok()
+
+    app.project_name = std::env::current_exe()
+        .ok()
         .and_then(|exe| std::fs::read_to_string(exe.parent()?.join("project-name.txt")).ok());
+
     engine_logger::component_health("game", "HEALTHY", true, "Game event loop started");
 
     event_loop
         .run_app(&mut app)
         .expect("game event loop failed");
+
     engine_logger::component_health("game", "STOPPED", false, "Game event loop stopped");
 }
 
