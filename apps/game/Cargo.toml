@@ -8,3 +8,5 @@ engine-logger = { path = "../../crates/logger" }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 renderer = { version = "0.1.0", path = "../../crates/renderer" }
 winit = "0.30.13"
+gltf = "1.4.1"
+tracing = "0.1.44"

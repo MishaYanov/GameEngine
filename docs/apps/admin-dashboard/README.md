@@ -43,6 +43,6 @@ cargo test -p engine-admin --offline real_native_template_validation -- --ignore
 cargo clippy -p engine-admin --all-targets --features desktop --offline -- -D warnings
 ```
 
-The full native template smoke test is opt-in because it compiles Vulkan/game dependencies and retains generated temporary output for inspection. Native Tauri interaction, interactive game rendering and installer smoke checks remain manual. See `designs/automation-and-logging-prd.md` for implementation status and future Angular-client templates.
+The full native template smoke test is opt-in because it compiles Vulkan/game dependencies and retains generated temporary output for inspection. Native Tauri interaction, interactive game rendering and installer smoke checks remain manual. See [automation and logging design](../../../designs/automation-and-logging-prd.md) for implementation status and future Angular-client templates.
 
-For step-by-step CLI, editor and dashboard instructions, see [the usage guide](../../docs/usage.md).
+For step-by-step CLI, editor and dashboard instructions, see [the usage guide](../../usage.md).

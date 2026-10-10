@@ -106,6 +106,8 @@ Flush refers to buffered output reaching the operating system, not an `fsync` du
 
 ## Verification and measurements
 
+Run the commands below from the repository root.
+
 ```powershell
 cargo test --workspace --all-targets --offline --locked
 cargo clippy -p engine-logger --all-targets --offline --locked -- -D warnings

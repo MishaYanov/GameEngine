@@ -1,0 +1,17 @@
+{
+  "name": "game-engine-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "preview": "node serve.mjs",
+    "test": "npm run build && node --test site.test.mjs"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.0"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  }
+}

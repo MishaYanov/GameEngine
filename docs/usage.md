@@ -216,4 +216,4 @@ Keep the generated workspace layout and read its generated README for details. T
 | Game exits or cannot initialize Vulkan | Check console/dashboard logs and GPU driver support; confirm assets remain alongside the installed runtime. |
 | Frontend development port is occupied | Stop the earlier development session; editor uses 4200 and admin dashboard uses 4300. |
 
-Additional references: [launcher details](../designs/terminal-launcher.md), [installation pipeline](../designs/project-installation.md), and [admin dashboard technical notes](../apps/admin-dashboard/README.md).
+Additional references: [launcher details](../designs/terminal-launcher.md), [installation pipeline](../designs/project-installation.md), and [admin dashboard technical notes](apps/admin-dashboard/README.md).

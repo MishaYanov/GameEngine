@@ -20,6 +20,7 @@ use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::{Window, WindowId},
 };
+use crate::assets::load_first_primitive;
 
 #[derive(Default)]
 struct GameApp {
@@ -513,8 +514,26 @@ impl ApplicationHandler for GameApp {
 }
 
 fn main() {
-    let _logging =
-        engine_logger::init_application("game").expect("failed to initialize game logger");
+    let _logging = engine_logger::init_application("game").expect("failed to initialize game logger");
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/props/robot.glb");
+    match assets::load_first_primitive(&path) {
+        Ok(mesh_data) => {
+            engine_logger::info!(
+            "Import verified: {} vertices, {} indices",
+            mesh_data.vertices().len(),
+            mesh_data.indices().len()
+        );
+        }
+        Err(error) => {
+            engine_logger::error!(
+            "Failed to import {}: {}",
+            path.display(),
+            error
+        );
+        }
+    }
+
     let event_loop = EventLoop::new().expect("failed to create event loop");
 
     event_loop.set_control_flow(ControlFlow::Poll);

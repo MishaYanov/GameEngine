@@ -237,7 +237,7 @@ Record performance measurements for normal logs, error traces, and sustained bur
 
 Implement these steps in order. Each step should produce a working, reviewable change with its own completion check. Do not start the complete dashboard and builder at once. Preserve existing user changes throughout.
 
-Steps 1 through 5 are implemented in `crates/logger` and integrated across the Rust workspace. The logger has no Angular or Tauri dependency. See `crates/logger/README.md` for API usage, defaults, operating limits, and measurements.
+Steps 1 through 5 are implemented in `crates/logger` and integrated across the Rust workspace. The logger has no Angular or Tauri dependency. See [shared logger documentation](../docs/crates/logger/README.md) for API usage, defaults, operating limits, and measurements.
 
 | Step | Implementation status | Verification |
 | --- | --- | --- |
@@ -366,7 +366,7 @@ The core implementation is available. Remaining release checks are native deskto
 
 - Resolved: independent Angular/Tauri administration application in `apps/admin-dashboard`. The existing Angular client remains separate.
 - Resolved for v1: vendor allowlisted native game, assets, renderer, runtime, bridge and logger sources. The generated root workspace excludes the Angular editor/host and administration dependencies. Angular client generation and installers remain future templates.
-- Implemented defaults: shared logger storage documented in `crates/logger/README.md`; collector 5000 records / 16 MiB, browser 1000 records, job history 200, board 1000 cards / 4 MiB, project history 50 / 32 MiB.
+- Implemented defaults: shared logger storage documented in [shared logger documentation](../docs/crates/logger/README.md); collector 5000 records / 16 MiB, browser 1000 records, job history 200, board 1000 cards / 4 MiB, project history 50 / 32 MiB.
 - Whether Angular-originated logs enter the Rust collector in the first dashboard milestone.
 - Supported target platforms, asset selection rules, and eventual distribution formats.
 - Whether remote collection is ever required.
