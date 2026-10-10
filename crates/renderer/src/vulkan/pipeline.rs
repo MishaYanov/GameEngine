@@ -8,6 +8,52 @@ pub struct VulkanGraphicsPipeline {
     layout: vk::PipelineLayout,
 }
 
+/// Opaque-material pipeline variants with identical descriptor/push layouts.
+/// Recreate the whole set when attachment formats change with the swapchain.
+pub struct VulkanMaterialPipelines {
+    single_sided: VulkanGraphicsPipeline,
+    double_sided: VulkanGraphicsPipeline,
+}
+
+impl VulkanMaterialPipelines {
+    pub fn new(
+        device: &Device,
+        color_format: vk::Format,
+        depth_format: vk::Format,
+        camera_layout: vk::DescriptorSetLayout,
+        texture_layout: vk::DescriptorSetLayout,
+    ) -> Result<Self, String> {
+        let single_sided = VulkanGraphicsPipeline::new(
+            device,
+            color_format,
+            depth_format,
+            camera_layout,
+            texture_layout,
+            false,
+        )?;
+        let double_sided = VulkanGraphicsPipeline::new(
+            device,
+            color_format,
+            depth_format,
+            camera_layout,
+            texture_layout,
+            true,
+        )?;
+        Ok(Self {
+            single_sided,
+            double_sided,
+        })
+    }
+
+    pub fn for_material(&self, double_sided: bool) -> &VulkanGraphicsPipeline {
+        if double_sided {
+            &self.double_sided
+        } else {
+            &self.single_sided
+        }
+    }
+}
+
 impl VulkanGraphicsPipeline {
     pub fn new(
         device: &Device,
@@ -40,7 +86,7 @@ impl VulkanGraphicsPipeline {
         };
 
         let push_constant_ranges = [vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(ModelPushConstants::OFFSET)
             .size(ModelPushConstants::SIZE)];
 

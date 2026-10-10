@@ -7,7 +7,7 @@ use ash::{Device, vk};
 
 use super::{
     CameraUniform, ModelPushConstants, RenderObject, VulkanCamera, VulkanCameraError,
-    VulkanDepthBuffer, VulkanDevice, VulkanGraphicsPipeline, VulkanSwapchain,
+    VulkanDepthBuffer, VulkanDevice, VulkanMaterialPipelines, VulkanSwapchain,
 };
 
 pub struct VulkanFrame {
@@ -125,7 +125,7 @@ impl VulkanFrame {
         device: &VulkanDevice,
         swapchain: &VulkanSwapchain,
         depth_buffer: &VulkanDepthBuffer,
-        pipeline: &VulkanGraphicsPipeline,
+        pipelines: &VulkanMaterialPipelines,
 
         camera: &VulkanCamera,
         camera_uniform: &CameraUniform,
@@ -163,8 +163,7 @@ impl VulkanFrame {
             swapchain.extent(),
             depth_buffer.image(),
             depth_buffer.view(),
-            pipeline.raw(),
-            pipeline.layout(),
+            pipelines,
             camera.descriptor_set(),
             objects,
         )?;
@@ -221,8 +220,7 @@ impl VulkanFrame {
         extent: vk::Extent2D,
         depth_image: vk::Image,
         depth_view: vk::ImageView,
-        pipeline: vk::Pipeline,
-        pipeline_layout: vk::PipelineLayout,
+        pipelines: &VulkanMaterialPipelines,
         camera_descriptor_set: vk::DescriptorSet,
         objects: &[RenderObject<'_>],
     ) -> Result<(), VulkanFrameError> {
@@ -365,27 +363,6 @@ impl VulkanFrame {
                 .cmd_set_scissor(self.command_buffer, 0, &[scissor]);
 
             /*
-             * For now every object uses the
-             * same graphics pipeline.
-             */
-            self.device.cmd_bind_pipeline(
-                self.command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline,
-            );
-
-            let camera_sets = [camera_descriptor_set];
-
-            self.device.cmd_bind_descriptor_sets(
-                self.command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline_layout,
-                0,
-                &camera_sets,
-                &[],
-            );
-
-            /*
              * Each render object may reference
              * a completely different mesh.
              */
@@ -393,6 +370,22 @@ impl VulkanFrame {
                 let mesh = object.mesh();
 
                 let material = object.material();
+
+                let pipeline = pipelines.for_material(material.double_sided());
+                let pipeline_layout = pipeline.layout();
+                self.device.cmd_bind_pipeline(
+                    self.command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline.raw(),
+                );
+                self.device.cmd_bind_descriptor_sets(
+                    self.command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline_layout,
+                    0,
+                    &[camera_descriptor_set],
+                    &[],
+                );
 
                 /*
                  * Set 1 contains this object's material.
@@ -426,12 +419,15 @@ impl VulkanFrame {
                     vk::IndexType::UINT32,
                 );
 
+                let mut push_constants = *object.transform();
+                push_constants.base_color_factor = object.material().base_color_factor();
+
                 self.device.cmd_push_constants(
                     self.command_buffer,
                     pipeline_layout,
-                    vk::ShaderStageFlags::VERTEX,
+                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     ModelPushConstants::OFFSET,
-                    object.transform().as_bytes(),
+                    push_constants.as_bytes(),
                 );
 
                 self.device

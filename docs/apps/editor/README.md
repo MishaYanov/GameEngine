@@ -21,7 +21,7 @@ For frontend layout work, run `npm.cmd start` from `apps/editor` and open `http:
 
 Enter a project name and existing absolute destination parent. **Create & launch project** builds a release game, installs a new named child folder, and attempts to launch it. Submission is disabled during the operation; failures preserve form values. Installation success and launch failure are reported separately.
 
-The starter displays two textured triangles and contains an executable/assets, not editable scenes or independent sources. Use admin Project Builder for source generation. See [usage](../../usage.md).
+The form still describes a triangle starter, but the game now loads `props/robot.glb`. The installer omits that model, so installation/spawn success can be followed by a missing-model exit. See the [game guide](../game/README.md). Output contains an executable/assets, not editable scenes or independent sources. Use admin Project Builder for source generation. See [usage](../../usage.md).
 
 - `src/app/app.ts` and `app.html`: validation, busy/error/result state, browser detection, and UI.
 - `src/app/core/engine/engine.service.ts`: invokes `engine_status`.

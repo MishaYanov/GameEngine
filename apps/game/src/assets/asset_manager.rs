@@ -8,29 +8,25 @@ use std::{
 };
 
 use renderer::vulkan::{
-    VulkanDevice, VulkanInstance, VulkanMesh, VulkanMeshError, VulkanTexture, VulkanTextureError,
+    VulkanDevice, VulkanInstance, VulkanMaterial, VulkanMesh, VulkanMeshError, VulkanTexture,
+    VulkanTextureError,
 };
 
-use super::{ImageAsset, ImageAssetError, MeshData};
+use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
 
 pub struct AssetManager {
     root: PathBuf,
-
     textures: HashMap<PathBuf, Arc<VulkanTexture>>,
-
     meshes: HashMap<String, Arc<VulkanMesh>>,
+    image_textures: HashMap<String, Arc<VulkanTexture>>,
 }
 
 #[derive(Debug)]
 pub enum AssetManagerError {
     Io(io::Error),
-
     Image(ImageAssetError),
-
     Texture(VulkanTextureError),
-
     Mesh(VulkanMeshError),
-
     OutsideAssetRoot { path: PathBuf, root: PathBuf },
 }
 
@@ -97,10 +93,9 @@ impl AssetManager {
 
         Ok(Self {
             root,
-
             textures: HashMap::new(),
-
             meshes: HashMap::new(),
+            image_textures: HashMap::new(),
         })
     }
 
@@ -180,7 +175,7 @@ impl AssetManager {
     }
 
     pub fn loaded_texture_count(&self) -> usize {
-        self.textures.len()
+        self.textures.len() + self.image_textures.len()
     }
 
     pub fn loaded_mesh_count(&self) -> usize {
@@ -203,6 +198,50 @@ impl AssetManager {
         self.meshes.clear();
 
         self.textures.clear();
+        self.image_textures.clear();
+    }
+
+    pub fn load_image_texture(
+        &mut self,
+        instance: &VulkanInstance,
+        device: &VulkanDevice,
+        id: impl Into<String>,
+        image: &ImageAsset,
+    ) -> Result<Arc<VulkanTexture>, AssetManagerError> {
+        let id = id.into();
+
+        if let Some(texture) = self.image_textures.get(&id) {
+            return Ok(Arc::clone(texture));
+        }
+
+        let texture = Arc::new(VulkanTexture::from_rgba8(
+            instance.raw(),
+            device,
+            image.width(),
+            image.height(),
+            image.pixels(),
+        )?);
+
+        self.image_textures.insert(id, Arc::clone(&texture));
+        Ok(texture)
+    }
+
+    pub fn load_material(
+        &mut self,
+        instance: &VulkanInstance,
+        device: &VulkanDevice,
+        image_id: &str,
+        data: &MaterialData,
+    ) -> Result<VulkanMaterial, AssetManagerError> {
+        let texture = match data.base_color_image.as_ref() {
+            Some(image) => self.load_image_texture(instance, device, image_id, image)?,
+            None => {
+                let white = ImageAsset::from_rgba8(1, 1, vec![255, 255, 255, 255])?;
+                self.load_image_texture(instance, device, "builtin:white", &white)?
+            }
+        };
+
+        Ok(VulkanMaterial::new(texture, data.double_sided, data.base_color_factor))
     }
 
     fn resolve(&self, path: impl AsRef<Path>) -> Result<PathBuf, AssetManagerError> {

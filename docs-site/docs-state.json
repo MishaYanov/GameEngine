@@ -1,10 +1,46 @@
 {
-  "last_checked_commit": "babb1fc3e473cc06d09d6fe3303fdd78f2c40c17",
+  "last_checked_commit": "2216ce9a62e097357b826b8042f96d8f26ba4824",
   "last_checked_date": "2026-10-10",
-  "last_documentation_update_commit": null,
+  "last_documentation_update_commit": "2216ce9a62e097357b826b8042f96d8f26ba4824",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "pending_documentation_changes": [
-    "glTF/GLB first-primitive loader and robot.glb added in working tree; current docs still describe an unfinished importer."
+  "reviewed_commits": [
+    "babb1fc3e473cc06d09d6fe3303fdd78f2c40c17",
+    "2216ce9a62e097357b826b8042f96d8f26ba4824"
   ],
-  "working_tree_at_check": []
+  "documented_changes": [
+    "First-primitive glTF/GLB import and robot rendering",
+    "Decoded image validation and imported image row order",
+    "Base-color image/factor and double-sided material/pipeline contracts",
+    "Current installer omits required robot.glb asset",
+    "Uncommitted MaterialData declaration identified as work in progress"
+  ],
+  "pending_documentation_changes": [
+    "Reinspect MaterialData and assets/mod.rs once the in-progress refactor is completed; these files changed during documentation verification."
+  ],
+  "verification": [
+    "Static site rebuilt: 21 pages; local links verified",
+    "Five site interaction/anchor/space tests passed",
+    "cargo check -p game --offline --locked passed with seven warnings before later edits to assets/mod.rs",
+    "git diff --check passed"
+  ],
+  "verification_limits": [
+    "Native GPU rendering and installer launch were not exercised",
+    "Browser visual QA remains unverified",
+    "Source changed after the successful compile check; that result does not certify the later working tree"
+  ],
+  "working_tree_at_check": [
+    " M apps/game/src/assets/gltf_loader.rs",
+    "AM apps/game/src/assets/material_data.rs",
+    " M apps/game/src/assets/mod.rs",
+    " M designs/project-installation.md",
+    " M docs/apps/editor/README.md",
+    " M docs/apps/game/README.md",
+    " M docs/architecture.md",
+    " M docs/compiler/README.md",
+    " M docs/crates/renderer/README.md",
+    " M docs/graphics-and-assets.md",
+    " M docs/main.md",
+    " M docs/testing.md",
+    " M docs/usage.md"
+  ]
 }

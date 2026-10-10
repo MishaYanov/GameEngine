@@ -14,7 +14,7 @@ cargo run -p renderer --example vulkan_probe
 cargo test -p renderer --offline --locked
 ```
 
-The probe exercises initialization/device information rather than a presented scene. Use the native game for manual frame checks once incomplete game work is resolved.
+The probe exercises initialization/device information rather than a presented scene. Use the native game for manual imported-model and frame checks.
 
 ## API levels
 
@@ -28,12 +28,18 @@ The public `vulkan` exports provide drawing resources:
 | `VulkanDevice`, `QueueFamilies` | Device and graphics/presentation queues |
 | `VulkanSwapchain`, `VulkanDepthBuffer` | Presentation images and depth |
 | `VulkanBuffer`, `VulkanMesh`, `Vertex` | Allocations and indexed geometry |
-| `VulkanTexture`, `VulkanMaterial` | Texture upload and texture-owning materials |
+| `VulkanTexture`, `VulkanMaterial` | Texture upload and materials with shared texture ownership and double-sided state |
 | `VulkanCamera`, `CameraUniform` | Camera buffer/descriptors |
 | `VulkanGraphicsPipeline`, `ModelPushConstants` | Fixed pipeline and object transform |
 | `RenderObject`, `VulkanFrame`, `FrameStatus` | Draw inputs, synchronization, rebuild status |
 
 Presented applications use `VulkanInstance::for_display` and `VulkanDevice::for_surface`. The status wrapper's device creation does not replace selection of a surface-compatible device.
+
+## Material culling contract
+
+`VulkanMaterial::new(texture: Arc<VulkanTexture>, double_sided: bool)` stores texture ownership and exposes `double_sided()`. `VulkanGraphicsPipeline::new` now accepts a final `double_sided: bool` parameter: true selects no face culling, false selects back-face culling. This is pipeline state, not a per-object dynamic switch; build a matching pipeline for the materials being drawn.
+
+Both demo materials share the imported robot texture. The loader currently hardcodes double-sided true rather than reading the glTF material flag. The fragment shader samples texture color directly; imported base-color factor, alpha handling, and full PBR are not implemented.
 
 ## Shaders and ownership
 

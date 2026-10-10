@@ -9,7 +9,7 @@ The editor startup screen asks for a project name and an existing destination fo
 
 The form disables submission during the build and displays build failures without discarding user input. Cargo runs on a blocking worker, keeping the editor UI responsive. The current progress message covers the whole build; streamed compiler progress can be added later.
 
-The installed executable reads its project name and assets beside itself. In starter mode it renders two stationary textured triangles in a native Vulkan window. The original development game still renders its cube demo. The starter is a runtime stub; it does not generate an editable scene or a separate source project yet.
+The installed executable reads its project name and assets beside itself. The game now imports `props/robot.glb` in both modes, drawing stationary instances in installed mode and rotating instances in development. The installer still copies only the earlier triangle textures, so fresh output is missing the required model and exits during import. The earlier triangle/cube scene description is superseded; see [current game behavior](../docs/apps/game/README.md). The starter is a runtime stub; it does not generate an editable scene or a separate source project yet.
 
 Development requirements: Rust/Cargo, the engine source workspace, and a Vulkan-capable GPU/driver. This version builds from the development checkout; a distributable installer should ship a prebuilt runtime and avoid requiring Cargo on the user's machine.
 

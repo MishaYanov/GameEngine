@@ -6,6 +6,7 @@ use glam::{EulerRot, Mat4, Quat, Vec3};
 #[derive(Debug, Clone, Copy)]
 pub struct ModelPushConstants {
     pub model: [f32; 16],
+    pub base_color_factor: [f32; 4],
 }
 
 impl ModelPushConstants {
@@ -18,6 +19,7 @@ impl ModelPushConstants {
             model: [
                 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
             ],
+            base_color_factor: [1.0; 4],
         }
     }
 
@@ -37,6 +39,7 @@ impl ModelPushConstants {
 
         Self {
             model: model.to_cols_array(),
+            base_color_factor: [1.0; 4],
         }
     }
 
@@ -46,5 +49,19 @@ impl ModelPushConstants {
 
     pub fn degrees_to_radians(degrees: f32) -> f32 {
         degrees.to_radians()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelPushConstants;
+    use std::mem::{offset_of, size_of};
+
+    #[test]
+    fn push_constant_layout_matches_shader_block() {
+        // GLSL std430: mat4 at byte 0, vec4 at byte 64.
+        assert_eq!(offset_of!(ModelPushConstants, model), 0);
+        assert_eq!(offset_of!(ModelPushConstants, base_color_factor), 64);
+        assert_eq!(size_of::<ModelPushConstants>(), 80);
     }
 }

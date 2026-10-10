@@ -22,7 +22,7 @@ pub use frame::{FrameStatus, VulkanFrame, VulkanFrameError};
 pub use instance::{PhysicalDeviceInfo, VulkanInitError, VulkanInstance, format_api_version};
 pub use material::VulkanMaterial;
 pub use mesh::{VulkanMesh, VulkanMeshError};
-pub use pipeline::VulkanGraphicsPipeline;
+pub use pipeline::{VulkanGraphicsPipeline, VulkanMaterialPipelines};
 pub use push_constants::ModelPushConstants;
 pub use render_object::RenderObject;
 pub use surface::{VulkanSurface, VulkanSurfaceError};

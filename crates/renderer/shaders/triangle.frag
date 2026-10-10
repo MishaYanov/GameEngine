@@ -7,10 +7,16 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0)
 uniform sampler2D textureSampler;
 
+layout(push_constant, std430)
+uniform ModelPushConstants {
+	mat4 model;
+	vec4 baseColorFactor;
+} modelData;
+
 void main() {
 	outColor =
 		texture(
 			textureSampler,
 			inUv
-		);
+		) * modelData.baseColorFactor;
 }

@@ -10,9 +10,10 @@ uniform CameraUniform {
 	mat4 viewProjection;
 } camera;
 
-layout(push_constant)
+layout(push_constant, std430)
 uniform ModelPushConstants {
 	mat4 model;
+	vec4 baseColorFactor;
 } modelData;
 
 void main() {

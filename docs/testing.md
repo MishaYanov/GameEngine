@@ -32,8 +32,8 @@ See [admin](apps/admin-dashboard/README.md) and [logger](crates/logger/README.md
 
 Rust tests cover admin collection/processes/jobs/board/generation, logger storage/panics, compiler path validation, and renderer validation diagnostics. Game, runtime, bridge, and editor host currently have no Rust behavioral tests. The editor has no configured end-to-end target. Compilation cannot prove rendering or desktop interaction.
 
-For graphics, check [cube and triangle modes](apps/game/README.md), texture/depth correctness, resize, minimize/restore, and closure with validation logs. For editor changes, check startup/status, invalid input, installation success, build failure, and launch reporting. For admin changes, verify native process controls, cancellation, project publication, and installer execution as applicable.
+For graphics, check [development and installed modes](apps/game/README.md), texture/depth correctness, resize, minimize/restore, and closure with validation logs. For editor changes, check startup/status, invalid input, installation success, build failure, and launch reporting. For admin changes, verify native process controls, cancellation, project publication, and installer execution as applicable.
 
-The current game working tree includes unfinished glTF code; suites compiling that module fail until it is completed or excluded. This build limitation is separate from test coverage.
+The glTF loader is now implemented, but has no dedicated behavioral tests. Manually check the robot primitive, imported texture orientation, UV selection, missing-model errors, and culling. Compiler path tests do not catch the current packaging mismatch: installed output omits `props/robot.glb`, which game startup requires.
 
 The [original test notes](../designs/testing.md) remain a runner/coverage reference. Passing the aggregate command does not establish full behavioral coverage or visual correctness.

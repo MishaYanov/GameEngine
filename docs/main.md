@@ -6,7 +6,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [CLI and dashboard usage](usage.md): Prerequisites, setup, installation, editor/launcher startup, dashboard workflows, and troubleshooting.
 - [Workspace architecture](architecture.md): Project responsibilities, dependencies, command flow, rendering ownership, installation, and source generation.
-- [Graphics and assets](graphics-and-assets.md): Caches, shader contracts, GPU lifetimes, adding assets, and model-import limitations.
+- [Graphics and assets](graphics-and-assets.md): Caches, shader contracts, GPU lifetimes, adding assets, glTF/GLB import, and material limitations.
 - [Testing and validation](testing.md): Aggregate/focused checks, coverage, build limitations, and manual desktop/GPU validation.
 
 - [Static documentation site](static-site.md): Build, preview, update, test, and host the Markdown-based website.
@@ -15,7 +15,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [Editor frontend](apps/editor/README.md): Setup UI, desktop/browser modes, contracts, source organization, builds, and tests.
 - [Editor desktop host](apps/editor-host/README.md): Tauri configuration, engine state, native commands, launch, and packaging.
-- [Native game demo](apps/game/README.md): Cube/triangle modes, assets, frame/resize lifecycle, and extension points.
+- [Native game demo](apps/game/README.md): GLB rendering, development/installed modes, asset packaging limits, and frame/resize lifecycle.
 - [Engine Admin](apps/admin-dashboard/README.md): Logs, processes, jobs, board, source generation, storage limits, and verification.
 
 ## Tools
