@@ -1,6 +1,3 @@
 mod engine;
 
-pub use engine::{
-    Engine,
-    EngineError,
-};
+pub use engine::{Engine, EngineError};

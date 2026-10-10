@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+engine-logger = { path = "../logger" }
 ash = "0.38.0"
 ash-window = "0.13.0"
 glam = "0.33.6"

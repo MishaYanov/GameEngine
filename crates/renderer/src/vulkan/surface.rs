@@ -29,7 +29,13 @@ impl Display for VulkanSurfaceError {
     }
 }
 
-impl Error for VulkanSurfaceError {}
+impl Error for VulkanSurfaceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanSurfaceError {
     fn from(value: vk::Result) -> Self {

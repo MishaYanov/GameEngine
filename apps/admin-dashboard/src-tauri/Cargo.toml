@@ -1,0 +1,29 @@
+[package]
+name = "engine-admin"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[features]
+default = []
+desktop = ["dep:tauri", "dep:tauri-build"]
+
+[lib]
+name = "engine_admin"
+
+[[bin]]
+name = "engine-admin"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[dependencies]
+engine-logger = { path = "../../../crates/logger" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.3", optional = true , features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", optional = true , features = [] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Storage_FileSystem"] }

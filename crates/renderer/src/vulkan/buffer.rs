@@ -57,7 +57,14 @@ impl Display for VulkanBufferError {
     }
 }
 
-impl Error for VulkanBufferError {}
+impl Error for VulkanBufferError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanBufferError {
     fn from(value: vk::Result) -> Self {

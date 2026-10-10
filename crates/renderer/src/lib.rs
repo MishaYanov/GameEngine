@@ -2,9 +2,4 @@ mod renderer;
 
 pub mod vulkan;
 
-pub use renderer::{
-	Renderer,
-	RendererError,
-	RendererInfo,
-};
-
+pub use renderer::{Renderer, RendererError, RendererInfo};

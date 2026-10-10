@@ -1,0 +1,1 @@
+{"compilerOptions":{"strict":true,"skipLibCheck":true,"target":"ES2022","module":"preserve","moduleResolution":"bundler","experimentalDecorators":true,"isolatedModules":true,"importHelpers":true,"lib":["ES2022","DOM"]},"angularCompilerOptions":{"strictTemplates":true,"strictInjectionParameters":true}}

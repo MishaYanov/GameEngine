@@ -1,43 +1,40 @@
-use renderer::vulkan::{
-	format_api_version,
-	VulkanDevice,
-	VulkanInstance,
-};
+use engine_logger::ResultLogExt;
+use renderer::vulkan::{VulkanDevice, VulkanInstance, format_api_version};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	println!("Initializing Vulkan...");
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _logging = engine_logger::init_application("vulkan-probe")?;
+    engine_logger::info!("Initializing Vulkan...");
 
-	let vulkan = VulkanInstance::new()?;
+    let vulkan = VulkanInstance::new().log_error("initialize Vulkan probe instance")?;
 
-	println!("Vulkan instance created.");
+    engine_logger::info!("Vulkan instance created.");
 
-	let devices = vulkan.physical_devices()?;
+    let devices = vulkan
+        .physical_devices()
+        .log_error("enumerate Vulkan devices")?;
 
-	println!("Found {} Vulkan device(s):", devices.len());
+    engine_logger::info!("Found {} Vulkan device(s):", devices.len());
 
-	for (index, device) in devices.iter().enumerate() {
-		println!();
-		println!("GPU #{index}");
-		println!("  Name:       {}", device.name);
-		println!("  Type:       {:?}", device.device_type);
-		println!(
-			"  Vulkan API: {}",
-			format_api_version(device.api_version)
-		);
-		println!("  Vendor ID:  {:#06x}", device.vendor_id);
-		println!("  Device ID:  {:#06x}", device.device_id);
-	}
+    for (index, device) in devices.iter().enumerate() {
+        engine_logger::info!("");
+        engine_logger::info!("GPU #{index}");
+        engine_logger::info!("  Name:       {}", device.name);
+        engine_logger::info!("  Type:       {:?}", device.device_type);
+        engine_logger::info!("  Vulkan API: {}", format_api_version(device.api_version));
+        engine_logger::info!("  Vendor ID:  {:#06x}", device.vendor_id);
+        engine_logger::info!("  Device ID:  {:#06x}", device.device_id);
+    }
 
-	println!();
-	println!("Selecting Vulkan device...");
+    engine_logger::info!("");
+    engine_logger::info!("Selecting Vulkan device...");
 
-	let device = VulkanDevice::new(vulkan.raw())?;
+    let device = VulkanDevice::new(vulkan.raw()).log_error("select Vulkan device")?;
 
-	println!("Logical Vulkan device created.");
-	println!(
-		"Graphics queue family: {}",
-		device.queue_families().graphics
-	);
+    engine_logger::info!("Logical Vulkan device created.");
+    engine_logger::info!(
+        "Graphics queue family: {}",
+        device.queue_families().graphics
+    );
 
-	Ok(())
+    Ok(())
 }

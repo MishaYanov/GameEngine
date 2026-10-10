@@ -63,7 +63,15 @@ impl Display for VulkanSwapchainError {
     }
 }
 
-impl Error for VulkanSwapchainError {}
+impl Error for VulkanSwapchainError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+            Self::Surface(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanSwapchainError {
     fn from(value: vk::Result) -> Self {

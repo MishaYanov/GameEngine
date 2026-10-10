@@ -61,7 +61,15 @@ impl Display for VulkanTextureError {
     }
 }
 
-impl Error for VulkanTextureError {}
+impl Error for VulkanTextureError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+            Self::Buffer(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanTextureError {
     fn from(value: vk::Result) -> Self {

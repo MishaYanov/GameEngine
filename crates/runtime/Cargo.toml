@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+engine-logger = { path = "../logger" }
 bridge = { path = "../bridge" }
 renderer = { path = "../renderer" }

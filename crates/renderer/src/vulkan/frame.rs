@@ -48,7 +48,14 @@ impl Display for VulkanFrameError {
     }
 }
 
-impl Error for VulkanFrameError {}
+impl Error for VulkanFrameError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+            Self::Camera(error) => Some(error),
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanFrameError {
     fn from(value: vk::Result) -> Self {
@@ -416,7 +423,7 @@ impl VulkanFrame {
                     self.command_buffer,
                     mesh.index_buffer().raw(),
                     0,
-                    vk::IndexType::UINT16,
+                    vk::IndexType::UINT32,
                 );
 
                 self.device.cmd_push_constants(

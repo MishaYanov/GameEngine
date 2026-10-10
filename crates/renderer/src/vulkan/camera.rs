@@ -51,7 +51,14 @@ impl Display for VulkanCameraError {
     }
 }
 
-impl Error for VulkanCameraError {}
+impl Error for VulkanCameraError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Vulkan(error) => Some(error),
+            Self::Buffer(error) => Some(error),
+        }
+    }
+}
 
 impl From<vk::Result> for VulkanCameraError {
     fn from(value: vk::Result) -> Self {

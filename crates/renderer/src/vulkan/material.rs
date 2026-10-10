@@ -1,13 +1,15 @@
+use std::sync::Arc;
+
 use ash::vk;
 
 use super::VulkanTexture;
 
 pub struct VulkanMaterial {
-    texture: VulkanTexture,
+    texture: Arc<VulkanTexture>,
 }
 
 impl VulkanMaterial {
-    pub fn new(texture: VulkanTexture) -> Self {
+    pub fn new(texture: Arc<VulkanTexture>) -> Self {
         Self { texture }
     }
 
@@ -20,6 +22,10 @@ impl VulkanMaterial {
     }
 
     pub fn texture(&self) -> &VulkanTexture {
+        &self.texture
+    }
+
+    pub fn texture_arc(&self) -> &Arc<VulkanTexture> {
         &self.texture
     }
 }

@@ -87,7 +87,15 @@ impl Display for VulkanInitError {
     }
 }
 
-impl Error for VulkanInitError {}
+impl Error for VulkanInitError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Loader(error) => Some(error),
+            Self::Vulkan(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<ash::LoadingError> for VulkanInitError {
     fn from(value: ash::LoadingError) -> Self {
@@ -250,6 +258,7 @@ fn create_debug_messenger_info() -> vk::DebugUtilsMessengerCreateInfoEXT<'static
     vk::DebugUtilsMessengerCreateInfoEXT::default()
         .message_severity(
             vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
                 | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
                 | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
         )
@@ -279,9 +288,27 @@ unsafe extern "system" fn vulkan_debug_callback(
         unsafe { CStr::from_ptr(callback_data.p_message) }.to_string_lossy()
     };
 
-    eprintln!("[Vulkan][{severity:?}][{message_type:?}] {message}");
+    let level = validation_log_level(severity);
+    engine_logger::event(
+        level,
+        "renderer::vulkan::validation",
+        format_args!("[{message_type:?}] {message}"),
+        engine_logger::Context::default(),
+    );
 
     vk::FALSE
+}
+
+fn validation_log_level(severity: vk::DebugUtilsMessageSeverityFlagsEXT) -> engine_logger::Level {
+    if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
+        engine_logger::Level::Error
+    } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
+        engine_logger::Level::Warning
+    } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::INFO) {
+        engine_logger::Level::Info
+    } else {
+        engine_logger::Level::Trace
+    }
 }
 
 pub fn format_api_version(version: u32) -> String {
@@ -291,4 +318,64 @@ pub fn format_api_version(version: u32) -> String {
         vk::api_version_minor(version),
         vk::api_version_patch(version),
     )
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::*;
+    #[test]
+    fn validation_severities_are_mapped_and_collected() {
+        use engine_logger::Level;
+        assert_eq!(
+            validation_log_level(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR),
+            Level::Error
+        );
+        assert_eq!(
+            validation_log_level(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING),
+            Level::Warning
+        );
+        assert_eq!(
+            validation_log_level(vk::DebugUtilsMessageSeverityFlagsEXT::INFO),
+            Level::Info
+        );
+        assert_eq!(
+            validation_log_level(vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE),
+            Level::Trace
+        );
+        let mut config = engine_logger::Config::new("vulkan-validation-test");
+        config.console = false;
+        config.error_backtraces = false;
+        let _logging = engine_logger::init(config).unwrap();
+        let data = vk::DebugUtilsMessengerCallbackDataEXT {
+            p_message: c"fixture validation failure".as_ptr(),
+            ..Default::default()
+        };
+        let result = unsafe {
+            vulkan_debug_callback(
+                vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                &data,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(result, vk::FALSE);
+        let record = engine_logger::snapshot(Default::default())
+            .entries
+            .remove(0);
+        assert_eq!(record.level, Level::Error);
+        assert_eq!(record.component, "renderer::vulkan::validation");
+        assert!(record.message.contains("fixture validation failure"));
+        assert!(record.message.contains("VALIDATION"));
+        assert_eq!(
+            unsafe {
+                vulkan_debug_callback(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                )
+            },
+            vk::FALSE
+        );
+    }
 }

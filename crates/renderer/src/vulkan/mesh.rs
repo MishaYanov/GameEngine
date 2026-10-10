@@ -33,7 +33,14 @@ impl Display for VulkanMeshError {
     }
 }
 
-impl Error for VulkanMeshError {}
+impl Error for VulkanMeshError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Buffer(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<VulkanBufferError> for VulkanMeshError {
     fn from(value: VulkanBufferError) -> Self {
@@ -42,12 +49,7 @@ impl From<VulkanBufferError> for VulkanMeshError {
 }
 
 impl VulkanMesh {
-    pub fn new(
-        instance: &Instance,
-        device: &VulkanDevice,
-        vertices: &[Vertex],
-        indices: &[u16],
-    ) -> Result<Self, VulkanMeshError> {
+    pub fn new(instance: &Instance, device: &VulkanDevice, vertices: &[Vertex], indices: &[u32]) -> Result<Self, VulkanMeshError> {
         let index_count =
             u32::try_from(indices.len()).map_err(|_| VulkanMeshError::TooManyIndices)?;
 
