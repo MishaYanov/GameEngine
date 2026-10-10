@@ -1,7 +1,10 @@
+use std::sync::Arc;
 use std::{
     error::Error,
     fmt::{Display, Formatter},
 };
+
+use super::VulkanMaterialLayout;
 
 use ash::{Device, Instance, vk};
 
@@ -9,16 +12,12 @@ use super::{VulkanBuffer, VulkanBufferError, VulkanDevice};
 
 pub struct VulkanTexture {
     device: Device,
-
     image: vk::Image,
     memory: vk::DeviceMemory,
     view: vk::ImageView,
     sampler: vk::Sampler,
-
-    descriptor_set_layout: vk::DescriptorSetLayout,
-
+    material_layout: Arc<VulkanMaterialLayout>,
     descriptor_pool: vk::DescriptorPool,
-
     descriptor_set: vk::DescriptorSet,
 }
 
@@ -87,13 +86,21 @@ impl VulkanTexture {
     pub fn checkerboard(
         instance: &Instance,
         device: &VulkanDevice,
+        material_layout: Arc<VulkanMaterialLayout>,
     ) -> Result<Self, VulkanTextureError> {
-        Self::checkerboard_with_colors(instance, device, [235, 235, 235, 255], [35, 35, 35, 255])
+        Self::checkerboard_with_colors(
+            instance,
+            device,
+            material_layout,
+            [235, 235, 235, 255],
+            [35, 35, 35, 255],
+        )
     }
 
     pub fn checkerboard_with_colors(
         instance: &Instance,
         device: &VulkanDevice,
+        material_layout: Arc<VulkanMaterialLayout>,
 
         color_a: [u8; 4],
         color_b: [u8; 4],
@@ -111,12 +118,13 @@ impl VulkanTexture {
             }
         }
 
-        Self::from_rgba8(instance, device, WIDTH, HEIGHT, &pixels)
+        Self::from_rgba8(instance, device, material_layout, WIDTH, HEIGHT, &pixels)
     }
 
     pub fn from_rgba8(
         instance: &Instance,
         device: &VulkanDevice,
+        material_layout: Arc<VulkanMaterialLayout>,
 
         width: u32,
         height: u32,
@@ -275,46 +283,13 @@ impl VulkanTexture {
             Err(error) => {
                 unsafe {
                     ash_device.destroy_image_view(view, None);
-
                     ash_device.free_memory(memory, None);
-
                     ash_device.destroy_image(image, None);
                 }
 
                 return Err(error.into());
             }
         };
-
-        /*
-         * set = 1
-         * binding = 0
-         */
-        let bindings = [vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
-
-        let layout_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
-
-        let descriptor_set_layout =
-            match unsafe { ash_device.create_descriptor_set_layout(&layout_info, None) } {
-                Ok(layout) => layout,
-
-                Err(error) => {
-                    unsafe {
-                        ash_device.destroy_sampler(sampler, None);
-
-                        ash_device.destroy_image_view(view, None);
-
-                        ash_device.free_memory(memory, None);
-
-                        ash_device.destroy_image(image, None);
-                    }
-
-                    return Err(error.into());
-                }
-            };
 
         let pool_sizes = [vk::DescriptorPoolSize {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -331,8 +306,6 @@ impl VulkanTexture {
 
             Err(error) => {
                 unsafe {
-                    ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-
                     ash_device.destroy_sampler(sampler, None);
 
                     ash_device.destroy_image_view(view, None);
@@ -346,7 +319,7 @@ impl VulkanTexture {
             }
         };
 
-        let layouts = [descriptor_set_layout];
+        let layouts = [material_layout.raw()];
 
         let allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(descriptor_pool)
@@ -358,8 +331,6 @@ impl VulkanTexture {
             Err(error) => {
                 unsafe {
                     ash_device.destroy_descriptor_pool(descriptor_pool, None);
-
-                    ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
 
                     ash_device.destroy_sampler(sampler, None);
 
@@ -397,14 +368,14 @@ impl VulkanTexture {
             view,
             sampler,
 
-            descriptor_set_layout,
+            material_layout,
             descriptor_pool,
             descriptor_set,
         })
     }
 
     pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.descriptor_set_layout
+        self.material_layout.raw()
     }
 
     pub fn descriptor_set(&self) -> vk::DescriptorSet {
@@ -417,9 +388,6 @@ impl Drop for VulkanTexture {
         unsafe {
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
-
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
 
             self.device.destroy_sampler(self.sampler, None);
 

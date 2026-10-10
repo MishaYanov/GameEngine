@@ -8,17 +8,23 @@ use std::{
 };
 
 use renderer::vulkan::{
-    VulkanDevice, VulkanInstance, VulkanMaterial, VulkanMesh, VulkanMeshError, VulkanTexture,
-    VulkanTextureError,
+    VulkanDevice, VulkanInstance, VulkanMaterial, VulkanMaterialLayout, VulkanMesh,
+    VulkanMeshError, VulkanTexture, VulkanTextureError,
 };
 
 use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
+use super::{
+    Model,
+    gltf_loader::{GltfLoaderError, load_first_mesh},
+    model::ModelPart,
+};
 
 pub struct AssetManager {
     root: PathBuf,
     textures: HashMap<PathBuf, Arc<VulkanTexture>>,
     meshes: HashMap<String, Arc<VulkanMesh>>,
     image_textures: HashMap<String, Arc<VulkanTexture>>,
+    material_layout: Arc<VulkanMaterialLayout>,
 }
 
 #[derive(Debug)]
@@ -27,6 +33,7 @@ pub enum AssetManagerError {
     Image(ImageAssetError),
     Texture(VulkanTextureError),
     Mesh(VulkanMeshError),
+    Gltf(GltfLoaderError),
     OutsideAssetRoot { path: PathBuf, root: PathBuf },
 }
 
@@ -49,6 +56,7 @@ impl Display for AssetManagerError {
                 write!(formatter, "Vulkan mesh asset error: {error}",)
             }
 
+            Self::Gltf(error) => write!(formatter, "model import error: {error}"),
             Self::OutsideAssetRoot { path, root } => {
                 write!(
                     formatter,
@@ -61,7 +69,24 @@ impl Display for AssetManagerError {
     }
 }
 
-impl Error for AssetManagerError {}
+impl Error for AssetManagerError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Image(error) => Some(error),
+            Self::Texture(error) => Some(error),
+            Self::Mesh(error) => Some(error),
+            Self::Gltf(error) => Some(error),
+            Self::OutsideAssetRoot { .. } => None,
+        }
+    }
+}
+
+impl From<GltfLoaderError> for AssetManagerError {
+    fn from(value: GltfLoaderError) -> Self {
+        Self::Gltf(value)
+    }
+}
 
 impl From<io::Error> for AssetManagerError {
     fn from(value: io::Error) -> Self {
@@ -88,7 +113,53 @@ impl From<VulkanMeshError> for AssetManagerError {
 }
 
 impl AssetManager {
-    pub fn new(root: impl AsRef<Path>) -> Result<Self, AssetManagerError> {
+    /// Import the first mesh and reuse any already-uploaded GPU resources.
+    pub fn load_model(
+        &mut self,
+        instance: &VulkanInstance,
+        device: &VulkanDevice,
+        path: impl AsRef<Path>,
+    ) -> Result<Model, AssetManagerError> {
+        let full_path = self.resolve(path)?;
+        let imported_parts = load_first_mesh(&full_path)?;
+        let mut parts = Vec::with_capacity(imported_parts.len());
+
+        for imported in imported_parts {
+            let mesh_key = format!(
+                "{}#mesh:{}#primitive:{}",
+                full_path.display(),
+                imported.mesh_index,
+                imported.primitive_index,
+            );
+            let image_key = match imported.base_color_image_index {
+                Some(index) => format!("{}#image:{}", full_path.display(), index),
+                None => "builtin:white".to_string(),
+            };
+            let mesh = self.load_mesh(instance, device, mesh_key, &imported.mesh)?;
+            let material = self.load_material(instance, device, &image_key, &imported.material)?;
+            engine_logger::info!(
+                "Prepared primitive {}: {} indices, double-sided {}",
+                imported.primitive_index,
+                mesh.index_count(),
+                material.double_sided(),
+            );
+            parts.push(ModelPart::new(mesh, material));
+        }
+
+        engine_logger::info!(
+            "Loaded {}: {} model parts; GPU meshes: {}, GPU textures: {}",
+            full_path.display(),
+            parts.len(),
+            self.loaded_mesh_count(),
+            self.loaded_texture_count(),
+        );
+        Ok(Model::new(parts))
+    }
+
+    pub fn new(
+        root: impl AsRef<Path>,
+        material_layout: Arc<VulkanMaterialLayout>,
+    ) -> Result<Self, AssetManagerError> {
         let root = root.as_ref().canonicalize()?;
 
         Ok(Self {
@@ -96,6 +167,7 @@ impl AssetManager {
             textures: HashMap::new(),
             meshes: HashMap::new(),
             image_textures: HashMap::new(),
+            material_layout,
         })
     }
 
@@ -123,6 +195,7 @@ impl AssetManager {
         let texture = VulkanTexture::from_rgba8(
             instance.raw(),
             device,
+            Arc::clone(&self.material_layout),
             image.width(),
             image.height(),
             image.pixels(),
@@ -217,6 +290,7 @@ impl AssetManager {
         let texture = Arc::new(VulkanTexture::from_rgba8(
             instance.raw(),
             device,
+            Arc::clone(&self.material_layout),
             image.width(),
             image.height(),
             image.pixels(),
@@ -241,7 +315,11 @@ impl AssetManager {
             }
         };
 
-        Ok(VulkanMaterial::new(texture, data.double_sided, data.base_color_factor))
+        Ok(VulkanMaterial::new(
+            texture,
+            data.double_sided,
+            data.base_color_factor,
+        ))
     }
 
     fn resolve(&self, path: impl AsRef<Path>) -> Result<PathBuf, AssetManagerError> {

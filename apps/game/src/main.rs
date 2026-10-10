@@ -1,16 +1,22 @@
 mod assets;
+pub mod model_instance;
+pub mod scene;
+pub mod transform;
 
 use assets::AssetManager;
 use engine_logger::ResultLogExt;
+use model_instance::ModelInstance;
+use transform::Transform;
 
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use renderer::vulkan::{
     CameraUniform, FrameStatus, ModelPushConstants, RenderObject, VulkanCamera, VulkanDepthBuffer,
-    VulkanDevice, VulkanFrame, VulkanInstance, VulkanMaterial, VulkanMaterialPipelines, VulkanMesh,
+    VulkanDevice, VulkanFrame, VulkanInstance, VulkanMaterialLayout, VulkanMaterialPipelines,
     VulkanSurface, VulkanSwapchain,
 };
 
+use crate::scene::{EntityId, Scene};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -19,19 +25,16 @@ use winit::{
     window::{Window, WindowId},
 };
 
-/// One drawable part; instances borrow these resources instead of uploading copies.
-struct ModelPart {
-    mesh: Arc<VulkanMesh>,
-    material: VulkanMaterial,
-}
-
 #[derive(Default)]
 struct GameApp {
     frame: Option<VulkanFrame>,
-    parts: Vec<ModelPart>,
+    scene: Scene,
+    left_robot: Option<EntityId>,
+    right_robot: Option<EntityId>,
     pipelines: Option<VulkanMaterialPipelines>,
     camera: Option<VulkanCamera>,
     asset_manager: Option<AssetManager>,
+    material_layout: Option<Arc<VulkanMaterialLayout>>,
     depth_buffer: Option<VulkanDepthBuffer>,
     swapchain: Option<VulkanSwapchain>,
     device: Option<VulkanDevice>,
@@ -45,6 +48,24 @@ struct GameApp {
 }
 
 impl GameApp {
+    fn update(&mut self, elapsed: f32) {
+        if self.project_name.is_some() {
+            return;
+        }
+
+        if let Some(id) = self.left_robot {
+            if let Some(left) = self.scene.get_mut(id) {
+                left.transform_mut().rotation = [elapsed * 0.6, elapsed * 0.9, 0.0];
+            }
+        }
+
+        if let Some(id) = self.right_robot {
+            if let Some(right) = self.scene.get_mut(id) {
+                right.transform_mut().rotation = [elapsed * -0.5, elapsed * 0.75, elapsed * 0.2];
+            }
+        }
+    }
+
     fn recreate_swapchain(&mut self) -> Result<bool, String> {
         let size = self
             .window
@@ -104,17 +125,17 @@ impl GameApp {
             VulkanDepthBuffer::new(instance.raw(), device, new_swapchain.extent())
                 .map_err(|error| format!("failed recreating depth buffer: {error}"))?;
 
-        let part = self
-            .parts
-            .first()
-            .ok_or("no model parts are initialized".to_string())?;
+        let material_layout = self
+            .material_layout
+            .as_ref()
+            .ok_or("material layout is not initialized".to_string())?;
 
         let new_pipelines = VulkanMaterialPipelines::new(
             device.raw(),
             new_swapchain.format(),
             new_depth_buffer.format(),
             camera.descriptor_set_layout(),
-            part.material.descriptor_set_layout(),
+            material_layout.raw(),
         )
         .map_err(|error| format!("failed recreating graphics pipeline: {error}"))?;
 
@@ -224,91 +245,27 @@ impl ApplicationHandler for GameApp {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
         };
 
-        let model_path = asset_root
-            .join("props/robot.glb")
-            .canonicalize()
-            .expect("failed to resolve robot model path");
-
-        let mut asset_manager =
-            AssetManager::new(asset_root).expect("failed to create asset manager");
-
-        // The loader now returns geometry and material data together.
-        let imported_parts = match assets::load_first_mesh(&model_path) {
-            Ok(data) => data,
+        let material_layout = Arc::new(
+            VulkanMaterialLayout::new(device.raw()).expect("failed to create material layout"),
+        );
+        let mut asset_manager = AssetManager::new(asset_root, Arc::clone(&material_layout))
+            .expect("failed to create asset manager");
+        let model = match asset_manager.load_model(&instance, &device, "props/robot.glb") {
+            Ok(model) => model,
             Err(error) => {
-                engine_logger::error!("Failed to import {}: {}", model_path.display(), error);
-
+                engine_logger::error!("Failed to load robot model: {}", error);
                 event_loop.exit();
                 return;
             }
         };
 
-        let mut parts = Vec::with_capacity(imported_parts.len());
-        for imported in imported_parts {
-            let mesh_key = format!(
-                "{}#mesh:{}#primitive:{}",
-                model_path.display(),
-                imported.mesh_index,
-                imported.primitive_index,
-            );
-            let image_key = match imported.base_color_image_index {
-                Some(index) => format!("{}#image:{}", model_path.display(), index),
-                None => "builtin:white".to_string(),
-            };
-
-            let mesh = match asset_manager.load_mesh(&instance, &device, mesh_key, &imported.mesh) {
-                Ok(mesh) => mesh,
-                Err(error) => {
-                    engine_logger::error!(
-                        "Failed to upload primitive {}: {}",
-                        imported.primitive_index,
-                        error
-                    );
-                    event_loop.exit();
-                    return;
-                }
-            };
-            let material = match asset_manager.load_material(
-                &instance,
-                &device,
-                &image_key,
-                &imported.material,
-            ) {
-                Ok(material) => material,
-                Err(error) => {
-                    engine_logger::error!(
-                        "Failed to create primitive {} material: {}",
-                        imported.primitive_index,
-                        error
-                    );
-                    event_loop.exit();
-                    return;
-                }
-            };
-            engine_logger::info!(
-                "Uploaded primitive {}: {} indices, double-sided {}",
-                imported.primitive_index,
-                mesh.index_count(),
-                material.double_sided(),
-            );
-            parts.push(ModelPart { mesh, material });
-        }
-        engine_logger::info!(
-            "Uploaded {} model parts; GPU meshes: {}, GPU textures: {}",
-            parts.len(),
-            asset_manager.loaded_mesh_count(),
-            asset_manager.loaded_texture_count(),
-        );
-
-        // load_first_mesh rejects empty meshes. Texture descriptor layouts
-        // currently have the same bindings for every material.
-        let first_part = parts.first().expect("imported mesh has no parts");
+        // Pipeline creation depends on renderer resources, even for an empty scene.
         let pipelines = VulkanMaterialPipelines::new(
             device.raw(),
             swapchain.format(),
             depth_buffer.format(),
             camera.descriptor_set_layout(),
-            first_part.material.descriptor_set_layout(),
+            material_layout.raw(),
         )
         .expect("failed to create Vulkan graphics pipeline");
 
@@ -321,10 +278,31 @@ impl ApplicationHandler for GameApp {
         engine_logger::info!("Frame resources created.");
 
         self.frame = Some(frame);
-        self.parts = parts;
+
+        let model = Arc::new(model);
+
+        self.left_robot = Some(self.scene.spawn(ModelInstance::new(
+            Arc::clone(&model),
+            Transform {
+                position: [-0.8, 0.0, 0.0],
+                scale: [0.7; 3],
+                ..Transform::default()
+            },
+        )));
+
+        self.right_robot = Some(self.scene.spawn(ModelInstance::new(
+            Arc::clone(&model),
+            Transform {
+                position: [0.8, 0.0, 0.0],
+                scale: [0.7; 3],
+                ..Transform::default()
+            },
+        )));
+
         self.pipelines = Some(pipelines);
         self.camera = Some(camera);
         self.asset_manager = Some(asset_manager);
+        self.material_layout = Some(material_layout);
         self.depth_buffer = Some(depth_buffer);
         self.swapchain = Some(swapchain);
         self.device = Some(device);
@@ -411,9 +389,7 @@ impl ApplicationHandler for GameApp {
                     .map(|start| start.elapsed().as_secs_f32())
                     .unwrap_or(0.0);
 
-                if self.parts.is_empty() {
-                    return;
-                }
+                self.update(elapsed);
 
                 let result = match (
                     self.frame.as_mut(),
@@ -431,34 +407,28 @@ impl ApplicationHandler for GameApp {
                         Some(pipelines),
                         Some(camera),
                     ) => {
-                        let transforms = [
-                            ModelPushConstants::from_3d(
-                                [-0.8, 0.0, 0.0],
-                                if self.project_name.is_some() {
-                                    [0.0; 3]
-                                } else {
-                                    [elapsed * 0.6, elapsed * 0.9, 0.0]
-                                },
-                                [0.7, 0.7, 0.7],
-                            ),
-                            ModelPushConstants::from_3d(
-                                [0.8, 0.0, 0.0],
-                                if self.project_name.is_some() {
-                                    [0.0; 3]
-                                } else {
-                                    [elapsed * -0.5, elapsed * 0.75, elapsed * 0.2]
-                                },
-                                [0.7, 0.7, 0.7],
-                            ),
-                        ];
+                        let part_count: usize = self
+                            .scene
+                            .instances()
+                            .map(|instance| instance.model().parts().len())
+                            .sum();
 
-                        let mut objects = Vec::with_capacity(self.parts.len() * transforms.len());
-                        for transform in transforms {
-                            for part in &self.parts {
+                        let mut objects = Vec::with_capacity(part_count);
+
+                        for instance in self.scene.instances() {
+                            let transform = instance.transform();
+
+                            let push_constants = ModelPushConstants::from_3d(
+                                transform.position,
+                                transform.rotation,
+                                transform.scale,
+                            );
+
+                            for part in instance.model().parts() {
                                 objects.push(RenderObject::new(
-                                    part.mesh.as_ref(),
-                                    &part.material,
-                                    transform,
+                                    part.mesh(),
+                                    part.material(),
+                                    push_constants,
                                 ));
                             }
                         }
