@@ -1,24 +1,17 @@
-mod assets;
-pub mod model_instance;
-pub mod scene;
-pub mod transform;
+use runtime::scene::{EntityId, Scene};
 
-use assets::AssetManager;
 use engine_logger::ResultLogExt;
-use model_instance::ModelInstance;
-use renderer::{
-    WindowRenderer,
-    vulkan::{CameraUniform, ModelPushConstants, RenderObject},
-};
-use scene::{EntityId, Scene};
+use renderer::{vulkan::CameraUniform, WindowRenderer};
 use std::{path::PathBuf, sync::Arc, time::Instant};
-use transform::Transform;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+use runtime::assets::AssetManager;
+use runtime::model_instance::ModelInstance;
+use runtime::transform::Transform;
 
 #[derive(Default)]
 struct GameApp {
@@ -123,18 +116,9 @@ impl GameApp {
             0.1,
             100.0,
         );
-        let mut objects = Vec::new();
-        for instance in self.scene.instances() {
-            let transform = instance.transform();
-            let constants = ModelPushConstants::from_3d(
-                transform.position,
-                transform.rotation,
-                transform.scale,
-            );
-            for part in instance.model().parts() {
-                objects.push(RenderObject::new(part.mesh(), part.material(), constants));
-            }
-        }
+
+        let objects = self.scene.render_objects();
+
         renderer.draw(&camera, &objects)?;
         Ok(())
     }

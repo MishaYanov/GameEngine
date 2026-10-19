@@ -1,6 +1,6 @@
-# Native game demo
+# Native game application
 
-Source: `apps/game`. Cargo package: `game`. The application owns its winit window, scene, asset cache, and low-level Vulkan drawing resources. These scene/model APIs currently live in the game application rather than shared `runtime`.
+Source: `apps/game`. Cargo package: `game`. The executable owns window events and application behavior; reusable scene/model/asset APIs live in `runtime`, and Vulkan presentation resources live in `renderer::WindowRenderer`.
 
 ## Run
 
@@ -10,44 +10,34 @@ From the repository root after [setup](../../usage.md):
 cargo run -p game
 .\dev.ps1 game
 cargo run -p game --release
+cargo run -p game --example renderer_smoke --offline --locked
 ```
 
-Requires Vulkan 1.3, a capable GPU driver, and `glslc` for shader builds. Debug initialization also requires the Khronos validation layer.
+Requires Vulkan 1.3, a capable driver, `glslc` for shader builds, and the Khronos validation layer in debug builds.
 
-## Models and scene instances
+## Application boundary
 
-`AssetManager::load_model` imports **every indexed triangle primitive of the first mesh** from `props/robot.glb`. Each `ModelPart` owns a shared GPU mesh and a material; `Model` groups those parts. Two `ModelInstance` values share one `Arc<Model>` and have independent `Transform` values with position, Euler rotation in radians, and scale.
+`GameApp` owns `Scene`, `AssetManager`, `WindowRenderer`, and a shared window reference. `initialize()` creates the window/renderer, calls `assets.load_model(&renderer, "props/robot.glb")`, and spawns two instances sharing one `Arc<Model>`. `update(elapsed)` changes independent rotations. `render()` calls renderer `prepare()`, builds camera data from the actual extent, gets `scene.render_objects()`, and submits it with `renderer.draw()`.
 
-`Scene::spawn` returns an `EntityId`; `get_mut` permits transform changes, `remove` returns the removed instance, and `instances` supplies drawing iteration. IDs increase without reuse within the scene. There is no scene serialization, hierarchy, general ECS, or editor command integration yet.
+The application no longer constructs GPU device/swapchain resources or recreates them on resize. Window events call `renderer.resize`; minimized zero-size frames suspend through `prepare()`. Renderer errors are logged and stop the loop. Elapsed-time rotation exists; frame-delta/input-driven movement is the next milestone, not an implemented feature.
 
-On each redraw, the game updates instance transforms, expands every model part into a borrowed `RenderObject`, and calls `VulkanFrame::draw`. Materials retain their own imported color factor and double-sided flag. Shared images reuse GPU texture uploads; factor-only materials use the cached `builtin:white` texture. The fragment shader multiplies sampled color by the material factor.
+## Shared scene and model APIs
 
-## Scene modes and packaging
+Use `runtime::scene::Scene`, `runtime::model_instance::ModelInstance`, `runtime::Transform`, and `runtime::assets::AssetManager`. Scene spawn returns `EntityId`; mutable lookup changes transforms, removal returns ownership, and iteration or `render_objects()` supplies rendering. Draw requests borrow existing mesh/material resources.
 
-| Mode | Selection | Scene | Asset root |
-| --- | --- | --- | --- |
-| Development | No readable name file beside executable | Two rotating robot model instances | Compiled manifest directory's `assets` |
-| Installed | Readable `project-name.txt` beside executable | Two stationary model instances | `assets` beside executable |
+Import covers all indexed triangle primitives of the first glTF mesh, with base-color images/factors and per-material sidedness. Shared image uploads and factor-only white fallback are supported. Nodes, additional meshes, animation/skinning, lighting/full PBR, scene persistence, and editor scene commands remain outside this scope.
 
-The name file supplies the installed window title. Both modes require `props/robot.glb`. **The compiler still copies only the old `crate.png` and `bricks.jpg` textures**, so fresh installation succeeds but runtime model import fails. For manual inspection, copy the model to `<installed folder>/assets/props/robot.glb` and preserve any external resources needed by other models. See [compiler](../../compiler/README.md).
+## Modes and distribution
 
-The admin builder allows GLB/glTF assets and adjusts generated asset lookup. Preserve its generated workspace layout. Import only handles the first mesh: node transforms, additional meshes, animation/skinning, full PBR, and transparent-material behavior are not implemented.
+| Mode | Selection | Behavior / assets |
+| --- | --- | --- |
+| Development | No readable `project-name.txt` beside executable | Rotating model instances; assets below the compiled game manifest directory |
+| Installed | Name file beside executable | Stationary instances; executable-relative `assets` and supplied window title |
 
-## Renderer lifecycle
+The compiler now recursively copies the complete game asset directory, including `props/robot.glb` and nested resources. The previous missing-model packaging warning is resolved in source and covered by a copy test. Preserve executable, name file, and asset tree together. The generated admin workspace retains its separate source-generation workflow.
 
-`GameApp` owns frame resources, scene, single/double-sided pipeline variants, camera, asset manager, shared material layout, depth, swapchain, device, surface, and instance. Pipeline creation uses renderer-owned layout resources rather than requiring a scene object's material, allowing creation with no draw objects.
+## Shutdown and verification
 
-Resize or `SwapchainNeedsRebuild` marks presentation dirty; zero-sized windows defer drawing. Rebuild waits for idle and recreates dependent presentation resources. Render/rebuild failures log and exit. Heartbeats occur on redraw roughly every five seconds. `Drop` waits for GPU completion before fields are destroyed; preserve dependency ordering when adding owners. Native empty-scene resize and lifetime behavior still require manual validation.
+Scene and cache hold uploaded GPU resources and are declared before the renderer so they drop before its device. Game shutdown waits for idle before releasing those owners. `WindowRenderer` also waits during its own destruction and keeps the window alive with an `Arc`. This lifetime rule is enforced by application structure, not automatic backend-independent handles.
 
-## Extension and verification
-
-Use `Scene::spawn(ModelInstance::new(...))` for another instance; mutate its transform via its ID. Put reusable GPU geometry/material parts in a `Model`, and preserve device/layout lifetimes while any instance still holds it. See [graphics and assets](../../graphics-and-assets.md) and [renderer](../../crates/renderer/README.md).
-
-From the repository root:
-
-```powershell
-cargo check -p game --offline --locked
-cargo test -p game --bin game --offline --locked
-```
-
-Importer tests cover multiple primitives with distinct materials and unsupported-mode rejection. They do not validate native presentation, scene removal/resize, or complete model formats. See [testing](../../testing.md).
+The native smoke example uses runtime APIs and exercises textured robots, shared model draws, removal, cache/model release after idle, zero-size suspension, empty-scene resize, and shutdown. User-confirmed tests, smoke, and visible resize/minimize checks completed the five-step runtime migration. Hidden smoke execution checks lifecycle/assertions rather than image correctness. See [testing](../../testing.md), [runtime](../../crates/runtime/README.md), and [renderer](../../crates/renderer/README.md).

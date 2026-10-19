@@ -1,5 +1,5 @@
 use crate::assets::Model;
-use crate::transform::Transform;
+use crate::Transform;
 use std::sync::Arc;
 
 pub struct ModelInstance {

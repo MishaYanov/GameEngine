@@ -1,10 +1,9 @@
 //! Run with cargo run -p game --example renderer_smoke (requires native Vulkan).
-#[path = "../src/assets/mod.rs"]
-mod assets;
+use runtime::{Transform, assets, model_instance::ModelInstance, scene::Scene};
 
 use renderer::{
     DrawStatus, WindowRenderer,
-    vulkan::{CameraUniform, ModelPushConstants, RenderObject},
+    vulkan::{CameraUniform, ModelPushConstants},
 };
 use std::{
     sync::Arc,
@@ -20,7 +19,7 @@ use winit::{
 #[derive(Default)]
 struct Smoke {
     // Drop uploaded resources before the renderer.
-    model: Option<assets::Model>,
+    scene: Scene,
     assets: Option<assets::AssetManager>,
     renderer: Option<WindowRenderer>,
     window: Option<Arc<Window>>,
@@ -46,7 +45,51 @@ impl ApplicationHandler for Smoke {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
         )
         .unwrap();
-        self.model = Some(assets.load_model(&renderer, "props/robot.glb").unwrap());
+        let model = Arc::new(assets.load_model(&renderer, "props/robot.glb").unwrap());
+        assert!(!model.parts().is_empty());
+        let first_transform = Transform {
+            position: [-0.8, 0.0, 0.0],
+            rotation: [0.2, 0.3, 0.4],
+            scale: [0.7; 3],
+        };
+        let second_transform = Transform {
+            position: [0.8, 0.0, 0.0],
+            ..Transform::default()
+        };
+        let first = self
+            .scene
+            .spawn(ModelInstance::new(Arc::clone(&model), first_transform));
+        let second = self
+            .scene
+            .spawn(ModelInstance::new(Arc::clone(&model), second_transform));
+        {
+            let objects = self.scene.render_objects();
+            assert_eq!(objects.len(), model.parts().len() * 2);
+            for (index, object) in objects.iter().enumerate() {
+                let part = &model.parts()[index % model.parts().len()];
+                assert!(std::ptr::eq(object.mesh(), part.mesh()));
+                assert!(std::ptr::eq(object.material(), part.material()));
+                let transform = if index < model.parts().len() {
+                    self.scene.instances().next().unwrap().transform()
+                } else {
+                    self.scene.instances().nth(1).unwrap().transform()
+                };
+                let expected = ModelPushConstants::from_3d(
+                    transform.position,
+                    transform.rotation,
+                    transform.scale,
+                );
+                assert_eq!(object.transform().model, expected.model);
+            }
+        }
+        drop(self.scene.remove(first).unwrap());
+        self.scene.get_mut(second).unwrap().transform_mut().position = [0.0; 3];
+        for object in self.scene.render_objects() {
+            assert_eq!(
+                object.transform().model,
+                ModelPushConstants::identity().model
+            );
+        }
         self.assets = Some(assets);
         self.renderer = Some(renderer);
         self.window = Some(window);
@@ -80,16 +123,7 @@ impl ApplicationHandler for Smoke {
             0.1,
             100.0,
         );
-        let mut objects = Vec::new();
-        if let Some(model) = &self.model {
-            for part in model.parts() {
-                objects.push(RenderObject::new(
-                    part.mesh(),
-                    part.material(),
-                    ModelPushConstants::identity(),
-                ));
-            }
-        }
+        let objects = self.scene.render_objects();
         if renderer.draw(&camera, &objects).unwrap() != DrawStatus::Rendered {
             return;
         }
@@ -97,7 +131,7 @@ impl ApplicationHandler for Smoke {
         self.frames += 1;
         if self.frames == 2 {
             renderer.wait_idle().unwrap();
-            self.model = None;
+            self.scene = Scene::default();
             self.assets.as_mut().unwrap().clear();
             renderer.resize(0, 0);
             assert_eq!(renderer.prepare().unwrap(), None);
@@ -149,6 +183,6 @@ fn main() {
         "native validation logged errors: {errors:?}"
     );
     println!(
-        "PASS: textured draws, resource release, zero-size suspension, empty resize/draw, shutdown"
+        "PASS: scene resource mapping and transforms, textured draws, resource release, zero-size suspension, empty resize/draw, shutdown"
     );
 }

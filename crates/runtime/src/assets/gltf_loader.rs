@@ -99,11 +99,97 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn external_references_cannot_escape_or_use_schemes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .canonicalize()
+            .unwrap();
+        for uri in [
+            "../Cargo.toml",
+            "%2e%2e/Cargo.toml",
+            "file:///etc/passwd",
+            "https://example.com/model.bin",
+            "C:/secret.bin",
+            "\\\\server/share",
+            "/etc/passwd",
+            "%FF",
+            "a%00b",
+        ] {
+            let mut budget = IMPORT_LIMIT;
+            assert!(read_uri(&root, uri, &mut budget).is_err(), "accepted {uri}");
+        }
+        let mut budget = IMPORT_LIMIT;
+        let bytes = read_uri(&root, "Cargo.toml", &mut budget).unwrap();
+        assert_eq!(bytes, std::fs::read(root.join("Cargo.toml")).unwrap());
+        let mut budget = IMPORT_LIMIT;
+        assert_eq!(
+            read_uri_in_root(&root.join("src"), &root, "../Cargo.toml", &mut budget).unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn resources_enforce_remaining_budget() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .canonicalize()
+            .unwrap();
+        assert!(read_uri(&root, "Cargo.toml", &mut 1).is_err());
+        assert!(
+            read_uri(
+                &root,
+                "data:application/octet-stream;base64,AQIDBA==",
+                &mut 3
+            )
+            .is_err()
+        );
+        assert_eq!(
+            read_uri(
+                &root,
+                "data:application/octet-stream;base64,AQIDBA==",
+                &mut 4
+            )
+            .unwrap(),
+            [1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn bundled_glb_still_loads() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/game/assets/props/robot.glb");
+        assert!(!load_first_mesh(path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_escaping_buffer_and_image_before_import() {
+        let root = std::env::temp_dir().join(format!("gltf-security-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        {
+            let model = root.join("model.gltf");
+            for json in [
+                MODEL.replace("\"byteLength\":42", "\"byteLength\":42,\"uri\":\"../outside.bin\""),
+                MODEL.replace("\"byteLength\":42", "\"byteLength\":42,\"uri\":\"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"")
+                    .replace("\"materials\":[", "\"images\":[{\"uri\":\"file:///outside.png\"}],\"materials\":["),
+            ] {
+                std::fs::write(&model, json).unwrap();
+                assert!(matches!(load_resources(&model), Err(GltfLoaderError::Resource(_))));
+            }
+            let large = root.join("large.bin");
+            std::fs::File::create(&large)
+                .unwrap()
+                .set_len(RESOURCE_LIMIT as u64 + 1)
+                .unwrap();
+            let mut budget = IMPORT_LIMIT;
+            assert!(read_bounded(&large, &mut budget).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub struct ImportedPrimitive {
     pub mesh: MeshData,
-    pub(crate) material: MaterialData,
+    pub material: MaterialData,
     pub primitive_index: usize,
     pub mesh_index: usize,
     pub base_color_image_index: Option<usize>,
@@ -111,6 +197,7 @@ pub struct ImportedPrimitive {
 
 #[derive(Debug)]
 pub enum GltfLoaderError {
+    Resource(String),
     Import(gltf::Error),
     Image(ImageAssetError),
     NoMeshes,
@@ -131,6 +218,7 @@ pub enum GltfLoaderError {
 impl Display for GltfLoaderError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Resource(message) => write!(formatter, "glTF resource rejected: {message}"),
             Self::Import(error) => {
                 write!(formatter, "glTF import failed: {error}")
             }
@@ -227,10 +315,178 @@ impl From<ImageAssetError> for GltfLoaderError {
 /// applied yet; all returned geometry remains in mesh-local coordinates.
 pub fn load_first_mesh(path: impl AsRef<Path>) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
     let path = path.as_ref();
-    let (document, buffers, images) = gltf::import(path)?;
+    let (document, buffers, images) = load_resources(path)?;
     let parts = import_first_mesh(&document, &buffers, &images)?;
     engine_logger::info!("Imported {} parts from {}", parts.len(), path.display());
     Ok(parts)
+}
+
+pub(super) fn load_first_mesh_in_root(
+    path: &Path,
+    root: &Path,
+) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
+    let (document, buffers, images) = load_resources_in_root(path, root)?;
+    import_first_mesh(&document, &buffers, &images)
+}
+
+const RESOURCE_LIMIT: usize = 64 * 1024 * 1024;
+const IMPORT_LIMIT: usize = 256 * 1024 * 1024;
+
+fn rejected(message: impl ToString) -> GltfLoaderError {
+    GltfLoaderError::Resource(message.to_string())
+}
+
+fn charge(budget: &mut usize, bytes: usize) -> Result<(), GltfLoaderError> {
+    *budget = budget
+        .checked_sub(bytes)
+        .ok_or_else(|| rejected("import exceeds 256 MiB"))?;
+    Ok(())
+}
+
+fn read_bounded(path: &Path, budget: &mut usize) -> Result<Vec<u8>, GltfLoaderError> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(rejected)?;
+    let metadata = file.metadata().map_err(rejected)?;
+    if !metadata.is_file() || metadata.len() > RESOURCE_LIMIT.min(*budget) as u64 {
+        return Err(rejected(
+            "resource is not a regular file or exceeds byte limit",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(RESOURCE_LIMIT.min(*budget) as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(rejected)?;
+    if bytes.len() > RESOURCE_LIMIT {
+        return Err(rejected("resource exceeds 64 MiB"));
+    }
+    charge(budget, bytes.len())?;
+    Ok(bytes)
+}
+
+#[cfg(test)]
+fn read_uri(root: &Path, uri: &str, budget: &mut usize) -> Result<Vec<u8>, GltfLoaderError> {
+    read_uri_in_root(root, root, uri, budget)
+}
+
+fn read_uri_in_root(
+    base: &Path,
+    root: &Path,
+    uri: &str,
+    budget: &mut usize,
+) -> Result<Vec<u8>, GltfLoaderError> {
+    if let Some(data) = uri.strip_prefix("data:") {
+        let (_, encoded) = data
+            .split_once(";base64,")
+            .ok_or_else(|| rejected("unsupported data URI"))?;
+        if encoded.len() > RESOURCE_LIMIT.min(*budget).saturating_add(2) / 3 * 4 {
+            return Err(rejected("data URI exceeds byte limit"));
+        }
+        let bytes = base64::decode(encoded).map_err(rejected)?;
+        if bytes.len() > RESOURCE_LIMIT {
+            return Err(rejected("resource exceeds 64 MiB"));
+        }
+        charge(budget, bytes.len())?;
+        return Ok(bytes);
+    }
+    let decoded = urlencoding::decode(uri).map_err(rejected)?;
+    // Reject schemes, drive prefixes, UNC paths and platform-dependent separators.
+    if decoded.contains([':', '\\', '\0']) || Path::new(decoded.as_ref()).is_absolute() {
+        return Err(rejected("only relative asset references are supported"));
+    }
+    let path = base
+        .join(decoded.as_ref())
+        .canonicalize()
+        .map_err(rejected)?;
+    if !path.starts_with(root) {
+        return Err(rejected("reference escapes the model directory"));
+    }
+    read_bounded(&path, budget)
+}
+
+type Resources = (
+    gltf::Document,
+    Vec<gltf::buffer::Data>,
+    Vec<gltf::image::Data>,
+);
+
+fn load_resources(path: &Path) -> Result<Resources, GltfLoaderError> {
+    let path = path.canonicalize().map_err(rejected)?;
+    let root = path
+        .parent()
+        .ok_or_else(|| rejected("missing model directory"))?;
+    load_resources_in_root(&path, root)
+}
+
+fn load_resources_in_root(path: &Path, root: &Path) -> Result<Resources, GltfLoaderError> {
+    let path = path.canonicalize().map_err(rejected)?;
+    let root = root.canonicalize().map_err(rejected)?;
+    if !path.starts_with(&root) {
+        return Err(rejected("model escapes asset root"));
+    }
+    let base = path
+        .parent()
+        .ok_or_else(|| rejected("missing model directory"))?;
+    let mut budget = IMPORT_LIMIT;
+    let bytes = read_bounded(&path, &mut budget)?;
+    let gltf::Gltf { document, mut blob } = gltf::Gltf::from_slice(&bytes)?;
+    let mut buffers = Vec::new();
+    for buffer in document.buffers() {
+        if buffer.length() > RESOURCE_LIMIT {
+            return Err(rejected("buffer exceeds 64 MiB"));
+        }
+        let data = match buffer.source() {
+            gltf::buffer::Source::Uri(uri) => read_uri_in_root(base, &root, uri, &mut budget)?,
+            gltf::buffer::Source::Bin => blob
+                .take()
+                .ok_or_else(|| rejected("missing binary buffer"))?,
+        };
+        if data.len() < buffer.length() {
+            return Err(rejected("buffer is shorter than declared"));
+        }
+        buffers.push(gltf::buffer::Data(data));
+    }
+    let mut images = Vec::new();
+    for image in document.images() {
+        let external;
+        let encoded = match image.source() {
+            gltf::image::Source::Uri { uri, .. } => {
+                external = read_uri_in_root(base, &root, uri, &mut budget)?;
+                external.as_slice()
+            }
+            gltf::image::Source::View { view, .. } => {
+                let end = view
+                    .offset()
+                    .checked_add(view.length())
+                    .ok_or_else(|| rejected("image range overflow"))?;
+                buffers
+                    .get(view.buffer().index())
+                    .and_then(|b| b.0.get(view.offset()..end))
+                    .ok_or_else(|| rejected("image view outside buffer"))?
+            }
+        };
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(encoded))
+            .with_guessed_format()
+            .map_err(rejected)?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(4096);
+        limits.max_image_height = Some(4096);
+        limits.max_alloc = Some(RESOURCE_LIMIT.min(budget) as u64);
+        reader.limits(limits);
+        let decoded = reader.decode().map_err(rejected)?;
+        let size = (decoded.width() as usize)
+            .checked_mul(decoded.height() as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| rejected("image size overflow"))?;
+        charge(&mut budget, size)?;
+        let rgba = decoded.into_rgba8();
+        images.push(gltf::image::Data {
+            width: rgba.width(),
+            height: rgba.height(),
+            format: gltf::image::Format::R8G8B8A8,
+            pixels: rgba.into_raw(),
+        });
+    }
+    Ok((document, buffers, images))
 }
 
 fn import_first_mesh(

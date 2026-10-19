@@ -1,4 +1,5 @@
 use crate::model_instance::ModelInstance;
+use renderer::vulkan::{ModelPushConstants, RenderObject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityId(u64);
@@ -45,13 +46,32 @@ impl Scene {
     pub fn instances(&self) -> impl Iterator<Item = &ModelInstance> {
         self.entries.iter().map(|entry| &entry.instance)
     }
+
+    pub fn render_objects(&self) -> Vec<RenderObject<'_>> {
+        let mut objects = Vec::new();
+
+        for instance in self.instances() {
+            let transform = instance.transform();
+            let constants = ModelPushConstants::from_3d(
+                transform.position,
+                transform.rotation,
+                transform.scale,
+            );
+            for part in instance.model().parts() {
+                objects.push(RenderObject::new(part.mesh(), part.material(), constants));
+            }
+        }
+
+        objects
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{assets::Model, transform::Transform};
+    use crate::assets::Model;
     use std::sync::Arc;
+    use crate::Transform;
 
     fn instance(model: &Arc<Model>) -> ModelInstance {
         ModelInstance::new(Arc::clone(model), Transform::default())

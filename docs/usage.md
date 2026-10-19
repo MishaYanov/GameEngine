@@ -63,6 +63,8 @@ My Game/
     textures/
       crate.png
       bricks.jpg
+    props/
+      robot.glb
 ```
 
 Launch the installed demo:
@@ -71,7 +73,7 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. **Current packaging limitation:** the game requires `assets/props/robot.glb`, but the installer only copies the textures listed above. A fresh installation logs a missing-model error and exits. To inspect the installed mode manually, copy `apps/game/assets/props/robot.glb` into `<installed folder>/assets/props/robot.glb`; it then draws two stationary model instances containing every primitive in the first mesh. Keep executable, name file, and assets together. See [the game guide](apps/game/README.md).
+The window title uses the project name. The installer copies the complete nested asset tree, including `assets/props/robot.glb`; the earlier missing-model omission is fixed. Installed mode draws stationary robot model instances. Preserve executable, name file, and the asset tree together. See [the game guide](apps/game/README.md).
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 
@@ -79,7 +81,7 @@ Names accept letters, numbers, spaces, hyphens and underscores, with a limit of 
 
 Exit codes are `0` for success, `1` for build/install failure, and `2` for an incorrect number of arguments.
 
-This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene, and currently omits the required robot model.
+This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene.
 
 ## 3. Use the editor project setup screen
 
@@ -102,7 +104,7 @@ In the setup screen:
 2. Enter an existing **Destination folder**, such as `D:\Projects`.
 3. Click **Create & launch project**.
 4. Wait for the build and installation. The form disables submission while working.
-5. Read the installed path and launch status. The host attempts to open the graphics window after installation. The current missing-model packaging issue described above can make the child exit after a successful spawn.
+5. Read the installed path and launch status. The host attempts to open the graphics window after installation. Process-spawn success does not certify that the child subsequently initialized Vulkan or rendered successfully.
 
 This uses the same installer as the CLI, including its destination and overwrite rules. If launch fails after installation, the screen reports that separately; run `game.exe` from the installed folder to retry.
 
@@ -197,7 +199,7 @@ Keep the generated workspace layout and read its generated README for details. T
 
 | Workflow | Destination field | Result |
 | --- | --- | --- |
-| Compiler CLI / editor setup | Existing parent folder, e.g. `D:\Projects` | Installed runtime in a named child; required robot model currently omitted |
+| Compiler CLI / editor setup | Existing parent folder, e.g. `D:\Projects` | Installed runtime and complete asset tree in a named child |
 | Admin Project Builder | Full new folder path, e.g. `D:\Projects\IndependentGame` | Independent native source workspace, validated before publication |
 
 ## 5. Common problems

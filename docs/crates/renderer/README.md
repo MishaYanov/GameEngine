@@ -16,41 +16,32 @@ cargo test -p renderer --offline --locked
 
 The probe exercises initialization/device information rather than a presented scene. Use the native game for manual imported-model and frame checks.
 
-## API levels
+## Presentation owner: WindowRenderer
 
-`Renderer::new() -> Result<Renderer, RendererError>` creates an instance/device without a window surface. `Renderer::info()` returns `{ name, gpu_name, vulkan_api }`. Initialization errors preserve instance/device causes. Runtime uses this wrapper for editor status.
+`renderer::WindowRenderer` owns frame resources, both pipeline variants, depth buffer, swapchain, camera, material layout, device, surface, instance, and an `Arc` keeping the native window alive.
 
-The public `vulkan` exports provide drawing resources:
-
-| Types | Role |
+| Method | Contract |
 | --- | --- |
-| `VulkanInstance`, `VulkanSurface` | Loader/instance and window surface |
-| `VulkanDevice`, `QueueFamilies` | Device and graphics/presentation queues |
-| `VulkanSwapchain`, `VulkanDepthBuffer` | Presentation images and depth |
-| `VulkanBuffer`, `VulkanMesh`, `Vertex` | Allocations and indexed geometry |
-| `VulkanTexture`, `VulkanMaterial`, `VulkanMaterialLayout` | Texture upload and materials with shared texture ownership and double-sided state |
-| `VulkanCamera`, `CameraUniform` | Camera buffer/descriptors |
-| `VulkanGraphicsPipeline`, `VulkanMaterialPipelines`, `ModelPushConstants` | Fixed pipeline and object transform |
-| `RenderObject`, `VulkanFrame`, `FrameStatus` | Draw inputs, synchronization, rebuild status |
+| `new(window, width, height)` | Create resources for an `Arc` window with display/window handles |
+| `resize(width, height)` | Record dimensions and mark targets dirty; no immediate rebuild |
+| `prepare()` | Rebuild if needed; return actual extent or `None` when either dimension is zero |
+| `draw(camera, objects)` | Submit borrowed requests; return `DrawStatus` |
+| `upload_mesh(vertices, indices)` | Upload GPU geometry |
+| `upload_rgba8(width, height, pixels)` | Upload a texture using the owner's shared material layout |
+| `wait_idle()` | Wait before releasing external uploaded resources |
 
-Presented applications use `VulkanInstance::for_display` and `VulkanDevice::for_surface`. The status wrapper's device creation does not replace selection of a surface-compatible device.
+`DrawStatus` is `Rendered`, `Suspended`, or `NeedsRedraw`. Swapchain invalidation marks targets dirty for a later prepare. Internal `RenderTargets` groups frame, pipelines, depth, and swapchain. Rebuild waits for idle and takes old targets out before replacement, preventing reuse of a retired swapchain after a failure.
 
-## Shared material layout and pipeline contracts
+External meshes/textures must be released after GPU idle and before this owner/device. The renderer's destructor waits for idle but cannot enforce the lifetime of externally held resources. Runtime assets still contain Vulkan types.
 
-`VulkanMaterialLayout::new(device)` creates the shared descriptor set layout for a fragment combined image sampler at binding 0. Pass an `Arc<VulkanMaterialLayout>` to texture constructors and to the asset manager. Texture descriptor allocation and pipeline creation use this shared layout rather than deriving renderer setup from a scene object.
+## Status and low-level APIs
 
-`VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture, stores the imported sidedness and RGBA factor, and exposes both properties. `VulkanGraphicsPipeline::new` still takes its final culling boolean: true means no face culling; false means back-face culling.
+The existing `Renderer::new()` / `Renderer::info()` wrapper remains for editor/runtime GPU status and has not been unified with window presentation. Public `vulkan` types remain available for lower-level work; applications should use the presentation owner for upload, draw, resize, and shutdown.
 
-`VulkanMaterialPipelines::new` creates compatible single- and double-sided pipelines. `for_material(bool)` selects one; `VulkanFrame::draw` selects and binds the matching pipeline for each object. Recreate both variants when attachment formats change. Pipeline/layout creation can occur with an empty scene.
+`VulkanMaterialLayout` is renderer-owned and shared with uploaded textures. `VulkanMaterial::new(texture, double_sided, base_color_factor)` retains material properties. `VulkanMaterialPipelines` selects compatible single/double-sided variants per draw. `ModelPushConstants` contains a matrix at byte 0 and factor at byte 64 (80 bytes total); sampled color is multiplied by the factor. Full PBR, normal lighting, and transparent-material blending/sorting remain future work.
 
-`ModelPushConstants` is an 80-byte block: model matrix at byte 0 and base-color factor at byte 64, shared with vertex/fragment stages. The frame supplies each material's factor, and the fragment shader multiplies sampled texture color by it. Factor-only materials use a white texture supplied by the game asset manager. Full PBR, normal lighting, and transparent-material blend/sort behavior remain unimplemented.
+## Shaders and verification
 
-## Shaders and ownership
+`build.rs` compiles `crates/renderer/shaders/triangle.vert` and `triangle.frag` into `OUT_DIR`, using SDK `glslc` then PATH. The pipeline embeds SPIR-V; rebuild for shader changes.
 
-`build.rs` compiles `crates/renderer/shaders/triangle.vert` and `triangle.frag` into Cargo `OUT_DIR`. It checks `VULKAN_SDK/Bin/glslc.exe` on Windows (`bin/glslc` elsewhere), then PATH. The pipeline embeds SPIR-V through `include_bytes!`; shader changes require rebuilding, with no hot reload.
-
-Wrappers destroy handles in `Drop`, but `ash::Device` clones do not own the logical device's lifetime. Destroy dependent resources before device/instance and finish submitted work before release. See [graphics and assets](../../graphics-and-assets.md) for shader contracts and lifecycle details.
-
-## Verification limits
-
-Tests cover validation diagnostic behavior and the push-constant byte layout. Startup probes and manual frame checks cover different behavior. Drawing, resize/minimize, and visual correctness require a GPU/window. The current textured pipeline is not a general material/scene system. See [testing](../../testing.md) and [game](../../apps/game/README.md).
+Unit tests cover validation logging, device/surface selection rules, swapchain choices, and push-constant layout. Run the [native game smoke](../../apps/game/README.md) for upload/draw, resize, empty-scene, and shutdown behavior. The user confirmed native and visible-game checks after the runtime move; those results are distinct from automated checks performed during a docs update. See [testing](../../testing.md).

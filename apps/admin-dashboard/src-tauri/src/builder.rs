@@ -561,6 +561,17 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
+        if !cfg!(windows) {
+            assert_eq!(builder.runs[0].state, "FAILED");
+            assert_eq!(
+                builder.runs[0].detail.as_deref(),
+                Some("Project publication currently supports Windows only")
+            );
+            assert!(generated.staging.join("generation-manifest.json").is_file());
+            assert!(!root.join("output").exists());
+            assert_eq!(Builder::new(&admin).runs[0].state, "FAILED");
+            return;
+        }
         assert_eq!(
             builder.runs[0].state, "SUCCEEDED",
             "{:?}",
@@ -788,7 +799,17 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        assert_eq!(service.builder.runs[0].state, "SUCCEEDED");
+        if cfg!(windows) {
+            assert_eq!(service.builder.runs[0].state, "SUCCEEDED");
+        } else {
+            assert_eq!(service.builder.runs[0].state, "FAILED");
+            assert_eq!(
+                service.builder.runs[0].detail.as_deref(),
+                Some("Project publication currently supports Windows only")
+            );
+            assert!(generated.staging.join("generation-manifest.json").is_file());
+            assert!(!root.join("client").exists());
+        }
         service.board.link(&card.id, &generated.job_id).unwrap();
         let restored = crate::board::Board::new(&admin);
         assert_eq!(restored.cards[0].jobs.len(), 3);

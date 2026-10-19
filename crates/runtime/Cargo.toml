@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+gltf = "1.4.1"
+base64 = "0.13.1"
+urlencoding = "2.1.3"
 engine-logger = { path = "../logger" }
 bridge = { path = "../bridge" }
 renderer = { path = "../renderer" }

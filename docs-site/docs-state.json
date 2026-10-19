@@ -1,40 +1,79 @@
 {
-  "last_checked_commit": "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
-  "last_checked_date": "2026-10-10",
-  "last_documentation_update_commit": "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
+  "last_checked_commit": "c19dc4b64ad7dec59932ec579a27ff90359a3a94",
+  "last_checked_date": "2026-10-19",
+  "last_documentation_update_commit": "c19dc4b64ad7dec59932ec579a27ff90359a3a94",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "reviewed_commits": [
     "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
-    "4a7b41db41fe8a32856879eabe1d55d951a58017"
+    "c19dc4b64ad7dec59932ec579a27ff90359a3a94"
   ],
   "documented_changes": [
-    "Refreshed game, renderer, and runtime READMEs for multi-primitive models, shared instances, and game-local scene ownership",
-    "Updated graphics, architecture, testing, index, and usage descriptions for integrated MaterialData, shared descriptor layout, material pipeline variants, color factors, and white fallback",
-    "Preserved existing pipeline.md edits and recorded the outstanding robot model installer omission"
+    "WindowRenderer presentation ownership, upload methods, deferred resize and resource lifetimes",
+    "Completed five-step migration of assets/models/instances/scenes/Transform into runtime and Scene::render_objects",
+    "Public runtime APIs and external scene_api tests",
+    "Recursive game asset copying fixes robot packaging omission",
+    "Updated game/runtime/renderer/architecture/graphics/testing/usage/pipeline and affected references",
+    "Draft untracked Jenkins configuration distinguished from verified CI execution",
+    "Timing/delta and keyboard movement remain next planned work"
   ],
   "pending_documentation_changes": [
-    "Update installer documentation when required robot model packaging is fixed",
-    "Record native empty-scene resize and resource-lifecycle results after they are exercised"
+    "Update timing/input documentation when implemented",
+    "Record installed release outside-checkout results when verified",
+    "Update Jenkins setup status after its draft is run and validated"
   ],
   "verification": [
-    "Static site rebuilt and link-checked: 22 pages; five site tests passed",
-    "cargo test -p game -p renderer --lib --bins --offline --locked passed: four tests; three dead-code warning groups",
-    "git diff --check passed"
+    "npm.cmd test --prefix docs-site: 22 pages rebuilt/link-checked, five tests passed",
+    "cargo test -p runtime -p renderer -p bridge -p compiler --offline --locked: 23 passed, one native initialization test ignored",
+    "python -m unittest discover -s tests -p test_test_all.py -v: five passed",
+    "cargo check -p game --all-targets --offline --locked completed",
+    "git diff --check -- docs designs passed"
+  ],
+  "user_reported_verification": [
+    "User confirmed tests, native smoke, visible game, resize, and minimize pass after runtime module move",
+    "Attached renderer extraction notes report RTX 4070 smoke pass with 640x360 resized extent and no logged errors"
   ],
   "verification_limits": [
-    "Native Vulkan presentation, scene removal/empty-scene resize, and installed runtime were not exercised",
-    "Browser visual QA and clean-checkout reproducibility were not exercised"
+    "Native smoke and visible GPU checks were user-reported, not rerun by this docs review",
+    "No full workspace/Angular run, installed release launch, browser visual QA, or clean-checkout rebuild was performed",
+    "Jenkins configuration not launched",
+    "Runtime migration includes staged/unstaged changes; HEAD alone does not represent documented source"
   ],
   "working_tree_at_check": [
-    " M docs-site/docs-state.json",
+    " M Cargo.lock",
+    " M apps/game/Cargo.toml",
+    " M apps/game/examples/renderer_smoke.rs",
+    " M apps/game/src/main.rs",
+    " M crates/runtime/Cargo.toml",
+    "R  apps/game/src/assets/asset_manager.rs -> crates/runtime/src/assets/asset_manager.rs",
+    "RM apps/game/src/assets/gltf_loader.rs -> crates/runtime/src/assets/gltf_loader.rs",
+    "R  apps/game/src/assets/image_asset.rs -> crates/runtime/src/assets/image_asset.rs",
+    "RM apps/game/src/assets/material_data.rs -> crates/runtime/src/assets/material_data.rs",
+    "R  apps/game/src/assets/mesh_data.rs -> crates/runtime/src/assets/mesh_data.rs",
+    "R  apps/game/src/assets/mod.rs -> crates/runtime/src/assets/mod.rs",
+    "RM apps/game/src/assets/model.rs -> crates/runtime/src/assets/model.rs",
+    " M crates/runtime/src/lib.rs",
+    "R  apps/game/src/model_instance.rs -> crates/runtime/src/model_instance.rs",
+    "R  apps/game/src/scene.rs -> crates/runtime/src/scene.rs",
+    "R  apps/game/src/transform.rs -> crates/runtime/src/transform.rs",
+    " M designs/project-installation.md",
+    " M designs/testing.md",
+    " M docs/apps/editor-host/README.md",
+    " M docs/apps/editor/README.md",
     " M docs/apps/game/README.md",
     " M docs/architecture.md",
+    " M docs/compiler/README.md",
+    " M docs/crates/bridge/README.md",
     " M docs/crates/renderer/README.md",
     " M docs/crates/runtime/README.md",
     " M docs/graphics-and-assets.md",
     " M docs/main.md",
     " M docs/pipeline.md",
     " M docs/testing.md",
-    " M docs/usage.md"
+    " M docs/usage.md",
+    " M test_all.py",
+    " M tests/test_test_all.py",
+    "?? Jenkinsfile",
+    "?? ci/",
+    "?? crates/runtime/tests/"
   ]
 }

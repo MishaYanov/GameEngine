@@ -1273,9 +1273,8 @@ name = "game"
 version = "0.1.0"
 dependencies = [
  "engine-logger",
- "gltf",
- "image",
  "renderer",
+ "runtime",
  "tracing",
  "winit",
 ]
@@ -3379,9 +3378,13 @@ dependencies = [
 name = "runtime"
 version = "0.1.0"
 dependencies = [
+ "base64 0.13.1",
  "bridge",
  "engine-logger",
+ "gltf",
+ "image",
  "renderer",
+ "urlencoding",
 ]
 
 [[package]]

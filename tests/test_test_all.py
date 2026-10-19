@@ -29,12 +29,15 @@ class TestAllTests(unittest.TestCase):
 
     def test_native_build_is_explicit(self):
         self.assertEqual(len(test_all.suites()), 5)
-        self.assertIn("--ignored", test_all.suites(True)[-1][2])
+        self.assertFalse(any("renderer_smoke" in command for _, _, command in test_all.suites()))
 
     def test_native_mode_includes_runtime_and_generated_game_checks(self):
         native = test_all.suites(True)
-        self.assertEqual(len(native), 7)
-        self.assertEqual([suite[0] for suite in native[-2:]], ["Native Vulkan runtime", "Native generated game"])
-        for _, _, command in native[-2:]:
+        self.assertEqual(len(native), 8)
+        self.assertEqual([suite[0] for suite in native[-3:]], ["Native Vulkan runtime", "Native generated game", "Native scene rendering"])
+        for _, _, command in native[-3:-1]:
             self.assertIn("--ignored", command)
             self.assertIn("--locked", command)
+        self.assertIn("renderer_smoke", native[-1][2])
+        self.assertIn("run", native[-1][2])
+        self.assertIn("--locked", native[-1][2])

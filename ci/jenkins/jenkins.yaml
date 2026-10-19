@@ -1,0 +1,44 @@
+jenkins:
+  systemMessage: "Local Game Engine CI: main branch"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  nodes:
+    - permanent:
+        name: "engine-linux"
+        remoteFS: "/home/jenkins/agent"
+        numExecutors: 1
+        labelString: "engine-linux"
+        mode: EXCLUSIVE
+        launcher:
+          inbound:
+            webSocket: true
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+unclassified:
+  location:
+    url: "http://localhost:8080/"
+jobs:
+  - script: |
+      pipelineJob('game-engine-master') {
+        description('Build and test pushes to main. Job name retained for build history. Polls GitHub every two minutes. No deployment or Git write access.')
+        triggers { scm('H/2 * * * *') }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/MishaYanov/GameEngine.git') }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }

@@ -1,6 +1,6 @@
 # Engine Pipeline
 
-Reviewed on 2026-10-10 against commit `978f6e4` and the working tree. The engine is a rendering and scene prototype moving toward a reusable runtime. It is not yet a complete game engine or an integrated scene editor.
+Reviewed on 2026-10-19 against commit `c19dc4b` and staged, unstaged, and untracked changes, including the runtime migration. Renderer extraction and the five-step runtime move are complete for their stated scope; timing/input, persistence, and editor integration remain future milestones.
 
 This roadmap belongs to Engine Developer. Game App Developer remains empty. The target is a small playable game built through reusable engine APIs, with a persistent authoring workflow and a distributable that runs outside the checkout.
 
@@ -19,40 +19,49 @@ No completion percentage is assigned: a rendering demo and an integrated editor 
 
 | System | Status | Current capability | Remaining work |
 | --- | --- | --- | --- |
-| Window and Vulkan rendering | Implemented | Surface/device selection, swapchain, frame submission, indexed drawing, depth testing, resize handling, shutdown wait. | Repeated resize, minimize/restore, and shutdown verification with validation enabled. |
+| Window and Vulkan rendering | Implemented | Surface/device selection, swapchain, frame submission, indexed drawing, depth testing, resize handling, shutdown wait. | User confirms resize/minimize and shutdown checks; repeat after renderer changes. |
 | Camera and transforms | Partial | Perspective camera; per-instance position, Euler rotation, and scale. | Camera controls, input mapping, reusable timing and update API. |
 | glTF/GLB import | Partial | All primitives of the first mesh, geometry, indices, UVs, base-color image/factor, double-sided setting. | Scene nodes and their transforms, other meshes, normals/tangents, broader image/material support. |
 | Materials | Partial | Unlit texture multiplied by color factor, white fallback, single/double-sided pipelines. | Lighting, alpha modes, normal maps, metallic/roughness. This is not full PBR. |
 | Asset caches | Implemented | Cached GPU meshes/textures and model-path-qualified embedded-image keys. | Stable asset references, reload/invalidation policy, model-level caching. Repeated loads can still decode the file again. |
-| Model abstraction | Implemented | Model groups mesh/material parts; AssetManager imports and uploads them. | Move reusable types out of the game binary and define the boundary between portable data and Vulkan resources. |
-| Model instances | Implemented | Multiple instances share one Arc<Model> but have independent transforms. | Reusable gameplay API and persistence. |
-| Scene and IDs | Implemented | Flat scene with spawn, lookup, removal, iteration, and monotonically allocated entity IDs. | Lifecycle tests, serialized-reference rules, hierarchy when needed. There is no ECS yet. |
-| Shared material layout | Implemented; runtime check pending | Textures share a layout; pipeline creation/recreation no longer needs a scene object. | Remove every object and resize an empty scene on a live Vulkan device. |
-| Renderer ownership | Partial | Resource wrappers exist; GameApp still owns individual Vulkan resources and recreation logic. | Extract initialization, rendering, resize, upload access, and shutdown into a renderer owner. |
-| Shared runtime | Partial | crates/runtime initializes a renderer and exposes status. | It does not own the game's scene/update/render loop. Reconcile existing Engine/Renderer with the extraction instead of duplicating lifecycles. |
+| Model abstraction | Implemented in runtime | Shared Model/ModelPart types; AssetManager imports parts and delegates GPU upload to WindowRenderer. | Portable asset handles/backend independence remain future design work. |
+| Model instances | Implemented in runtime | Shared Arc<Model> and independent transforms; consumed by game through runtime APIs. | Persistence and broader gameplay API. |
+| Scene and IDs | Implemented in runtime | Spawn, mutation, removal, iteration, monotonically allocated IDs, and borrowed render_objects output. | Serialization/hierarchy; lifecycle unit/public-API tests now exist. No ECS yet. |
+| Shared material layout | Implemented; native checks user-confirmed | Layout belongs to WindowRenderer; empty-scene pipeline setup does not need a model. | Repeat native checks after future presentation changes. |
+| Renderer ownership | Complete for extraction milestone | WindowRenderer owns initialization, upload, draw, deferred resize, and shutdown; GameApp owns application behavior. | External GPU resource lifetimes still depend on application drop order and idle waits. |
+| Shared runtime | Complete for five-step migration | Assets, models, instances, scenes, Transform, and draw-request construction are shared runtime APIs; tests and smoke imports moved. | Status-only Engine/Renderer path is still separate; timing/input and editor viewport are future work. |
 | Diagnostics | Implemented | engine_logger, component health, error propagation, validation logging. | Extend diagnostics as systems arrive and measure actual runtime behavior. |
 | Editor shell | Partial | Angular/Tauri project setup and GPU status UI. | No integrated scene viewport, entity inspector, or scene-editing workflow. |
-| Packaging | Partial; known gap | Compiler installs the executable and selected textures. | It omits robot.glb required by startup. Package dependencies and verify outside the checkout. |
-| Tests and documentation | Partial | Loader/renderer unit tests, logger tests, frontend/site checks, generated docs. | Native lifecycle, clean-build, packaged-run, and broader integration verification. |
+| Packaging | Recursive asset-copy fix implemented | Compiler copies the complete nested asset tree, including robot.glb; a test verifies copied model/texture bytes. | Full installed release execution outside checkout remains separate validation. |
+| Tests and documentation | Expanded | Runtime public-API/import/scene tests, renderer lifecycle smoke, default/native runner, and docs/site checks. User confirms native/visible checks after migration. | Clean-checkout, installed-run, CI deployment, and broader coverage remain separate. |
 
-Evidence: [game](apps/game/README.md), [renderer](crates/renderer/README.md), [runtime](crates/runtime/README.md), [editor](apps/editor/README.md), [compiler](compiler/README.md), and [testing](testing.md). Source inspected includes apps/game/src/main.rs, scene.rs, model_instance.rs, transform.rs, the assets module, crates/renderer/src/vulkan, crates/runtime/src/engine.rs, and compiler/src/lib.rs. Older subsystem guides may lag this roadmap; pending updates are recorded in the documentation checkpoint.
+Evidence: [game](apps/game/README.md), [renderer](crates/renderer/README.md), [runtime](crates/runtime/README.md), [editor](apps/editor/README.md), [compiler](compiler/README.md), and [testing](testing.md). Source inspected includes apps/game/src/main.rs, its renderer_smoke example, crates/runtime scene/instance/transform/assets modules and public-API tests, crates/renderer/src/window_renderer.rs, and compiler asset copying. The reusable modules are no longer defined in the game binary.
 
-## Immediate sequence: complete the foundation
+## Completed foundation and next work
 
-| Order | Work | Why it comes next | Done when |
-| --- | --- | --- | --- |
-| 1 | Verify scene/resource lifecycle | Ownership must be reliable before extraction. | Two robots, single-object removal, empty scene, resize/minimize/restore, and shutdown work without validation errors or stale entity access. |
-| 2 | Extract a Vulkan renderer owner | GameApp mixes application behavior with low-level rendering. | GameApp requests draw/resize through a small API; renderer owns GPU resources and cleanup. Asset upload access is explicit rather than unrestricted public internals. |
-| 3 | Establish shared runtime APIs | Game and editor need the same engine behavior. | Scene/transform/asset interfaces live in library crates without a game-binary dependency; existing runtime/status initialization is reconciled. A second graphics backend is not required. |
-| 4 | Add timing, input, and gameplay boundaries | Elapsed-time demo rotation is not a gameplay loop. | Input actions and delta time control an object/camera; fixed-step updates exist where needed; focus loss clears held input. |
-| 5 | Save and load scenes | Authoring needs persistent data. | Versioned scenes store asset references and transforms, restore entity references deliberately, and report missing assets. Never serialize Vulkan handles, pointers, or Arc values. |
-| 6 | Integrate the editor | UI should call stable engine APIs. | Shared scene renders in a viewport; commands select/edit entities; reload and empty-scene lifecycle are verified. |
+Renderer ownership extraction is complete: WindowRenderer owns GPU presentation resources, uploads, deferred resize/rebuild, and shutdown. The subsequent five-step sharing sequence is also complete:
 
-Fix the packaging omission alongside these steps, before treating installed builds as usable.
+| Step | Status | Evidence |
+| --- | --- | --- |
+| Introduce a game library | Complete as an intermediate structure | No permanent game-library dependency is needed after the move. |
+| Move draw-request construction to Scene | Complete | Scene::render_objects builds borrowed requests. |
+| Move Transform to runtime | Complete | Game uses runtime::Transform. |
+| Move assets/models/instances/scenes | Complete | Public runtime modules and external scene_api tests exist. |
+| Validate after moving | Complete, user-confirmed | Tests, native smoke, visible rendering, resize, and minimize passed per user confirmation. |
+
+The next implementation sequence is:
+
+1. Calculate frame delta time; current demo rotation still uses elapsed time.
+2. Use keyboard input to move an object at a consistent speed, including held-input/focus-loss behavior as input develops.
+3. Establish broader gameplay/update boundaries and fixed steps where required.
+4. Add versioned scene persistence with stable asset references.
+5. Integrate the editor viewport and scene commands with shared APIs.
+
+These are future steps, not capabilities completed by the extraction. Recursive asset copying has resolved the old robot omission; running a fully installed release outside the checkout remains a separate check.
 
 ## When to build the UI
 
-The editor shell already exists. First establish renderer ownership and shared runtime boundaries, then inspect the Angular/Tauri host to choose viewport presentation and edit-command transport.
+The editor shell already exists. Renderer ownership and shared runtime scene boundaries now exist. Next inspect the Angular/Tauri host to choose viewport presentation and edit-command transport.
 
 | Editor stage | Scope | Acceptance test |
 | --- | --- | --- |
@@ -102,8 +111,8 @@ Use one small playable game to prove integration. Agree its scope before making 
 
 ## Review and verification
 
-The previous checkpoint was `2216ce9`. This review inspected later commits and staged, unstaged, and untracked changes. During review, current source was committed as `978f6e4` (adding scene); the source tree was clean before this rewrite. This supersedes the previous roadmap's tooling-blocked assessment.
+This review compared the previous checkpoint `978f6e4`, later commit `c19dc4b`, and current staged/unstaged/untracked changes. The runtime migration is currently in the working tree, so the commit alone does not identify all documented source.
 
-Documentation validation uses `npm.cmd test --prefix docs-site`: it rebuilds docs-site/dist, checks local links, and runs site tests. Engine checks use `cargo check -p game --offline --locked` and `cargo test -p game -p renderer --lib --bins --offline --locked`. Exact results and pending guide updates are recorded in docs-site/docs-state.json.
+The user confirmed post-move tests, native renderer smoke, and visible-game resize/minimize checks passed. The attached earlier notes report RTX 4070 smoke execution and the 640×360 empty-scene extent. These are attributed results rather than a claim of rerunning visible GPU checks during documentation editing.
 
-This review does not certify native GPU behavior, empty-scene resizing, installer execution, browser visual appearance, or clean-checkout reproducibility. These remain explicit verification gates.
+Documentation rebuilds and focused automated tests run in this review are recorded in `docs-site/docs-state.json`. Browser appearance, installed release execution, clean-checkout reproducibility, and the draft Jenkins configuration are not certified by the migration confirmation.

@@ -21,9 +21,9 @@ Names are trimmed, allow Unicode alphanumeric characters, spaces, hyphens, and u
 
 The nested build invokes `cargo build --locked --package game --release --target-dir <workspace>/target` in the workspace embedded from the compiler manifest path. Cargo must be on PATH, the source checkout must remain available, and shader compilation requires `glslc`. The nested build does not use `--offline`; an offline outer command does not force it offline.
 
-After building, atomic `create_dir` reserves the output. Installation copies the platform game executable, `assets/textures/crate.png`, `assets/textures/bricks.jpg`, `project-name.txt`, and `README.txt`. Copy/write failure attempts to remove only the newly created folder. Existing folders are never merged into.
+After building, atomic `create_dir` reserves the output. Installation copies the platform game executable, the entire nested `apps/game/assets` tree (including `props/robot.glb` and textures), `project-name.txt`, and `README.txt`. The recursive copier accepts regular files/directories and rejects unsupported asset entry types. Copy/write failure attempts to remove only the newly created folder. Existing folders are never merged into.
 
-This installs a runtime with no source workspace or editable scene. Its packaging still reflects the earlier triangle starter and does not include the model now required by the game. For independent sources, use the [admin builder](../apps/admin-dashboard/README.md). See the [installation design](../../designs/project-installation.md).
+This installs a runtime with no source workspace or editable scene. The previous missing-robot packaging omission is fixed; generated README wording still describes the older triangle starter, while the executable renders imported robots. For independent sources, use the [admin builder](../apps/admin-dashboard/README.md). See the [installation design](../../designs/project-installation.md).
 
 ## Verification
 
@@ -33,4 +33,4 @@ From the repository root:
 cargo test -p compiler --offline --locked
 ```
 
-Tests cover unsafe names/destinations, path resolution, and existing folders. They do not perform a full release install or GPU launch. When adding starter assets, update the explicit two-texture copy list. The game now requires `assets/props/robot.glb`, which this copy list omits. Installation can succeed while the spawned runtime subsequently logs a missing model and exits. The previous triangle-starter description is no longer the current rendering behavior; see [game](../apps/game/README.md) for the manual asset workaround.
+Tests cover unsafe names/destinations, length/whitespace rules, collisions, and copying nested model/texture assets byte-for-byte. The asset-copy test does not build a release executable or launch an installed game. Native installed-run validation remains separate from this file-copy evidence.

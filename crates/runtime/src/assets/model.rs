@@ -7,7 +7,7 @@ pub struct ModelPart {
 }
 
 impl ModelPart {
-    pub(super) fn new(mesh: Arc<VulkanMesh>, material: VulkanMaterial) -> Self {
+    pub fn new(mesh: Arc<VulkanMesh>, material: VulkanMaterial) -> Self {
         Self { mesh, material }
     }
 
@@ -25,7 +25,7 @@ pub struct Model {
 }
 
 impl Model {
-    pub(super) fn new(parts: Vec<ModelPart>) -> Self {
+    pub fn new(parts: Vec<ModelPart>) -> Self {
         Self { parts }
     }
 
@@ -36,7 +36,7 @@ impl Model {
 
 #[cfg(test)]
 impl Model {
-    pub(crate) fn empty_for_test() -> Self {
+    pub fn empty_for_test() -> Self {
         Self::new(Vec::new())
     }
 }

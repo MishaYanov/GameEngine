@@ -1,39 +1,40 @@
 # Testing and validation
 
-Run commands from the repository root after installing [prerequisites](usage.md) and both frontend dependency sets.
+Run from the repository root after [setup](usage.md). Install both frontend dependency sets and cache Rust dependencies first.
 
 ## Aggregate checks
 
 ```powershell
 python test_all.py
-# Include the opt-in generated native project build:
 python test_all.py --native
+npm.cmd test --prefix docs-site
 ```
 
-The runner executes all-target Rust workspace tests, Rust documentation tests, admin Angular tests, editor Angular tests without watching, and Python tool tests. It continues with other suites after failure and prints a summary. Exit codes are 0 for success, 1 for any failing/unavailable suite, and 130 for Ctrl+C.
+The default runner executes offline/locked Rust workspace tests (all targets), Rust documentation tests, admin Angular, editor Angular without watching, and Python tool tests. It continues after suite failures and returns 0 for success, 1 for any failure, or 130 for Ctrl+C. It installs no dependencies. Tkinter/display-dependent launcher checks can skip when unavailable.
 
-Cargo suites use `--offline --locked`; dependencies must be cached. Nothing is installed automatically. The native option adds the ignored `real_native_template_validation` test, requires SDK/compiler and cached native dependencies, and retains generated output. The launcher UI test can skip when Tkinter or a display is unavailable.
+`--native` adds the ignored Vulkan runtime initialization test, generated native-project validation, and the hidden `renderer_smoke` example. These need a supported GPU/window environment, SDK/compiler, and cached native dependencies; generated-project validation retains output. Hidden-window rendering checks execution/assertions, not visual correctness.
 
-## Focused checks
+## Focused runtime and presentation checks
 
 ```powershell
-cargo test -p compiler --offline --locked
-cargo test -p renderer --offline --locked
-cargo test -p engine-logger --all-targets --offline --locked
-cargo test -p engine-admin --offline --locked
-npm.cmd test --prefix apps/editor -- --watch=false
-npm.cmd test --prefix apps/admin-dashboard
-python -m unittest discover -s tests -p 'test_*.py' -v
+cargo test -p runtime -p renderer -p bridge -p compiler --offline --locked
+cargo test -p runtime --test scene_api --offline --locked
+cargo run -p game --example renderer_smoke --offline --locked
+cargo run -p game --offline --locked
 ```
 
-See [admin](apps/admin-dashboard/README.md) and [logger](crates/logger/README.md) for package-specific Clippy and smoke commands.
+Tests moved with assets/scenes into `runtime`. Coverage includes material/image import and validation, scene IDs/removal, shared-model transforms, external public API use, empty model draw lists, reference release, and error causes. Renderer checks include validation logging, device/swapchain selection, and push constants. Bridge serialization and recursive compiler asset copying have tests; editor-host launch results and admin health behavior also have focused coverage. These are scoped checks, not full engine behavioral coverage.
 
-## Coverage and manual checks
+## Completed migration and reported native evidence
 
-Rust tests cover admin collection/processes/jobs/board/generation, logger storage/panics, compiler path validation, and renderer validation diagnostics. Game importer tests now cover all first-mesh primitives with their material factors/sidedness and unsupported-mode rejection. Renderer tests also verify push-constant layout. Runtime, bridge, and editor host currently have no Rust behavioral tests. The editor has no configured end-to-end target. Compilation cannot prove rendering or desktop interaction.
+The user confirmed that the tests, native smoke, visible game, resizing, and minimizing passed after the runtime move. This completes the five-step sequence: temporary game library, Scene-owned draw construction, shared Transform, remaining runtime modules, and validation. No further feature implementation is required to finish that sequence.
 
-For graphics, check [development and installed modes](apps/game/README.md), texture/depth correctness, resize, minimize/restore, and closure with validation logs. For editor changes, check startup/status, invalid input, installation success, build failure, and launch reporting. For admin changes, verify native process controls, cancellation, project publication, and installer execution as applicable.
+The supplied renderer-ownership notes also report a hidden smoke pass on an RTX 4070, including a 640×360 resized extent and no logged errors. The example covers textured model drawing, request construction, instance removal, GPU idle before releasing cache/model references, zero-size suspension, empty-scene resize, and shutdown. The notes' earlier test count is historical, not a fixed count for the current tree.
 
-The glTF loader has focused behavioral tests, but full import and GPU presentation coverage remains limited. Manually check all robot model parts, imported texture orientation, UV selection, missing-model errors, and culling. Compiler path tests do not catch the current packaging mismatch: installed output omits `props/robot.glb`, which game startup requires.
+These are user-reported native/visual results, distinct from commands rerun during a documentation update. Exact current command outcomes and limits are in `docs-site/docs-state.json`. Installed release execution, clean-checkout reproducibility, and browser visual QA need their own evidence.
 
-The [original test notes](../designs/testing.md) remain a runner/coverage reference. Passing the aggregate command does not establish full behavioral coverage or visual correctness.
+## CI draft
+
+The untracked `Jenkinsfile` and `ci/jenkins` files define a local Linux-container Jenkins setup. The draft pipeline fetches locked Cargo dependencies, installs npm dependencies, runs default tests, builds both frontends, checks the docs site, and archives successful build output. It does not run native GPU checks or Windows packaging. The startup helper requires Docker Desktop Linux containers; it has not been launched or validated as part of this docs review. A draft configuration is not evidence of a successful CI run.
+
+See the [original test notes](../designs/testing.md), [runtime](crates/runtime/README.md), and [renderer](crates/renderer/README.md).

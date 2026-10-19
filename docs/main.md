@@ -27,7 +27,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 - [Bridge](crates/bridge/README.md): Status fields, JSON names, consumers, and contract changes.
 - [Logger](crates/logger/README.md): Diagnostics, records, configuration, storage, redaction, panic/shutdown behavior, and measurements.
 - [Renderer](crates/renderer/README.md): Vulkan requirements, probe, APIs, shader builds, ownership, and verification.
-- [Runtime](crates/runtime/README.md): Engine construction/status, errors, ownership, and current scope.
+- [Runtime](crates/runtime/README.md): Shared scenes, models, assets, transforms, status engine, and verification.
 
 ## Existing design and tool references
 

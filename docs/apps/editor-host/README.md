@@ -42,4 +42,4 @@ Commands live under `src/commands` and must be registered in `src/lib.rs`. Addin
 
 The application initializes logging; libraries use the existing logger. See [runtime](../../crates/runtime/README.md), [bridge](../../crates/bridge/README.md), and [architecture](../../architecture.md).
 
-Workspace tests compile the host, but it has no Rust command behavioral tests. Manually verify startup, status, invalid destination handling, successful creation, build failures, and launch-error reporting. See [testing](../../testing.md).
+Tests now cover project-launch result behavior; full native Tauri interactions remain manual. Manually verify startup, status, invalid destination handling, successful creation, build failures, and launch-error reporting. See [testing](../../testing.md).

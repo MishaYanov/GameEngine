@@ -16,7 +16,7 @@ use renderer::WindowRenderer;
 use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
 use super::{
     Model,
-    gltf_loader::{GltfLoaderError, load_first_mesh},
+    gltf_loader::{GltfLoaderError, load_first_mesh_in_root},
     model::ModelPart,
 };
 
@@ -120,7 +120,7 @@ impl AssetManager {
         path: impl AsRef<Path>,
     ) -> Result<Model, AssetManagerError> {
         let full_path = self.resolve(path)?;
-        let imported_parts = load_first_mesh(&full_path)?;
+        let imported_parts = load_first_mesh_in_root(&full_path, &self.root)?;
         let mut parts = Vec::with_capacity(imported_parts.len());
 
         for imported in imported_parts {

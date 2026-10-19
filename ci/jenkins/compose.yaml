@@ -1,0 +1,37 @@
+name: game-engine-ci
+services:
+  jenkins:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?Run start.ps1 first}
+    volumes:
+      - jenkins-home:/var/jenkins_home
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/login"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 20
+  agent:
+    build:
+      context: .
+      target: agent
+    restart: unless-stopped
+    environment:
+      JENKINS_URL: http://jenkins:8080/
+      JENKINS_AGENT_NAME: engine-linux
+      JENKINS_SECRET: ${JENKINS_AGENT_SECRET:-}
+      JENKINS_WEB_SOCKET: "true"
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+    volumes:
+      - agent-work:/home/jenkins/agent
+    depends_on:
+      jenkins:
+        condition: service_healthy
+volumes:
+  agent-work:
+  jenkins-home:

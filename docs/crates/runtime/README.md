@@ -1,30 +1,52 @@
-# Engine runtime
+# Shared engine runtime
 
-Source: `crates/runtime`. Cargo package: `runtime`. The runtime wraps renderer initialization and exposes engine status to the editor host.
+Source: `crates/runtime`. Cargo package: `runtime`. Runtime now provides the reusable assets, models, instances, transforms, and scene APIs consumed by the game, alongside the existing editor engine-status wrapper.
 
-## API and ownership
+## Shared application APIs
 
-`Engine::new() -> Result<Engine, EngineError>` constructs a `renderer::Renderer` and emits lifecycle diagnostics. `Engine::status() -> bridge::EngineStatusDto` reports initialization, renderer name, GPU name, and Vulkan API. `EngineError::Renderer` preserves the cause through `Error::source`.
+| API | Responsibility |
+| --- | --- |
+| `runtime::Transform` or `runtime::transform::Transform` | Position, Euler rotation in radians, scale |
+| `runtime::assets::AssetManager` | File import and GPU resource caches |
+| `runtime::assets::{Model, MaterialData, MeshData, ImageAsset}` | Model parts, CPU material/geometry/image data |
+| `runtime::model_instance::ModelInstance` | Shared `Arc<Model>` plus independent transform |
+| `runtime::scene::{Scene, EntityId}` | Spawn, mutable lookup, remove, iterate, construct draw requests |
 
-Inside a fallible application function:
+`Scene::render_objects()` returns `Vec<renderer::vulkan::RenderObject<'_>>` borrowing scene resources. Each model part becomes a request with its instance transform. Drop these borrowed requests before mutating the scene. IDs increase without reuse in one scene; persistence and cross-scene references are not defined.
+
+A minimal scene can be constructed without GPU resources:
 
 ```rust
-let engine = runtime::Engine::new()?;
-let status = engine.status();
-println!("{}: {} ({})", status.renderer, status.gpu_name, status.vulkan_api);
+use std::sync::Arc;
+use runtime::{Transform, assets::Model, model_instance::ModelInstance, scene::Scene};
+let mut scene = Scene::default();
+let id = scene.spawn(ModelInstance::new(
+    Arc::new(Model::new(Vec::new())), Transform::default(),
+));
+assert!(scene.render_objects().is_empty());
+assert!(scene.remove(id).is_some());
 ```
 
-The executable initializes the shared logger before constructing the engine and retains its guard. Initialization requires [Vulkan prerequisites](../renderer/README.md) even though this wrapper opens no graphics window.
+For real content, use `AssetManager::new(root)` and `load_model(&window_renderer, relative_path)`. It imports all primitives of the first glTF mesh and asks `WindowRenderer` to upload meshes/images. Models/materials still contain Vulkan-specific resources: this extraction establishes ownership and reuse, not backend independence. See [graphics and assets](../../graphics-and-assets.md).
 
-`Engine` owns its renderer. The host wraps it in a mutex; the game owns low-level renderer resources directly. The game now has `Scene`, `EntityId`, `ModelInstance`, and `Transform` types, but they remain in `apps/game` and are not shared runtime APIs. There is currently no runtime tick/update API, entity storage, physics, or scene-loading contract.
+## Status-only engine path
 
-## Verification
+`Engine::new() -> Result<Engine, EngineError>` still owns a status-only `renderer::Renderer`. `Engine::status()` returns `bridge::EngineStatusDto`; initialization errors preserve their root cause. The editor host wraps this engine in a mutex. This path remains separate from `WindowRenderer`; shared scene APIs do not yet provide an editor viewport or a unified update loop.
+
+The executable initializes the logger once. Uploaded scene/cache resources must be released after GPU idle and before their renderer/device. The game enforces that through shutdown and field order; the types do not prevent every lifetime misuse.
+
+## Verification and current milestone
 
 From the repository root:
 
 ```powershell
-cargo check -p runtime --offline --locked
-cargo test -p runtime --offline --locked
+cargo test -p runtime -p renderer --offline --locked
+cargo test -p runtime --test scene_api --offline --locked
+cargo run -p game --example renderer_smoke --offline --locked
 ```
 
-The crate has no behavioral Rust tests. Compilation does not verify GPU initialization; use the [renderer probe](../renderer/README.md) and desktop checks. See [architecture](../../architecture.md) and [testing](../../testing.md).
+Runtime tests cover import/material data, image validation, scene removal and independent transforms, public API visibility, shared reference release, empty draw lists, and engine error chains. Native engine initialization is opt-in/ignored by default.
+
+The five-step move is complete: temporary game library, scene-owned draw construction, Transform move, remaining reusable modules move, and validation. The temporary game library is no longer required. The user confirmed tests, native smoke, visible rendering, resize, and minimize checks after the move; see [testing](../../testing.md) for evidence boundaries.
+
+Next: delta time and keyboard movement at a consistent speed. Input mapping, fixed-step updates, scene persistence, hierarchy, full glTF scenes, and editor scene commands remain future work.

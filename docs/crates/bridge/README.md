@@ -26,4 +26,4 @@ cargo check -p bridge --offline --locked
 cargo test -p bridge --offline --locked
 ```
 
-There are no behavioral Rust tests. See [host](../../apps/editor-host/README.md), [runtime](../runtime/README.md), and [architecture](../../architecture.md).
+A serialization test verifies the camelCase engine-status JSON contract. See [host](../../apps/editor-host/README.md), [runtime](../runtime/README.md), and [architecture](../../architecture.md).
