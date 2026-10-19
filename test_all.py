@@ -20,6 +20,7 @@ def suites(native=False):
         ("Python tools", ROOT, [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]),
     ]
     if native:
+        commands.append(("Native Vulkan runtime", ROOT, [cargo, "test", "-p", "runtime", "--offline", "--locked", "native_runtime_initializes_and_reports_consistent_status", "--", "--ignored", "--nocapture"]))
         commands.append(("Native generated game", ROOT, [cargo, "test", "-p", "engine-admin", "--offline", "--locked", "real_native_template_validation", "--", "--ignored", "--nocapture"]))
     return commands
 
@@ -42,7 +43,7 @@ def run_suites(commands):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--native", action="store_true", help="Also build a generated game; requires Vulkan SDK and cached dependencies")
+    parser.add_argument("--native", action="store_true", help="Also initialize Vulkan and build a generated game; requires Vulkan GPU, SDK and cached dependencies")
     args = parser.parse_args(argv)
     try:
         return run_suites(suites(args.native))

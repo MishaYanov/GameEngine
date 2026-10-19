@@ -26,7 +26,7 @@ The host initializes its engine before showing the window, so Vulkan initializat
 
 ## Native rendering and generation
 
-The game uses low-level `renderer::vulkan` types directly and owns its winit loop, surface, presentation device, swapchain, depth, camera, pipeline, synchronization, and assets. The runtime status wrapper does not drive its drawing loop. Development mode displays two rotating instances of the first primitive from `props/robot.glb`; a readable `project-name.txt` selects executable-relative assets and stationary instances. The installer still omits the required robot model, so its current output fails model import; see the [game guide](apps/game/README.md). See [graphics and assets](graphics-and-assets.md).
+The game uses low-level `renderer::vulkan` types directly and owns its winit loop, surface, presentation device, swapchain, depth, camera, pipeline, synchronization, and assets. The runtime status wrapper does not drive its drawing loop. Development mode displays two rotating model instances containing every primitive of the first mesh from `props/robot.glb`; a readable `project-name.txt` selects executable-relative assets and stationary instances. The installer still omits the required robot model, so its current output fails model import; see the [game guide](apps/game/README.md). See [graphics and assets](graphics-and-assets.md).
 
 | Workflow | Destination | Output |
 | --- | --- | --- |
@@ -41,4 +41,4 @@ Each executable initializes the shared logger once and keeps its guard alive; li
 
 Dashboard controls apply to its owned processes. Python launcher terminals have a separate lifetime. The editor does not explicitly stop the game child when it closes. See the [admin](apps/admin-dashboard/README.md) and [logger](crates/logger/README.md) guides.
 
-Entity editing, scene persistence, and a general runtime simulation loop are not established features. glTF/GLB import and textured rendering are implemented for the first indexed triangle primitive; full scene import and PBR remain outside that scope. PRD requirements include future work; consult implementation status and [testing limits](testing.md).
+The game has an in-memory scene with entity IDs, spawn/remove, and transform mutation. Editor entity editing, scene persistence, and a general runtime simulation loop are not established features. glTF/GLB import and textured rendering support all indexed triangle primitives of the first mesh with distinct materials. Models are shared between game-local scene instances; full glTF scene traversal, persistence, runtime/editor integration, and PBR remain outside that scope. PRD requirements include future work; consult implementation status and [testing limits](testing.md).

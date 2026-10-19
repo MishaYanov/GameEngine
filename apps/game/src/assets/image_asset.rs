@@ -17,15 +17,9 @@ pub struct ImageAsset {
 pub enum ImageAssetError {
     Io(io::Error),
     Image(ImageError),
-    InvalidDimensions {
-        width: u32,
-        height: u32,
-    },
+    InvalidDimensions { width: u32, height: u32 },
     SizeOverflow,
-    InvalidPixelCount {
-        expected: usize,
-        actual: usize,
-    },
+    InvalidPixelCount { expected: usize, actual: usize },
 }
 
 impl Display for ImageAssetError {
@@ -40,17 +34,11 @@ impl Display for ImageAssetError {
             }
 
             Self::InvalidDimensions { width, height } => {
-                write!(
-                    formatter,
-                    "invalid image dimensions: {width}x{height}"
-                )
+                write!(formatter, "invalid image dimensions: {width}x{height}")
             }
 
             Self::SizeOverflow => {
-                write!(
-                    formatter,
-                    "image byte count exceeds the supported size"
-                )
+                write!(formatter, "image byte count exceeds the supported size")
             }
 
             Self::InvalidPixelCount { expected, actual } => {
@@ -90,23 +78,14 @@ impl ImageAsset {
     ///
     /// Each pixel must contain four bytes: red, green, blue, alpha.
     /// Preserves the supplied row order.
-    pub fn from_rgba8(
-        width: u32,
-        height: u32,
-        pixels: Vec<u8>,
-    ) -> Result<Self, ImageAssetError> {
+    pub fn from_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, ImageAssetError> {
         if width == 0 || height == 0 {
-            return Err(ImageAssetError::InvalidDimensions {
-                width,
-                height,
-            });
+            return Err(ImageAssetError::InvalidDimensions { width, height });
         }
 
-        let width_usize = usize::try_from(width)
-            .map_err(|_| ImageAssetError::SizeOverflow)?;
+        let width_usize = usize::try_from(width).map_err(|_| ImageAssetError::SizeOverflow)?;
 
-        let height_usize = usize::try_from(height)
-            .map_err(|_| ImageAssetError::SizeOverflow)?;
+        let height_usize = usize::try_from(height).map_err(|_| ImageAssetError::SizeOverflow)?;
 
         let expected = width_usize
             .checked_mul(height_usize)
@@ -130,12 +109,8 @@ impl ImageAsset {
     /// Loads an image file using the existing procedural-mesh UV convention.
     ///
     /// Converts to RGBA8 and flips vertically before constructing the asset.
-    pub fn load(
-        path: impl AsRef<Path>,
-    ) -> Result<Self, ImageAssetError> {
-        let image = ImageReader::open(path)?
-            .with_guessed_format()?
-            .decode()?;
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ImageAssetError> {
+        let image = ImageReader::open(path)?.with_guessed_format()?.decode()?;
 
         let mut rgba = image.to_rgba8();
 
@@ -158,5 +133,39 @@ impl ImageAsset {
 
     pub fn pixels(&self) -> &[u8] {
         &self.pixels
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba_input_rejects_zero_dimensions_and_incomplete_pixels() {
+        for (width, height) in [(0, 1), (1, 0)] {
+            assert!(matches!(
+                ImageAsset::from_rgba8(width, height, vec![]),
+                Err(ImageAssetError::InvalidDimensions { .. })
+            ));
+        }
+        assert!(matches!(
+            ImageAsset::from_rgba8(2, 1, vec![0; 7]),
+            Err(ImageAssetError::InvalidPixelCount {
+                expected: 8,
+                actual: 7
+            })
+        ));
+        assert!(matches!(
+            ImageAsset::from_rgba8(u32::MAX, u32::MAX, vec![]),
+            Err(ImageAssetError::SizeOverflow)
+        ));
+    }
+
+    #[test]
+    fn rgba_input_preserves_row_order_and_alpha() {
+        let pixels = vec![255, 0, 0, 0, 0, 255, 0, 128];
+        let image = ImageAsset::from_rgba8(1, 2, pixels.clone()).unwrap();
+        assert_eq!((image.width(), image.height()), (1, 2));
+        assert_eq!(image.pixels(), pixels);
     }
 }

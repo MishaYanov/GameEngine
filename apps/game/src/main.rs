@@ -6,43 +6,30 @@ pub mod transform;
 use assets::AssetManager;
 use engine_logger::ResultLogExt;
 use model_instance::ModelInstance;
-use transform::Transform;
-
-use std::{path::PathBuf, sync::Arc, time::Instant};
-
-use renderer::vulkan::{
-    CameraUniform, FrameStatus, ModelPushConstants, RenderObject, VulkanCamera, VulkanDepthBuffer,
-    VulkanDevice, VulkanFrame, VulkanInstance, VulkanMaterialLayout, VulkanMaterialPipelines,
-    VulkanSurface, VulkanSwapchain,
+use renderer::{
+    WindowRenderer,
+    vulkan::{CameraUniform, ModelPushConstants, RenderObject},
 };
-
-use crate::scene::{EntityId, Scene};
+use scene::{EntityId, Scene};
+use std::{path::PathBuf, sync::Arc, time::Instant};
+use transform::Transform;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::{Window, WindowId},
 };
 
 #[derive(Default)]
 struct GameApp {
-    frame: Option<VulkanFrame>,
+    // These external GPU resources must be released before the renderer/device.
     scene: Scene,
+    asset_manager: Option<AssetManager>,
+    renderer: Option<WindowRenderer>,
+    window: Option<Arc<Window>>,
     left_robot: Option<EntityId>,
     right_robot: Option<EntityId>,
-    pipelines: Option<VulkanMaterialPipelines>,
-    camera: Option<VulkanCamera>,
-    asset_manager: Option<AssetManager>,
-    material_layout: Option<Arc<VulkanMaterialLayout>>,
-    depth_buffer: Option<VulkanDepthBuffer>,
-    swapchain: Option<VulkanSwapchain>,
-    device: Option<VulkanDevice>,
-    surface: Option<VulkanSurface>,
-    instance: Option<VulkanInstance>,
-    window: Option<Window>,
     start_time: Option<Instant>,
-    swapchain_dirty: bool,
     last_heartbeat: Option<Instant>,
     project_name: Option<String>,
 }
@@ -52,13 +39,11 @@ impl GameApp {
         if self.project_name.is_some() {
             return;
         }
-
         if let Some(id) = self.left_robot {
             if let Some(left) = self.scene.get_mut(id) {
                 left.transform_mut().rotation = [elapsed * 0.6, elapsed * 0.9, 0.0];
             }
         }
-
         if let Some(id) = self.right_robot {
             if let Some(right) = self.scene.get_mut(id) {
                 right.transform_mut().rotation = [elapsed * -0.5, elapsed * 0.75, elapsed * 0.2];
@@ -66,221 +51,33 @@ impl GameApp {
         }
     }
 
-    fn recreate_swapchain(&mut self) -> Result<bool, String> {
-        let size = self
-            .window
-            .as_ref()
-            .ok_or("window is not initialized".to_string())?
-            .inner_size();
-
-        if size.width == 0 || size.height == 0 {
-            return Ok(false);
-        }
-
-        let instance = self
-            .instance
-            .as_ref()
-            .ok_or("Vulkan instance is not initialized".to_string())?;
-
-        let device = self
-            .device
-            .as_ref()
-            .ok_or("Vulkan device is not initialized".to_string())?;
-
-        let camera = self
-            .camera
-            .as_ref()
-            .ok_or("Vulkan camera is not initialized".to_string())?;
-
-        let surface = self
-            .surface
-            .as_ref()
-            .ok_or("Vulkan surface is not initialized".to_string())?;
-
-        let old_swapchain = self
-            .swapchain
-            .as_ref()
-            .ok_or("Vulkan swapchain is not initialized".to_string())?;
-
-        unsafe {
-            device
-                .raw()
-                .device_wait_idle()
-                .map_err(|error| format!("failed waiting for Vulkan device: {error:?}"))?;
-        }
-
-        engine_logger::info!("Recreating swapchain: {}x{}", size.width, size.height);
-
-        let new_swapchain = VulkanSwapchain::recreate(
-            instance.raw(),
-            device,
-            surface,
-            size.width,
-            size.height,
-            old_swapchain,
-        )
-        .map_err(|error| format!("failed recreating swapchain: {error}"))?;
-
-        let new_depth_buffer =
-            VulkanDepthBuffer::new(instance.raw(), device, new_swapchain.extent())
-                .map_err(|error| format!("failed recreating depth buffer: {error}"))?;
-
-        let material_layout = self
-            .material_layout
-            .as_ref()
-            .ok_or("material layout is not initialized".to_string())?;
-
-        let new_pipelines = VulkanMaterialPipelines::new(
-            device.raw(),
-            new_swapchain.format(),
-            new_depth_buffer.format(),
-            camera.descriptor_set_layout(),
-            material_layout.raw(),
-        )
-        .map_err(|error| format!("failed recreating graphics pipeline: {error}"))?;
-
-        let new_frame = VulkanFrame::new(device, &new_swapchain)
-            .map_err(|error| format!("failed recreating frame resources: {error}"))?;
-
-        self.frame = Some(new_frame);
-        self.pipelines = Some(new_pipelines);
-        self.depth_buffer = Some(new_depth_buffer);
-        self.swapchain = Some(new_swapchain);
-        self.swapchain_dirty = false;
-
-        engine_logger::info!("Swapchain recreated.");
-
-        Ok(true)
-    }
-}
-
-impl ApplicationHandler for GameApp {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-
-        let attributes = Window::default_attributes()
-            .with_title(self.project_name.as_deref().unwrap_or("Game Engine"))
-            .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
-
-        let window = event_loop
-            .create_window(attributes)
-            .expect("failed to create game window");
-
-        let display_handle = window
-            .display_handle()
-            .expect("failed to get display handle")
-            .as_raw();
-
-        let window_handle = window
-            .window_handle()
-            .expect("failed to get window handle")
-            .as_raw();
-
-        engine_logger::info!("Creating Vulkan instance...");
-
-        let instance =
-            VulkanInstance::for_display(display_handle).expect("failed to create Vulkan instance");
-
-        engine_logger::info!("Creating Vulkan surface...");
-
-        let surface = VulkanSurface::new(&instance, display_handle, window_handle)
-            .expect("failed to create Vulkan surface");
-
-        engine_logger::info!("Vulkan surface created.");
-        engine_logger::info!("Selecting presentation-capable GPU...");
-
-        let device = VulkanDevice::for_surface(instance.raw(), &surface)
-            .expect("failed to create Vulkan device");
-
-        engine_logger::info!("Creating camera resources...");
-
-        let camera = VulkanCamera::new(instance.raw(), &device)
-            .expect("failed to create Vulkan camera resources");
-
-        engine_logger::info!("Camera resources created.");
-
-        let queues = device.queue_families();
-
-        engine_logger::info!("Graphics queue family: {}", queues.graphics);
-        engine_logger::info!("Present queue family: {}", queues.present);
-
-        let size = window.inner_size();
-
-        engine_logger::info!("Creating swapchain {}x{}...", size.width, size.height);
-
-        let swapchain = VulkanSwapchain::new(
-            instance.raw(),
-            &device,
-            &surface,
-            size.width.max(1),
-            size.height.max(1),
-        )
-        .expect("failed to create Vulkan swapchain");
-
-        engine_logger::info!("Swapchain created.");
-        engine_logger::info!("Swapchain images: {}", swapchain.images().len());
-        engine_logger::info!(
-            "Swapchain extent: {}x{}",
-            swapchain.extent().width,
-            swapchain.extent().height
+    fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
+        let window = Arc::new(
+            event_loop
+                .create_window(
+                    Window::default_attributes()
+                        .with_title(self.project_name.as_deref().unwrap_or("Game Engine"))
+                        .with_inner_size(winit::dpi::LogicalSize::new(1280, 720)),
+                )
+                .map_err(|e| e.to_string())?,
         );
-        engine_logger::info!("Swapchain format: {:?}", swapchain.format());
-
-        engine_logger::info!("Creating depth buffer...");
-
-        let depth_buffer = VulkanDepthBuffer::new(instance.raw(), &device, swapchain.extent())
-            .expect("failed to create Vulkan depth buffer");
-
-        engine_logger::info!("Depth buffer created.");
-
+        let size = window.inner_size();
+        let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
         let asset_root = if self.project_name.is_some() {
             std::env::current_exe()
-                .expect("failed to locate executable")
+                .map_err(|e| e.to_string())?
                 .parent()
-                .expect("executable has no parent directory")
+                .ok_or("executable has no parent")?
                 .join("assets")
         } else {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
         };
-
-        let material_layout = Arc::new(
-            VulkanMaterialLayout::new(device.raw()).expect("failed to create material layout"),
+        let mut assets = AssetManager::new(asset_root).map_err(|e| e.to_string())?;
+        let model = Arc::new(
+            assets
+                .load_model(&renderer, "props/robot.glb")
+                .map_err(|e| format!("Failed to load robot model: {e}"))?,
         );
-        let mut asset_manager = AssetManager::new(asset_root, Arc::clone(&material_layout))
-            .expect("failed to create asset manager");
-        let model = match asset_manager.load_model(&instance, &device, "props/robot.glb") {
-            Ok(model) => model,
-            Err(error) => {
-                engine_logger::error!("Failed to load robot model: {}", error);
-                event_loop.exit();
-                return;
-            }
-        };
-
-        // Pipeline creation depends on renderer resources, even for an empty scene.
-        let pipelines = VulkanMaterialPipelines::new(
-            device.raw(),
-            swapchain.format(),
-            depth_buffer.format(),
-            camera.descriptor_set_layout(),
-            material_layout.raw(),
-        )
-        .expect("failed to create Vulkan graphics pipeline");
-
-        engine_logger::info!("Graphics pipeline created.");
-        engine_logger::info!("Creating frame resources...");
-
-        let frame =
-            VulkanFrame::new(&device, &swapchain).expect("failed to create Vulkan frame resources");
-
-        engine_logger::info!("Frame resources created.");
-
-        self.frame = Some(frame);
-
-        let model = Arc::new(model);
-
         self.left_robot = Some(self.scene.spawn(ModelInstance::new(
             Arc::clone(&model),
             Transform {
@@ -289,7 +86,6 @@ impl ApplicationHandler for GameApp {
                 ..Transform::default()
             },
         )));
-
         self.right_robot = Some(self.scene.spawn(ModelInstance::new(
             Arc::clone(&model),
             Transform {
@@ -298,26 +94,66 @@ impl ApplicationHandler for GameApp {
                 ..Transform::default()
             },
         )));
-
-        self.pipelines = Some(pipelines);
-        self.camera = Some(camera);
-        self.asset_manager = Some(asset_manager);
-        self.material_layout = Some(material_layout);
-        self.depth_buffer = Some(depth_buffer);
-        self.swapchain = Some(swapchain);
-        self.device = Some(device);
-        self.surface = Some(surface);
-        self.instance = Some(instance);
+        self.asset_manager = Some(assets);
+        self.renderer = Some(renderer);
         self.window = Some(window);
         self.start_time = Some(Instant::now());
-
         engine_logger::component_health(
             "renderer",
             "HEALTHY",
             false,
             "Game rendering resources initialized",
         );
+        Ok(())
+    }
 
+    fn render(&mut self) -> Result<(), String> {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return Ok(());
+        };
+        let Some([width, height]) = renderer.prepare()? else {
+            return Ok(());
+        };
+        let camera = CameraUniform::perspective(
+            [0.0, 0.0, 3.0],
+            [0.0; 3],
+            [0.0, 1.0, 0.0],
+            60.0_f32.to_radians(),
+            width as f32 / height as f32,
+            0.1,
+            100.0,
+        );
+        let mut objects = Vec::new();
+        for instance in self.scene.instances() {
+            let transform = instance.transform();
+            let constants = ModelPushConstants::from_3d(
+                transform.position,
+                transform.rotation,
+                transform.scale,
+            );
+            for part in instance.model().parts() {
+                objects.push(RenderObject::new(part.mesh(), part.material(), constants));
+            }
+        }
+        renderer.draw(&camera, &objects)?;
+        Ok(())
+    }
+}
+
+impl ApplicationHandler for GameApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        if self
+            .initialize(event_loop)
+            .map_err(std::io::Error::other)
+            .log_error_for("game::renderer", "initialize game")
+            .is_err()
+        {
+            event_loop.exit();
+            return;
+        }
         self.window.as_ref().unwrap().request_redraw();
     }
 
@@ -327,19 +163,23 @@ impl ApplicationHandler for GameApp {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = &self.window else {
-            return;
-        };
-
-        if window.id() != window_id {
+        if self
+            .window
+            .as_ref()
+            .is_none_or(|window| window.id() != window_id)
+        {
             return;
         }
-
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Resized(size) => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.resize(size.width, size.height);
+                }
+                if size.width > 0 && size.height > 0 {
+                    self.window.as_ref().unwrap().request_redraw();
+                }
             }
-
             WindowEvent::RedrawRequested => {
                 if self
                     .last_heartbeat
@@ -348,136 +188,40 @@ impl ApplicationHandler for GameApp {
                     engine_logger::heartbeat("game");
                     self.last_heartbeat = Some(Instant::now());
                 }
-
-                let size = match self.window.as_ref() {
-                    Some(window) => window.inner_size(),
-                    None => return,
-                };
-
+                let size = self.window.as_ref().unwrap().inner_size();
                 if size.width == 0 || size.height == 0 {
                     return;
                 }
-
-                if self.swapchain_dirty {
-                    match self.recreate_swapchain() {
-                        Ok(true) => {}
-                        Ok(false) => return,
-                        Err(error) => {
-                            engine_logger::error!("{error}");
-                            event_loop.exit();
-                            return;
-                        }
-                    }
-                }
-
-                let extent = self.swapchain.as_ref().unwrap().extent();
-                let aspect_ratio = extent.width as f32 / extent.height as f32;
-
-                let camera_uniform = CameraUniform::perspective(
-                    [0.0, 0.0, 3.0],
-                    [0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    60.0_f32.to_radians(),
-                    aspect_ratio,
-                    0.1,
-                    100.0,
-                );
-
                 let elapsed = self
                     .start_time
                     .as_ref()
                     .map(|start| start.elapsed().as_secs_f32())
                     .unwrap_or(0.0);
-
                 self.update(elapsed);
-
-                let result = match (
-                    self.frame.as_mut(),
-                    self.device.as_ref(),
-                    self.swapchain.as_ref(),
-                    self.depth_buffer.as_ref(),
-                    self.pipelines.as_ref(),
-                    self.camera.as_ref(),
-                ) {
-                    (
-                        Some(frame),
-                        Some(device),
-                        Some(swapchain),
-                        Some(depth_buffer),
-                        Some(pipelines),
-                        Some(camera),
-                    ) => {
-                        let part_count: usize = self
-                            .scene
-                            .instances()
-                            .map(|instance| instance.model().parts().len())
-                            .sum();
-
-                        let mut objects = Vec::with_capacity(part_count);
-
-                        for instance in self.scene.instances() {
-                            let transform = instance.transform();
-
-                            let push_constants = ModelPushConstants::from_3d(
-                                transform.position,
-                                transform.rotation,
-                                transform.scale,
-                            );
-
-                            for part in instance.model().parts() {
-                                objects.push(RenderObject::new(
-                                    part.mesh(),
-                                    part.material(),
-                                    push_constants,
-                                ));
-                            }
-                        }
-
-                        frame.draw(
-                            device,
-                            swapchain,
-                            depth_buffer,
-                            pipelines,
-                            camera,
-                            &camera_uniform,
-                            &objects,
-                        )
-                    }
-
-                    _ => return,
-                };
-
-                match result.log_error_for("game::renderer", "render frame") {
-                    Ok(FrameStatus::Rendered) => {}
-
-                    Ok(FrameStatus::SwapchainNeedsRebuild) => {
-                        self.swapchain_dirty = true;
-                    }
-
-                    Err(_) => {
-                        event_loop.exit();
-                        return;
-                    }
-                }
-
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-
-            WindowEvent::Resized(size) => {
-                self.swapchain_dirty = true;
-
-                if size.width == 0 || size.height == 0 {
+                if self
+                    .render()
+                    .map_err(std::io::Error::other)
+                    .log_error_for("game::renderer", "render frame")
+                    .is_err()
+                {
+                    event_loop.exit();
                     return;
                 }
-
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.window.as_ref().unwrap().request_redraw();
             }
-
             _ => {}
+        }
+    }
+}
+
+impl Drop for GameApp {
+    fn drop(&mut self) {
+        // Wait before automatic field destruction releases scene meshes/textures.
+        if let Some(renderer) = self.renderer.as_ref() {
+            let _ = renderer
+                .wait_idle()
+                .map_err(std::io::Error::other)
+                .log_error_for("game::renderer", "wait before releasing scene");
         }
     }
 }
@@ -504,14 +248,4 @@ fn main() {
         .expect("game event loop failed");
 
     engine_logger::component_health("game", "STOPPED", false, "Game event loop stopped");
-}
-
-impl Drop for GameApp {
-    fn drop(&mut self) {
-        if let Some(device) = self.device.as_ref() {
-            unsafe {
-                let _ = device.raw().device_wait_idle();
-            }
-        }
-    }
 }

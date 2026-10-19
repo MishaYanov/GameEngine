@@ -30,3 +30,11 @@ class TestAllTests(unittest.TestCase):
     def test_native_build_is_explicit(self):
         self.assertEqual(len(test_all.suites()), 5)
         self.assertIn("--ignored", test_all.suites(True)[-1][2])
+
+    def test_native_mode_includes_runtime_and_generated_game_checks(self):
+        native = test_all.suites(True)
+        self.assertEqual(len(native), 7)
+        self.assertEqual([suite[0] for suite in native[-2:]], ["Native Vulkan runtime", "Native generated game"])
+        for _, _, command in native[-2:]:
+            self.assertIn("--ignored", command)
+            self.assertIn("--locked", command)

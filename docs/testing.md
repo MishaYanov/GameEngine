@@ -30,10 +30,10 @@ See [admin](apps/admin-dashboard/README.md) and [logger](crates/logger/README.md
 
 ## Coverage and manual checks
 
-Rust tests cover admin collection/processes/jobs/board/generation, logger storage/panics, compiler path validation, and renderer validation diagnostics. Game, runtime, bridge, and editor host currently have no Rust behavioral tests. The editor has no configured end-to-end target. Compilation cannot prove rendering or desktop interaction.
+Rust tests cover admin collection/processes/jobs/board/generation, logger storage/panics, compiler path validation, and renderer validation diagnostics. Game importer tests now cover all first-mesh primitives with their material factors/sidedness and unsupported-mode rejection. Renderer tests also verify push-constant layout. Runtime, bridge, and editor host currently have no Rust behavioral tests. The editor has no configured end-to-end target. Compilation cannot prove rendering or desktop interaction.
 
 For graphics, check [development and installed modes](apps/game/README.md), texture/depth correctness, resize, minimize/restore, and closure with validation logs. For editor changes, check startup/status, invalid input, installation success, build failure, and launch reporting. For admin changes, verify native process controls, cancellation, project publication, and installer execution as applicable.
 
-The glTF loader is now implemented, but has no dedicated behavioral tests. Manually check the robot primitive, imported texture orientation, UV selection, missing-model errors, and culling. Compiler path tests do not catch the current packaging mismatch: installed output omits `props/robot.glb`, which game startup requires.
+The glTF loader has focused behavioral tests, but full import and GPU presentation coverage remains limited. Manually check all robot model parts, imported texture orientation, UV selection, missing-model errors, and culling. Compiler path tests do not catch the current packaging mismatch: installed output omits `props/robot.glb`, which game startup requires.
 
 The [original test notes](../designs/testing.md) remain a runner/coverage reference. Passing the aggregate command does not establish full behavioral coverage or visual correctness.

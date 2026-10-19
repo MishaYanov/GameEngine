@@ -1,45 +1,39 @@
 {
-  "last_checked_commit": "2216ce9a62e097357b826b8042f96d8f26ba4824",
+  "last_checked_commit": "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
   "last_checked_date": "2026-10-10",
-  "last_documentation_update_commit": "2216ce9a62e097357b826b8042f96d8f26ba4824",
+  "last_documentation_update_commit": "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "reviewed_commits": [
-    "babb1fc3e473cc06d09d6fe3303fdd78f2c40c17",
-    "2216ce9a62e097357b826b8042f96d8f26ba4824"
+    "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
+    "4a7b41db41fe8a32856879eabe1d55d951a58017"
   ],
   "documented_changes": [
-    "First-primitive glTF/GLB import and robot rendering",
-    "Decoded image validation and imported image row order",
-    "Base-color image/factor and double-sided material/pipeline contracts",
-    "Current installer omits required robot.glb asset",
-    "Uncommitted MaterialData declaration identified as work in progress"
+    "Refreshed game, renderer, and runtime READMEs for multi-primitive models, shared instances, and game-local scene ownership",
+    "Updated graphics, architecture, testing, index, and usage descriptions for integrated MaterialData, shared descriptor layout, material pipeline variants, color factors, and white fallback",
+    "Preserved existing pipeline.md edits and recorded the outstanding robot model installer omission"
   ],
   "pending_documentation_changes": [
-    "Reinspect MaterialData and assets/mod.rs once the in-progress refactor is completed; these files changed during documentation verification."
+    "Update installer documentation when required robot model packaging is fixed",
+    "Record native empty-scene resize and resource-lifecycle results after they are exercised"
   ],
   "verification": [
-    "Static site rebuilt: 21 pages; local links verified",
-    "Five site interaction/anchor/space tests passed",
-    "cargo check -p game --offline --locked passed with seven warnings before later edits to assets/mod.rs",
+    "Static site rebuilt and link-checked: 22 pages; five site tests passed",
+    "cargo test -p game -p renderer --lib --bins --offline --locked passed: four tests; three dead-code warning groups",
     "git diff --check passed"
   ],
   "verification_limits": [
-    "Native GPU rendering and installer launch were not exercised",
-    "Browser visual QA remains unverified",
-    "Source changed after the successful compile check; that result does not certify the later working tree"
+    "Native Vulkan presentation, scene removal/empty-scene resize, and installed runtime were not exercised",
+    "Browser visual QA and clean-checkout reproducibility were not exercised"
   ],
   "working_tree_at_check": [
-    " M apps/game/src/assets/gltf_loader.rs",
-    "AM apps/game/src/assets/material_data.rs",
-    " M apps/game/src/assets/mod.rs",
-    " M designs/project-installation.md",
-    " M docs/apps/editor/README.md",
+    " M docs-site/docs-state.json",
     " M docs/apps/game/README.md",
     " M docs/architecture.md",
-    " M docs/compiler/README.md",
     " M docs/crates/renderer/README.md",
+    " M docs/crates/runtime/README.md",
     " M docs/graphics-and-assets.md",
     " M docs/main.md",
+    " M docs/pipeline.md",
     " M docs/testing.md",
     " M docs/usage.md"
   ]

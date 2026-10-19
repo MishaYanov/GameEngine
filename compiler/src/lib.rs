@@ -72,13 +72,7 @@ pub fn install_project(name: &str, destination: &str) -> Result<PathBuf, String>
                 .join(format!("game{}", std::env::consts::EXE_SUFFIX)),
             path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
         )?;
-        fs::create_dir_all(path.join("assets/textures"))?;
-        for texture in ["crate.png", "bricks.jpg"] {
-            fs::copy(
-                workspace.join("apps/game/assets/textures").join(texture),
-                path.join("assets/textures").join(texture),
-            )?;
-        }
+        copy_assets(&workspace.join("apps/game/assets"), &path.join("assets"))?;
         fs::write(path.join("project-name.txt"), name.trim())?;
         fs::write(
             path.join("README.txt"),
@@ -94,9 +88,59 @@ pub fn install_project(name: &str, destination: &str) -> Result<PathBuf, String>
     Ok(path)
 }
 
+fn copy_assets(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let output = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_assets(&entry.path(), &output)?;
+        } else if entry.file_type()?.is_file() {
+            fs::copy(entry.path(), output)?;
+        } else {
+            return Err(std::io::Error::other("Unsupported asset file type"));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn project_names_enforce_length_and_normalize_surrounding_whitespace() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        assert!(project_path(&"a".repeat(81), root).is_err());
+        assert!(project_path(&"a".repeat(80), root).is_ok());
+        assert_eq!(
+            project_path("  Demo QA  ", root).unwrap(),
+            Path::new(root).join("Demo QA")
+        );
+        assert!(project_path("Demo", "").is_err());
+    }
+    #[test]
+    fn installation_copies_models_and_nested_dependencies() {
+        let destination =
+            std::env::temp_dir().join(format!("engine-assets-{}", std::process::id()));
+        fs::create_dir(&destination).unwrap();
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("apps/game/assets");
+        let result = copy_assets(&source, &destination);
+        let model = fs::read(destination.join("props/robot.glb"));
+        let texture = fs::read(destination.join("textures/crate.png"));
+        fs::remove_dir_all(&destination).unwrap();
+        result.unwrap();
+        assert_eq!(
+            model.unwrap(),
+            fs::read(source.join("props/robot.glb")).unwrap()
+        );
+        assert_eq!(
+            texture.unwrap(),
+            fs::read(source.join("textures/crate.png")).unwrap()
+        );
+    }
     #[test]
     fn rejects_unsafe_names_and_destinations() {
         for name in ["", "../escape", "a/b", "CON", "Lpt1", "a:stream"] {

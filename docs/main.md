@@ -15,7 +15,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [Editor frontend](apps/editor/README.md): Setup UI, desktop/browser modes, contracts, source organization, builds, and tests.
 - [Editor desktop host](apps/editor-host/README.md): Tauri configuration, engine state, native commands, launch, and packaging.
-- [Native game demo](apps/game/README.md): GLB rendering, development/installed modes, asset packaging limits, and frame/resize lifecycle.
+- [Native game demo](apps/game/README.md): Multi-primitive GLB models, scene instances, development/installed modes, packaging limits, and renderer lifecycle.
 - [Engine Admin](apps/admin-dashboard/README.md): Logs, processes, jobs, board, source generation, storage limits, and verification.
 
 ## Tools

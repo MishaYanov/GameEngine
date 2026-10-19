@@ -16,7 +16,7 @@ println!("{}: {} ({})", status.renderer, status.gpu_name, status.vulkan_api);
 
 The executable initializes the shared logger before constructing the engine and retains its guard. Initialization requires [Vulkan prerequisites](../renderer/README.md) even though this wrapper opens no graphics window.
 
-`Engine` owns its renderer. The host wraps it in a mutex; the game owns low-level renderer resources directly. There is currently no tick/update API, entity storage, physics, or scene-loading contract.
+`Engine` owns its renderer. The host wraps it in a mutex; the game owns low-level renderer resources directly. The game now has `Scene`, `EntityId`, `ModelInstance`, and `Transform` types, but they remain in `apps/game` and are not shared runtime APIs. There is currently no runtime tick/update API, entity storage, physics, or scene-loading contract.
 
 ## Verification
 

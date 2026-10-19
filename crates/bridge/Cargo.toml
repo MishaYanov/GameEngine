@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 engine-logger = { path = "../logger" }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"

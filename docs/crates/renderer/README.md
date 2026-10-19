@@ -28,18 +28,22 @@ The public `vulkan` exports provide drawing resources:
 | `VulkanDevice`, `QueueFamilies` | Device and graphics/presentation queues |
 | `VulkanSwapchain`, `VulkanDepthBuffer` | Presentation images and depth |
 | `VulkanBuffer`, `VulkanMesh`, `Vertex` | Allocations and indexed geometry |
-| `VulkanTexture`, `VulkanMaterial` | Texture upload and materials with shared texture ownership and double-sided state |
+| `VulkanTexture`, `VulkanMaterial`, `VulkanMaterialLayout` | Texture upload and materials with shared texture ownership and double-sided state |
 | `VulkanCamera`, `CameraUniform` | Camera buffer/descriptors |
-| `VulkanGraphicsPipeline`, `ModelPushConstants` | Fixed pipeline and object transform |
+| `VulkanGraphicsPipeline`, `VulkanMaterialPipelines`, `ModelPushConstants` | Fixed pipeline and object transform |
 | `RenderObject`, `VulkanFrame`, `FrameStatus` | Draw inputs, synchronization, rebuild status |
 
 Presented applications use `VulkanInstance::for_display` and `VulkanDevice::for_surface`. The status wrapper's device creation does not replace selection of a surface-compatible device.
 
-## Material culling contract
+## Shared material layout and pipeline contracts
 
-`VulkanMaterial::new(texture: Arc<VulkanTexture>, double_sided: bool)` stores texture ownership and exposes `double_sided()`. `VulkanGraphicsPipeline::new` now accepts a final `double_sided: bool` parameter: true selects no face culling, false selects back-face culling. This is pipeline state, not a per-object dynamic switch; build a matching pipeline for the materials being drawn.
+`VulkanMaterialLayout::new(device)` creates the shared descriptor set layout for a fragment combined image sampler at binding 0. Pass an `Arc<VulkanMaterialLayout>` to texture constructors and to the asset manager. Texture descriptor allocation and pipeline creation use this shared layout rather than deriving renderer setup from a scene object.
 
-Both demo materials share the imported robot texture. The loader currently hardcodes double-sided true rather than reading the glTF material flag. The fragment shader samples texture color directly; imported base-color factor, alpha handling, and full PBR are not implemented.
+`VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture, stores the imported sidedness and RGBA factor, and exposes both properties. `VulkanGraphicsPipeline::new` still takes its final culling boolean: true means no face culling; false means back-face culling.
+
+`VulkanMaterialPipelines::new` creates compatible single- and double-sided pipelines. `for_material(bool)` selects one; `VulkanFrame::draw` selects and binds the matching pipeline for each object. Recreate both variants when attachment formats change. Pipeline/layout creation can occur with an empty scene.
+
+`ModelPushConstants` is an 80-byte block: model matrix at byte 0 and base-color factor at byte 64, shared with vertex/fragment stages. The frame supplies each material's factor, and the fragment shader multiplies sampled texture color by it. Factor-only materials use a white texture supplied by the game asset manager. Full PBR, normal lighting, and transparent-material blend/sort behavior remain unimplemented.
 
 ## Shaders and ownership
 
@@ -49,4 +53,4 @@ Wrappers destroy handles in `Drop`, but `ash::Device` clones do not own the logi
 
 ## Verification limits
 
-Tests cover validation diagnostic behavior. Startup probes and manual frame checks cover different behavior. Drawing, resize/minimize, and visual correctness require a GPU/window. The current textured pipeline is not a general material/scene system. See [testing](../../testing.md) and [game](../../apps/game/README.md).
+Tests cover validation diagnostic behavior and the push-constant byte layout. Startup probes and manual frame checks cover different behavior. Drawing, resize/minimize, and visual correctness require a GPU/window. The current textured pipeline is not a general material/scene system. See [testing](../../testing.md) and [game](../../apps/game/README.md).

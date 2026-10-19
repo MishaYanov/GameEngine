@@ -71,7 +71,7 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. **Current packaging limitation:** the game requires `assets/props/robot.glb`, but the installer only copies the textures listed above. A fresh installation logs a missing-model error and exits. To inspect the installed mode manually, copy `apps/game/assets/props/robot.glb` into `<installed folder>/assets/props/robot.glb`; it then draws two stationary instances of the first imported primitive. Keep executable, name file, and assets together. See [the game guide](apps/game/README.md).
+The window title uses the project name. **Current packaging limitation:** the game requires `assets/props/robot.glb`, but the installer only copies the textures listed above. A fresh installation logs a missing-model error and exits. To inspect the installed mode manually, copy `apps/game/assets/props/robot.glb` into `<installed folder>/assets/props/robot.glb`; it then draws two stationary model instances containing every primitive in the first mesh. Keep executable, name file, and assets together. See [the game guide](apps/game/README.md).
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 

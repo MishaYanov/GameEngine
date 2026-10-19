@@ -33,3 +33,10 @@ impl Model {
         &self.parts
     }
 }
+
+#[cfg(test)]
+impl Model {
+    pub(crate) fn empty_for_test() -> Self {
+        Self::new(Vec::new())
+    }
+}

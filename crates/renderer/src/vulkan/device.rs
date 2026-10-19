@@ -205,6 +205,19 @@ fn select_physical_device(
     let mut candidates = Vec::new();
 
     for physical_device in devices {
+        let properties = unsafe { instance.get_physical_device_properties(physical_device) };
+        if properties.api_version < vk::API_VERSION_1_3 {
+            continue;
+        }
+        let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default();
+        let mut features = vk::PhysicalDeviceFeatures2::default().push_next(&mut dynamic_rendering);
+        unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
+        let Some(score) =
+            presentation_device_score(&properties, dynamic_rendering.dynamic_rendering)
+        else {
+            continue;
+        };
+
         if !supports_swapchain(instance, physical_device)? {
             continue;
         }
@@ -227,9 +240,7 @@ fn select_physical_device(
             continue;
         }
 
-        let properties = unsafe { instance.get_physical_device_properties(physical_device) };
-
-        candidates.push((score_device(&properties), physical_device, queue_families));
+        candidates.push((score, physical_device, queue_families));
     }
 
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
@@ -306,6 +317,14 @@ fn score_device(properties: &vk::PhysicalDeviceProperties) -> u32 {
     }
 }
 
+fn presentation_device_score(
+    properties: &vk::PhysicalDeviceProperties,
+    dynamic_rendering: vk::Bool32,
+) -> Option<u32> {
+    (properties.api_version >= vk::API_VERSION_1_3 && dynamic_rendering == vk::TRUE)
+        .then(|| score_device(properties))
+}
+
 fn find_graphics_queue_family(
     instance: &Instance,
     physical_device: vk::PhysicalDevice,
@@ -320,4 +339,29 @@ fn find_graphics_queue_family(
             family.queue_count > 0 && family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
         })
         .map(|(index, _)| index as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incompatible_discrete_gpus_do_not_outrank_compatible_integrated_gpus() {
+        let mut discrete = vk::PhysicalDeviceProperties {
+            device_type: vk::PhysicalDeviceType::DISCRETE_GPU,
+            api_version: vk::API_VERSION_1_2,
+            ..Default::default()
+        };
+        assert_eq!(presentation_device_score(&discrete, vk::TRUE), None);
+        discrete.api_version = vk::API_VERSION_1_3;
+        assert_eq!(presentation_device_score(&discrete, vk::FALSE), None);
+
+        let integrated = vk::PhysicalDeviceProperties {
+            device_type: vk::PhysicalDeviceType::INTEGRATED_GPU,
+            api_version: vk::API_VERSION_1_3,
+            ..Default::default()
+        };
+        assert_eq!(presentation_device_score(&integrated, vk::TRUE), Some(500));
+        assert_eq!(presentation_device_score(&discrete, vk::TRUE), Some(1000));
+    }
 }

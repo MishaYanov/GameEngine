@@ -1,114 +1,109 @@
 # Engine Pipeline
 
-## Assessment status
+Reviewed on 2026-10-10 against commit `978f6e4` and the working tree. The engine is a rendering and scene prototype moving toward a reusable runtime. It is not yet a complete game engine or an integrated scene editor.
 
-Requested assessment date: 2026-10-10.
+This roadmap belongs to Engine Developer. Game App Developer remains empty. The target is a small playable game built through reusable engine APIs, with a persistent authoring workflow and a distributable that runs outside the checkout.
 
-This pipeline describes the milestones toward a functional game engine. The current implementation stage and completed features are **unverified**: workspace access failed before source files, Git history, staged changes, unstaged changes, untracked files, or the documentation checkpoint could be inspected. Do not interpret the requirements below as features known to be missing.
+## Status definitions
 
-This document belongs to the Engine Developer documentation. It does not add content to Game App Developer.
-
-## Current stage
-
-The project's current stage cannot be assigned from verified evidence yet. Use the following gates to determine it; code existence alone does not establish completion.
-
-| Stage | Evidence required to pass |
+| Status | Meaning |
 | --- | --- |
-| Foundation | The project builds and core modules have defined responsibilities. |
-| Prototype | A running demo renders a scene and responds to player input. |
-| Functional engine / MVP | Reusable engine systems support a small playable game that can be packaged and run outside the development environment. |
-| Alpha | The intended game-development workflow works end to end, with known limitations tracked. |
-| Production-ready | Stability, performance, build reproducibility, and release workflows meet defined targets. |
+| Implemented | Present in source for the stated scope; not a claim of production readiness or full runtime verification. |
+| Partial | Useful implementation exists, but important capabilities or boundaries are incomplete. |
+| Planned | No integrated implementation found in the inspected game/runtime/rendering paths. |
+| Runtime check pending | Code exists, but live behavior was not exercised in this review. |
 
-The practical target is the functional engine / MVP gate. Build one small playable game to demonstrate that rendering, input, scenes, assets, gameplay, and packaging work together.
+No completion percentage is assigned: a rendering demo and an integrated editor have different acceptance criteria.
 
-## Front end
+## What we have built
 
-For this pipeline, front end means the visible game experience and authoring interface.
+| System | Status | Current capability | Remaining work |
+| --- | --- | --- | --- |
+| Window and Vulkan rendering | Implemented | Surface/device selection, swapchain, frame submission, indexed drawing, depth testing, resize handling, shutdown wait. | Repeated resize, minimize/restore, and shutdown verification with validation enabled. |
+| Camera and transforms | Partial | Perspective camera; per-instance position, Euler rotation, and scale. | Camera controls, input mapping, reusable timing and update API. |
+| glTF/GLB import | Partial | All primitives of the first mesh, geometry, indices, UVs, base-color image/factor, double-sided setting. | Scene nodes and their transforms, other meshes, normals/tangents, broader image/material support. |
+| Materials | Partial | Unlit texture multiplied by color factor, white fallback, single/double-sided pipelines. | Lighting, alpha modes, normal maps, metallic/roughness. This is not full PBR. |
+| Asset caches | Implemented | Cached GPU meshes/textures and model-path-qualified embedded-image keys. | Stable asset references, reload/invalidation policy, model-level caching. Repeated loads can still decode the file again. |
+| Model abstraction | Implemented | Model groups mesh/material parts; AssetManager imports and uploads them. | Move reusable types out of the game binary and define the boundary between portable data and Vulkan resources. |
+| Model instances | Implemented | Multiple instances share one Arc<Model> but have independent transforms. | Reusable gameplay API and persistence. |
+| Scene and IDs | Implemented | Flat scene with spawn, lookup, removal, iteration, and monotonically allocated entity IDs. | Lifecycle tests, serialized-reference rules, hierarchy when needed. There is no ECS yet. |
+| Shared material layout | Implemented; runtime check pending | Textures share a layout; pipeline creation/recreation no longer needs a scene object. | Remove every object and resize an empty scene on a live Vulkan device. |
+| Renderer ownership | Partial | Resource wrappers exist; GameApp still owns individual Vulkan resources and recreation logic. | Extract initialization, rendering, resize, upload access, and shutdown into a renderer owner. |
+| Shared runtime | Partial | crates/runtime initializes a renderer and exposes status. | It does not own the game's scene/update/render loop. Reconcile existing Engine/Renderer with the extraction instead of duplicating lifecycles. |
+| Diagnostics | Implemented | engine_logger, component health, error propagation, validation logging. | Extend diagnostics as systems arrive and measure actual runtime behavior. |
+| Editor shell | Partial | Angular/Tauri project setup and GPU status UI. | No integrated scene viewport, entity inspector, or scene-editing workflow. |
+| Packaging | Partial; known gap | Compiler installs the executable and selected textures. | It omits robot.glb required by startup. Package dependencies and verify outside the checkout. |
+| Tests and documentation | Partial | Loader/renderer unit tests, logger tests, frontend/site checks, generated docs. | Native lifecycle, clean-build, packaged-run, and broader integration verification. |
 
-| Section | Completion evidence | Current status |
+Evidence: [game](apps/game/README.md), [renderer](crates/renderer/README.md), [runtime](crates/runtime/README.md), [editor](apps/editor/README.md), [compiler](compiler/README.md), and [testing](testing.md). Source inspected includes apps/game/src/main.rs, scene.rs, model_instance.rs, transform.rs, the assets module, crates/renderer/src/vulkan, crates/runtime/src/engine.rs, and compiler/src/lib.rs. Older subsystem guides may lag this roadmap; pending updates are recorded in the documentation checkpoint.
+
+## Immediate sequence: complete the foundation
+
+| Order | Work | Why it comes next | Done when |
+| --- | --- | --- | --- |
+| 1 | Verify scene/resource lifecycle | Ownership must be reliable before extraction. | Two robots, single-object removal, empty scene, resize/minimize/restore, and shutdown work without validation errors or stale entity access. |
+| 2 | Extract a Vulkan renderer owner | GameApp mixes application behavior with low-level rendering. | GameApp requests draw/resize through a small API; renderer owns GPU resources and cleanup. Asset upload access is explicit rather than unrestricted public internals. |
+| 3 | Establish shared runtime APIs | Game and editor need the same engine behavior. | Scene/transform/asset interfaces live in library crates without a game-binary dependency; existing runtime/status initialization is reconciled. A second graphics backend is not required. |
+| 4 | Add timing, input, and gameplay boundaries | Elapsed-time demo rotation is not a gameplay loop. | Input actions and delta time control an object/camera; fixed-step updates exist where needed; focus loss clears held input. |
+| 5 | Save and load scenes | Authoring needs persistent data. | Versioned scenes store asset references and transforms, restore entity references deliberately, and report missing assets. Never serialize Vulkan handles, pointers, or Arc values. |
+| 6 | Integrate the editor | UI should call stable engine APIs. | Shared scene renders in a viewport; commands select/edit entities; reload and empty-scene lifecycle are verified. |
+
+Fix the packaging omission alongside these steps, before treating installed builds as usable.
+
+## When to build the UI
+
+The editor shell already exists. First establish renderer ownership and shared runtime boundaries, then inspect the Angular/Tauri host to choose viewport presentation and edit-command transport.
+
+| Editor stage | Scope | Acceptance test |
 | --- | --- | --- |
-| Window and rendering | A window opens, renders the target content, handles resizing, and shuts down cleanly. | Unverified |
-| Camera and viewport | Camera movement and coordinate transforms behave correctly in a representative scene. | Unverified |
-| Player input | Required keyboard, mouse, or controller inputs drive gameplay predictably. | Unverified |
-| Game UI | Menus, HUD, and required interactions work at supported resolutions. | Unverified |
-| Editor tools, if intended | Users can inspect and edit scenes or entities, save changes, and preview them. | Unverified |
+| First useful editor | Viewport, scene list, selection, transform inspector. | Select either robot and change only its transform immediately in the viewport. |
+| Authoring workflow | Create/delete, asset selection, save/load, undo/redo. | Edit a scene, undo an edit, restart, and reopen the saved result. |
+| Play mode | Runtime start/stop with authored data separate from play state. | Gameplay changes do not silently overwrite the scene; stopping restores authoring state. |
+| Specialist tools | Material, animation, audio, script, and particle panels as runtime systems arrive. | Each panel edits real engine data, persists it, and previews the corresponding behavior. |
 
-### Work toward the MVP
+Full lighting, skeletal animation, scripting, and particles are not prerequisites for the first inspector. Reliable ownership, shared APIs, and scene lifecycle are prerequisites. Runtime game UI (menus/HUD) is separate from editor UI.
 
-1. Verify the window, renderer, camera, and input together in a playable scene.
-2. Implement only the UI needed to start, play, restart, and exit the sample game.
-3. Define supported resolutions and test resizing and focus changes.
-4. If an editor is part of the intended product, establish its minimum authoring workflow. Otherwise, a documented code-based workflow can support the first functional engine milestone.
+## Gameplay and content systems
 
-## Back end
+These are future systems, not capabilities already demonstrated by the robots. Their order should follow the first game's needs and the dependencies below.
 
-For this pipeline, back end means the engine runtime and gameplay systems. A network server is required only if the intended games need one.
+| System | Status | Prerequisites | First implementation | Completion evidence |
+| --- | --- | --- | --- | --- |
+| Full static-model import | Partial | Stable asset/model API. | Traverse glTF nodes, compose hierarchy transforms, import all referenced meshes/materials. | A multi-node/multi-mesh fixture has correct placement and reuses shared meshes. |
+| Lighting and richer materials | Planned beyond base color | Normals, material schema, pipeline variants. | Directional light, then metallic/roughness, normal maps, supported alpha modes. | Known assets show correct lighting, cutouts, and supported transparency. |
+| Collision and physics | Planned | Shared scene, timing, transform ownership. | Colliders, queries, events, movement; rigid bodies as required. | Movement collides consistently across frame rates; removed entities leave no colliders. |
+| Sound and audio | Planned | Asset references, lifecycle, settings, update loop. | Device/mixer, sound handles, play/stop/loop, master/music/effects volume; spatial listener/emitters next. | One-shots and music play; spatial emitters move; volume works; unloading releases voices safely. |
+| Animation | Planned; demo rotation only | Node import, timing, transform ownership. | Clip/time/channel sampling and interpolation; then skeletons, inverse-bind matrices, skinning, blending. | A known clip plays, pauses, loops, and animates two instances independently; skinning follows joints correctly. |
+| Custom scripts | Planned | Stable IDs, gameplay API, timing, lifecycle, logging, persistence. | Script properties and start/update/destroy callbacks; choose embedded language or native extensions after requirements are defined. | A script responds to input and moves an entity; errors are isolated and logged; stale references cannot access removed entities. |
+| Particle system | Planned | Timing, camera, assets/materials; blending for translucent particles. | CPU emitters with spawn rate, lifetime, velocity, color/size curves, textured billboards. Defer GPU simulation. | Emitters start/stop, respect limits, expire particles, and clean up on scene unload. |
+| Runtime game UI | Planned | Input routing, viewport sizing, fonts/images. | Text, buttons, simple layout, HUD, pause/menu focus. | Start/pause/restart work at supported resolutions without leaking menu input into gameplay. |
+| Saves and settings | Planned | Versioned serialization, game-state API. | Separate authored scenes, user settings, and runtime saves. | State survives restart; invalid/older data has a defined recovery or migration path. |
+| Asset tooling | Planned beyond caches | Stable IDs and dependency tracking. | Asset browser, import settings, reload, dependency-aware packaging. | Updates reach instances and installed games resolve all required assets. |
+| Performance and scale | Planned | Representative scenes and timing measurements. | CPU/GPU timing, memory budgets, then culling/batching where justified. | A named test scene meets recorded frame-time/memory budgets on a named machine. |
 
-| Section | Completion evidence | Current status |
-| --- | --- | --- |
-| Main loop and lifecycle | Initialization, update, rendering, timing, and shutdown operate coherently. | Unverified |
-| Scenes and entities | Gameplay objects can be created, updated, removed, and organized with correct ownership. | Unverified |
-| Asset management | Required assets load reliably, report failures, and release resources correctly. | Unverified |
-| Gameplay API | The sample game can express its rules through reusable engine interfaces. | Unverified |
-| Collision and physics | Required interactions behave consistently; a simple collision system may suffice. | Unverified |
-| Audio | Required sounds play with appropriate controls and resource cleanup. | Unverified |
-| Persistence | Scenes, configuration, or saves required by the workflow survive a restart. | Unverified |
+Define the script trust model and allowed engine APIs before selecting an execution mechanism. Define the order in which animation, physics, scripts, and manual edits write transforms so they do not overwrite one another unpredictably.
 
-### Work toward the MVP
+An ECS, GPU particle simulation, networking, and hot reload are optional extensions until a concrete game or measured constraint requires them.
 
-1. Verify resource ownership and lifecycle boundaries before integrating more systems.
-2. Connect scenes, entities, assets, and gameplay through one complete sample game.
-3. Add collision, audio, and persistence to the extent required by that game.
-4. Test scene reloads, repeated creation and destruction, and missing or invalid assets.
-5. Define which parts belong to the engine and which belong to the sample game so the engine can support a second game without copying its internals.
+## Functional engine acceptance gates
 
-## Infrastructure
+Use one small playable game to prove integration. Agree its scope before making every optional feature mandatory.
 
-Infrastructure means the development, verification, and distribution foundation. Cloud hosting is optional unless the engine's intended workflow requires it.
+| Gate | Required evidence |
+| --- | --- |
+| Reuse | Game rules use engine APIs without copying renderer internals. |
+| Playability | Input, an objective, success/failure, and restart work together. |
+| Content | The audio, animation, scripts, collision, and effects selected for the game work together. |
+| Authoring | The supported workflow saves and reloads scenes predictably. |
+| Lifecycle | Scene changes, empty scenes, removal, pause, and shutdown are reliable. |
+| Distribution | Clean builds package required assets and run outside the development directory. |
+| Diagnostics | Missing assets, import failures, script errors, and graphics errors produce useful logs. |
+| Quality | Automated and manual scenarios pass; supported hardware and performance budgets are recorded. |
 
-| Section | Completion evidence | Current status |
-| --- | --- | --- |
-| Build and dependencies | A clean checkout builds using documented commands and declared dependencies. | Unverified |
-| Configuration | Development and release settings are explicit and reproducible. | Unverified |
-| Diagnostics | Logs and errors identify failures well enough to debug them. | Unverified |
-| Automated checks | Relevant tests and build checks detect meaningful regressions. | Unverified |
-| Packaging | A distributable contains required binaries and assets and runs outside the source tree. | Unverified |
-| Performance checks | Representative scenes meet explicit frame-time and memory targets. | Unverified |
-| Documentation site | Markdown sources build into `docs-site/dist` and site checks pass. | Unverified |
+## Review and verification
 
-### Work toward the MVP
+The previous checkpoint was `2216ce9`. This review inspected later commits and staged, unstaged, and untracked changes. During review, current source was committed as `978f6e4` (adding scene); the source tree was clean before this rewrite. This supersedes the previous roadmap's tooling-blocked assessment.
 
-1. Establish one repeatable build command and one command to run the sample game.
-2. Verify a clean checkout instead of relying on local build artifacts.
-3. Add tests at important system boundaries and automate the build.
-4. Package the sample game and run it outside the development directory.
-5. Record supported platforms, dependencies, known limitations, and diagnostic procedures.
+Documentation validation uses `npm.cmd test --prefix docs-site`: it rebuilds docs-site/dist, checks local links, and runs site tests. Engine checks use `cargo check -p game --offline --locked` and `cargo test -p game -p renderer --lib --bins --offline --locked`. Exact results and pending guide updates are recorded in docs-site/docs-state.json.
 
-## Recommended execution order
-
-| Order | Milestone | Exit condition |
-| --- | --- | --- |
-| 1 | Establish the actual baseline | Inspect HEAD, Git history, staged/unstaged/untracked changes, and `docs-site/docs-state.json`; classify each section as complete, partial, missing, or unverified. |
-| 2 | Stabilize the foundation | A repeatable build launches a scene with reliable update timing, rendering, input, and shutdown. |
-| 3 | Complete a playable vertical slice | A small game has a start state, player interaction, an objective, an outcome, and a restart path. |
-| 4 | Prove engine reuse | Game logic uses defined engine interfaces and scene/asset systems rather than modifications to engine internals. |
-| 5 | Pass the functional engine gate | The packaged game runs outside the checkout and its essential workflow passes checks. |
-| 6 | Move toward alpha | Address observed stability, usability, tooling, and performance gaps against the intended scope. |
-
-## Functional engine acceptance checklist
-
-- [ ] A clean checkout builds with documented commands.
-- [ ] A small playable game exercises rendering, input, assets, scenes, and gameplay together.
-- [ ] Required collision, audio, and persistence work in that game.
-- [ ] Initialization, scene changes, restarts, and shutdown behave consistently.
-- [ ] Errors provide useful diagnostics.
-- [ ] The game packages and runs outside the development environment.
-- [ ] Relevant automated checks pass.
-- [ ] Known limitations and supported targets are recorded.
-
-These boxes are assessment gates, not a claim that the corresponding work is absent.
-
-## Documentation verification limits
-
-Workspace tooling failed with `helper_unknown_error: setup refresh had errors`. Source inspection, Git inspection, documentation baseline comparison, site rebuild, and site checks could not run. The existing `docs-site/docs-state.json` was not read or changed, and no inspected commit is claimed. Once access is restored, inspect the checkpoint and current Git tree, replace unverified statuses with evidence, rebuild the site, run its checks, and record the inspected commit and remaining verification limits in the existing checkpoint format.
+This review does not certify native GPU behavior, empty-scene resizing, installer execution, browser visual appearance, or clean-checkout reproducibility. These remain explicit verification gates.

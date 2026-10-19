@@ -74,6 +74,31 @@ mod tests {
             Err(GltfLoaderError::UnsupportedMode(Mode::Lines))
         ));
     }
+
+    #[test]
+    fn rejects_indices_outside_the_vertex_buffer() {
+        let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+        let mut buffers = geometry();
+        buffers[0].0[40..42].copy_from_slice(&3_u16.to_le_bytes());
+        assert!(matches!(
+            import_first_mesh(&document, &buffers, &[]),
+            Err(GltfLoaderError::IndexOutOfBounds {
+                index: 3,
+                vertex_count: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn factor_only_materials_get_safe_default_uvs() {
+        let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+        let parts = import_first_mesh(&document, &geometry(), &[]).unwrap();
+        for part in parts {
+            for vertex in part.mesh.vertices() {
+                assert_eq!(vertex.uv, [0.0, 0.0]);
+            }
+        }
+    }
 }
 
 pub struct ImportedPrimitive {

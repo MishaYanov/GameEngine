@@ -31,6 +31,25 @@ fn entry() -> LogEntry {
         .entries
         .remove(0)
 }
+
+#[test]
+fn reader_rejects_malformed_complete_records_and_future_schemas() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("corrupt.jsonl");
+    fs::write(&path, b"{not json}\n").unwrap();
+    assert!(read_jsonl(&path, 4096).is_err());
+    let mut record = entry();
+    record.schema_version = crate::SCHEMA_VERSION + 1;
+    let mut bytes = serde_json::to_vec(&record).unwrap();
+    bytes.push(b'\n');
+    fs::write(&path, bytes).unwrap();
+    assert!(
+        read_jsonl(&path, 4096)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported log schema")
+    );
+}
 #[test]
 fn rotation_retention_and_trailing_line_recovery() {
     let fixture = Fixture::new();

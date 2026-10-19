@@ -6,7 +6,7 @@ This guide describes the current demo and renderer contracts. See [renderer](cra
 
 The asset layer lives in `apps/game/src/assets`. `ImageAsset::load` opens/decodes an image, converts it to RGBA8, and flips it vertically once to match the demo UV convention. The manifest enables PNG and JPEG decoding. `ImageAsset::from_rgba8(width, height, pixels)` accepts already decoded data, preserves row order, and rejects zero dimensions, size overflow, or a byte count other than `width * height * 4`. glTF images use this constructor without the standalone-file vertical flip.
 
-`AssetManager::new(root)` canonicalizes an existing directory. Texture lookup joins and canonicalizes the path, rejects resolved paths outside the root, and caches `Arc<VulkanTexture>` by canonical filename. Files must exist; symlinks escaping the root are rejected.
+`AssetManager::new(root, Arc<VulkanMaterialLayout>)` canonicalizes an existing directory. Texture lookup joins and canonicalizes the path, rejects resolved paths outside the root, and caches `Arc<VulkanTexture>` by canonical filename. Files must exist; symlinks escaping the root are rejected.
 
 `load_mesh(instance, device, id, data)` uploads `MeshData` and caches `Arc<VulkanMesh>` by caller-supplied string ID. Reusing an ID returns the cached mesh even if new data differs. Use distinct stable IDs for distinct geometry. Count and membership methods expose cache state.
 
@@ -16,18 +16,20 @@ The asset layer lives in `apps/game/src/assets`. `ImageAsset::load` opens/decode
 
 `MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle/cube constructors. `Vertex` has C layout: position `[f32; 3]` at location 0 and UV `[f32; 2]` at location 1. Binding/attribute descriptions derive stride/offsets from this Rust layout.
 
-The vertex shader computes `camera.viewProjection * model * position`.
+The vertex shader computes `camera.viewProjection * model * position`; the fragment shader multiplies the sampled texture by the material base-color factor.
 
 | Shader input | Binding |
 | --- | --- |
 | Position / UV | Locations 0 / 1 |
 | Camera view-projection | Descriptor set 0, binding 0 |
 | Sampled texture | Descriptor set 1, binding 0 |
-| Model matrix | Vertex shader push constant |
+| Model matrix and base-color factor | 80-byte push constant block shared by vertex/fragment stages |
 
-`CameraUniform::perspective` creates camera data. `ModelPushConstants::from_3d` accepts translation, Euler rotation in radians, and scale. `VulkanMaterial::new(texture, double_sided)` owns an `Arc<VulkanTexture>` and stores a double-sided flag. Pass that flag as the final argument to `VulkanGraphicsPipeline::new`: true disables face culling; false enables back-face culling. This choice belongs to the pipeline, not to each draw object independently. `RenderObject` borrows mesh/material and carries the transform.
+`CameraUniform::perspective` creates camera data. `ModelPushConstants::from_3d` accepts translation, Euler rotation in radians, and scale. The block contains the matrix at byte 0 and material factor at byte 64. `VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture and material properties. `VulkanMaterialPipelines` supplies matching single/double-sided variants; frame drawing chooses a variant per material.
 
-Change Rust layout, pipeline descriptors, and GLSL together. The current shaders sample color directly without applying imported base-color factor, normal-based lighting, alpha behavior, or full glTF PBR. Sources are `crates/renderer/shaders/triangle.vert` and `triangle.frag`; the renderer build script compiles and embeds their SPIR-V. Rebuild to apply shader changes.
+A renderer-owned `VulkanMaterialLayout` is shared by textures, the asset manager, and pipelines. Constructors for GPU textures take that shared layout. Pipeline setup does not depend on a scene object, permitting an empty scene. Preserve the layout and logical device until dependent descriptor resources are released.
+
+Change Rust layout, pipeline descriptors, and GLSL together. The shaders apply base-color factors, but provide no normal lighting, full PBR, or transparent-material blending/sorting. Shader sources remain `crates/renderer/shaders/triangle.vert` and `triangle.frag`; rebuilding compiles and embeds SPIR-V.
 
 ## Add a texture or procedural mesh
 
@@ -49,31 +51,21 @@ Extent/format changes can invalidate depth, pipeline, and frame resources. Follo
 
 ## glTF and GLB import
 
-`load_first_primitive(path) -> Result<ImportedPrimitive, GltfLoaderError>` uses `gltf::import` to read geometry and images, including GLB input. The game calls it once during window initialization for `assets/props/robot.glb`, then uploads its mesh and image for rendering.
+`load_first_mesh(path) -> Result<Vec<ImportedPrimitive>, GltfLoaderError>` imports every primitive of the first mesh through `gltf::import`. Any unsupported primitive rejects the import rather than being silently skipped. Returned geometry stays in mesh-local coordinates: nodes/transforms, other meshes, animations, and skinning are not traversed.
 
-`ImportedPrimitive` separates CPU geometry and material data:
+Each `ImportedPrimitive` contains `MeshData`, mesh/primitive indices, an optional source image index, and crate-local `MaterialData`. Material data contains an optional base-color image, RGBA factor, and the actual glTF `doubleSided` flag.
 
-| Field | Contract |
-| --- | --- |
-| `mesh: MeshData` | First mesh's first indexed triangle primitive |
-| `base_color_image: Option<ImageAsset>` | Decoded base-color image, if referenced |
-| `base_color_factor: [f32; 4]` | Imported material factor, currently logged rather than shaded |
-| `double_sided: bool` | Currently hardcoded true; not read from the glTF material |
+Positions and indices are required. The loader rejects non-triangle modes, empty geometry, invalid index count/bounds, and mismatched position/UV counts. Textured materials require the referenced UV set; untextured materials can use zero UVs. Images support decoded RGB8 (expanded to RGBA8) and RGBA8; other formats are rejected. Imported row order is preserved. Import/image errors expose underlying causes.
 
-The loader requires positions and indices, rejects non-triangle modes and empty geometry, checks triangle index count and index bounds, and reads the UV set requested by the base-color texture. A textured primitive must have that UV set; an untextured primitive can use zero UVs. Position and UV counts must match.
+### Models, instances, and GPU caches
 
-Imported images support `R8G8B8` (expanded with alpha 255) and `R8G8B8A8`. Other decoded formats are rejected. `ImageAsset::from_rgba8` validates the dimensions/byte count and preserves imported row order. Buffer/image import errors retain their underlying causes through `GltfLoaderError::source`.
+`AssetManager::load_model` resolves a path inside its canonical root, reimports CPU data, and returns a `Model` containing one `ModelPart` per primitive. GPU meshes are cached by canonical path plus mesh/primitive indices; imported images are cached by canonical path plus image index. Repeated model loads reuse uploads, not the CPU import or the returned model object.
 
-### CPU import to GPU material
+`load_image_texture` caches decoded image uploads by caller ID. `load_material` uses the imported image or shared `builtin:white` 1×1 texture, enabling factor-only materials. Its `VulkanMaterial` stores factor/sidedness independently even when textures are shared. `loaded_texture_count` includes both file and imported-image caches. Reused IDs keep existing uploads; there is no hot reload/invalidation.
 
-1. Load the primitive and pass `&imported.mesh` to `AssetManager::load_mesh` with a distinct ID; the robot uses `props/robot.glb#mesh:0#primitive:0`.
-2. Upload the optional image with `VulkanTexture::from_rgba8`. The current game requires it and exits if no base-color image exists, even though the loader allows factor-only materials.
-3. Share the resulting `Arc<VulkanTexture>` across materials. The demo creates two materials referencing the same texture and two draw objects referencing the same mesh.
-4. Construct the pipeline using the material's double-sided flag. The robot's imported texture is uploaded directly, outside the file-texture cache.
+`ModelPart` owns an `Arc<VulkanMesh>` and material; `Model` groups parts. `ModelInstance` owns `Arc<Model>` and independent position/rotation/scale. `Scene` owns instances under increasing entity IDs, with spawn, mutable lookup, removal, and iteration. These types live in the game, not shared runtime.
 
-There is no node transform traversal, additional primitive selection, complete scene assembly, skinning, animation, normal-based shading, texture sampler import, or full PBR support. The game does not currently fall back to a solid-color texture for factor-only materials. Procedural geometry helpers and standalone texture loading remain available, but are no longer the default demo scene.
-
-A separate `MaterialData` type is being introduced in uncommitted work under `src/assets/material_data.rs`. It currently declares private image/factor/double-sided fields and is not integrated into the importer/rendering flow reviewed here. Treat it as work in progress rather than a public replacement contract.
+The game loads the robot model once, shares it between two instances, and expands each instance's parts into `RenderObject` inputs per frame. `clear()` releases cache references; scene/model/material owners can still retain GPU resources. Release those owners before destroying their device. No complete scene import, persistence, ECS, or editor entity commands are provided by this model layer.
 
 ### Packaging
 
