@@ -11,6 +11,8 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [Static documentation site](static-site.md): Build, preview, update, test, and host the Markdown-based website.
 
+- [Timing, input, and camera — in progress](timing-input-camera.md): Current clock/key/camera contracts, provisional game controls, and remaining verification.
+
 ## Applications
 
 - [Editor frontend](apps/editor/README.md): Setup UI, desktop/browser modes, contracts, source organization, builds, and tests.

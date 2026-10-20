@@ -29,6 +29,10 @@ assert!(scene.remove(id).is_some());
 
 For real content, use `AssetManager::new(root)` and `load_model(&window_renderer, relative_path)`. It imports all primitives of the first glTF mesh and asks `WindowRenderer` to upload meshes/images. Models/materials still contain Vulkan-specific resources: this extraction establishes ownership and reuse, not backend independence. See [graphics and assets](../../graphics-and-assets.md).
 
+## Timing, input, and camera — in progress
+
+The working tree now exposes `FrameClock` (`time.rs`), `InputState`/`Key` (`input.rs`), and CPU `Camera` (`camera.rs`) from the crate root. The game uses them for capped delta-time updates, keyboard movement, and mouse-look camera control. All three APIs and their integration are **in progress**, not a completed input/gameplay milestone. See [current contracts and provisional controls](../../timing-input-camera.md).
+
 ## Status-only engine path
 
 `Engine::new() -> Result<Engine, EngineError>` still owns a status-only `renderer::Renderer`. `Engine::status()` returns `bridge::EngineStatusDto`; initialization errors preserve their root cause. The editor host wraps this engine in a mutex. This path remains separate from `WindowRenderer`; shared scene APIs do not yet provide an editor viewport or a unified update loop.
@@ -49,4 +53,4 @@ Runtime tests cover import/material data, image validation, scene removal and in
 
 The five-step move is complete: temporary game library, scene-owned draw construction, Transform move, remaining reusable modules move, and validation. The temporary game library is no longer required. The user confirmed tests, native smoke, visible rendering, resize, and minimize checks after the move; see [testing](../../testing.md) for evidence boundaries.
 
-Next: delta time and keyboard movement at a consistent speed. Input mapping, fixed-step updates, scene persistence, hierarchy, full glTF scenes, and editor scene commands remain future work.
+Timing, key state, movement, and camera control are now implemented provisionally in the working tree and remain in progress. Action mapping, fixed-step updates, scene persistence, hierarchy, full glTF scenes, and editor scene commands remain future work.

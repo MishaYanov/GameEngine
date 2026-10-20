@@ -17,9 +17,9 @@ Requires Vulkan 1.3, a capable driver, `glslc` for shader builds, and the Khrono
 
 ## Application boundary
 
-`GameApp` owns `Scene`, `AssetManager`, `WindowRenderer`, and a shared window reference. `initialize()` creates the window/renderer, calls `assets.load_model(&renderer, "props/robot.glb")`, and spawns two instances sharing one `Arc<Model>`. `update(elapsed)` changes independent rotations. `render()` calls renderer `prepare()`, builds camera data from the actual extent, gets `scene.render_objects()`, and submits it with `renderer.draw()`.
+`GameApp` owns `Scene`, `AssetManager`, `WindowRenderer`, and a shared window reference. `initialize()` creates the window/renderer, calls `assets.load_model(&renderer, "props/robot.glb")`, and spawns two instances sharing one `Arc<Model>`. `update(delta_seconds)` now uses `FrameClock` delta time and `InputState` for movement and rotation; runtime `Camera` supplies view data. This integration is in progress. `render()` calls renderer `prepare()`, builds camera data from the actual extent, gets `scene.render_objects()`, and submits it with `renderer.draw()`.
 
-The application no longer constructs GPU device/swapchain resources or recreates them on resize. Window events call `renderer.resize`; minimized zero-size frames suspend through `prepare()`. Renderer errors are logged and stop the loop. Elapsed-time rotation exists; frame-delta/input-driven movement is the next milestone, not an implemented feature.
+The application no longer constructs GPU device/swapchain resources or recreates them on resize. Window events call `renderer.resize`; minimized zero-size frames suspend through `prepare()`. Renderer errors are logged and stop the loop. The working tree now has capped delta-time updates, keyboard movement, and mouse look. These controls are **in progress**, with provisional bindings and no claim of completed native interaction validation. See [timing, input, and camera](../../timing-input-camera.md).
 
 ## Shared scene and model APIs
 

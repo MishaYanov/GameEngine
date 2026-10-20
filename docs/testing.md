@@ -33,6 +33,10 @@ The supplied renderer-ownership notes also report a hidden smoke pass on an RTX 
 
 These are user-reported native/visual results, distinct from commands rerun during a documentation update. Exact current command outcomes and limits are in `docs-site/docs-state.json`. Installed release execution, clean-checkout reproducibility, and browser visual QA need their own evidence.
 
+## In-progress timing/input/camera checks
+
+`time.rs`, `input.rs`, and `camera.rs` add runtime unit tests for clock boundaries, key-state transitions, and camera math/rotation limits. These modules and game controls are explicitly **in progress**. Prior user-confirmed native extraction checks do not establish that the later controls passed. See [the current guide](timing-input-camera.md) for manual focus/capture/movement scenarios.
+
 ## CI draft
 
 The untracked `Jenkinsfile` and `ci/jenkins` files define a local Linux-container Jenkins setup. The draft pipeline fetches locked Cargo dependencies, installs npm dependencies, runs default tests, builds both frontends, checks the docs site, and archives successful build output. It does not run native GPU checks or Windows packaging. The startup helper requires Docker Desktop Linux containers; it has not been launched or validated as part of this docs review. A draft configuration is not evidence of a successful CI run.

@@ -35,6 +35,10 @@ The game owns window events, application updates, and shared runtime scene/cache
 
 The compiler embeds the source workspace location and builds from that checkout. Its output has no editable source project. The admin builder copies allowlisted inputs and retains failed staging. See [usage](usage.md) for destination rules.
 
+## Timing, input, and camera — in progress
+
+The current working tree adds shared `runtime::FrameClock`, `InputState`/`Key`, and `Camera`. The game adapts native events, updates using capped delta seconds, and turns CPU camera values into renderer uniforms. Mouse displacement is handled without delta scaling. These modules and their game integration remain **in progress**; see [contracts and provisional controls](timing-input-camera.md).
+
 ## Diagnostics and ownership
 
 Each executable initializes the shared logger once and keeps its guard alive; libraries emit through that logger. Applications exchange diagnostics through per-session JSONL files rather than shared memory. Engine Admin collects those files and maintains separate administration history.

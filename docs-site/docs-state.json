@@ -1,79 +1,51 @@
 {
-  "last_checked_commit": "c19dc4b64ad7dec59932ec579a27ff90359a3a94",
+  "last_checked_commit": "cf0a462558840a8823ac2955952a96c1a36faec7",
   "last_checked_date": "2026-10-19",
-  "last_documentation_update_commit": "c19dc4b64ad7dec59932ec579a27ff90359a3a94",
+  "last_documentation_update_commit": "cf0a462558840a8823ac2955952a96c1a36faec7",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "reviewed_commits": [
-    "978f6e44b5c9a61691f4147b4dfc69c0557c5ef4",
-    "c19dc4b64ad7dec59932ec579a27ff90359a3a94"
+    "c19dc4b64ad7dec59932ec579a27ff90359a3a94",
+    "cf0a462558840a8823ac2955952a96c1a36faec7"
   ],
   "documented_changes": [
-    "WindowRenderer presentation ownership, upload methods, deferred resize and resource lifetimes",
-    "Completed five-step migration of assets/models/instances/scenes/Transform into runtime and Scene::render_objects",
-    "Public runtime APIs and external scene_api tests",
-    "Recursive game asset copying fixes robot packaging omission",
-    "Updated game/runtime/renderer/architecture/graphics/testing/usage/pipeline and affected references",
-    "Draft untracked Jenkins configuration distinguished from verified CI execution",
-    "Timing/delta and keyboard movement remain next planned work"
+    "Added timing-input-camera.md covering time.rs FrameClock, input.rs key lifecycle, and camera.rs CPU view data",
+    "Marked all three modules and game integration explicitly in progress",
+    "Documented provisional WASD object movement, arrow-key camera movement, captured mouse look, Escape release, focus/reset behavior, and installed-mode limits",
+    "Updated runtime/game READMEs, architecture, roadmap, testing, and documentation index"
   ],
   "pending_documentation_changes": [
-    "Update timing/input documentation when implemented",
-    "Record installed release outside-checkout results when verified",
-    "Update Jenkins setup status after its draft is run and validated"
+    "Review timing/input/camera after implementation and visible control checks are complete; keep in-progress status until explicitly finished",
+    "Other changes since the previous checkpoint outside this request have not received a comprehensive documentation audit",
+    "Installed release and Jenkins verification remain separate outstanding checks"
   ],
   "verification": [
-    "npm.cmd test --prefix docs-site: 22 pages rebuilt/link-checked, five tests passed",
-    "cargo test -p runtime -p renderer -p bridge -p compiler --offline --locked: 23 passed, one native initialization test ignored",
-    "python -m unittest discover -s tests -p test_test_all.py -v: five passed",
-    "cargo check -p game --all-targets --offline --locked completed",
-    "git diff --check -- docs designs passed"
+    "npm.cmd test --prefix docs-site: 23 pages rebuilt/link-checked; five site tests passed",
+    "cargo test -p runtime --lib --offline --locked: 35 passed, one native initialization test ignored",
+    "cargo check -p game --all-targets --offline --locked passed",
+    "git diff --check -- docs passed"
   ],
   "user_reported_verification": [
     "User confirmed tests, native smoke, visible game, resize, and minimize pass after runtime module move",
     "Attached renderer extraction notes report RTX 4070 smoke pass with 640x360 resized extent and no logged errors"
   ],
   "verification_limits": [
-    "Native smoke and visible GPU checks were user-reported, not rerun by this docs review",
-    "No full workspace/Angular run, installed release launch, browser visual QA, or clean-checkout rebuild was performed",
-    "Jenkins configuration not launched",
-    "Runtime migration includes staged/unstaged changes; HEAD alone does not represent documented source"
+    "No native movement, cursor capture, focus-loss, or camera visual checks performed",
+    "Earlier user-confirmed extraction smoke does not cover the new timing/input/camera integration",
+    "Documented modules are staged/unstaged work in progress; commit alone does not identify the source",
+    "Changes outside timing/input/camera were not exhaustively reviewed in this scoped request"
   ],
   "working_tree_at_check": [
-    " M Cargo.lock",
-    " M apps/game/Cargo.toml",
-    " M apps/game/examples/renderer_smoke.rs",
     " M apps/game/src/main.rs",
-    " M crates/runtime/Cargo.toml",
-    "R  apps/game/src/assets/asset_manager.rs -> crates/runtime/src/assets/asset_manager.rs",
-    "RM apps/game/src/assets/gltf_loader.rs -> crates/runtime/src/assets/gltf_loader.rs",
-    "R  apps/game/src/assets/image_asset.rs -> crates/runtime/src/assets/image_asset.rs",
-    "RM apps/game/src/assets/material_data.rs -> crates/runtime/src/assets/material_data.rs",
-    "R  apps/game/src/assets/mesh_data.rs -> crates/runtime/src/assets/mesh_data.rs",
-    "R  apps/game/src/assets/mod.rs -> crates/runtime/src/assets/mod.rs",
-    "RM apps/game/src/assets/model.rs -> crates/runtime/src/assets/model.rs",
+    "AM crates/runtime/src/camera.rs",
+    "AM crates/runtime/src/input.rs",
     " M crates/runtime/src/lib.rs",
-    "R  apps/game/src/model_instance.rs -> crates/runtime/src/model_instance.rs",
-    "R  apps/game/src/scene.rs -> crates/runtime/src/scene.rs",
-    "R  apps/game/src/transform.rs -> crates/runtime/src/transform.rs",
-    " M designs/project-installation.md",
-    " M designs/testing.md",
-    " M docs/apps/editor-host/README.md",
-    " M docs/apps/editor/README.md",
+    "AM crates/runtime/src/time.rs",
     " M docs/apps/game/README.md",
     " M docs/architecture.md",
-    " M docs/compiler/README.md",
-    " M docs/crates/bridge/README.md",
-    " M docs/crates/renderer/README.md",
     " M docs/crates/runtime/README.md",
-    " M docs/graphics-and-assets.md",
     " M docs/main.md",
     " M docs/pipeline.md",
     " M docs/testing.md",
-    " M docs/usage.md",
-    " M test_all.py",
-    " M tests/test_test_all.py",
-    "?? Jenkinsfile",
-    "?? ci/",
-    "?? crates/runtime/tests/"
+    "?? docs/timing-input-camera.md"
   ]
 }

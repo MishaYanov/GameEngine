@@ -1,6 +1,6 @@
 # Engine Pipeline
 
-Reviewed on 2026-10-19 against commit `c19dc4b` and staged, unstaged, and untracked changes, including the runtime migration. Renderer extraction and the five-step runtime move are complete for their stated scope; timing/input, persistence, and editor integration remain future milestones.
+Reviewed on 2026-10-19 against commit `c19dc4b` and staged, unstaged, and untracked changes, including the runtime migration. Renderer extraction and the five-step runtime move are complete for their stated scope; timing/input/camera are now in progress in the working tree; persistence and editor integration remain future milestones.
 
 This roadmap belongs to Engine Developer. Game App Developer remains empty. The target is a small playable game built through reusable engine APIs, with a persistent authoring workflow and a distributable that runs outside the checkout.
 
@@ -20,7 +20,7 @@ No completion percentage is assigned: a rendering demo and an integrated editor 
 | System | Status | Current capability | Remaining work |
 | --- | --- | --- | --- |
 | Window and Vulkan rendering | Implemented | Surface/device selection, swapchain, frame submission, indexed drawing, depth testing, resize handling, shutdown wait. | User confirms resize/minimize and shutdown checks; repeat after renderer changes. |
-| Camera and transforms | Partial | Perspective camera; per-instance position, Euler rotation, and scale. | Camera controls, input mapping, reusable timing and update API. |
+| Camera, timing, and input | In progress | Runtime FrameClock, InputState/Key, and Camera; provisional delta-scaled object/camera movement and captured mouse look in game. | Native control validation, input/action design, fixed-step policy, and completion review; see [guide](timing-input-camera.md). |
 | glTF/GLB import | Partial | All primitives of the first mesh, geometry, indices, UVs, base-color image/factor, double-sided setting. | Scene nodes and their transforms, other meshes, normals/tangents, broader image/material support. |
 | Materials | Partial | Unlit texture multiplied by color factor, white fallback, single/double-sided pipelines. | Lighting, alpha modes, normal maps, metallic/roughness. This is not full PBR. |
 | Asset caches | Implemented | Cached GPU meshes/textures and model-path-qualified embedded-image keys. | Stable asset references, reload/invalidation policy, model-level caching. Repeated loads can still decode the file again. |
@@ -29,7 +29,7 @@ No completion percentage is assigned: a rendering demo and an integrated editor 
 | Scene and IDs | Implemented in runtime | Spawn, mutation, removal, iteration, monotonically allocated IDs, and borrowed render_objects output. | Serialization/hierarchy; lifecycle unit/public-API tests now exist. No ECS yet. |
 | Shared material layout | Implemented; native checks user-confirmed | Layout belongs to WindowRenderer; empty-scene pipeline setup does not need a model. | Repeat native checks after future presentation changes. |
 | Renderer ownership | Complete for extraction milestone | WindowRenderer owns initialization, upload, draw, deferred resize, and shutdown; GameApp owns application behavior. | External GPU resource lifetimes still depend on application drop order and idle waits. |
-| Shared runtime | Complete for five-step migration | Assets, models, instances, scenes, Transform, and draw-request construction are shared runtime APIs; tests and smoke imports moved. | Status-only Engine/Renderer path is still separate; timing/input and editor viewport are future work. |
+| Shared runtime | Complete for five-step migration | Assets, models, instances, scenes, Transform, and draw-request construction are shared runtime APIs; tests and smoke imports moved. | Status-only Engine/Renderer path is still separate; timing/input/camera are in progress; editor viewport remains future work. |
 | Diagnostics | Implemented | engine_logger, component health, error propagation, validation logging. | Extend diagnostics as systems arrive and measure actual runtime behavior. |
 | Editor shell | Partial | Angular/Tauri project setup and GPU status UI. | No integrated scene viewport, entity inspector, or scene-editing workflow. |
 | Packaging | Recursive asset-copy fix implemented | Compiler copies the complete nested asset tree, including robot.glb; a test verifies copied model/texture bytes. | Full installed release execution outside checkout remains separate validation. |
@@ -51,13 +51,13 @@ Renderer ownership extraction is complete: WindowRenderer owns GPU presentation 
 
 The next implementation sequence is:
 
-1. Calculate frame delta time; current demo rotation still uses elapsed time.
-2. Use keyboard input to move an object at a consistent speed, including held-input/focus-loss behavior as input develops.
+1. **In progress:** FrameClock supplies delta seconds capped at 100 ms; game rotation/movement now uses delta time.
+2. **In progress:** InputState tracks key transitions/held state, Camera supplies movement/look data, and game adapts keyboard/mouse/focus events. Validate native interaction before closing the milestone.
 3. Establish broader gameplay/update boundaries and fixed steps where required.
 4. Add versioned scene persistence with stable asset references.
 5. Integrate the editor viewport and scene commands with shared APIs.
 
-These are future steps, not capabilities completed by the extraction. Recursive asset copying has resolved the old robot omission; running a fully installed release outside the checkout remains a separate check.
+The first two items describe ongoing work after extraction; later items remain planned. Recursive asset copying has resolved the old robot omission; running a fully installed release outside the checkout remains a separate check.
 
 ## When to build the UI
 
