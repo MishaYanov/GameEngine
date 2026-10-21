@@ -4,6 +4,7 @@ mod image_asset;
 pub mod material_data;
 mod mesh_data;
 pub mod model;
+mod primitives;
 
 pub use asset_manager::AssetManager;
 

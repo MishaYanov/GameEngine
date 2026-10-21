@@ -14,7 +14,7 @@ The asset layer lives in `crates/runtime/src/assets`. `ImageAsset::load` opens/d
 
 ## Geometry and shader contracts
 
-`MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle/cube constructors. `Vertex` has C layout: position `[f32; 3]` at location 0 and UV `[f32; 2]` at location 1. Binding/attribute descriptions derive stride/offsets from this Rust layout.
+`MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle, cube, plane, polygon, sphere, and capsule constructors. `Vertex` has C layout: position `[f32; 3]` at location 0 and UV `[f32; 2]` at location 1. Binding/attribute descriptions derive stride/offsets from this Rust layout.
 
 The vertex shader computes `camera.viewProjection * model * position`; the fragment shader multiplies the sampled texture by the material base-color factor.
 
@@ -30,6 +30,35 @@ The vertex shader computes `camera.viewProjection * model * position`; the fragm
 A `WindowRenderer`-owned `VulkanMaterialLayout` is shared by uploaded textures and pipelines. Runtime asset methods receive `&WindowRenderer` and call `upload_mesh` / `upload_rgba8`; they no longer receive a raw Vulkan instance/device or own a separate material-layout reference. Pipeline setup does not depend on a scene object, permitting an empty scene. Preserve the layout and logical device until dependent descriptor resources are released.
 
 Change Rust layout, pipeline descriptors, and GLSL together. The shaders apply base-color factors, but provide no normal lighting, full PBR, or transparent-material blending/sorting. Shader sources remain `crates/renderer/shaders/triangle.vert` and `triangle.frag`; rebuilding compiles and embeds SPIR-V.
+
+## Procedural primitives — in progress
+
+The working tree extracts shape builders into private modules under `crates/runtime/src/assets/primitives`. Use the public `runtime::assets::MeshData` constructors, rather than importing those implementation modules. These builders create CPU vertex/index data; GPU upload still goes through `AssetManager::load_mesh(&renderer, id, &data)`.
+
+| Constructor | Current geometry and dimensions |
+| --- | --- |
+| `MeshData::triangle()` | XY triangle at Z=0; three vertices and two opposite-winding index triangles, preserving the existing two-sided geometry |
+| `MeshData::cube()` | Unit cube centered at the origin, spanning ±0.5 on each axis; separate face vertices/UVs |
+| `MeshData::plane()` | Unit XZ plane at Y=0, spanning ±0.5 in X/Z; four vertices, two triangles facing +Y |
+| `MeshData::polygon(sides)` | Regular XY polygon at Z=0 with radius 0.5, center-fan triangulation, facing +Z; requires at least three sides |
+| `MeshData::sphere()` | Radius-0.5 rounded mesh centered at the origin, with Y-axis poles |
+| `MeshData::capsule()` | Y-aligned capsule with radius 0.5 and cylinder half-height 0.5: total height 2, width/depth 1 |
+
+`polygon(sides)` panics when `sides < 3`; it does not return a validation error. Sphere and capsule currently have fixed resolution: 32 angular segments and eight rings per hemisphere. Their shared `rounded.rs` builder duplicates the UV seam, makes pole positions exact, and skips degenerate pole triangles. Radius, capsule height, and tessellation are not public constructor parameters yet.
+
+```rust
+use runtime::assets::MeshData;
+let ground = MeshData::plane();
+let marker = MeshData::polygon(6);
+let ball = MeshData::sphere();
+let character_shape = MeshData::capsule();
+```
+
+Vertices currently contain position and UV only: normals, tangents, lighting-ready attributes, collision shapes, and mesh LOD are not supplied. Each constructor creates fresh CPU data; use distinct stable upload IDs for different shapes/parameters because an existing cache ID returns the old GPU mesh.
+
+To render, upload the data, pair it with a material in a ModelPart/Model, and spawn a ModelInstance. This does not automatically add primitive entities to the robot demo or give them serialized identifiers. Current scene persistence expects a source `model_path`; procedural meshes have no primitive-specific JSON schema or save/load workflow yet.
+
+The focused primitive test checks cube, plane, polygon(5), sphere, and capsule for finite positions, bounded UVs, and nondegenerate triangles; rounded shapes additionally check outward orientation. A separate should-panic test covers invalid polygon side count. The geometry loop does not include the legacy opposite-winding triangle. Native visual verification of the new shapes has not been performed in this docs review.
 
 ## Add a texture or procedural mesh
 

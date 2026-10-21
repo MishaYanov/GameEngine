@@ -6,12 +6,24 @@ pub struct MeshData {
 }
 
 impl MeshData {
+    pub fn plane() -> Self {
+        super::primitives::plane::build()
+    }
+    
+    pub fn polygon(sides: u32) -> Self {
+        super::primitives::polygon::build(sides)
+    }
+
+    pub fn sphere() -> Self {
+        super::primitives::sphere::build()
+    }
+
+    pub fn capsule() -> Self {
+        super::primitives::capsule::build()
+    }
+
     pub fn triangle() -> Self {
-        Self::new(vec![
-            Vertex::new([-0.7, -0.6, 0.0], [0.0, 1.0]),
-            Vertex::new([0.7, -0.6, 0.0], [1.0, 1.0]),
-            Vertex::new([0.0, 0.7, 0.0], [0.5, 0.0]),
-        ], vec![0, 1, 2, 2, 1, 0])
+        super::primitives::triangle::build()
     }
     pub fn new(vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
         Self { vertices, indices }
@@ -26,56 +38,6 @@ impl MeshData {
     }
 
     pub fn cube() -> Self {
-        let vertices = vec![
-            /*
-             * Front +Z
-             */
-            Vertex::new([-0.5, -0.5, 0.5], [0.0, 0.0]),
-            Vertex::new([0.5, -0.5, 0.5], [1.0, 0.0]),
-            Vertex::new([0.5, 0.5, 0.5], [1.0, 1.0]),
-            Vertex::new([-0.5, 0.5, 0.5], [0.0, 1.0]),
-            /*
-             * Back -Z
-             */
-            Vertex::new([0.5, -0.5, -0.5], [0.0, 0.0]),
-            Vertex::new([-0.5, -0.5, -0.5], [1.0, 0.0]),
-            Vertex::new([-0.5, 0.5, -0.5], [1.0, 1.0]),
-            Vertex::new([0.5, 0.5, -0.5], [0.0, 1.0]),
-            /*
-             * Left -X
-             */
-            Vertex::new([-0.5, -0.5, -0.5], [0.0, 0.0]),
-            Vertex::new([-0.5, -0.5, 0.5], [1.0, 0.0]),
-            Vertex::new([-0.5, 0.5, 0.5], [1.0, 1.0]),
-            Vertex::new([-0.5, 0.5, -0.5], [0.0, 1.0]),
-            /*
-             * Right +X
-             */
-            Vertex::new([0.5, -0.5, 0.5], [0.0, 0.0]),
-            Vertex::new([0.5, -0.5, -0.5], [1.0, 0.0]),
-            Vertex::new([0.5, 0.5, -0.5], [1.0, 1.0]),
-            Vertex::new([0.5, 0.5, 0.5], [0.0, 1.0]),
-            /*
-             * Top +Y
-             */
-            Vertex::new([-0.5, 0.5, 0.5], [0.0, 0.0]),
-            Vertex::new([0.5, 0.5, 0.5], [1.0, 0.0]),
-            Vertex::new([0.5, 0.5, -0.5], [1.0, 1.0]),
-            Vertex::new([-0.5, 0.5, -0.5], [0.0, 1.0]),
-            /*
-             * Bottom -Y
-             */
-            Vertex::new([-0.5, -0.5, -0.5], [0.0, 0.0]),
-            Vertex::new([0.5, -0.5, -0.5], [1.0, 0.0]),
-            Vertex::new([0.5, -0.5, 0.5], [1.0, 1.0]),
-            Vertex::new([-0.5, -0.5, 0.5], [0.0, 1.0]),
-        ];
-
-        let indices = vec![
-            0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16,
-            17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20,
-        ];
-
-        Self { vertices, indices }
+        super::primitives::cube::build()
     }
 }

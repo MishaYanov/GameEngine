@@ -29,6 +29,10 @@ assert!(scene.remove(id).is_some());
 
 For real content, use `AssetManager::new(root)` and `load_model(&window_renderer, relative_path)`. It imports all primitives of the first glTF mesh and asks `WindowRenderer` to upload meshes/images. Models/materials still contain Vulkan-specific resources: this extraction establishes ownership and reuse, not backend independence. See [graphics and assets](../../graphics-and-assets.md).
 
+## Procedural primitives — in progress
+
+`assets::MeshData` now exposes `triangle()`, `cube()`, `plane()`, `polygon(sides)`, `sphere()`, and `capsule()` through private shape-builder modules. They produce position/UV CPU meshes, uploaded with `AssetManager::load_mesh`. Polygon requires at least three sides; sphere/capsule dimensions and resolution are currently fixed. See [primitive dimensions, limits, and tests](../../graphics-and-assets.md#procedural-primitives-in-progress). Procedural scene serialization and collision shapes are not implemented by these constructors.
+
 ## Timing, input, and camera — in progress
 
 The working tree now exposes `FrameClock` (`time.rs`), `InputState`/`Key` (`input.rs`), and CPU `Camera` (`camera.rs`) from the crate root. The game uses them for capped delta-time updates, keyboard movement, and mouse-look camera control. All three APIs and their integration are **in progress**, not a completed input/gameplay milestone. See [current contracts and provisional controls](../../timing-input-camera.md).
