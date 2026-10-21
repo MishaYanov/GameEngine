@@ -17,6 +17,7 @@ pub struct StorageConfig {
     pub queue_capacity: usize,
     pub max_file_bytes: usize,
     pub max_record_bytes: usize,
+    /// Segment count per stream (ordinary and error), each bounded by max_file_bytes.
     pub max_files: usize,
     /// Inactive session retention. Active sessions are never deleted.
     pub max_sessions: usize,
@@ -112,9 +113,7 @@ impl Writer {
                             if let Err(error) = result {
                                 worker_health.error(error);
                                 worker_health.disk_drops.fetch_add(1, Ordering::Relaxed);
-                                // A partial write may have left a trailing fragment. Never append
-                                // more records to that damaged segment; retain memory diagnostics.
-                                sink = None;
+                                // Sink disables only the failed stream; the other keeps working.
                             }
                         }
                         Ok(Command::Flush(ack)) => {
@@ -218,12 +217,8 @@ impl Drop for Writer {
 }
 
 struct Sink {
-    config: StorageConfig,
-    directory: PathBuf,
-    file: Option<BufWriter<File>>,
-    bytes: usize,
-    index: u64,
-    paths: std::collections::VecDeque<PathBuf>,
+    ordinary: Option<Segment>,
+    errors: Option<Segment>,
     _lock: File,
 }
 impl Sink {
@@ -238,22 +233,88 @@ impl Sink {
             .open(directory.join("session.lock"))?;
         lock.try_lock()
             .map_err(|e| io::Error::other(e.to_string()))?;
-        let file_path = directory.join("000000.jsonl");
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file_path)?;
+        let open = |errors| match Segment::new(config.clone(), directory.clone(), errors) {
+            Ok(segment) => Some(segment),
+            Err(error) => {
+                health.error(error);
+                None
+            }
+        };
+        let ordinary = open(false);
+        let errors = open(true);
         if let Err(error) = prune_sessions(&config, session) {
             health.error(error);
         }
         Ok(Self {
+            ordinary,
+            errors,
+            _lock: lock,
+        })
+    }
+    fn write(&mut self, entry: &LogEntry) -> io::Result<()> {
+        let ordinary = Self::write_stream(&mut self.ordinary, entry);
+        let errors = if entry.level == crate::Level::Error {
+            Self::write_stream(&mut self.errors, entry)
+        } else {
+            Ok(())
+        };
+        ordinary.and(errors)
+    }
+    fn write_stream(stream: &mut Option<Segment>, entry: &LogEntry) -> io::Result<()> {
+        let result = stream
+            .as_mut()
+            .ok_or_else(|| io::Error::other("log stream unavailable"))?
+            .write(entry);
+        if result.is_err() {
+            // A partial write can leave a fragment. Never append to a damaged stream.
+            stream.take();
+        }
+        result
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        let ordinary = Self::flush_stream(&mut self.ordinary);
+        let errors = Self::flush_stream(&mut self.errors);
+        ordinary.and(errors)
+    }
+    fn flush_stream(stream: &mut Option<Segment>) -> io::Result<()> {
+        let result = stream.as_mut().map_or(Ok(()), Segment::flush);
+        if result.is_err() {
+            stream.take();
+        }
+        result
+    }
+}
+struct Segment {
+    config: StorageConfig,
+    directory: PathBuf,
+    file: Option<BufWriter<File>>,
+    bytes: usize,
+    index: u64,
+    paths: std::collections::VecDeque<PathBuf>,
+    errors: bool,
+}
+impl Segment {
+    fn name(errors: bool, index: u64) -> String {
+        match (errors, index) {
+            (false, _) => format!("{index:06}.jsonl"),
+            (true, 0) => "errors.jsonl".into(),
+            (true, _) => format!("errors-{index:06}.jsonl"),
+        }
+    }
+    fn new(config: StorageConfig, directory: PathBuf, errors: bool) -> io::Result<Self> {
+        let file_path = directory.join(Self::name(errors, 0));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file_path)?;
+        Ok(Self {
             config,
             directory,
+            errors,
             file: Some(BufWriter::with_capacity(64 * 1024, file)),
             bytes: 0,
             index: 0,
             paths: [file_path].into(),
-            _lock: lock,
         })
     }
     fn write(&mut self, entry: &LogEntry) -> io::Result<()> {
@@ -269,7 +330,7 @@ impl Sink {
             // Remove before creation so even a failed rotation cannot grow beyond the limit.
             while self.paths.len() >= self.config.max_files {
                 let old = self.paths.front().unwrap();
-                if *old == self.directory.join(format!("{:06}.jsonl", self.index)) {
+                if *old == self.directory.join(Self::name(self.errors, self.index)) {
                     // Close before removing on Windows, retaining unique segment names for readers.
                     self.file.take();
                 }
@@ -277,7 +338,7 @@ impl Sink {
                 self.paths.pop_front();
             }
             let next = self.index + 1;
-            let path = self.directory.join(format!("{next:06}.jsonl"));
+            let path = self.directory.join(Self::name(self.errors, next));
             let file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -364,13 +425,12 @@ fn prune_sessions(config: &StorageConfig, current: &str) -> io::Result<()> {
             let entry = entry?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if entry.file_type()?.is_file()
-                && name.ends_with(".jsonl")
-                && name
-                    .trim_end_matches(".jsonl")
-                    .bytes()
-                    .all(|b| b.is_ascii_digit())
-            {
+            let stem = name.strip_suffix(".jsonl");
+            let numbered = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+            let owned = stem.is_some_and(|s| {
+                numbered(s) || s == "errors" || s.strip_prefix("errors-").is_some_and(numbered)
+            });
+            if entry.file_type()?.is_file() && owned {
                 fs::remove_file(entry.path())?;
             }
         }

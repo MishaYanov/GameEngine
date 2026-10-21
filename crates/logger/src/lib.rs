@@ -213,9 +213,16 @@ pub fn init(config: Config) -> Result<LoggingGuard, Box<dyn Error + Send + Sync>
     }));
     Ok(LoggingGuard)
 }
-/// Defaults to local app data; ENGINE_LOG_DIR overrides it.
+/// Defaults to INFO; ENGINE_LOG_MODE=debug enables DEBUG in any build profile.
+/// ENGINE_LOG_DIR overrides the storage root. Console control is independent.
 pub fn init_application(application: &str) -> Result<LoggingGuard, Box<dyn Error + Send + Sync>> {
     let mut config = Config::new(application);
+    config.level = match std::env::var("ENGINE_LOG_MODE") {
+        Err(std::env::VarError::NotPresent) => LevelFilter::Info,
+        Ok(mode) if mode == "regular" => LevelFilter::Info,
+        Ok(mode) if mode == "debug" => LevelFilter::Debug,
+        _ => return Err("ENGINE_LOG_MODE must be 'regular' or 'debug'".into()),
+    };
     config.console = !std::env::var("ENGINE_LOG_CONSOLE").is_ok_and(|v| v == "false" || v == "0");
     config.storage = Some(StorageConfig::new(log_directory()));
     init(config)
