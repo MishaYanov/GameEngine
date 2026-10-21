@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "entities": [
+    {
+      "name": "Left Robot",
+      "model_path": "props/robot.glb",
+      "transform": {
+        "position": [
+          -0.3963982,
+          -0.7856969,
+          0.0
+        ],
+        "rotation": [
+          3.7170155,
+          5.575566,
+          0.0
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      }
+    },
+    {
+      "name": "Right Robot",
+      "model_path": "props/robot.glb",
+      "transform": {
+        "position": [
+          0.8,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          -3.0975366,
+          4.646285,
+          1.2390151
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      }
+    }
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "vertical_fov": 1.0471976,
+    "near": 0.1,
+    "far": 100.0
+  }
+}

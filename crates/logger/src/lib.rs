@@ -653,4 +653,5 @@ pub fn shutdown(timeout: Duration) -> bool {
         .is_none_or(|writer| writer.shutdown(timeout))
 }
 #[cfg(test)]
+#[path = "tests_logger.rs"]
 mod tests;

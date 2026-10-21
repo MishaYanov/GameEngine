@@ -1,21 +1,23 @@
-use runtime::scene::{EntityId, Scene};
-use runtime::FrameClock;
-use runtime::{InputState, Key};
-use runtime::Camera;
+mod game;
 
+use runtime::FrameClock;
+use runtime::scene::Scene;
+use runtime::{Camera, CameraController};
+use runtime::{InputState, Key};
+
+use crate::game::RobotGame;
 use engine_logger::ResultLogExt;
-use renderer::{vulkan::CameraUniform, WindowRenderer};
+use renderer::{WindowRenderer, vulkan::CameraUniform};
+use runtime::assets::AssetManager;
+use runtime::scene_io;
 use std::{path::PathBuf, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
-    keyboard::{KeyCode, PhysicalKey},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
 };
-use runtime::assets::AssetManager;
-use runtime::model_instance::ModelInstance;
-use runtime::transform::Transform;
 
 #[derive(Default)]
 struct GameApp {
@@ -24,14 +26,16 @@ struct GameApp {
     asset_manager: Option<AssetManager>,
     renderer: Option<WindowRenderer>,
     window: Option<Arc<Window>>,
-    left_robot: Option<EntityId>,
-    right_robot: Option<EntityId>,
     clock: FrameClock,
     input: InputState,
     camera: Camera,
+    camera_controller: CameraController,
+    game: Option<RobotGame>,
     mouse_captured: bool,
     last_heartbeat: Option<Instant>,
     project_name: Option<String>,
+    asset_root: Option<PathBuf>,
+    scene_path: Option<PathBuf>,
 }
 
 impl GameApp {
@@ -40,92 +44,28 @@ impl GameApp {
             return;
         }
 
-        let mut direction = [0.0_f32; 2];
-        let mut camera_direction = [0.0_f32; 2];
-
-        if self.input.is_held(Key::W) {
-            direction[1] += 1.0;
-        }
-
-        if self.input.is_held(Key::S) {
-            direction[1] -= 1.0;
-        }
-
-        if self.input.is_held(Key::A) {
-            direction[0] -= 1.0;
-        }
-
-        if self.input.is_held(Key::D) {
-            direction[0] += 1.0;
-        }
-
-        if self.input.is_held(Key::ArrowUp) {
-            camera_direction[1] += 1.0;
-        }
-
-        if self.input.is_held(Key::ArrowDown) {
-            camera_direction[1] -= 1.0;
-        }
-
-        if self.input.is_held(Key::ArrowLeft) {
-            camera_direction[0] -= 1.0;
-        }
-
-        if self.input.is_held(Key::ArrowRight) {
-            camera_direction[0] += 1.0;
-        }
-
-        let length =
-            (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
-
-        if length > 0.0 {
-            direction[0] /= length;
-            direction[1] /= length;
-        }
-
-        let camera_length = (
-            camera_direction[0] * camera_direction[0]
-                + camera_direction[1] * camera_direction[1]
-        ).sqrt();
-
-        if camera_length > 0.0 {
-            camera_direction[0] /= camera_length;
-            camera_direction[1] /= camera_length;
-        }
-
-        let forward = self.camera.forward();
-        let right = self.camera.right();
-        let camera_speed = 2.0;
-        let distance = camera_speed * delta_seconds;
-
-        for axis in 0..3 {
-            self.camera.position[axis] +=
-                (right[axis] * camera_direction[0]
-                    + forward[axis] * camera_direction[1])
-                    * distance;
-        }
-
-        let move_speed = 1.0; // World units per second.
-        let distance = move_speed * delta_seconds;
-
-        if let Some(id) = self.left_robot {
-            if let Some(left) = self.scene.get_mut(id) {
-                let transform = &mut left.transform_mut();
-
-                transform.position[0] += direction[0] * distance;
-                transform.position[1] += direction[1] * distance;
-
-                transform.rotation[0] += 0.6 * delta_seconds;
-                transform.rotation[1] += 0.9 * delta_seconds;
+        // Reload wins if both commands arrive in the same frame, so a save
+        // cannot overwrite disk edits that the user intended to reload.
+        if self.input.just_pressed(Key::F9) {
+            if let Err(error) = self.reload_scene() {
+                engine_logger::error!("Failed to reload scene: {error}");
             }
+            self.clock.reset();
+            return;
         }
-        if let Some(id) = self.right_robot {
-            if let Some(right) = self.scene.get_mut(id) {
-                let rotation = &mut right.transform_mut().rotation;
-                rotation[0] += delta_seconds * -0.5;
-                rotation[1] += delta_seconds * 0.75;
-                rotation[2] += delta_seconds * 0.2;
+        if self.input.just_pressed(Key::F5) {
+            if let Err(error) = self.save_scene() {
+                engine_logger::error!("Failed to save scene: {error}");
             }
+            self.clock.reset();
+            return;
+        }
+
+        self.camera_controller
+            .update(&mut self.camera, &self.input, delta_seconds);
+
+        if let Some(game) = self.game.as_mut() {
+            game.update(&mut self.scene, &self.input, delta_seconds);
         }
     }
 
@@ -139,6 +79,7 @@ impl GameApp {
                 )
                 .map_err(|e| e.to_string())?,
         );
+
         let size = window.inner_size();
         let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
         let asset_root = if self.project_name.is_some() {
@@ -150,29 +91,18 @@ impl GameApp {
         } else {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
         };
-        let mut assets = AssetManager::new(asset_root).map_err(|e| e.to_string())?;
-        let model = Arc::new(
-            assets
-                .load_model(&renderer, "props/robot.glb")
-                .map_err(|e| format!("Failed to load robot model: {e}"))?,
-        );
-        self.left_robot = Some(self.scene.spawn(ModelInstance::new(
-            Arc::clone(&model),
-            Transform {
-                position: [-0.8, 0.0, 0.0],
-                scale: [0.7; 3],
-                ..Transform::default()
-            },
-        )));
-        self.right_robot = Some(self.scene.spawn(ModelInstance::new(
-            Arc::clone(&model),
-            Transform {
-                position: [0.8, 0.0, 0.0],
-                scale: [0.7; 3],
-                ..Transform::default()
-            },
-        )));
-        self.asset_manager = Some(assets);
+
+        let scene_path = asset_root.join("scenes/robots.json");
+        let loaded = scene_io::load(&scene_path, &asset_root, &renderer)?;
+        let game = RobotGame::from_entities(&loaded.entity_ids)?;
+
+        // Install only after every fallible initialization step has succeeded.
+        self.scene = loaded.scene;
+        self.asset_manager = Some(loaded.assets);
+        self.camera = loaded.camera;
+        self.game = Some(game);
+        self.asset_root = Some(asset_root);
+        self.scene_path = Some(scene_path);
         self.renderer = Some(renderer);
         self.window = Some(window);
         self.clock.reset();
@@ -182,6 +112,44 @@ impl GameApp {
             false,
             "Game rendering resources initialized",
         );
+        Ok(())
+    }
+
+    fn save_scene(&self) -> Result<(), String> {
+        let path = self
+            .scene_path
+            .as_deref()
+            .ok_or("Scene path is not initialized")?;
+        scene_io::save(path, &self.scene, &self.camera)?;
+        engine_logger::info!("Saved scene: {}", path.display());
+        Ok(())
+    }
+
+    fn reload_scene(&mut self) -> Result<(), String> {
+        let path = self
+            .scene_path
+            .as_deref()
+            .ok_or("Scene path is not initialized")?;
+        let asset_root = self
+            .asset_root
+            .as_deref()
+            .ok_or("Asset root is not initialized")?;
+        let renderer = self
+            .renderer
+            .as_ref()
+            .ok_or("Renderer is not initialized")?;
+
+        let loaded = scene_io::load(path, asset_root, renderer)?;
+        let game = RobotGame::from_entities(&loaded.entity_ids)?;
+
+        // Drawing can still reference the old meshes and textures. Finish all
+        // GPU work before assignments release the old scene, then its cache.
+        renderer.wait_idle()?;
+        self.scene = loaded.scene;
+        self.asset_manager = Some(loaded.assets);
+        self.camera = loaded.camera;
+        self.game = Some(game);
+        engine_logger::info!("Reloaded scene: {}", path.display());
         Ok(())
     }
 
@@ -260,37 +228,12 @@ impl ApplicationHandler for GameApp {
         self.window.as_ref().unwrap().request_redraw();
     }
 
-    fn device_event(
-        &mut self,
-        _event_loop: &ActiveEventLoop,
-        _device_id: DeviceId,
-        event: DeviceEvent,
-    ) {
-        if !self.mouse_captured
-            || self.window.as_ref().is_none_or(|window| !window.has_focus())
-        {
-            return;
-        }
-
-        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
-            let sensitivity = 0.002_f32;
-            // Mouse deltas are displacement, so they must not be multiplied by frame time.
-            self.camera
-                .rotate(dx as f32 * sensitivity, -dy as f32 * sensitivity);
-        }
-    }
-
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.set_mouse_capture(false);
-    }
-
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
-
         if self
             .window
             .as_ref()
@@ -308,7 +251,7 @@ impl ApplicationHandler for GameApp {
             } => {
                 self.set_mouse_capture(true);
             }
-            WindowEvent::KeyboardInput {event, ..} => {
+            WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
                 };
@@ -324,6 +267,9 @@ impl ApplicationHandler for GameApp {
                     KeyCode::ArrowDown => Key::ArrowDown,
                     KeyCode::ArrowLeft => Key::ArrowLeft,
                     KeyCode::ArrowRight => Key::ArrowRight,
+                    KeyCode::Tab => Key::Tab,
+                    KeyCode::F5 => Key::F5,
+                    KeyCode::F9 => Key::F9,
                     _ => return,
                 };
 
@@ -335,7 +281,7 @@ impl ApplicationHandler for GameApp {
                 if key == Key::Escape && event.state == ElementState::Pressed {
                     self.set_mouse_capture(false);
                 }
-            },
+            }
             WindowEvent::Focused(false) => {
                 self.set_mouse_capture(false);
                 self.input.reset();
@@ -386,6 +332,31 @@ impl ApplicationHandler for GameApp {
             _ => {}
         }
     }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if !self.mouse_captured
+            || self
+                .window
+                .as_ref()
+                .is_none_or(|window| !window.has_focus())
+        {
+            return;
+        }
+
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            self.camera_controller
+                .mouse_motion(&mut self.camera, dx, dy);
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.set_mouse_capture(false);
+    }
 }
 
 impl Drop for GameApp {
@@ -423,3 +394,7 @@ fn main() {
 
     engine_logger::component_health("game", "STOPPED", false, "Game event loop stopped");
 }
+
+#[cfg(test)]
+#[path = "tests_app_scene_io.rs"]
+mod tests;

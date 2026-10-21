@@ -1,4 +1,6 @@
 use crate::model_instance::ModelInstance;
+use crate::scene_data::{CameraData, EntityData, TransformData};
+use crate::{Camera, SceneData};
 use renderer::vulkan::{ModelPushConstants, RenderObject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6,6 +8,8 @@ pub struct EntityId(u64);
 
 struct SceneEntry {
     id: EntityId,
+    name: String,
+    model_path: Option<String>,
     instance: ModelInstance,
 }
 
@@ -17,6 +21,38 @@ pub struct Scene {
 
 impl Scene {
     pub fn spawn(&mut self, instance: ModelInstance) -> EntityId {
+        self.spawn_named("entity", instance)
+    }
+
+    pub fn name(&self, id: EntityId) -> Option<&str> {
+        let name = self
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)?
+            .name
+            .as_str();
+        Some(name)
+    }
+
+    pub fn spawn_named(&mut self, name: impl Into<String>, instance: ModelInstance) -> EntityId {
+        self.spawn_entry(name.into(), None, instance)
+    }
+
+    pub fn spawn_model(
+        &mut self,
+        name: impl Into<String>,
+        model_path: impl Into<String>,
+        instance: ModelInstance,
+    ) -> EntityId {
+        self.spawn_entry(name.into(), Some(model_path.into()), instance)
+    }
+
+    fn spawn_entry(
+        &mut self,
+        name: String,
+        model_path: Option<String>,
+        instance: ModelInstance,
+    ) -> EntityId {
         let id = EntityId(self.next_id);
 
         self.next_id = self
@@ -24,7 +60,12 @@ impl Scene {
             .checked_add(1)
             .expect("scene entity IDs exhausted");
 
-        self.entries.push(SceneEntry { id, instance });
+        self.entries.push(SceneEntry {
+            id,
+            name,
+            model_path,
+            instance,
+        });
 
         id
     }
@@ -64,43 +105,47 @@ impl Scene {
 
         objects
     }
+
+    pub fn to_data(&self, camera: &Camera) -> Result<SceneData, String> {
+        let mut entities = Vec::with_capacity(self.entries.len());
+
+        for (index, entry) in self.entries.iter().enumerate() {
+            let model_path = entry.model_path.as_ref().ok_or_else(|| {
+                format!(
+                    "entity {index} ({:?}): cannot save without a source model path",
+                    entry.name
+                )
+            })?;
+            let transform = entry.instance.transform();
+
+            entities.push(EntityData {
+                name: entry.name.clone(),
+                model_path: model_path.clone(),
+                transform: TransformData {
+                    position: transform.position,
+                    rotation: transform.rotation,
+                    scale: transform.scale,
+                },
+            });
+        }
+
+        let data = SceneData {
+            schema_version: 1,
+            entities,
+            camera: CameraData {
+                position: camera.position,
+                yaw: camera.yaw,
+                pitch: camera.pitch,
+                vertical_fov: camera.vertical_fov,
+                near_plane: camera.near,
+                far_plane: camera.far,
+            },
+        };
+        data.validate()?;
+        Ok(data)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::assets::Model;
-    use std::sync::Arc;
-    use crate::Transform;
-
-    fn instance(model: &Arc<Model>) -> ModelInstance {
-        ModelInstance::new(Arc::clone(model), Transform::default())
-    }
-
-    #[test]
-    fn removal_does_not_reuse_ids_or_change_other_entities() {
-        let model = Arc::new(Model::empty_for_test());
-        let mut scene = Scene::default();
-        let first = scene.spawn(instance(&model));
-        let second = scene.spawn(instance(&model));
-        scene.get_mut(second).unwrap().transform_mut().position = [1.0, 2.0, 3.0];
-        assert!(scene.remove(first).is_some());
-        assert!(scene.remove(first).is_none());
-        assert!(scene.get_mut(first).is_none());
-        let third = scene.spawn(instance(&model));
-        assert_ne!(first, third);
-        assert_ne!(second, third);
-        let positions: Vec<_> = scene.instances().map(|i| i.transform().position).collect();
-        assert_eq!(positions, vec![[1.0, 2.0, 3.0], [0.0; 3]]);
-    }
-
-    #[test]
-    fn shared_model_instances_have_independent_transforms() {
-        let model = Arc::new(Model::empty_for_test());
-        let mut first = instance(&model);
-        let second = instance(&model);
-        first.transform_mut().scale = [2.0; 3];
-        assert_eq!(second.transform().scale, [1.0; 3]);
-        assert!(std::ptr::eq(first.model(), second.model()));
-    }
-}
+#[path = "tests_scene.rs"]
+mod tests;

@@ -65,7 +65,7 @@ Positions and indices are required. The loader rejects non-triangle modes, empty
 
 `ModelPart` owns an `Arc<VulkanMesh>` and material; `Model` groups parts. `ModelInstance` owns `Arc<Model>` and independent position/rotation/scale. `Scene` owns instances under increasing entity IDs, with spawn, mutable lookup, removal, and iteration. These types now live in `runtime`; `Scene::render_objects()` handles instance-to-part draw conversion. Requests borrow existing resources, so release them before mutating the scene. Models still hold Vulkan-specific resources, so the API is not backend-independent.
 
-The game loads the robot model once, shares it between two instances, and asks the runtime scene for `RenderObject` inputs per frame. `clear()` releases cache references; scene/model/material owners can still retain GPU resources. Release those owners before destroying their device. No complete scene import, persistence, ECS, or editor entity commands are provided by this model layer.
+The game loads the robot model once, shares it between two instances, and asks the runtime scene for `RenderObject` inputs per frame. `clear()` releases cache references; scene/model/material owners can still retain GPU resources. Release those owners before destroying their device. No complete glTF scene import, ECS, or editor entity commands are provided by this model layer. Initial JSON scene persistence now records model paths, names, transforms, and camera via runtime scene_data/scene_io; see [scene persistence](scene-persistence.md).
 
 ### Packaging
 

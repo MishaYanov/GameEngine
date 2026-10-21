@@ -23,6 +23,7 @@ def suites(native=False):
         commands.append(("Native Vulkan runtime", ROOT, [cargo, "test", "-p", "runtime", "--offline", "--locked", "native_runtime_initializes_and_reports_consistent_status", "--", "--ignored", "--nocapture"]))
         commands.append(("Native generated game", ROOT, [cargo, "test", "-p", "engine-admin", "--offline", "--locked", "real_native_template_validation", "--", "--ignored", "--nocapture"]))
         commands.append(("Native scene rendering", ROOT, [cargo, "run", "-p", "game", "--example", "renderer_smoke", "--offline", "--locked"]))
+        commands.append(("Native scene save/reload", ROOT, [cargo, "run", "-p", "game", "--example", "scene_io_smoke", "--offline", "--locked"]))
     return commands
 
 

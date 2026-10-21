@@ -37,8 +37,16 @@ These are user-reported native/visual results, distinct from commands rerun duri
 
 `time.rs`, `input.rs`, and `camera.rs` add runtime unit tests for clock boundaries, key-state transitions, and camera math/rotation limits. These modules and game controls are explicitly **in progress**. Prior user-confirmed native extraction checks do not establish that the later controls passed. See [the current guide](timing-input-camera.md) for manual focus/capture/movement scenarios.
 
+## New controller and scene-I/O coverage — in progress
+
+The working tree adds CameraController tests, RobotGame selection/movement tests, SceneData validation tests, Scene save/replacement tests, and app save/reload command/error tests. Run `cargo test -p runtime -p game -p compiler --offline --locked`. The untracked `scene_io_smoke` example can be invoked separately with `cargo run -p game --example scene_io_smoke --offline --locked`; it is not in the current aggregate native runner. Prior native confirmations do not cover these new controls or save/reload. See [scene persistence](scene-persistence.md).
+
 ## CI draft
 
 The untracked `Jenkinsfile` and `ci/jenkins` files define a local Linux-container Jenkins setup. The draft pipeline fetches locked Cargo dependencies, installs npm dependencies, runs default tests, builds both frontends, checks the docs site, and archives successful build output. It does not run native GPU checks or Windows packaging. The startup helper requires Docker Desktop Linux containers; it has not been launched or validated as part of this docs review. A draft configuration is not evidence of a successful CI run.
 
 See the [original test notes](../designs/testing.md), [runtime](crates/runtime/README.md), and [renderer](crates/renderer/README.md).
+
+## Test source organization
+
+The current working tree also extracts inline tests into adjacent `tests_*.rs` files across runtime, renderer, logger, bridge, compiler, editor host, and admin modules. The production modules include these files under `cfg(test)`; file movement alone is not new feature verification. Public runtime integration tests remain under `crates/runtime/tests`. Focused checks for this documentation update do not replace a full workspace rerun after the reorganization.

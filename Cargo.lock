@@ -3384,6 +3384,8 @@ dependencies = [
  "gltf",
  "image",
  "renderer",
+ "serde",
+ "serde_json",
  "urlencoding",
 ]
 

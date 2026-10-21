@@ -21,7 +21,7 @@ Names are trimmed, allow Unicode alphanumeric characters, spaces, hyphens, and u
 
 The nested build invokes `cargo build --locked --package game --release --target-dir <workspace>/target` in the workspace embedded from the compiler manifest path. Cargo must be on PATH, the source checkout must remain available, and shader compilation requires `glslc`. The nested build does not use `--offline`; an offline outer command does not force it offline.
 
-After building, atomic `create_dir` reserves the output. Installation copies the platform game executable, the entire nested `apps/game/assets` tree (including `props/robot.glb` and textures), `project-name.txt`, and `README.txt`. The recursive copier accepts regular files/directories and rejects unsupported asset entry types. Copy/write failure attempts to remove only the newly created folder. Existing folders are never merged into.
+After building, atomic `create_dir` reserves the output. Installation copies the platform game executable, the entire nested `apps/game/assets` tree (including `scenes/robots.json`, `props/robot.glb`, and textures), `project-name.txt`, and `README.txt`. The recursive copier accepts regular files/directories and rejects unsupported asset entry types. Copy/write failure attempts to remove only the newly created folder. Existing folders are never merged into.
 
 This installs a runtime with no source workspace or editable scene. The previous missing-robot packaging omission is fixed; generated README wording still describes the older triangle starter, while the executable renders imported robots. For independent sources, use the [admin builder](../apps/admin-dashboard/README.md). See the [installation design](../../designs/project-installation.md).
 
@@ -33,4 +33,4 @@ From the repository root:
 cargo test -p compiler --offline --locked
 ```
 
-Tests cover unsafe names/destinations, length/whitespace rules, collisions, and copying nested model/texture assets byte-for-byte. The asset-copy test does not build a release executable or launch an installed game. Native installed-run validation remains separate from this file-copy evidence.
+Tests cover unsafe names/destinations, length/whitespace rules, collisions, and copying nested scene/model/texture assets byte-for-byte. The asset-copy test does not build a release executable or launch an installed game. Native installed-run validation remains separate from this file-copy evidence.

@@ -1,6 +1,6 @@
 # Engine Pipeline
 
-Reviewed on 2026-10-19 against commit `c19dc4b` and staged, unstaged, and untracked changes, including the runtime migration. Renderer extraction and the five-step runtime move are complete for their stated scope; timing/input/camera are now in progress in the working tree; persistence and editor integration remain future milestones.
+Reviewed on 2026-10-21 against commit `72dad5d` and staged, unstaged, and untracked changes, including the controller/gameplay split and scene persistence prototype. Renderer extraction and the five-step runtime move are complete for their stated scope; timing/input/camera are now in progress in the working tree; initial scene persistence and the controller/gameplay split are now also in progress; editor integration remains future work.
 
 This roadmap belongs to Engine Developer. Game App Developer remains empty. The target is a small playable game built through reusable engine APIs, with a persistent authoring workflow and a distributable that runs outside the checkout.
 
@@ -25,8 +25,8 @@ No completion percentage is assigned: a rendering demo and an integrated editor 
 | Materials | Partial | Unlit texture multiplied by color factor, white fallback, single/double-sided pipelines. | Lighting, alpha modes, normal maps, metallic/roughness. This is not full PBR. |
 | Asset caches | Implemented | Cached GPU meshes/textures and model-path-qualified embedded-image keys. | Stable asset references, reload/invalidation policy, model-level caching. Repeated loads can still decode the file again. |
 | Model abstraction | Implemented in runtime | Shared Model/ModelPart types; AssetManager imports parts and delegates GPU upload to WindowRenderer. | Portable asset handles/backend independence remain future design work. |
-| Model instances | Implemented in runtime | Shared Arc<Model> and independent transforms; consumed by game through runtime APIs. | Persistence and broader gameplay API. |
-| Scene and IDs | Implemented in runtime | Spawn, mutation, removal, iteration, monotonically allocated IDs, and borrowed render_objects output. | Serialization/hierarchy; lifecycle unit/public-API tests now exist. No ECS yet. |
+| Model instances | Implemented in runtime | Shared Arc<Model> and independent transforms; consumed by game through runtime APIs. | Initial persistence is in progress; broader gameplay API remains to be defined. |
+| Scene and IDs | Implemented in runtime | Spawn, mutation, removal, iteration, monotonically allocated IDs, and borrowed render_objects output. | Initial JSON snapshots, names/source paths, and file I/O now exist in progress; hierarchy, durable references, and ECS remain absent. |
 | Shared material layout | Implemented; native checks user-confirmed | Layout belongs to WindowRenderer; empty-scene pipeline setup does not need a model. | Repeat native checks after future presentation changes. |
 | Renderer ownership | Complete for extraction milestone | WindowRenderer owns initialization, upload, draw, deferred resize, and shutdown; GameApp owns application behavior. | External GPU resource lifetimes still depend on application drop order and idle waits. |
 | Shared runtime | Complete for five-step migration | Assets, models, instances, scenes, Transform, and draw-request construction are shared runtime APIs; tests and smoke imports moved. | Status-only Engine/Renderer path is still separate; timing/input/camera are in progress; editor viewport remains future work. |
@@ -36,6 +36,14 @@ No completion percentage is assigned: a rendering demo and an integrated editor 
 | Tests and documentation | Expanded | Runtime public-API/import/scene tests, renderer lifecycle smoke, default/native runner, and docs/site checks. User confirms native/visible checks after migration. | Clean-checkout, installed-run, CI deployment, and broader coverage remain separate. |
 
 Evidence: [game](apps/game/README.md), [renderer](crates/renderer/README.md), [runtime](crates/runtime/README.md), [editor](apps/editor/README.md), [compiler](compiler/README.md), and [testing](testing.md). Source inspected includes apps/game/src/main.rs, its renderer_smoke example, crates/runtime scene/instance/transform/assets modules and public-API tests, crates/renderer/src/window_renderer.rs, and compiler asset copying. The reusable modules are no longer defined in the game binary.
+
+## Current working-tree additions — in progress
+
+`CameraController` now separates camera movement/mouse math from platform events. `RobotGame` separates robot selection/movement/rotation from GameApp and chooses the first two scene entities by file order. Tab toggles the selected robot.
+
+Initial persistence now exists: schema-version-1 SceneData, named source-path scene entries, JSON validation, scene_io load/save, bundled robots.json, and F5/F9 commands. Save writes the development asset scene; reload builds a replacement before swapping it after GPU idle. These are implemented prototypes awaiting complete native/visual and distribution checks, not a finished authoring workflow. See [scene persistence](scene-persistence.md).
+
+Compiler recursive copying includes scene JSON; the admin builder asset allowlist still excludes it, creating a new generated-runtime packaging gap.
 
 ## Completed foundation and next work
 
@@ -54,10 +62,10 @@ The next implementation sequence is:
 1. **In progress:** FrameClock supplies delta seconds capped at 100 ms; game rotation/movement now uses delta time.
 2. **In progress:** InputState tracks key transitions/held state, Camera supplies movement/look data, and game adapts keyboard/mouse/focus events. Validate native interaction before closing the milestone.
 3. Establish broader gameplay/update boundaries and fixed steps where required.
-4. Add versioned scene persistence with stable asset references.
+4. **In progress:** versioned scene JSON, asset-relative model paths, names/transforms/camera, save/reload, and validation now exist. Durable entity references, migration, and full native/packaging evidence remain.
 5. Integrate the editor viewport and scene commands with shared APIs.
 
-The first two items describe ongoing work after extraction; later items remain planned. Recursive asset copying has resolved the old robot omission; running a fully installed release outside the checkout remains a separate check.
+Timing/input/camera, gameplay separation, and initial persistence are ongoing after extraction. Editor integration remains planned. Recursive asset copying has resolved the old robot omission; running a fully installed release outside the checkout remains a separate check.
 
 ## When to build the UI
 
@@ -111,7 +119,7 @@ Use one small playable game to prove integration. Agree its scope before making 
 
 ## Review and verification
 
-This review compared the previous checkpoint `978f6e4`, later commit `c19dc4b`, and current staged/unstaged/untracked changes. The runtime migration is currently in the working tree, so the commit alone does not identify all documented source.
+This review compared the previous checkpoint `978f6e4`, later commits through `72dad5d`, and current staged/unstaged/untracked changes. The runtime migration is currently in the working tree, so the commit alone does not identify all documented source.
 
 The user confirmed post-move tests, native renderer smoke, and visible-game resize/minimize checks passed. The attached earlier notes report RTX 4070 smoke execution and the 640×360 empty-scene extent. These are attributed results rather than a claim of rerunning visible GPU checks during documentation editing.
 

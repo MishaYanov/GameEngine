@@ -12,7 +12,7 @@ Source: `crates/runtime`. Cargo package: `runtime`. Runtime now provides the reu
 | `runtime::model_instance::ModelInstance` | Shared `Arc<Model>` plus independent transform |
 | `runtime::scene::{Scene, EntityId}` | Spawn, mutable lookup, remove, iterate, construct draw requests |
 
-`Scene::render_objects()` returns `Vec<renderer::vulkan::RenderObject<'_>>` borrowing scene resources. Each model part becomes a request with its instance transform. Drop these borrowed requests before mutating the scene. IDs increase without reuse in one scene; persistence and cross-scene references are not defined.
+`Scene::render_objects()` returns `Vec<renderer::vulkan::RenderObject<'_>>` borrowing scene resources. Each model part becomes a request with its instance transform. Drop these borrowed requests before mutating the scene. IDs increase without reuse in one scene; initial persistence stores source paths/names/transforms/camera rather than IDs; stable cross-scene references are not defined.
 
 A minimal scene can be constructed without GPU resources:
 
@@ -32,6 +32,12 @@ For real content, use `AssetManager::new(root)` and `load_model(&window_renderer
 ## Timing, input, and camera — in progress
 
 The working tree now exposes `FrameClock` (`time.rs`), `InputState`/`Key` (`input.rs`), and CPU `Camera` (`camera.rs`) from the crate root. The game uses them for capped delta-time updates, keyboard movement, and mouse-look camera control. All three APIs and their integration are **in progress**, not a completed input/gameplay milestone. See [current contracts and provisional controls](../../timing-input-camera.md).
+
+## Scene data and I/O — in progress
+
+`runtime::SceneData` defines schema-version-1 entities/transforms/camera JSON with validation. `runtime::scene_io::{load, save, LoadedScene}` loads models and IDs in file order and saves snapshots via a sibling temporary file and rename. `Scene::spawn_model` records name/source path, `name` reads labels, and `to_data` creates a saveable snapshot; anonymous/source-less entries cannot be saved. No durable entity identity or version migration is established yet. See [schema, failure handling, and controls](../../scene-persistence.md).
+
+`runtime::CameraController` now handles normalized camera movement and mouse rotation. Robot-specific rules stay in `apps/game/src/game.rs`. The existing timing/input/camera in-progress designation remains in effect.
 
 ## Status-only engine path
 
@@ -53,4 +59,4 @@ Runtime tests cover import/material data, image validation, scene removal and in
 
 The five-step move is complete: temporary game library, scene-owned draw construction, Transform move, remaining reusable modules move, and validation. The temporary game library is no longer required. The user confirmed tests, native smoke, visible rendering, resize, and minimize checks after the move; see [testing](../../testing.md) for evidence boundaries.
 
-Timing, key state, movement, and camera control are now implemented provisionally in the working tree and remain in progress. Action mapping, fixed-step updates, scene persistence, hierarchy, full glTF scenes, and editor scene commands remain future work.
+Timing, key state, movement, and camera control are now implemented provisionally in the working tree and remain in progress. Initial scene persistence is now in progress. Action mapping, fixed-step updates, hierarchy, full glTF scenes, and editor scene commands remain future work.

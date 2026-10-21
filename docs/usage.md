@@ -63,6 +63,8 @@ My Game/
     textures/
       crate.png
       bricks.jpg
+    scenes/
+      robots.json
     props/
       robot.glb
 ```
@@ -73,7 +75,7 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. The installer copies the complete nested asset tree, including `assets/props/robot.glb`; the earlier missing-model omission is fixed. Installed mode draws stationary robot model instances. Preserve executable, name file, and the asset tree together. See [the game guide](apps/game/README.md).
+The window title uses the project name. The installer copies the complete nested asset tree, including `assets/scenes/robots.json` and `assets/props/robot.glb`; the earlier missing-model omission is fixed. Installed mode draws stationary robot model instances. Preserve executable, name file, and the asset tree together. See [the game guide](apps/game/README.md).
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 
@@ -82,6 +84,10 @@ Names accept letters, numbers, spaces, hyphens and underscores, with a limit of 
 Exit codes are `0` for success, `1` for build/install failure, and `2` for an incorrect number of arguments.
 
 This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene.
+
+### Development scene controls — in progress
+
+The development game now reads `apps/game/assets/scenes/robots.json`. Tab selects either robot; WASD moves the selected robot; arrows and captured mouse motion control the camera. F5 saves transforms/camera to the active scene and F9 reloads it, discarding unsaved state. Saving modifies the checkout asset file. These commands are skipped in installed/name-file mode. See [scene persistence](scene-persistence.md) before using save/reload.
 
 ## 3. Use the editor project setup screen
 

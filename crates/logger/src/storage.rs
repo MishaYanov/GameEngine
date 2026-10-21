@@ -412,4 +412,5 @@ pub fn read_jsonl(path: impl AsRef<Path>, max_line_bytes: usize) -> io::Result<V
     Ok(entries)
 }
 #[cfg(test)]
+#[path = "tests_storage.rs"]
 mod tests;

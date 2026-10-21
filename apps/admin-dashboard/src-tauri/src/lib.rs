@@ -278,4 +278,5 @@ pub fn start_worker(service: &Arc<Mutex<AdminService>>) {
     });
 }
 #[cfg(test)]
+#[path = "tests_admin.rs"]
 mod tests;

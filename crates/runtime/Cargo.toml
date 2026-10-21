@@ -11,3 +11,5 @@ urlencoding = "2.1.3"
 engine-logger = { path = "../logger" }
 bridge = { path = "../bridge" }
 renderer = { path = "../renderer" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
