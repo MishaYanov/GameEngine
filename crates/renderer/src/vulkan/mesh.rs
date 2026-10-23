@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use ash::Instance;
+use ash::{Instance, vk};
 
 use super::{Vertex, VulkanBuffer, VulkanBufferError, VulkanDevice};
 
@@ -49,7 +49,58 @@ impl From<VulkanBufferError> for VulkanMeshError {
 }
 
 impl VulkanMesh {
-    pub fn new(instance: &Instance, device: &VulkanDevice, vertices: &[Vertex], indices: &[u32]) -> Result<Self, VulkanMeshError> {
+	pub(crate) fn dynamic(
+		instance: &Instance,
+		device: &VulkanDevice,
+		vertices: usize,
+		indices: usize,
+	) -> Result<Self, VulkanMeshError> {
+		let properties =
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+		let vertex_buffer = VulkanBuffer::new(
+			instance,
+			device,
+			(vertices * size_of::<Vertex>()) as u64,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			properties,
+		)?;
+		let index_buffer = VulkanBuffer::new(
+			instance,
+			device,
+			(indices * size_of::<u32>()) as u64,
+			vk::BufferUsageFlags::INDEX_BUFFER,
+			properties,
+		)?;
+		Ok(Self {
+			vertex_buffer,
+			index_buffer,
+			index_count: 0,
+		})
+	}
+
+	/// Caller must wait for all draws that reference these buffers first.
+	pub(crate) fn write_dynamic(
+		&mut self,
+		vertices: &[Vertex],
+		indices: &[u32],
+	) -> Result<(), VulkanMeshError> {
+		let count = u32::try_from(indices.len()).map_err(|_| VulkanMeshError::TooManyIndices)?;
+		if size_of_val(vertices) as u64 > self.vertex_buffer.size()
+			|| size_of_val(indices) as u64 > self.index_buffer.size()
+		{
+			return Err(VulkanMeshError::TooManyIndices);
+		}
+		self.vertex_buffer.write(vertices)?;
+		self.index_buffer.write(indices)?;
+		self.index_count = count;
+		Ok(())
+	}
+	pub fn new(
+		instance: &Instance,
+		device: &VulkanDevice,
+		vertices: &[Vertex],
+		indices: &[u32],
+	) -> Result<Self, VulkanMeshError> {
         let index_count =
             u32::try_from(indices.len()).map_err(|_| VulkanMeshError::TooManyIndices)?;
 

@@ -7,6 +7,9 @@ use glam::{EulerRot, Mat4, Quat, Vec3};
 pub struct ModelPushConstants {
     pub model: [f32; 16],
     pub base_color_factor: [f32; 4],
+	// x bits: 1 unlit, 2 screen-space, 4 vertex color, 8 depth-free overlay.
+	// Remaining words pad std430 to 16 bytes.
+	pub flags: [u32; 4],
 }
 
 impl ModelPushConstants {
@@ -20,6 +23,7 @@ impl ModelPushConstants {
                 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
             ],
             base_color_factor: [1.0; 4],
+			flags: [0; 4],
         }
     }
 
@@ -40,6 +44,7 @@ impl ModelPushConstants {
         Self {
             model: model.to_cols_array(),
             base_color_factor: [1.0; 4],
+			flags: [0; 4],
         }
     }
 

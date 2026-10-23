@@ -465,10 +465,31 @@ fn import_primitive(
         }
     }
 
+	let normals = reader
+		.read_normals()
+		.map(|values| values.collect::<Vec<_>>());
+	if let Some(normals) = &normals
+		&& (normals.len() != positions.len()
+		|| normals.iter().any(|normal| {
+		let normal = glam::Vec3::from_array(*normal);
+		!normal.is_finite() || normal.length_squared() < 1.0e-12
+	}))
+	{
+		return Err(rejected(
+			"NORMAL must contain one finite nonzero vector per position",
+		));
+	}
     let vertices: Vec<Vertex> = positions
         .into_iter()
         .zip(tex_coords)
-        .map(|(position, uv)| Vertex::new(position, uv))
+		.enumerate()
+		.map(|(index, (position, uv))| {
+			Vertex::new(position, uv).with_normal(normals.as_ref().map_or([0.0; 3], |normals| {
+				glam::Vec3::from_array(normals[index])
+					.normalize()
+					.to_array()
+			}))
+		})
         .collect();
 
     engine_logger::info!(

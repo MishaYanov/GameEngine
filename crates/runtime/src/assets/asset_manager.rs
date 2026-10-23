@@ -122,8 +122,21 @@ impl AssetManager {
         let full_path = self.resolve(path)?;
         let imported_parts = load_first_mesh_in_root(&full_path, &self.root)?;
         let mut parts = Vec::with_capacity(imported_parts.len());
+        let mut bounds: Option<crate::Bounds3> = None;
 
         for imported in imported_parts {
+            let primitive_bounds = crate::Bounds3::from_points(
+                imported
+                    .mesh
+                    .vertices()
+                    .iter()
+                    .map(|vertex| vertex.position),
+            )
+                .map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
+            if let Some(primitive_bounds) = primitive_bounds {
+                bounds =
+                    Some(bounds.map_or(primitive_bounds, |bounds| bounds.union(primitive_bounds)));
+            }
             let mesh_key = format!(
                 "{}#mesh:{}#primitive:{}",
                 full_path.display(),
@@ -152,7 +165,7 @@ impl AssetManager {
             self.loaded_mesh_count(),
             self.loaded_texture_count(),
         );
-        Ok(Model::new(parts))
+        Ok(Model::with_bounds(parts, bounds))
     }
 
     pub fn new(root: impl AsRef<Path>) -> Result<Self, AssetManagerError> {

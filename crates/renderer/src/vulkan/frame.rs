@@ -70,6 +70,13 @@ impl From<VulkanCameraError> for VulkanFrameError {
 }
 
 impl VulkanFrame {
+	pub fn wait_complete(&self) -> Result<(), VulkanFrameError> {
+		unsafe {
+			self.device
+				.wait_for_fences(&[self.in_flight], true, u64::MAX)?;
+		}
+		Ok(())
+	}
     pub fn new(
         device: &VulkanDevice,
         swapchain: &VulkanSwapchain,
@@ -371,7 +378,10 @@ impl VulkanFrame {
 
                 let material = object.material();
 
-                let pipeline = pipelines.for_material(material.double_sided());
+				let pipeline = pipelines.for_object(
+					material.double_sided(),
+		            object.transform().flags[0] & (2 | 8) != 0,
+				);
                 let pipeline_layout = pipeline.layout();
                 self.device.cmd_bind_pipeline(
                     self.command_buffer,

@@ -7,6 +7,14 @@ pub struct RenderObject<'a> {
 }
 
 impl<'a> RenderObject<'a> {
+	pub fn unlit(mut self) -> Self {
+		self.transform.flags[0] |= 1;
+		self
+	}
+	pub fn screen_space(mut self) -> Self {
+		self.transform.flags[0] |= 3;
+		self
+	}
     pub fn new(
         mesh: &'a VulkanMesh,
         material: &'a VulkanMaterial,

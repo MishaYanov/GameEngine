@@ -1,40 +1,46 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "bindings": {
+    "robot_a": "robot-left",
+    "robot_b": "robot-right"
+  },
   "entities": [
     {
+      "key": "robot-left",
       "name": "Left Robot",
       "model_path": "props/robot.glb",
       "transform": {
         "position": [
-          -0.3963982,
-          -0.7856969,
+          -0.876909,
+          1.3740416,
           0.0
         ],
         "rotation": [
-          3.7170155,
-          5.575566,
-          0.0
+          27.58272,
+          41.374016,
+          0.52359873
         ],
         "scale": [
-          0.7,
-          0.7,
-          0.7
+          7.584298,
+          7.584298,
+          7.584298
         ]
       }
     },
     {
+      "key": "robot-right",
       "name": "Right Robot",
       "model_path": "props/robot.glb",
       "transform": {
         "position": [
-          0.8,
-          0.0,
+          -0.06850351,
+          0.21304485,
           0.0
         ],
         "rotation": [
-          -3.0975366,
-          4.646285,
-          1.2390151
+          -22.985537,
+          34.47834,
+          9.194234
         ],
         "scale": [
           0.7,
@@ -46,9 +52,9 @@
   ],
   "camera": {
     "position": [
+      0.5411804,
       0.0,
-      0.0,
-      3.0
+      3.6055243
     ],
     "yaw": 0.0,
     "pitch": 0.0,

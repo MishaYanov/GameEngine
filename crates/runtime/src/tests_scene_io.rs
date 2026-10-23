@@ -1,6 +1,6 @@
 use super::save;
 use crate::{
-    Camera, SceneData, Transform,
+	Camera, EntityKey, SceneData, Transform,
     assets::Model,
     model_instance::ModelInstance,
     scene::{EntityId, Scene},
@@ -60,8 +60,24 @@ fn instance(model: &Arc<Model>, x: f32) -> ModelInstance {
 fn fixture() -> (Scene, Camera, [EntityId; 2]) {
     let model = Arc::new(Model::new(Vec::new()));
     let mut scene = Scene::default();
-    let left = scene.spawn_model("Left label", "props/robot.glb", instance(&model, -0.8));
-    let right = scene.spawn_model("Right label", "props/alternate.gltf", instance(&model, 0.8));
+	let left = scene
+		.spawn_keyed_model(
+			EntityKey::new("left").unwrap(),
+			"Left label",
+			"props/robot.glb",
+			instance(&model, -0.8),
+		)
+		.unwrap();
+	let right = scene
+		.spawn_keyed_model(
+			EntityKey::new("right").unwrap(),
+			"Right label",
+			"props/alternate.gltf",
+			instance(&model, 0.8),
+		)
+		.unwrap();
+	scene.set_binding("robot_a", left).unwrap();
+	scene.set_binding("robot_b", right).unwrap();
     (scene, Camera::default(), [left, right])
 }
 
@@ -96,7 +112,12 @@ fn snapshot_keeps_names_paths_order_live_transforms_and_all_camera_settings() {
     camera.far = 250.0;
 
     let data = scene.to_data(&camera).unwrap();
-    assert_eq!(data.schema_version, 1);
+	assert_eq!(
+		data.schema_version,
+		crate::scene_data::CURRENT_SCHEMA_VERSION
+	);
+	assert_eq!(data.bindings["robot_a"].as_str(), "left");
+	assert_eq!(data.bindings["robot_b"].as_str(), "right");
     assert_eq!(data.entities.len(), 2);
     assert_eq!(data.entities[0].name, "Left label");
     assert_eq!(data.entities[0].model_path, "props/robot.glb");

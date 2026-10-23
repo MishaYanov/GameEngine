@@ -22,11 +22,23 @@ impl ModelPart {
 
 pub struct Model {
     parts: Vec<ModelPart>,
+	bounds: Option<crate::Bounds3>,
 }
 
 impl Model {
     pub fn new(parts: Vec<ModelPart>) -> Self {
-        Self { parts }
+		Self {
+			parts,
+			bounds: None,
+		}
+	}
+
+	pub fn with_bounds(parts: Vec<ModelPart>, bounds: Option<crate::Bounds3>) -> Self {
+		Self { parts, bounds }
+	}
+
+	pub fn bounds(&self) -> Option<crate::Bounds3> {
+		self.bounds
     }
 
     pub fn parts(&self) -> &[ModelPart] {

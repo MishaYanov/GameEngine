@@ -1273,6 +1273,7 @@ name = "game"
 version = "0.1.0"
 dependencies = [
  "engine-logger",
+    "glam",
  "renderer",
  "runtime",
  "tracing",
@@ -3381,12 +3382,14 @@ dependencies = [
  "base64 0.13.1",
  "bridge",
  "engine-logger",
+    "glam",
  "gltf",
  "image",
  "renderer",
  "serde",
  "serde_json",
  "urlencoding",
+    "uuid",
 ]
 
 [[package]]

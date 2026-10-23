@@ -12,10 +12,11 @@ use std::{
 use renderer::WindowRenderer;
 
 use crate::{
-    Camera, SceneData, Transform,
+	Camera, Transform,
     assets::{AssetManager, Model},
     model_instance::ModelInstance,
     scene::{EntityId, Scene},
+	scene_data::parse_json,
 };
 
 pub struct LoadedScene {
@@ -23,6 +24,7 @@ pub struct LoadedScene {
     pub assets: AssetManager,
     pub camera: Camera,
     pub entity_ids: Vec<EntityId>,
+	pub source_schema_version: u32,
 }
 
 pub fn load(
@@ -32,8 +34,9 @@ pub fn load(
 ) -> Result<LoadedScene, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("Failed to read scene '{}': {error}", path.display()))?;
-    let data = SceneData::from_json(&source)
+	let parsed = parse_json(&source)
         .map_err(|error| format!("Failed to load scene '{}': {error}", path.display()))?;
+	let data = parsed.data;
     let mut assets = AssetManager::new(asset_root).map_err(|error| {
         format!(
             "Failed to open asset root '{}': {error}",
@@ -66,11 +69,26 @@ pub fn load(
             rotation: entity.transform.rotation,
             scale: entity.transform.scale,
         };
-        entity_ids.push(scene.spawn_model(
-            entity.name,
-            entity.model_path,
-            ModelInstance::new(model, transform),
-        ));
+		let id = scene
+			.spawn_keyed_model(
+				entity.key,
+			    entity.name,
+			    entity.model_path,
+			    ModelInstance::new(model, transform),
+			)
+			.map_err(|error| format!("Scene '{}', entity {index}: {error}", path.display()))?;
+		entity_ids.push(id);
+	}
+
+	for (name, key) in data.bindings {
+		let id = scene.entity_by_key(&key).ok_or_else(|| {
+			format!(
+				"Scene '{}', binding {name:?}: missing entity key {:?}",
+				path.display(),
+				key.as_str()
+			)
+		})?;
+		scene.set_binding(name, id)?;
     }
 
     let camera = Camera {
@@ -87,6 +105,7 @@ pub fn load(
         assets,
         camera,
         entity_ids,
+		source_schema_version: parsed.source_schema_version,
     })
 }
 

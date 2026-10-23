@@ -1,6 +1,10 @@
 # Timing, input, and camera — in progress
 
-**Status: In progress.** This guide describes the current staged/unstaged implementation of `crates/runtime/src/time.rs`, `input.rs`, and `camera.rs`, the new `camera_controller.rs`, plus integration in `apps/game/src/main.rs` and robot rules in `game.rs`. These are evolving APIs and controls, not a completed gameplay/input milestone. Earlier native checks for renderer/runtime extraction do not verify these new changes.
+**Status: In progress.** This guide describes the current staged/unstaged implementation of
+`crates/runtime/src/time.rs`, `input.rs`, and `camera.rs`, the new `camera_controller.rs`, plus integration in
+`apps/game/src/main.rs` and robot rules in `game.rs`. The native editing extension is implemented and automated
+tests/hidden examples are reported in [steps 11–20](editor-steps-11-20.md). Human-visible control acceptance remains
+unverified; no complete gameplay framework is claimed.
 
 ## time.rs: FrameClock
 
@@ -10,7 +14,9 @@
 
 ## input.rs: key state
 
-`runtime::{InputState, Key}` tracks held keys and per-frame pressed/released transitions independently of winit. Current keys are W/A/S/D, Space, Escape, the four arrow keys, Tab, F5, and F9.
+`runtime::{InputState, Key}` tracks held keys and per-frame pressed/released transitions independently of winit. Current
+keys are W/A/S/D, Space, Escape, the four arrow keys, Tab, F5, and F9, Q/E/R/F, N/C, Z/Y, left/right Control, and
+Delete.
 
 | Method | Behavior |
 | --- | --- |
@@ -21,7 +27,11 @@
 | `end_frame()` | Clear transitions while keeping held keys |
 | `reset()` | Clear held keys and both transition sets |
 
-A press/release within one frame can set both transitions; repeated key-down events do not create a new transition while held. The game maps physical winit key codes into this enum, runs update, then calls `end_frame()`. Focus loss clears input and releases mouse capture. Key rebinding, action mapping, text input, gamepad, and editor/UI input routing are not provided by this module yet.
+A press/release within one frame can set both transitions; repeated key-down events do not create a new transition while
+held. The game maps physical winit key codes into this enum, runs update, then calls `end_frame()`. Focus loss clears
+input and releases mouse capture. The game now routes native panel text, clicks, and drags separately and suppresses
+held movement during editing contexts. Key rebinding, general action mapping, and gamepad support are not provided by
+InputState itself.
 
 ## camera.rs: Camera
 
@@ -35,21 +45,29 @@ This CPU camera is distinct from `renderer::vulkan::VulkanCamera`, which owns GP
 
 `runtime::CameraController` separates camera behavior from native event handling. `update(&mut camera, &input, delta_seconds)` applies normalized arrow-key movement using camera forward/right; default move_speed is 2 units/second. `mouse_motion(&mut camera, dx, dy)` applies default sensitivity 0.002 to displacement without multiplying by frame time. The game still decides when focus/capture permits motion. This is a prototype controller, not action mapping or an editor camera framework.
 
-Robot movement/selection/rotation now lives in application `RobotGame` (`apps/game/src/game.rs`), while GameApp adapts events, manages scene I/O, updates CameraController, and delegates robot behavior. See [scene save/reload](scene-persistence.md).
+Generic selection/commands now live in runtime SceneEditor; RobotGame owns optional simulation during Play. GameApp
+starts in Edit, routes panels/drag/native events, manages scene I/O and temporary Play state, updates CameraController,
+and delegates edits or simulation according to mode. See [scene save/reload](scene-persistence.md).
 
 ## Current development controls — provisional
 
-| Input | Current behavior |
-| --- | --- |
-| W/S | Move the selected robot along positive/negative world Y |
-| A/D | Move the selected robot along negative/positive world X |
-| Arrow keys | Move camera forward/backward and strafe right/left |
-| Right mouse press | Capture cursor for mouse look while focused |
-| Captured mouse motion | Rotate yaw/pitch; sensitivity currently 0.002 radians per motion unit |
-| Escape | Release capture and restore cursor visibility |
-| Space | Tracked; no gameplay action currently assigned |
-| Tab | Toggle the selected robot |
-| F5 / F9 | Save / reload the active JSON scene; reload wins if both arrive together |
+| Input                 | Current behavior                                                         |
+|-----------------------|--------------------------------------------------------------------------|
+| W/S                   | Move Edit selection in world Y; move robot_a in robot Play               |
+| A/D                   | Move Edit selection in world X; move robot_a in robot Play               |
+| Arrow keys            | Move camera forward/backward and strafe right/left                       |
+| Right mouse press     | Capture cursor for mouse look while focused                              |
+| Captured mouse motion | Rotate yaw/pitch; sensitivity currently 0.002 radians per motion unit    |
+| Escape                | Release capture and restore cursor visibility                            |
+| Space                 | Toggle robot simulation pause during Play (rotation and WASD)            |
+| Tab                   | Cycle all scene entities                                                 |
+| Q/E, R/F              | Rotate Z in 5-degree steps; scale ×/÷1.1                                 |
+| Ctrl+Z / Ctrl+Y       | Mixed Edit transform/name/entity undo / redo                             |
+| N / C / Delete        | Undoable Edit spawn / duplicate / delete                                 |
+| F1 / F6 / F7          | Toggle panels / Edit-Play / culling                                      |
+| 1 / 2 / 3             | Translate / rotate / scale gizmo in Edit                                 |
+| Left click / drag     | Panel/field action, handle drag, or ray selection in Edit                |
+| F5 / F9               | Save / reload the active JSON scene; reload wins if both arrive together |
 
 Object speed is currently 1 world unit/second; camera speed is 2. Diagonal input is normalized. Camera forward motion follows pitch, so looking up/down also changes the vertical movement component. Mouse motion is displacement and is deliberately **not** multiplied by frame delta.
 

@@ -1,5 +1,5 @@
 use super::*;
-use runtime::{Transform, assets::Model, model_instance::ModelInstance};
+use runtime::{EntityKey, Transform, assets::Model, model_instance::ModelInstance};
 use std::sync::Arc;
 
 fn assert_close(actual: f32, expected: f32) {
@@ -26,34 +26,40 @@ fn held_input(keys: &[Key]) -> InputState {
 fn scene_with_robots() -> (Scene, RobotGame) {
     let model = Arc::new(Model::new(Vec::new()));
     let mut scene = Scene::default();
-    let left_robot = scene.spawn_model(
-        "Left Robot",
-        "props/robot.glb",
-        ModelInstance::new(
-            Arc::clone(&model),
-            Transform {
-                position: [-0.8, 0.0, 0.0],
-                scale: [0.7; 3],
-                ..Transform::default()
-            },
-        ),
-    );
-    let right_robot = scene.spawn_model(
-        "Right Robot",
-        "props/robot.glb",
-        ModelInstance::new(
-            model,
-            Transform {
-                position: [0.8, 0.0, 0.0],
-                scale: [0.7; 3],
-                ..Transform::default()
-            },
-        ),
-    );
-    (
-        scene,
-        RobotGame::from_entities(&[left_robot, right_robot]).unwrap(),
-    )
+    let left_robot = scene
+        .spawn_keyed_model(
+            EntityKey::new("left").unwrap(),
+            "Left Robot",
+            "props/robot.glb",
+            ModelInstance::new(
+                Arc::clone(&model),
+                Transform {
+                    position: [-0.8, 0.0, 0.0],
+                    scale: [0.7; 3],
+                    ..Transform::default()
+                },
+            ),
+        )
+        .unwrap();
+    let right_robot = scene
+        .spawn_keyed_model(
+            EntityKey::new("right").unwrap(),
+            "Right Robot",
+            "props/robot.glb",
+            ModelInstance::new(
+                model,
+                Transform {
+                    position: [0.8, 0.0, 0.0],
+                    scale: [0.7; 3],
+                    ..Transform::default()
+                },
+            ),
+        )
+        .unwrap();
+    scene.set_binding("robot_a", left_robot).unwrap();
+    scene.set_binding("robot_b", right_robot).unwrap();
+    let game = RobotGame::from_scene(&scene).unwrap();
+    (scene, game)
 }
 
 fn transforms(scene: &Scene) -> Vec<([f32; 3], [f32; 3], [f32; 3])> {
@@ -72,7 +78,8 @@ fn game_app_updates_existing_robots_without_gpu_resources_or_respawning() {
     let (left_id, right_id) = (game.left_robot, game.right_robot);
     let mut app = crate::GameApp::default();
     app.scene = scene;
-    app.game = Some(game);
+    app.editor = runtime::SceneEditor::from_scene(&app.scene);
+    app.start_play().unwrap();
     app.input = held_input(&[Key::W, Key::ArrowRight]);
     assert!(app.renderer.is_none());
     assert!(app.asset_manager.is_none());
@@ -108,7 +115,7 @@ fn wasd_moves_only_the_left_robot_on_world_xy() {
         (Key::D, [-0.3, 0.0, 0.0]),
     ] {
         let (mut scene, mut game) = scene_with_robots();
-        game.update(&mut scene, &held_input(&[key]), 0.5);
+        game.update(&mut scene, &held_input(&[key]), 0.5).unwrap();
         assert_vector(
             scene.get_mut(game.left_robot).unwrap().transform().position,
             expected,
@@ -133,7 +140,7 @@ fn opposite_wasd_keys_cancel_independently() {
         (vec![Key::W, Key::S, Key::D], [-0.3, 0.0, 0.0]),
     ] {
         let (mut scene, mut game) = scene_with_robots();
-        game.update(&mut scene, &held_input(&keys), 0.5);
+        game.update(&mut scene, &held_input(&keys), 0.5).unwrap();
         assert_vector(
             scene.get_mut(game.left_robot).unwrap().transform().position,
             expected,
@@ -147,7 +154,8 @@ fn diagonal_wasd_movement_preserves_one_unit_per_second() {
     for (horizontal, x) in [(Key::A, -component), (Key::D, component)] {
         for (vertical, y) in [(Key::S, -component), (Key::W, component)] {
             let (mut scene, mut game) = scene_with_robots();
-            game.update(&mut scene, &held_input(&[horizontal, vertical]), 0.5);
+            game.update(&mut scene, &held_input(&[horizontal, vertical]), 0.5)
+                .unwrap();
             let position = scene.get_mut(game.left_robot).unwrap().transform().position;
             assert_vector(position, [-0.8 + x, y, 0.0]);
             assert_close(
@@ -178,9 +186,11 @@ fn updates_add_existing_rotation_and_partition_elapsed_time_consistently() {
             .rotation = [-0.2, 0.3, -0.4];
     }
     let mut input = held_input(&[Key::W, Key::D]);
-    whole_game.update(&mut whole_scene, &input, 0.5);
+    whole_game.update(&mut whole_scene, &input, 0.5).unwrap();
     for delta_seconds in [0.1, 0.15, 0.25] {
-        split_game.update(&mut split_scene, &input, delta_seconds);
+        split_game
+            .update(&mut split_scene, &input, delta_seconds)
+            .unwrap();
         input.end_frame();
     }
 
@@ -204,7 +214,7 @@ fn updates_add_existing_rotation_and_partition_elapsed_time_consistently() {
     }
 
     let before = transforms(&split_scene);
-    split_game.update(&mut split_scene, &input, 0.0);
+    split_game.update(&mut split_scene, &input, 0.0).unwrap();
     assert_eq!(transforms(&split_scene), before);
 }
 
@@ -225,7 +235,7 @@ fn camera_keys_unrelated_keys_and_released_wasd_do_not_move_robots() {
         released_w,
     ] {
         let (mut scene, mut game) = scene_with_robots();
-        game.update(&mut scene, &input, 0.5);
+        game.update(&mut scene, &input, 0.5).unwrap();
         assert_vector(
             scene.get_mut(game.left_robot).unwrap().transform().position,
             [-0.8, 0.0, 0.0],
@@ -252,7 +262,8 @@ fn deleted_robot_handles_do_not_stop_remaining_robot_updates() {
             scene.remove(game.right_robot).unwrap();
         }
         for _ in 0..2 {
-            game.update(&mut scene, &held_input(&[Key::W]), 0.25);
+            game.update(&mut scene, &held_input(&[Key::W]), 0.25)
+                .unwrap();
         }
         assert_eq!(
             scene.instances().count(),
@@ -290,21 +301,21 @@ fn project_name_guard_keeps_robot_and_camera_state_unchanged() {
 }
 
 #[test]
-fn binding_requires_two_distinct_entities_and_uses_source_order() {
+fn binding_requires_two_distinct_entities_and_uses_named_roles() {
     let (mut scene, original) = scene_with_robots();
-    assert!(RobotGame::from_entities(&[]).is_err());
-    assert!(RobotGame::from_entities(&[original.left_robot]).is_err());
-    assert!(RobotGame::from_entities(&[original.left_robot, original.left_robot]).is_err());
+    assert!(RobotGame::from_scene(&Scene::default()).is_err());
+    scene.set_binding("robot_b", original.left_robot).unwrap();
+    assert!(RobotGame::from_scene(&scene).is_err());
+    scene.set_binding("robot_a", original.right_robot).unwrap();
     let extra = scene.spawn_named(
         "Other robot",
         ModelInstance::new(Arc::new(Model::new(Vec::new())), Transform::default()),
     );
-    let mut game =
-        RobotGame::from_entities(&[original.right_robot, original.left_robot, extra]).unwrap();
+    let mut game = RobotGame::from_scene(&scene).unwrap();
     assert_eq!(game.left_robot, original.right_robot);
     assert_eq!(game.right_robot, original.left_robot);
-    assert_eq!(game.selected_robot, original.right_robot);
-    game.update(&mut scene, &held_input(&[Key::W]), 0.5);
+    game.update(&mut scene, &held_input(&[Key::W]), 0.5)
+        .unwrap();
     assert_vector(
         scene
             .get_mut(original.right_robot)
@@ -325,85 +336,71 @@ fn binding_requires_two_distinct_entities_and_uses_source_order() {
 }
 
 #[test]
-fn tab_switches_selected_movement_once_per_press_without_changing_names_or_spin() {
+fn space_pauses_simulation_and_movement_until_a_fresh_press_resumes() {
     let (mut scene, mut game) = scene_with_robots();
-    let mut input = held_input(&[Key::W, Key::Tab]);
-    game.update(&mut scene, &input, 0.1);
-    assert_eq!(game.selected_robot, game.right_robot);
+    let before = transforms(&scene);
+    let mut input = held_input(&[Key::Space, Key::W]);
+    game.update(&mut scene, &input, 0.5).unwrap();
+    assert!(game.animation_paused());
+    assert_eq!(transforms(&scene), before);
     input.end_frame();
-    input.press(Key::Tab); // OS repeat while held must not create a new press.
-    game.update(&mut scene, &input, 0.2);
-    assert_eq!(game.selected_robot, game.right_robot);
-    assert_vector(
-        scene.get_mut(game.left_robot).unwrap().transform().position,
-        [-0.8, 0.0, 0.0],
-    );
-    assert_vector(
-        scene
-            .get_mut(game.right_robot)
-            .unwrap()
-            .transform()
-            .position,
-        [0.8, 0.3, 0.0],
-    );
-
-    input.release(Key::Tab);
+    input.press(Key::Space);
+    game.update(&mut scene, &input, 1.0).unwrap();
+    assert_eq!(transforms(&scene), before);
+    input.release(Key::Space);
     input.end_frame();
-    input.press(Key::Tab);
-    game.update(&mut scene, &input, 0.3);
-    assert_eq!(game.selected_robot, game.left_robot);
+    input.press(Key::Space);
+    game.update(&mut scene, &input, 0.5).unwrap();
+    assert!(!game.animation_paused());
     assert_vector(
-        scene.get_mut(game.left_robot).unwrap().transform().position,
-        [-0.8, 0.3, 0.0],
+        scene.get(game.left_robot).unwrap().transform().position,
+        [-0.8, 0.5, 0.0],
     );
     assert_vector(
-        scene
-            .get_mut(game.right_robot)
-            .unwrap()
-            .transform()
-            .position,
-        [0.8, 0.3, 0.0],
+        scene.get(game.right_robot).unwrap().transform().rotation,
+        [-0.25, 0.375, 0.1],
     );
-    assert_vector(
-        scene.get_mut(game.left_robot).unwrap().transform().rotation,
-        [0.36, 0.54, 0.0],
-    );
-    assert_vector(
-        scene
-            .get_mut(game.right_robot)
-            .unwrap()
-            .transform()
-            .rotation,
-        [-0.3, 0.45, 0.12],
-    );
-    assert_eq!(scene.name(game.left_robot), Some("Left Robot"));
-    assert_eq!(scene.name(game.right_robot), Some("Right Robot"));
 }
 
 #[test]
-fn tab_can_select_a_survivor_after_the_selected_robot_is_deleted() {
+fn edit_only_shortcuts_do_not_edit_transform_or_create_entities_during_simulation() {
     let (mut scene, mut game) = scene_with_robots();
-    scene.remove(game.left_robot).unwrap();
-    let mut input = held_input(&[Key::W]);
-    game.update(&mut scene, &input, 0.1);
+    let input = held_input(&[
+        Key::Q,
+        Key::E,
+        Key::R,
+        Key::F,
+        Key::Tab,
+        Key::N,
+        Key::C,
+        Key::Delete,
+        Key::ControlLeft,
+        Key::Z,
+        Key::Y,
+    ]);
+    game.update(&mut scene, &input, 0.5).unwrap();
+    assert_eq!(scene.instances().count(), 2);
     assert_vector(
-        scene
-            .get_mut(game.right_robot)
-            .unwrap()
-            .transform()
-            .position,
-        [0.8, 0.0, 0.0],
+        scene.get(game.left_robot).unwrap().transform().position,
+        [-0.8, 0.0, 0.0],
     );
-    input.press(Key::Tab);
-    game.update(&mut scene, &input, 0.1);
-    assert_eq!(game.selected_robot, game.right_robot);
     assert_vector(
-        scene
-            .get_mut(game.right_robot)
-            .unwrap()
-            .transform()
-            .position,
-        [0.8, 0.1, 0.0],
+        scene.get(game.left_robot).unwrap().transform().rotation,
+        [0.3, 0.45, 0.0],
     );
-    assert_eq!(scene.name(game.left_robot), None);
+    assert_vector(
+        scene.get(game.left_robot).unwrap().transform().scale,
+        [0.7; 3],
+    );
+}
+
+#[test]
+fn nonfinite_simulation_delta_is_rejected_before_mutating_a_robot() {
+    let (mut scene, mut game) = scene_with_robots();
+    let before = transforms(&scene);
+    assert!(
+        game.update(&mut scene, &held_input(&[Key::W]), f32::INFINITY)
+            .is_err()
+    );
+    assert_eq!(transforms(&scene), before);
 }

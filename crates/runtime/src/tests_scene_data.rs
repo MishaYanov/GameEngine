@@ -2,12 +2,18 @@ use super::*;
 use serde_json::{Value, json};
 
 fn valid_data() -> SceneData {
+    let mut btm = BTreeMap::new();
+    btm.insert("robot-0".to_owned(), EntityKey::new("robot-0").unwrap());
+    btm.insert("robot-1".to_owned(), EntityKey::new("robot-1").unwrap());
+
     SceneData {
-        schema_version: 1,
+        schema_version: CURRENT_SCHEMA_VERSION,
+        bindings: btm,
         entities: [-0.8, 0.8]
             .into_iter()
             .enumerate()
             .map(|(index, x)| EntityData {
+                key: EntityKey::new(format!("robot-{index}")).unwrap(),
                 name: format!("Robot {index}"),
                 model_path: "props/robot.glb".to_owned(),
                 transform: TransformData {
@@ -61,7 +67,7 @@ fn two_robot_roundtrip_preserves_all_fields_and_near_far_json_names() {
 
 #[test]
 fn versions_and_unknown_fields_are_rejected_at_every_nesting_level() {
-    for version in [0, 2, u32::MAX] {
+    for version in [0, 3, u32::MAX] {
         let mut data = valid_data();
         data.schema_version = version;
         assert_rejected(&data);
@@ -199,12 +205,14 @@ fn camera_boundaries_match_runtime_pitch_and_valid_projection_ranges() {
 }
 
 #[test]
-fn bundled_scene_remains_valid_and_keeps_demo_role_order() {
+fn bundled_scene_remains_valid_and_binds_demo_roles_to_persistent_keys() {
     let source = include_str!("../../../apps/game/assets/scenes/robots.json");
     let data = SceneData::from_json(source).unwrap();
     assert_eq!(data.entities.len(), 2);
     assert_eq!(data.entities[0].name, "Left Robot");
     assert_eq!(data.entities[1].name, "Right Robot");
+    assert_eq!(data.bindings["robot_a"], data.entities[0].key);
+    assert_eq!(data.bindings["robot_b"], data.entities[1].key);
     for entity in &data.entities {
         let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/game/assets")
@@ -222,6 +230,122 @@ fn bundled_scene_remains_valid_and_keeps_demo_role_order() {
     );
 }
 
+fn legacy_value() -> Value {
+    let mut value = as_value();
+    value["schema_version"] = json!(1);
+    value.as_object_mut().unwrap().remove("bindings");
+    for entity in value["entities"].as_array_mut().unwrap() {
+        entity.as_object_mut().unwrap().remove("key");
+    }
+    value
+}
+
+#[test]
+fn legacy_json_migrates_deterministically_and_saves_as_version_two() {
+    let legacy = legacy_value();
+    let original = legacy.to_string();
+    let parsed = parse_json(&original).unwrap();
+    assert_eq!(parsed.source_schema_version, 1);
+    assert_eq!(parsed.data.schema_version, CURRENT_SCHEMA_VERSION);
+    assert!(parsed.data.bindings.is_empty());
+    for (index, entity) in parsed.data.entities.iter().enumerate() {
+        assert_eq!(entity.key.as_str(), format!("legacy-entity-{index}"));
+        assert_eq!(
+            serde_json::to_value(&entity.transform).unwrap(),
+            legacy["entities"][index]["transform"]
+        );
+        assert_eq!(
+            entity.name,
+            legacy["entities"][index]["name"].as_str().unwrap()
+        );
+    }
+    let repeated = parse_json(&original).unwrap();
+    let saved = parsed.data.to_json().unwrap();
+    assert_eq!(saved, repeated.data.to_json().unwrap());
+    let reloaded = parse_json(&saved).unwrap();
+    assert_eq!(reloaded.source_schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(reloaded.data.to_json().unwrap(), saved);
+}
+
+#[test]
+fn legacy_json_still_rejects_unknown_fields_including_version_two_metadata() {
+    for (pointer, field, extra) in [
+        ("", "bindings", json!({})),
+        ("/entities/0", "key", json!("unexpected-key")),
+        ("/entities/0/transform", "unexpected", json!(true)),
+        ("/camera", "unexpected", json!(true)),
+    ] {
+        let mut legacy = legacy_value();
+        legacy
+            .pointer_mut(pointer)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert(field.into(), extra);
+        assert!(
+            SceneData::from_json(&legacy.to_string())
+                .unwrap_err()
+                .contains("unknown field")
+        );
+    }
+}
+
+#[test]
+fn current_schema_rejects_invalid_duplicate_keys_and_dangling_bindings() {
+    for key in [
+        "",
+        " ",
+        "has space",
+        "tab\tkey",
+        "line\nbreak",
+        "nonbreaking\u{a0}space",
+    ] {
+        let mut value = as_value();
+        value["entities"][0]["key"] = json!(key);
+        assert!(
+            SceneData::from_json(&value.to_string()).is_err(),
+            "accepted {key:?}"
+        );
+    }
+    let mut duplicate = valid_data();
+    duplicate.entities[1].key = duplicate.entities[0].key.clone();
+    assert_rejected(&duplicate);
+    for (name, key) in [
+        ("", "robot-0"),
+        (" \t", "robot-0"),
+        ("robot_a", "missing"),
+        ("robot_a", "bad key"),
+    ] {
+        let mut value = as_value();
+        value["bindings"] = json!({ name: key });
+        assert!(
+            SceneData::from_json(&value.to_string()).is_err(),
+            "accepted binding {name:?}: {key:?}"
+        );
+    }
+    for (pointer, field) in [("", "bindings"), ("/entities/0", "key")] {
+        let mut value = as_value();
+        value
+            .pointer_mut(pointer)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(SceneData::from_json(&value.to_string()).is_err());
+    }
+}
+
+#[test]
+fn entity_reordering_preserves_named_bindings_and_persistent_keys() {
+    let mut data = valid_data();
+    let bindings = data.bindings.clone();
+    data.entities.reverse();
+    let parsed = SceneData::from_json(&data.to_json().unwrap()).unwrap();
+    assert_eq!(parsed.bindings, bindings);
+    assert_eq!(parsed.entities[0].key.as_str(), "robot-1");
+    assert_eq!(parsed.entities[1].key.as_str(), "robot-0");
+}
+
 #[test]
 fn empty_scenes_and_duplicate_unicode_labels_roundtrip_without_changing_order() {
     let mut data = valid_data();
@@ -235,6 +359,7 @@ fn empty_scenes_and_duplicate_unicode_labels_roundtrip_without_changing_order() 
         serde_json::to_value(parsed).unwrap()
     );
     data.entities.clear();
+    data.bindings.clear();
     assert!(
         SceneData::from_json(&data.to_json().unwrap())
             .unwrap()

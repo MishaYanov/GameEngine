@@ -317,12 +317,10 @@ fn choose_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatK
         .unwrap_or(formats[0])
 }
 
-fn choose_present_mode(modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
-    modes
-        .iter()
-        .copied()
-        .find(|mode| *mode == vk::PresentModeKHR::MAILBOX)
-        .unwrap_or(vk::PresentModeKHR::FIFO)
+fn choose_present_mode(_modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
+	// FIFO is required by Vulkan and paces presentation to the display refresh.
+	// MAILBOX can keep rendering replacement frames that are never displayed.
+	vk::PresentModeKHR::FIFO
 }
 
 fn choose_extent(

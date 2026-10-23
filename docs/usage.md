@@ -85,9 +85,25 @@ Exit codes are `0` for success, `1` for build/install failure, and `2` for an in
 
 This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene.
 
-### Development scene controls — in progress
+### Native development editing
 
-The development game now reads `apps/game/assets/scenes/robots.json`. Tab selects either robot; WASD moves the selected robot; arrows and captured mouse motion control the camera. F5 saves transforms/camera to the active scene and F9 reloads it, discarding unsaved state. Saving modifies the checkout asset file. These commands are skipped in installed/name-file mode. See [scene persistence](scene-persistence.md) before using save/reload.
+`cargo run -p game` starts in Edit with `apps/game/assets/scenes/robots.json`. F1 toggles panels; F6 runs temporary Play
+and Stop restores authored state. F5 saves authored transforms/camera even during Play; F9 reloads disk. Saving changes
+the checkout asset file, so keep a copy or review the diff if experimenting.
+
+In Edit, click fields/entities/handles; Tab cycles selection, WASD/QE/RF edit transforms, 1/2/3 select gizmo mode,
+N/C/Delete create/duplicate/remove, and Ctrl+Z/Y undo/redo mixed edits. Names and property edits are undoable;
+structural edits no longer clear history or protect robot roles just for simulation. Arrow keys and right-mouse capture
+control the camera. Space pauses optional robot simulation during Play, including rotation and WASD. F7 toggles culling.
+
+The panel offers a flat hierarchy list, name/transform fields, dirty indicator, model catalog Refresh/Place, and
+FRAME/UPDATE statistics. Generic scenes need no robot bindings. Text entry suppresses movement; Enter applies and Escape
+cancels. Panels hide in windows below 800×400 logical pixels; current ASCII display and short-window limits are
+documented in [native editing](scene-editing.md). No human-visible acceptance or GPU profiling was performed for the new
+tools; see [step report and evidence](editor-steps-11-20.md).
+
+Installed/name-file mode does not expose these development tools. The separate Angular/Tauri editor below still supplies
+project setup rather than this native authoring interface.
 
 ## 3. Use the editor project setup screen
 

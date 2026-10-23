@@ -1,4 +1,5 @@
 mod asset_manager;
+pub mod catalog;
 pub mod gltf_loader;
 mod image_asset;
 pub mod material_data;

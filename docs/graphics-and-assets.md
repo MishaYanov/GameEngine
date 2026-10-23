@@ -14,22 +14,32 @@ The asset layer lives in `crates/runtime/src/assets`. `ImageAsset::load` opens/d
 
 ## Geometry and shader contracts
 
-`MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle, cube, plane, polygon, sphere, and capsule constructors. `Vertex` has C layout: position `[f32; 3]` at location 0 and UV `[f32; 2]` at location 1. Binding/attribute descriptions derive stride/offsets from this Rust layout.
+`MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle, cube, plane, polygon, sphere, and
+capsule constructors. `Vertex` has 32-byte C layout: position `[f32; 3]` at byte 0/location 0, UV `[f32; 2]` at byte
+12/location 1, and normal `[f32; 3]` at byte 20/location 2. Binding/attribute descriptions derive stride/offsets from
+this Rust layout.
 
 The vertex shader computes `camera.viewProjection * model * position`; the fragment shader multiplies the sampled texture by the material base-color factor.
 
-| Shader input | Binding |
-| --- | --- |
-| Position / UV | Locations 0 / 1 |
-| Camera view-projection | Descriptor set 0, binding 0 |
-| Sampled texture | Descriptor set 1, binding 0 |
-| Model matrix and base-color factor | 80-byte push constant block shared by vertex/fragment stages |
+| Shader input                             | Binding                                          |
+|------------------------------------------|--------------------------------------------------|
+| Position / UV / Normal                   | Locations 0 / 1 / 2                              |
+| Camera view-projection                   | Descriptor set 0, binding 0                      |
+| Sampled texture                          | Descriptor set 1, binding 0                      |
+| Model matrix / base-color factor / flags | 96-byte push constant block: offsets 0 / 64 / 80 |
 
-`CameraUniform::perspective` creates camera data. `ModelPushConstants::from_3d` accepts translation, Euler rotation in radians, and scale. The block contains the matrix at byte 0 and material factor at byte 64. `VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture and material properties. `VulkanMaterialPipelines` supplies matching single/double-sided variants; frame drawing chooses a variant per material.
+`CameraUniform::perspective` creates camera data. `ModelPushConstants::from_3d` accepts translation, Euler rotation in
+radians, and scale. The block contains the matrix at byte 0, material factor at byte 64, and four flag words at byte 80.
+`VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture and material properties.
+`VulkanMaterialPipelines` supplies matching single/double-sided variants; frame drawing chooses a variant per material.
 
 A `WindowRenderer`-owned `VulkanMaterialLayout` is shared by uploaded textures and pipelines. Runtime asset methods receive `&WindowRenderer` and call `upload_mesh` / `upload_rgba8`; they no longer receive a raw Vulkan instance/device or own a separate material-layout reference. Pipeline setup does not depend on a scene object, permitting an empty scene. Preserve the layout and logical device until dependent descriptor resources are released.
 
-Change Rust layout, pipeline descriptors, and GLSL together. The shaders apply base-color factors, but provide no normal lighting, full PBR, or transparent-material blending/sorting. Shader sources remain `crates/renderer/shaders/triangle.vert` and `triangle.frag`; rebuilding compiles and embeds SPIR-V.
+Change Rust layout, pipeline descriptors, and GLSL together. The shaders now transform normals by inverse transpose and
+apply fixed directional lighting: ambient 0.25 plus diffuse 0.75 from normalized direction [-0.4, 0.8, 0.6]. Flags
+provide unlit, screen-space/font, vertex-color, and depth-free overlay paths. This is not full PBR, shadowing, or
+transparent-material blending/sorting. Shader sources remain `crates/renderer/shaders/triangle.vert` and
+`triangle.frag`; rebuilding compiles and embeds SPIR-V.
 
 ## Procedural primitives — in progress
 
@@ -54,7 +64,10 @@ let ball = MeshData::sphere();
 let character_shape = MeshData::capsule();
 ```
 
-Vertices currently contain position and UV only: normals, tangents, lighting-ready attributes, collision shapes, and mesh LOD are not supplied. Each constructor creates fresh CPU data; use distinct stable upload IDs for different shapes/parameters because an existing cache ID returns the old GPU mesh.
+Vertices now include normals. MeshData generates area-weighted normals for missing/zero attributes, with +Z fallback
+when no usable sum exists. Split face vertices retain hard edges; imported NORMAL data is checked for finite/nonzero
+values and normalized. Tangents, collision shapes, and LOD are not supplied. Each constructor creates fresh CPU data;
+use distinct stable upload IDs for different shapes/parameters because an existing cache ID returns the old GPU mesh.
 
 To render, upload the data, pair it with a material in a ModelPart/Model, and spawn a ModelInstance. This does not automatically add primitive entities to the robot demo or give them serialized identifiers. Current scene persistence expects a source `model_path`; procedural meshes have no primitive-specific JSON schema or save/load workflow yet.
 
@@ -94,7 +107,11 @@ Positions and indices are required. The loader rejects non-triangle modes, empty
 
 `ModelPart` owns an `Arc<VulkanMesh>` and material; `Model` groups parts. `ModelInstance` owns `Arc<Model>` and independent position/rotation/scale. `Scene` owns instances under increasing entity IDs, with spawn, mutable lookup, removal, and iteration. These types now live in `runtime`; `Scene::render_objects()` handles instance-to-part draw conversion. Requests borrow existing resources, so release them before mutating the scene. Models still hold Vulkan-specific resources, so the API is not backend-independent.
 
-The game loads the robot model once, shares it between two instances, and asks the runtime scene for `RenderObject` inputs per frame. `clear()` releases cache references; scene/model/material owners can still retain GPU resources. Release those owners before destroying their device. No complete glTF scene import, ECS, or editor entity commands are provided by this model layer. Initial JSON scene persistence now records model paths, names, transforms, and camera via runtime scene_data/scene_io; see [scene persistence](scene-persistence.md).
+The game loads the robot model once, shares it between two instances, and asks the runtime scene for `RenderObject`
+inputs per frame. `clear()` releases cache references; scene/model/material owners can still retain GPU resources.
+Release those owners before destroying their device. No complete glTF scene import or ECS is provided by this model
+layer. Generic editing now uses SceneEditor above it. Initial JSON scene persistence now records model paths, names,
+transforms, and camera via runtime scene_data/scene_io; see [scene persistence](scene-persistence.md).
 
 ### Packaging
 
@@ -105,3 +122,15 @@ The game resolves `props/robot.glb` below its selected asset root. The compiler 
 Check development robot rendering and installed mode separately with its packaged asset tree. Inspect texture orientation, depth ordering, resize, minimize/restore, and clean closure. Debug validation messages use the shared logger. For startup failures, check Vulkan 1.3 driver support and validation layers; for shader failures, check `glslc`; for missing assets, check mode-specific roots and the install copy list.
 
 A native window/GPU is required to validate visual correctness. See [testing](testing.md).
+
+## Bounds, discovery, and visibility
+
+AssetManager computes cached Model bounds from imported CPU positions. Picking uses inverse-transform slab intersections
+and a near/far Vulkan camera ray; selection boxes reuse one GPU mesh. The catalog scans sorted GLB/glTF paths with
+root/link/depth/entry limits. Repeated panel placements cache and share a template model.
+
+Scene::render_visible uses transformed model AABBs and six Vulkan clip planes, retaining unknown/invalid bounds
+conservatively. F7 toggles culling. Draw and triangle totals include enabled selection/gizmo/panel overlays; wall FRAME
+and CPU UPDATE averages are not GPU profiling. UI/gizmo geometry is batched into reused host-coherent buffers with fence
+completion before updates; this avoids per-frame GPU allocation, not every CPU allocation. See
+the [steps 11–20 report](editor-steps-11-20.md) for API/file mapping and evidence.

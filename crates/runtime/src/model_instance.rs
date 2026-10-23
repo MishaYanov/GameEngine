@@ -2,6 +2,7 @@ use crate::assets::Model;
 use crate::Transform;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct ModelInstance {
     model: Arc<Model>,
     transform: Transform,

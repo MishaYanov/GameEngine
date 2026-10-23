@@ -65,12 +65,26 @@ fn snapshot(loaded: &LoadedScene) -> String {
 }
 
 fn assert_loaded_robots(loaded: &LoadedScene) {
+	assert_eq!(loaded.source_schema_version, 2);
     assert_eq!(loaded.entity_ids.len(), 2);
     assert_eq!(loaded.scene.instances().count(), 2);
     assert_ne!(loaded.entity_ids[0], loaded.entity_ids[1]);
     assert_eq!(loaded.scene.name(loaded.entity_ids[0]), Some("Left Robot"));
     assert_eq!(loaded.scene.name(loaded.entity_ids[1]), Some("Right Robot"));
     let data = loaded.scene.to_data(&loaded.camera).unwrap();
+	assert_eq!(data.schema_version, 2);
+	assert_eq!(
+		loaded.scene.binding("robot_a"),
+		loaded.scene.entity_by_key(&data.bindings["robot_a"])
+	);
+	assert_eq!(
+		loaded.scene.binding("robot_b"),
+		loaded.scene.entity_by_key(&data.bindings["robot_b"])
+	);
+	assert_ne!(
+		loaded.scene.binding("robot_a"),
+		loaded.scene.binding("robot_b")
+	);
     assert_eq!(data.entities.len(), 2);
     for entity in &data.entities {
         assert_eq!(entity.model_path, "props/robot.glb");

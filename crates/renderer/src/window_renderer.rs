@@ -36,6 +36,27 @@ pub enum DrawStatus {
 }
 
 impl WindowRenderer {
+	pub fn create_dynamic_mesh(
+		&self,
+		vertices: usize,
+		indices: usize,
+	) -> Result<VulkanMesh, String> {
+		VulkanMesh::dynamic(self.instance.raw(), &self.device, vertices, indices)
+			.map_err(|e| e.to_string())
+	}
+
+	pub fn write_dynamic_mesh(
+		&self,
+		mesh: &mut VulkanMesh,
+		vertices: &[Vertex],
+		indices: &[u32],
+	) -> Result<(), String> {
+		if let Some(targets) = &self.targets {
+			targets.frame.wait_complete().map_err(|e| e.to_string())?;
+		}
+		mesh.write_dynamic(vertices, indices)
+			.map_err(|e| e.to_string())
+	}
     pub fn new<W: HasDisplayHandle + HasWindowHandle + 'static>(
         window: Arc<W>,
         width: u32,

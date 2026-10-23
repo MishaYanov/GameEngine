@@ -39,9 +39,16 @@ The compiler embeds the source workspace location and builds from that checkout.
 
 The current working tree adds shared `runtime::FrameClock`, `InputState`/`Key`, and `Camera`. The game adapts native events, updates using capped delta seconds, and turns CPU camera values into renderer uniforms. Mouse displacement is handled without delta scaling. These modules and their game integration remain **in progress**; see [contracts and provisional controls](timing-input-camera.md).
 
-## Scene startup and application rules — in progress
+## Native editing and Play ownership
 
-Game startup now loads `assets/scenes/robots.json` through runtime scene I/O. SceneData validates schema version 1 and stores entity names, asset paths, transforms, and camera, not GPU resources or runtime IDs. RobotGame assigns roles by file order; CameraController owns reusable movement/look behavior. F5/F9 save/reload is implemented in the working tree with failure logging and GPU-idle replacement. This is initial persistence, not a completed editor workflow. See [scene persistence](scene-persistence.md).
+Game startup now loads `assets/scenes/robots.json` through runtime scene I/O. SceneData writes schema version 2 with
+persistent keys and role bindings and migrates version-1 input. It stores entity names, asset paths, transforms, and
+camera, not GPU resources or transient IDs. SceneEditor owns generic edit logic/history, and RobotGame optionally
+resolves robot bindings only for Play simulation. CameraController owns reusable movement/look behavior. F5/F9
+save/reload is implemented in the working tree with failure logging and GPU-idle replacement. The native game now adds
+Edit/Play isolation, entity/property panels, mouse picking/gizmos, asset placement, lighting, and culling/statistics.
+The Angular/Tauri setup editor is not upgraded by this work. See [steps 11–20](editor-steps-11-20.md) for files and
+evidence. See [scene persistence](scene-persistence.md).
 
 ## Diagnostics and ownership
 
@@ -49,4 +56,11 @@ Each executable initializes the shared logger once and keeps its guard alive; li
 
 Dashboard controls apply to its owned processes. Python launcher terminals have a separate lifetime. The editor does not explicitly stop the game child when it closes. See the [admin](apps/admin-dashboard/README.md) and [logger](crates/logger/README.md) guides.
 
-The shared runtime has an in-memory scene with entity IDs, spawn/remove, and transform mutation. Initial versioned JSON scene persistence is in progress; editor entity editing and a general runtime simulation loop are not established features. glTF/GLB import and textured rendering support all indexed triangle primitives of the first mesh with distinct materials. Models, instances, transforms, scenes, and asset APIs now live in `runtime`. `Scene::render_objects()` constructs borrowed draw requests; full glTF scene traversal, durable entity references, runtime/editor integration, and PBR remain outside that scope. PRD requirements include future work; consult implementation status and [testing limits](testing.md).
+The shared runtime has an in-memory scene with entity IDs, spawn/remove, and transform mutation. Initial versioned JSON
+scene persistence is in progress; editor entity editing and a general runtime simulation loop are not established
+features. glTF/GLB import and textured rendering support all indexed triangle primitives of the first mesh with distinct
+materials. Models, instances, transforms, scenes, and asset APIs now live in `runtime`. `Scene::render_objects()`
+constructs borrowed draw requests; full glTF scene traversal, global cross-scene reference management, runtime/editor
+integration, and PBR remain outside that scope. Shared selection/transform commands/history and demo structural editing
+are now in progress; see [editing](scene-editing.md). PRD requirements include future work; consult implementation
+status and [testing limits](testing.md).

@@ -9,3 +9,4 @@ runtime = { path = "../../crates/runtime" }
 renderer = { version = "0.1.0", path = "../../crates/renderer" }
 winit = "0.30.13"
 tracing = "0.1.44"
+glam = "0.33.6"

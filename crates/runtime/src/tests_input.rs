@@ -1,6 +1,6 @@
 use super::*;
 
-const KEYS: [Key; 13] = [
+const KEYS: [Key; 25] = [
     Key::W,
     Key::A,
     Key::S,
@@ -14,6 +14,18 @@ const KEYS: [Key; 13] = [
     Key::Tab,
     Key::F5,
     Key::F9,
+	Key::F6,
+	Key::Q,
+	Key::E,
+	Key::R,
+	Key::F,
+	Key::N,
+	Key::C,
+	Key::Z,
+	Key::Y,
+	Key::ControlLeft,
+	Key::ControlRight,
+	Key::Delete,
 ];
 
 fn assert_state(input: &InputState, key: Key, held: bool, pressed: bool, released: bool) {
@@ -128,4 +140,39 @@ fn reset_clears_held_and_pending_transitions_and_accepts_fresh_presses() {
         input.press(key);
         assert_state(&input, key, true, true, false);
     }
+}
+
+#[test]
+fn suppression_clears_motion_and_edges_and_ignores_repeat_until_release() {
+	let mut input = InputState::default();
+	for key in [Key::F6, Key::W, Key::ControlLeft] {
+		input.press(key);
+	}
+	input.suppress_held();
+	for _ in 0..3 {
+		for key in [Key::F6, Key::W, Key::ControlLeft] {
+			input.press(key);
+			assert_state(&input, key, false, false, false);
+		}
+		input.end_frame();
+		input.suppress_held();
+	}
+	input.release(Key::F6);
+	assert_state(&input, Key::F6, false, false, false);
+	input.press(Key::F6);
+	assert_state(&input, Key::F6, true, true, false);
+	input.press(Key::W);
+	assert_state(&input, Key::W, false, false, false);
+}
+
+#[test]
+fn focus_reset_rearms_suppressed_keys_and_suppression_does_not_block_new_keys() {
+	let mut input = InputState::default();
+	input.press(Key::F6);
+	input.suppress_held();
+	input.press(Key::D);
+	assert_state(&input, Key::D, true, true, false);
+	input.reset();
+	input.press(Key::F6);
+	assert_state(&input, Key::F6, true, true, false);
 }

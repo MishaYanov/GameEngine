@@ -13,6 +13,7 @@ pub struct VulkanGraphicsPipeline {
 pub struct VulkanMaterialPipelines {
     single_sided: VulkanGraphicsPipeline,
     double_sided: VulkanGraphicsPipeline,
+	overlay: VulkanGraphicsPipeline,
 }
 
 impl VulkanMaterialPipelines {
@@ -30,6 +31,7 @@ impl VulkanMaterialPipelines {
             camera_layout,
             texture_layout,
             false,
+            false,
         )?;
         let double_sided = VulkanGraphicsPipeline::new(
             device,
@@ -38,10 +40,21 @@ impl VulkanMaterialPipelines {
             camera_layout,
             texture_layout,
             true,
+            false,
+		)?;
+		let overlay = VulkanGraphicsPipeline::new(
+			device,
+		    color_format,
+		    depth_format,
+		    camera_layout,
+		    texture_layout,
+		    true,
+		    true,
         )?;
         Ok(Self {
             single_sided,
             double_sided,
+			overlay,
         })
     }
 
@@ -52,6 +65,13 @@ impl VulkanMaterialPipelines {
             &self.single_sided
         }
     }
+	pub fn for_object(&self, double_sided: bool, overlay: bool) -> &VulkanGraphicsPipeline {
+		if overlay {
+			&self.overlay
+		} else {
+			self.for_material(double_sided)
+		}
+	}
 }
 
 impl VulkanGraphicsPipeline {
@@ -64,6 +84,7 @@ impl VulkanGraphicsPipeline {
 
         texture_layout: vk::DescriptorSetLayout,
         double_sided: bool,
+        overlay: bool,
     ) -> Result<Self, String> {
         let vertex_shader = create_shader_module(
             device,
@@ -155,8 +176,8 @@ impl VulkanGraphicsPipeline {
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
-            .depth_test_enable(true)
-            .depth_write_enable(true)
+			.depth_test_enable(!overlay)
+			.depth_write_enable(!overlay)
             .depth_compare_op(vk::CompareOp::LESS)
             .depth_bounds_test_enable(false)
             .stencil_test_enable(false);

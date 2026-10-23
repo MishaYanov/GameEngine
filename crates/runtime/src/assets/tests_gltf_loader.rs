@@ -4,6 +4,58 @@ fn read_uri(root: &Path, uri: &str, budget: &mut usize) -> Result<Vec<u8>, GltfL
     read_uri_in_root(root, root, uri, budget)
 }
 
+fn normal_fixture(normal: [f32; 3], count: usize) -> (gltf::Document, Vec<gltf::buffer::Data>) {
+	let mut value: serde_json::Value = serde_json::from_str(MODEL).unwrap();
+	value["buffers"][0]["byteLength"] = serde_json::json!(80);
+	value["bufferViews"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"buffer":0,"byteOffset":44,"byteLength":36}));
+	value["accessors"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"bufferView":2,"componentType":5126,"count":count,"type":"VEC3"}));
+	for primitive in value["meshes"][0]["primitives"].as_array_mut().unwrap() {
+		primitive["attributes"]["NORMAL"] = serde_json::json!(2);
+	}
+	let mut buffers = geometry();
+	buffers[0].0.extend_from_slice(&[0, 0]);
+	for _ in 0..3 {
+		for value in normal {
+			buffers[0].0.extend_from_slice(&value.to_le_bytes());
+		}
+	}
+	(
+		gltf::Gltf::from_slice(value.to_string().as_bytes())
+			.unwrap()
+			.document,
+		buffers,
+	)
+}
+
+#[test]
+fn gltf_import_preserves_provided_normal_direction_and_normalizes_it() {
+	let (document, buffers) = normal_fixture([2.0, 0.0, 0.0], 3);
+	let parts = import_first_mesh(&document, &buffers, &[]).unwrap();
+	for part in parts {
+		for vertex in part.mesh.vertices() {
+			assert_eq!(vertex.normal, [1.0, 0.0, 0.0]);
+		}
+	}
+}
+
+#[test]
+fn gltf_import_rejects_zero_nonfinite_or_mismatched_normals() {
+	for (normal, count) in [
+		([0.0; 3], 3),
+		([f32::NAN, 0.0, 1.0], 3),
+		([0.0, 0.0, 1.0], 2),
+	] {
+		let (document, buffers) = normal_fixture(normal, count);
+		assert!(import_first_mesh(&document, &buffers, &[]).is_err());
+	}
+}
+
 const MODEL: &str = r#"{
     "asset":{"version":"2.0"},
     "buffers":[{"byteLength":42}],

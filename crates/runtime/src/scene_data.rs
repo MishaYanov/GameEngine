@@ -1,9 +1,14 @@
+use crate::entity_key::EntityKey;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneData {
     pub schema_version: u32,
+    pub bindings: BTreeMap<String, EntityKey>,
     pub entities: Vec<EntityData>,
     pub camera: CameraData,
 }
@@ -11,6 +16,7 @@ pub struct SceneData {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntityData {
+    pub key: EntityKey,
     pub name: String,
     pub model_path: String,
     pub transform: TransformData,
@@ -39,9 +45,88 @@ pub struct CameraData {
     pub far_plane: f32,
 }
 
+#[derive(Debug)]
+pub struct ParsedScene {
+    pub data: SceneData,
+    pub source_schema_version: u32,
+}
+
+#[derive(Deserialize)]
+struct VersionHeader {
+    schema_version: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SceneDataV1 {
+    schema_version: u32,
+    entities: Vec<EntityDataV1>,
+    camera: CameraData,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityDataV1 {
+    name: String,
+    model_path: String,
+    transform: TransformData,
+}
+
+impl SceneDataV1 {
+    fn migrate(self) -> Result<SceneData, String> {
+        let entities = self
+            .entities
+            .into_iter()
+            .enumerate()
+            .map(|(index, entity)| {
+                Ok(EntityData {
+                    key: EntityKey::new(format!("legacy-entity-{index}"))?,
+                    name: entity.name,
+                    model_path: entity.model_path,
+                    transform: entity.transform,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        Ok(SceneData {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            bindings: BTreeMap::new(),
+            entities,
+            camera: self.camera,
+        })
+    }
+}
+
+pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
+    let header = serde_json::from_str::<VersionHeader>(source)
+        .map_err(|error| format!("Invalid scene JSON: {error}"))?;
+
+    let parsed = match header.schema_version {
+        1 => {
+            let legacy = serde_json::from_str::<SceneDataV1>(source)
+                .map_err(|error| format!("Invalid version-1 scene JSON: {error}"))?;
+            ParsedScene {
+                source_schema_version: legacy.schema_version,
+                data: legacy.migrate()?,
+            }
+        }
+        CURRENT_SCHEMA_VERSION => ParsedScene {
+            source_schema_version: header.schema_version,
+            data: serde_json::from_str::<SceneData>(source)
+                .map_err(|error| format!("Invalid version-2 scene JSON: {error}"))?,
+        },
+        version => return Err(format!("Unsupported schema version: {version}")),
+    };
+
+    parsed.data.validate()?;
+    Ok(parsed)
+}
+
 impl SceneData {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != 1 {
+        let mut entity_keys = HashSet::new();
+
+        if self.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(format!(
                 "Unsupported schema version: {}",
                 self.schema_version
@@ -50,6 +135,18 @@ impl SceneData {
 
         for (index, entity) in self.entities.iter().enumerate() {
             let context = format!("entity {index} ({:?})", entity.name);
+
+            // Derived deserialization does not call EntityKey::new.
+            entity
+                .key
+                .validate()
+                .map_err(|error| format!("{context}: {error}"))?;
+            if !entity_keys.insert(entity.key.as_str()) {
+                return Err(format!(
+                    "{context}: duplicate entity key {:?}",
+                    entity.key.as_str()
+                ));
+            }
 
             if entity.name.trim().is_empty() {
                 return Err(format!("{context}: name cannot be empty or whitespace"));
@@ -83,6 +180,20 @@ impl SceneData {
                 .all(|value| value.is_finite())
             {
                 return Err(format!("{context}: transform values must all be finite"));
+            }
+        }
+
+        for (name, key) in &self.bindings {
+            if name.trim().is_empty() {
+                return Err("Binding name cannot be empty or whitespace".to_string());
+            }
+            key.validate()
+                .map_err(|error| format!("Binding {name:?}: {error}"))?;
+            if !entity_keys.contains(key.as_str()) {
+                return Err(format!(
+                    "Binding {name:?} targets missing entity key {:?}",
+                    key.as_str()
+                ));
             }
         }
 
@@ -126,12 +237,7 @@ impl SceneData {
     }
 
     pub fn from_json(source: &str) -> Result<Self, String> {
-        let scene = serde_json::from_str::<Self>(source)
-            .map_err(|error| format!("Invalid scene JSON: {error}"))?;
-
-        scene.validate()?;
-
-        Ok(scene)
+        parse_json(source).map(|parsed| parsed.data)
     }
 
     pub fn to_json(&self) -> Result<String, String> {

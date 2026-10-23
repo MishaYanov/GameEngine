@@ -4,6 +4,9 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [Editor and rendering changes: steps 11–20](editor-steps-11-20.md): Responsibility, reasoning, exact file map,
+  controls, examples, resources, and automated/native evidence for the native editing prototype.
+
 - [CLI and dashboard usage](usage.md): Prerequisites, setup, installation, editor/launcher startup, dashboard workflows, and troubleshooting.
 - [Workspace architecture](architecture.md): Project responsibilities, dependencies, command flow, rendering ownership, installation, and source generation.
 - [Graphics and assets](graphics-and-assets.md): Caches, shader contracts, GPU lifetimes, adding assets, glTF/GLB import, and material limitations.
@@ -13,7 +16,11 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [Timing, input, and camera — in progress](timing-input-camera.md): Current clock/key/camera contracts, provisional game controls, and remaining verification.
 
-- [Scene data, save, and reload — in progress](scene-persistence.md): Versioned JSON, named model entities, F5/F9 behavior, validation, and packaging limits.
+- [Scene data, save, and reload — in progress](scene-persistence.md): Version-2 keys/bindings, version-1 migration,
+  F5/F9 behavior, validation, and packaging limits.
+
+- [Native scene editing](scene-editing.md): SceneEditor, Edit/Play, panels, gizmos, mixed history, assets, and visual
+  verification limits.
 
 ## Applications
 

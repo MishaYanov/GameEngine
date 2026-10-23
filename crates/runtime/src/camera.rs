@@ -1,6 +1,6 @@
 use std::f32::consts::TAU;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Camera {
     pub position: [f32; 3],
     pub yaw: f32,

@@ -54,7 +54,7 @@ fn presentation_preferences_keep_supported_fallbacks() {
     );
     assert_eq!(
         choose_present_mode(&[vk::PresentModeKHR::FIFO, vk::PresentModeKHR::MAILBOX]),
-        vk::PresentModeKHR::MAILBOX
+        vk::PresentModeKHR::FIFO
     );
     assert_eq!(
         choose_composite_alpha(vk::CompositeAlphaFlagsKHR::empty()),
