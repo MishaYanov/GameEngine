@@ -1,9 +1,9 @@
 # Scene data, save, and reload — in progress
 
-**Status: implemented prototype; automated verification, native visual acceptance pending.** The current working tree
-introduces `runtime::scene_data`, `runtime::scene_io`, application save/reload, and the bundled
-`apps/game/assets/scenes/robots.json`. This is a first scene format and demo integration, not a completed editor
-authoring workflow.
+Scene documents are owned by engine-core and exposed through runtime adapters. Current authoring retains multiple drafts
+under project schema 2, while scene saves remain schema 3. Read [project lifecycle](project-lifecycle.md) for scene IDs,
+project opening, per-scene dirty state, Save As, register, reload policies and catalog-wide build checks. Native visual
+acceptance remains separate.
 
 ## Schema version 3 and persistent identity
 
@@ -32,8 +32,8 @@ PrefabData has its own schema version 1 and bounded isolated entity subtrees. Ex
 preserving placement; instantiation creates new keys and remaps internal parents as one edit. Prefabs are not
 live-linked overrides or copies of every referenced asset. See [steps 21–35](editor-steps-21-35.md).
 
-The older GPU SceneEditor/Scene snapshot APIs remain for legacy demo compatibility, with a different history model. Do
-not carry their transient IDs/history across document replacement or treat them as the new Angular transport.
+Native SceneEditor delegates authored edits/history to the core session. Scene/EntityId and GPU snapshots remain
+resource adapters; transient IDs are not persistent scene/entity identities.
 
 ## Load and save APIs
 
@@ -50,9 +50,9 @@ Angular owns editor controls and the chosen game pane. Its service supplies open
 operations; no new layout or hardcoded keys were added. The host's EditorWorkspace resolves scoped project paths and
 owns CPU session data, while the Windows viewport worker owns render resources.
 
-The standalone game now normally runs without editor overlays. Historical native-demo F5/F6/F9 controls require the
-explicit legacy demo environment variable and are not the product editor contract. See [game modes](apps/game/README.md)
-and [Angular integration](apps/editor/README.md).
+Source game execution defaults to Development mode with the existing panels/gizmos; installed projects default to
+Player. Both use shared core semantics. The Angular editor remains the product UI direction.
+See [game modes](apps/game/README.md).
 
 Compiler installation and admin source generation now include validated asset JSON, fixing the earlier missing-scene
 packaging omission. Copying is bounded and ordered with link/containment/format checks. Generated compilation, a

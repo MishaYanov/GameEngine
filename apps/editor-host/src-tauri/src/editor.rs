@@ -1,5 +1,7 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
-use bridge::editor::{EditorCommandRequest, EditorSnapshotDto};
+use crate::project_location::ProjectLocation;
+use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto};
+use runtime::scene_catalog::SceneId;
 use runtime::{
 	asset_jobs::{AssetJobError, AssetJobId, AssetJobLimits},
 	asset_registry::{AssetMetadata, AssetRef},
@@ -7,7 +9,7 @@ use runtime::{
 	editor::PrefabData,
 	project::ProjectData,
 	scene_data::EntityData,
-	EntityKey,
+	Engine, EntityKey,
 };
 use std::{
 	collections::{HashMap, HashSet, VecDeque},
@@ -17,6 +19,14 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering},
 };
 
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadPolicy {
+	#[default]
+	RequireClean,
+	DiscardUnsaved,
+}
+
 static NEXT_WORKSPACE: AtomicU64 = AtomicU64::new(1);
 
 pub struct EditorWorkspace {
@@ -25,6 +35,7 @@ pub struct EditorWorkspace {
 	pub asset_root: PathBuf,
 	pub scene_path: PathBuf,
 	pub project_path: PathBuf,
+	workspace_kind: WorkspaceKind,
 	metadata: AssetManager,
 	jobs: AssetImportService,
 	pending: HashMap<AssetJobId, PendingAsset>,
@@ -32,6 +43,14 @@ pub struct EditorWorkspace {
 	completions: VecDeque<AssetCompletion>,
 	completion_bytes: usize,
 }
+/// A manifest-backed workspace never falls back to standalone mode merely
+/// because its manifest disappears from disk.
+#[derive(Clone, Copy)]
+enum WorkspaceKind {
+	StandaloneScene,
+	ManifestBacked,
+}
+
 enum PendingAsset {
 	Bounds,
 	Import { position: [f32; 3], revision: u64 },
@@ -96,38 +115,86 @@ impl EditorWorkspace {
 		{
 			return Err("Project manifest must not be a symbolic link".into());
 		}
-		let project = if project_path.exists() {
+		let (project, workspace_kind) = if project_path.exists() {
 			let project = ProjectData::load(&project_path)?;
-			if resolve_existing(&asset_root, &project.startup_scene)? != scene_path {
+			if resolve_existing(&asset_root, project.startup_scene_path()?)? != scene_path {
 				return Err("Open the configured startup scene for this project".into());
 			}
-			project
+			(project, WorkspaceKind::ManifestBacked)
 		} else {
-			ProjectData::for_scene("Untitled", relative_scene, &parsed.data)?
+			(
+				ProjectData::for_scene("Untitled", relative_scene, &parsed.data)?,
+				WorkspaceKind::StandaloneScene,
+			)
 		};
+		let documents = load_project_documents(&asset_root, &project)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
+			.with_scenes(documents)
 			.build()
 			.map_err(|e| e.to_string())?;
+
 		let metadata = AssetManager::new(&asset_root).map_err(|e| e.to_string())?;
+
 		let jobs =
 			AssetImportService::with_notifier(&asset_root, AssetJobLimits::default(), on_ready)?;
-		let mut workspace = Self {
-			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
-			backend,
+
+		let mut workspace = Self::generate_wrokspace(
 			asset_root,
 			scene_path,
 			project_path,
+			workspace_kind,
+			backend,
 			metadata,
 			jobs,
-			pending: HashMap::new(),
-			bounds_seen: HashSet::new(),
-			completions: VecDeque::new(),
-			completion_bytes: 0,
-		};
+		);
 		workspace.cache_bounds();
+
 		engine_logger::info!(target: "editor", "Scene workspace loaded: generation={}", workspace.generation);
 		Ok(workspace)
 	}
+
+	pub fn open_project_with_notifier(
+		location: ProjectLocation,
+		on_ready: impl Fn() + Send + 'static,
+	) -> Result<Self, String> {
+		let asset_root = location.assets().to_path_buf();
+		let project_path = location.manifest().to_path_buf();
+
+		let project = ProjectData::load(location.manifest())?;
+
+		let scene_path = resolve_existing(location.assets(), project.startup_scene_path()?)?;
+
+		let parsed = file_operation("load_scene", runtime::scene_io::load_data(&scene_path))?;
+
+		let documents = load_project_documents(&asset_root, &project)?;
+		let backend = runtime::EngineBuilder::new(parsed.data, project)
+			.with_scenes(documents)
+			.build()
+			.map_err(|e| e.to_string())?;
+
+		let metadata = AssetManager::new(location.assets()).map_err(|e| e.to_string())?;
+
+		let jobs = AssetImportService::with_notifier(
+			location.assets(),
+			AssetJobLimits::default(),
+			on_ready,
+		)?;
+
+		let mut workspace = Self::generate_wrokspace(
+			asset_root,
+			scene_path,
+			project_path,
+			WorkspaceKind::ManifestBacked,
+			backend,
+			metadata,
+			jobs,
+		);
+		workspace.cache_bounds();
+
+		engine_logger::info!(target: "editor", "Scene workspace loaded: generation={}", workspace.generation);
+		Ok(workspace)
+	}
+
 	fn cache_bounds(&mut self) {
 		let data = self.backend.session().authored_document();
 		let references: HashSet<_> = data
@@ -299,8 +366,69 @@ impl EditorWorkspace {
 		&mut self,
 		request: EditorCommandRequest,
 	) -> Result<runtime::CommandReceipt, runtime::BackendError> {
+		// Preserve coordinator error ordering before filesystem preparation.
+		self.check_revision(request.expected_revision)
+			.map_err(|message| runtime::BackendError {
+				code: runtime::BackendErrorCode::Conflict,
+				message,
+				current_revision: Some(self.backend.session().revision()),
+			})?;
+		runtime::editor::CommandFactory::validate(&request.command).map_err(|message| {
+			runtime::BackendError {
+				code: runtime::BackendErrorCode::InvalidCommand,
+				message,
+				current_revision: Some(self.backend.session().revision()),
+			}
+		})?;
+		// Prepare filesystem-dependent intent before the coordinator mutates.
+		let preflight: Result<(), String> = (|| {
+			match &request.command {
+				Command::AddScene { asset_path, .. } => {
+					if resolve_output(&self.asset_root, asset_path)?.exists() {
+						return Err("Scene creation requires a new path; register an existing file explicitly".into());
+					}
+				}
+				Command::ChangeScenePath {
+					scene_id,
+					asset_path,
+				} => {
+					let target = resolve_existing(&self.asset_root, asset_path)?;
+					for entry in self.backend.session().project().scenes.iter() {
+						if entry.id() != scene_id
+							&& resolve_existing(&self.asset_root, entry.asset_path())
+							.ok()
+							.as_ref() == Some(&target)
+						{
+							return Err("Scene path resolves to another catalog scene".into());
+						}
+					}
+					let document = self.backend.session().scene_document(scene_id)?;
+					if runtime::scene_io::load_data(&target)?.data != *document {
+						return Err(
+							"Scene path must contain the authored document; use Save As".into()
+						);
+					}
+				}
+				_ => {}
+			}
+			Ok(())
+		})();
+		preflight.map_err(|message| runtime::BackendError {
+			code: runtime::BackendErrorCode::CommandRejected,
+			message,
+			current_revision: Some(self.backend.session().revision()),
+		})?;
 		let receipt = self.backend.execute(request)?;
-		if receipt.changes.topology_changed {
+		// Relative paths are already domain-validated. Resolve filesystem access
+		// only at file operations; no fallible path read after a committed edit.
+		self.scene_path = self.asset_root.join(
+			self.backend
+				.session()
+				.project()
+				.scene_path(self.backend.session().active_scene_id())
+				.expect("active catalog entry"),
+		);
+		if receipt.changes.topology_changed || receipt.changes.full_resync {
 			self.cache_bounds();
 		}
 		Ok(receipt)
@@ -310,44 +438,166 @@ impl EditorWorkspace {
 		if self.backend.session().has_transaction() {
 			return Err("Commit or cancel the grouped edit before saving".into());
 		}
+		let path = self
+			.backend
+			.session()
+			.project()
+			.scene_path(self.backend.session().active_scene_id())?;
+		let output = resolve_output(&self.asset_root, path)?;
 		file_operation(
 			"save_scene",
-			runtime::scene_io::save_data(
-				&self.scene_path,
-				&self.backend.session().authored_document(),
-			),
+			runtime::scene_io::save_data(&output, &self.backend.session().authored_document()),
 		)?;
 		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
 		engine_logger::info!(target: "editor", "Scene saved: generation={}, revision={}", self.generation, self.backend.session().revision());
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
+
+	/// Compatibility API: calling reload explicitly discards workspace edits.
 	pub fn reload(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
+		self.reload_with_policy(revision, ReloadPolicy::DiscardUnsaved)
+	}
+
+	pub fn reload_with_policy(
+		&mut self,
+		revision: u64,
+		policy: ReloadPolicy,
+	) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
-		if self.backend.session().has_transaction() {
-			return Err("Commit or cancel the grouped edit before reloading".into());
+		if self.backend.session().has_transaction()
+			|| (self.backend.session().is_playing() && matches!(policy, ReloadPolicy::RequireClean))
+		{
+			return Err("Stop Play and finish grouped edits before reloading".into());
 		}
-		let project = if self.project_path.exists() {
-			ProjectData::load(&self.project_path)?
+		if matches!(policy, ReloadPolicy::RequireClean) && self.backend.session().is_dirty() {
+			return Err(
+				"Workspace contains unsaved edits; request discard_unsaved explicitly to reload"
+					.into(),
+			);
+		}
+		let next_kind = if matches!(self.workspace_kind, WorkspaceKind::ManifestBacked)
+			|| self.project_path.try_exists().map_err(|e| e.to_string())?
+		{
+			WorkspaceKind::ManifestBacked
 		} else {
-			self.backend.session().project().clone()
+			WorkspaceKind::StandaloneScene
 		};
-		let scene_path = resolve_existing(&self.asset_root, &project.startup_scene)?;
+		let project = match next_kind {
+			WorkspaceKind::ManifestBacked => {
+				file_operation("reload_project", ProjectData::load(&self.project_path))?
+			}
+			WorkspaceKind::StandaloneScene => self.backend.session().project().clone(),
+		};
+		let scene_path = resolve_existing(&self.asset_root, project.startup_scene_path()?)?;
 		let data = file_operation("reload_scene", runtime::scene_io::load_data(&scene_path))?.data;
-		self.backend
-			.replace_project_document(data, project)
+		let documents = load_project_documents(&self.asset_root, &project)?;
+		let mut candidate = runtime::EngineBuilder::new(data, project)
+			.with_scenes(documents)
+			.build()
 			.map_err(|e| e.to_string())?;
+		candidate
+			.supersede_revision(revision)
+			.map_err(|e| e.to_string())?;
+		let snapshot = candidate.snapshot().map_err(|e| e.to_string())?;
+		self.jobs.advance_generation().map_err(|e| e.to_string())?;
+		self.backend = candidate;
+		// The replacement owns a fresh journal and scene revision sequence. A
+		// new workspace generation also forces existing viewport caches to resync.
+		self.generation = NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed);
+		self.workspace_kind = next_kind;
 		self.scene_path = scene_path;
 		self.metadata.clear();
-		self.jobs.advance_generation().map_err(|e| e.to_string())?;
 		self.pending.clear();
 		self.bounds_seen.clear();
 		self.completions.clear();
 		self.completion_bytes = 0;
-		self.backend.clear_assets();
 		self.cache_bounds();
-		engine_logger::info!(target: "editor", "Scene reloaded: generation={}, revision={}", self.generation, self.backend.session().revision());
+		Ok(snapshot)
+	}
+
+	fn check_compound_capacity(&self) -> Result<(), String> {
+		if self.backend.session().revision().checked_add(2).is_none()
+			|| self.backend.change_cursor().checked_add(4).is_none()
+		{
+			return Err("Workspace revision/event space is exhausted".into());
+		}
+		Ok(())
+	}
+
+	pub fn register_scene(
+		&mut self,
+		path: &str,
+		revision: u64,
+	) -> Result<EditorSnapshotDto, String> {
+		self.check_revision(revision)?;
+		let resolved = resolve_existing(&self.asset_root, path)?;
+		for entry in self.backend.session().project().scenes.iter() {
+			if resolve_existing(&self.asset_root, entry.asset_path())
+				.ok()
+				.as_ref() == Some(&resolved)
+			{
+				return Err("Scene file is already registered".into());
+			}
+		}
+		let document =
+			file_operation("register_scene", runtime::scene_io::load_data(&resolved))?.data;
+		let id = SceneId::generate();
+		self.check_compound_capacity()?;
+		self.backend
+			.execute(EditorCommandRequest {
+				expected_revision: revision,
+				command: Command::AddScene {
+					id: id.clone(),
+					asset_path: path.into(),
+					document,
+				},
+			})
+			.map_err(|e| e.to_string())?;
+		self.backend
+			.mark_scene_saved_by_id(&id)
+			.map_err(|e| e.to_string())?;
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
+
+	pub fn save_scene_as(
+		&mut self,
+		path: &str,
+		revision: u64,
+	) -> Result<EditorSnapshotDto, String> {
+		self.check_revision(revision)?;
+		if self.backend.session().is_playing() || self.backend.session().has_transaction() {
+			return Err("Stop Play and finish grouped edits before saving a scene as".into());
+		}
+		self.check_compound_capacity()?;
+		let id = self.backend.session().active_scene_id().clone();
+		runtime::scene_catalog::SceneDescriptor::new(id.clone(), path)?;
+		let output = resolve_output(&self.asset_root, path)?;
+		if output.exists() {
+			return Err("Save As requires a new destination file".into());
+		}
+		for entry in self.backend.session().project().scenes.iter() {
+			if entry.id() != &id && entry.asset_path().eq_ignore_ascii_case(path) {
+				return Err("Scene path is already registered".into());
+			}
+		}
+		// An unsuccessful catalog commit may leave a new unreferenced file;
+		// the old file and authored state are preserved.
+		file_operation(
+			"save_scene_as",
+			runtime::scene_io::save_data(&output, &self.backend.session().authored_document()),
+		)?;
+		self.execute_receipt(EditorCommandRequest {
+			expected_revision: revision,
+			command: Command::ChangeScenePath {
+				scene_id: id,
+				asset_path: path.into(),
+			},
+		})
+			.map_err(|e| e.to_string())?;
+		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
+		self.backend.snapshot().map_err(|e| e.to_string())
+	}
+
 	pub fn save_project(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
 		if self.backend.session().has_transaction() || self.backend.session().is_playing() {
@@ -356,17 +606,23 @@ impl EditorWorkspace {
 			);
 		}
 		let project = self.backend.session().project();
-		if resolve_existing(&self.asset_root, &project.startup_scene)? != self.scene_path {
-			return Err("The configured startup scene must match the open scene; open that project scene before saving".into());
+		self.backend.session().validate_all_documents()?;
+		let mut files = HashSet::new();
+		for entry in project.scenes.iter() {
+			if !files.insert(resolve_existing(&self.asset_root, entry.asset_path())?) {
+				return Err("Catalog scenes resolve to the same file".into());
+			}
 		}
-		project.validate_scene(&self.backend.session().authored_document())?;
 		file_operation("save_project", atomic_json(&self.project_path, project))?;
+		// The manifest now exists even if marking its saved baseline later fails.
+		self.workspace_kind = WorkspaceKind::ManifestBacked;
 		self.backend
 			.mark_project_saved()
 			.map_err(|e| e.to_string())?;
 		engine_logger::info!(target:"editor","Project settings saved: generation={}, revision={}",self.generation,self.backend.session().revision());
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
+
 	/// Capture validated saved inputs under the workspace lock. Compilation and
 	/// installation run after the caller releases that lock.
 	pub fn prepare_build(&self, revision: u64) -> Result<compiler::PreparedProject, String> {
@@ -382,14 +638,16 @@ impl EditorWorkspace {
 		if disk != *session.project() {
 			return Err("Project settings changed on disk; reload before building".into());
 		}
-		let scene = resolve_existing(&self.asset_root, &disk.startup_scene)?;
-		if scene != self.scene_path
-			|| runtime::scene_io::load_data(&scene)?.data != *session.authored_document()
-		{
-			return Err("Startup scene changed on disk; reload before building".into());
+		for entry in disk.scenes.iter() {
+			let scene = resolve_existing(&self.asset_root, entry.asset_path())?;
+			let document = self.backend.session().scene_document(entry.id())?;
+			if runtime::scene_io::load_data(&scene)?.data != *document {
+				return Err("Project scene changed on disk; reload before building".into());
+			}
 		}
 		compiler::prepare_project(&disk, &self.asset_root)
 	}
+
 	pub fn check_revision(&self, revision: u64) -> Result<(), String> {
 		if revision != self.backend.session().revision() {
 			return Err(format!(
@@ -399,6 +657,7 @@ impl EditorWorkspace {
 		}
 		Ok(())
 	}
+
 	pub fn import_model(
 		&mut self,
 		path: &str,
@@ -513,9 +772,33 @@ impl EditorWorkspace {
 		engine_logger::info!(target: "editor", "Prefab loaded: generation={}, entities={count}", self.generation);
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
+
+	fn generate_wrokspace(
+		asset_root: PathBuf,
+		scene_path: PathBuf,
+		project_path: PathBuf,
+		workspace_kind: WorkspaceKind,
+		backend: Engine,
+		metadata: AssetManager,
+		jobs: AssetImportService,
+	) -> EditorWorkspace {
+		Self {
+			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
+			backend,
+			asset_root,
+			scene_path,
+			project_path,
+			workspace_kind,
+			metadata,
+			jobs,
+			pending: HashMap::new(),
+			bounds_seen: HashSet::new(),
+			completions: VecDeque::new(),
+			completion_bytes: 0,
+		}
+	}
 }
-// String errors can contain user-authored JSON or absolute paths. Keep them in the
-// command response; persist only a stable operation category at the owning boundary.
+
 fn file_operation<T>(operation: &'static str, result: Result<T, String>) -> Result<T, String> {
 	result.inspect_err(|_| {
 		engine_logger::error!(target: "editor", "Editor file operation failed: operation={operation}");
@@ -609,4 +892,35 @@ fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String>
 		return Err(error.to_string());
 	}
 	Ok(())
+}
+
+fn load_project_documents(
+	root: &Path,
+	project: &ProjectData,
+) -> Result<Vec<(SceneId, runtime::scene_data::SceneData)>, String> {
+	let mut seen = HashSet::new();
+	let mut documents = Vec::new();
+	let mut retained_bytes = 0usize;
+	for entry in project.scenes.iter() {
+		let path = resolve_existing(root, entry.asset_path())?;
+		if !seen.insert(path.clone()) {
+			return Err("Catalog entries resolve to the same scene file".into());
+		}
+		let document = file_operation("load_scene", runtime::scene_io::load_data(&path))?.data;
+		retained_bytes = retained_bytes.saturating_add(
+			document
+				.to_json()?
+				.len()
+				.saturating_mul(4)
+				.saturating_add(std::mem::size_of::<runtime::scene_data::SceneData>()),
+		);
+		if retained_bytes > runtime::editor::EditorSession::MAX_RETAINED_DOCUMENT_BYTES {
+			return Err("Retained scene document byte budget exceeded".into());
+		}
+		project.validate_scene_for(entry.id(), &document)?;
+		if entry.id() != &project.startup_scene_id {
+			documents.push((entry.id().clone(), document));
+		}
+	}
+	Ok(documents)
 }

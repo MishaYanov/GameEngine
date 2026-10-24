@@ -139,3 +139,52 @@ fn typed_component_commands_reject_unknown_fields_and_malformed_component_shapes
 		);
 	}
 }
+
+#[test]
+fn scene_lifecycle_commands_roundtrip_stable_ids_and_reject_extra_transport_fields() {
+	let document = json!({
+		"schema_version":3,"entities":[],"bindings":{},"lights":[],
+		"camera":{"position":[0,0,3],"yaw":0,"pitch":0,"vertical_fov":1,"near":0.1,"far":100}
+	});
+	for command in [
+		json!({"type":"add_scene","id":"secondary","asset_path":"scenes/secondary.json","document":document}),
+		json!({"type":"switch_scene","scene_id":"secondary"}),
+		json!({"type":"remove_scene","scene_id":"secondary"}),
+		json!({"type":"set_startup_scene","scene_id":"secondary"}),
+		json!({"type":"change_scene_path","scene_id":"secondary","asset_path":"scenes/renamed.json"}),
+	] {
+		let valid = json!({"expected_revision":42,"command":command});
+		let parsed: EditorCommandRequest = serde_json::from_value(valid.clone()).unwrap();
+		let encoded = serde_json::to_value(&parsed).unwrap();
+		let id_field = if command["type"] == "add_scene" {
+			"id"
+		} else {
+			"scene_id"
+		};
+		assert_eq!(encoded["command"][id_field], "secondary");
+		let decoded: EditorCommandRequest = serde_json::from_value(encoded).unwrap();
+		assert_eq!(decoded.command, parsed.command);
+		assert_eq!(decoded.expected_revision, 42);
+		let mut extra = valid;
+		extra["command"]
+			.as_object_mut()
+			.unwrap()
+			.insert("unexpected".into(), json!(true));
+		assert!(serde_json::from_value::<EditorCommandRequest>(extra).is_err());
+	}
+	for command in [
+		json!({"type":"switch_scene"}),
+		json!({"type":"switch_scene","scene_id":42}),
+		json!({"type":"add_scene","id":"secondary","asset_path":"scenes/secondary.json"}),
+		json!({"type":"change_scene_path","scene_id":"secondary"}),
+		json!({"type":"change_scene_path","scene_id":"two words","asset_path":"scenes/renamed.json"}),
+		json!({"type":"set_startup_scene","scene_id":""}),
+	] {
+		assert!(
+			serde_json::from_value::<EditorCommandRequest>(
+				json!({"expected_revision":42,"command":command})
+			)
+				.is_err()
+		);
+	}
+}

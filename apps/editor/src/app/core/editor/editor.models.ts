@@ -1,3 +1,34 @@
+export type SceneId = string;
+
+export interface SceneDescriptor {
+    readonly id: SceneId;
+    readonly asset_path: string;
+}
+
+export type BehaviorSpec =
+    | {
+    readonly kind: 'controlled_move';
+    readonly entity: string;
+    readonly speed: number;
+    readonly space: 'local' | 'world'
+}
+    | { readonly kind: 'spin'; readonly entity: string; readonly angular_velocity: Vec3 };
+
+export interface ProjectData {
+    readonly schema_version: 2;
+    readonly name: string;
+    readonly scenes: readonly SceneDescriptor[];
+    readonly startup_scene_id: SceneId;
+    readonly fixed_hz: number;
+    readonly max_catchup_steps: number;
+    readonly behaviors: readonly { readonly scene_id: SceneId; readonly behavior: BehaviorSpec }[];
+}
+
+export interface SceneState extends SceneDescriptor {
+    readonly loaded: boolean;
+    readonly dirty: boolean;
+}
+
 /** Wire contracts mirror bridge::editor. Rust validates every incoming value. */
 export type EntityKey = string;
 export type Vec2 = readonly [number, number];
@@ -87,6 +118,18 @@ export interface SnapSettings {
 /** Intent has no dependency on key bindings, panels, tools, or mouse buttons. */
 export type EditorCommand =
     | {
+    readonly type: 'add_scene';
+    readonly id: SceneId;
+    readonly asset_path: string;
+    readonly document: SceneDocument
+}
+    | { readonly type: 'switch_scene'; readonly scene_id: SceneId }
+    | { readonly type: 'remove_scene'; readonly scene_id: SceneId }
+    | { readonly type: 'set_startup_scene'; readonly scene_id: SceneId }
+    | { readonly type: 'change_scene_path'; readonly scene_id: SceneId; readonly asset_path: string }
+    | { readonly type: 'set_project'; readonly project: ProjectData }
+    | { readonly type: 'set_entity_input'; readonly entity: EntityKey; readonly movement: Vec3 }
+    | {
     readonly type: 'pick_selection';
     readonly pixel: Vec2;
     readonly extent: Vec2;
@@ -147,6 +190,10 @@ export interface EditorCommandRequest {
 }
 
 export interface EditorSnapshot {
+    readonly active_scene_id: SceneId;
+    readonly project: ProjectData;
+    readonly project_dirty: boolean;
+    readonly scenes: readonly SceneState[];
     readonly revision: number;
     readonly scene_revision: number;
     readonly document: SceneDocument;

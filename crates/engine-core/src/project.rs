@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	EntityKey,
-	scene_data::{SceneData, validate_model_path},
+	scene_catalog::{SceneCatalog, SceneDescriptor, SceneId},
+	scene_data::SceneData,
 };
 
-pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_SCHEMA_VERSION: u32 = 2;
 pub const MAX_PROJECT_BYTES: usize = 1024 * 1024;
 pub const MAX_BEHAVIORS: usize = 1024;
 
@@ -82,16 +83,32 @@ impl BehaviorSpec {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SceneBehavior {
+	pub scene_id: SceneId,
+	pub behavior: BehaviorSpec,
+}
+impl SceneBehavior {
+	pub fn entity(&self) -> &EntityKey {
+		self.behavior.entity()
+	}
+	pub fn validate(&self) -> Result<(), String> {
+		self.behavior.validate()
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectData {
 	pub schema_version: u32,
 	pub name: String,
-	pub startup_scene: String,
+	pub scenes: SceneCatalog,
+	pub startup_scene_id: SceneId,
 	#[serde(default = "default_hz")]
 	pub fixed_hz: u32,
 	#[serde(default = "default_catchup")]
 	pub max_catchup_steps: u32,
 	#[serde(default)]
-	pub behaviors: Vec<BehaviorSpec>,
+	pub behaviors: Vec<SceneBehavior>,
 }
 
 fn default_hz() -> u32 {
@@ -109,10 +126,26 @@ impl ProjectData {
 		startup_scene: impl Into<String>,
 		scene: &SceneData,
 	) -> Result<Self, String> {
+		Self::for_scene_with_id(name, SceneId::generate(), startup_scene, scene)
+	}
+
+	/// Supply an existing identity, or a stable identity for a transient tool
+	/// document. Newly authored scenes normally use `for_scene` instead.
+	pub fn for_scene_with_id(
+		name: impl Into<String>,
+		id: SceneId,
+		startup_scene: impl Into<String>,
+		scene: &SceneData,
+	) -> Result<Self, String> {
+		let mut scenes = SceneCatalog::default();
+		scenes
+			.insert(SceneDescriptor::new(id.clone(), startup_scene)?)
+			.map_err(|e| e.to_string())?;
 		let project = Self {
 			schema_version: PROJECT_SCHEMA_VERSION,
 			name: name.into(),
-			startup_scene: startup_scene.into(),
+			scenes,
+			startup_scene_id: id,
 			fixed_hz: default_hz(),
 			max_catchup_steps: default_catchup(),
 			behaviors: Vec::new(),
@@ -134,10 +167,11 @@ impl ProjectData {
 		{
 			return Err("Project name must contain visible text, at most 80 bytes, and no control characters".into());
 		}
-		validate_model_path(&self.startup_scene)
-			.map_err(|error| format!("Startup scene: {error}"))?;
-		if !self.startup_scene.to_ascii_lowercase().ends_with(".json") {
-			return Err("Startup scene must name an asset-relative JSON scene".into());
+		self.scenes
+			.get(&self.startup_scene_id)
+			.map_err(|e| e.to_string())?;
+		for entry in self.scenes.iter() {
+			SceneDescriptor::new(entry.id().clone(), entry.asset_path())?;
 		}
 		if self.fixed_hz == 0
 			|| self.fixed_hz > 1000
@@ -152,6 +186,9 @@ impl ProjectData {
 			return Err(format!("Project exceeds {MAX_BEHAVIORS} behaviors"));
 		}
 		for (index, behavior) in self.behaviors.iter().enumerate() {
+			self.scenes
+				.get(&behavior.scene_id)
+				.map_err(|e| e.to_string())?;
 			behavior
 				.validate()
 				.map_err(|error| format!("Behavior {index}: {error}"))?;
@@ -161,15 +198,43 @@ impl ProjectData {
 		Ok(())
 	}
 
+	pub fn startup_scene_path(&self) -> Result<&str, String> {
+		self.scene_path(&self.startup_scene_id)
+	}
+	pub fn scene_path(&self, id: &SceneId) -> Result<&str, String> {
+		self.scenes
+			.get(id)
+			.map(|s| s.asset_path())
+			.map_err(|e| e.to_string())
+	}
+	pub fn behaviors_for<'a>(
+		&'a self,
+		id: &'a SceneId,
+	) -> impl Iterator<Item=&'a BehaviorSpec> + 'a {
+		self.behaviors
+			.iter()
+			.filter(move |b| &b.scene_id == id)
+			.map(|b| &b.behavior)
+	}
+	pub fn add_behavior(&mut self, behavior: BehaviorSpec) {
+		self.behaviors.push(SceneBehavior {
+			scene_id: self.startup_scene_id.clone(),
+			behavior,
+		});
+	}
 	pub fn validate_scene(&self, scene: &SceneData) -> Result<(), String> {
+		self.validate_scene_for(&self.startup_scene_id, scene)
+	}
+	pub fn validate_scene_for(&self, id: &SceneId, scene: &SceneData) -> Result<(), String> {
 		self.validate()?;
+		self.scenes.get(id).map_err(|e| e.to_string())?;
 		scene.validate()?;
 		let keys: HashSet<_> = scene
 			.entities
 			.iter()
 			.map(|entity| entity.key.as_str())
 			.collect();
-		for (index, behavior) in self.behaviors.iter().enumerate() {
+		for (index, behavior) in self.behaviors_for(id).enumerate() {
 			if !keys.contains(behavior.entity().as_str()) {
 				return Err(format!(
 					"Behavior {index} targets missing entity {:?}",
@@ -183,6 +248,14 @@ impl ProjectData {
 	pub fn from_json(source: &str) -> Result<Self, String> {
 		if source.len() > MAX_PROJECT_BYTES {
 			return Err("Project JSON exceeds 1 MiB".into());
+		}
+		let header: crate::project_format::VersionHeader =
+			serde_json::from_str(source).map_err(|e| format!("Invalid project JSON: {e}"))?;
+		if header.schema_version != PROJECT_SCHEMA_VERSION {
+			return Err(format!(
+				"Unsupported project schema version: {}",
+				header.schema_version
+			));
 		}
 		let value: Self = serde_json::from_str(source)
 			.map_err(|error| format!("Invalid project JSON: {error}"))?;

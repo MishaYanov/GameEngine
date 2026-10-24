@@ -52,9 +52,11 @@ pub fn prepare_project(
 	}
 	let asset_root = asset_root.canonicalize().map_err(|e| e.to_string())?;
 	let files = prepare_assets(&asset_root).map_err(|e| format!("Asset preflight failed: {e}"))?;
-	let scene = read_authored_scene(&asset_root, &project.startup_scene)?;
-	project.validate_scene(&scene)?;
-	validate_model_references(&scene, &asset_root, &files)?;
+	for entry in project.scenes.iter() {
+		let scene = read_authored_scene(&asset_root, entry.asset_path())?;
+		project.validate_scene_for(entry.id(), &scene)?;
+		validate_model_references(&scene, &asset_root, &files)?;
+	}
 	let total_bytes = files.iter().map(|entry| entry.bytes).sum();
 	Ok(PreparedProject {
 		project: project.clone(),
@@ -178,13 +180,14 @@ pub fn install_prepared_project(
 			path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
 		)?;
 		copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
-		let copied_scene =
-			read_authored_scene(&path.join("assets"), &prepared.project.startup_scene)
+		for entry in prepared.project.scenes.iter() {
+			let copied_scene = read_authored_scene(&path.join("assets"), entry.asset_path())
 				.map_err(io::Error::other)?;
-		prepared
-			.project
-			.validate_scene(&copied_scene)
-			.map_err(io::Error::other)?;
+			prepared
+				.project
+				.validate_scene_for(entry.id(), &copied_scene)
+				.map_err(io::Error::other)?;
+		}
 		let mut project_json = prepared.project.to_json().map_err(io::Error::other)?;
 		project_json.push('\n');
 		fs::write(path.join("project.json"), project_json)?;
@@ -209,18 +212,18 @@ pub fn install_prepared_project(
 fn legacy_starter_project(name: &str, scene: &SceneData) -> Result<ProjectData, String> {
 	let mut project = ProjectData::for_scene(name, "scenes/robots.json", scene)?;
 	if let Some(entity) = scene.bindings.get("robot_a") {
-		project.behaviors.push(BehaviorSpec::ControlledMove {
+		project.add_behavior(BehaviorSpec::ControlledMove {
 			entity: entity.clone(),
 			speed: 1.0,
 			space: BehaviorSpace::World,
 		});
-		project.behaviors.push(BehaviorSpec::Spin {
+		project.add_behavior(BehaviorSpec::Spin {
 			entity: entity.clone(),
 			angular_velocity: [0.6, 0.9, 0.0],
 		});
 	}
 	if let Some(entity) = scene.bindings.get("robot_b") {
-		project.behaviors.push(BehaviorSpec::Spin {
+		project.add_behavior(BehaviorSpec::Spin {
 			entity: entity.clone(),
 			angular_velocity: [-0.5, 0.75, 0.2],
 		});

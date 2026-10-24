@@ -1,5 +1,7 @@
 pub mod assets;
-pub use engine_core::{asset_jobs, asset_registry, events, project, simulation_session, world};
+pub use engine_core::{
+	asset_jobs, asset_registry, events, project, scene_catalog, simulation_session, world,
+};
 pub mod bounds;
 pub mod camera;
 pub mod camera_controller;

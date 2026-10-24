@@ -6,6 +6,10 @@ this state. Current verification is recorded below; the earlier [steps 21–35](
 verify this batch. Existing project guides may still describe the earlier architecture: this focused update does not
 broadly reconcile them.
 
+Current follow-up: [project lifecycle and multi-scene authoring](project-lifecycle.md) supersedes this milestone�s
+project-v1 and proposed steps 46�47 descriptions. The prompt below preserves the original handoff; inspect current
+source before following it.
+
 ## Current authoring-to-player workflow
 
 ```text

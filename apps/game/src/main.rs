@@ -311,12 +311,10 @@ impl GameApp {
 			PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
 		};
 
-		let startup_scene = self
-			.project
-			.as_ref()
-			.map_or("scenes/robots.json", |project| {
-				project.startup_scene.as_str()
-			});
+		let startup_scene = match self.project.as_ref() {
+			Some(project) => project.startup_scene_path()?,
+			None => "scenes/robots.json",
+		};
 		let scene_path = asset_root.join(startup_scene);
 		let mut loaded = scene_io::load(&scene_path, &asset_root, &renderer)?;
 		let mut editor = Self::prepare_editor(&mut loaded)?;
@@ -563,9 +561,10 @@ impl GameApp {
 			.map(ProjectData::load)
 			.transpose()?
 			.or_else(|| self.project.clone());
-		let path = project
-			.as_ref()
-			.map_or(old_path, |project| asset_root.join(&project.startup_scene));
+		let path = match project.as_ref() {
+			Some(project) => asset_root.join(project.startup_scene_path()?),
+			None => old_path,
+		};
 		let renderer = self
 			.renderer
 			.as_ref()

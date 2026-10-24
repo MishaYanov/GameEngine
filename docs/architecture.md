@@ -1,28 +1,36 @@
 # Workspace architecture
 
-The intended product is one Angular editor with controls and a game pane. Runtime exposes editing/game logic, bridge
-defines transport, and Tauri supplies project/native ownership. This batch implements integration APIs and engine
+The intended product is one Angular editor with controls and a game pane. engine-core owns CPU editing/game logic,
+runtime supplies GPU adapters, bridge re-exports transport contracts, and Tauri supplies project/native ownership. This
+batch implements integration APIs and engine
 foundations, not a finished editor layout. Start with [usage](usage.md) and
 the [steps 21–35 learning report](editor-steps-21-35.md).
 
+Current project schema 2 and editor protocol 2 support retained multi-scene authoring.
+See [project lifecycle](project-lifecycle.md) for the current contract; earlier step reports describe historical
+milestones.
+
 ## Projects and boundaries
 
-| Source                     | Responsibility                                                                                                | Guide                                   |
-|----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------|
-| apps/editor                | Angular22 models/service/directive; UI layout and key bindings belong here                                    | [Frontend](apps/editor/README.md)       |
-| apps/editor-host/src-tauri | Project CPU workspace, async IPC, on-demand Windows child viewport                                            | [Host](apps/editor-host/README.md)      |
-| crates/bridge              | Editor/engine DTOs, capabilities, input-independent command contracts                                         | [Bridge](crates/bridge/README.md)       |
-| crates/runtime             | EditorSession, schema3, history/transactions, hierarchy/prefabs, camera, static imports, simulation/collision | [Runtime](crates/runtime/README.md)     |
-| crates/renderer            | WindowRenderer, lights, actual GPU queries, batching/instancing, device/presentation lifecycle                | [Renderer](crates/renderer/README.md)   |
-| apps/game                  | Normal standalone player; native editor demo requires explicit opt-in                                         | [Game](apps/game/README.md)             |
-| apps/admin-dashboard       | Separate logs/process/jobs/board/source-generation tool                                                       | [Admin](apps/admin-dashboard/README.md) |
-| compiler                   | Builds/installs executable plus validated asset tree                                                          | [Compiler](compiler/README.md)          |
-| crates/logger              | Process diagnostics and bounded persistent records                                                            | [Logger](crates/logger/README.md)       |
+| Source                     | Responsibility                                                                                                               | Guide                                     |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------|
+| apps/editor                | Angular22 models/service/directive; UI layout and key bindings belong here                                                   | [Frontend](apps/editor/README.md)         |
+| apps/editor-host/src-tauri | Project CPU workspace, async IPC, on-demand Windows child viewport                                                           | [Host](apps/editor-host/README.md)        |
+| crates/bridge              | Editor/engine DTOs, capabilities, input-independent command contracts                                                        | [Bridge](crates/bridge/README.md)         |
+| crates/engine-core         | CPU coordinator, commands/history, project/scene documents, shared simulation, world/collision caches and bounded asset jobs | [Project lifecycle](project-lifecycle.md) |
+| apps/headless              | CPU-only project/scene execution and bounded replay                                                                          | [Backend handoff](project3-handoff.md)    |
+| crates/runtime             | Core re-exports, GPU scene synchronization, asset import/cache, native SceneEditor adapter and GraphicsProbe                 | [Runtime](crates/runtime/README.md)       |
+| crates/renderer            | WindowRenderer, lights, actual GPU queries, batching/instancing, device/presentation lifecycle                               | [Renderer](crates/renderer/README.md)     |
+| apps/game                  | Development learning harness from source; installed projects use Player                                                      | [Game](apps/game/README.md)               |
+| apps/admin-dashboard       | Separate logs/process/jobs/board/source-generation tool                                                                      | [Admin](apps/admin-dashboard/README.md)   |
+| compiler                   | Builds/installs executable plus validated asset tree                                                                         | [Compiler](compiler/README.md)            |
+| crates/logger              | Process diagnostics and bounded persistent records                                                                           | [Logger](crates/logger/README.md)         |
 
 ## Editor data flow
 
 Angular EditorService publishes authoritative signals and queues typed operations. EditorCommandRequest includes
-expected_revision; native EditorWorkspace delegates to runtime::editor::EditorSession for validation/mutation.
+expected_revision; native EditorWorkspace delegates to the engine-core Engine/EditorSession coordinator for
+validation/mutation.
 Snapshot/capabilities tell widgets what is available. Input notifications do not become edits unless the frontend owner
 maps them into intent. Stale requests fail; recovery refreshes memory rather than reloading disk or silently replaying
 an edit.
@@ -32,7 +40,7 @@ components or raw Vulkan objects. Command revision, rendered scene revision and 
 purposes and are not a single interchangeable counter.
 
 The host initializes CPU state and logging without eager GPU construction. A cached EngineStatusDto is filled on demand
-by Engine::probe_status and Renderer::probe_info, which inspect a Vulkan instance and physical-device information
+by GraphicsProbe::probe_status and Renderer::probe_info, which inspect a Vulkan instance and physical-device information
 without creating a logical device. This reports probe information, not runtime health. The viewport worker owns the
 actual presentation GPU lifetime rather than retaining a second permanent headless engine device.
 
@@ -47,9 +55,9 @@ The render worker owns native/Vulkan state and reconciles scene/cache changes. I
 inactive Play input need not force continuous work. Parent close, minimization, bounds, DPI, attach/detach and worker
 shutdown are explicit lifecycle concerns, not proof of interactive correctness.
 
-The older native SceneEditor/panels are a legacy example under GAME_ENGINE_NATIVE_EDITOR_DEMO=1. Normal game execution
-is overlay-free and does not create another editor UI fork. The Angular/Tauri integration and that historical demo have
-different command/history ownership.
+The source game defaults to Development, preserving existing native controls/panels/gizmos through a core-delegating
+SceneEditor adapter. Installed projects default to Player; explicit --development/--player flags select mode. The
+Angular app remains the future product editor.
 
 ## Scene, simulation, and rendering
 

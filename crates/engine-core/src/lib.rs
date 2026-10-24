@@ -13,6 +13,8 @@ pub mod events;
 pub mod input;
 pub mod picking;
 pub mod project;
+pub mod project_format;
+pub mod scene_catalog;
 pub mod scene_data;
 pub mod simulation;
 pub mod simulation_session;

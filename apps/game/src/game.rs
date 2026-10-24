@@ -33,7 +33,7 @@ pub(crate) fn legacy_project(
 			.key(right)
 			.ok_or("Legacy right robot has no persistent key")?
 			.clone();
-		project.behaviors = vec![
+		for behavior in [
 			BehaviorSpec::ControlledMove {
 				entity: left.clone(),
 				speed: 1.0,
@@ -47,7 +47,9 @@ pub(crate) fn legacy_project(
 				entity: right,
 				angular_velocity: [-0.5, 0.75, 0.2],
 			},
-		];
+		] {
+			project.add_behavior(behavior);
+		}
 	}
 	project.validate_scene(&data)?;
 	Ok(project)
@@ -85,8 +87,7 @@ impl RobotGame {
 		right_robot: EntityId,
 	) -> Result<Self, String> {
 		let controlled = project
-			.behaviors
-			.iter()
+			.behaviors_for(&project.startup_scene_id)
 			.filter_map(|behavior| match behavior {
 				BehaviorSpec::ControlledMove { entity, .. } => Some(entity.clone()),
 				_ => None,

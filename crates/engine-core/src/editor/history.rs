@@ -1,6 +1,7 @@
 use crate::{
 	EntityKey,
 	project::ProjectData,
+	scene_catalog::SceneId,
 	scene_data::{CameraData, EntityData, LightData, SceneData},
 };
 use std::{
@@ -20,6 +21,7 @@ struct Change {
 	after: Option<(usize, EntityData)>,
 }
 pub(super) struct Patch {
+	scene_id: SceneId,
 	changes: Vec<Change>,
 	project: Option<(ProjectData, ProjectData)>,
 	camera: Option<(CameraData, CameraData)>,
@@ -33,6 +35,11 @@ pub(super) struct Patch {
 	_label: String,
 }
 impl Patch {
+	pub fn in_scene(mut self, id: SceneId) -> Self {
+		self.bytes = self.bytes.saturating_add(id.as_str().len());
+		self.scene_id = id;
+		self
+	}
 	pub fn between(
 		before: &SceneData,
 		after: &SceneData,
@@ -130,7 +137,7 @@ impl Patch {
 			for project in [a, b] {
 				bytes = bytes
 					.saturating_add(project.name.capacity())
-					.saturating_add(project.startup_scene.capacity())
+					.saturating_add(project.to_json().map_or(0, |s| s.len().saturating_mul(4)))
 					.saturating_add(
 						project
 							.behaviors
@@ -143,6 +150,7 @@ impl Patch {
 			}
 		}
 		Ok(Self {
+			scene_id: project_before.startup_scene_id.clone(),
 			project,
 			changes,
 			camera,
@@ -265,7 +273,7 @@ impl Patch {
 		} else {
 			current_project
 		};
-		project.validate_scene(&next)?;
+		project.validate_scene_for(&self.scene_id, &next)?;
 		Ok((next, project.clone(), selection.clone()))
 	}
 }
@@ -276,6 +284,42 @@ pub(super) struct History {
 	bytes: usize,
 }
 impl History {
+	pub fn target_scene(&self, redo: bool) -> Option<&SceneId> {
+		if redo {
+			self.redo.last()
+		} else {
+			self.undo.back()
+		}
+			.map(|p| &p.scene_id)
+	}
+	pub fn retained_scene_ids(&self) -> HashSet<SceneId> {
+		let mut ids = HashSet::new();
+		for patch in self.undo.iter().chain(self.redo.iter()) {
+			ids.insert(patch.scene_id.clone());
+			if let Some((a, b)) = &patch.project {
+				ids.extend(
+					a.scenes
+						.iter()
+						.chain(b.scenes.iter())
+						.map(|s| s.id().clone()),
+				);
+			}
+		}
+		ids
+	}
+	pub fn preview_restore(
+		&self,
+		current: &SceneData,
+		project: &ProjectData,
+		redo: bool,
+	) -> Result<Option<(SceneData, ProjectData, Vec<EntityKey>)>, String> {
+		let record = if redo {
+			self.redo.last()
+		} else {
+			self.undo.back()
+		};
+		record.map(|r| r.apply(current, project, redo)).transpose()
+	}
 	pub fn retain_entity_keys(&self, keys: &mut HashSet<EntityKey>) {
 		for patch in self.undo.iter().chain(self.redo.iter()) {
 			for change in &patch.changes {

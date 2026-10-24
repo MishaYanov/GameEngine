@@ -3,6 +3,7 @@ use engine_core::{
 	Bounds3, Engine, EngineBuilder,
 	command::{EditorCommandDto, EditorCommandRequest},
 	project::{MAX_PROJECT_BYTES, ProjectData},
+	scene_catalog::SceneId,
 	scene_data::{MAX_SCENE_BYTES, SceneData, validate_model_path},
 };
 use serde::{
@@ -250,9 +251,14 @@ fn validate_elapsed(elapsed: f64) -> Result<(), String> {
 fn run(options: Options) -> Result<Summary, String> {
 	let started = Instant::now();
 	let budget = Duration::from_millis(options.budget_ms.unwrap_or(30_000));
-	let (project, parsed) = source(&options)?;
+	let Source {
+		project,
+		parsed,
+		documents,
+	} = source(&options)?;
 	let source_schema = parsed.source_schema_version;
 	let mut engine = EngineBuilder::new(parsed.data, project)
+		.with_scenes(documents)
 		.build()
 		.map_err(|e| e.to_string())?;
 	let mut measures = Measurements::default();
@@ -409,9 +415,12 @@ fn run(options: Options) -> Result<Summary, String> {
 	}
 	Ok(summary)
 }
-fn source(
-	options: &Options,
-) -> Result<(ProjectData, engine_core::scene_data::ParsedScene), String> {
+struct Source {
+	project: ProjectData,
+	parsed: engine_core::scene_data::ParsedScene,
+	documents: Vec<(SceneId, SceneData)>,
+}
+fn source(options: &Options) -> Result<Source, String> {
 	if let Some(path) = &options.project {
 		let manifest = path
 			.canonicalize()
@@ -426,9 +435,35 @@ fn source(
 		if !root.is_dir() {
 			return Err("Asset root must be a directory".into());
 		}
-		let scene = contained(&root, &project.startup_scene)?;
-		let parsed = engine_core::scene_data::parse_json(&read_bounded(&scene, MAX_SCENE_BYTES)?)?;
-		return Ok((project, parsed));
+		let mut parsed = None;
+		let mut documents = Vec::new();
+		let mut paths = HashSet::new();
+		let mut document_bytes = 0usize;
+		for entry in project.scenes.iter() {
+			let path = contained(&root, entry.asset_path())?;
+			if !paths.insert(path.clone()) {
+				return Err("Scene paths resolve to the same file".into());
+			}
+			let document =
+				engine_core::scene_data::parse_json(&read_bounded(&path, MAX_SCENE_BYTES)?)?;
+			project.validate_scene_for(entry.id(), &document.data)?;
+			document_bytes = document_bytes
+				.saturating_add(document.data.to_json()?.len().saturating_mul(4))
+				.saturating_add(std::mem::size_of::<SceneData>());
+			if document_bytes > engine_core::editor::EditorSession::MAX_RETAINED_DOCUMENT_BYTES {
+				return Err("Retained scene document byte budget exceeded".into());
+			}
+			if entry.id() == &project.startup_scene_id {
+				parsed = Some(document);
+			} else {
+				documents.push((entry.id().clone(), document.data));
+			}
+		}
+		return Ok(Source {
+			project,
+			parsed: parsed.ok_or("Startup scene is missing")?,
+			documents,
+		});
 	}
 	let scene = options
 		.scene
@@ -458,10 +493,18 @@ fn source(
 		.ok_or("Scene reference must be valid UTF-8")?
 		.replace('\\', "/");
 	let parsed = engine_core::scene_data::parse_json(&read_bounded(&scene, MAX_SCENE_BYTES)?)?;
-	Ok((
-		ProjectData::for_scene("Headless scene", relative, &parsed.data)?,
+	// A standalone run has no persisted catalog. Its transient identity must
+	// remain stable so identical inputs produce comparable diagnostic hashes.
+	Ok(Source {
+		project: ProjectData::for_scene_with_id(
+			"Headless scene",
+			SceneId::new("headless-scene")?,
+			relative,
+			&parsed.data,
+		)?,
 		parsed,
-	))
+		documents: Vec::new(),
+	})
 }
 fn contained(root: &Path, relative: &str) -> Result<PathBuf, String> {
 	validate_model_path(relative)?;

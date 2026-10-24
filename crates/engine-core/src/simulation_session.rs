@@ -71,7 +71,10 @@ impl GameModuleFactory for ConfiguredBehaviorFactory {
 	fn create(&self, project: &ProjectData) -> Result<Box<dyn GameModule>, String> {
 		project.validate()?;
 		Ok(Box::new(ProjectModule {
-			behaviors: project.behaviors.clone(),
+			behaviors: project
+				.behaviors_for(&project.startup_scene_id)
+				.cloned()
+				.collect(),
 		}))
 	}
 }
@@ -224,8 +227,7 @@ impl SimulationSession {
 	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
 		if !self
 			.project
-			.behaviors
-			.iter()
+			.behaviors_for(&self.project.startup_scene_id)
 			.any(|b| matches!(b,BehaviorSpec::ControlledMove{entity:target,..}if target==entity))
 		{
 			return Err("Input target has no configured controlled movement behavior".into());
@@ -249,8 +251,7 @@ impl SimulationSession {
 		let movement = normalized_input(movement)?;
 		let targets = self
 			.project
-			.behaviors
-			.iter()
+			.behaviors_for(&self.project.startup_scene_id)
 			.filter_map(|b| match b {
 				BehaviorSpec::ControlledMove { entity, .. } => Some(entity.clone()),
 				_ => None,

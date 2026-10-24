@@ -49,9 +49,12 @@ pub struct CommandReceipt {
 	pub changes: WorldChange,
 	pub state_changed: bool,
 	pub project_changed: bool,
+	pub active_scene_id: crate::scene_catalog::SceneId,
+	pub affected_scenes: Vec<crate::scene_catalog::SceneId>,
 }
 
 pub struct EngineBuilder {
+	documents: Vec<(crate::scene_catalog::SceneId, SceneData)>,
 	scene: SceneData,
 	project: ProjectData,
 	module_factory: Arc<dyn GameModuleFactory>,
@@ -60,11 +63,19 @@ pub struct EngineBuilder {
 impl EngineBuilder {
 	pub fn new(scene: SceneData, project: ProjectData) -> Self {
 		Self {
+			documents: Vec::new(),
 			scene,
 			project,
 			module_factory: Arc::new(ConfiguredBehaviorFactory),
 			asset_limits: AssetRegistryLimits::default(),
 		}
+	}
+	pub fn with_scenes(
+		mut self,
+		documents: Vec<(crate::scene_catalog::SceneId, SceneData)>,
+	) -> Self {
+		self.documents = documents;
+		self
 	}
 	pub fn module_factory(mut self, factory: Arc<dyn GameModuleFactory>) -> Self {
 		self.module_factory = factory;
@@ -83,6 +94,7 @@ impl EngineBuilder {
 		self.project.validate_scene(&self.scene).map_err(invalid)?;
 		let assets = AssetRegistry::new(self.asset_limits).map_err(invalid)?;
 		let mut session = EditorSession::for_project(self.scene, self.project).map_err(invalid)?;
+		session.load_saved_scenes(self.documents).map_err(invalid)?;
 		session
 			.set_module_factory(self.module_factory)
 			.map_err(invalid)?;
@@ -190,6 +202,12 @@ impl Engine {
 	pub fn mark_scene_saved(&mut self) -> Result<CommandReceipt, BackendError> {
 		self.mutate_session(EditorSession::mark_scene_saved)
 	}
+	pub fn mark_scene_saved_by_id(
+		&mut self,
+		id: &crate::scene_catalog::SceneId,
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|s| s.mark_scene_saved_by_id(id))
+	}
 	pub fn mark_project_saved(&mut self) -> Result<CommandReceipt, BackendError> {
 		self.mutate_session(EditorSession::mark_project_saved)
 	}
@@ -287,6 +305,8 @@ impl Engine {
 		operation: impl FnOnce(&mut EditorSession) -> Result<(), String>,
 	) -> Result<CommandReceipt, BackendError> {
 		self.ensure_event_capacity()?;
+		let before_scene = self.session.active_scene_id().clone();
+		let before_states = self.session.scene_states();
 		let revision = self.session.revision();
 		let was_playing = self.session.is_playing();
 		let before = self.session.authored_document();
@@ -299,7 +319,9 @@ impl Engine {
 		} else {
 			WorldChange::between(&before, &after)
 		};
-		if was_playing != self.session.is_playing() {
+		if was_playing != self.session.is_playing()
+			|| before_scene != *self.session.active_scene_id()
+		{
 			changes.full_resync = true;
 			changes.changed_entities.clear();
 			changes.removed_entities.clear();
@@ -319,7 +341,44 @@ impl Engine {
 		if state_changed && changes.is_empty() && !project_changed {
 			self.publish(BackendEventKind::StateChanged)?;
 		}
+		let after_states = self.session.scene_states();
+		let mut affected_scenes: Vec<_> = before_states
+			.iter()
+			.chain(after_states.iter())
+			.filter(|state| {
+				before_states
+					.iter()
+					.find(|s| s.id == state.id)
+					.map(|s| (&s.asset_path, s.dirty, s.loaded))
+					!= after_states
+					.iter()
+					.find(|s| s.id == state.id)
+					.map(|s| (&s.asset_path, s.dirty, s.loaded))
+			})
+			.map(|s| s.id.clone())
+			.collect();
+		if !changes.is_empty() {
+			affected_scenes.push(self.session.active_scene_id().clone());
+		}
+		if project_changed {
+			for state in before_states.iter().chain(after_states.iter()) {
+				if !before_project
+					.behaviors_for(&state.id)
+					.eq(after_project.behaviors_for(&state.id))
+				{
+					affected_scenes.push(state.id.clone());
+				}
+			}
+			if before_project.startup_scene_id != after_project.startup_scene_id {
+				affected_scenes.push(before_project.startup_scene_id.clone());
+				affected_scenes.push(after_project.startup_scene_id.clone());
+			}
+		}
+		affected_scenes.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+		affected_scenes.dedup();
 		Ok(CommandReceipt {
+			active_scene_id: self.session.active_scene_id().clone(),
+			affected_scenes,
 			revision: self.session.revision(),
 			scene_revision: self.session.scene_revision(),
 			change_cursor: self.journal.cursor(),
@@ -341,10 +400,11 @@ impl Engine {
 	}
 	fn publish(&mut self, event: BackendEventKind) -> Result<(), BackendError> {
 		self.journal
-			.publish(
+			.publish_for_scene(
 				self.session.revision(),
 				self.session.scene_revision(),
 				event,
+				Some(self.session.active_scene_id().clone()),
 			)
 			.map_err(|message| self.error(BackendErrorCode::Internal, message))
 	}

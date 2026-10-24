@@ -1,5 +1,6 @@
 //! Input-independent transport contracts. Scene payloads are validated by the domain.
 use crate::project::ProjectData;
+use crate::scene_catalog::SceneId;
 use crate::scene_data::{CameraData, ColliderData, LightData, MaterialOverrideData, SceneData};
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +65,24 @@ impl Default for SnapSettingsDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditorCommandDto {
+	AddScene {
+		id: SceneId,
+		asset_path: String,
+		document: SceneData,
+	},
+	SwitchScene {
+		scene_id: SceneId,
+	},
+	RemoveScene {
+		scene_id: SceneId,
+	},
+	SetStartupScene {
+		scene_id: SceneId,
+	},
+	ChangeScenePath {
+		scene_id: SceneId,
+		asset_path: String,
+	},
 	PickSelection {
 		pixel: [f64; 2],
 		extent: [u32; 2],
@@ -168,7 +187,17 @@ pub struct EditorCommandRequest {
 	pub command: EditorCommandDto,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SceneStateDto {
+	pub id: SceneId,
+	pub asset_path: String,
+	pub loaded: bool,
+	pub dirty: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSnapshotDto {
+	pub active_scene_id: SceneId,
+	pub project_dirty: bool,
+	pub scenes: Vec<SceneStateDto>,
 	pub revision: u64,
 	pub scene_revision: u64,
 	pub document: SceneData,

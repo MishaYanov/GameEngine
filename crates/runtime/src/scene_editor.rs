@@ -124,8 +124,7 @@ impl SceneEditor {
 		let direction = movement_direction(input);
 		if self.project().is_some_and(|project| {
 			project
-				.behaviors
-				.iter()
+				.behaviors_for(&project.startup_scene_id)
 				.any(|behavior| matches!(behavior, BehaviorSpec::ControlledMove { .. }))
 		}) {
 			self.execute_core(Command::SetPlayInput {

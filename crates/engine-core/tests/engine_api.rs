@@ -18,11 +18,11 @@ fn fixture() -> Engine {
 		entity("other", [1.0, 0.0, 0.0]),
 	]);
 	let mut project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
-	project.behaviors = vec![BehaviorSpec::ControlledMove {
+	project.add_behavior(BehaviorSpec::ControlledMove {
 		entity: key("actor"),
 		speed: 2.0,
 		space: Default::default(),
-	}];
+	});
 	EngineBuilder::new(data, project).build().unwrap()
 }
 fn run(engine: &mut Engine, command: Command) -> engine_core::CommandReceipt {
@@ -38,10 +38,10 @@ fn run(engine: &mut Engine, command: Command) -> engine_core::CommandReceipt {
 fn builder_validates_authored_scene_project_and_resource_limits_without_graphics() {
 	let data = scene(vec![entity("actor", [0.0; 3])]);
 	let mut invalid = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
-	invalid.behaviors = vec![BehaviorSpec::Spin {
+	invalid.add_behavior(BehaviorSpec::Spin {
 		entity: key("missing"),
 		angular_velocity: [0.0, 1.0, 0.0],
-	}];
+	});
 	let error = EngineBuilder::new(data.clone(), invalid)
 		.build()
 		.err()

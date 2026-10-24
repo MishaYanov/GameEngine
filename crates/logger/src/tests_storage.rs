@@ -3,13 +3,15 @@ use crate::{Config, Logger, SnapshotRequest};
 struct Fixture(PathBuf);
 impl Fixture {
 	fn new() -> Self {
+		static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 		let root = std::env::temp_dir().join(format!(
-			"engine-logger-test-{}-{}",
+			"engine-logger-test-{}-{}-{}",
 			std::process::id(),
 			std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
 				.unwrap()
-				.as_nanos()
+				.as_nanos(),
+			NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
 		));
 		fs::create_dir(&root).unwrap();
 		Self(root)

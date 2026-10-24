@@ -1,7 +1,9 @@
 //! CPU document application service. Transport/UI and GPU ownership stay outside.
 mod factory;
 mod history;
+mod scene_documents;
 pub use factory::CommandRequestBuilder;
+use scene_documents::SceneDraft;
 mod operations;
 mod prefab;
 use crate::command::{
@@ -11,6 +13,7 @@ use crate::command::{
 use crate::{
 	Bounds3, EntityKey,
 	project::ProjectData,
+	scene_catalog::SceneId,
 	scene_data::SceneData,
 	simulation_session::{
 		ConfiguredBehaviorFactory, GameModuleFactory, SimulationSession, TickOutcome,
@@ -26,6 +29,9 @@ use std::{
 const MAX_SELECTION: usize = 4096;
 
 pub struct EditorSession {
+	active_scene_id: SceneId,
+	saved_path: Option<String>,
+	drafts: HashMap<SceneId, SceneDraft>,
 	data: Arc<SceneData>,
 	project: Arc<ProjectData>,
 	saved_project: Arc<ProjectData>,
@@ -52,6 +58,23 @@ pub struct CommandFactory;
 impl CommandFactory {
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
+			("add_scene", "Add scene", "scene", true, false),
+			("switch_scene", "Switch scene", "scene", false, false),
+			("remove_scene", "Remove scene", "scene", true, false),
+			(
+				"set_startup_scene",
+				"Set startup scene",
+				"scene",
+				true,
+				false,
+			),
+			(
+				"change_scene_path",
+				"Change scene path",
+				"scene",
+				true,
+				false,
+			),
 			("set_project", "Configure project", "project", true, false),
 			(
 				"set_entity_input",
@@ -166,9 +189,14 @@ impl EditorSession {
 	}
 	pub fn for_project(data: SceneData, project: ProjectData) -> Result<Self, String> {
 		project.validate_scene(&data)?;
+		let active_scene_id = project.startup_scene_id.clone();
+		let saved_path = Some(project.startup_scene_path()?.to_owned());
 		let project = Arc::new(project);
 		let data = Arc::new(data);
 		Ok(Self {
+			active_scene_id,
+			saved_path,
+			drafts: HashMap::new(),
 			saved_project: Arc::clone(&project),
 			project,
 			module_factory: Arc::new(ConfiguredBehaviorFactory),
@@ -225,9 +253,14 @@ impl EditorSession {
 		Ok(())
 	}
 	pub fn replace_document(&mut self, data: SceneData) -> Result<(), String> {
+		if self.project.scenes.iter().count() != 1 {
+			return Err("Single-scene replacement cannot replace a multi-scene workspace; prepare a complete workspace reload".into());
+		}
 		let mut project = (*self.project).clone();
 		let keys: HashSet<_> = data.entities.iter().map(|e| &e.key).collect();
-		project.behaviors.retain(|b| keys.contains(b.entity()));
+		project
+			.behaviors
+			.retain(|b| b.scene_id != self.active_scene_id || keys.contains(b.entity()));
 		self.replace_project_document(data, project)
 	}
 	/// Replace both authored inputs only after validation. A reload establishes
@@ -241,6 +274,9 @@ impl EditorSession {
 		self.require_no_transaction()?;
 		self.ensure_revision_capacity()?;
 		self.play = None;
+		self.active_scene_id = project.startup_scene_id.clone();
+		self.saved_path = Some(project.startup_scene_path()?.to_owned());
+		self.drafts.clear();
 		self.data = Arc::new(data);
 		self.saved = Arc::clone(&self.data);
 		self.project = Arc::new(project);
@@ -312,8 +348,9 @@ impl EditorSession {
 		if self.has_transaction() {
 			return Err("Commit or cancel the current edit before saving".into());
 		}
-		if self.saved != self.data || self.saved_project != self.project {
+		if self.active_scene_dirty() || self.saved_project != self.project {
 			self.ensure_revision_capacity()?;
+			self.saved_path = Some(self.project.scene_path(&self.active_scene_id)?.to_owned());
 			self.saved = Arc::clone(&self.data);
 			self.saved_project = Arc::clone(&self.project);
 			self.bump();
@@ -321,12 +358,13 @@ impl EditorSession {
 		Ok(())
 	}
 	pub fn is_dirty(&self) -> bool {
-		self.data != self.saved || self.project != self.saved_project
+		self.project != self.saved_project || self.scene_states().iter().any(|s| s.dirty)
 	}
 	pub fn mark_scene_saved(&mut self) -> Result<(), String> {
 		self.require_no_transaction()?;
-		if self.saved != self.data {
+		if self.active_scene_dirty() {
 			self.ensure_revision_capacity()?;
+			self.saved_path = Some(self.project.scene_path(&self.active_scene_id)?.to_owned());
 			self.saved = Arc::clone(&self.data);
 			self.bump();
 		}
@@ -349,6 +387,9 @@ impl EditorSession {
 	}
 	pub fn snapshot(&self) -> Result<EditorSnapshotDto, String> {
 		Ok(EditorSnapshotDto {
+			active_scene_id: self.active_scene_id.clone(),
+			project_dirty: self.project != self.saved_project,
+			scenes: self.scene_states(),
 			revision: self.revision,
 			scene_revision: self.scene_revision,
 			document: self.data.as_ref().clone(),
@@ -360,7 +401,7 @@ impl EditorSession {
 				.collect(),
 			mode: if self.is_playing() { "play" } else { "edit" }.into(),
 			paused: self.play.as_ref().is_some_and(SimulationSession::paused),
-			dirty: self.data != self.saved || self.project != self.saved_project,
+			dirty: self.is_dirty(),
 			can_undo: self.history.can_undo(),
 			can_redo: self.history.can_redo(),
 			transaction: self.transaction.as_ref().map(|t| t.label.clone()),
@@ -392,6 +433,18 @@ impl EditorSession {
 		self.ensure_revision_capacity()?;
 		let command = request.command;
 		match command {
+			Command::AddScene {
+				id,
+				asset_path,
+				document,
+			} => self.add_scene(id, asset_path, document)?,
+			Command::SwitchScene { scene_id } => self.switch_scene(scene_id)?,
+			Command::RemoveScene { scene_id } => self.remove_scene(scene_id)?,
+			Command::SetStartupScene { scene_id } => self.set_startup_scene(scene_id)?,
+			Command::ChangeScenePath {
+				scene_id,
+				asset_path,
+			} => self.change_scene_path(scene_id, asset_path)?,
 			Command::PickSelection {
 				pixel,
 				extent,
@@ -483,6 +536,9 @@ impl EditorSession {
 				}
 			}
 			Command::SetProject { project } => {
+				if project.scenes != self.project.scenes {
+					return Err("Use scene catalog commands to change scene entries".into());
+				}
 				self.require_edit()?;
 				self.commit_project(
 					(*self.data).clone(),
@@ -494,8 +550,10 @@ impl EditorSession {
 			Command::StartPlay => {
 				self.require_edit()?;
 				self.require_no_transaction()?;
+				let mut runtime_project = (*self.project).clone();
+				runtime_project.startup_scene_id = self.active_scene_id.clone();
 				self.play = Some(SimulationSession::with_factory(
-					(*self.project).clone(),
+					runtime_project,
 					Arc::clone(&self.data),
 					self.module_factory.as_ref(),
 				)?);
@@ -576,7 +634,8 @@ impl EditorSession {
 					&transaction.selection,
 					&self.selection,
 					transaction.label.clone(),
-				)?;
+				)?
+					.in_scene(self.active_scene_id.clone());
 				self.history.record(patch)?;
 				self.transaction = None;
 				self.bump();
@@ -591,14 +650,7 @@ impl EditorSession {
 				self.bump();
 			}
 			Command::Undo | Command::Redo => {
-				self.require_edit()?;
-				self.require_no_transaction()?;
-				let redo = matches!(command, Command::Redo);
-				if let Some((data, project, selection)) =
-					self.history.restore(&self.data, &self.project, redo)?
-				{
-					self.install_project(data, project, selection);
-				}
+				self.restore_history(matches!(command, Command::Redo))?
 			}
 			mutation => {
 				self.require_edit()?;
@@ -645,7 +697,9 @@ impl EditorSession {
 	) -> Result<(), String> {
 		let mut project = (*self.project).clone();
 		let keys: HashSet<_> = next.entities.iter().map(|e| &e.key).collect();
-		project.behaviors.retain(|b| keys.contains(b.entity()));
+		project
+			.behaviors
+			.retain(|b| b.scene_id != self.active_scene_id || keys.contains(b.entity()));
 		self.commit_project(next, project, selection, label)
 	}
 	fn commit_project(
@@ -655,7 +709,8 @@ impl EditorSession {
 		selection: Vec<EntityKey>,
 		label: &str,
 	) -> Result<(), String> {
-		project.validate_scene(&next)?;
+		self.validate_project_documents(&project, &self.active_scene_id, &next)?;
+		self.check_document_budget(Some((&self.active_scene_id, &next)))?;
 		validate_selection(&next, &selection)?;
 		if next == *self.data && project == *self.project && selection == self.selection {
 			return Ok(());
@@ -670,7 +725,8 @@ impl EditorSession {
 				&self.selection,
 				&selection,
 				label.into(),
-			)?;
+			)?
+				.in_scene(self.active_scene_id.clone());
 			self.history.record(patch)?;
 		}
 		self.install_project(next, project, selection);

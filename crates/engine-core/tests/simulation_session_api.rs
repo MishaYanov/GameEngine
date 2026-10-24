@@ -12,7 +12,9 @@ use std::sync::Arc;
 use support::*;
 fn project(data: &engine_core::SceneData, behaviors: Vec<BehaviorSpec>) -> ProjectData {
 	let mut p = ProjectData::for_scene("Project", "scenes/main.json", data).unwrap();
-	p.behaviors = behaviors;
+	for behavior in behaviors {
+		p.add_behavior(behavior);
+	}
 	p
 }
 fn controlled(target: &str, speed: f32, space: BehaviorSpace) -> BehaviorSpec {

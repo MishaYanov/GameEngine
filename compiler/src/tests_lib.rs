@@ -182,13 +182,16 @@ fn invalid_project_behavior_targets_and_missing_startup_scene_fail_before_a_buil
 	let fixture = AssetFixture::new();
 	let source = fixture.0.join("source");
 	let (mut project, _) = authored_scene_fixture(&source);
-	project.behaviors = vec![BehaviorSpec::Spin {
+	project.add_behavior(BehaviorSpec::Spin {
 		entity: engine_core::EntityKey::new("missing").unwrap(),
 		angular_velocity: [0.0, 1.0, 0.0],
-	}];
+	});
 	assert!(prepare_project(&project, &source).is_err());
 	project.behaviors.clear();
-	project.startup_scene = "scenes/missing.json".into();
+	project
+		.scenes
+		.change_path(&project.startup_scene_id, "scenes/missing.json")
+		.unwrap();
 	assert!(prepare_project(&project, &source).is_err());
 }
 
@@ -212,4 +215,74 @@ fn project_preflight_rejects_missing_renderable_models_but_allows_transform_only
 	scene.entities[0].renderable = false;
 	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	assert!(prepare_project(&project, &source).is_ok());
+}
+
+#[test]
+fn project_preflight_checks_nonstartup_scene_files_models_and_scoped_behavior_targets() {
+	use engine_core::{
+		project::SceneBehavior,
+		scene_catalog::{SceneDescriptor, SceneId},
+	};
+
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (mut project, mut secondary) = authored_scene_fixture(&source);
+	let secondary_id = SceneId::new("secondary").unwrap();
+	project
+		.scenes
+		.insert(SceneDescriptor::new(secondary_id.clone(), "scenes/secondary.json").unwrap())
+		.unwrap();
+	assert!(
+		prepare_project(&project, &source).is_err(),
+		"missing nonstartup scene was accepted"
+	);
+
+	secondary
+		.entities
+		.push(engine_core::scene_data::EntityData::new(
+			engine_core::EntityKey::new("secondary-actor").unwrap(),
+			"Secondary actor",
+			"models/missing.glb",
+		));
+	fs::write(
+		source.join("scenes/secondary.json"),
+		secondary.to_json().unwrap(),
+	)
+		.unwrap();
+	assert!(
+		prepare_project(&project, &source).is_err(),
+		"missing nonstartup model was accepted"
+	);
+
+	secondary.entities[0].renderable = false;
+	fs::write(
+		source.join("scenes/secondary.json"),
+		secondary.to_json().unwrap(),
+	)
+		.unwrap();
+	project.behaviors.push(SceneBehavior {
+		scene_id: secondary_id,
+		behavior: BehaviorSpec::Spin {
+			entity: secondary.entities[0].key.clone(),
+			angular_velocity: [0.0, 1.0, 0.0],
+		},
+	});
+	let prepared = prepare_project(&project, &source).unwrap();
+	let destination = fixture.0.join("copied");
+	copy_prepared_assets(prepared.asset_root(), &destination, &prepared.files).unwrap();
+	for scene in ["scenes/main.json", "scenes/secondary.json"] {
+		assert_eq!(
+			fs::read(source.join(scene)).unwrap(),
+			fs::read(destination.join(scene)).unwrap()
+		);
+	}
+
+	project.behaviors[0].behavior = BehaviorSpec::Spin {
+		entity: engine_core::EntityKey::new("missing").unwrap(),
+		angular_velocity: [0.0, 1.0, 0.0],
+	};
+	assert!(
+		prepare_project(&project, &source).is_err(),
+		"missing target in nonstartup scene was accepted"
+	);
 }

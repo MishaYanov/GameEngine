@@ -34,6 +34,16 @@ its owner.
 The core service does not assign shortcuts. Future UI controls and key bindings use the same execute path. Do not mutate
 signal snapshots or duplicate runtime scene semantics in components.
 
+## Project and scene operations
+
+The service requires editor protocol 2 / scene schema 3; ProjectData mirrors project schema 2.
+`openProject(manifestPath)`, `registerScene(path)`, `switchScene(id)`, `saveSceneAs(path)` and `saveProject()` wrap the
+host APIs. Snapshots expose active scene identity, project state and per-scene dirty flags. `save()` persists only the
+active scene; `saveProject()` persists only the manifest. `reload()` explicitly sends `discard_unsaved`, while
+`refresh()` reads in-memory state. The UI must make destructive reload intent clear.
+See [project lifecycle](../../project-lifecycle.md) for a complete example and limits. No new scene-browser template is
+implied by these service changes.
+
 ## Pane boundary and platform limits
 
 EngineViewportDirective is available as `[engineViewport]` with input/status/error outputs. It has not been applied to a
@@ -49,8 +59,9 @@ bounds, clipping, DPI, focus, or shutdown has been performed for this batch.
 
 [Steps 21–35](../../editor-steps-21-35.md) explain the complete runtime/host/frontend split, camera commands, snapping,
 multi-selection, hierarchy, scene3, prefabs, static scene import, tints/lights, simulation/collision, GPU timing, and
-instancing. These are APIs for the Angular editor plus game pane, not a second native authoring product. The earlier
-native game UI remains an explicitly opt-in legacy demo.
+instancing. These are APIs for the Angular editor plus game pane, not a second native authoring product. The source game
+defaults to Development mode with the existing native learning harness; installed projects default to Player. The native
+harness delegates to the shared core session and is not the future Angular editor.
 
 ## Build and checks
 

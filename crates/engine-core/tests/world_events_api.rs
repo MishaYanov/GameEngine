@@ -220,3 +220,30 @@ fn steady_leaf_updates_in_a_large_world_keep_document_storage_and_skip_unrelated
 	assert_eq!(world.matrix_updates() - before, 8);
 	assert_eq!(world.world_matrices()[0], glam::Mat4::IDENTITY);
 }
+
+#[test]
+fn change_journal_preserves_scene_identity_through_serialization_and_cursor_filtering() {
+	let mut journal = ChangeJournal::default();
+	let first = engine_core::scene_catalog::SceneId::new("first").unwrap();
+	let second = engine_core::scene_catalog::SceneId::new("second").unwrap();
+	journal
+		.publish(1, 1, BackendEventKind::StateChanged)
+		.unwrap();
+	journal
+		.publish_for_scene(2, 2, BackendEventKind::StateChanged, Some(first.clone()))
+		.unwrap();
+	journal
+		.publish_for_scene(3, 3, BackendEventKind::StateChanged, Some(second.clone()))
+		.unwrap();
+	let events = journal.since(0).unwrap().events;
+	assert!(events[0].scene_id.is_none());
+	assert_eq!(events[1].scene_id, Some(first));
+	assert_eq!(events[2].scene_id, Some(second.clone()));
+	let encoded = serde_json::to_string(&events[2]).unwrap();
+	let decoded: engine_core::events::BackendEvent = serde_json::from_str(&encoded).unwrap();
+	assert_eq!(decoded.scene_id, Some(second));
+	assert_eq!(decoded.sequence, 3);
+	let next = journal.since(2).unwrap();
+	assert_eq!(next.events.len(), 1);
+	assert_eq!(next.events[0].scene_id, decoded.scene_id);
+}

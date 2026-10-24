@@ -1,8 +1,7 @@
 # Shared runtime and editor logic
 
-Source: `crates/runtime`. This crate provides CPU scene documents/editor semantics alongside shared
-asset/model/GPU-scene helpers and the compatibility engine-status path. The Angular app owns editor presentation and
-bindings; runtime defines validated behavior.
+Source: `crates/runtime`. CPU documents, commands and simulation live in engine-core and are re-exported here. Runtime
+supplies shared asset/model/GPU-scene adapters and GraphicsProbe; Angular owns presentation and bindings.
 
 ## EditorSession: the Angular domain boundary
 
@@ -19,6 +18,14 @@ authored content and rejects an uncommitted transaction.
 The CPU history is capped at 128 records / 16 MiB, selection at 4096. Atomic validation/error behavior matters as much
 as nominal command success. This is separate from the older GPU SceneEditor history; do not reuse one session's
 transient IDs in another.
+
+## Project documents
+
+Project schema 2 adds SceneCatalog/SceneId, startup_scene_id and scene-scoped behavior entries. Core EditorSession
+retains active/inactive drafts, per-scene saved baselines and scene-aware history; EngineBuilder::with_scenes prepares
+all documents. Editor protocol 2 snapshots expose the catalog and dirty states.
+See [project lifecycle](../../project-lifecycle.md) for caps, commands, version rejection, host paths and save/reload
+semantics.
 
 ## Scene and asset modules
 
@@ -38,13 +45,13 @@ still contain Vulkan types, so the asset/GPU-scene side is not backend-independe
 
 ## Legacy and compatibility APIs
 
-Transform, Scene/EntityId, ModelInstance, AssetManager and SceneEditor remain public shared helpers used by native
-examples/legacy demo. Their snapshots/commands use transient runtime resources and a different history model. The new
-Angular service targets EditorSession/bridge DTOs rather than mutable GPU objects.
+Transform and CPU editor/scene types are re-exported from engine-core. Scene/EntityId, ModelInstance, AssetManager and
+SceneEditor adapt those documents to Vulkan resources. Native SceneEditor delegates authored edits/history to the core
+session; legacy CommandHistory/RobotGame helpers remain compatibility leftovers rather than the normal GameApp pipeline.
 
-`Engine::new()` / `Engine::status()` remain compatibility APIs. The host caches the DTO from `Engine::probe_status()`,
-which queries instance/physical-device information without creating a logical device or advertising persistent runtime
-health; the actual embedded presentation renderer has its own owner. Do not treat status as an embedded editor viewport.
+`runtime::Engine` now refers to the CPU coordinator. Graphics availability uses `GraphicsProbe::probe_status()`; it
+queries physical-device information without retaining a logical device. Do not confuse that status with the embedded
+viewport's GPU ownership.
 
 Procedural MeshData constructors (triangle/cube/plane/polygon/sphere/capsule) remain available with generated normals.
 See [graphics and assets](../../graphics-and-assets.md). No primitive-specific persistence UI or collision shape is

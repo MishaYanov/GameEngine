@@ -6,12 +6,17 @@ scene mutation, filesystem access, or GPU lifecycle.
 ## Editor protocol
 
 `bridge::editor` adds typed command requests, snapshots, capabilities, transforms, snapping, prefab/collision and
-viewport status/input DTOs. Current capability negotiation is protocol version 1 with scene schema 3. The Angular
+viewport status/input DTOs. Current capability negotiation is protocol version 2 with scene schema 3; project manifests
+use schema 2. Core command/snapshot DTOs are re-exported from engine-core, while viewport DTOs remain bridge-owned. The
+Angular
 mirrors live under apps/editor/src/app/core/editor/editor.models.ts; update both sides together.
 
 EditorCommandRequest carries expected_revision plus a tagged snake_case EditorCommandDto. A snapshot includes
 revision/scene_revision, document, persistent-key selection, mode/paused/dirty, undo/redo availability, transaction
-label and snapping settings. Command descriptors report categories, undoability and Play availability so UI owners need
+label and snapping settings. Expanded snapshots also carry active_scene_id, project, project_dirty and per-scene
+loaded/dirty states. Typed commands add catalog creation/removal/path changes, scene switching and startup selection.
+See [project lifecycle](../../project-lifecycle.md) for incompatible project-v1 rejection and the save/reload contract.
+Command descriptors report categories, undoability and Play availability so UI owners need
 not hardcode backend assumptions.
 
 Viewport status includes draw/instance/triangle counts and optional asynchronous GPU time with a support flag.

@@ -13,6 +13,7 @@ pub enum BackendEventKind {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendEvent {
+	pub scene_id: Option<crate::scene_catalog::SceneId>,
 	pub sequence: u64,
 	pub revision: u64,
 	pub scene_revision: u64,
@@ -47,11 +48,21 @@ impl ChangeJournal {
 		scene_revision: u64,
 		event: BackendEventKind,
 	) -> Result<(), String> {
+		self.publish_for_scene(revision, scene_revision, event, None)
+	}
+	pub fn publish_for_scene(
+		&mut self,
+		revision: u64,
+		scene_revision: u64,
+		event: BackendEventKind,
+		scene_id: Option<crate::scene_catalog::SceneId>,
+	) -> Result<(), String> {
 		let sequence = self
 			.cursor
 			.checked_add(1)
 			.ok_or("Backend event sequence is exhausted")?;
 		let event = BackendEvent {
+			scene_id,
 			sequence,
 			revision,
 			scene_revision,

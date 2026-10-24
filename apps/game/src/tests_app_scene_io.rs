@@ -60,7 +60,7 @@ fn fixture() -> (GameApp, [EntityId; 2]) {
 		runtime::scene_editor::ProjectData::for_scene("QA authored project", "robots.json", &data)
 			.unwrap();
 	use runtime::project::BehaviorSpec;
-	project.behaviors = vec![
+	for behavior in [
 		BehaviorSpec::ControlledMove {
 			entity: app.scene.key(ids[0]).unwrap().clone(),
 			speed: 1.0,
@@ -74,7 +74,9 @@ fn fixture() -> (GameApp, [EntityId; 2]) {
 			entity: app.scene.key(ids[1]).unwrap().clone(),
 			angular_velocity: [-0.5, 0.75, 0.2],
 		},
-	];
+	] {
+		project.add_behavior(behavior);
+	}
 	app.project = Some(project.clone());
 	app.editor.set_initial_project(project).unwrap();
 	app.input.press(Key::W);
@@ -1126,4 +1128,41 @@ fn project_save_failure_after_scene_write_keeps_authored_dirty_baselines_for_ret
 	project
 		.validate_scene(&app.scene.to_data(&app.camera).unwrap())
 		.unwrap();
+}
+
+#[test]
+fn saving_current_scene_preserves_catalog_ids_and_inactive_scene_behaviors() {
+	use runtime::project::{BehaviorSpec, SceneBehavior};
+
+	let directory = TestDirectory::new();
+	let (mut app, _) = fixture();
+	app.input.reset();
+	let mut project = app.editor.project().unwrap().clone();
+	let secondary = runtime::project::ProjectData::for_scene(
+		"Secondary fixture",
+		"scenes/secondary.json",
+		&app.scene.to_data(&app.camera).unwrap(),
+	)
+		.unwrap();
+	let secondary_id = secondary.startup_scene_id.clone();
+	project
+		.scenes
+		.insert(secondary.scenes.iter().next().unwrap().clone())
+		.unwrap();
+	project.behaviors.push(SceneBehavior {
+		scene_id: secondary_id,
+		behavior: BehaviorSpec::Spin {
+			entity: EntityKey::new("only-in-secondary").unwrap(),
+			angular_velocity: [0.0, 1.0, 0.0],
+		},
+	});
+	app.project = Some(project.clone());
+	app.editor.set_initial_project(project.clone()).unwrap();
+	app.scene_path = Some(directory.0.join("robots.json"));
+	app.project_path = Some(directory.0.join("project.json"));
+	app.save_scene().unwrap();
+	let saved = runtime::project::ProjectData::load(app.project_path.as_ref().unwrap()).unwrap();
+	assert_eq!(saved, project);
+	assert_eq!(app.editor.project(), Some(&project));
+	assert!(!app.is_dirty());
 }

@@ -59,6 +59,26 @@ impl CommandFactory {
 		serde_json::to_writer(CommandBudget(0), command)
 			.map_err(|error| format!("Command size validation failed: {error}"))?;
 		match command {
+			EditorCommandDto::AddScene {
+				id,
+				asset_path,
+				document,
+			} => {
+				crate::scene_catalog::SceneId::new(id.as_str())?;
+				crate::scene_catalog::SceneDescriptor::new(id.clone(), asset_path)?;
+				document.validate()?;
+			}
+			EditorCommandDto::SwitchScene { scene_id }
+			| EditorCommandDto::RemoveScene { scene_id }
+			| EditorCommandDto::SetStartupScene { scene_id } => {
+				crate::scene_catalog::SceneId::new(scene_id.as_str())?;
+			}
+			EditorCommandDto::ChangeScenePath {
+				scene_id,
+				asset_path,
+			} => {
+				crate::scene_catalog::SceneDescriptor::new(scene_id.clone(), asset_path)?;
+			}
 			EditorCommandDto::Select { keys } => {
 				target_count(keys.len())?;
 				for key in keys {

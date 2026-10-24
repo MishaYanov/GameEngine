@@ -91,7 +91,7 @@ fn game_app_updates_existing_robots_without_gpu_resources_or_respawning() {
 	let mut project =
 		runtime::project::ProjectData::for_scene("Configured QA game", "scenes/robots.json", &data)
 			.unwrap();
-	project.behaviors = vec![
+	for behavior in [
 		runtime::project::BehaviorSpec::ControlledMove {
 			entity: app.scene.key(left_id).unwrap().clone(),
 			speed: 1.0,
@@ -105,7 +105,9 @@ fn game_app_updates_existing_robots_without_gpu_resources_or_respawning() {
 			entity: app.scene.key(right_id).unwrap().clone(),
 			angular_velocity: [-0.5, 0.75, 0.2],
 		},
-	];
+	] {
+		project.add_behavior(behavior);
+	}
 	app.editor.set_initial_project(project).unwrap();
 	app.start_play().unwrap();
 	app.input = held_input(&[Key::W, Key::ArrowRight]);

@@ -1,5 +1,6 @@
 mod commands;
 mod editor;
+mod project_location;
 mod state;
 mod viewport;
 
@@ -51,6 +52,8 @@ pub fn run() {
 			editor_capabilities,
 			editor_open,
 			editor_open_project,
+			editor_register_scene,
+			editor_save_scene_as,
 			editor_snapshot,
 			editor_execute,
 			editor_execute_receipt,

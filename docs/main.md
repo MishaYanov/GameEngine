@@ -4,6 +4,9 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 2, protocol 2, scene IDs, retained
+  drafts/history, save/reload policies, Angular helpers and all-scene build validation.
+
 - [PROJECT3 backend handoff](project3-handoff.md): Authored project-to-player workflow, steps 36–45 foundations, limits,
   and a copy-ready teaching-first prompt for proposed steps 46–55.
 
@@ -53,6 +56,9 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 ## Existing design and tool references
 
 These documents remain in `designs`. Requirements can describe future work; consult project guides and implementation status for current behavior.
+
+- [Error handling design and implementation plan](../designs/error-handling.md): Proposed typed errors, Tauri contracts,
+  recovery rules, and implementation steps for every app, crate, and repository tool.
 
 - [Automation and logging PRD](../designs/automation-and-logging-prd.md): Requirements, delivery steps, status, and future decisions.
 - [Project installation pipeline](../designs/project-installation.md): Editor/compiler installation sequence and starter behavior.

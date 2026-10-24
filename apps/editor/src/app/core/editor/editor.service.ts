@@ -9,6 +9,7 @@ import type {
     EditorSnapshot,
     ModelAsset,
     Prefab,
+    SceneId,
     Vec3,
     ViewportBounds,
     ViewportInput,
@@ -90,7 +91,7 @@ export class EditorService {
         if (this.capabilitiesRequest) return this.capabilitiesRequest;
         this.capabilitiesRequest = this.native<EditorCapabilities>('editor_capabilities')
             .then((capabilities) => {
-                if (capabilities.protocol_version !== 1 || capabilities.scene_schema_version !== 3) {
+                if (capabilities.protocol_version !== 2 || capabilities.scene_schema_version !== 3) {
                     throw new EditorClientError(
                         'backend',
                         'editor_capabilities',
@@ -117,6 +118,30 @@ export class EditorService {
         });
     }
 
+    openProject(manifestPath: string): Promise<EditorSnapshot> {
+        return this.enqueue('editor_open_project', async () => {
+            const result = await this.native<EditorSnapshot>('editor_open_project', {manifestPath});
+            this.assetsState.set(null);
+            return this.accept(result);
+        });
+    }
+
+    switchScene(sceneId: SceneId): Promise<EditorSnapshot> {
+        return this.execute({type: 'switch_scene', scene_id: sceneId});
+    }
+
+    registerScene(path: string): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_register_scene', {path});
+    }
+
+    saveSceneAs(path: string): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_save_scene_as', {path});
+    }
+
+    saveProject(): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_save_project');
+    }
+
     refresh(): Promise<EditorSnapshot> {
         return this.enqueue('editor_snapshot', async () =>
             this.accept(await this.native<EditorSnapshot>('editor_snapshot')),
@@ -139,7 +164,7 @@ export class EditorService {
     }
 
     reload(): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_reload');
+        return this.snapshotOperation('editor_reload', {policy: 'discard_unsaved'});
     }
 
     assets(refresh = false): Promise<readonly ModelAsset[]> {

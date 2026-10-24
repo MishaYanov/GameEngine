@@ -1,48 +1,64 @@
-# Starter compiler and installer
+# Authored project compiler and installer
 
-Source: `compiler`. Cargo package: `compiler`. This development tool builds the native game in release mode and installs a starter executable with textures. The editor calls its library and also launches the result.
+Source: `compiler`. The tool builds the native game in release mode and packages an authored manifest plus its validated
+assets. CPU project/scene types come from engine-core. See [project lifecycle](../project-lifecycle.md) for project
+schema 2 and multi-scene authoring.
 
 ## CLI and library
 
-From the repository root, with `D:\Projects` already present:
+The compatibility CLI still takes exactly a project name and an existing absolute destination parent:
 
 ```powershell
 cargo run -p compiler -- 'My Game' 'D:\Projects'
-& 'D:\Projects\My Game\game.exe'
 ```
 
-The CLI accepts exactly two arguments: name and existing absolute destination parent. It installs without launching. Exit codes are 0 for success, 1 for build/install failure, and 2 for wrong argument count. See [setup and usage](../usage.md).
+It uses the bundled starter configuration, installs without launching, and exits 0 on success, 1 on build/install
+failure or 2 on wrong argument count. `install_project(name, destination)` remains the starter adapter. Application
+hosts can use:
 
-`project_path(name, destination)` validates and returns a proposed child path without creating it. `install_project(name, destination)` validates, builds, reserves a folder, copies output, and returns `Result<PathBuf, String>`.
+- `prepare_project(&project, asset_root)` to validate/capture authored inputs into PreparedProject.
+- `install_authored_project(&project, asset_root, destination)` or
+  `install_project_from_manifest(manifest_path, destination)` to package authored projects.
+- `install_prepared_project(&prepared, destination)` to build/copy a previously captured project.
+- `project_path(name, destination)` to validate a proposed output without creating it.
 
-Names are trimmed, allow Unicode alphanumeric characters, spaces, hyphens, and underscores, and are limited to 80 UTF-8 bytes. Reserved Windows device names are rejected. The destination must be an existing absolute directory; existing child paths are rejected.
+Names are trimmed, limited to 80 UTF-8 bytes and allow Unicode alphanumeric characters, spaces, hyphens and underscores.
+Reserved Windows device names and existing child paths are rejected. Destination parents must already exist and be
+absolute.
 
-## Build and installation
+## Multi-scene preparation and installation
 
-The nested build invokes `cargo build --locked --package game --release --target-dir <workspace>/target` in the workspace embedded from the compiler manifest path. Cargo must be on PATH, the source checkout must remain available, and shader compilation requires `glslc`. The nested build does not use `--offline`; an offline outer command does not force it offline.
+Project schema 2 identifies catalog entries by stable SceneId, startup_scene_id and scene-scoped behaviors. Preparation
+validates every catalog scene and its referenced models against the captured asset file set. Fingerprints detect changed
+copied inputs within this contract; they are not cryptographic signatures. Detailed glTF geometry validation remains
+with the runtime importer.
 
-After building, atomic `create_dir` reserves the output. Installation copies the platform game executable, the bounded
-validated nested `apps/game/assets` tree (including `scenes/robots.json`, `props/robot.glb`, and textures),
-`project-name.txt`, and `README.txt`. The recursive copier accepts regular files/directories and rejects unsupported
-asset entry types. Copy/write failure attempts to remove only the newly created folder. Existing folders are never
-merged into.
+The nested build invokes `cargo build --locked --package game --release --target-dir <workspace>/target` using the
+source workspace. Cargo and shader compiler glslc must be available. The nested build does not use --offline; an offline
+outer invocation does not make it offline automatically.
 
-This installs a runtime with no source workspace or editable scene. The previous missing-robot packaging omission is fixed; generated README wording still describes the older triangle starter, while the executable renders imported robots. For independent sources, use the [admin builder](../apps/admin-dashboard/README.md). See the [installation design](../../designs/project-installation.md).
+Installation reserves a new folder with atomic create_dir, copies the executable and prepared assets, revalidates every
+copied catalog scene, and writes project.json plus project-name.txt and README.txt. Source projects retain authored
+configuration/assets; output packages contain those data files, not the source workspace. Installed project detection
+defaults the game to Player mode. Copy/write failure retains the incomplete output for inspection and returns its path;
+existing directories are never merged.
 
-## Verification
+The host's build_project additionally requires clean Edit state, no open transaction, matching saved manifest and every
+catalog scene matching memory. It releases the workspace lock before compiling. Registering a scene or saving its
+manifest does not automatically save dirty scene drafts.
 
-From the repository root:
+## Packaging bounds and checks
+
+Asset collection validates before copying, orders entries, rejects unsupported file/link types and checks containment
+and input changes. Limits include 32 directory levels, 10,000 visited entries, 64 MiB per file, 16 MiB asset JSON and
+512 MiB total. The asset JSON cap is lower than the scene parser's 32 MiB input ceiling. These are acceptance limits,
+not measured real-time capacity.
 
 ```powershell
 cargo test -p compiler --offline --locked
 ```
 
-Tests cover unsafe names/destinations, length/whitespace rules, collisions, and copying nested scene/model/texture assets byte-for-byte. The asset-copy test does not build a release executable or launch an installed game. Native installed-run validation remains separate from this file-copy evidence.
-
-## Packaging bounds
-
-The current copier validates/collects before output, sorts entries, checks containment and link changes, and validates
-JSON assets. Limits include 32 directory levels, 10,000 visited entries, 64 MiB per file, 16 MiB JSON, and 512 MiB total
-assets. Only supported model/image/JSON formats are accepted; this is no longer a promise to copy every arbitrary file
-under assets. The admin source builder also now includes validated scene JSON.
-See [step22](../editor-steps-21-35.md#step-22-json-aware-packaging).
+Tests include project validation, source/output preservation, catalog scene/model checks and changed-input rejection.
+This documentation update did not execute engine tests or an installed release. Copied-template checks, file-copy tests
+and successful compilation are separate from launching and accepting an installed game. [Testing](../testing.md) records
+historical evidence; the documentation checkpoint distinguishes it from current checks.

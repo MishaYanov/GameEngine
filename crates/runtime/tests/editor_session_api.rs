@@ -45,11 +45,11 @@ fn fixture() -> EditorSession {
 	let mut project =
 		engine_core::project::ProjectData::for_scene("Test project", "scenes/main.json", &data)
 			.unwrap();
-	project.behaviors = vec![engine_core::project::BehaviorSpec::ControlledMove {
+	project.add_behavior(engine_core::project::BehaviorSpec::ControlledMove {
 		entity: key("a"),
 		speed: 2.0,
 		space: engine_core::project::BehaviorSpace::World,
-	}];
+	});
 	EditorSession::for_project(data, project).unwrap()
 }
 fn transform(key: &str, position: [f32; 3]) -> TransformEditDto {
@@ -804,11 +804,11 @@ fn play_tick_demand_requires_target_and_movement_and_motion_error_pauses_without
 	let mut project =
 		engine_core::project::ProjectData::for_scene("Test project", "scenes/main.json", &data)
 			.unwrap();
-	project.behaviors = vec![engine_core::project::BehaviorSpec::ControlledMove {
+	project.add_behavior(engine_core::project::BehaviorSpec::ControlledMove {
 		entity: key("child"),
 		speed: 2.0,
 		space: engine_core::project::BehaviorSpace::World,
-	}];
+	});
 	let mut s = EditorSession::for_project(data, project).unwrap();
 	assert!(!s.needs_tick());
 	run(&mut s, Command::StartPlay);
@@ -831,4 +831,36 @@ fn play_tick_demand_requires_target_and_movement_and_motion_error_pauses_without
 	assert_eq!(s.revision(), revision);
 	s.tick(1.0).unwrap();
 	assert_eq!(s.render_document(), before);
+}
+
+#[test]
+fn compatibility_session_does_not_run_another_scenes_behavior_for_an_overlapping_entity_key() {
+	use engine_core::{
+		project::{BehaviorSpec, ProjectData, SceneBehavior},
+		scene_catalog::{SceneDescriptor, SceneId},
+	};
+
+	let data = scene(vec![entity("actor", [0.0; 3])]);
+	let mut project =
+		ProjectData::for_scene("Scoped behaviors", "scenes/main.json", &data).unwrap();
+	let secondary_id = SceneId::new("secondary").unwrap();
+	project
+		.scenes
+		.insert(SceneDescriptor::new(secondary_id.clone(), "scenes/secondary.json").unwrap())
+		.unwrap();
+	project.behaviors.push(SceneBehavior {
+		scene_id: secondary_id,
+		behavior: BehaviorSpec::Spin {
+			entity: key("actor"),
+			angular_velocity: [0.0, 2.0, 0.0],
+		},
+	});
+	let mut session = EditorSession::for_project(data, project).unwrap();
+	let authored = session.authored_document();
+	run(&mut session, Command::StartPlay);
+	for _ in 0..6 {
+		session.tick(1.0 / 60.0).unwrap();
+	}
+	assert_eq!(session.render_document(), authored);
+	assert!(!session.needs_tick());
 }

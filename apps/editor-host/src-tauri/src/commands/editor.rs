@@ -1,5 +1,8 @@
-//! Thin IPC adapters. CPU/file work runs off the WebView thread; widgets only send intent.
-use crate::{editor::EditorWorkspace, state::EditorState};
+use crate::project_location::ProjectLocation;
+use crate::{
+	editor::{EditorWorkspace, ReloadPolicy},
+	state::EditorState,
+};
 use bridge::editor::{
 	EditorCapabilitiesDto, EditorCommandRequest, EditorSnapshotDto, ViewportBoundsDto,
 	ViewportStatusDto,
@@ -72,7 +75,7 @@ async fn workspace<T: Send + 'static>(
 pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDto, String> {
 	trusted_window(&window)?;
 	Ok(EditorCapabilitiesDto {
-		protocol_version: 1,
+		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 		commands: CommandFactory::capabilities(),
 		max_selection: 4096,
@@ -82,12 +85,12 @@ pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDt
 	})
 }
 
-#[tauri::command]
-pub async fn editor_open(
+/// Prepare a candidate off the WebView thread, then install it through the
+/// same revision, completion and viewport path for scene and project opening.
+async fn open_workspace(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
-	asset_root: String,
-	scene_path: String,
+	prepare: impl FnOnce(Box<dyn Fn() + Send>) -> Result<EditorWorkspace, String> + Send + 'static,
 ) -> Result<EditorSnapshotDto, String> {
 	trusted_window(&window)?;
 	let shared = Arc::clone(&state.editor);
@@ -96,7 +99,7 @@ pub async fn editor_open(
 		let notify_editor = Arc::clone(&shared);
 		let notify_viewport = Arc::clone(&viewport);
 		let notify_window = window.clone();
-		let mut candidate = EditorWorkspace::open_with_notifier(&asset_root, &scene_path, move || {
+		let mut candidate = prepare(Box::new(move || {
 			let editor = Arc::clone(&notify_editor);
 			let viewport = Arc::clone(&notify_viewport);
 			let window = notify_window.clone();
@@ -107,7 +110,7 @@ pub async fn editor_open(
 					if let Ok(viewport) = viewport.lock() { viewport.invalidate(); }
 				}
 			});
-		})?;
+		}))?;
 		let snapshot = {
 			let mut current = shared.lock().map_err(|_| "Editor state lock failed")?;
 			if let Some(old) = current.as_ref() {
@@ -130,12 +133,25 @@ pub async fn editor_open(
 		.await
 		.map_err(|e| {
 			if matches!(&e, tauri::Error::JoinError(join) if join.is_panic()) {
-				engine_logger::debug!(target: "editor", "Scene open worker panicked; panic hook owns the error record");
+				engine_logger::debug!(target: "editor", "Editor open worker panicked; panic hook owns the error record");
 			} else {
-				engine_logger::error!(target: "editor", "Scene open worker cancelled");
+				engine_logger::error!(target: "editor", "Editor open worker cancelled");
 			}
 			format!("Editor worker failed: {e}")
 		})?
+}
+
+#[tauri::command]
+pub async fn editor_open(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	asset_root: String,
+	scene_path: String,
+) -> Result<EditorSnapshotDto, String> {
+	open_workspace(window, state, move |on_ready| {
+		EditorWorkspace::open_with_notifier(&asset_root, &scene_path, on_ready)
+	})
+		.await
 }
 
 #[tauri::command]
@@ -144,35 +160,12 @@ pub async fn editor_open_project(
 	state: State<'_, EditorState>,
 	manifest_path: String,
 ) -> Result<EditorSnapshotDto, String> {
-	trusted_window(&window)?;
-	let (asset_root, scene_path) =
-		tauri::async_runtime::spawn_blocking(move || -> Result<(String, String), String> {
-			let path = std::path::Path::new(&manifest_path);
-			if path.file_name().and_then(|name| name.to_str()) != Some("project.json")
-				|| std::fs::symlink_metadata(path)
-					.map_err(|e| e.to_string())?
-					.file_type()
-					.is_symlink()
-			{
-				return Err("Open a project.json manifest without symbolic links".into());
-			}
-			let manifest = path.canonicalize().map_err(|e| e.to_string())?;
-			let project = runtime::project::ProjectData::load(&manifest)?;
-			let assets = manifest
-				.parent()
-				.ok_or("Project directory is missing")?
-				.join("assets");
-			Ok((
-				assets
-					.to_str()
-					.ok_or("Project path must contain valid Unicode")?
-					.to_owned(),
-				project.startup_scene,
-			))
-		})
+	open_workspace(window, state, move |on_ready| {
+		let location = ProjectLocation::from_manifest(std::path::Path::new(&manifest_path))
+			.map_err(|error| error.to_string())?;
+		EditorWorkspace::open_project_with_notifier(location, on_ready)
+	})
 		.await
-		.map_err(|e| format!("Project open worker failed: {e}"))??;
-	editor_open(window, state, asset_root, scene_path).await
 }
 #[tauri::command]
 pub async fn editor_snapshot(
@@ -333,10 +326,38 @@ pub async fn editor_reload(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	expected_revision: u64,
+	policy: Option<ReloadPolicy>,
 ) -> Result<EditorSnapshotDto, String> {
 	trusted_window(&window)?;
 	workspace(state, true, Some("reload"), move |w| {
-		w.reload(expected_revision)
+		w.reload_with_policy(expected_revision, policy.unwrap_or_default())
+	})
+		.await
+}
+
+#[tauri::command]
+pub async fn editor_register_scene(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	path: String,
+	expected_revision: u64,
+) -> Result<EditorSnapshotDto, String> {
+	trusted_window(&window)?;
+	workspace(state, true, Some("register_scene"), move |w| {
+		w.register_scene(&path, expected_revision)
+	})
+		.await
+}
+#[tauri::command]
+pub async fn editor_save_scene_as(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	path: String,
+	expected_revision: u64,
+) -> Result<EditorSnapshotDto, String> {
+	trusted_window(&window)?;
+	workspace(state, true, Some("save_scene_as"), move |w| {
+		w.save_scene_as(&path, expected_revision)
 	})
 	.await
 }

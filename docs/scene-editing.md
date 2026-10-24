@@ -6,7 +6,8 @@ was added. Read the [learning report](editor-steps-21-35.md) for each step's rat
 
 ## Authoritative document API
 
-`runtime::editor::EditorSession` owns validated SceneData, saved authored state, a temporary Play copy, persistent-key
+`engine_core::editor::EditorSession` (re-exported by runtime) owns validated SceneData, saved authored state, a
+temporary Play copy, persistent-key
 selection, snapping, transactions and bounded patch history. `EditorCommandRequest` carries expected_revision. A
 rejected/stale command is not silently retried. Snapshot revision is command/document state; scene_revision
 independently invalidates rendered Play content. Workspace generation distinguishes project replacement.
@@ -42,15 +43,17 @@ atop it. The UI owner must surface platform capability limits and input/error st
 not document edits until mapped by the frontend owner. No finished inspector, multi-selection gesture UI, snapping
 toolbar, or prefab browser is claimed.
 
-## Legacy native prototype
+## Multi-scene documents and native adapter
 
-The prior SceneEditor/EntitySelection/CommandHistory and native panels/gizmos remain a legacy example. Its history uses
-transient IDs and a different 256-entry model; it is not interchangeable with EditorSession's persistent-key patches.
-Normal `game` execution no longer displays those editor overlays. Use `GAME_ENGINE_NATIVE_EDITOR_DEMO=1` explicitly for
-the earlier keyboard demonstration described in [steps 11–20](editor-steps-11-20.md).
+Project schema 2 retains independent authored/saved scene drafts. Switching requires Edit/no transaction, keeps unsaved
+drafts and clears selection; cross-scene undo can activate the scene owning an earlier edit. Structural catalog changes
+share history. Snapshots expose active_scene_id, project_dirty and per-scene dirty state.
+Read [project lifecycle](project-lifecycle.md) for the exact commands and persistence limits.
 
-That demo is not the product editor, a second UI fork, or evidence that the Angular app has its final layout. Earlier
-native keyboard controls must not be presented as hardcoded EditorSession bindings.
+The native SceneEditor now delegates to the core session rather than maintaining a competing active history pipeline.
+Source game execution defaults to Development and preserves panels/gizmos/learning controls; installed projects default
+to Player. Legacy CommandHistory/RobotGame APIs remain compatibility leftovers. Angular/Tauri owns future product
+presentation and bindings.
 
 ## Verification boundaries
 

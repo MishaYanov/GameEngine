@@ -38,7 +38,14 @@ See [packaging step22](../../editor-steps-21-35.md#step-22-json-aware-packaging)
 
 Project Builder v1 creates an independent **native game workspace on Windows**. It does not generate the Angular editor/client host. Enter a name, source and new absolute destination outside the source workspace; the destination parent must already exist. Preview the allowlisted sources/assets, then generate. Offline validation uses cached Cargo dependencies by default; disable the checkbox to permit downloads. Rust and Vulkan SDK/glslc are required.
 
-The builder copies game sources/assets and logger, renderer, runtime and bridge into sibling staging, writes a fresh root workspace, and queues validation. Only success publishes the destination with a Windows move that cannot replace an existing path. Preview fingerprints detect changed files; template symlinks are rejected. Failure, cancellation and interruption retain staging for inspection. No automatic recursive cleanup is performed. Project history retains at most 50 runs / 32 MiB. Keep the generated workspace layout when running its game so executable-relative asset paths remain valid. The manifest records copied inputs, revision where available, toolchain, operation and relative output artifacts; local source modifications are included and labelled as a working tree snapshot.
+The builder copies game sources/assets and engine-core, logger, renderer, runtime and bridge into sibling staging,
+writes a fresh root workspace, and queues validation. Only success publishes the destination with a Windows move that
+cannot replace an existing path. Preview fingerprints detect changed files; template symlinks are rejected. Failure,
+cancellation and interruption retain staging for inspection. No automatic recursive cleanup is performed. Project
+history retains at most 50 runs / 32 MiB. Keep the generated workspace layout when running its game so
+executable-relative asset paths remain valid. The manifest records copied inputs, revision where available, toolchain,
+operation and relative output artifacts; local source modifications are included and labelled as a working tree
+snapshot.
 
 Verification includes a full error → card → failed build → successful rerun → generated project fixture, source-independent fixture compilation, publication collisions, source navigation after moving staging and the actual copied native game build. Existing logger tests cover redaction before persistence; exports preserve retained records, while raw process output is not automatically redacted. Add redaction at the emitting source before logging sensitive output.
 
@@ -51,3 +58,6 @@ cargo clippy -p engine-admin --all-targets --features desktop --offline -- -D wa
 The full native template smoke test is opt-in because it compiles Vulkan/game dependencies and retains generated temporary output for inspection. Native Tauri interaction, interactive game rendering and installer smoke checks remain manual. See [automation and logging design](../../../designs/automation-and-logging-prd.md) for implementation status and future Angular-client templates.
 
 For step-by-step CLI, editor and dashboard instructions, see [the usage guide](../../usage.md).
+
+Native template validation now checks every project-schema-2 catalog scene and its scene-scoped behaviors, not only the
+startup file. See [project lifecycle](../../project-lifecycle.md) for catalog and packaging contracts.

@@ -16,6 +16,18 @@ function snapshot(revision: number): EditorSnapshot {
         mode: 'edit',
         paused: false,
         dirty: false,
+        project_dirty: false,
+        active_scene_id: 'main',
+        scenes: [{id: 'main', asset_path: 'scenes/main.json', loaded: true, dirty: false}],
+        project: {
+            schema_version: 2,
+            name: 'Service fixture',
+            scenes: [{id: 'main', asset_path: 'scenes/main.json'}],
+            startup_scene_id: 'main',
+            fixed_hz: 60,
+            max_catchup_steps: 8,
+            behaviors: [],
+        },
         can_undo: false,
         can_redo: false,
         transaction: null,
@@ -38,7 +50,7 @@ function snapshot(revision: number): EditorSnapshot {
 }
 
 const capabilities: EditorCapabilities = {
-    protocol_version: 1,
+    protocol_version: 2,
     scene_schema_version: 3,
     commands: [],
     max_selection: 4096,
@@ -131,6 +143,65 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.error()).toBeNull();
     });
 
+    it('queues scene switches before edits so the next request uses the new scene revision', async () => {
+        const current: EditorSnapshot = {
+            ...snapshot(7),
+            project: {
+                ...snapshot(7).project,
+                scenes: [
+                    {id: 'main', asset_path: 'scenes/main.json'},
+                    {id: 'secondary', asset_path: 'scenes/secondary.json'},
+                ],
+            },
+            scenes: [
+                {id: 'main', asset_path: 'scenes/main.json', loaded: true, dirty: true},
+                {id: 'secondary', asset_path: 'scenes/secondary.json', loaded: true, dirty: false},
+            ],
+            dirty: true,
+        };
+        const switched: EditorSnapshot = {...current, revision: 8, active_scene_id: 'secondary'};
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(current)
+            .mockResolvedValueOnce(switched)
+            .mockResolvedValueOnce({...switched, revision: 9});
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scenes/main.json');
+        const switching = service.switchScene('secondary');
+        const editing = service.execute({type: 'rename', key: 'actor', name: 'Changed secondary'});
+        await Promise.all([switching, editing]);
+        expect(invoke).toHaveBeenNthCalledWith(2, 'editor_execute', {
+            request: {expected_revision: 7, command: {type: 'switch_scene', scene_id: 'secondary'}},
+        });
+        expect(invoke).toHaveBeenNthCalledWith(3, 'editor_execute', {
+            request: {
+                expected_revision: 8,
+                command: {type: 'rename', key: 'actor', name: 'Changed secondary'},
+            },
+        });
+        expect(service.snapshot()?.active_scene_id).toBe('secondary');
+        expect(service.snapshot()?.scenes[0].dirty).toBe(true);
+        expect(service.dirty()).toBe(true);
+    });
+
+    it('preserves the active scene and dirty drafts when a scene switch is rejected', async () => {
+        const current: EditorSnapshot = {
+            ...snapshot(3),
+            dirty: true,
+            scenes: [{id: 'main', asset_path: 'scenes/main.json', loaded: true, dirty: true}],
+        };
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(current)
+            .mockRejectedValueOnce('Scene is not registered in the catalog')
+            .mockResolvedValueOnce(current);
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scenes/main.json');
+        await expect(service.switchScene('missing')).rejects.toMatchObject({kind: 'backend'});
+        expect(service.snapshot()).toEqual(current);
+        expect(invoke).toHaveBeenLastCalledWith('editor_snapshot', undefined);
+        expect(vi.mocked(invoke).mock.calls.filter(([operation]) => operation === 'editor_execute')).toHaveLength(1);
+        expect(vi.mocked(invoke).mock.calls.some(([operation]) => operation === 'editor_reload')).toBe(false);
+    });
+
     it('rejects commands before opening a document and browser-only use before invoking native IPC', async () => {
         const service = TestBed.inject(EditorService);
         await expect(service.execute({type: 'undo'})).rejects.toMatchObject({kind: 'not_open'});
@@ -144,6 +215,106 @@ describe('EditorService native command and viewport queues', () => {
         expect(invoke).not.toHaveBeenCalled();
     });
 
+    it('opens the selected project manifest and invalidates cached assets only after success', async () => {
+        const opened: EditorSnapshot = {
+            ...snapshot(8),
+            active_scene_id: 'startup',
+            scenes: [{id: 'startup', asset_path: 'scenes/startup.json', loaded: true, dirty: false}],
+            project: {
+                ...snapshot(8).project,
+                startup_scene_id: 'startup',
+                scenes: [{id: 'startup', asset_path: 'scenes/startup.json'}],
+            },
+        };
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(3))
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce(opened);
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scenes/main.json');
+        await service.assets();
+        expect(service.modelAssets()).toEqual([]);
+        const manifest = 'D:/Projects/My Game/project.json';
+        expect(await service.openProject(manifest)).toEqual(opened);
+        expect(invoke).toHaveBeenLastCalledWith('editor_open_project', {manifestPath: manifest});
+        expect(service.snapshot()).toEqual(opened);
+        expect(service.modelAssets()).toBeNull();
+        expect(service.pending()).toBe(0);
+    });
+
+    it('preserves the current project and asset cache when opening another project fails', async () => {
+        const current = {...snapshot(3), dirty: true};
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(current)
+            .mockResolvedValueOnce([])
+            .mockRejectedValueOnce('Invalid project manifest')
+            .mockResolvedValueOnce(snapshot(4));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('current/project.json');
+        await service.assets();
+        await expect(service.openProject('invalid/project.json')).rejects.toMatchObject({
+            kind: 'backend', operation: 'editor_open_project',
+        });
+        expect(service.snapshot()).toEqual(current);
+        expect(service.modelAssets()).toEqual([]);
+        expect(service.dirty()).toBe(true);
+        await service.saveProject();
+        expect(invoke).toHaveBeenLastCalledWith('editor_save_project', {expectedRevision: 3});
+        expect(service.error()).toBeNull();
+    });
+
+    it('queues scene registration, save-as, project save and reload with each returned revision', async () => {
+        for (const revision of [10, 11, 12, 13, 14]) {
+            vi.mocked(invoke).mockResolvedValueOnce(snapshot(revision));
+        }
+        const service = TestBed.inject(EditorService);
+        await service.openProject('game/project.json');
+        const registering = service.registerScene('scenes/second.json');
+        const savingAs = service.saveSceneAs('scenes/renamed.json');
+        const savingProject = service.saveProject();
+        const reloading = service.reload();
+        expect(service.pending()).toBe(4);
+        await Promise.all([registering, savingAs, savingProject, reloading]);
+        expect(vi.mocked(invoke).mock.calls.slice(1)).toEqual([
+            ['editor_register_scene', {path: 'scenes/second.json', expectedRevision: 10}],
+            ['editor_save_scene_as', {path: 'scenes/renamed.json', expectedRevision: 11}],
+            ['editor_save_project', {expectedRevision: 12}],
+            ['editor_reload', {policy: 'discard_unsaved', expectedRevision: 13}],
+        ]);
+        expect(service.snapshot()?.revision).toBe(14);
+        expect(service.pending()).toBe(0);
+    });
+
+    it('uses the recovered revision for a queued project save after save-as conflicts', async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(3))
+            .mockRejectedValueOnce('Revision conflict: current 9')
+            .mockResolvedValueOnce(snapshot(9))
+            .mockResolvedValueOnce(snapshot(10));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('game/project.json');
+        const savingAs = service.saveSceneAs('scenes/renamed.json');
+        const savingProject = service.saveProject();
+        await expect(savingAs).rejects.toMatchObject({kind: 'conflict'});
+        await savingProject;
+        expect(invoke).toHaveBeenNthCalledWith(2, 'editor_save_scene_as', {
+            path: 'scenes/renamed.json', expectedRevision: 3,
+        });
+        expect(invoke).toHaveBeenNthCalledWith(3, 'editor_snapshot', undefined);
+        expect(invoke).toHaveBeenLastCalledWith('editor_save_project', {expectedRevision: 9});
+        expect(vi.mocked(invoke).mock.calls.filter(([operation]) => operation === 'editor_save_scene_as')).toHaveLength(1);
+        expect(service.snapshot()?.revision).toBe(10);
+    });
+
+    it('rejects scene lifecycle persistence calls before a project is open without invoking IPC', async () => {
+        const service = TestBed.inject(EditorService);
+        await expect(service.registerScene('scenes/second.json')).rejects.toMatchObject({kind: 'not_open'});
+        await expect(service.saveSceneAs('scenes/renamed.json')).rejects.toMatchObject({kind: 'not_open'});
+        await expect(service.saveProject()).rejects.toMatchObject({kind: 'not_open'});
+        expect(invoke).not.toHaveBeenCalled();
+        expect(service.pending()).toBe(0);
+    });
+
     it('deduplicates capabilities and rejects incompatible protocol/schema before caching', async () => {
         const result = deferred<EditorCapabilities>();
         vi.mocked(invoke).mockReturnValueOnce(result.promise);
@@ -151,13 +322,16 @@ describe('EditorService native command and viewport queues', () => {
         const first = service.loadCapabilities();
         const second = service.loadCapabilities();
         expect(second).toBe(first);
-        result.resolve({...capabilities, scene_schema_version: 2});
+        result.resolve({...capabilities, protocol_version: 1});
         await expect(first).rejects.toMatchObject({kind: 'backend'});
+        expect(service.capabilities()).toBeNull();
+        vi.mocked(invoke).mockResolvedValueOnce({...capabilities, scene_schema_version: 2});
+        await expect(service.loadCapabilities()).rejects.toMatchObject({kind: 'backend'});
         expect(service.capabilities()).toBeNull();
         vi.mocked(invoke).mockResolvedValueOnce(capabilities);
         expect(await service.loadCapabilities()).toEqual(capabilities);
         await service.loadCapabilities();
-        expect(invoke).toHaveBeenCalledTimes(2);
+        expect(invoke).toHaveBeenCalledTimes(3);
     });
 
     it('coalesces queued viewport bounds to the latest geometry', async () => {

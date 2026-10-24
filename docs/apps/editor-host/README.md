@@ -6,6 +6,7 @@ keyboard bindings.
 
 ## Responsibilities
 
+- `project_location.rs`: canonical project root, project.json and contained assets ownership; typed ProjectOpenError.
 - `editor.rs`: EditorWorkspace, project-root paths, scene load/save, asset metadata, model imports, prefabs and revision
   checks.
 - `commands/editor.rs`: typed editor IPC and trusted main-window checks; blocking CPU/filesystem work uses async
@@ -38,6 +39,20 @@ owner to interpret; it is not a domain command by itself.
 
 The existing engine_status/create_project commands remain for status and the setup installer; they are separate from the
 new editor document API.
+
+## Project lifecycle and multi-scene persistence
+
+`editor_open_project` uses ProjectLocation and prepares every catalog scene before installing a candidate. Project
+schema 2 uses stable scene IDs and scene-scoped behaviors; capabilities advertise protocol 2 / scene schema 3.
+`editor_register_scene` registers an existing file, while `editor_save_scene_as` writes a new destination and changes
+the active scene path. `editor_save` saves only the active scene; `editor_save_project` saves the manifest.
+
+`editor_execute_receipt` and `editor_changes` expose coordinator receipts/change pages. Catalog operations travel
+through typed commands. `editor_reload` accepts `require_clean` (default when omitted) or explicit `discard_unsaved`; it
+validates all replacement documents and refreshes generation/jobs/caches only after success. Manifest-backed state never
+silently falls back when project.json disappears. Build preparation compares every scene with disk before releasing the
+workspace lock for compilation. See [project lifecycle](../../project-lifecycle.md) for failure behavior and frontend
+helpers.
 
 ## Windows viewport boundary
 

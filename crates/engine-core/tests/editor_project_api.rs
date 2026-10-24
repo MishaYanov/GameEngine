@@ -16,12 +16,15 @@ fn run(session: &mut EditorSession, command: Command) {
 		.unwrap();
 }
 fn configured(data: &engine_core::SceneData) -> ProjectData {
-	let mut project = ProjectData::for_scene("Authored", "scenes/main.json", data).unwrap();
-	project.behaviors = vec![BehaviorSpec::ControlledMove {
+	configure(ProjectData::for_scene("Authored", "scenes/main.json", data).unwrap())
+}
+fn configure(mut project: ProjectData) -> ProjectData {
+	project.name = "Authored".into();
+	project.add_behavior(BehaviorSpec::ControlledMove {
 		entity: key("actor"),
 		speed: 2.0,
 		space: BehaviorSpace::World,
-	}];
+	});
 	project
 }
 
@@ -79,7 +82,7 @@ fn project_configuration_is_undoable_groupable_and_rejected_changes_preserve_pro
 	let mut editor = EditorSession::new(data.clone()).unwrap();
 	let original = editor.project().clone();
 	assert!(original.behaviors.is_empty());
-	let project = configured(&data);
+	 let project = configure(original.clone());
 	run(
 		&mut editor,
 		Command::SetProject {
@@ -95,7 +98,7 @@ fn project_configuration_is_undoable_groupable_and_rejected_changes_preserve_pro
 	assert_eq!(editor.project(), &project);
 	let snapshot = serde_json::to_value(editor.snapshot().unwrap()).unwrap();
 	let mut invalid = project;
-	invalid.behaviors[0] = BehaviorSpec::ControlledMove {
+	 invalid.behaviors[0].behavior = BehaviorSpec::ControlledMove {
 		entity: key("missing"),
 		speed: 1.0,
 		space: BehaviorSpace::World,
@@ -185,12 +188,8 @@ fn default_editor_projects_have_no_selection_driven_gameplay_and_clear_input_is_
 	editor.tick(10.0).unwrap();
 	assert_eq!(editor.render_document().as_ref(), &data);
 	run(&mut editor, Command::StopPlay);
-	run(
-		&mut editor,
-		Command::SetProject {
-			project: configured(&data),
-		},
-	);
+	let project = configure(editor.project().clone());
+	run(&mut editor, Command::SetProject { project });
 	run(&mut editor, Command::StartPlay);
 	run(
 		&mut editor,

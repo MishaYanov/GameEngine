@@ -92,9 +92,9 @@ EngineViewportDirective plus runtime/host logic. It does not compose a new edito
 newly built app template. Do not expect a finished hierarchy/material/prefab screen merely by launching the existing
 setup app.
 
-Normal `cargo run -p game` is an overlay-free player path. The earlier native panels/gizmos are available only with
-GAME_ENGINE_NATIVE_EDITOR_DEMO=1 for deliberate legacy inspection; their keyboard controls are not runtime EditorSession
-defaults. Physical shortcuts/tool gestures belong to the Angular UI owner.
+Source `cargo run -p game` defaults to Development with existing panels/gizmos and learning controls. Installed projects
+default to Player. Explicit `--development`/`--player` flags select mode; the native harness delegates to the shared
+core session. The future Angular UI owns product shortcuts/tool gestures.
 
 A future UI integration can open an asset root/scene, inspect capabilities, send typed expected-revision commands and
 apply the viewport directive to its chosen pane. The current native child is Windows-only with airspace/visibility/DPI

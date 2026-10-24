@@ -1,8 +1,8 @@
 # Standalone game runtime
 
-Source: `apps/game`. **Normal execution is a game/player path, not an editor overlay UI.** The editor product belongs to
-the Angular app and its chosen embedded game pane. Runtime exposes the reusable logic and the Tauri host owns native
-rendering integration.
+Source: `apps/game`. The source executable defaults to Development mode with the existing learning panels, gizmos and
+controls. Installed projects default to Player mode. The future product editor remains Angular/Tauri; native tools are a
+transitional harness over shared core semantics.
 
 ## Run
 
@@ -22,24 +22,20 @@ Steps 21–35 add hierarchy/world transforms, scene schema3, static glTF node/me
 directional/point lights, bounded fixed steps and conservative collision movement. Renderer submission adds asynchronous
 GPU timestamps and compatible opaque instancing. Actual model/material/scene inputs remain validated and bounded.
 
-RobotGame is demo-specific behavior. EditorSession is a separate CPU document application service for Angular commands;
-the game executable is not a replacement Angular UI or a location to hardcode all editor shortcuts.
-See [steps 21–35](../../editor-steps-21-35.md), [runtime](../../crates/runtime/README.md)
-and [renderer](../../crates/renderer/README.md).
+## Modes and authored gameplay
 
-## Explicit legacy editor demo
+Use `cargo run -p game -- --development` or `cargo run -p game -- --player` to choose explicitly. Installed project
+detection selects Player by default; the older environment switch remains a compatibility input. Development retains
+existing controls, but native SceneEditor delegates edits/history to core EditorSession.
 
-To inspect the earlier native prototype deliberately:
+Project schema 2 identifies startup_scene_id in its scene catalog. The player loads that document and applies its
+scene-scoped ControlledMove/Spin behaviors through the same SimulationSession used by editor Play. RobotGame and older
+CommandHistory APIs remain compatibility helpers, not the normal GameApp behavior pipeline.
+See [project lifecycle](../../project-lifecycle.md), [backend handoff](../../project3-handoff.md)
+and [runtime](../../crates/runtime/README.md).
 
-```powershell
-$env:GAME_ENGINE_NATIVE_EDITOR_DEMO = '1'
-cargo run -p game --locked --offline
-Remove-Item Env:GAME_ENGINE_NATIVE_EDITOR_DEMO
-```
-
-This opt-in path retains prior native panels, selection/gizmos and keyboard demonstration controls. They are not
-composed into Angular and do not define bindings for the typed runtime editor. See the
-historical [steps 11–20 report](../../editor-steps-11-20.md). Production default stays overlay-free.
+Multi-scene authoring is not automatic gameplay scene transitions. Keep the manifest, scenes, models and asset
+dependencies together in an installed project.
 
 ## Resource and timing limits
 

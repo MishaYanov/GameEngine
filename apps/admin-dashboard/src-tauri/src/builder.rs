@@ -213,37 +213,40 @@ fn publish_new(source: &Path, destination: &Path) -> io::Result<()> {
 fn validate_project_template(source: &Path, manifest: &Path) -> io::Result<()> {
 	let project = engine_core::project::ProjectData::load(manifest).map_err(io::Error::other)?;
 	let root = source.join("apps/game/assets").canonicalize()?;
-	let mut path = root.clone();
-	for component in Path::new(&project.startup_scene).components() {
-		if !matches!(component, std::path::Component::Normal(_)) {
+	for entry in project.scenes.iter() {
+		let mut path = root.clone();
+		for component in Path::new(entry.asset_path()).components() {
+			if !matches!(component, std::path::Component::Normal(_)) {
+				return Err(io::Error::other(
+					"Startup scene path must remain asset-relative",
+				));
+			}
+			path.push(component);
+			if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+				return Err(io::Error::other(
+					"Startup scene symbolic links are unsupported",
+				));
+			}
+		}
+		if !path.canonicalize()?.starts_with(&root) {
+			return Err(io::Error::other("Startup scene escaped the asset root"));
+		}
+		let file = fs::File::open(path)?;
+		let metadata = file.metadata()?;
+		if !metadata.is_file() || metadata.len() > engine_core::scene_data::MAX_SCENE_BYTES as u64 {
 			return Err(io::Error::other(
-				"Startup scene path must remain asset-relative",
+				"Startup scene must be a regular file within the scene byte limit",
 			));
 		}
-		path.push(component);
-		if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-			return Err(io::Error::other(
-				"Startup scene symbolic links are unsupported",
-			));
-		}
+		let mut json = String::new();
+		file.take(engine_core::scene_data::MAX_SCENE_BYTES as u64 + 1)
+			.read_to_string(&mut json)?;
+		let scene = engine_core::scene_data::parse_json(&json).map_err(io::Error::other)?;
+		project
+			.validate_scene_for(entry.id(), &scene.data)
+			.map_err(io::Error::other)?;
 	}
-	if !path.canonicalize()?.starts_with(&root) {
-		return Err(io::Error::other("Startup scene escaped the asset root"));
-	}
-	let file = fs::File::open(path)?;
-	let metadata = file.metadata()?;
-	if !metadata.is_file() || metadata.len() > engine_core::scene_data::MAX_SCENE_BYTES as u64 {
-		return Err(io::Error::other(
-			"Startup scene must be a regular file within the scene byte limit",
-		));
-	}
-	let mut json = String::new();
-	file.take(engine_core::scene_data::MAX_SCENE_BYTES as u64 + 1)
-		.read_to_string(&mut json)?;
-	let scene = engine_core::scene_data::parse_json(&json).map_err(io::Error::other)?;
-	project
-		.validate_scene(&scene.data)
-		.map_err(io::Error::other)
+	Ok(())
 }
 impl Builder {
 	pub fn new(data: &Path) -> Self {
