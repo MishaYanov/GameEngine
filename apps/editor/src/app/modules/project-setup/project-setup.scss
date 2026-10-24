@@ -1,5 +1,5 @@
-@use './styles/components/layout';
-@use './styles/components/panes';
+@use '../../styles/components/layout';
+@use '../../styles/components/panes';
 
 .brand {
   font-weight: var(--font-weight-bold);

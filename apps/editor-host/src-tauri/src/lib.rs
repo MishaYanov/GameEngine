@@ -1,11 +1,15 @@
 mod commands;
 mod editor;
+mod layout_preferences;
 mod project_location;
 mod state;
 mod viewport;
 
 use crate::commands::editor::*;
 use crate::commands::engine::engine_status;
+use crate::commands::preferences::{
+	editor_layout_preferences_load, editor_layout_preferences_save,
+};
 use crate::commands::project::create_project;
 use state::EditorState;
 use tauri::Manager;
@@ -49,6 +53,8 @@ pub fn run() {
 		.invoke_handler(tauri::generate_handler![
 			engine_status,
 			create_project,
+			editor_layout_preferences_load,
+			editor_layout_preferences_save,
 			editor_capabilities,
 			editor_open,
 			editor_open_project,

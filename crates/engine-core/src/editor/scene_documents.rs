@@ -12,6 +12,7 @@ pub(super) struct SceneDraft {
 	pub data: Arc<SceneData>,
 	pub saved: Arc<SceneData>,
 	pub saved_path: Option<String>,
+	pub selection: Vec<EntityKey>,
 }
 
 impl EditorSession {
@@ -58,13 +59,18 @@ impl EditorSession {
 			|| self.saved_path.as_deref() != self.project.scene_path(&self.active_scene_id).ok()
 	}
 
+	fn active_draft(&self) -> SceneDraft {
+		SceneDraft {
+			data: Arc::clone(&self.data),
+			saved: Arc::clone(&self.saved),
+			saved_path: self.saved_path.clone(),
+			selection: self.selection.clone(),
+		}
+	}
+
 	fn draft(&self, id: &SceneId) -> Result<SceneDraft, String> {
 		if id == &self.active_scene_id {
-			Ok(SceneDraft {
-				data: Arc::clone(&self.data),
-				saved: Arc::clone(&self.saved),
-				saved_path: self.saved_path.clone(),
-			})
+			Ok(self.active_draft())
 		} else {
 			self.drafts
 				.get(id)
@@ -93,6 +99,7 @@ impl EditorSession {
 					saved: Arc::clone(&data),
 					data,
 					saved_path: Some(self.project.scene_path(&id)?.to_owned()),
+					selection: Vec::new(),
 				},
 			);
 		}
@@ -128,23 +135,15 @@ impl EditorSession {
 
 	fn activate(&mut self, id: SceneId, draft: SceneDraft) {
 		if id != self.active_scene_id {
-			self.drafts.insert(
-				self.active_scene_id.clone(),
-				SceneDraft {
-					data: Arc::clone(&self.data),
-					saved: Arc::clone(&self.saved),
-					saved_path: self.saved_path.clone(),
-				},
-			);
+			let outgoing = self.active_draft();
+			self.drafts.insert(self.active_scene_id.clone(), outgoing);
 			self.drafts.remove(&id);
 			self.active_scene_id = id;
 		}
 		self.data = draft.data;
 		self.saved = draft.saved;
 		self.saved_path = draft.saved_path;
-		self.selection.clear();
-		// Bounds describe project-relative assets, so they remain valid across
-		// scene navigation and same-scene history restoration.
+		self.selection = draft.selection;
 		self.scene_revision += 1;
 	}
 
@@ -157,6 +156,7 @@ impl EditorSession {
 		}
 		let draft = self.draft(&id)?;
 		self.project.validate_scene_for(&id, &draft.data)?;
+		validate_selection(&draft.data, &draft.selection)?;
 		self.check_document_budget(None)?;
 		self.activate(id, draft);
 		self.bump();
@@ -186,6 +186,7 @@ impl EditorSession {
 			data: Arc::clone(&data),
 			saved: data,
 			saved_path: None,
+			selection: Vec::new(),
 		};
 		let mut staged = self.drafts.clone();
 		staged.insert(id.clone(), draft.clone());
@@ -196,7 +197,7 @@ impl EditorSession {
 			&staged,
 			None,
 		)?;
-		// History is accepted before either catalog or document membership commits.
+
 		self.commit_project(
 			(*self.data).clone(),
 			project,
@@ -284,13 +285,14 @@ impl EditorSession {
 			return Ok(());
 		};
 		let mut draft = self.draft(&id)?;
-		let Some((data, project, _)) =
+		let Some((data, project, selection)) =
 			self.history
 				.preview_restore(&draft.data, &self.project, redo)?
 		else {
 			return Ok(());
 		};
 		self.validate_project_documents(&project, &id, &data)?;
+		validate_selection(&data, &selection)?;
 		self.check_document_budget(Some((&id, &data)))?;
 		let Some((data, project, selection)) =
 			self.history.restore(&draft.data, &self.project, redo)?
@@ -298,9 +300,9 @@ impl EditorSession {
 			return Ok(());
 		};
 		draft.data = Arc::new(data);
+		draft.selection = selection;
 		self.activate(id, draft);
 		self.project = Arc::new(project);
-		self.selection = selection;
 		self.bump();
 		Ok(())
 	}

@@ -1,5 +1,5 @@
 export const environment = {
     name: 'staging',
     toolsEnabled: true,
-    defaultRoute: 'setup',
+    startInEditor: false,
 } as const;

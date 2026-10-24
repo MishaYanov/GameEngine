@@ -1,19 +1,19 @@
 import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import {invoke} from '@tauri-apps/api/core';
-import {ProjectSetup as App} from './project-setup';
+import {ProjectSetup} from './project-setup';
 
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({isTauri: () => true, invoke: vi.fn()}));
 
 describe('Project setup', () => {
     beforeEach(async () => {
         vi.mocked(invoke).mockReset();
         vi.mocked(invoke).mockResolvedValue(null);
-        await TestBed.configureTestingModule({imports: [App]}).compileComponents();
+        await TestBed.configureTestingModule({imports: [ProjectSetup]}).compileComponents();
     });
 
     it('renders the project setup fields', async () => {
-        const fixture = TestBed.createComponent(App);
+        const fixture = TestBed.createComponent(ProjectSetup);
         await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
         expect(root.querySelector('h1')?.textContent).toContain('Create your project');
@@ -21,7 +21,7 @@ describe('Project setup', () => {
     });
 
     it('validates inputs before starting a build', async () => {
-        const fixture = TestBed.createComponent(App);
+        const fixture = TestBed.createComponent(ProjectSetup);
         await fixture.whenStable();
         vi.mocked(invoke).mockClear();
         fixture.nativeElement
@@ -33,7 +33,7 @@ describe('Project setup', () => {
     });
 
     it('submits values and shows the installed project', async () => {
-        const fixture = TestBed.createComponent(App);
+        const fixture = TestBed.createComponent(ProjectSetup);
         await fixture.whenStable();
         vi.mocked(invoke).mockResolvedValue({
             path: 'D:\\Projects\\Demo',

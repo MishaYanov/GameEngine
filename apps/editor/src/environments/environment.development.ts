@@ -1,5 +1,5 @@
 export const environment = {
     name: 'development',
     toolsEnabled: true,
-    defaultRoute: 'demo',
+    startInEditor: true,
 } as const;

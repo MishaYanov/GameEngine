@@ -14,7 +14,7 @@ import type {UnlistenFn} from '@tauri-apps/api/event';
 import type {ViewportBounds, ViewportInput, ViewportStatus} from './editor.models';
 import {EditorClientError, EditorService} from './editor.service';
 
-/** Attach the native child to an existing Angular pane; supplies no layout or shortcuts. */
+/** Attach the native child to an existing Angular pane.scss; supplies no layout or shortcuts. */
 @Directive({selector: '[engineViewport]', exportAs: 'engineViewport'})
 export class EngineViewportDirective {
     readonly engineViewport = input(true, {transform: booleanAttribute});
@@ -215,7 +215,7 @@ export class EngineViewportDirective {
             this.latestBounds = null;
             this.report(cause);
             // A rejected resize must not leave an old visible game surface running
-            // over a pane that Angular has moved or hidden.
+            // over a pane.scss that Angular has moved or hidden.
             await this.editor.detachViewport().catch(() => undefined);
             this.attached = false;
             this.lastBounds = null;

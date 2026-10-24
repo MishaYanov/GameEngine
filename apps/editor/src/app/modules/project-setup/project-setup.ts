@@ -1,8 +1,8 @@
 import {Component, computed, inject, signal} from '@angular/core';
 import {FormControl, FormGroup, ReactiveFormsModule, Validators} from '@angular/forms';
 import {invoke, isTauri} from '@tauri-apps/api/core';
-import {EngineService} from './core/engine/engine.service';
-import {EngineStatus} from './core/engine/engine.models';
+import {EngineService} from '../../core/engine/engine.service';
+import {EngineStatus} from '../../core/engine/engine.models';
 
 interface ProjectResult {
     path: string;
@@ -13,8 +13,8 @@ interface ProjectResult {
 @Component({
     selector: 'app-project-setup',
     imports: [ReactiveFormsModule],
-    templateUrl: './app.html',
-    styleUrl: './app.scss',
+    templateUrl: './project-setup.html',
+    styleUrl: './project-setup.scss',
 })
 export class ProjectSetup {
     protected readonly status = signal<EngineStatus | null>(null);

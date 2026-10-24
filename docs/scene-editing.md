@@ -45,9 +45,14 @@ toolbar, or prefab browser is claimed.
 
 ## Multi-scene documents and native adapter
 
-Project schema 2 retains independent authored/saved scene drafts. Switching requires Edit/no transaction, keeps unsaved
-drafts and clears selection; cross-scene undo can activate the scene owning an earlier edit. Structural catalog changes
-share history. Snapshots expose active_scene_id, project_dirty and per-scene dirty state.
+Project schema 2 retains independent authored/saved scene drafts and transient per-scene selections. Switching requires
+Edit/no transaction, keeps unsaved drafts and the outgoing selection, and restores the incoming scene's selection after
+validating it. Cross-scene undo/redo can activate the scene owning an earlier edit and restores that history record's
+selection; it validates the restored selection before changing history or activation. Structural catalog changes share
+history. Navigation adds no undo entry. Freshly created/loaded drafts and reopened workspaces start with empty
+selection;
+selection is not saved in scene/project files and does not affect dirty flags or saved baselines. Snapshots expose
+active_scene_id, project_dirty and per-scene dirty state.
 Read [project lifecycle](project-lifecycle.md) for the exact commands and persistence limits.
 
 The native SceneEditor now delegates to the core session rather than maintaining a competing active history pipeline.

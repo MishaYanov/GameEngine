@@ -49,6 +49,14 @@ fn switch(engine: &mut Engine, id: &SceneId) {
 		},
 	);
 }
+fn select(engine: &mut Engine, keys: &[&str]) {
+	run(
+		engine,
+		Command::Select {
+			keys: keys.iter().map(|value| (*value).into()).collect(),
+		},
+	);
+}
 fn rejected_without_mutation(engine: &mut Engine, command: Command) {
 	let before = serde_json::to_value(engine.snapshot().unwrap()).unwrap();
 	let cursor = engine.change_cursor();
@@ -65,6 +73,107 @@ fn rejected_without_mutation(engine: &mut Engine, command: Command) {
 		before
 	);
 	assert_eq!(engine.change_cursor(), cursor);
+}
+
+#[test]
+fn each_scene_remembers_its_selection_without_dirtying_documents_or_adding_history() {
+	let (mut engine, first, second) = fixture();
+	let first_document = engine.session().scene_document(&first).unwrap();
+	let second_document = engine.session().scene_document(&second).unwrap();
+	select(&mut engine, &["actor"]);
+	switch(&mut engine, &second);
+	assert!(engine.session().selection().is_empty());
+	select(&mut engine, &["actor"]);
+	switch(&mut engine, &first);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+	select(&mut engine, &[]);
+	switch(&mut engine, &second);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+	switch(&mut engine, &first);
+	assert!(engine.session().selection().is_empty());
+
+	let snapshot = engine.snapshot().unwrap();
+	assert!(!snapshot.dirty);
+	assert!(!snapshot.project_dirty);
+	assert!(snapshot.scenes.iter().all(|state| !state.dirty));
+	assert!(!snapshot.can_undo && !snapshot.can_redo);
+	assert_eq!(
+		engine.session().scene_document(&first).unwrap(),
+		first_document
+	);
+	assert_eq!(
+		engine.session().scene_document(&second).unwrap(),
+		second_document
+	);
+}
+
+#[test]
+fn added_loaded_and_reopened_scene_documents_start_with_empty_selections() {
+	let (mut engine, first, second) = fixture();
+	assert!(engine.session().selection().is_empty());
+	select(&mut engine, &["actor"]);
+	switch(&mut engine, &second);
+	assert!(engine.session().selection().is_empty());
+	select(&mut engine, &["actor"]);
+
+	// Reopening constructs a fresh session from authored documents and project data.
+	let mut reopened = EngineBuilder::new(
+		(*engine.session().scene_document(&first).unwrap()).clone(),
+		engine.session().project().clone(),
+	)
+	.with_scenes(vec![(
+		second.clone(),
+		(*engine.session().scene_document(&second).unwrap()).clone(),
+	)])
+	.build()
+	.unwrap();
+	assert_eq!(reopened.session().active_scene_id(), &first);
+	assert!(reopened.session().selection().is_empty());
+	switch(&mut reopened, &second);
+	assert!(reopened.session().selection().is_empty());
+
+	let added = SceneId::new("new-selection-scene").unwrap();
+	run(
+		&mut engine,
+		Command::AddScene {
+			id: added.clone(),
+			asset_path: "scenes/new-selection-scene.json".into(),
+			document: scene(vec![entity("new-actor", [0.0; 3])]),
+		},
+	);
+	switch(&mut engine, &added);
+	assert!(engine.session().selection().is_empty());
+	switch(&mut engine, &second);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+}
+
+#[test]
+fn cross_scene_undo_and_redo_restore_patch_selection_and_retain_the_outgoing_selection() {
+	let (mut engine, first, second) = fixture();
+	select(&mut engine, &["actor"]);
+	run(&mut engine, Command::DeleteSelection);
+	assert!(engine.session().selection().is_empty());
+	switch(&mut engine, &second);
+	select(&mut engine, &["actor"]);
+
+	run(&mut engine, Command::Undo);
+	assert_eq!(engine.session().active_scene_id(), &first);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+	assert_eq!(
+		engine.snapshot().unwrap().document.entities[0].key,
+		key("actor")
+	);
+	switch(&mut engine, &second);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+
+	run(&mut engine, Command::Redo);
+	assert_eq!(engine.session().active_scene_id(), &first);
+	assert!(engine.session().selection().is_empty());
+	assert!(engine.snapshot().unwrap().document.entities.is_empty());
+	switch(&mut engine, &second);
+	assert_eq!(engine.session().selection(), &[key("actor")]);
+	switch(&mut engine, &first);
+	assert!(engine.session().selection().is_empty());
 }
 
 #[test]

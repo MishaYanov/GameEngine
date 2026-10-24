@@ -2,5 +2,5 @@
 export const environment = {
     name: 'production',
     toolsEnabled: false,
-    defaultRoute: 'setup',
+    startInEditor: false,
 } as const;

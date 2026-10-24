@@ -38,8 +38,10 @@ characters. Catalog serialization is ordered by ID. Scene-scoped behaviors are c
 identical entity keys in different scenes do not share behavior accidentally.
 
 Manifests remain bounded to 1 MiB. Retained authored/saved scene documents have a 256 MiB conservative logical budget
-and a 64-document count ceiling, including documents retained for history. This accounting does not measure total
-process or GPU memory. Each scene retains its existing individual validation and size limits.
+and a 64-document count ceiling, including documents retained for history. That document budget excludes selection
+vectors, history storage and allocator overhead; it does not measure total process or GPU memory. Each scene retains
+its existing individual validation and size limits, and each selection is separately limited to 4,096 distinct existing
+entity keys.
 
 ## Open a project or standalone scene
 
@@ -62,23 +64,29 @@ after successful validation/reload.
 ## Documents, switching and history
 
 `EngineBuilder::with_scenes` supplies inactive documents. `EditorSession` retains active and inactive authored/saved
-drafts. Snapshots now include `active_scene_id`, `project`, `project_dirty` and sorted `scenes` entries containing `id`,
-`asset_path`, `loaded` and `dirty`.
+drafts together with each scene's transient selection. Snapshots now include `active_scene_id`, `project`,
+`project_dirty` and sorted `scenes` entries containing `id`, `asset_path`, `loaded` and `dirty`.
 
 - `add_scene` adds an explicit ID, new relative path and document. In the host it requires a new file path; it does not
   write the document automatically. Save the scene before persisting a catalog that references it.
-- `switch_scene` requires Edit mode and no open transaction. It retains dirty drafts, activates the selected document
-  and clears selection. Navigation is not itself a history edit.
+- `switch_scene` requires Edit mode and no open transaction. It retains dirty drafts and the outgoing selection, then
+  activates the incoming document with that scene's retained selection. The incoming selection is validated before
+  activation. Navigation is not itself a history edit.
 - `set_startup_scene` changes which scene the player starts with; it does not switch the editor's active scene.
 - `remove_scene` requires an inactive, nonstartup, clean scene. It removes catalog membership and that scene's
   configured behaviors, without deleting its disk file. History may retain its document for undo.
 - `change_scene_path` changes catalog metadata. The host requires an existing file containing the authored document and
   rejects another scene's resolved path; use Save As to create a new destination.
 
-History records retain scene identity. Undo/redo can activate the scene belonging to the target edit, even after
-navigation, while preserving other drafts. Scene/catalog/project changes use the shared bounded history; open
-transactions and Play restrict structural operations. The overall dirty state includes project settings and inactive
-scene drafts, not only the displayed document.
+History records retain scene identity and historical selection. Undo/redo can activate the scene belonging to the target
+edit, even after navigation, restoring the selection recorded for that edit while preserving other drafts. Restored
+selection is validated before consuming the history record or activating its scene. Scene/catalog/project changes use
+the shared bounded history; open transactions and Play restrict structural operations. The overall dirty state includes
+project settings and inactive scene drafts, not only the displayed document.
+
+Selection retention lasts only for the current session. Newly created or freshly loaded scene drafts start with empty
+selection, and reopening a workspace starts empty again. Selection is not serialized into scene/project files and does
+not contribute to scene/project dirty flags or change saved baselines.
 
 ## Save, Save As, register and reload
 

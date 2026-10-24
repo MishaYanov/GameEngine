@@ -1,0 +1,5 @@
+@use '../../../styles/components/pane' as p;
+
+.app-drawer {
+  @include p.pane;
+}

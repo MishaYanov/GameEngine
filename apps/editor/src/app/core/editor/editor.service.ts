@@ -1,7 +1,6 @@
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
-import {isTauri} from '@tauri-apps/api/core';
-import type {UnlistenFn} from '@tauri-apps/api/event';
-import {EDITOR_BACKEND} from './editor-backend';
+import {invoke, isTauri} from '@tauri-apps/api/core';
+import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import type {
     CollisionSnapshot,
     EditorCapabilities,
@@ -40,7 +39,6 @@ interface PendingBounds {
 @Service()
 export class EditorService {
     readonly nativeAvailable = typeof window !== 'undefined' && isTauri();
-    private readonly backend = inject(EDITOR_BACKEND);
     private readonly destroyRef = inject(DestroyRef);
     private readonly snapshotState = signal<EditorSnapshot | null>(null);
     readonly snapshot = this.snapshotState.asReadonly();
@@ -81,8 +79,8 @@ export class EditorService {
             this.listeners.clear();
             // Finish any already submitted attach before the final detach. Do not
             // leave a native child behind when its Angular owner is destroyed.
-            if (this.backend.available && this.viewportRequested) {
-                void this.viewportQueue.then(() => this.backend.request('editor_viewport_detach')).catch(() => undefined);
+            if (this.nativeAvailable && this.viewportRequested) {
+                void this.viewportQueue.then(() => invoke('editor_viewport_detach')).catch(() => undefined);
             }
         });
     }
@@ -438,10 +436,10 @@ export class EditorService {
     }
 
     private async listenNative<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
-        if (!this.backend.available || this.destroyed) return () => undefined;
+        if (!this.nativeAvailable || this.destroyed) return () => undefined;
         let active = true;
-        const nativeUnlisten = await this.backend.subscribe<T>(event, (payload) => {
-            if (active && !this.destroyed) handler(payload);
+        const nativeUnlisten = await listen<T>(event, (message) => {
+            if (active && !this.destroyed) handler(message.payload);
         });
         const unlisten = () => {
             if (active) {
@@ -468,11 +466,11 @@ export class EditorService {
         } catch (cause: unknown) {
             return Promise.reject(cause);
         }
-        return this.backend.request<T>(operation, args);
+        return invoke<T>(operation, args);
     }
 
     private assertNative(operation: string): void {
-        if (!this.backend.available || this.destroyed) {
+        if (!this.nativeAvailable || this.destroyed) {
             throw new EditorClientError(
                 'unavailable',
                 operation,

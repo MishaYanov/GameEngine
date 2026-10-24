@@ -1,6 +1,6 @@
 import {BuilderFormControlOptions} from "./builder-form-control.model";
 
 
-export type FormOptions = {
+export type ElFormOptions = {
     controls: BuilderFormControlOptions[]
 }

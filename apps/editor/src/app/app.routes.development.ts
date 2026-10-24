@@ -1,18 +1,20 @@
 import {Routes} from '@angular/router';
-import {isTauri} from '@tauri-apps/api/core';
 import {environment} from '../environments/environment';
+import {applicationRoutes} from './app.routes.shared';
 
-export const routes: Routes = [
-    {path: '', pathMatch: 'full', redirectTo: isTauri() ? 'setup' : environment.defaultRoute},
-    {path: 'setup', loadComponent: () => import('./project-setup').then((m) => m.ProjectSetup)},
-    {
-        path: 'demo',
-        loadComponent: () => import('./demo/demo-workspace').then((m) => m.DemoWorkspace),
-    },
-    {
-        path: 'design',
-        loadChildren: () =>
-            import('../../projects/design/src/design.routes').then((m) => m.designRoutes),
-    },
-    {path: '**', redirectTo: 'setup'},
-];
+// Startup routing is shared by the browser and Tauri. Explicit deep links are retained.
+export function developmentRoutes(startInEditor: boolean): Routes {
+    return [
+        {path: '', pathMatch: 'full', redirectTo: startInEditor ? 'editor' : 'setup'},
+        ...applicationRoutes,
+        {path: 'demo', pathMatch: 'full', redirectTo: 'editor'},
+        {
+            path: 'design',
+            loadChildren: () =>
+                import('../../projects/design/src/design.routes').then((m) => m.designRoutes),
+        },
+        {path: '**', redirectTo: 'setup'},
+    ];
+}
+
+export const routes = developmentRoutes(environment.startInEditor);

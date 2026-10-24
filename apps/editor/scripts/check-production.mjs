@@ -6,7 +6,7 @@ const stats = JSON.parse(
 );
 const inputs = Object.keys(stats.inputs).map((path) => path.replaceAll('\\', '/'));
 const forbidden = inputs.filter((path) =>
-    /(?:src\/app\/demo\/|projects\/design\/|app\.routes\.development|environment\.(?:development|staging))/.test(
+    /(?:projects\/design\/|\.design\.ts$|app\.routes\.development|environment\.(?:development|staging))/.test(
         path,
     ),
 );
@@ -16,9 +16,13 @@ assert.deepEqual(
     `Development tools leaked into production: ${forbidden.join(', ')}`,
 );
 assert.ok(
-    inputs.some((path) => path.endsWith('src/app/project-setup.ts')),
+    inputs.some((path) => path.endsWith('src/app/modules/project-setup/project-setup.ts')),
     'The production project setup must remain bundled.',
 );
+assert.ok(
+    inputs.some((path) => path.endsWith('src/app/modules/editor/editor.ts')),
+    'The editor route must remain bundled.',
+);
 console.log(
-    'Production bundle verified: project setup included; demo, design and non-production environments excluded.',
+    'Production bundle verified: project setup included; design and non-production entry points excluded.',
 );

@@ -1,7 +1,7 @@
 import {Component, input} from '@angular/core';
 
 @Component({
-    selector: 'editor-pane',
+    selector: 'editor-pane.scss',
     template: `
         <section [attr.aria-label]="title()">
             <header>
