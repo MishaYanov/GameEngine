@@ -7,7 +7,7 @@ use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest};
 use editor::{EditorWorkspace, ReloadPolicy};
 use project_location::{ProjectLocation, ProjectOpenError};
 use runtime::scene_catalog::{SceneDescriptor, SceneId};
-use runtime::{EntityKey, scene_data::EntityData};
+use runtime::{scene_data::EntityData, EntityKey};
 use std::{
 	fs,
 	path::PathBuf,
@@ -88,6 +88,75 @@ fn run(workspace: &mut EditorWorkspace, command: Command) {
 		.unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn unsaved_scene_case_alias_is_rejected_without_mutation_or_files() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let document = (*workspace.backend.session().authored_document()).clone();
+	run(
+		&mut workspace,
+		Command::AddScene {
+			id: SceneId::new("first").unwrap(),
+			asset_path: "scenes/New.json".into(),
+			document: document.clone(),
+		},
+	);
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let error = workspace
+		.execute(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command: Command::AddScene {
+				id: SceneId::new("second").unwrap(),
+				asset_path: "SCENES/new.json".into(),
+				document,
+			},
+		})
+		.unwrap_err();
+	assert!(error.contains("reserved"), "{error}");
+	assert_eq!(
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+		before
+	);
+	assert!(!fixture.0.join("scenes/New.json").exists());
+	assert!(!fixture.0.join("scenes/new.json").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn save_rechecks_case_alias_ownership_and_preserves_existing_file() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let original = fs::read(fixture.0.join("scenes/main.json")).unwrap();
+	let document = (*workspace.backend.session().authored_document()).clone();
+	// Exercise the save boundary even for catalog entries created outside the
+	// host adapter, so creation-time checks alone cannot hide an unsafe save.
+	workspace
+		.backend
+		.execute(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command: Command::AddScene {
+				id: SceneId::new("alias").unwrap(),
+				asset_path: "scenes/MAIN.json".into(),
+				document,
+			},
+		})
+		.unwrap();
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let error = workspace
+		.save(workspace.backend.session().revision())
+		.unwrap_err();
+	assert!(error.contains("reserved"), "{error}");
+	assert_eq!(
+		fs::read(fixture.0.join("scenes/main.json")).unwrap(),
+		original
+	);
+	assert_eq!(
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+		before
+	);
+}
+
 #[test]
 fn project_open_uses_canonical_selected_manifest_startup_scene_and_notifier() {
 	let fixture = Fixture::new();
@@ -99,7 +168,7 @@ fn project_open_uses_canonical_selected_manifest_startup_scene_and_notifier() {
 		fixture.0.join("scenes/configured.json"),
 		scene.to_json().unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let manifest = fixture.write_project("scenes/configured.json");
 	let location =
 		ProjectLocation::from_manifest(&fixture.0.join("scenes/../../project.json")).unwrap();
@@ -111,7 +180,7 @@ fn project_open_uses_canonical_selected_manifest_startup_scene_and_notifier() {
 	let mut workspace = EditorWorkspace::open_project_with_notifier(location, move || {
 		let _ = notify.send(());
 	})
-		.unwrap();
+	.unwrap();
 	assert_eq!(workspace.project_path, manifest.canonicalize().unwrap());
 	assert_eq!(workspace.asset_root, fixture.0.canonicalize().unwrap());
 	assert_eq!(
@@ -215,7 +284,7 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 		fixture.0.join("scenes/second.json"),
 		secondary.to_json().unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let mut project =
 		runtime::project::ProjectData::for_scene("Two scenes", "scenes/main.json", &main).unwrap();
 	let second = SceneId::new("second").unwrap();
@@ -227,7 +296,7 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 		fixture.0.parent().unwrap().join("project.json"),
 		project.to_json().unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	(fixture, project, second)
 }
 
@@ -299,7 +368,7 @@ fn workspace_switch_preserves_drafts_and_saves_only_active_scene_then_reopens_st
 		ProjectLocation::from_manifest(&workspace.project_path).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(reopened.backend.snapshot().unwrap().active_scene_id, second);
 	assert_eq!(
 		reopened.backend.session().authored_document().entities[0].name,
@@ -397,7 +466,7 @@ fn save_scene_as_keeps_identity_and_old_file_then_persists_new_path_on_project_s
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(reopened.backend.snapshot().unwrap().active_scene_id, id);
 	assert_eq!(
 		reopened.scene_path,
@@ -424,14 +493,12 @@ fn failed_save_scene_as_preserves_catalog_history_paths_revision_and_disk() {
 	let cursor = workspace.backend.change_cursor();
 	let original = fs::read(&workspace.scene_path).unwrap();
 	let path = workspace.scene_path.clone();
-	assert!(
-		workspace
-			.save_scene_as(
-				"scenes/stale.json",
-				workspace.backend.session().revision() - 1
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.save_scene_as(
+			"scenes/stale.json",
+			workspace.backend.session().revision() - 1
+		)
+		.is_err());
 	assert!(!fixture.0.join("scenes/stale.json").exists());
 	fs::write(fixture.0.join("scenes/existing.json"), "do not overwrite").unwrap();
 	for invalid in [
@@ -439,11 +506,9 @@ fn failed_save_scene_as_preserves_catalog_history_paths_revision_and_disk() {
 		"missing/scene.json",
 		"scenes/existing.json",
 	] {
-		assert!(
-			workspace
-				.save_scene_as(invalid, workspace.backend.session().revision())
-				.is_err()
-		);
+		assert!(workspace
+			.save_scene_as(invalid, workspace.backend.session().revision())
+			.is_err());
 		assert_eq!(
 			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
 			before
@@ -527,15 +592,13 @@ fn registering_existing_scene_marks_it_saved_and_catalog_removal_keeps_its_file(
 		},
 	);
 	assert!(registered_path.exists());
-	assert!(
-		workspace
-			.backend
-			.session()
-			.project()
-			.scenes
-			.get(&added)
-			.is_err()
-	);
+	assert!(workspace
+		.backend
+		.session()
+		.project()
+		.scenes
+		.get(&added)
+		.is_err());
 	run(&mut workspace, Command::Undo);
 	run(&mut workspace, Command::SwitchScene { scene_id: added });
 	assert_eq!(
@@ -544,11 +607,9 @@ fn registering_existing_scene_marks_it_saved_and_catalog_removal_keeps_its_file(
 	);
 	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
 	for invalid in ["scenes/registered.json", "scenes/missing.json"] {
-		assert!(
-			workspace
-				.register_scene(invalid, workspace.backend.session().revision())
-				.is_err()
-		);
+		assert!(workspace
+			.register_scene(invalid, workspace.backend.session().revision())
+			.is_err());
 		assert_eq!(
 			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
 			before
@@ -583,27 +644,23 @@ fn reload_policy_protects_all_drafts_and_discard_validates_every_scene_before_mu
 		},
 	);
 	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
-	assert!(
-		workspace
-			.reload_with_policy(
-				workspace.backend.session().revision(),
-				ReloadPolicy::RequireClean
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::RequireClean
+		)
+		.is_err());
 	assert_eq!(
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
 		before
 	);
 	fs::write(&second_path, "{bad scene").unwrap();
-	assert!(
-		workspace
-			.reload_with_policy(
-				workspace.backend.session().revision(),
-				ReloadPolicy::DiscardUnsaved
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved
+		)
+		.is_err());
 	assert_eq!(
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
 		before
@@ -772,10 +829,9 @@ fn workspace_paths_are_asset_relative_and_rejected_prefabs_do_not_touch_document
 	}
 	assert_eq!(fs::read_dir(fixture.0.join("prefabs")).unwrap().count(), 0);
 	fs::write(fixture.0.join("prefabs/bad.json"), "{bad json").unwrap();
-	assert!(
-		w.load_prefab("prefabs/bad.json", [0.0; 3], revision)
-			.is_err()
-	);
+	assert!(w
+		.load_prefab("prefabs/bad.json", [0.0; 3], revision)
+		.is_err());
 	assert_eq!(w.backend.session().authored_document(), before);
 	assert_eq!(w.backend.session().revision(), revision);
 }
@@ -879,10 +935,9 @@ fn gltf_import_expands_transform_nodes_offsets_roots_and_undo_restores_all() {
 		w.backend.session().selection(),
 		&[imported.entities[1].key.clone()]
 	);
-	assert!(
-		w.import_model("models/triangle.gltf", [0.0; 3], revision)
-			.is_err()
-	);
+	assert!(w
+		.import_model("models/triangle.gltf", [0.0; 3], revision)
+		.is_err());
 	assert_eq!(w.backend.session().authored_document(), imported);
 	run(&mut w, Command::Undo);
 	assert_eq!(w.backend.session().authored_document(), before);
@@ -902,10 +957,9 @@ fn direct_prefab_callback_checks_revision_before_expanding_and_rejects_play_edit
 			"models/triangle.gltf",
 		)],
 	};
-	assert!(
-		w.instantiate_prefab(prefab.clone(), [0.0; 3], w.backend.session().revision() + 1)
-			.is_err()
-	);
+	assert!(w
+		.instantiate_prefab(prefab.clone(), [0.0; 3], w.backend.session().revision() + 1)
+		.is_err());
 	assert_eq!(w.backend.session().authored_document().entities.len(), 1);
 	w.instantiate_prefab(
 		prefab.clone(),
@@ -921,16 +975,15 @@ fn direct_prefab_callback_checks_revision_before_expanding_and_rejects_play_edit
 	);
 	run(&mut w, Command::StartPlay);
 	let before = w.backend.session().authored_document();
-	assert!(
-		w.instantiate_prefab(prefab, [0.0; 3], w.backend.session().revision())
-			.is_err()
-	);
+	assert!(w
+		.instantiate_prefab(prefab, [0.0; 3], w.backend.session().revision())
+		.is_err());
 	assert_eq!(w.backend.session().authored_document(), before);
 }
 
 #[test]
-fn authored_project_and_scene_save_independently_and_prepare_build_requires_both_current_disk_inputs()
-{
+fn authored_project_and_scene_save_independently_and_prepare_build_requires_both_current_disk_inputs(
+) {
 	let fixture = Fixture::new();
 	let mut w = fixture.open();
 	assert!(!w.project_path.exists());
@@ -1108,7 +1161,7 @@ fn manifest_backed_reload_rejects_missing_manifest_without_mutating_workspace() 
 				ProjectLocation::from_manifest(&manifest).unwrap(),
 				|| {},
 			)
-				.unwrap()
+			.unwrap()
 		} else {
 			fixture.open()
 		};
@@ -1130,11 +1183,9 @@ fn standalone_reload_works_without_manifest_and_failed_save_does_not_promote_it(
 		},
 	);
 	workspace.project_path = fixture.0.join("missing/project.json");
-	assert!(
-		workspace
-			.save_project(workspace.backend.session().revision())
-			.is_err()
-	);
+	assert!(workspace
+		.save_project(workspace.backend.session().revision())
+		.is_err());
 	workspace.project_path = manifest;
 	let reloaded = workspace
 		.reload(workspace.backend.session().revision())
@@ -1160,11 +1211,9 @@ fn standalone_adopts_discovered_manifest_only_after_successful_reload() {
 	let fixture = Fixture::new();
 	let mut workspace = fixture.open();
 	fixture.write_project("scenes/missing.json");
-	assert!(
-		workspace
-			.reload(workspace.backend.session().revision())
-			.is_err()
-	);
+	assert!(workspace
+		.reload(workspace.backend.session().revision())
+		.is_err());
 	fs::remove_file(&workspace.project_path).unwrap();
 	workspace
 		.reload(workspace.backend.session().revision())
@@ -1234,17 +1283,13 @@ fn successful_reload_renews_generation_and_rejects_old_job_tickets_at_zero_scene
 		.unwrap();
 	assert_eq!(reloaded.scene_revision, 0);
 	assert_ne!(workspace.generation, old_generation);
-	assert!(
-		workspace
-			.cancel_import(ticket.job_id, ticket.workspace_generation)
-			.is_err()
-	);
-	assert!(
-		workspace
-			.drain_asset_jobs()
-			.iter()
-			.all(|completion| completion.job_id != ticket.job_id)
-	);
+	assert!(workspace
+		.cancel_import(ticket.job_id, ticket.workspace_generation)
+		.is_err());
+	assert!(workspace
+		.drain_asset_jobs()
+		.iter()
+		.all(|completion| completion.job_id != ticket.job_id));
 	assert_eq!(
 		workspace
 			.backend
@@ -1281,11 +1326,10 @@ fn async_model_import_adopts_one_current_revision_edit_and_is_undoable() {
 	assert_eq!(w.backend.session().authored_document(), before);
 	run(&mut w, Command::Redo);
 	assert_eq!(w.backend.session().authored_document(), data);
-	assert!(
-		w.recent_completions()
-			.iter()
-			.any(|c| c.job_id == ticket.job_id && c.accepted)
-	);
+	assert!(w
+		.recent_completions()
+		.iter()
+		.any(|c| c.job_id == ticket.job_id && c.accepted));
 }
 
 #[test]
@@ -1374,23 +1418,20 @@ fn async_job_cancellation_checks_workspace_scope_and_prevents_adoption_even_afte
 			1024 * 1024,
 		)
 		.unwrap();
-	assert!(
-		w.cancel_import(ticket.job_id, ticket.workspace_generation + 1)
-			.is_err()
-	);
-	assert!(
-		w.cancel_import(ticket.job_id, ticket.workspace_generation)
-			.unwrap()
-	);
+	assert!(w
+		.cancel_import(ticket.job_id, ticket.workspace_generation + 1)
+		.is_err());
+	assert!(w
+		.cancel_import(ticket.job_id, ticket.workspace_generation)
+		.unwrap());
 	let completion = await_completion(&mut w, &ready, ticket.job_id);
 	assert!(!completion.accepted);
 	assert_eq!(completion.error_code, Some("cancelled"));
 	assert!(completion.error.is_some());
 	assert_eq!(w.backend.session().authored_document(), before);
-	assert!(
-		!w.cancel_import(ticket.job_id, ticket.workspace_generation)
-			.unwrap()
-	);
+	assert!(!w
+		.cancel_import(ticket.job_id, ticket.workspace_generation)
+		.unwrap());
 }
 
 fn metadata_import_workspace(
@@ -1477,12 +1518,11 @@ fn accepted_async_import_registers_only_selected_meshes_and_reload_invalidates_t
 	assert_eq!(w.backend.assets().len(), 1);
 	let selected = runtime::asset_registry::AssetRef::new("models/selected.gltf", Some(1)).unwrap();
 	let handle = w.backend.assets().find(&selected).unwrap();
-	assert!(
-		w.backend
-			.assets()
-			.find(&runtime::asset_registry::AssetRef::new("models/selected.gltf", Some(0)).unwrap())
-			.is_none()
-	);
+	assert!(w
+		.backend
+		.assets()
+		.find(&runtime::asset_registry::AssetRef::new("models/selected.gltf", Some(0)).unwrap())
+		.is_none());
 	assert_eq!(
 		w.backend.session().authored_document().entities[1].mesh_index,
 		Some(1)
@@ -1553,7 +1593,7 @@ fn step46_manual_lifecycle_flow_is_automated() {
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	assert!(!workspace.backend.snapshot().unwrap().dirty);
 	rename(&mut workspace, "Keep A unsaved");
 
@@ -1561,13 +1601,11 @@ fn step46_manual_lifecycle_flow_is_automated() {
 	// replacement is private to the Tauri adapter and is not simulated here.
 	let invalid_fixture = Fixture::new();
 	let invalid_manifest = invalid_fixture.write_project("scenes/missing.json");
-	assert!(
-		EditorWorkspace::open_project_with_notifier(
-			ProjectLocation::from_manifest(&invalid_manifest).unwrap(),
-			|| {},
-		)
-			.is_err()
-	);
+	assert!(EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&invalid_manifest).unwrap(),
+		|| {},
+	)
+	.is_err());
 
 	let stale_revision = workspace.backend.session().revision();
 	rename(&mut workspace, "A newer edit");

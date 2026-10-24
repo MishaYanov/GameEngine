@@ -1,0 +1,76 @@
+@use 'sass:map';
+
+// Exact size/weight/line-height triples from linear-app-figma-variables.json.
+// Semantic aliases adapt the heading scale to the editor. Tracking and unitless
+// line heights are editor defaults. Fonts use local fallbacks until assets are supplied.
+$typography: () !default;
+
+@function typography() {
+  @return map.merge(
+          (
+                  size-64: 64px,
+                  weight-64: 510,
+                  line-height-64: 64px,
+                  size-40: 40px,
+                  weight-40: 510,
+                  line-height-40: 44px,
+                  size-32: 32px,
+                  weight-32: 400,
+                  line-height-32: 36px,
+                  size-24: 24px,
+                  weight-24: 400,
+                  line-height-24: 31.92px,
+                  size-20: 20px,
+                  weight-20: 590,
+                  line-height-20: 26.6px,
+                  size-18: 18px,
+                  weight-18: 400,
+                  line-height-18: 28.8px,
+                  size-17: 17px,
+                  weight-17: 590,
+                  line-height-17: 27.2px,
+                  size-16: 16px,
+                  weight-16: 400,
+                  size-15: 15px,
+                  weight-15: 400,
+                  line-height-15: 24px,
+                  size-14: 14px,
+                  weight-14: 510,
+                  line-height-14: 21px,
+                  size-13-3333: 13.3333px,
+                  weight-13-3333: 400,
+                  size-13: 13px,
+                  weight-13: 400,
+                  line-height-13: 19.5px,
+                  family-sans: (
+                          'Inter Variable',
+                          Inter,
+                          'Segoe UI',
+                          sans-serif,
+                  ),
+                  family-mono: (
+                          'Berkeley Mono',
+                          'Cascadia Code',
+                          Consolas,
+                          monospace,
+                  ),
+                  size-xs: var(--font-size-13),
+                  size-sm: var(--font-size-13),
+                  size-md: var(--font-size-14),
+                  size-lg: var(--font-size-16),
+                  size-xl: var(--font-size-24),
+                  size-display: var(--font-size-40),
+                  size-display-compact: var(--font-size-32),
+                  weight-regular: 400,
+                  weight-medium: 510,
+                  weight-semibold: 590,
+                  weight-bold: 590,
+                  line-height-tight: 1.1,
+                  line-height-normal: 1.5,
+                  line-height-relaxed: 1.7,
+                  tracking-tight: -0.04em,
+                  tracking-label: 0.12em,
+          ),
+          $typography
+  );
+}

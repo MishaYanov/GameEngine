@@ -1,0 +1,44 @@
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 0;
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-md);
+    line-height: var(--font-line-height-normal);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: var(--focus-offset);
+  }
+
+  ::selection {
+    background: var(--color-selection);
+    color: var(--color-text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-xs: 0ms;
+      --duration-sm: 0ms;
+      --duration-md: 0ms;
+      --duration-fast: 0ms;
+    }
+  }
+}

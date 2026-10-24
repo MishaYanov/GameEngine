@@ -1,0 +1,56 @@
+@use 'sass:map';
+
+// s0-s28 preserve the complete extracted section-spacing scale.
+// Numeric keys are the editor's compact control-spacing extension; they are not
+// claimed as extracted tokens. Both groups accept partial !default overrides.
+$spacing: () !default;
+
+@function spacing() {
+  @return map.merge(
+          (
+                  s0: 1px,
+                  s1: 39px,
+                  s2: 47px,
+                  s3: 51px,
+                  s4: 56px,
+                  s5: 69px,
+                  s6: 79px,
+                  s7: 91px,
+                  s8: 95px,
+                  s9: 99px,
+                  s10: 111px,
+                  s11: 123px,
+                  s12: 127px,
+                  s13: 131px,
+                  s14: 135px,
+                  s15: 152px,
+                  s16: 155px,
+                  s17: 159px,
+                  s18: 166px,
+                  s19: 199px,
+                  s20: 203px,
+                  s21: 212px,
+                  s22: 216px,
+                  s23: 220px,
+                  s24: 224px,
+                  s25: 282px,
+                  s26: 375px,
+                  s27: 385px,
+                  s28: 450px,
+                  0: 0,
+                  1: 0.25rem,
+                  2: 0.5rem,
+                  3: 0.75rem,
+                  4: 1rem,
+                  5: 1.25rem,
+                  6: 1.5rem,
+                  7: 1.75rem,
+                  8: 2rem,
+                  10: 2.5rem,
+                  12: 3rem,
+                  16: 4rem,
+                  20: 5rem,
+          ),
+          $spacing
+  );
+}

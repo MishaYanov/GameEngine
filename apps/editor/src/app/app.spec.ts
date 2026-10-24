@@ -1,7 +1,7 @@
 import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import {invoke} from '@tauri-apps/api/core';
-import {App} from './app';
+import {ProjectSetup as App} from './project-setup';
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: vi.fn() }));
 

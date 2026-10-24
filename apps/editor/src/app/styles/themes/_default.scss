@@ -1,0 +1,101 @@
+@use 'sass:map';
+
+$dark-theme: () !default;
+$light-theme: () !default;
+
+// Brand roles follow the supplied export. Actions use its secondary indigo so
+// the bright primary/accent remain available without overwhelming editor controls.
+@function _brand() {
+  @return (
+          color-primary: var(--palette-brand-primary),
+          color-secondary: var(--palette-brand-secondary),
+          color-accent: var(--palette-brand-accent),
+          color-on-accent: var(--palette-background-bg0),
+          color-action: var(--color-secondary),
+          color-on-action: var(--palette-text-text1),
+          color-action-hover: color-mix(in srgb, var(--color-action) 90%, var(--palette-neutral-n900)),
+          color-focus: var(--color-secondary)
+  );
+}
+
+@function dark-theme() {
+  @return map.merge(
+          map.merge(
+                  _brand(),
+                  (
+                          color-scheme: dark,
+                          color-bg: var(--palette-background-bg0),
+                          color-sidebar: var(--palette-background-bg1),
+                          color-surface: var(--palette-background-bg2),
+                          color-surface-raised: var(--palette-background-bg5),
+                          color-surface-hover: var(--palette-neutral-n700),
+                          color-text: var(--palette-text-text0),
+                          color-text-secondary: var(--palette-text-text4),
+                          color-text-muted: var(--palette-text-text2),
+                          color-border: var(--palette-neutral-n800),
+                          color-border-strong: var(--palette-neutral-n500),
+                          color-success: var(--palette-status-success),
+                          color-danger: var(--palette-status-danger),
+                          color-warning: var(--palette-status-warning),
+                          color-info: var(--palette-status-info),
+                  )
+          ),
+          $dark-theme
+  );
+}
+
+// The reference describes a dark website. This light theme is an editor
+// adaptation; status colors are darkened with black to retain readable contrast.
+@function light-theme() {
+  @return map.merge(
+          map.merge(
+                  _brand(),
+                  (
+                          color-scheme: light,
+                          color-bg: var(--palette-background-bg4),
+                          color-sidebar: var(--palette-neutral-n100),
+                          color-surface: var(--palette-neutral-n100),
+                          color-surface-raised: var(--palette-background-bg4),
+                          color-surface-hover: var(--palette-neutral-n400),
+                          color-text: var(--palette-neutral-n700),
+                          color-text-secondary: var(--palette-neutral-n200),
+                          color-text-muted: var(--palette-neutral-n200),
+                          color-border: var(--palette-neutral-n300),
+                          color-border-strong: var(--palette-neutral-n500),
+                          color-success: color-mix(
+                                  in srgb,
+                                  var(--palette-status-success) 70%,
+                                  var(--palette-neutral-n900)
+                          ),
+                          color-danger: color-mix(
+                                  in srgb,
+                                  var(--palette-status-danger) 70%,
+                                  var(--palette-neutral-n900)
+                          ),
+                          color-warning: color-mix(
+                                  in srgb,
+                                  var(--palette-status-warning) 45%,
+                                  var(--palette-neutral-n900)
+                          ),
+                          color-info: color-mix(in srgb, var(--palette-status-info) 45%, var(--palette-neutral-n900)),
+                  )
+          ),
+          $light-theme
+  );
+}
+
+@mixin properties($tokens, $prefix: '') {
+  @each $name, $value in $tokens {
+    --#{$prefix}#{$name}: #{$value};
+  }
+}
+
+@mixin derived-colors {
+  --color-selection: color-mix(in srgb, var(--color-secondary) 24%, var(--color-bg));
+  --color-info-bg: color-mix(in srgb, var(--color-info) 8%, var(--color-surface));
+  --color-info-border: color-mix(in srgb, var(--color-info) 40%, var(--color-border));
+  --color-success-bg: color-mix(in srgb, var(--color-success) 8%, var(--color-surface));
+  --color-success-border: color-mix(in srgb, var(--color-success) 40%, var(--color-border));
+  --color-preview-start: color-mix(in srgb, var(--color-secondary) 12%, var(--color-surface));
+  --color-preview-end: var(--color-surface);
+}

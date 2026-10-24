@@ -1,0 +1,26 @@
+@use 'sass:map';
+
+$layout: () !default;
+// Media queries cannot read CSS custom properties; configure this at build time.
+$breakpoint-compact: 53.125rem !default;
+
+@function layout() {
+  @return map.merge(
+          (
+                  content-max-width: 75rem,
+                  page-padding-block: var(--space-10),
+                  page-padding-inline: var(--space-12),
+                  page-padding-compact: var(--space-6),
+                  header-gap: var(--space-12),
+                  workspace-columns: minmax(0, 1.1fr) minmax(0, 1fr),
+                  workspace-gap: var(--space-20),
+                  sidebar-width: 15rem,
+                  inspector-width: 20rem,
+                  toolbar-height: 2.75rem,
+                  statusbar-height: 1.75rem,
+                  control-height: 2.25rem,
+                  error-max-height: 17.5rem,
+          ),
+          $layout
+  );
+}

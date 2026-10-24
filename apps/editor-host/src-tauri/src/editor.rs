@@ -384,7 +384,7 @@ impl EditorWorkspace {
 		let preflight: Result<(), String> = (|| {
 			match &request.command {
 				Command::AddScene { asset_path, .. } => {
-					if resolve_output(&self.asset_root, asset_path)?.exists() {
+					if self.scene_output(asset_path, None)?.exists() {
 						return Err("Scene creation requires a new path; register an existing file explicitly".into());
 					}
 				}
@@ -392,12 +392,13 @@ impl EditorWorkspace {
 					scene_id,
 					asset_path,
 				} => {
+					self.scene_output(asset_path, Some(scene_id))?;
 					let target = resolve_existing(&self.asset_root, asset_path)?;
 					for entry in self.backend.session().project().scenes.iter() {
 						if entry.id() != scene_id
 							&& resolve_existing(&self.asset_root, entry.asset_path())
-							.ok()
-							.as_ref() == Some(&target)
+								.ok()
+								.as_ref() == Some(&target)
 						{
 							return Err("Scene path resolves to another catalog scene".into());
 						}
@@ -433,6 +434,22 @@ impl EditorWorkspace {
 		}
 		Ok(receipt)
 	}
+	/// Compare prospective destinations too: unsaved scenes have no file to
+	/// canonicalize yet. Resolve parent aliases before comparing file names.
+	fn scene_output(&self, path: &str, owner: Option<&SceneId>) -> Result<PathBuf, String> {
+		let output = resolve_output(&self.asset_root, path)?;
+		for entry in self.backend.session().project().scenes.iter() {
+			if Some(entry.id()) != owner {
+				let other = resolve_output(&self.asset_root, entry.asset_path())?;
+				if same_destination(&output, &other)? {
+					return Err(
+						"Scene destination is already reserved by another catalog scene".into(),
+					);
+				}
+			}
+		}
+		Ok(output)
+	}
 	pub fn save(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
 		if self.backend.session().has_transaction() {
@@ -443,7 +460,7 @@ impl EditorWorkspace {
 			.session()
 			.project()
 			.scene_path(self.backend.session().active_scene_id())?;
-		let output = resolve_output(&self.asset_root, path)?;
+		let output = self.scene_output(path, Some(self.backend.session().active_scene_id()))?;
 		file_operation(
 			"save_scene",
 			runtime::scene_io::save_data(&output, &self.backend.session().authored_document()),
@@ -571,7 +588,7 @@ impl EditorWorkspace {
 		self.check_compound_capacity()?;
 		let id = self.backend.session().active_scene_id().clone();
 		runtime::scene_catalog::SceneDescriptor::new(id.clone(), path)?;
-		let output = resolve_output(&self.asset_root, path)?;
+		let output = self.scene_output(path, Some(&id))?;
 		if output.exists() {
 			return Err("Save As requires a new destination file".into());
 		}
@@ -593,7 +610,7 @@ impl EditorWorkspace {
 				asset_path: path.into(),
 			},
 		})
-			.map_err(|e| e.to_string())?;
+		.map_err(|e| e.to_string())?;
 		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
@@ -823,6 +840,41 @@ fn resolve_existing(root: &Path, path: &str) -> Result<PathBuf, String> {
 		return Err("Requested file is outside the asset root or is not a file".into());
 	}
 	Ok(candidate)
+}
+#[cfg(windows)]
+fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
+	use std::os::windows::ffi::OsStrExt;
+	#[link(name = "kernel32")]
+	extern "system" {
+		fn CompareStringOrdinal(
+			a: *const u16,
+			a_len: i32,
+			b: *const u16,
+			b_len: i32,
+			ignore_case: i32,
+		) -> i32;
+	}
+	let a: Vec<u16> = left.as_os_str().encode_wide().collect();
+	let b: Vec<u16> = right.as_os_str().encode_wide().collect();
+	// SAFETY: Both pointers address live UTF-16 arrays of the supplied lengths.
+	let result = unsafe {
+		CompareStringOrdinal(
+			a.as_ptr(),
+			a.len().try_into().map_err(|_| "Path too long")?,
+			b.as_ptr(),
+			b.len().try_into().map_err(|_| "Path too long")?,
+			1,
+		)
+	};
+	match result {
+		0 => Err("Cannot compare scene destinations".into()),
+		2 => Ok(true),
+		_ => Ok(false),
+	}
+}
+#[cfg(not(windows))]
+fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
+	Ok(left == right)
 }
 fn resolve_output(root: &Path, path: &str) -> Result<PathBuf, String> {
 	relative(path)?;

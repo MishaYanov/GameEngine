@@ -1,2 +1,23 @@
-:root {
+@use 'index' as tokens;
+
+// CSS has no !default declaration. This low-priority layer supplies defaults;
+// unlayered user rules (even if loaded earlier) and inline properties override it.
+@layer theme, base;
+
+@layer theme {
+  :root {
+    @include tokens.properties(tokens.palette(), 'palette-');
+    @include tokens.properties(tokens.typography(), 'font-');
+    @include tokens.properties(tokens.spacing(), 'space-');
+    @include tokens.properties(tokens.layout(), 'layout-');
+    @include tokens.properties(tokens.effects());
+    @include tokens.properties(tokens.motion());
+    @include tokens.properties(tokens.dark-theme());
+    @include tokens.derived-colors;
+    color-scheme: var(--color-scheme);
+  }
+
+  :root[data-theme='light'] {
+    @include tokens.properties(tokens.light-theme());
+  }
 }

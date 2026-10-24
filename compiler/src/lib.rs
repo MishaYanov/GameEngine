@@ -9,6 +9,7 @@ use std::{
 
 use engine_core::{
 	project::{BehaviorSpace, BehaviorSpec, ProjectData},
+	scene_catalog::SceneDescriptor,
 	scene_data::SceneData,
 };
 
@@ -39,7 +40,23 @@ impl PreparedProject {
 	pub fn total_bytes(&self) -> u64 {
 		self.total_bytes
 	}
+	fn validate_inputs(&self) -> Result<(), String> {
+		for asset in &self.files {
+			checked_asset_path(&self.asset_root, &asset.relative)
+				.and_then(|input| copy_verified_asset(&input, asset, &mut io::sink()))
+				.map_err(|cause| {
+					format!(
+						"Prepared asset {:?} is no longer valid: {cause}",
+						asset.relative
+					)
+				})?;
+		}
+		Ok(())
+	}
 }
+
+const MAX_SCENE_REPORT_BYTES: usize = 16 * 1024;
+const OMISSION_NOTICE: &str = "\nFurther scene diagnostics omitted.";
 
 pub fn prepare_project(
 	project: &ProjectData,
@@ -52,11 +69,9 @@ pub fn prepare_project(
 	}
 	let asset_root = asset_root.canonicalize().map_err(|e| e.to_string())?;
 	let files = prepare_assets(&asset_root).map_err(|e| format!("Asset preflight failed: {e}"))?;
-	for entry in project.scenes.iter() {
-		let scene = read_authored_scene(&asset_root, entry.asset_path())?;
-		project.validate_scene_for(entry.id(), &scene)?;
-		validate_model_references(&scene, &asset_root, &files)?;
-	}
+
+	validate_catalog_scenes(project, &asset_root, &files)?;
+
 	let total_bytes = files.iter().map(|entry| entry.bytes).sum();
 	Ok(PreparedProject {
 		project: project.clone(),
@@ -147,6 +162,7 @@ pub fn install_prepared_project(
 	destination: &str,
 ) -> Result<PathBuf, String> {
 	let path = project_path(&prepared.project.name, destination)?;
+	prepared.validate_inputs()?;
 	let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.ok_or("Missing engine workspace")?;
@@ -180,14 +196,12 @@ pub fn install_prepared_project(
 			path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
 		)?;
 		copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
-		for entry in prepared.project.scenes.iter() {
-			let copied_scene = read_authored_scene(&path.join("assets"), entry.asset_path())
-				.map_err(io::Error::other)?;
-			prepared
-				.project
-				.validate_scene_for(entry.id(), &copied_scene)
-				.map_err(io::Error::other)?;
-		}
+
+		let copied_root = path.join("assets").canonicalize()?;
+
+		validate_catalog_scenes(&prepared.project, &copied_root, &prepared.files)
+			.map_err(io::Error::other)?;
+
 		let mut project_json = prepared.project.to_json().map_err(io::Error::other)?;
 		project_json.push('\n');
 		fs::write(path.join("project.json"), project_json)?;
@@ -236,58 +250,8 @@ fn read_authored_scene(root: &Path, relative: &str) -> Result<SceneData, String>
 	engine_core::scene_data::validate_model_path(relative)?;
 	let root = root.canonicalize().map_err(|e| e.to_string())?;
 	let path = checked_asset_path(&root, Path::new(relative)).map_err(|e| e.to_string())?;
-	let file = fs::File::open(path).map_err(|e| e.to_string())?;
-	let mut json = String::new();
-	file.take(engine_core::scene_data::MAX_SCENE_BYTES as u64 + 1)
-		.read_to_string(&mut json)
-		.map_err(|e| e.to_string())?;
-	engine_core::scene_data::parse_json(&json).map(|parsed| parsed.data)
-}
 
-fn validate_model_references(
-	scene: &SceneData,
-	root: &Path,
-	files: &[PackageAsset],
-) -> Result<(), String> {
-	let packaged: HashSet<&Path> = files.iter().map(|entry| entry.relative.as_path()).collect();
-	let mut checked = HashSet::new();
-	for entity in scene.entities.iter().filter(|entity| entity.renderable) {
-		if !checked.insert(entity.model_path.as_str()) {
-			continue;
-		}
-		let relative = Path::new(&entity.model_path);
-		let supported = relative
-			.extension()
-			.and_then(|value| value.to_str())
-			.is_some_and(|extension| {
-				extension.eq_ignore_ascii_case("gltf") || extension.eq_ignore_ascii_case("glb")
-			});
-		if !supported {
-			return Err(format!(
-				"Renderable model '{}' must use glTF (.gltf or .glb)",
-				entity.model_path
-			));
-		}
-		let path = checked_asset_path(root, relative)
-			.map_err(|error| format!("Model '{}' preflight failed: {error}", entity.model_path))?;
-		if !fs::metadata(&path)
-			.map_err(|error| error.to_string())?
-			.is_file()
-		{
-			return Err(format!(
-				"Model '{}' must be a regular file",
-				entity.model_path
-			));
-		}
-		let canonical_relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-		if !packaged.contains(canonical_relative) {
-			return Err(format!(
-				"Model '{}' is absent from the prepared asset snapshot",
-				entity.model_path
-			));
-		}
-	}
-	Ok(())
+	read_scene_file(&path)
 }
 
 pub fn copy_assets(source: &Path, destination: &Path) -> std::io::Result<()> {
@@ -335,13 +299,27 @@ fn copy_prepared_assets(root: &Path, destination: &Path, files: &[PackageAsset])
 			.write(true)
 			.create_new(true)
 			.open(output)?;
-		if copy_and_hash(&input, entry.bytes, &mut writer)? != entry.fingerprint {
-			return Err(io::Error::other(
-				"Asset changed after preflight; build again from the current authored files",
-			));
-		}
+		copy_verified_asset(&input, entry, &mut writer)?;
 	}
 	Ok(())
+}
+
+fn verify_asset_fingerprint(asset: &PackageAsset, actual: u64) -> io::Result<()> {
+	if actual != asset.fingerprint {
+		return Err(io::Error::other(
+			"Asset changed after preflight; build again from the current authored files",
+		));
+	}
+	Ok(())
+}
+
+fn copy_verified_asset(
+	input: &Path,
+	asset: &PackageAsset,
+	writer: &mut impl Write,
+) -> io::Result<()> {
+	let actual = copy_and_hash(input, asset.bytes, writer)?;
+	verify_asset_fingerprint(asset, actual)
 }
 
 fn checked_asset_path(root: &Path, relative: &Path) -> io::Result<PathBuf> {
@@ -448,6 +426,162 @@ fn collect_assets(
 	}
 	files.push((relative.to_path_buf(), metadata.len()));
 	Ok(())
+}
+
+fn scene_error(entry: &SceneDescriptor, cause: String) -> String {
+	format!(
+		"Scene {:?} ({:?}): {cause}",
+		entry.id().as_str(),
+		entry.asset_path()
+	)
+}
+
+fn validate_catalog_scenes(
+	project: &ProjectData,
+	root: &Path,
+	files: &[PackageAsset],
+) -> Result<(), String> {
+	let packaged: HashSet<&Path> = files.iter().map(|asset| asset.relative.as_path()).collect();
+
+	let mut report = String::new();
+	let mut truncated = false;
+
+	for entry in ordered_scenes(project) {
+		if let Err(error) = validate_catalog_scene(project, root, entry, &packaged) {
+			append_scene_error(&mut report, &error, &mut truncated);
+		}
+	}
+
+	if report.is_empty() {
+		Ok(())
+	} else {
+		Err(report)
+	}
+}
+
+fn validate_model_references(
+	scene: &SceneData,
+	root: &Path,
+	packaged: &HashSet<&Path>,
+) -> Result<(), String> {
+	let mut checked = HashSet::new();
+
+	for entity in scene.entities.iter().filter(|entity| entity.renderable) {
+		if !checked.insert(entity.model_path.as_str()) {
+			continue;
+		}
+
+		let relative = Path::new(&entity.model_path);
+		let supported = relative
+			.extension()
+			.and_then(|value| value.to_str())
+			.is_some_and(|extension| {
+				extension.eq_ignore_ascii_case("gltf") || extension.eq_ignore_ascii_case("glb")
+			});
+
+		if !supported {
+			return Err(format!(
+				"Renderable model '{}' must use glTF (.gltf or .glb)",
+				entity.model_path
+			));
+		}
+
+		prepared_asset_path(root, relative, packaged)
+			.map_err(|error| format!("Model '{}' preflight failed: {error}", entity.model_path))?;
+	}
+
+	Ok(())
+}
+
+fn validate_catalog_scene(
+	project: &ProjectData,
+	root: &Path,
+	entry: &SceneDescriptor,
+	packaged: &HashSet<&Path>,
+) -> Result<(), String> {
+	let path = prepared_asset_path(root, Path::new(entry.asset_path()), packaged)
+		.map_err(|cause| scene_error(entry, cause))?;
+	let scene = read_scene_file(&path).map_err(|cause| scene_error(entry, cause))?;
+
+	project
+		.validate_scene_for(entry.id(), &scene)
+		.map_err(|cause| scene_error(entry, cause))?;
+
+	validate_model_references(&scene, root, packaged).map_err(|cause| scene_error(entry, cause))?;
+
+	Ok(())
+}
+
+fn ordered_scenes(project: &ProjectData) -> Vec<&SceneDescriptor> {
+	let mut scenes: Vec<_> = project.scenes.iter().collect();
+
+	scenes.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
+
+	scenes
+}
+
+fn append_scene_error(report: &mut String, error: &str, truncated: &mut bool) {
+	if *truncated {
+		return;
+	}
+
+	// Keep space for the notice, including its leading newline.
+	let content_limit = MAX_SCENE_REPORT_BYTES - OMISSION_NOTICE.len();
+	let remaining = content_limit.saturating_sub(report.len());
+	let separator = if report.is_empty() { "" } else { "\n" };
+
+	if separator.len() + error.len() <= remaining {
+		report.push_str(separator);
+		report.push_str(error);
+		return;
+	}
+
+	// Append as much of this error as fits.
+	if remaining >= separator.len() {
+		report.push_str(separator);
+
+		let mut end = remaining - separator.len();
+
+		while !error.is_char_boundary(end) {
+			end -= 1;
+		}
+
+		report.push_str(&error[..end]);
+	}
+
+	report.push_str(OMISSION_NOTICE);
+	*truncated = true;
+}
+
+fn prepared_asset_path(
+	root: &Path,
+	relative: &Path,
+	packaged: &HashSet<&Path>,
+) -> Result<PathBuf, String> {
+	let path = checked_asset_path(root, relative).map_err(|error| error.to_string())?;
+	if !fs::metadata(&path)
+		.map_err(|error| error.to_string())?
+		.is_file()
+	{
+		return Err("Asset must be a regular file".into());
+	}
+	let canonical_relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+	if !packaged.contains(canonical_relative) {
+		return Err("Asset is absent from the prepared asset snapshot".into());
+	}
+	Ok(path)
+}
+
+fn read_scene_file(path: &Path) -> Result<SceneData, String> {
+	// Read and parse the already-resolved file.
+	let file = fs::File::open(path).map_err(|e| e.to_string())?;
+	let mut json = String::new();
+
+	file.take(engine_core::scene_data::MAX_SCENE_BYTES as u64 + 1)
+		.read_to_string(&mut json)
+		.map_err(|e| e.to_string())?;
+
+	engine_core::scene_data::parse_json(&json).map(|parsed| parsed.data)
 }
 
 #[cfg(test)]

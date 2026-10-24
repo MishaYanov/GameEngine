@@ -1,0 +1,59 @@
+@use '../abstracts/variables' as tokens;
+
+@mixin project-setup {
+  :host {
+    display: block;
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  main {
+    max-width: var(--layout-content-max-width);
+    margin: auto;
+    padding: var(--layout-page-padding-block) var(--layout-page-padding-inline);
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding-bottom: var(--layout-header-gap);
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: var(--layout-workspace-columns);
+    gap: var(--layout-workspace-gap);
+    align-items: start;
+  }
+
+  .workspace > * {
+    min-width: 0;
+  }
+
+  aside {
+    padding-top: var(--space-5);
+  }
+
+  @media (max-width: tokens.$breakpoint-compact) {
+    main {
+      padding: var(--layout-page-padding-compact);
+    }
+
+    .workspace {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-6);
+    }
+
+    header {
+      padding-bottom: var(--space-6);
+    }
+
+    h1 {
+      font-size: var(--font-size-display-compact);
+    }
+  }
+}

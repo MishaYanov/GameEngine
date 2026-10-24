@@ -1,0 +1,81 @@
+@use 'sass:map';
+
+// Complete radius and shadow primitives from linear-app-design-tokens.json.
+// Named aliases plus editor border, focus and disabled defaults are configurable.
+$effects: () !default;
+
+@function effects() {
+  @return map.merge(
+          (
+                  radius-r0: 1px,
+                  radius-r1: 4px,
+                  radius-r2: 7px,
+                  radius-r3: 12px,
+                  radius-r4: 16px,
+                  radius-r5: 20px,
+                  radius-r6: 50px,
+                  radius-r7: 400px,
+                  radius-r8: 9999px,
+                  shadow-sh0: (
+                          rgba(94, 106, 210, 0.1) 0px 0px 0px 0.125074px,
+                  ),
+                  shadow-sh1: (
+                          rgba(0, 0, 0, 0.1) 0px 0px 0px 2px,
+                  ),
+                  shadow-sh2: (
+                          rgba(0, 0, 0, 0.2) 0px 0px 0px 1px,
+                  ),
+                  shadow-sh3: (
+                          rgb(35, 37, 42) 0px 0px 0px 1px inset,
+                  ),
+                  shadow-sh4: (
+                          rgba(8, 9, 10, 0.1) 0px 0px 0px 1px,
+                          rgba(8, 9, 10, 0.4) 0px 0px 64px 0px,
+                  ),
+                  shadow-sh5: (
+                          rgba(255, 255, 255, 0.03) 0px 0px 0px 1px inset,
+                          rgba(255, 255, 255, 0.04) 0px 1px 0px 0px inset,
+                          rgba(0, 0, 0, 0.6) 0px 0px 0px 1px,
+                          rgba(0, 0, 0, 0.1) 0px 4px 4px 0px,
+                  ),
+                  shadow-sh6: (
+                          rgba(0, 0, 0, 0.4) 0px 1px 0px 0px,
+                  ),
+                  shadow-sh7: (
+                          rgb(35, 37, 42) 1px 0px 0px 0px inset,
+                  ),
+                  shadow-sh8: (
+                          rgba(0, 0, 0, 0.03) 0px 1.2px 0px 0px,
+                  ),
+                  shadow-sh9: (
+                          rgba(0, 0, 0, 0.4) 0px 2px 4px 0px,
+                  ),
+                  shadow-sh10: (
+                          rgba(0, 0, 0, 0) 0px 8px 2px 0px,
+                          rgba(0, 0, 0, 0.01) 0px 5px 2px 0px,
+                          rgba(0, 0, 0, 0.04) 0px 3px 2px 0px,
+                          rgba(0, 0, 0, 0.07) 0px 1px 1px 0px,
+                          rgba(0, 0, 0, 0.08) 0px 0px 1px 0px,
+                  ),
+                  shadow-sh11: (
+                          rgba(0, 0, 0, 0.2) 0px 0px 12px 0px inset,
+                  ),
+                  shadow-sh12: (
+                          rgba(8, 9, 10, 0.6) 0px 4px 32px 0px,
+                  ),
+                  radius-xs: var(--radius-r0),
+                  radius-sm: var(--radius-r1),
+                  radius-md: var(--radius-r2),
+                  radius-lg: var(--radius-r3),
+                  radius-xl: var(--radius-r4),
+                  radius-2xl: var(--radius-r5),
+                  radius-pill: var(--radius-r8),
+                  shadow-popover: var(--shadow-sh12),
+                  border-width: 1px,
+                  focus-width: 2px,
+                  focus-offset: 3px,
+                  opacity-disabled: 0.6,
+          ),
+          $effects
+  );
+}

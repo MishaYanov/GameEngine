@@ -1,0 +1,50 @@
+@use 'sass:map';
+
+// Source: https://www.designlang.app/gallery/linear-app (2026-05-21 extraction).
+// Primitive names and values follow linear-app-design-tokens.json. Brand accent
+// comes from the Figma export; status colors come from the page's color census.
+// Override only needed entries with @use ... with ($palette: (...)).
+$palette: () !default;
+
+@function palette() {
+  @return map.merge(
+          (
+                  brand-primary: #e4f222,
+                  brand-secondary: #5e6ad2,
+                  neutral-n100: #f7f8f8,
+                  neutral-n200: #62666d,
+                  neutral-n300: #d0d6e0,
+                  neutral-n400: #e2e4e7,
+                  neutral-n500: #8a8f98,
+                  neutral-n600: #08090a,
+                  neutral-n700: #23252a,
+                  neutral-n800: #383b3f,
+                  neutral-n900: #000000,
+                  neutral-n1000: #121414,
+                  background-bg0: #08090a,
+                  background-bg1: #090a0b,
+                  background-bg2: #101112,
+                  background-bg3: #121314,
+                  background-bg4: #ffffff,
+                  background-bg5: #161718,
+                  background-bg6: #0f1011,
+                  background-bg7: #e4f222,
+                  text-text0: #f7f8f8,
+                  text-text1: #ffffff,
+                  text-text2: #8a8f98,
+                  text-text3: #08090a,
+                  text-text4: #d0d6e0,
+                  text-text5: #62666d,
+                  text-text6: #e2e4e6,
+                  text-text7: #e2e4e7,
+                  text-text8: #6d78d5,
+                  text-text9: #f79ce0,
+                  brand-accent: #00ff05,
+                  status-success: #27a644,
+                  status-danger: #f34e52,
+                  status-warning: #ffdf9f,
+                  status-info: #83dcdc,
+          ),
+          $palette
+  );
+}

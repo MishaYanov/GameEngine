@@ -1,45 +1,51 @@
 {
-  "last_checked_commit": "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+  "last_checked_commit": "1a4c7634a8d568bea625b4afa279abef8524308f",
   "last_checked_date": "2026-10-24",
-  "last_documentation_update_commit": "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+  "last_documentation_update_commit": "1a4c7634a8d568bea625b4afa279abef8524308f",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "Inspection baseline only. HEAD is unchanged from the prior checkpoint, but staged/unstaged/untracked changes were inspected and current documentation now covers the observed project-schema-2/multi-scene working tree. The SHA does not identify uncommitted content or prove all guides match source.",
+  "baseline_note": "Inspection baseline only. HEAD remains 1a4c7634a8d568bea625b4afa279abef8524308f from the prior checkpoint while dirty compiler source/tests and extensive unrelated Angular/editor-host work have evolved. Inspected Git history, current tree inventory, staged/unstaged changes and untracked files. The SHA does not identify dirty source or certify unrelated guides. last_documentation_update_commit is observed HEAD, not a new documentation commit.",
   "reviewed_commits": [
     "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
     "a48ff6c5b84096b540f1401eff452c222e167493",
-    "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8"
+    "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+    "1a4c7634a8d568bea625b4afa279abef8524308f"
   ],
-  "documentation_report": "docs/project-lifecycle.md",
-  "documentation_scope": "Explicit user-requested diff update: project lifecycle/root ownership, project schema 2, editor protocol 2 and multi-scene authoring across core/host/frontend/compiler/headless; reconcile affected current project guides and annotate historical handoff. Engine Developer only; Markdown source, generated docs-site/dist. No code/tests, staging or commits by documentation maintenance.",
+  "documentation_report": "docs/compiler/README.md",
+  "documentation_scope": "Explicit user-requested DOC_MANAGER follow-up for the completed five-step stale-input compiler slice. This pass updates only the compiler guide/checkpoint and regenerates docs-site/dist; prior related diagnostic/lifecycle documentation edits remain. Engine Developer only. No production/test/config changes, staging, commits or unrelated guide reconciliation by documentation maintenance.",
   "documented_changes": [
-    "Added project lifecycle/multi-scene guide and main index entry, including example schema-2 manifest and typed Angular operations",
-    "Documented schema-1 project rejection (no migration), stable SceneId/catalog limits, startup selection and scene-scoped behaviors; scene schema remains 3",
-    "Documented retained drafts/logical budgets, cross-scene undo, structural restrictions and independent project/per-scene dirty/save baselines",
-    "Documented canonical ProjectLocation, candidate replacement, standalone/manifest-backed promotion, missing-manifest preservation and explicit reload policies",
-    "Documented register/Save As failure semantics, no multi-file atomic guarantee, all-catalog disk equality/build/model preflight and headless loading",
-    "Updated host/frontend/bridge/runtime/architecture/persistence/editing/game/compiler/admin/usage/testing guides; corrected source Development versus installed Player and GraphicsProbe naming",
-    "Preserved historical step reports and proposed error-handling design; added follow-up pointer to the PROJECT3 milestone"
+    "Documented private PreparedProject::validate_inputs before Cargo/output creation, after destination validation",
+    "Documented streamed captured-asset path/regular-file/size/fingerprint recheck into io::sink with relative-path context and existing string-error boundary",
+    "Documented shared copy_verified_asset/verify_asset_fingerprint reuse and retained copy-time checks for changes made during compilation",
+    "Documented one additional streamed pass, no immutable/atomic filesystem snapshot or cryptographic guarantee; existing 16 KiB scene-report contract remains separate and unchanged",
+    "Updated compiler test command/coverage description for final scoped stale-input regressions; Game App Developer remains empty"
   ],
   "pending_documentation_changes": [
-    "Current engine/frontend/native behavior not rerun by documentation maintenance; existing tests and historical results do not certify this evolving working tree",
-    "Interactive native controls/appearance, Angular pane layout/integration acceptance, installed release execution, clean-checkout reproducibility and Jenkins remain unverified",
+    "Extensive unrelated concurrent Angular app/design-project/demo/backend/route/environment/pane/style/build-config work and editor-host destination-alias work are inventoried but outside this compiler documentation update and acceptance",
+    "Full installer nested release build and installed Player execution, interactive native/GPU/UI acceptance, clean-checkout reproducibility and Jenkins remain unverified",
     "Hardware cadence, performance speedup, total process/driver memory utilization and full logger infrastructure audit remain outside this update",
-    "Error-handling design remains proposed: workspace-wide typed errors/thiserror/public DTO migration is not established by current project-location errors",
-    "Historical step reports intentionally preserve milestone behavior; unrelated feature guides may retain earlier details requiring a future targeted review"
+    "Error-handling design remains proposed; no workspace-wide typed errors/thiserror/public DTO migration is established by compiler string errors",
+    "Historical step reports preserve milestone behavior; unrelated feature guides were not broadly reconciled"
   ],
   "verification": [
-    "Documentation local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
-    "Documentation local: 503 local/cross-page anchor targets resolved across 30 pages; project lifecycle guide present in developer index",
-    "Documentation local: git diff --check -- docs passed",
-    "Inspection local: Git history/current HEAD, empty staged index, unstaged tracked diff and untracked source/test/backup inventory inspected; compared against recorded checkpoint",
-    "Documentation maintenance modified Markdown and docs-state.json only; generated site output rebuilt in docs-site/dist"
+    "DOC_MANAGER local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
+    "DOC_MANAGER local: 508 local/cross-page anchor targets resolved across 30 pages; prepared-input-recheck section exists and Game App Developer remains empty",
+    "DOC_MANAGER local: focused git diff --check passed for compiler Markdown/checkpoint",
+    "Inspection local: HEAD/history checked against unchanged 1a4c763 checkpoint; complete tree inventory, staged/unstaged change inventory, current compiler source and untracked files inspected; extensive concurrent work preserved",
+    "TESTER final handoff and actual final logs inspected: cargo test -p compiler --all-targets --offline --locked passed 18 library tests and zero binary tests, zero failed/ignored",
+    "TESTER final handoff and actual final log inspected: cargo clippy -p compiler --all-targets --offline --locked -- -D warnings passed; only environmental incremental-cache hardlink fallback warnings",
+    "TESTER regressions: unchanged inputs accepted; equal-size mutation rejected early and during copying; table-driven resized/missing/directory-replaced inputs retain relative context; test diffcheck passed",
+    "TESTER before/after SHA256 files match each other and current compiler source/tests/Cargo.lock; no production edits followed final tests",
+    "SECURITY final handoff: no actionable introduced defect in scoped static review; containment, stream bounds and retained copy-time checks preserved",
+    "DOC_MANAGER changed only compiler Markdown and docs-state.json this pass; generated output rebuilt in docs-site/dist; prior related Markdown changes preserved"
   ],
   "verification_limits": [
-    "No Rust/frontend/native/GPU/installed-client tests executed this turn; documentation statements derive from inspected implementation, not new runtime acceptance",
-    "HEAD remains 706f87a867ecb0f8694a2a8aa8c20faa7d1671b8 while uncommitted source has changed; checkpoint is an inspection baseline",
-    "Project schema 1 is rejected, not automatically migrated; scene-schema migration is a separate contract",
-    "Existing untracked backup files and proposed designs/error-handling.md were preserved; no test/source/staging/commit actions performed",
-    "Error-handling proposal not presented as implemented; existing string-returning host boundaries remain documented"
+    "Compiler tests/Clippy are TESTER final evidence for current dirty compiler source; DOC_MANAGER independently executed documentation checks only",
+    "Pre-Cargo guard order was inspected statically: destination validation, input recheck, Cargo launch, output creation. Focused tests do not execute the full successful installer/nested release build or launch an installed Player",
+    "No full workspace, unrelated Angular/editor-host, native/GPU/UI, installed-release, clean-checkout or Jenkins acceptance is claimed",
+    "Pre-build validation adds a streamed pass and preserves existing copy-time checks; neither produces an immutable or atomic filesystem snapshot or cryptographic proof",
+    "The existing 16 KiB aggregate scene-report text limit does not cover new prepared-input errors, temporary errors, outer installation messages, Cargo output or total memory",
+    "HEAD remains an inspection baseline; dirty compiler source/tests and extensive concurrent Angular/editor-host work are not identified by that SHA. DOC_MANAGER did not modify production, tests, backup files, staged state or commits",
+    "Local generated links/anchors were checked; preserved remote links were not revalidated"
   ],
   "user_reported_verification": [
     "User confirmed tests, native smoke, visible game, resize, and minimize pass after runtime module move",
@@ -70,77 +76,101 @@
     ]
   },
   "working_tree_at_check": [
-    " M apps/admin-dashboard/src-tauri/src/builder.rs",
-    " M apps/editor-host/src-tauri/src/commands/editor.rs",
     " M apps/editor-host/src-tauri/src/editor.rs",
-    " M apps/editor-host/src-tauri/src/lib.rs",
-    "A  apps/editor-host/src-tauri/src/project_location.rs",
     " M apps/editor-host/src-tauri/tests/editor_workspace.rs",
-    " M apps/editor/src/app/core/editor/editor.models.ts",
-    " M apps/editor/src/app/core/editor/editor.service.spec.ts",
+    " M apps/editor/angular.json",
+    " M apps/editor/package.json",
+    "A  apps/editor/projects/design/src/design.routes.ts",
+    "A  apps/editor/projects/design/src/index.html",
+    "A  apps/editor/projects/design/src/main.ts",
+    "AM apps/editor/projects/design/src/workbench.html",
+    "AM apps/editor/projects/design/src/workbench.scss",
+    "A  apps/editor/projects/design/src/workbench.ts",
+    "A  apps/editor/projects/design/tsconfig.app.json",
+    "AM apps/editor/scripts/check-production.mjs",
+    " M apps/editor/src/app/app.html",
+    "AM apps/editor/src/app/app.routes.development.ts",
+    "?? apps/editor/src/app/app.routes.production.ts",
+    "?? apps/editor/src/app/app.routes.spec.ts",
+    " M apps/editor/src/app/app.routes.ts",
+    " M apps/editor/src/app/app.scss",
+    " M apps/editor/src/app/app.spec.ts",
+    " M apps/editor/src/app/app.ts",
+    "AM apps/editor/src/app/core/editor/editor-backend.ts",
     " M apps/editor/src/app/core/editor/editor.service.ts",
-    " M apps/game/project.json",
-    " M apps/game/src/game.rs",
-    " M apps/game/src/main.rs",
-    " M apps/game/src/tests_app_scene_io.rs",
-    " M apps/game/src/tests_game.rs",
-    " M apps/headless/src/main.rs",
-    " M apps/headless/tests/cli.rs",
+    "A  apps/editor/src/app/demo/demo-editor-backend.spec.ts",
+    "AM apps/editor/src/app/demo/demo-editor-backend.ts",
+    "AM apps/editor/src/app/demo/demo-project.ts",
+    "AM apps/editor/src/app/demo/demo-workspace.html",
+    "AM apps/editor/src/app/demo/demo-workspace.scss",
+    "AM apps/editor/src/app/demo/demo-workspace.spec.ts",
+    "AM apps/editor/src/app/demo/demo-workspace.ts",
+    "?? apps/editor/src/app/modules/editor/editor.html",
+    "?? apps/editor/src/app/modules/editor/editor.scss",
+    "?? apps/editor/src/app/modules/editor/editor.spec.ts",
+    "?? apps/editor/src/app/modules/editor/editor.ts",
+    "A  apps/editor/src/app/project-setup.ts",
+    "AM apps/editor/src/app/shared/pane/pane.scss",
+    "AM apps/editor/src/app/shared/pane/pane.ts",
+    "A  apps/editor/src/app/styles/_index.scss",
+    "A  apps/editor/src/app/styles/abstracts/_colors.scss",
+    "A  apps/editor/src/app/styles/abstracts/_effects.scss",
+    "A  apps/editor/src/app/styles/abstracts/_layout.scss",
+    "A  apps/editor/src/app/styles/abstracts/_motion.scss",
+    "A  apps/editor/src/app/styles/abstracts/_spacing.scss",
+    "A  apps/editor/src/app/styles/abstracts/_typography.scss",
+    " M apps/editor/src/app/styles/abstracts/_variables.scss",
+    " M apps/editor/src/app/styles/components/layout.scss",
+    " M apps/editor/src/app/styles/components/panes.scss",
+    " M apps/editor/src/app/styles/core/core.scss",
+    " M apps/editor/src/app/styles/root.scss",
+    "A  apps/editor/src/app/styles/themes/_default.scss",
+    "AM apps/editor/src/environments/environment.development.ts",
+    "AM apps/editor/src/environments/environment.staging.ts",
+    "AM apps/editor/src/environments/environment.ts",
+    " M apps/editor/src/styles.scss",
+    " M apps/editor/tsconfig.app.json",
     " M compiler/src/lib.rs",
     " M compiler/src/tests_lib.rs",
-    " M crates/bridge/tests/editor_contract.rs",
-    " M crates/engine-core/src/command.rs",
-    " M crates/engine-core/src/editor/factory.rs",
-    " M crates/engine-core/src/editor/history.rs",
-    " M crates/engine-core/src/editor/mod.rs",
-    "A  crates/engine-core/src/editor/scene_documents.rs",
-    " M crates/engine-core/src/engine.rs",
-    " M crates/engine-core/src/events.rs",
-    " M crates/engine-core/src/lib.rs",
-    " M crates/engine-core/src/project.rs",
-    "A  crates/engine-core/src/project_format.rs",
-    "A  crates/engine-core/src/scene_catalog.rs",
-    " M crates/engine-core/src/simulation_session.rs",
-    "AM crates/engine-core/src/tests_scene_catalog.rs",
-    " M crates/engine-core/tests/editor_project_api.rs",
-    " M crates/engine-core/tests/engine_api.rs",
-    "AM crates/engine-core/tests/multi_scene_api.rs",
-    " M crates/engine-core/tests/project_api.rs",
-    " M crates/engine-core/tests/simulation_session_api.rs",
-    " M crates/engine-core/tests/world_events_api.rs",
-    " M crates/logger/src/tests_storage.rs",
-    " M crates/runtime/src/lib.rs",
-    " M crates/runtime/src/scene_editor.rs",
-    " M crates/runtime/tests/editor_session_api.rs",
-    "A  designs/error-handling.md",
-    " M docs-site/docs-state.json",
-    " M docs/apps/admin-dashboard/README.md",
-    " M docs/apps/editor-host/README.md",
-    " M docs/apps/editor/README.md",
-    " M docs/apps/game/README.md",
-    " M docs/architecture.md",
-    " M docs/compiler/README.md",
-    " M docs/crates/bridge/README.md",
-    " M docs/crates/runtime/README.md",
-    " M docs/main.md",
-    " M docs/project3-handoff.md",
-    " M docs/scene-editing.md",
-    " M docs/scene-persistence.md",
-    " M docs/testing.md",
-    " M docs/usage.md",
     "?? crates/engine-core/tests/command_factory_api.rs~",
     "?? crates/renderer/src/vulkan/lighting.rs~",
     "?? crates/renderer/src/vulkan/render_object.rs~",
-    "?? docs/project-lifecycle.md"
+    " M docs-site/docs-state.json",
+    " M docs/compiler/README.md",
+    " M docs/project-lifecycle.md"
   ],
   "staged_files_at_check": [
-    "apps/editor-host/src-tauri/src/project_location.rs",
-    "crates/engine-core/src/editor/scene_documents.rs",
-    "crates/engine-core/src/project_format.rs",
-    "crates/engine-core/src/scene_catalog.rs",
-    "crates/engine-core/src/tests_scene_catalog.rs",
-    "crates/engine-core/tests/multi_scene_api.rs",
-    "designs/error-handling.md"
+    "apps/editor/projects/design/src/design.routes.ts",
+    "apps/editor/projects/design/src/index.html",
+    "apps/editor/projects/design/src/main.ts",
+    "apps/editor/projects/design/src/workbench.html",
+    "apps/editor/projects/design/src/workbench.scss",
+    "apps/editor/projects/design/src/workbench.ts",
+    "apps/editor/projects/design/tsconfig.app.json",
+    "apps/editor/scripts/check-production.mjs",
+    "apps/editor/src/app/app.routes.development.ts",
+    "apps/editor/src/app/core/editor/editor-backend.ts",
+    "apps/editor/src/app/demo/demo-editor-backend.spec.ts",
+    "apps/editor/src/app/demo/demo-editor-backend.ts",
+    "apps/editor/src/app/demo/demo-project.ts",
+    "apps/editor/src/app/demo/demo-workspace.html",
+    "apps/editor/src/app/demo/demo-workspace.scss",
+    "apps/editor/src/app/demo/demo-workspace.spec.ts",
+    "apps/editor/src/app/demo/demo-workspace.ts",
+    "apps/editor/src/app/project-setup.ts",
+    "apps/editor/src/app/shared/pane/pane.scss",
+    "apps/editor/src/app/shared/pane/pane.ts",
+    "apps/editor/src/app/styles/_index.scss",
+    "apps/editor/src/app/styles/abstracts/_colors.scss",
+    "apps/editor/src/app/styles/abstracts/_effects.scss",
+    "apps/editor/src/app/styles/abstracts/_layout.scss",
+    "apps/editor/src/app/styles/abstracts/_motion.scss",
+    "apps/editor/src/app/styles/abstracts/_spacing.scss",
+    "apps/editor/src/app/styles/abstracts/_typography.scss",
+    "apps/editor/src/app/styles/themes/_default.scss",
+    "apps/editor/src/environments/environment.development.ts",
+    "apps/editor/src/environments/environment.staging.ts",
+    "apps/editor/src/environments/environment.ts"
   ],
   "preserved_scene_sha256": "63A13AC7E1B0FEC1E00C66A85DE3169897D01BF989842F7037B523140107AA42",
   "historical_documentation_updates": [
@@ -363,39 +393,244 @@
         "Research links were consulted in the preceding design discussion; this turn verified local documentation links rather than rechecking remote availability",
         "Working-tree source changes are uncommitted; HEAD alone does not identify their contents"
       ]
+    },
+    {
+      "documentation_report": "docs/project-lifecycle.md",
+      "documentation_scope": "Explicit user-requested diff update: project lifecycle/root ownership, project schema 2, editor protocol 2 and multi-scene authoring across core/host/frontend/compiler/headless; reconcile affected current project guides and annotate historical handoff. Engine Developer only; Markdown source, generated docs-site/dist. No code/tests, staging or commits by documentation maintenance.",
+      "documented_changes": [
+        "Added project lifecycle/multi-scene guide and main index entry, including example schema-2 manifest and typed Angular operations",
+        "Documented schema-1 project rejection (no migration), stable SceneId/catalog limits, startup selection and scene-scoped behaviors; scene schema remains 3",
+        "Documented retained drafts/logical budgets, cross-scene undo, structural restrictions and independent project/per-scene dirty/save baselines",
+        "Documented canonical ProjectLocation, candidate replacement, standalone/manifest-backed promotion, missing-manifest preservation and explicit reload policies",
+        "Documented register/Save As failure semantics, no multi-file atomic guarantee, all-catalog disk equality/build/model preflight and headless loading",
+        "Updated host/frontend/bridge/runtime/architecture/persistence/editing/game/compiler/admin/usage/testing guides; corrected source Development versus installed Player and GraphicsProbe naming",
+        "Preserved historical step reports and proposed error-handling design; added follow-up pointer to the PROJECT3 milestone"
+      ],
+      "pending_documentation_changes": [
+        "Current engine/frontend/native behavior not rerun by documentation maintenance; existing tests and historical results do not certify this evolving working tree",
+        "Interactive native controls/appearance, Angular pane layout/integration acceptance, installed release execution, clean-checkout reproducibility and Jenkins remain unverified",
+        "Hardware cadence, performance speedup, total process/driver memory utilization and full logger infrastructure audit remain outside this update",
+        "Error-handling design remains proposed: workspace-wide typed errors/thiserror/public DTO migration is not established by current project-location errors",
+        "Historical step reports intentionally preserve milestone behavior; unrelated feature guides may retain earlier details requiring a future targeted review"
+      ],
+      "verification": [
+        "Documentation local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
+        "Documentation local: 503 local/cross-page anchor targets resolved across 30 pages; project lifecycle guide present in developer index",
+        "Documentation local: git diff --check -- docs passed",
+        "Inspection local: Git history/current HEAD, empty staged index, unstaged tracked diff and untracked source/test/backup inventory inspected; compared against recorded checkpoint",
+        "Documentation maintenance modified Markdown and docs-state.json only; generated site output rebuilt in docs-site/dist"
+      ],
+      "verification_limits": [
+        "No Rust/frontend/native/GPU/installed-client tests executed this turn; documentation statements derive from inspected implementation, not new runtime acceptance",
+        "HEAD remains 706f87a867ecb0f8694a2a8aa8c20faa7d1671b8 while uncommitted source has changed; checkpoint is an inspection baseline",
+        "Project schema 1 is rejected, not automatically migrated; scene-schema migration is a separate contract",
+        "Existing untracked backup files and proposed designs/error-handling.md were preserved; no test/source/staging/commit actions performed",
+        "Error-handling proposal not presented as implemented; existing string-returning host boundaries remain documented"
+      ],
+      "working_tree_at_check": [
+        " M apps/admin-dashboard/src-tauri/src/builder.rs",
+        " M apps/editor-host/src-tauri/src/commands/editor.rs",
+        " M apps/editor-host/src-tauri/src/editor.rs",
+        " M apps/editor-host/src-tauri/src/lib.rs",
+        "A  apps/editor-host/src-tauri/src/project_location.rs",
+        " M apps/editor-host/src-tauri/tests/editor_workspace.rs",
+        " M apps/editor/src/app/core/editor/editor.models.ts",
+        " M apps/editor/src/app/core/editor/editor.service.spec.ts",
+        " M apps/editor/src/app/core/editor/editor.service.ts",
+        " M apps/game/project.json",
+        " M apps/game/src/game.rs",
+        " M apps/game/src/main.rs",
+        " M apps/game/src/tests_app_scene_io.rs",
+        " M apps/game/src/tests_game.rs",
+        " M apps/headless/src/main.rs",
+        " M apps/headless/tests/cli.rs",
+        " M compiler/src/lib.rs",
+        " M compiler/src/tests_lib.rs",
+        " M crates/bridge/tests/editor_contract.rs",
+        " M crates/engine-core/src/command.rs",
+        " M crates/engine-core/src/editor/factory.rs",
+        " M crates/engine-core/src/editor/history.rs",
+        " M crates/engine-core/src/editor/mod.rs",
+        "A  crates/engine-core/src/editor/scene_documents.rs",
+        " M crates/engine-core/src/engine.rs",
+        " M crates/engine-core/src/events.rs",
+        " M crates/engine-core/src/lib.rs",
+        " M crates/engine-core/src/project.rs",
+        "A  crates/engine-core/src/project_format.rs",
+        "A  crates/engine-core/src/scene_catalog.rs",
+        " M crates/engine-core/src/simulation_session.rs",
+        "AM crates/engine-core/src/tests_scene_catalog.rs",
+        " M crates/engine-core/tests/editor_project_api.rs",
+        " M crates/engine-core/tests/engine_api.rs",
+        "AM crates/engine-core/tests/multi_scene_api.rs",
+        " M crates/engine-core/tests/project_api.rs",
+        " M crates/engine-core/tests/simulation_session_api.rs",
+        " M crates/engine-core/tests/world_events_api.rs",
+        " M crates/logger/src/tests_storage.rs",
+        " M crates/runtime/src/lib.rs",
+        " M crates/runtime/src/scene_editor.rs",
+        " M crates/runtime/tests/editor_session_api.rs",
+        "A  designs/error-handling.md",
+        " M docs-site/docs-state.json",
+        " M docs/apps/admin-dashboard/README.md",
+        " M docs/apps/editor-host/README.md",
+        " M docs/apps/editor/README.md",
+        " M docs/apps/game/README.md",
+        " M docs/architecture.md",
+        " M docs/compiler/README.md",
+        " M docs/crates/bridge/README.md",
+        " M docs/crates/runtime/README.md",
+        " M docs/main.md",
+        " M docs/project3-handoff.md",
+        " M docs/scene-editing.md",
+        " M docs/scene-persistence.md",
+        " M docs/testing.md",
+        " M docs/usage.md",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~",
+        "?? docs/project-lifecycle.md"
+      ],
+      "staged_files_at_check": [
+        "apps/editor-host/src-tauri/src/project_location.rs",
+        "crates/engine-core/src/editor/scene_documents.rs",
+        "crates/engine-core/src/project_format.rs",
+        "crates/engine-core/src/scene_catalog.rs",
+        "crates/engine-core/src/tests_scene_catalog.rs",
+        "crates/engine-core/tests/multi_scene_api.rs",
+        "designs/error-handling.md"
+      ],
+      "verification_logs": [],
+      "inspected_working_tree_files": [
+        {
+          "status": " M",
+          "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
+          "sha256": "3822c421b03909a373d49a44a069877648bc09628c10d24d6145d0e87c3c50aa",
+          "bytes": 14801
+        },
+        {
+          "status": " M",
+          "path": "apps/editor-host/src-tauri/src/editor.rs",
+          "sha256": "f13348778b503fa0107eaca8a52f2cf94b86a698588d7ca0cdafddef648c265b",
+          "bytes": 22643
+        },
+        {
+          "status": " M",
+          "path": "apps/editor-host/src-tauri/src/lib.rs",
+          "sha256": "afe3751c167109e700731e9d90874fda0032db82c82e9333b5296343f7340b3c",
+          "bytes": 2369
+        },
+        {
+          "status": "AM",
+          "path": "apps/editor-host/src-tauri/src/project_location.rs",
+          "sha256": "7d200d784a4cd7da2e1a168f7139914781127ba9133ce2045a7104e269e43c8c",
+          "bytes": 3168
+        },
+        {
+          "status": " M",
+          "path": "apps/editor-host/src-tauri/tests/editor_workspace.rs",
+          "sha256": "f1f1348a2c957fa6558166bb20157a7c1c8657d8dd749c0e59955a03ee2a807f",
+          "bytes": 30691
+        },
+        {
+          "status": "??",
+          "path": "crates/engine-core/tests/command_factory_api.rs~",
+          "sha256": "6dfcb0ef94d50fb3c0198300d4f2a30a7d6f820dd8a85ade31f3423f2a434a6a",
+          "bytes": 2883
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/lighting.rs~",
+          "sha256": "96b94b736dd492ce623dd9bf89d6a324066a8d76e052ed15140deeeb9e4bffd4",
+          "bytes": 3069
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/render_object.rs~",
+          "sha256": "cea9aa5f7920a76cdf7cb69b8f1976b61638649fa6507e8ed8922f4137a53f23",
+          "bytes": 1093
+        }
+      ],
+      "commit": "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+      "last_checked_date": "2026-10-24"
+    },
+    {
+      "documentation_report": "docs/compiler/README.md",
+      "documentation_scope": "Explicit user-requested DOC_MANAGER update for the completed compiler scene diagnostics and captured asset membership slice. Updated compiler guide and affected project-lifecycle paragraph only. Engine Developer; Markdown source and regenerated docs-site/dist. No production/test/config changes, staging or commits by documentation maintenance.",
+      "documented_changes": [
+        "Contextual scene ID/path diagnostics retain original causes and report one primary failure per invalid scene in ascending SceneId string order",
+        "Aggregated scene report retains at most 16 KiB UTF-8 text with character-boundary truncation and one omission notice; limit excludes temporary allocations and outer error wrappers",
+        "Source and copied catalogs use the same scene/behavior-target/model validation pass; copied asset root is canonicalized",
+        "One captured-path index per catalog pass; shared resolver requires canonical contained regular files and captured membership for scenes before parsing and for model references",
+        "Captured path membership is distinct from content/fingerprint checks and an atomic filesystem snapshot; detailed geometry validation remains a runtime responsibility",
+        "Existing public string-error interfaces and separate proposed typed-error migration remain accurately distinguished; Game App Developer stays empty"
+      ],
+      "verification": [
+        "DOC_MANAGER local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
+        "DOC_MANAGER local: 506 local/cross-page anchor targets resolved across 30 pages; compiler diagnostic section exists and Game App Developer remains empty",
+        "DOC_MANAGER local: focused git diff --check passed for Markdown/checkpoint; bundled robots.json SHA256 unchanged",
+        "Inspection local: history from recorded baseline through 1a4c763, complete Git tree inventory, staged/unstaged diffs and untracked backup inventory inspected; unrelated work preserved",
+        "TESTER final handoff and actual final logs inspected: cargo test -p compiler --all-targets --offline --locked passed 17 library tests and zero binary tests, zero failed/ignored",
+        "TESTER final handoff and actual final log inspected: cargo clippy -p compiler --all-targets --offline --locked -- -D warnings passed; environment incremental-cache hardlink fallback warnings remain",
+        "TESTER final before/after SHA256 evidence matches current compiler/src/lib.rs, compiler/src/tests_lib.rs and Cargo.lock; initial Clippy assertion failure is superseded by final reruns",
+        "Earlier LOGGER/SECURITY scoped static review handoff found no actionable introduced issue; this update did not rerun those reviews",
+        "DOC_MANAGER changed Markdown and docs-state.json only; generated output rebuilt in docs-site/dist"
+      ],
+      "verification_limits": [
+        "Compiler test/Clippy acceptance belongs to TESTER final evidence for current dirty compiler source; DOC_MANAGER independently ran documentation checks only",
+        "Focused copied-root and file-copy regressions do not execute install_prepared_project through its nested release build or launch an installed Player",
+        "No full workspace, Angular/frontend, native/GPU/UI, installed-release or Jenkins acceptance is claimed",
+        "16 KiB cap bounds retained aggregate scene report text, not every individual error allocation, Cargo output, outer installation messages or total memory",
+        "Captured membership proves canonical path inclusion, not unchanged bytes or an atomic/malicious-tampering-resistant filesystem snapshot; existing copy size/fingerprint guards are separate",
+        "HEAD 1a4c763 remains an inspection baseline while compiler and unrelated source/tests/styles are uncommitted; no source, backup, staged state or commit was modified by DOC_MANAGER",
+        "Remote primary reading links were preserved; checks cover generated local links/anchors rather than remote availability"
+      ],
+      "verification_logs": [
+        "target/compiler-scene-diagnostics/compiler-handoff-all-targets-tests-final.log",
+        "target/compiler-scene-diagnostics/compiler-handoff-clippy-final.log",
+        "target/compiler-scene-diagnostics/compiler-handoff-final-source-before.json",
+        "target/compiler-scene-diagnostics/compiler-handoff-final-source-after.json"
+      ],
+      "verified_compiler_source_files": [
+        {
+          "path": "compiler/src/lib.rs",
+          "sha256": "c21ea39075393207bdf4d613810a00215ca241dd0cab542e13c34d33ed150f6a"
+        },
+        {
+          "path": "compiler/src/tests_lib.rs",
+          "sha256": "77383d6cade9a649752656dd21a346bcedd0b21eef6fc53631edc5fe91233e32"
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2"
+        }
+      ],
+      "commit": "1a4c7634a8d568bea625b4afa279abef8524308f",
+      "last_checked_date": "2026-10-24",
+      "working_tree_inventory_summary": {
+        "dirty_or_untracked_paths": 38,
+        "staged_paths": 8
+      }
     }
   ],
-  "verification_logs": [],
+  "verification_logs": [
+    "target/compiler-scene-diagnostics/compiler-stale-input-tests-final.log",
+    "target/compiler-scene-diagnostics/compiler-stale-input-clippy-final.log",
+    "target/compiler-scene-diagnostics/compiler-stale-input-source-before.json",
+    "target/compiler-scene-diagnostics/compiler-stale-input-source-after.json"
+  ],
   "inspected_working_tree_files": [
     {
       "status": " M",
-      "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
-      "sha256": "3822c421b03909a373d49a44a069877648bc09628c10d24d6145d0e87c3c50aa",
-      "bytes": 14801
+      "path": "compiler/src/lib.rs",
+      "sha256": "362264290654901aa8c557e62ca30f42a52ed47dee7cab1d780883ec1084eb8d",
+      "bytes": 17337
     },
     {
       "status": " M",
-      "path": "apps/editor-host/src-tauri/src/editor.rs",
-      "sha256": "f13348778b503fa0107eaca8a52f2cf94b86a698588d7ca0cdafddef648c265b",
-      "bytes": 22643
-    },
-    {
-      "status": " M",
-      "path": "apps/editor-host/src-tauri/src/lib.rs",
-      "sha256": "afe3751c167109e700731e9d90874fda0032db82c82e9333b5296343f7340b3c",
-      "bytes": 2369
-    },
-    {
-      "status": "AM",
-      "path": "apps/editor-host/src-tauri/src/project_location.rs",
-      "sha256": "7d200d784a4cd7da2e1a168f7139914781127ba9133ce2045a7104e269e43c8c",
-      "bytes": 3168
-    },
-    {
-      "status": " M",
-      "path": "apps/editor-host/src-tauri/tests/editor_workspace.rs",
-      "sha256": "f1f1348a2c957fa6558166bb20157a7c1c8657d8dd749c0e59955a03ee2a807f",
-      "bytes": 30691
+      "path": "compiler/src/tests_lib.rs",
+      "sha256": "4ca364571167ff476435e7aebfbb8ff0bacdefb94f92c1b9627a07e1ded70970",
+      "bytes": 19273
     },
     {
       "status": "??",
@@ -414,6 +649,32 @@
       "path": "crates/renderer/src/vulkan/render_object.rs~",
       "sha256": "cea9aa5f7920a76cdf7cb69b8f1976b61638649fa6507e8ed8922f4137a53f23",
       "bytes": 1093
+    },
+    {
+      "status": " M",
+      "path": "docs-site/docs-state.json",
+      "note": "Checkpoint inventory excludes its own content hash."
+    },
+    {
+      "status": " M",
+      "path": "docs/compiler/README.md",
+      "sha256": "c4cf46682bb711c2975394d47ae8c1faf9b9cdbdcd2e9cc2607d060a84e84e8a",
+      "bytes": 6993
     }
-  ]
+  ],
+  "verified_compiler_source_files": [
+    {
+      "path": "compiler/src/lib.rs",
+      "sha256": "362264290654901aa8c557e62ca30f42a52ed47dee7cab1d780883ec1084eb8d"
+    },
+    {
+      "path": "compiler/src/tests_lib.rs",
+      "sha256": "4ca364571167ff476435e7aebfbb8ff0bacdefb94f92c1b9627a07e1ded70970"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2"
+    }
+  ],
+  "working_tree_inventory_note": "All dirty/untracked statuses are recorded. Content hashes below identify the scoped compiler/checkpoint/Markdown and preserved backup files; unrelated concurrent files are inventoried without claiming acceptance."
 }

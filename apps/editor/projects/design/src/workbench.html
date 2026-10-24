@@ -1,0 +1,85 @@
+<div class="workbench">
+    <header>
+        <div>
+            <h1>Design workbench</h1>
+            <p>Components and views · {{ environment }}</p>
+        </div>
+        <div aria-label="Preview settings" class="settings" role="group">
+            <button (click)="theme.set('dark')" [attr.aria-pressed]="theme() === 'dark'">Dark</button>
+            <button (click)="theme.set('light')" [attr.aria-pressed]="theme() === 'light'">Light</button>
+            <button (click)="compact.set(!compact())" [attr.aria-pressed]="compact()">
+                Compact frame
+            </button>
+            <label
+            >Action color<input (input)="changeAccent($event)" [value]="accent()" type="color"
+            /></label>
+            <button (click)="accent.set('#5e6ad2')">Reset color</button>
+        </div>
+    </header>
+    <div class="layout">
+        <nav aria-label="Design previews">
+            <button (click)="view.set('pane')" [attr.aria-pressed]="view() === 'pane'">Pane</button>
+            <button (click)="view.set('controls')" [attr.aria-pressed]="view() === 'controls'">
+                Controls
+            </button>
+            <button (click)="view.set('workspace')" [attr.aria-pressed]="view() === 'workspace'">
+                Editor view
+            </button>
+            <p>Live component sources shared with the editor. Sample data resets on reload.</p>
+        </nav>
+        <section
+                [class.compact]="compact()"
+                aria-label="Component preview"
+                class="preview-area"
+                role="main"
+        >
+            @switch (view()) {
+                @case ('pane') {
+                    <div class="specimen">
+                        <editor-pane title="Scene hierarchy"
+                        ><span class="muted" pane-actions>3 entities</span>
+                            <div aria-label="Sample hierarchy" class="list" role="group">
+                                @for (name of ['Ground', 'Player', 'Supply crate']; track name) {
+                                    <button (click)="selected.set(name)" [attr.aria-pressed]="selected() === name">
+                                        ◇ {{ name }}
+                                    </button>
+                                }
+                            </div>
+                        </editor-pane>
+                        <p role="status">Selected: {{ selected() }}</p>
+                    </div>
+                }
+                @case ('controls') {
+                    <div class="specimen">
+                        <editor-pane title="Control states">
+                            <div class="control-row">
+                                <button class="primary">Primary action</button>
+                                <button>Secondary action
+                                </button
+                                >
+                                <button disabled>Disabled action</button>
+                            </div>
+                            <label for="design-field">Entity name</label
+                            ><input id="design-field" value="Player"/>
+                            <label for="design-invalid">Invalid field</label
+                            ><input
+                                aria-describedby="design-error"
+                                aria-invalid="true"
+                                id="design-invalid"
+                                value=""
+                        />
+                            <p class="error" id="design-error">Enter an entity name.</p>
+                            <label for="design-disabled">Disabled field</label
+                            ><input disabled id="design-disabled" value="Read only while playing"/>
+                            <p class="muted">Muted text and supporting information.</p>
+                            <p class="success">Success: session draft saved.</p>
+                        </editor-pane>
+                    </div>
+                }
+                @case ('workspace') {
+                    <editor-demo-workspace [embedded]="true"/>
+                }
+            }
+        </section>
+    </div>
+</div>

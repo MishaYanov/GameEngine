@@ -126,7 +126,10 @@ migration.
 
 Host build preparation requires clean Edit state, no grouped edit, a manifest matching memory and **every catalog scene
 ** matching its retained document on disk. Compilation runs after releasing the workspace lock. Compiler preparation
-checks each catalog scene and its referenced model membership; copied output is revalidated scene by scene. Admin
+requires catalog scenes and referenced models to belong to the captured asset list; copied output uses the same
+validation pass against its canonical asset root. Scene failures include ID/path context in stable ID order, with one
+primary cause per invalid scene and a 16 KiB UTF-8 report limit. See [compiler diagnostics and packaging
+checks](compiler/README.md#scene-validation-diagnostics) for the report scope and captured-input limits. Admin
 native-template validation also traverses the catalog. Detailed geometry import remains a runtime concern.
 
 Player launch resolves the configured startup ID to a scene path; configured simulation uses that scene's behaviors.

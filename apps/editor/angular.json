@@ -31,7 +31,8 @@
             ],
             "styles": [
               "src/styles.scss"
-            ]
+            ],
+            "outputPath": "dist/editor"
           },
           "configurations": {
             "production": {
@@ -52,7 +53,43 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.development.ts"
+                },
+                {
+                  "replace": "src/app/app.routes.ts",
+                  "with": "src/app/app.routes.development.ts"
+                }
+              ]
+            },
+            "staging": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
+              ],
+              "outputHashing": "all",
+              "sourceMap": false,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.staging.ts"
+                },
+                {
+                  "replace": "src/app/app.routes.ts",
+                  "with": "src/app/app.routes.development.ts"
+                }
+              ]
             }
           },
           "defaultConfiguration": "production"
@@ -65,12 +102,78 @@
             },
             "development": {
               "buildTarget": "editor:build:development"
+            },
+            "staging": {
+              "buildTarget": "editor:build:staging"
             }
           },
           "defaultConfiguration": "development"
         },
         "test": {
           "builder": "@angular/build:unit-test"
+        }
+      }
+    },
+    "design": {
+      "projectType": "application",
+      "root": "projects/design",
+      "sourceRoot": "projects/design/src",
+      "prefix": "design",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "projects/design/src/main.ts",
+            "index": "projects/design/src/index.html",
+            "tsConfig": "projects/design/tsconfig.app.json",
+            "outputPath": "dist/design",
+            "baseHref": "/design/",
+            "inlineStyleLanguage": "scss",
+            "styles": [
+              "src/styles.scss"
+            ]
+          },
+          "configurations": {
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.development.ts"
+                }
+              ]
+            },
+            "staging": {
+              "optimization": true,
+              "sourceMap": false,
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.staging.ts"
+                }
+              ]
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "options": {
+            "port": 4300,
+            "servePath": "/design"
+          },
+          "configurations": {
+            "development": {
+              "buildTarget": "design:build:development"
+            },
+            "staging": {
+              "buildTarget": "design:build:staging"
+            }
+          },
+          "defaultConfiguration": "development"
         }
       }
     }

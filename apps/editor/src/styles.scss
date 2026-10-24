@@ -1,1 +1,4 @@
-/* You can add global styles to this file, and also import other style files */
+// Optional build-time overrides go first:
+// @use './app/styles' with ($palette: (brand-secondary: #515bc0));
+@use './app/styles/root';
+@use './app/styles/core/core';
