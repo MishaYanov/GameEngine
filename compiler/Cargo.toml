@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 engine-logger = { path = "../crates/logger" }
+engine-core = { path = "../crates/engine-core" }

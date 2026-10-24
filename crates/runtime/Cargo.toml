@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+engine-core = { path = "../engine-core" }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 gltf = "1.4.1"
 base64 = "0.13.1"

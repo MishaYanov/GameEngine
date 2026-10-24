@@ -1,6 +1,7 @@
-# Timing, input, and camera — in progress
+# Timing, input, and camera
 
-**Status: In progress.** This guide describes the current staged/unstaged implementation of
+**Current scope:** the low-level clock/key/camera APIs remain shared; authoritative editor commands and fixed-step
+simulation now add the steps21–35 integration. This guide describes the current staged/unstaged implementation of
 `crates/runtime/src/time.rs`, `input.rs`, and `camera.rs`, the new `camera_controller.rs`, plus integration in
 `apps/game/src/main.rs` and robot rules in `game.rs`. The native editing extension is implemented and automated
 tests/hidden examples are reported in [steps 11–20](editor-steps-11-20.md). Human-visible control acceptance remains
@@ -49,29 +50,26 @@ Generic selection/commands now live in runtime SceneEditor; RobotGame owns optio
 starts in Edit, routes panels/drag/native events, manages scene I/O and temporary Play state, updates CameraController,
 and delegates edits or simulation according to mode. See [scene save/reload](scene-persistence.md).
 
-## Current development controls — provisional
+## Current editor intent versus legacy controls
 
-| Input                 | Current behavior                                                         |
-|-----------------------|--------------------------------------------------------------------------|
-| W/S                   | Move Edit selection in world Y; move robot_a in robot Play               |
-| A/D                   | Move Edit selection in world X; move robot_a in robot Play               |
-| Arrow keys            | Move camera forward/backward and strafe right/left                       |
-| Right mouse press     | Capture cursor for mouse look while focused                              |
-| Captured mouse motion | Rotate yaw/pitch; sensitivity currently 0.002 radians per motion unit    |
-| Escape                | Release capture and restore cursor visibility                            |
-| Space                 | Toggle robot simulation pause during Play (rotation and WASD)            |
-| Tab                   | Cycle all scene entities                                                 |
-| Q/E, R/F              | Rotate Z in 5-degree steps; scale ×/÷1.1                                 |
-| Ctrl+Z / Ctrl+Y       | Mixed Edit transform/name/entity undo / redo                             |
-| N / C / Delete        | Undoable Edit spawn / duplicate / delete                                 |
-| F1 / F6 / F7          | Toggle panels / Edit-Play / culling                                      |
-| 1 / 2 / 3             | Translate / rotate / scale gizmo in Edit                                 |
-| Left click / drag     | Panel/field action, handle drag, or ray selection in Edit                |
-| F5 / F9               | Save / reload the active JSON scene; reload wins if both arrive together |
+The new Angular editor contract does not assign physical keys. EditorSession offers frame/orbit/pan/dolly, snapping,
+multi-key transforms and Play input as typed commands; its capability descriptors tell UI owners what is available. A UI
+owner chooses how raw viewport events map to intent. No new app layout/toolbars were composed.
 
-Object speed is currently 1 world unit/second; camera speed is 2. Diagonal input is normalized. Camera forward motion follows pitch, so looking up/down also changes the vertical movement component. Mouse motion is displacement and is deliberately **not** multiplied by frame delta.
+The earlier WASD/Tab/QE/RF/F-key native demonstration controls apply only when GAME_ENGINE_NATIVE_EDITOR_DEMO=1, not
+normal game launch or default EditorSession policy. Normal game mode is overlay-free.
+See [current editor guide](scene-editing.md) and the historical [steps11–20](editor-steps-11-20.md) rather than treating
+old key examples as current product bindings.
 
-Capture attempts Locked mode then Confined as fallback, and only enables mouse look after success. Capture errors are logged. Focus loss, zero-size resize, and application exit release capture; right-button release is not currently the release gesture. Installed/name-file mode skips movement/rotation updates and disallows capture.
+## Fixed simulation step
+
+`runtime::simulation::FixedStepper` defaults to60Hz and at most8 catch-up steps per advance. It caps accepted elapsed
+time at0.25seconds, reports dropped time and interpolation, and resets on pause. This is separate from FrameClock's
+capped redraw delta and FIFO display pacing. Editor Play ticks apply validated movement intent, not keyboard codes;
+conservative collision can block motion or pause/reset after error.
+
+See [steps23–25 and32](editor-steps-21-35.md#step-23-frame-orbit-pan-and-dolly-camera-commands) for concrete
+command/settings examples. Fixed stepping does not establish networking determinism or a complete physics engine.
 
 ## Checks and remaining verification
 

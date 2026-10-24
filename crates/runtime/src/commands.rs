@@ -236,7 +236,7 @@ impl CommandHistory {
 					entity: change.entity,
 					transform: if forward { change.after } else { change.before },
 				}
-					.apply(scene)?;
+				.apply(scene)?;
 				Ok(SceneEditEffect {
 					entity: change.entity,
 					present: true,

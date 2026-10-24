@@ -1,5 +1,9 @@
 # Editor and rendering changes: steps 11–20
 
+**Historical milestone:** normal game/editor ownership, schema and rendering contracts have advanced
+in [steps 21–35](editor-steps-21-35.md). The native UI and metrics below describe that earlier implementation, not the
+current Angular product direction.
+
 This Engine Developer report describes implemented steps 11–20 against Git baseline `b8c2301` and the current
 staged/unstaged working tree. **Verification is automated only.** The user chose to finish without interactive
 UI/gameplay or rendered-image acceptance checks when native launch access expired. Implementation and tests are complete

@@ -42,8 +42,8 @@ switch ($Project)
 
         $TauriCli =
         Join-Path `
-                $Root `
-                "apps\editor\node_modules\.bin\tauri.cmd"
+				$Root `
+				"apps\editor\node_modules\.bin\tauri.cmd"
 
         Run-InDirectory "$Root\apps\editor-host" {
             & $TauriCli dev
@@ -63,8 +63,8 @@ switch ($Project)
 
         Run-InDirectory $Root {
             cargo run `
-                -p renderer `
-                --example vulkan_probe
+				-p renderer `
+				--example vulkan_probe
         }
     }
 }

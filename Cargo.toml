@@ -7,7 +7,9 @@ members = [
     "apps/game",
     "compiler",
     "crates/bridge",
+    "crates/engine-core",
     "crates/logger",
     "crates/renderer",
     "crates/runtime",
+    "apps/headless",
 ]

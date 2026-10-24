@@ -30,7 +30,7 @@ node --version
 npm.cmd --version
 ```
 
-## 2. Install the triangle demo with the CLI
+## 2. Install the native game with the CLI
 
 The compiler CLI takes two positional arguments:
 
@@ -85,25 +85,21 @@ Exit codes are `0` for success, `1` for build/install failure, and `2` for an in
 
 This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene.
 
-### Native development editing
+### Current editor integration direction
 
-`cargo run -p game` starts in Edit with `apps/game/assets/scenes/robots.json`. F1 toggles panels; F6 runs temporary Play
-and Stop restores authored state. F5 saves authored transforms/camera even during Play; F9 reloads disk. Saving changes
-the checkout asset file, so keep a copy or review the diff if experimenting.
+The Angular app owns editor controls and the game pane. This sequence adds typed core/editor models, EditorService and
+EngineViewportDirective plus runtime/host logic. It does not compose a new editor layout or apply the directive in a
+newly built app template. Do not expect a finished hierarchy/material/prefab screen merely by launching the existing
+setup app.
 
-In Edit, click fields/entities/handles; Tab cycles selection, WASD/QE/RF edit transforms, 1/2/3 select gizmo mode,
-N/C/Delete create/duplicate/remove, and Ctrl+Z/Y undo/redo mixed edits. Names and property edits are undoable;
-structural edits no longer clear history or protect robot roles just for simulation. Arrow keys and right-mouse capture
-control the camera. Space pauses optional robot simulation during Play, including rotation and WASD. F7 toggles culling.
+Normal `cargo run -p game` is an overlay-free player path. The earlier native panels/gizmos are available only with
+GAME_ENGINE_NATIVE_EDITOR_DEMO=1 for deliberate legacy inspection; their keyboard controls are not runtime EditorSession
+defaults. Physical shortcuts/tool gestures belong to the Angular UI owner.
 
-The panel offers a flat hierarchy list, name/transform fields, dirty indicator, model catalog Refresh/Place, and
-FRAME/UPDATE statistics. Generic scenes need no robot bindings. Text entry suppresses movement; Enter applies and Escape
-cancels. Panels hide in windows below 800×400 logical pixels; current ASCII display and short-window limits are
-documented in [native editing](scene-editing.md). No human-visible acceptance or GPU profiling was performed for the new
-tools; see [step report and evidence](editor-steps-11-20.md).
-
-Installed/name-file mode does not expose these development tools. The separate Angular/Tauri editor below still supplies
-project setup rather than this native authoring interface.
+A future UI integration can open an asset root/scene, inspect capabilities, send typed expected-revision commands and
+apply the viewport directive to its chosen pane. The current native child is Windows-only with airspace/visibility/DPI
+lifecycle constraints. See [Angular guide](apps/editor/README.md), [host](apps/editor-host/README.md),
+and [steps21–35](editor-steps-21-35.md) for examples and limits.
 
 ## 3. Use the editor project setup screen
 

@@ -41,9 +41,8 @@ pub fn scan_models(root: impl AsRef<Path>) -> Result<Vec<ModelAsset>, String> {
 				pending.push((path, depth + 1));
 			} else if kind.is_file()
 				&& path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-				s.eq_ignore_ascii_case("gltf") || s.eq_ignore_ascii_case("glb")
-			})
-			{
+					s.eq_ignore_ascii_case("gltf") || s.eq_ignore_ascii_case("glb")
+				}) {
 				let relative = path
 					.strip_prefix(&root)
 					.map_err(|error| error.to_string())?

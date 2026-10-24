@@ -42,13 +42,13 @@ fn editor_operates_without_game_bindings_and_structural_undo_keeps_selection_val
 	assert_eq!(editor.selected_entity(), Some(duplicate));
 	editor.delete_selected(&mut scene).unwrap();
 	assert_eq!(editor.selected_entity(), Some(first));
-	for expected in [Some(duplicate), Some(first), Some(first)] {
+	for expected in [Some(duplicate), Some(spawned), Some(first)] {
 		editor
 			.update(&mut scene, &keys(&[Key::ControlLeft, Key::Z]), 0.0)
 			.unwrap();
 		assert_eq!(editor.selected_entity(), expected);
 	}
-	for expected in [Some(spawned), Some(duplicate), Some(first)] {
+	for expected in [Some(spawned), Some(duplicate), None] {
 		editor
 			.update(&mut scene, &keys(&[Key::ControlRight, Key::Y]), 0.0)
 			.unwrap();
@@ -86,9 +86,10 @@ fn continuous_movement_merges_and_end_gesture_creates_a_separate_undo_step() {
 #[test]
 fn selecting_another_entity_prevents_merging_its_edits_with_the_previous_one() {
 	let (mut scene, mut editor, first) = fixture();
-	let second = scene
-		.spawn_persistent_model("Other", "props/robot.glb", instance())
+	let second = editor
+		.spawn(&mut scene, "Other", "props/robot.glb", instance())
 		.unwrap();
+	editor.select(&scene, first).unwrap();
 	let mut input = keys(&[Key::W]);
 	editor.update(&mut scene, &input, 0.2).unwrap();
 	input.end_frame();

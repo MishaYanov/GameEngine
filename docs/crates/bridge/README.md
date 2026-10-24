@@ -1,29 +1,35 @@
 # Shared engine contracts
 
-Source: `crates/bridge`. Cargo package: `bridge`. This crate provides Rust DTOs returned to the frontend. It currently contains `EngineStatusDto` and implements no IPC transport or entity commands.
+Source: `crates/bridge`. The crate defines serializable engine/editor data; it owns no UI layout, native input bindings,
+scene mutation, filesystem access, or GPU lifecycle.
 
-## Engine status contract
+## Editor protocol
 
-`EngineStatusDto` derives `Debug`, `Clone`, and `Serialize`. Serde uses camelCase JSON names:
+`bridge::editor` adds typed command requests, snapshots, capabilities, transforms, snapping, prefab/collision and
+viewport status/input DTOs. Current capability negotiation is protocol version 1 with scene schema 3. The Angular
+mirrors live under apps/editor/src/app/core/editor/editor.models.ts; update both sides together.
 
-| Rust field | JSON field | Type |
-| --- | --- | --- |
-| `initialized` | `initialized` | Boolean |
-| `renderer` | `renderer` | String |
-| `gpu_name` | `gpuName` | String |
-| `vulkan_api` | `vulkanApi` | String |
+EditorCommandRequest carries expected_revision plus a tagged snake_case EditorCommandDto. A snapshot includes
+revision/scene_revision, document, persistent-key selection, mode/paused/dirty, undo/redo availability, transaction
+label and snapping settings. Command descriptors report categories, undoability and Play availability so UI owners need
+not hardcode backend assumptions.
 
-Runtime constructs the value, the host returns it from `engine_status`, and the editor models it in `apps/editor/src/app/core/engine/engine.models.ts`. Coordinate changes across these consumers. Values describe the initialized renderer rather than an embedded editor viewport.
+Viewport status includes draw/instance/triangle counts and optional asynchronous GPU time with a support flag.
+Unsupported/unavailable timing is not zero GPU cost. Native input/status/error events support the Angular game-pane
+owner. No shortcuts or mock document state are defined by this transport.
 
-## Extension and verification
+## Engine status compatibility
 
-Keep shared serializable engine data here and platform/UI behavior in applications. Preserve JSON names or update frontend types/callers together. The status type currently defines no version migration or deserialization contract.
+EngineStatusDto remains camelCase JSON: initialized, renderer, gpuName, vulkanApi. Its naming differs from the
+snake_case editor DTO contract; do not blindly rename one to match the other. The status wrapper is separate from
+presentation/document editing.
 
-From the repository root:
+## Checks
 
 ```powershell
-cargo check -p bridge --offline --locked
-cargo test -p bridge --offline --locked
+cargo test -p bridge --locked --offline
 ```
 
-A serialization test verifies the camelCase engine-status JSON contract. See [host](../../apps/editor-host/README.md), [runtime](../runtime/README.md), and [architecture](../../architecture.md).
+Serialization and contract tests help keep Rust/TypeScript in agreement; integration and visual acceptance remain
+separate. See [Angular editor](../../apps/editor/README.md), [runtime](../runtime/README.md),
+and [steps 21–35](../../editor-steps-21-35.md).

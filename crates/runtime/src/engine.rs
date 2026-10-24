@@ -1,64 +1,75 @@
 use std::{
-    error::Error,
-    fmt::{Display, Formatter},
+	error::Error,
+	fmt::{Display, Formatter},
 };
 
 use bridge::EngineStatusDto;
 use renderer::{Renderer, RendererError};
 
-pub struct Engine {
-    renderer: Renderer,
+pub struct GraphicsProbe {
+	renderer: Renderer,
 }
 
 #[derive(Debug)]
-pub enum EngineError {
-    Renderer(RendererError),
+pub enum GraphicsProbeError {
+	Renderer(RendererError),
 }
 
-impl Display for EngineError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Renderer(error) => {
-                write!(formatter, "renderer initialization failed: {error}")
-            }
-        }
-    }
+impl Display for GraphicsProbeError {
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Renderer(error) => {
+				write!(formatter, "renderer initialization failed: {error}")
+			}
+		}
+	}
 }
 
-impl Error for EngineError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Renderer(error) => Some(error),
-        }
-    }
+impl Error for GraphicsProbeError {
+	fn source(&self) -> Option<&(dyn Error + 'static)> {
+		match self {
+			Self::Renderer(error) => Some(error),
+		}
+	}
 }
 
-impl From<RendererError> for EngineError {
-    fn from(value: RendererError) -> Self {
-        Self::Renderer(value)
-    }
+impl From<RendererError> for GraphicsProbeError {
+	fn from(value: RendererError) -> Self {
+		Self::Renderer(value)
+	}
 }
 
-impl Engine {
-    pub fn new() -> Result<Self, EngineError> {
-        engine_logger::info!("Initializing engine runtime");
-        let renderer = Renderer::new()?;
-        engine_logger::info!("Engine runtime initialized");
-        engine_logger::component_health("runtime", "HEALTHY", false, "Engine runtime initialized");
+impl GraphicsProbe {
+	/// Availability probe used by the editor setup screen before a viewport
+	/// exists. No logical device or long-lived renderer is created.
+	pub fn probe_status() -> Result<EngineStatusDto, GraphicsProbeError> {
+		let renderer = Renderer::probe_info()?;
+		Ok(EngineStatusDto {
+			initialized: true,
+			renderer: renderer.name,
+			gpu_name: renderer.gpu_name,
+			vulkan_api: renderer.vulkan_api,
+		})
+	}
 
-        Ok(Self { renderer })
-    }
+	pub fn new() -> Result<Self, GraphicsProbeError> {
+		engine_logger::debug!(target: "graphics_probe", "Creating graphics probe resources");
+		let renderer = Renderer::new()?;
+		engine_logger::debug!(target: "graphics_probe", "Graphics probe resources created");
 
-    pub fn status(&self) -> EngineStatusDto {
-        let renderer = self.renderer.info();
+		Ok(Self { renderer })
+	}
 
-        EngineStatusDto {
-            initialized: true,
-            renderer: renderer.name,
-            gpu_name: renderer.gpu_name,
-            vulkan_api: renderer.vulkan_api,
-        }
-    }
+	pub fn status(&self) -> EngineStatusDto {
+		let renderer = self.renderer.info();
+
+		EngineStatusDto {
+			initialized: true,
+			renderer: renderer.name,
+			gpu_name: renderer.gpu_name,
+			vulkan_api: renderer.vulkan_api,
+		}
+	}
 }
 
 #[cfg(test)]

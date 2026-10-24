@@ -1,8 +1,8 @@
 use std::{
-    error::Error,
-    fmt::{Display, Formatter},
-    mem::size_of_val,
-    ptr,
+	error::Error,
+	fmt::{Display, Formatter},
+	mem::size_of_val,
+	ptr,
 };
 
 use ash::{Device, Instance, vk};
@@ -10,331 +10,353 @@ use ash::{Device, Instance, vk};
 use super::VulkanDevice;
 
 pub struct VulkanBuffer {
-    device: Device,
-    buffer: vk::Buffer,
-    memory: vk::DeviceMemory,
-    size: vk::DeviceSize,
+	device: Device,
+	buffer: vk::Buffer,
+	memory: vk::DeviceMemory,
+	size: vk::DeviceSize,
 }
 
 #[derive(Debug)]
 pub enum VulkanBufferError {
-    Vulkan(vk::Result),
-    NoSuitableMemoryType,
-    EmptyData,
-    DataTooLarge {
-        buffer_size: vk::DeviceSize,
-        data_size: vk::DeviceSize,
-    },
+	Vulkan(vk::Result),
+	NoSuitableMemoryType,
+	EmptyData,
+	DataTooLarge {
+		buffer_size: vk::DeviceSize,
+		data_size: vk::DeviceSize,
+	},
 }
 
 impl Display for VulkanBufferError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Vulkan(error) => {
-                write!(formatter, "Vulkan buffer error: {error:?}",)
-            }
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Vulkan(error) => {
+				write!(formatter, "Vulkan buffer error: {error:?}",)
+			}
 
-            Self::NoSuitableMemoryType => {
-                write!(formatter, "no suitable Vulkan memory type found",)
-            }
+			Self::NoSuitableMemoryType => {
+				write!(formatter, "no suitable Vulkan memory type found",)
+			}
 
-            Self::EmptyData => {
-                write!(formatter, "cannot create Vulkan buffer from empty data",)
-            }
+			Self::EmptyData => {
+				write!(formatter, "cannot create Vulkan buffer from empty data",)
+			}
 
-            Self::DataTooLarge {
-                buffer_size,
-                data_size,
-            } => {
-                write!(
-                    formatter,
-                    "buffer upload is too large: \
+			Self::DataTooLarge {
+				buffer_size,
+				data_size,
+			} => {
+				write!(
+					formatter,
+					"buffer upload is too large: \
 					 {data_size} bytes for a \
 					 {buffer_size}-byte buffer",
-                )
-            }
-        }
-    }
+				)
+			}
+		}
+	}
 }
 
 impl Error for VulkanBufferError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Vulkan(error) => Some(error),
-            _ => None,
-        }
-    }
+	fn source(&self) -> Option<&(dyn Error + 'static)> {
+		match self {
+			Self::Vulkan(error) => Some(error),
+			_ => None,
+		}
+	}
 }
 
 impl From<vk::Result> for VulkanBufferError {
-    fn from(value: vk::Result) -> Self {
-        Self::Vulkan(value)
-    }
+	fn from(value: vk::Result) -> Self {
+		Self::Vulkan(value)
+	}
 }
 
 impl VulkanBuffer {
-    pub fn new(
-        instance: &Instance,
-        device: &VulkanDevice,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        memory_properties: vk::MemoryPropertyFlags,
-    ) -> Result<Self, VulkanBufferError> {
-        let ash_device = device.raw().clone();
+	pub fn new(
+		instance: &Instance,
+		device: &VulkanDevice,
+		size: vk::DeviceSize,
+		usage: vk::BufferUsageFlags,
+		memory_properties: vk::MemoryPropertyFlags,
+	) -> Result<Self, VulkanBufferError> {
+		let properties =
+			unsafe { instance.get_physical_device_memory_properties(device.physical_device()) };
+		Self::with_memory_properties(device, size, usage, memory_properties, &properties)
+	}
 
-        let create_info = vk::BufferCreateInfo::default()
-            .size(size)
-            .usage(usage)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+	pub(crate) fn host_vertex(
+		device: &VulkanDevice,
+		size: vk::DeviceSize,
+	) -> Result<Self, VulkanBufferError> {
+		Self::with_memory_properties(
+			device,
+			size,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+			device.memory_properties(),
+		)
+	}
 
-        let buffer = unsafe { ash_device.create_buffer(&create_info, None)? };
+	fn with_memory_properties(
+		device: &VulkanDevice,
+		size: vk::DeviceSize,
+		usage: vk::BufferUsageFlags,
+		memory_properties: vk::MemoryPropertyFlags,
+		physical_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+	) -> Result<Self, VulkanBufferError> {
+		let ash_device = device.raw().clone();
 
-        let requirements = unsafe { ash_device.get_buffer_memory_requirements(buffer) };
+		let create_info = vk::BufferCreateInfo::default()
+			.size(size)
+			.usage(usage)
+			.sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-        let physical_memory_properties =
-            unsafe { instance.get_physical_device_memory_properties(device.physical_device()) };
+		let buffer = unsafe { ash_device.create_buffer(&create_info, None)? };
 
-        let memory_type_index = match find_memory_type(
-            requirements.memory_type_bits,
-            memory_properties,
-            &physical_memory_properties,
-        ) {
-            Some(index) => index,
+		let requirements = unsafe { ash_device.get_buffer_memory_requirements(buffer) };
 
-            None => {
-                unsafe {
-                    ash_device.destroy_buffer(buffer, None);
-                }
+		let memory_type_index = match find_memory_type(
+			requirements.memory_type_bits,
+			memory_properties,
+			physical_memory_properties,
+		) {
+			Some(index) => index,
 
-                return Err(VulkanBufferError::NoSuitableMemoryType);
-            }
-        };
+			None => {
+				unsafe {
+					ash_device.destroy_buffer(buffer, None);
+				}
 
-        let allocate_info = vk::MemoryAllocateInfo::default()
-            .allocation_size(requirements.size)
-            .memory_type_index(memory_type_index);
+				return Err(VulkanBufferError::NoSuitableMemoryType);
+			}
+		};
 
-        let memory = match unsafe { ash_device.allocate_memory(&allocate_info, None) } {
-            Ok(memory) => memory,
+		let allocate_info = vk::MemoryAllocateInfo::default()
+			.allocation_size(requirements.size)
+			.memory_type_index(memory_type_index);
 
-            Err(error) => {
-                unsafe {
-                    ash_device.destroy_buffer(buffer, None);
-                }
+		let memory = match unsafe { ash_device.allocate_memory(&allocate_info, None) } {
+			Ok(memory) => memory,
 
-                return Err(error.into());
-            }
-        };
+			Err(error) => {
+				unsafe {
+					ash_device.destroy_buffer(buffer, None);
+				}
 
-        if let Err(error) = unsafe { ash_device.bind_buffer_memory(buffer, memory, 0) } {
-            unsafe {
-                ash_device.free_memory(memory, None);
+				return Err(error.into());
+			}
+		};
 
-                ash_device.destroy_buffer(buffer, None);
-            }
+		if let Err(error) = unsafe { ash_device.bind_buffer_memory(buffer, memory, 0) } {
+			unsafe {
+				ash_device.free_memory(memory, None);
 
-            return Err(error.into());
-        }
+				ash_device.destroy_buffer(buffer, None);
+			}
 
-        Ok(Self {
-            device: ash_device,
-            buffer,
-            memory,
-            size,
-        })
-    }
+			return Err(error.into());
+		}
 
-    pub fn vertex<T>(
-        instance: &Instance,
-        device: &VulkanDevice,
-        data: &[T],
-    ) -> Result<Self, VulkanBufferError> {
-        Self::upload_static(instance, device, data, vk::BufferUsageFlags::VERTEX_BUFFER)
-    }
+		Ok(Self {
+			device: ash_device,
+			buffer,
+			memory,
+			size,
+		})
+	}
 
-    pub fn index<T>(
-        instance: &Instance,
-        device: &VulkanDevice,
-        data: &[T],
-    ) -> Result<Self, VulkanBufferError> {
-        Self::upload_static(instance, device, data, vk::BufferUsageFlags::INDEX_BUFFER)
-    }
+	pub fn vertex<T>(
+		instance: &Instance,
+		device: &VulkanDevice,
+		data: &[T],
+	) -> Result<Self, VulkanBufferError> {
+		Self::upload_static(instance, device, data, vk::BufferUsageFlags::VERTEX_BUFFER)
+	}
 
-    fn upload_static<T>(
-        instance: &Instance,
-        device: &VulkanDevice,
-        data: &[T],
-        final_usage: vk::BufferUsageFlags,
-    ) -> Result<Self, VulkanBufferError> {
-        let size = size_of_val(data) as vk::DeviceSize;
+	pub fn index<T>(
+		instance: &Instance,
+		device: &VulkanDevice,
+		data: &[T],
+	) -> Result<Self, VulkanBufferError> {
+		Self::upload_static(instance, device, data, vk::BufferUsageFlags::INDEX_BUFFER)
+	}
 
-        if size == 0 {
-            return Err(VulkanBufferError::EmptyData);
-        }
+	fn upload_static<T>(
+		instance: &Instance,
+		device: &VulkanDevice,
+		data: &[T],
+		final_usage: vk::BufferUsageFlags,
+	) -> Result<Self, VulkanBufferError> {
+		let size = size_of_val(data) as vk::DeviceSize;
 
-        let staging = Self::new(
-            instance,
-            device,
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+		if size == 0 {
+			return Err(VulkanBufferError::EmptyData);
+		}
 
-        staging.write(data)?;
+		let staging = Self::new(
+			instance,
+			device,
+			size,
+			vk::BufferUsageFlags::TRANSFER_SRC,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		)?;
 
-        /*
-         * Final GPU-local buffer.
-         *
-         * TRANSFER_DST is required because
-         * the staging buffer will copy into it.
-         */
-        let gpu_buffer = Self::new(
-            instance,
-            device,
-            size,
-            final_usage | vk::BufferUsageFlags::TRANSFER_DST,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
+		staging.write(data)?;
 
-        copy_buffer(device, staging.raw(), gpu_buffer.raw(), size)?;
+		/*
+		 * Final GPU-local buffer.
+		 *
+		 * TRANSFER_DST is required because
+		 * the staging buffer will copy into it.
+		 */
+		let gpu_buffer = Self::new(
+			instance,
+			device,
+			size,
+			final_usage | vk::BufferUsageFlags::TRANSFER_DST,
+			vk::MemoryPropertyFlags::DEVICE_LOCAL,
+		)?;
 
-        /*
-         * staging is dropped here after the GPU
-         * copy has completed.
-         */
-        Ok(gpu_buffer)
-    }
+		copy_buffer(device, staging.raw(), gpu_buffer.raw(), size)?;
 
-    pub fn write<T>(&self, data: &[T]) -> Result<(), VulkanBufferError> {
-        let data_size = size_of_val(data) as vk::DeviceSize;
+		/*
+		 * staging is dropped here after the GPU
+		 * copy has completed.
+		 */
+		Ok(gpu_buffer)
+	}
 
-        if data_size > self.size {
-            return Err(VulkanBufferError::DataTooLarge {
-                buffer_size: self.size,
+	pub fn write<T>(&self, data: &[T]) -> Result<(), VulkanBufferError> {
+		let data_size = size_of_val(data) as vk::DeviceSize;
 
-                data_size,
-            });
-        }
+		if data_size > self.size {
+			return Err(VulkanBufferError::DataTooLarge {
+				buffer_size: self.size,
 
-        if data_size == 0 {
-            return Ok(());
-        }
+				data_size,
+			});
+		}
 
-        let mapped = unsafe {
-            self.device
-                .map_memory(self.memory, 0, data_size, vk::MemoryMapFlags::empty())?
-        };
+		if data_size == 0 {
+			return Ok(());
+		}
 
-        unsafe {
-            ptr::copy_nonoverlapping(
-                data.as_ptr().cast::<u8>(),
-                mapped.cast::<u8>(),
-                data_size as usize,
-            );
+		let mapped = unsafe {
+			self.device
+				.map_memory(self.memory, 0, data_size, vk::MemoryMapFlags::empty())?
+		};
 
-            self.device.unmap_memory(self.memory);
-        }
+		unsafe {
+			ptr::copy_nonoverlapping(
+				data.as_ptr().cast::<u8>(),
+				mapped.cast::<u8>(),
+				data_size as usize,
+			);
 
-        Ok(())
-    }
+			self.device.unmap_memory(self.memory);
+		}
 
-    pub fn raw(&self) -> vk::Buffer {
-        self.buffer
-    }
+		Ok(())
+	}
 
-    pub fn size(&self) -> vk::DeviceSize {
-        self.size
-    }
+	pub fn raw(&self) -> vk::Buffer {
+		self.buffer
+	}
+
+	pub fn size(&self) -> vk::DeviceSize {
+		self.size
+	}
 }
 
 impl Drop for VulkanBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_buffer(self.buffer, None);
+	fn drop(&mut self) {
+		unsafe {
+			self.device.destroy_buffer(self.buffer, None);
 
-            self.device.free_memory(self.memory, None);
-        }
-    }
+			self.device.free_memory(self.memory, None);
+		}
+	}
 }
 
 fn copy_buffer(
-    device: &VulkanDevice,
-    source: vk::Buffer,
-    destination: vk::Buffer,
-    size: vk::DeviceSize,
+	device: &VulkanDevice,
+	source: vk::Buffer,
+	destination: vk::Buffer,
+	size: vk::DeviceSize,
 ) -> Result<(), VulkanBufferError> {
-    let ash_device = device.raw();
+	let ash_device = device.raw();
 
-    let pool_info = vk::CommandPoolCreateInfo::default()
-        .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-        .queue_family_index(device.queue_families().graphics);
+	let pool_info = vk::CommandPoolCreateInfo::default()
+		.flags(vk::CommandPoolCreateFlags::TRANSIENT)
+		.queue_family_index(device.queue_families().graphics);
 
-    let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
+	let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
 
-    let result = (|| -> Result<(), VulkanBufferError> {
-        let allocate_info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+	let result = (|| -> Result<(), VulkanBufferError> {
+		let allocate_info = vk::CommandBufferAllocateInfo::default()
+			.command_pool(command_pool)
+			.level(vk::CommandBufferLevel::PRIMARY)
+			.command_buffer_count(1);
 
-        let command_buffers = unsafe { ash_device.allocate_command_buffers(&allocate_info)? };
+		let command_buffers = unsafe { ash_device.allocate_command_buffers(&allocate_info)? };
 
-        let command_buffer = command_buffers[0];
+		let command_buffer = command_buffers[0];
 
-        let begin_info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+		let begin_info = vk::CommandBufferBeginInfo::default()
+			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
-        unsafe {
-            ash_device.begin_command_buffer(command_buffer, &begin_info)?;
-        }
+		unsafe {
+			ash_device.begin_command_buffer(command_buffer, &begin_info)?;
+		}
 
-        let copy_regions = [vk::BufferCopy::default()
-            .src_offset(0)
-            .dst_offset(0)
-            .size(size)];
+		let copy_regions = [vk::BufferCopy::default()
+			.src_offset(0)
+			.dst_offset(0)
+			.size(size)];
 
-        unsafe {
-            ash_device.cmd_copy_buffer(command_buffer, source, destination, &copy_regions);
+		unsafe {
+			ash_device.cmd_copy_buffer(command_buffer, source, destination, &copy_regions);
 
-            ash_device.end_command_buffer(command_buffer)?;
-        }
+			ash_device.end_command_buffer(command_buffer)?;
+		}
 
-        let command_buffers = [command_buffer];
-        let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+		let command_buffers = [command_buffer];
+		let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
 
-        unsafe {
-            ash_device.queue_submit(device.graphics_queue(), &[submit_info], vk::Fence::null())?;
-            ash_device.queue_wait_idle(device.graphics_queue())?;
-        }
+		unsafe {
+			ash_device.queue_submit(device.graphics_queue(), &[submit_info], vk::Fence::null())?;
+			ash_device.queue_wait_idle(device.graphics_queue())?;
+		}
 
-        Ok(())
-    })();
+		Ok(())
+	})();
 
-    unsafe {
-        ash_device.destroy_command_pool(command_pool, None);
-    }
+	unsafe {
+		ash_device.destroy_command_pool(command_pool, None);
+	}
 
-    result
+	result
 }
 
 fn find_memory_type(
-    type_filter: u32,
-    required_properties: vk::MemoryPropertyFlags,
-    memory_properties: &vk::PhysicalDeviceMemoryProperties,
+	type_filter: u32,
+	required_properties: vk::MemoryPropertyFlags,
+	memory_properties: &vk::PhysicalDeviceMemoryProperties,
 ) -> Option<u32> {
-    for index in 0..memory_properties.memory_type_count {
-        let supported = type_filter & (1_u32 << index) != 0;
+	for index in 0..memory_properties.memory_type_count {
+		let supported = type_filter & (1_u32 << index) != 0;
 
-        if !supported {
-            continue;
-        }
+		if !supported {
+			continue;
+		}
 
-        let memory_type = memory_properties.memory_types[index as usize];
+		let memory_type = memory_properties.memory_types[index as usize];
 
-        if memory_type.property_flags.contains(required_properties) {
-            return Some(index);
-        }
-    }
+		if memory_type.property_flags.contains(required_properties) {
+			return Some(index);
+		}
+	}
 
-    None
+	None
 }

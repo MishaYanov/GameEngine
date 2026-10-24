@@ -85,10 +85,12 @@ impl GameApp {
 			.map_or((&self.scene, &self.camera), |authored| {
 				(&authored.scene, &authored.camera)
 			});
-		self.tools
-			.saved
-			.as_ref()
-			.is_some_and(|saved| !scene.matches_data(saved, camera))
+		self.editor.project() != self.project.as_ref()
+			|| self
+				.tools
+				.saved
+				.as_ref()
+				.is_some_and(|saved| !scene.matches_data(saved, camera))
 	}
 
 	pub(crate) fn refresh_assets(&mut self) -> Result<(), String> {
@@ -150,15 +152,14 @@ impl GameApp {
 	}
 
 	pub(crate) fn panel_action(&mut self, action: PanelAction) -> Result<(), String> {
-		if self.project_name.is_some() {
-			return Err("Editor panels are unavailable in an installed project".into());
+		if self.standalone_runtime {
+			return Err("Editor panels are unavailable in Player mode".into());
 		}
 		if self.authored.is_some()
 			&& !matches!(
-                action,
-                PanelAction::TogglePlay | PanelAction::Save | PanelAction::Reload
-            )
-		{
+				action,
+				PanelAction::TogglePlay | PanelAction::Save | PanelAction::Reload
+			) {
 			return Err("Stop Play before editing the scene".into());
 		}
 		// Mouse commands have the same timing boundary as keyboard commands:
@@ -192,7 +193,7 @@ impl GameApp {
 	}
 
 	pub(crate) fn left_press(&mut self) -> Result<(), String> {
-		if self.project_name.is_some() || self.mouse_captured {
+		if self.standalone_runtime || self.mouse_captured {
 			return Ok(());
 		}
 		let Some(pixel) = self.cursor_position else {
@@ -345,7 +346,7 @@ impl GameApp {
 	}
 
 	pub(crate) fn editor_key(&mut self, code: KeyCode, event: &KeyEvent) -> bool {
-		if self.project_name.is_some() {
+		if self.standalone_runtime {
 			return false;
 		}
 		if self.tools.panel.edit.is_some() {
@@ -369,13 +370,13 @@ impl GameApp {
 					}
 				}
 				KeyCode::KeyA
-				if self.input.is_held(runtime::Key::ControlLeft)
-					|| self.input.is_held(runtime::Key::ControlRight) =>
-					{
-						if let Some(edit) = self.tools.panel.edit.as_mut() {
-							edit.replace = true;
-						}
+					if self.input.is_held(runtime::Key::ControlLeft)
+						|| self.input.is_held(runtime::Key::ControlRight) =>
+				{
+					if let Some(edit) = self.tools.panel.edit.as_mut() {
+						edit.replace = true;
 					}
+				}
 				_ => {
 					if let Some(text) = &event.text
 						&& let Some(edit) = self.tools.panel.edit.as_mut()
@@ -404,9 +405,9 @@ impl GameApp {
 			}
 			// Finish an active preview before mode/save/history commands.
 			if matches!(
-                code,
-                KeyCode::F5 | KeyCode::F6 | KeyCode::F9 | KeyCode::KeyZ | KeyCode::KeyY
-            ) {
+				code,
+				KeyCode::F5 | KeyCode::F6 | KeyCode::F9 | KeyCode::KeyZ | KeyCode::KeyY
+			) {
 				self.cancel_drag();
 			} else {
 				return true;

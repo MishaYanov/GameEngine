@@ -4,6 +4,13 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [PROJECT3 backend handoff](project3-handoff.md): Authored project-to-player workflow, steps 36–45 foundations, limits,
+  and a copy-ready teaching-first prompt for proposed steps 46–55.
+
+- [Angular editor and engine foundations: steps 21–35](editor-steps-21-35.md): Typed integration without UI composition,
+  camera/snapping/group history, hierarchy/schema3/prefabs, static import, materials/lights, simulation/collision, GPU
+  timestamps, instancing, examples and resources.
+
 - [Editor and rendering changes: steps 11–20](editor-steps-11-20.md): Responsibility, reasoning, exact file map,
   controls, examples, resources, and automated/native evidence for the native editing prototype.
 
@@ -16,15 +23,17 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [Timing, input, and camera — in progress](timing-input-camera.md): Current clock/key/camera contracts, provisional game controls, and remaining verification.
 
-- [Scene data, save, and reload — in progress](scene-persistence.md): Version-2 keys/bindings, version-1 migration,
-  F5/F9 behavior, validation, and packaging limits.
+- [Scene data, save, and reload — in progress](scene-persistence.md): Schema3, older-version migration, persistent keys
+  and hierarchy,
+  authored persistence, prefabs, validation, and packaging limits.
 
-- [Native scene editing](scene-editing.md): SceneEditor, Edit/Play, panels, gizmos, mixed history, assets, and visual
-  verification limits.
+- [Scene editing](scene-editing.md): Typed editor commands, Edit/Play, selection, transactions, hierarchy, assets, and
+  legacy demo limits.
 
 ## Applications
 
-- [Editor frontend](apps/editor/README.md): Setup UI, desktop/browser modes, contracts, source organization, builds, and tests.
+- [Editor frontend](apps/editor/README.md): Setup screen, typed editor service/models, viewport directive,
+  desktop/browser limits, and builds.
 - [Editor desktop host](apps/editor-host/README.md): Tauri configuration, engine state, native commands, launch, and packaging.
 - [Native game demo](apps/game/README.md): Multi-primitive GLB models, scene instances, development/installed modes, packaging limits, and renderer lifecycle.
 - [Engine Admin](apps/admin-dashboard/README.md): Logs, processes, jobs, board, source generation, storage limits, and verification.
@@ -35,7 +44,8 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Shared crates
 
-- [Bridge](crates/bridge/README.md): Status fields, JSON names, consumers, and contract changes.
+- [Bridge](crates/bridge/README.md): Status and typed editor DTOs, protocol/schema versions, consumers, and contract
+  changes.
 - [Logger](crates/logger/README.md): Diagnostics, records, configuration, storage, redaction, panic/shutdown behavior, and measurements.
 - [Renderer](crates/renderer/README.md): Vulkan requirements, probe, APIs, shader builds, ownership, and verification.
 - [Runtime](crates/runtime/README.md): Shared scenes, models, assets, transforms, status engine, and verification.

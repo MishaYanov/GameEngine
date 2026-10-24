@@ -1,4 +1,197 @@
-@if (error() || state()?.board_storage_error) { <div class="banner" role="alert">{{ error() || state()?.board_storage_error }}</div> }
-<section class="panel settings"><h2>{{ editing() ? 'Edit card' : 'Create a task' }}</h2><form (ngSubmit)="save()"><label>Title<input name="title" required maxlength="200" [(ngModel)]="draft.title"></label><label>Description<textarea name="description" maxlength="16000" [(ngModel)]="draft.description"></textarea></label><label>Priority<select name="priority" [(ngModel)]="draft.priority"><option>Low</option><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Component<input name="component" maxlength="100" [(ngModel)]="draft.component"></label><label>Status<select name="column" [(ngModel)]="draft.column">@for (column of columns; track column) { <option [value]="column">{{ label(column) }}</option> }</select></label><label>Diagnostic session<input name="session" maxlength="200" [(ngModel)]="draft.session_id"></label><button class="primary" [disabled]="!api.desktop || busy()">{{ editing() ? 'Save card' : 'Create card' }}</button>@if (editing()) { <button type="button" (click)="reset()">Cancel edit</button> }</form></section>
-<details class="settings"><summary>Automation settings</summary><label>Package<select [(ngModel)]="package">@for (package of packages; track package) { <option [value]="package">{{ package }}</option> }</select></label><label>Profile<select [(ngModel)]="profile"><option value="dev">Development</option><option value="release">Release</option></select></label><label>Existing job to link<select [(ngModel)]="linkJob"><option value="">Choose a job</option>@for (run of state()?.jobs ?? []; track run.id) { <option [value]="run.id">{{ run.kind }} / {{ run.package }} / {{ run.state }} / {{ run.id }}</option> }</select></label></details>
-<div class="kanban">@for (column of columns; track column) { <section class="kanban-column" (dragover)="$event.preventDefault()" (drop)="drop($event,column)" [attr.aria-label]="label(column)"><h2>{{ label(column) }} <small>{{ cards(column).length }}</small></h2>@for (card of cards(column); track card.id) { <article class="kanban-card" [draggable]="api.desktop && !busy()" (dragstart)="drag($event,card)" (dragend)="dragging=''" (dragover)="$event.preventDefault()" (drop)="drop($event,column,card.id)"><span class="eyebrow">{{ card.priority }} · {{ card.component || 'General' }}</span><h3>{{ card.title }}</h3><p class="card-description">{{ card.description }}</p><label>Status<select [disabled]="!api.desktop || busy()" [ngModel]="card.column" (ngModelChange)="move(card,$event)">@for (status of columns; track status) { <option [value]="status">{{ label(status) }}</option> }</select></label><div class="card-actions"><button (click)="edit(card)">Edit</button><button [disabled]="!api.desktop || busy()" (click)="reorder(card,-1)" aria-label="Move card up">↑</button><button [disabled]="!api.desktop || busy()" (click)="reorder(card,1)" aria-label="Move card down">↓</button><button [disabled]="!api.desktop || busy()" (click)="deleteId.set(card.id)">Delete</button></div>@if (deleteId() === card.id) { <p>Delete this card and its links?</p><button [disabled]="busy()" (click)="remove(card)">Delete card</button><button (click)="deleteId.set(null)">Keep card</button> }@if (card.session_id) { <button (click)="viewLogs.emit({session_id:card.session_id})">Session logs</button> }<details><summary>Jobs and diagnostics ({{ card.jobs.length }})</summary><div class="card-actions"><button [disabled]="!api.desktop || busy()" (click)="queue(card,'BUILD')">Build</button><button [disabled]="!api.desktop || busy()" (click)="queue(card,'TEST')">Test</button><button [disabled]="!api.desktop || !linkJob || busy()" (click)="run('link_card_job',{id:card.id,job:linkJob})">Link selected job</button></div>@for (id of card.jobs; track id) { <p class="linked-job">{{ job(id)?.state ?? 'History no longer retained' }} <small>{{ id }}</small><button (click)="viewLogs.emit({operation_id:id})">Diagnostics</button></p> }@if (hint(card)) { <p class="suggestion">{{ hint(card) }}</p> }</details></article> } @empty { <p class="muted">No cards. Drop a card here or change its status.</p> }</section> }</div>
+@if (error() || state()?.board_storage_error) {
+    <div class="banner" role="alert">
+        {{ error() || state()?.board_storage_error }}
+    </div>
+}
+<section class="panel settings">
+    <h2>{{ editing() ? 'Edit card' : 'Create a task' }}</h2>
+    <form (ngSubmit)="save()">
+        <label
+        >Title<input
+                [(ngModel)]="draft.title"
+                maxlength="200"
+                name="title"
+                required/></label
+        ><label
+    >Description<textarea
+            [(ngModel)]="draft.description"
+            maxlength="16000"
+            name="description"
+    ></textarea></label
+    ><label
+    >Priority<select [(ngModel)]="draft.priority" name="priority">
+        <option>Low</option>
+        <option>Normal</option>
+        <option>High</option>
+        <option>Urgent</option>
+    </select></label
+    ><label
+    >Component<input
+            [(ngModel)]="draft.component"
+            maxlength="100"
+            name="component"/></label
+    ><label
+    >Status<select [(ngModel)]="draft.column" name="column">
+        @for (column of columns; track column) {
+            <option [value]="column">{{ label(column) }}</option>
+        }
+    </select></label
+    ><label
+    >Diagnostic session<input
+            [(ngModel)]="draft.session_id"
+            maxlength="200"
+            name="session"/></label
+    >
+        <button [disabled]="!api.desktop || busy()" class="primary">
+            {{ editing() ? 'Save card' : 'Create card' }}
+        </button
+        >@if (editing()) {
+        <button (click)="reset()" type="button">Cancel edit</button>
+    }
+    </form>
+</section>
+<details class="settings">
+    <summary>Automation settings</summary>
+    <label
+    >Package<select [(ngModel)]="package">
+        @for (package of packages; track package) {
+            <option [value]="package">{{ package }}</option>
+        }
+    </select></label
+    ><label
+>Profile<select [(ngModel)]="profile">
+    <option value="dev">Development</option>
+    <option value="release">Release</option>
+</select></label
+><label
+>Existing job to link<select [(ngModel)]="linkJob">
+    <option value="">Choose a job</option>
+    @for (run of state()?.jobs ?? []; track run.id) {
+        <option [value]="run.id">
+            {{ run.kind }} / {{ run.package }} / {{ run.state }} / {{
+                run.id
+            }}
+        </option>
+    }
+</select></label
+>
+</details>
+<div class="kanban">
+    @for (column of columns; track column) {
+        <section
+                (dragover)="$event.preventDefault()"
+                (drop)="drop($event,column)"
+                [attr.aria-label]="label(column)"
+                class="kanban-column"
+        >
+            <h2>{{ label(column) }} <small>{{ cards(column).length }}</small></h2>
+            @for (card of cards(column); track card.id) {
+                <article
+                        (dragend)="dragging=''"
+                        (dragover)="$event.preventDefault()"
+                        (dragstart)="drag($event,card)"
+                        (drop)="drop($event,column,card.id)"
+                        [draggable]="api.desktop && !busy()"
+                        class="kanban-card"
+                >
+			<span class="eyebrow"
+            >{{ card.priority }} · {{ card.component || 'General' }}</span
+            >
+                    <h3>{{ card.title }}</h3>
+                    <p class="card-description">{{ card.description }}</p>
+                    <label
+                    >Status<select
+                            (ngModelChange)="move(card,$event)"
+                            [disabled]="!api.desktop || busy()"
+                            [ngModel]="card.column"
+                    >
+                        @for (status of columns; track status) {
+                            <option [value]="status">{{ label(status) }}</option>
+                        }
+                    </select></label
+                    >
+                    <div class="card-actions">
+                        <button (click)="edit(card)">Edit
+                        </button
+                        >
+                        <button
+                                (click)="reorder(card,-1)"
+                                [disabled]="!api.desktop || busy()"
+                                aria-label="Move card up"
+                        >
+                            ↑
+                        </button
+                        >
+                        <button
+                                (click)="reorder(card,1)"
+                                [disabled]="!api.desktop || busy()"
+                                aria-label="Move card down"
+                        >
+                            ↓
+                        </button
+                        >
+                        <button
+                                (click)="deleteId.set(card.id)"
+                                [disabled]="!api.desktop || busy()"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                    @if (deleteId() === card.id) {
+                        <p>Delete this card and its links?</p>
+                        <button (click)="remove(card)" [disabled]="busy()">
+                            Delete card
+                        </button
+                        >
+                        <button (click)="deleteId.set(null)">Keep card</button>
+                    }
+                    @if (card.session_id) {
+                        <button (click)="viewLogs.emit({session_id:card.session_id})">
+                            Session logs
+                        </button>
+                    }
+                    <details>
+                        <summary>Jobs and diagnostics ({{ card.jobs.length }})</summary>
+                        <div class="card-actions">
+                            <button
+                                    (click)="queue(card,'BUILD')"
+                                    [disabled]="!api.desktop || busy()"
+                            >
+                                Build
+                            </button
+                            >
+                            <button
+                                    (click)="queue(card,'TEST')"
+                                    [disabled]="!api.desktop || busy()"
+                            >
+                                Test
+                            </button
+                            >
+                            <button
+                                    (click)="run('link_card_job',{id:card.id,job:linkJob})"
+                                    [disabled]="!api.desktop || !linkJob || busy()"
+                            >
+                                Link selected job
+                            </button>
+                        </div>
+                        @for (id of card.jobs; track id) {
+                            <p class="linked-job">
+                                {{ job(id)?.state ?? 'History no longer retained' }}
+                                <small>{{ id }}</small
+                                >
+                                <button (click)="viewLogs.emit({operation_id:id})">
+                                    Diagnostics
+                                </button>
+                            </p>
+                        }
+                        @if (hint(card)) {
+                            <p class="suggestion">{{ hint(card) }}</p>
+                        }
+                    </details>
+                </article>
+            } @empty {
+                <p class="muted">No cards. Drop a card here or change its status.</p>
+            }
+        </section>
+    }
+</div>

@@ -1,47 +1,66 @@
-# Editor frontend
+# Angular editor integration
 
-Source: `apps/editor`. This Angular application provides project setup and GPU information through the [Tauri host](../editor-host/README.md). See [setup](../../usage.md) for prerequisites.
+Source: `apps/editor`. The Angular 22 app owns editor UI, input bindings and the chosen game pane. Runtime supplies
+editor behavior through a typed Tauri bridge. **This batch adds integration APIs, not a new UI layout, mock screen, or
+composed editor template.** The current setup/status screen has not been replaced with a finished scene editor.
 
 ## Run
 
-From the repository root:
+From the repository root after [setup](../../usage.md):
 
 ```powershell
 npm.cmd ci --prefix apps/editor
 .\dev.ps1 editor
-# Alternative:
-python launcher.py --run client
 ```
 
-The host starts Angular on port 4200 and opens the desktop window. Rust/Cargo, Windows Tauri prerequisites, Vulkan 1.3 support, and the SDK are required. Vulkan initializes before the host shows its window.
+For browser-only frontend work, run `npm.cmd start` from apps/editor. Native workspace/viewport operations require
+Tauri; browser mode reports unavailable rather than supplying fake document data. GPU resources are now created on
+demand in the host, not unconditionally before the window opens.
 
-For frontend layout work, run `npm.cmd start` from `apps/editor` and open `http://localhost:4200/`. Browser mode disables creation because native commands require Tauri.
+## Frontend modules
 
-## Current workflow and contracts
+| File under src/app/core/editor | Role                                                                                                           |
+|--------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `editor.models.ts`             | Typed scene3 documents, commands, snapshot/capability/error and viewport metrics/input shapes                  |
+| `editor.service.ts`            | Read-only signals, native command queues, revision-aware edits, imports/prefabs/collisions, viewport lifecycle |
+| `engine-viewport.directive.ts` | Attach a native child to one existing Angular DOM pane; observe bounds/visibility and emit input/status/errors |
 
-Enter a project name and existing absolute destination parent. **Create & launch project** builds a release game, installs a new named child folder, and attempts to launch it. Submission is disabled during the operation; failures preserve form values. Installation success and launch failure are reported separately.
+EditorService exposes document, selection, dirty, playing, pending/busy, capabilities, assets, collisions and viewport
+signals. Open a project, load capabilities, execute typed intent, and accept the returned authoritative snapshot.
+Commands use expected_revision; errors are reported and recover the in-memory snapshot where possible, with no silent
+replay or disk reload. The document queue is bounded at 256 pending operations; continuous input should be coalesced by
+its owner.
 
-The form still describes a triangle starter, but the game now loads `props/robot.glb`. The installer now copies the full nested asset tree, including that model. Process-spawn success still does not certify later rendering success. See the [game guide](../game/README.md). Output contains an executable/assets, not editable scenes or independent sources. Use admin Project Builder for source generation. See [usage](../../usage.md).
+The core service does not assign shortcuts. Future UI controls and key bindings use the same execute path. Do not mutate
+signal snapshots or duplicate runtime scene semantics in components.
 
-- `src/app/app.ts` and `app.html`: validation, busy/error/result state, browser detection, and UI.
-- `src/app/core/engine/engine.service.ts`: invokes `engine_status`.
-- `src/app/core/engine/engine.models.ts`: frontend status type.
-- `src/app/app.spec.ts`: frontend behavioral tests.
+## Pane boundary and platform limits
 
-`engine_status` returns `initialized`, `renderer`, `gpuName`, and `vulkanApi`. `create_project` accepts `{ name, destination }` and returns `{ path, launched, launchError }`. Keep models aligned with [host](../editor-host/README.md) and [bridge](../../crates/bridge/README.md) contracts.
+EngineViewportDirective is available as `[engineViewport]` with input/status/error outputs. It has not been applied to a
+newly composed app pane here. The eventual UI owner chooses layout, imports the directive, binds controls, handles
+errors, and maps raw input into commands. The directive handles one viewport reservation, resize/intersection
+visibility, bounds updates and teardown.
 
-Frontend validation limits names to 80 characters. Backend validation uses 80 UTF-8 bytes and also checks reserved names, paths, and collisions; it is authoritative for multibyte names.
+Embedding currently uses a Windows native child window. It has native airspace: ordinary HTML is not an arbitrary
+overlay above the Vulkan child. Non-Windows capability limits must be surfaced. No interactive acceptance of pane
+bounds, clipping, DPI, focus, or shutdown has been performed for this batch.
 
-## Build and verify
+## Contracts and learning report
 
-From `apps/editor`:
+[Steps 21–35](../../editor-steps-21-35.md) explain the complete runtime/host/frontend split, camera commands, snapping,
+multi-selection, hierarchy, scene3, prefabs, static scene import, tints/lights, simulation/collision, GPU timing, and
+instancing. These are APIs for the Angular editor plus game pane, not a second native authoring product. The earlier
+native game UI remains an explicitly opt-in legacy demo.
+
+## Build and checks
+
+From apps/editor:
 
 ```powershell
 npm.cmd run build
 npm.cmd test -- --watch=false
-npm.cmd run ng -- generate component component-name
 ```
 
-The production frontend goes to `dist/editor/browser`. See [host packaging](../editor-host/README.md). There is no configured end-to-end target in `angular.json`; desktop creation/launch needs manual checks. See [testing](../../testing.md).
-
-Scene editing, entity manipulation, and an embedded viewport are not implemented. If controls are disabled, use desktop mode. If port 4200 is occupied, stop the old development session. If the host exits at startup, check terminal/shared logs, Vulkan support, and debug validation layers. Frontend status errors are suppressed; host initialization errors can prevent any window from opening. A spawned game can fail later, so inspect its logs separately.
+Production output remains `dist/editor/browser`. Consult [testing](../../testing.md) for exact evidence; successful
+TypeScript/build checks do not establish a finished UI layout or visible embedded-viewport acceptance.
+See [host](../editor-host/README.md) and [bridge](../../crates/bridge/README.md).

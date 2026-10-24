@@ -2,10 +2,27 @@ use super::ModelPushConstants;
 use std::mem::{offset_of, size_of};
 
 #[test]
+fn instance_vertex_stream_layout_matches_shader_matrix_and_tint_locations() {
+	use crate::vulkan::instancing::InstanceData;
+	let binding = InstanceData::binding_description();
+	assert_eq!(size_of::<InstanceData>(), 80);
+	assert_eq!(binding.binding, 1);
+	assert_eq!(binding.stride, 80);
+	assert_eq!(binding.input_rate, ash::vk::VertexInputRate::INSTANCE);
+	let attributes = InstanceData::attribute_descriptions();
+	for (index, attribute) in attributes.iter().enumerate() {
+		assert_eq!(attribute.location, 3 + index as u32);
+		assert_eq!(attribute.binding, 1);
+		assert_eq!(attribute.offset, index as u32 * 16);
+		assert_eq!(attribute.format, ash::vk::Format::R32G32B32A32_SFLOAT);
+	}
+}
+
+#[test]
 fn push_constant_layout_matches_shader_block() {
 	// GLSL std430: mat4, vec4 color, uvec4 flags.
-    assert_eq!(offset_of!(ModelPushConstants, model), 0);
-    assert_eq!(offset_of!(ModelPushConstants, base_color_factor), 64);
+	assert_eq!(offset_of!(ModelPushConstants, model), 0);
+	assert_eq!(offset_of!(ModelPushConstants, base_color_factor), 64);
 	assert_eq!(offset_of!(ModelPushConstants, flags), 80);
 	assert_eq!(size_of::<ModelPushConstants>(), 96);
 	assert_eq!(ModelPushConstants::SIZE, 96);

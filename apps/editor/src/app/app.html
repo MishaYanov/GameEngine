@@ -1,35 +1,111 @@
 <main>
-  <header><span class="brand">△ GAME ENGINE</span><span class="badge">PROJECT SETUP</span></header>
-  <div class="workspace">
-    <section class="setup" aria-labelledby="setup-title">
-      <p class="eyebrow">START SOMETHING NEW</p>
-      <h1 id="setup-title">Create your project.</h1>
-      <p class="intro">Give it a name and a home. We’ll build a starter project and open its graphics window.</p>
-      <form [formGroup]="form" (ngSubmit)="createProject()" [attr.aria-busy]="busy()">
-        <label for="project-name">Project name</label>
-        <input id="project-name" formControlName="name" placeholder="My first game" maxlength="80" autocomplete="off" aria-describedby="name-help" [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid" />
-        <p id="name-help" class="hint">Letters, numbers, spaces, hyphens and underscores.</p>
-        <label for="destination">Destination folder</label>
-        <input id="destination" formControlName="destination" placeholder="D:\Projects" autocomplete="off" aria-describedby="destination-help" [attr.aria-invalid]="form.controls.destination.touched && form.controls.destination.invalid" />
-        <p id="destination-help" class="hint">Enter an existing absolute folder path. A new folder named after your project will be created inside it.</p>
-        @if (form.touched && form.invalid) { <p class="error" role="alert">Enter a valid project name and destination.</p> }
-        @if (!desktop) { <p class="notice">Open the desktop editor to build and launch projects.</p> }
-        <button type="submit" [disabled]="busy() || !desktop">{{ buttonLabel() }} <span aria-hidden="true">↗</span></button>
-        <p class="hint">First builds can take several minutes. Requires Rust/Cargo and a Vulkan-capable GPU.</p>
-      </form>
-      <div aria-live="polite" role="status">
-        @if (busy()) { <p class="notice">Building the runtime, installing assets, then opening the triangle demo…</p> }
-        @if (result(); as project) {
-          <div class="success"><strong>Project installed</strong><p>{{ project.path }}</p><p>{{ project.launched ? 'Graphics window launched.' : 'Installed, but the graphics window could not be launched: ' + project.launchError }}</p><p>Run game.exe from this folder to open it again.</p></div>
-        }
-      </div>
-      @if (error()) { <pre class="error" role="alert">{{ error() }}</pre> }
-    </section>
-    <aside aria-label="Starter project preview">
-      <div class="preview"><svg viewBox="0 0 500 320" role="img" aria-label="Preview of two triangles"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#93c5fd"/><stop offset="1" stop-color="#6366f1"/></linearGradient><linearGradient id="b" x2="1" y2="1"><stop stop-color="#6ee7b7"/><stop offset="1" stop-color="#14b8a6"/></linearGradient></defs><path d="M145 78 L52 239 L238 239 Z" fill="url(#a)"/><path d="M355 78 L262 239 L448 239 Z" fill="url(#b)"/></svg><span>STARTER SCENE / 01</span></div>
-      <h2>A window. Two triangles.</h2><p>Your first build uses the engine’s Vulkan renderer with a simple textured triangle scene.</p>
-      <ol><li>Build the starter runtime</li><li>Install executable and assets</li><li>Launch your graphics window</li></ol>
-      @if (status(); as engine) { <p class="gpu">{{ engine.renderer }} · {{ engine.gpuName }} · Vulkan {{ engine.vulkanApi }}</p> }
-    </aside>
-  </div>
+    <header><span class="brand">△ GAME ENGINE</span><span class="badge">PROJECT SETUP</span></header>
+    <div class="workspace">
+        <section aria-labelledby="setup-title" class="setup">
+            <p class="eyebrow">START SOMETHING NEW</p>
+            <h1 id="setup-title">Create your project.</h1>
+            <p class="intro">
+                Give it a name and a home. We’ll build a starter project and open its graphics window.
+            </p>
+            <form (ngSubmit)="createProject()" [attr.aria-busy]="busy()" [formGroup]="form">
+                <label for="project-name">Project name</label>
+                <input
+                        [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
+                        aria-describedby="name-help"
+                        autocomplete="off"
+                        formControlName="name"
+                        id="project-name"
+                        maxlength="80"
+                        placeholder="My first game"
+                />
+                <p class="hint" id="name-help">Letters, numbers, spaces, hyphens and underscores.</p>
+                <label for="destination">Destination folder</label>
+                <input
+                        [attr.aria-invalid]="
+						form.controls.destination.touched && form.controls.destination.invalid
+					"
+                        aria-describedby="destination-help"
+                        autocomplete="off"
+                        formControlName="destination"
+                        id="destination"
+                        placeholder="D:\Projects"
+                />
+                <p class="hint" id="destination-help">
+                    Enter an existing absolute folder path. A new folder named after your project will be
+                    created inside it.
+                </p>
+                @if (form.touched && form.invalid) {
+                    <p class="error" role="alert">Enter a valid project name and destination.</p>
+                }
+                @if (!desktop) {
+                    <p class="notice">Open the desktop editor to build and launch projects.</p>
+                }
+                <button [disabled]="busy() || !desktop" type="submit">
+                    {{ buttonLabel() }} <span aria-hidden="true">↗</span>
+                </button>
+                <p class="hint">
+                    First builds can take several minutes. Requires Rust/Cargo and a Vulkan-capable GPU.
+                </p>
+            </form>
+            <div aria-live="polite" role="status">
+                @if (busy()) {
+                    <p class="notice">
+                        Building the runtime, installing assets, then opening the triangle demo…
+                    </p>
+                }
+                @if (result(); as project) {
+                    <div class="success">
+                        <strong>Project installed</strong>
+                        <p>{{ project.path }}</p>
+                        <p>
+                            {{
+                                project.launched
+                                    ? 'Graphics window launched.'
+                                    : 'Installed, but the graphics window could not be launched: ' +
+                                    project.launchError
+                            }}
+                        </p>
+                        <p>Run game.exe from this folder to open it again.</p>
+                    </div>
+                }
+            </div>
+            @if (error()) {
+                <pre class="error" role="alert">{{ error() }}</pre>
+            }
+        </section>
+        <aside aria-label="Starter project preview">
+            <div class="preview">
+                <svg aria-label="Preview of two triangles" role="img" viewBox="0 0 500 320">
+                    <defs>
+                        <linearGradient id="a" x2="1" y2="1">
+                            <stop stop-color="#93c5fd"/>
+                            <stop offset="1" stop-color="#6366f1"/>
+                        </linearGradient>
+                        <linearGradient id="b" x2="1" y2="1">
+                            <stop stop-color="#6ee7b7"/>
+                            <stop offset="1" stop-color="#14b8a6"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M145 78 L52 239 L238 239 Z" fill="url(#a)"/>
+                    <path d="M355 78 L262 239 L448 239 Z" fill="url(#b)"/>
+                </svg
+                >
+                <span>STARTER SCENE / 01</span>
+            </div>
+            <h2>A window. Two triangles.</h2>
+            <p>
+                Your first build uses the engine’s Vulkan renderer with a simple textured triangle scene.
+            </p>
+            <ol>
+                <li>Build the starter runtime</li>
+                <li>Install executable and assets</li>
+                <li>Launch your graphics window</li>
+            </ol>
+            @if (status(); as engine) {
+                <p class="gpu">
+                    {{ engine.renderer }} · {{ engine.gpuName }} · Vulkan {{ engine.vulkanApi }}
+                </p>
+            }
+        </aside>
+    </div>
 </main>

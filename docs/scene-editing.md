@@ -1,79 +1,60 @@
-# Native scene editing
+# Editor commands and document ownership
 
-Steps 11–20 implement shared SceneEditor APIs and a native editing interface in the game. Automated verification is
-available; visible acceptance and GPU-performance appearance checks remain unverified. This is separate from the
-Angular/Tauri editor, which still provides its setup/status shell. See
-the [step-by-step change report](editor-steps-11-20.md) for rationale, files, examples, and resources.
+The current editor direction is **Angular controls plus a game pane**, with runtime logic behind a typed bridge. Steps
+21–35 implement the integration contracts and engine foundations; no editor layout, mock screen, or composed template
+was added. Read the [learning report](editor-steps-21-35.md) for each step's rationale, file map, example and resources.
 
-## SceneEditor and Edit/Play
+## Authoritative document API
 
-`runtime::SceneEditor` owns generic EntitySelection and CommandHistory. It exposes selection, picking, keyboard
-transform edits, rename, spawn, duplicate, deletion, and drag commits. RobotGame no longer owns editing: it runs
-optional robot simulation during Play.
+`runtime::editor::EditorSession` owns validated SceneData, saved authored state, a temporary Play copy, persistent-key
+selection, snapping, transactions and bounded patch history. `EditorCommandRequest` carries expected_revision. A
+rejected/stale command is not silently retried. Snapshot revision is command/document state; scene_revision
+independently invalidates rendered Play content. Workspace generation distinguishes project replacement.
 
-Development starts in Edit. F6 runs a temporary cloned Scene/camera with shared Arc<Model> resources; Stop restores
-authored state. Generic scenes need no robot bindings to open or enter Play. F5 during Play saves authored data. Failed
-reload preserves active state; successful reload installs a fresh editor and clears obsolete history. Installed mode
-does not expose these development tools.
+`bridge::editor` defines input-independent commands, capabilities, snapshots and viewport DTOs. Angular's EditorService
+queues requests, publishes authoritative read-only signals, and reports/reconciles errors. Widgets and user-configured
+bindings choose command intent; runtime does not assign physical keys. No UI should mutate snapshot arrays in place or
+reimplement domain transforms.
 
-## Selection, bounds, and picking
+## Selection, snapping, hierarchy, and history
 
-EntitySelection validates live IDs and cycles all scene entities. Persistent EntityKey values belong to saved identity;
-runtime EntityIds remain scene lookup values. Picking uses model-local bounds, inverse transforms, a Vulkan near/far
-screen ray, and nearest slab intersection. Exact ties keep scene order; empty clicks clear selection; singular or
-unbounded models are skipped. Coordinates are physical pixels remapped to the actual surface extent.
+Selection is a validated list of up to 4096 distinct persistent keys. Commands support local/world transforms,
+frame/orbit/pan/dolly camera, translation/rotation/scale snapping, reparenting and grouped edits. World hierarchy is
+derived from local TRS and parent keys; missing/cyclic parents or unsupported shear/singular keep-world conversions
+fail.
 
-A selected bounded model displays one cached unit-box overlay transformed by its bounds/instance. Selection is
-box-based, not triangle-accurate. The native hierarchy panel is a flat entity list, not a new parent-child scene graph.
+Patch history stores changed entity/camera/light/binding/selection data, bounded at 128 records and 16 MiB.
+Begin/commit/cancel transactions group a gesture. Saving/reloading while a transaction is open requires an explicit
+commit/cancel first. Authored save state is separate from Play simulation and history is not serialized.
 
-## Mixed undo/redo
+Prefab export/instantiation remaps internal identities and parent references. Importing a static glTF scene creates
+entities/transform nodes for its selected scene and reuses mesh resources. Per-entity tint, lights and colliders are
+document data and use the same validated command path.
 
-`SetTransform.apply` validates finite transforms. CommandHistory now records Transform, Rename, Spawn, Duplicate (as a
-spawn snapshot), and Delete, with 256 undo entries. EntitySnapshot restoration preserves IDs, keys, order, role
-bindings, and model sharing. Failed restoration leaves its history record in place; no-ops/errors do not discard redo.
-Fresh changed edits clear redo. Use `undo_scene`/`redo_scene` for mixed history; transform-only wrappers reject
-structural records.
+## Frontend and viewport integration
 
-Structural edits no longer clear the entire history. Generic Edit deletion does not protect demo roles merely for
-simulation; removing an entity clears targeting bindings, and undo restores them. Camera motion, save/reload, and Play
-simulation are not authored history commands. History is not serialized and cannot be carried into a replacement scene.
+The files under `apps/editor/src/app/core/editor` provide typed models, EditorService, and EngineViewportDirective. The
+directive attaches one enabled Angular DOM pane to an on-demand native viewport, observes layout/visibility and emits
+status/raw input/errors. It has not been applied by newly composed app layout in this batch.
 
-## Native controls
+The Windows child viewport has native airspace and lifecycle/DPI/focus constraints; ordinary HTML is not a free overlay
+atop it. The UI owner must surface platform capability limits and input/error states. Raw mouse/key notifications are
+not document edits until mapped by the frontend owner. No finished inspector, multi-selection gesture UI, snapping
+toolbar, or prefab browser is claimed.
 
-| Input                | Behavior                                                                 |
-|----------------------|--------------------------------------------------------------------------|
-| F1                   | Toggle native panels, subject to compact-window layout limits            |
-| F5 / F9              | Save authored content / reload                                           |
-| F6 / F7              | Toggle Edit/Play / toggle frustum culling                                |
-| Left click           | Panel action, gizmo handle, or object box selection in Edit              |
-| 1 / 2 / 3            | Translate / rotate / scale gizmo                                         |
-| Tab                  | Cycle current Edit entities                                              |
-| WASD                 | Move Edit selection in world XY; move robot_a in robot Play              |
-| Q/E                  | Z rotation steps of -/+5 degrees in Edit                                 |
-| R/F                  | Uniform scale ×1.1 / ÷1.1 in Edit                                        |
-| N / C / Delete       | Robot shortcut spawn / duplicate / delete in Edit                        |
-| Ctrl+Z / Ctrl+Y      | Mixed undo / redo                                                        |
-| Space                | Toggle robot simulation pause during Play (rotation and WASD)            |
-| Right mouse / Escape | Capture for camera look / release; Escape cancels active drag/text first |
-| Enter                | Apply active property text field                                         |
+## Legacy native prototype
 
-Panel fields edit names and numeric transforms through history; rotation is shown in degrees and stored in radians.
-Typing blocks movement. Allowed panel commands also reset timing, suppress held input, and end gestures before
-execution, preventing file/model-loading time from becoming the next movement delta even on failure. The dirty marker
-compares authored scene and camera with saved content, including identity/bindings; undo exactly to saved content clears
-it. It does not compare simulated Play state.
+The prior SceneEditor/EntitySelection/CommandHistory and native panels/gizmos remain a legacy example. Its history uses
+transient IDs and a different 256-entry model; it is not interchangeable with EditorSession's persistent-key patches.
+Normal `game` execution no longer displays those editor overlays. Use `GAME_ENGINE_NATIVE_EDITOR_DEMO=1` explicitly for
+the earlier keyboard demonstration described in [steps 11–20](editor-steps-11-20.md).
 
-## Mouse gizmos and assets
+That demo is not the product editor, a second UI fork, or evidence that the Angular app has its final layout. Earlier
+native keyboard controls must not be presented as hardcoded EditorSession bindings.
 
-Translate uses world-axis projected screen mapping, rotate uses world-axis quaternion/ray-plane math, and scale follows
-local axes. A drag previews from the original transform; release commits one undo entry. Escape, focus loss, resize, and
-mode changes cancel back to the original state. Invalid/non-finite and camera-parallel handle cases are rejected.
+## Verification boundaries
 
-The asset panel scans supported GLB/glTF paths under the root, skips links, enforces limits, and sorts paths. Refresh
-rescans; Place creates an undoable entity three units along camera forward. Cached templates share models across
-placements. There are no thumbnails, search, general glTF scene-node import, or material/light inspectors.
-
-Panels use a bitmap ASCII font; Unicode names remain data, with fallback glyphs for unsupported display characters.
-Panels hide below 800×400 logical pixels and short windows can truncate lower fields. No screenshot or native
-interaction review was done for this batch.
-See [verification evidence](editor-steps-11-20.md#verification-evidence-and-limits).
+Final implementation/review/test results for steps 21–35 are recorded in [testing](testing.md) and
+docs-site/docs-state.json. Automated checks and hidden native examples are distinct from interactive Angular pane
+acceptance. No visual completion, full physics, animated importer, PBR, GPU-utilization percentage, or measured
+instancing speedup is inferred from the code alone.

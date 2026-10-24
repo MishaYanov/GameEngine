@@ -3,9 +3,35 @@
 Run from the repository root after [setup](usage.md). Cache locked Rust dependencies and install frontend/docs
 dependencies first.
 
-## Current steps 11–20 evidence
+## Current steps21–35 verification
 
-The implementation/tester handoff reports the following final results for the current editing/rendering work:
+The [learning report](editor-steps-21-35.md#verification-and-remaining-work) records the current Angular/runtime/host
+evidence and scope. Implementation/TESTER handoffs report:
+
+- Workspace all-target offline/locked tests: **294 passed, zero failed, two ignored**. TESTER added 62 Rust tests; the
+  copied-template native test also passed in a separate explicit run.
+- Angular editor suite: **13 passed**, including 10 new service tests. Production build and strict TypeScript pass.
+- Both default ignored checks passed in separate explicit runs: native Vulkan initialization (**one passed**) and
+  copied-template native validation (**one passed**, manifest/artifacts checked). Both hidden-window examples (
+  `renderer_smoke`, `scene_io_smoke`) pass. The renderer smoke verifies 257 compatible instances in one draw and
+  completed GPU timestamps, plus resource budgets/lifecycle.
+- Workspace all-target check, ordinary game/app build, Clippy and targeted formatting checks pass, with inherited
+  lint/cache warnings.
+- SECURITY closed both resource P2 findings and failed-import cleanup concern in static re-review. LOGGER added targeted
+  editor/viewport boundary logs and passed the host check.
+
+Documentation maintenance separately rebuilt/link-checked 27 pages, passed all five site tests, resolved 416 anchor
+targets and checked documentation whitespace. It did not modify production code or tests. Bundled scene content remains
+unchanged. Exact inspection baseline and verification limits live in `docs-site/docs-state.json`.
+
+Angular build/strict TypeScript checks and CPU contract tests do not prove that a UI layout was composed or that the
+Windows child pane was interactively accepted. Hidden GPU/native examples, when run, are execution evidence distinct
+from visible input/appearance checks. GPU timestamp support/availability is not a utilization or speedup result.
+
+## Historical steps 11–20 evidence
+
+The implementation/tester handoff reports the following final results for the earlier steps 11�20 editing/rendering
+work:
 
 | Check                                                  | Result and scope                                                                                                        |
 |--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
@@ -78,13 +104,15 @@ Ctrl+C. Dependencies are not installed automatically. Tkinter/display-dependent 
 
 The current native option adds runtime initialization, generated-project validation, and renderer_smoke. scene_io_smoke
 is invoked separately. Native generated-project compilation retains output and is not the same as launching the
-generated scene. The builder still omits JSON scenes from its asset allowlist; generation can compile yet fail runtime
-startup.
+generated scene. The JSON asset omission is fixed with bounded validation; generation compilation still does not
+establish final installed runtime acceptance.
 
 ## Remaining independent checks
 
-Visible native UI/control/lighting acceptance, GPU timestamps/budgets, clean-checkout reproducibility, installed release
-execution, Angular/Tauri scene integration, and Jenkins execution evidence remain separate. The Jenkins draft/default
+Visible native UI/control/lighting acceptance, measured performance budgets, clean-checkout reproducibility, installed
+release
+execution, composed Angular/Tauri pane acceptance, and Jenkins execution evidence remain separate. The Jenkins
+draft/default
 headless pipeline does not exercise native GPU or Windows packaging. Do not infer those results from this report.
 
 See [steps 11–20](editor-steps-11-20.md), [native scene editing](scene-editing.md), [scene persistence](scene-persistence.md),

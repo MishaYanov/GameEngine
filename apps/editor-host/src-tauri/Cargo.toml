@@ -28,3 +28,7 @@ tauri-plugin-log = "2"
 runtime = { path = "../../../crates/runtime" }
 bridge = { path = "../../../crates/bridge" }
 commands = "0.0.5"
+renderer = { path = "../../../crates/renderer" }
+winit = "0.30.13"
+raw-window-handle = "0.6"
+glam = "0.33.6"

@@ -1,15 +1,23 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use runtime::Engine;
+use bridge::EngineStatusDto;
 
 pub struct EditorState {
-    pub engine: Mutex<Engine>,
+	pub engine_status: Arc<Mutex<Option<EngineStatusDto>>>,
+	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
+	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
 }
 
-impl EditorState {
-    pub fn new(engine: Engine) -> Self {
-        Self {
-            engine: Mutex::new(engine),
-        }
-    }
+impl Default for EditorState {
+	fn default() -> Self {
+		let editor = Arc::new(Mutex::new(None));
+		let viewport = Arc::new(Mutex::new(crate::viewport::ViewportHost::new(Arc::clone(
+			&editor,
+		))));
+		Self {
+			engine_status: Arc::new(Mutex::new(None)),
+			editor,
+			viewport,
+		}
+	}
 }

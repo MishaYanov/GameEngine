@@ -10,36 +10,31 @@ The asset layer lives in `crates/runtime/src/assets`. `ImageAsset::load` opens/d
 
 `load_mesh(renderer, id, data)` uploads `MeshData` and caches `Arc<VulkanMesh>` by caller-supplied string ID. Reusing an ID returns the cached mesh even if new data differs. Use distinct stable IDs for distinct geometry. Count and membership methods expose cache state.
 
-`clear()` releases cache references, but materials and other `Arc` holders can keep resources alive. Clearing does not guarantee immediate GPU destruction. Automatic invalidation and hot reload are not implemented.
+`clear()` releases cache references, but materials and other `Arc` holders can keep resources alive. Clearing does not
+guarantee immediate GPU destruction. Explicit cache clearing/pruning and scene reconciliation exist; this is not
+automatic file hot reload.
 
 ## Geometry and shader contracts
 
-`MeshData` stores `Vec<Vertex>` and `Vec<u32>` indices, with procedural triangle, cube, plane, polygon, sphere, and
-capsule constructors. `Vertex` has 32-byte C layout: position `[f32; 3]` at byte 0/location 0, UV `[f32; 2]` at byte
-12/location 1, and normal `[f32; 3]` at byte 20/location 2. Binding/attribute descriptions derive stride/offsets from
-this Rust layout.
+Vertex remains a 32-byte C layout: position at offset0/location0, UV offset12/location1, normal offset20/location2.
+InstanceData adds an 80-byte matrix+tint record at binding1/locations3–7. ModelPushConstants remains96bytes, with
+model0, factor64 and flags80. Instanced input is a frame-batcher flag; unlit/font/vertex-color/depth-free paths remain
+separate.
 
-The vertex shader computes `camera.viewProjection * model * position`; the fragment shader multiplies the sampled texture by the material base-color factor.
+| Uniform/resource | Binding                                         |
+|------------------|-------------------------------------------------|
+| Camera matrix    | Set0/binding0                                   |
+| LightingUniform  | Set0/binding1; up to16 directional/point lights |
+| Material sampler | Set1/binding0                                   |
 
-| Shader input                             | Binding                                          |
-|------------------------------------------|--------------------------------------------------|
-| Position / UV / Normal                   | Locations 0 / 1 / 2                              |
-| Camera view-projection                   | Descriptor set 0, binding 0                      |
-| Sampled texture                          | Descriptor set 1, binding 0                      |
-| Model matrix / base-color factor / flags | 96-byte push constant block: offsets 0 / 64 / 80 |
+Transforms come from local/world scene hierarchy or per-instance batch data. Entity tint combines with source material
+color; normals use inverse transpose with a collapsed-transform fallback. Scene lights replace the former single
+hardcoded directional source, while migration supplies compatible defaults for old data. Lighting remains basic, without
+PBR/shadows or all transparency/material extensions.
 
-`CameraUniform::perspective` creates camera data. `ModelPushConstants::from_3d` accepts translation, Euler rotation in
-radians, and scale. The block contains the matrix at byte 0, material factor at byte 64, and four flag words at byte 80.
-`VulkanMaterial::new(texture, double_sided, base_color_factor)` owns a shared texture and material properties.
-`VulkanMaterialPipelines` supplies matching single/double-sided variants; frame drawing chooses a variant per material.
-
-A `WindowRenderer`-owned `VulkanMaterialLayout` is shared by uploaded textures and pipelines. Runtime asset methods receive `&WindowRenderer` and call `upload_mesh` / `upload_rgba8`; they no longer receive a raw Vulkan instance/device or own a separate material-layout reference. Pipeline setup does not depend on a scene object, permitting an empty scene. Preserve the layout and logical device until dependent descriptor resources are released.
-
-Change Rust layout, pipeline descriptors, and GLSL together. The shaders now transform normals by inverse transpose and
-apply fixed directional lighting: ambient 0.25 plus diffuse 0.75 from normalized direction [-0.4, 0.8, 0.6]. Flags
-provide unlit, screen-space/font, vertex-color, and depth-free overlay paths. This is not full PBR, shadowing, or
-transparent-material blending/sorting. Shader sources remain `crates/renderer/shaders/triangle.vert` and
-`triangle.frag`; rebuilding compiles and embeds SPIR-V.
+Rust layout, vertex attributes, descriptor interfaces and both shaders must change together. Shader sources remain
+crates/renderer/shaders/triangle.vert and triangle.frag, compiled/embedded during rebuild. Overlay shader attribute
+reuse does not imply every draw is a lit scene object.
 
 ## Procedural primitives — in progress
 
@@ -91,17 +86,32 @@ The game declares scene/cache before `WindowRenderer`, waits for idle before rel
 
 Extent/format changes can invalidate depth, pipeline, and frame resources. `WindowRenderer::resize` marks targets dirty; `prepare` waits for idle, takes old targets out, and rebuilds replacements. A zero dimension returns `None`. `draw` exposes `DrawStatus::{Rendered, Suspended, NeedsRedraw}`; the application no longer recreates the swapchain itself.
 
-## glTF and GLB import
+## glTF and GLB static import
 
-`load_first_mesh(path) -> Result<Vec<ImportedPrimitive>, GltfLoaderError>` imports every primitive of the first mesh through `gltf::import`. Any unsupported primitive rejects the import rather than being silently skipped. Returned geometry stays in mesh-local coordinates: nodes/transforms, other meshes, animations, and skinning are not traversed.
+The legacy load_first_mesh API remains distinct from selected static-scene import. The new scene_import path chooses a
+glTF default scene or first available scene, visits nodes/parent links, preserves local transforms and selected meshes,
+and represents transform-only nodes as nonrenderable scene entities. Shared meshes/materials are reused. SceneData
+mesh_index distinguishes source meshes.
 
-Each `ImportedPrimitive` contains `MeshData`, mesh/primitive indices, an optional source image index, and public `MaterialData`. Material data contains an optional base-color image, RGBA factor, and the actual glTF `doubleSided` flag.
+Static import rejects unsupported skins/morph behavior and does not provide animation playback. Geometry/image/resource
+budgets, containment checks and graph validation apply. Selected unique meshes have a 256 MiB decoded-geometry preflight
+limit including expanded indices. AssetManager caps logical GPU resources at 512 MiB and 8,192 resources, accounting for
+externally retained references through a weak-reference ledger. Scene draw expansion is capped at 65,536 render objects
+through fallible production APIs. These limits do not measure total driver memory. Full static node/mesh traversal must
+not be described as full dynamic glTF support, every material extension, or unrestricted file loading.
 
-Positions and indices are required. The loader rejects non-triangle modes, empty geometry, invalid index count/bounds, and mismatched position/UV counts. Textured materials require the referenced UV set; untextured materials can use zero UVs. Images support decoded RGB8 (expanded to RGBA8) and RGBA8; other formats are rejected. Imported row order is preserved. Import/image errors expose underlying causes.
+Positions/indices, normals, UV and image validation remain part of mesh import. Imported normals are finite/nonzero and
+normalized; missing normals use area-weighted generation. Source images support decoded RGB8/RGBA8 and preserve imported
+row order. Material overrides are optional per-entity tint data rather than destructive edits to shared textures.
+See [steps 29–31](editor-steps-21-35.md#step-29-static-gltf-scenes-nodes-and-meshes).
 
 ### Models, instances, and GPU caches
 
-`AssetManager::load_model` resolves a path inside its canonical root, reimports CPU data, and returns a `Model` containing one `ModelPart` per primitive. GPU meshes are cached by canonical path plus mesh/primitive indices; imported images are cached by canonical path plus image index. Repeated model loads reuse uploads, not the CPU import or the returned model object.
+`AssetManager::load_model` resolves a path inside its canonical root, reimports CPU data, and returns a `Model`
+containing one `ModelPart` per primitive. GPU meshes are cached by canonical path plus mesh/primitive indices; imported
+images are cached by canonical path plus image index. AssetManager now also caches static-scene metadata/selected mesh
+models and prunes/reconciles reuse. Cache identity is not a guarantee of automatic file reload; a project refresh/reload
+is explicit.
 
 `load_image_texture` caches decoded image uploads by caller ID. `load_material` uses the imported image or shared `builtin:white` 1×1 texture, enabling factor-only materials. Its `VulkanMaterial` stores factor/sidedness independently even when textures are shared. `loaded_texture_count` includes both file and imported-image caches. Reused IDs keep existing uploads; there is no hot reload/invalidation.
 
@@ -115,7 +125,14 @@ transforms, and camera via runtime scene_data/scene_io; see [scene persistence](
 
 ### Packaging
 
-The game resolves `props/robot.glb` below its selected asset root. The compiler now recursively copies the full asset tree, fixing the previous missing-model issue. The admin builder allowlist includes `.glb`, `.gltf`, and `.bin` assets; inspect preview for all external resources a model needs. See [game modes and packaging](apps/game/README.md) and [compiler limits](compiler/README.md).
+Compiler and admin source generation include validated asset JSON with supported model/image files, fixing the missing
+scene JSON omission. Traversal, entry count, depth, per-file/total bytes and JSON content are checked; links and
+unsafe/unsupported files are rejected. Package JSON has a16MiB ceiling even though the scene parser accepts up to32MiB,
+so larger valid documents may still require splitting to meet distribution bounds.
+
+Keep external model dependencies under the asset root and inspect source-generation preview. Successful copying or
+generation compilation is not an installed-runtime acceptance test.
+See [packaging step22](editor-steps-21-35.md#step-22-json-aware-packaging).
 
 ## Troubleshooting and manual checks
 
@@ -134,3 +151,15 @@ conservatively. F7 toggles culling. Draw and triangle totals include enabled sel
 and CPU UPDATE averages are not GPU profiling. UI/gizmo geometry is batched into reused host-coherent buffers with fence
 completion before updates; this avoids per-frame GPU allocation, not every CPU allocation. See
 the [steps 11–20 report](editor-steps-11-20.md) for API/file mapping and evidence.
+
+## Lights, instancing, and GPU metrics
+
+Scene3 supports directional/point lights and per-entity tint. Renderer set_lights validates bounded light input before
+mutation. Compatible opaque draws use reusable instance matrix/tint data at binding 1; overlays/unlit/alpha paths
+preserve ordering barriers. Buffers can grow up to an explicit limit, so reuse does not mean no allocation during
+capacity growth.
+
+GPU timestamps are read asynchronously from a completed range using device period/valid bits and availability, with no
+extra query WAIT. Unsupported/not-ready values remain optional. The measured range excludes CPU work, acquisition,
+presentation and display pacing. No speedup or utilization claim follows from instancing alone.
+See [steps 34–35](editor-steps-21-35.md#step-34-asynchronous-gpu-timestamps-and-submission-metrics).

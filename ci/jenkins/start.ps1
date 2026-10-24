@@ -23,7 +23,14 @@ $envPath = Join-Path $PSScriptRoot '.env'
 if (-not (Test-Path -LiteralPath $envPath)) {
     $randomBytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($randomBytes) } finally { $rng.Dispose() }
+    try
+    {
+        $rng.GetBytes($randomBytes)
+    }
+    finally
+    {
+        $rng.Dispose()
+    }
     $password = [Convert]::ToBase64String($randomBytes)
     Set-Content -LiteralPath $envPath -Value "JENKINS_ADMIN_PASSWORD=$password" -Encoding ascii
 }

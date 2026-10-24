@@ -43,7 +43,8 @@ impl SelectionOverlay {
 		scene: &Scene,
 		editor: &SceneEditor,
 	) -> Option<RenderObject<'a>> {
-		let instance = scene.get(editor.selected_entity()?)?;
+		let selected = editor.selected_entity()?;
+		let instance = scene.get(selected)?;
 		let bounds = instance.model().bounds()?;
 		let min = glam::Vec3::from_array(bounds.min());
 		let max = glam::Vec3::from_array(bounds.max());
@@ -56,7 +57,7 @@ impl SelectionOverlay {
 			min - padding,
 		);
 		let transform = ModelPushConstants {
-			model: (instance.transform().matrix() * local).to_cols_array(),
+			model: (scene.world_matrix(selected).ok()? * local).to_cols_array(),
 			base_color_factor: [1.0; 4],
 			flags: [1, 0, 0, 0],
 		};

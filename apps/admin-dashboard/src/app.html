@@ -1,8 +1,483 @@
-<div class="shell"><aside class="sidebar"><div class="brand">ENGINE ADMIN</div><nav>@for (item of nav; track item) { <button [class.active]="section() === item" (click)="section.set(item)">{{ item }}</button> }</nav><p class="muted">Independent development application</p></aside><main><header class="page-header"><div><span class="eyebrow">DEVELOPMENT WORKSPACE</span><h1>{{ section() }}</h1></div><span class="badge">{{ api.preview ? 'READ-ONLY SAMPLE PREVIEW' : api.desktop ? 'DESKTOP' : 'DISCONNECTED' }}</span></header>@if (error()) { <div class="banner">{{ error() }} <button (click)="error.set('')">Dismiss</button></div> }@if (notice()) { <div class="banner">{{ notice() }} <button (click)="notice.set('')">Dismiss</button></div> }@if (state()?.collector?.storage_error) { <div class="banner">{{ state()?.collector?.storage_error }}</div> }
-@if (section() === 'Overview') {
-<section class="metrics"><article><span>COMPONENTS</span><strong>{{ state()?.components?.length ?? 0 }}</strong></article><article><span>RUNNING APPLICATIONS</span><strong>{{ runningCount() }}</strong></article><article><span>SESSION FILES</span><strong>{{ state()?.collector?.scanned_files ?? 0 }}</strong></article></section><section class="panel"><div class="panel-heading"><h2>Component health</h2></div><div class="component-grid">@for (component of state()?.components ?? []; track component.id) { <article class="component-card"><h3>{{ component.label }}</h3><span class="badge" [attr.data-status]="component.health">{{ component.health }}</span><p>{{ component.detail }}</p><small>{{ component.last_event_ms | date:'medium' }}</small>@if (component.stale) { <p>Heartbeat is stale</p> }</article> }</div></section><section class="panel"><h2>Managed applications</h2>@for (target of state()?.targets ?? []; track target.id) { <div class="process-target"><strong>{{ target.label }}</strong><span class="muted">{{ target.available ? target.executable : 'Build executable first' }}</span><button [disabled]="!api.desktop || !target.available || !!running(target.id) || !!busy()" (click)="action('start_application', {id:target.id}, 'Start application')">Start</button><button [disabled]="!api.desktop || !running(target.id) || !!busy()" (click)="action('stop_application', {id:target.id}, 'Stop application')">Stop</button><button [disabled]="!api.desktop || !running(target.id) || !!busy()" (click)="action('restart_application', {id:target.id}, 'Restart application')">Restart</button></div> }</section><section class="panel"><h2>Process history</h2><table><thead><tr><th>APPLICATION / PID</th><th>STATUS</th><th>DURATION</th><th>EXIT</th><th>SESSION</th></tr></thead><tbody>@for (run of state()?.processes ?? []; track run.id) { <tr><td>{{ run.application }} / {{ run.pid }}</td><td><span class="badge" [attr.data-status]="run.state">{{ run.state }}</span></td><td>{{ duration(run) }}</td><td>{{ run.exit_code ?? '—' }}</td><td><button [disabled]="!run.session_id" (click)="selectRun(run)">Logs</button></td></tr> }</tbody></table></section><details class="settings"><summary>Workspace settings</summary><form (ngSubmit)="configure()"><label>Workspace<input name="workspace" [(ngModel)]="workspace"></label><label>Log directory<input name="logs" [(ngModel)]="logDirectory"></label><button [disabled]="!api.desktop || !!busy()">Save settings</button></form><p>Malformed lines: {{ state()?.collector?.malformed_lines }} · History gaps: {{ state()?.collector?.history_gaps }} · Oversized lines: {{ state()?.collector?.oversized_lines }} · Output drops: {{ state()?.process_output_drops }}</p>@if (state()?.collector?.checkpoint_error) { <p>{{ state()?.collector?.checkpoint_error }}</p> }@if (state()?.process_storage_error) { <p>{{ state()?.process_storage_error }}</p> }</details>
-} @else if (section() === 'Builds' || section() === 'Tests') {
-<section class="panel settings"><h2>{{ section() === 'Builds' ? 'Build a package' : 'Run package tests' }}</h2><p class="muted">Jobs run one at a time. Each run links its Cargo diagnostics and raw output. Test command outcomes do not imply structured test counts.</p><form (ngSubmit)="queueJob()"><label>Package<select name="package" [(ngModel)]="jobPackage">@for (package of packages; track package) { <option [value]="package">{{ package }}</option> }</select></label><label>Profile<select name="profile" [(ngModel)]="jobProfile"><option value="dev">Development</option><option value="release">Release</option></select></label><button class="primary" [disabled]="!api.desktop || !!busy()">Queue {{ section() === 'Builds' ? 'build' : 'tests' }}</button></form></section>@if (state()?.job_storage_error) { <div class="banner">{{ state()?.job_storage_error }}</div> }<section class="panel"><h2>Run history</h2><table><thead><tr><th>PACKAGE / PROFILE</th><th>STATUS</th><th>DURATION</th><th>EXIT</th><th>ACTIONS</th></tr></thead><tbody>@for (run of jobRuns(); track run.id) { <tr><td>{{ run.package }} / {{ run.profile }}<small>{{ run.id }}</small></td><td><span class="badge" [attr.data-status]="run.state">{{ run.state }}</span>@if (run.detail) { <p>{{ run.detail }}</p> }</td><td>@if (run.started_ms) { {{ (((run.ended_ms ?? state()?.collector?.last_scan_ms ?? run.started_ms) - run.started_ms) / 1000).toFixed(1) }}s } @else { Queued }</td><td>{{ run.exit_code ?? '—' }}</td><td><button (click)="selectJob(run)">Logs</button>@if (run.state === 'QUEUED' || run.state === 'RUNNING') { <button [disabled]="!api.desktop || !!busy()" (click)="action('cancel_job', {id:run.id}, 'Cancel job')">Cancel</button> }@if (run.artifacts.length) { <details><summary>Artifacts</summary><pre>{{ run.artifacts | json }}</pre></details> }</td></tr> } @empty { <tr><td colspan="5" class="empty">No jobs yet</td></tr> }</tbody></table></section>
-} @else if (section() === 'Logs') {
-<section class="log-toolbar"><input aria-label="Search logs" placeholder="Search messages" [(ngModel)]="filter.search" (ngModelChange)="filtersChanged()"><select aria-label="Severity" [(ngModel)]="filter.severity" (ngModelChange)="filtersChanged()"><option [ngValue]="null">All levels</option>@for (level of levels; track level) { <option [ngValue]="level">{{ level }}</option> }</select><input aria-label="Application filter" placeholder="Application" [(ngModel)]="filter.application" (ngModelChange)="filtersChanged()"><button (click)="paused.set(!paused()); refresh()">{{ paused() ? 'Resume' : 'Pause' }}</button><button [disabled]="!api.desktop" (click)="exportLogs()">Export</button></section><details class="advanced-filters"><summary>More filters</summary><div><label>Component<input [(ngModel)]="filter.component" (ngModelChange)="filtersChanged()"></label><label>Session<input [(ngModel)]="filter.session_id" (ngModelChange)="filtersChanged()"></label><label>Operation<input [(ngModel)]="filter.operation_id" (ngModelChange)="filtersChanged()"></label><label>From<input type="datetime-local" [(ngModel)]="from" (ngModelChange)="datesChanged()"></label><label>To<input type="datetime-local" [(ngModel)]="to" (ngModelChange)="datesChanged()"></label><button (click)="clearFilters()">Clear filters</button></div></details><p class="log-summary">{{ matching() }} matching retained records · showing {{ logs().length }} · {{ paused() ? 'Display paused; collection continues' : 'Live' }}</p>@if (historyGap()) { <div class="banner">Older records have left retained history.</div> }<section class="log-workspace" [class.with-detail]="!!selected()"><div class="panel log-list"><table><thead><tr><th>TIME</th><th>LEVEL</th><th>COMPONENT / MESSAGE</th></tr></thead><tbody>@for (record of logs(); track record.cursor) { <tr><td>{{ record.entry.timestamp_ms | date:'HH:mm:ss.SSS' }}</td><td><span class="badge" [attr.data-status]="record.entry.level">{{ record.entry.level }}</span></td><td><button class="log-select" (click)="selected.set(record)"><span class="log-component">{{ record.entry.application }} / {{ record.entry.component }}</span><span class="log-message">{{ record.entry.message }}</span></button></td></tr> } @empty { <tr><td colspan="3" class="empty">No matching diagnostics</td></tr> }</tbody></table></div>@if (selected(); as record) { <aside class="panel detail"><button (click)="selected.set(null)" aria-label="Close record details">Close</button><h3>{{ record.entry.message }}</h3><dl><dt>Session</dt><dd>{{ record.entry.session_id }}</dd><dt>Process / thread</dt><dd>{{ record.entry.process_id }} / {{ record.entry.thread }}</dd><dt>Source</dt><dd>{{ record.entry.file ?? 'Unavailable' }}:{{ record.entry.line }}</dd></dl><button (click)="copySelected()">Copy record</button><button [disabled]="!api.desktop || !!busy()" (click)="createCard()">Create task</button><button [disabled]="!api.desktop || !record.entry.file" (click)="action('open_source', {cursor:record.cursor}, 'Open source')">Open source</button>@if (record.entry.error; as errorDetails) { <h4>Error causes</h4><pre>{{ errorDetails | json }}</pre> }<h4>Stack trace</h4>@if (record.entry.stack_trace; as stack) { <span>{{ stack.capture_kind }}</span><pre>{{ stack.text }}</pre> } @else { <p>No stack trace captured.</p> }<h4>Related operation</h4><pre>{{ record.entry.correlation | json }}</pre><h4>Attributes</h4><pre>{{ record.entry.attributes | json }}</pre></aside> }</section>
-} @else if (section() === 'Board') { <admin-board [state]="state()" (changed)="refresh()" (viewLogs)="linkedLogs($event)"/> } @else if (section() === 'Project Builder') { <admin-builder [state]="state()" (changed)="refresh()" (viewLogs)="linkedLogs($event)"/> } @else { <section class="panel future"><h2>{{ section() }} is planned</h2><p>{{ section() === 'Board' ? 'Kanban follows in steps 11–12.' : 'Client project generation follows in steps 13–14.' }}</p></section> }<footer class="page-footer">Engine Admin / Client build remains separate</footer></main></div>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand">ENGINE ADMIN</div>
+        <nav>
+            @for (item of nav; track item) {
+                <button
+                        (click)="section.set(item)"
+                        [class.active]="section() === item"
+                >
+                    {{ item }}
+                </button>
+            }
+        </nav>
+        <p class="muted">Independent development application</p>
+    </aside>
+    <main>
+        <header class="page-header">
+            <div>
+                <span class="eyebrow">DEVELOPMENT WORKSPACE</span>
+                <h1>{{ section() }}</h1>
+            </div>
+            <span class="badge"
+            >{{
+                    api.preview ? 'READ-ONLY SAMPLE PREVIEW' : api.desktop ?
+                        'DESKTOP' : 'DISCONNECTED'
+                }}</span
+            >
+        </header>
+        @if (error()) {
+            <div class="banner">
+                {{ error() }}
+                <button (click)="error.set('')">Dismiss</button>
+            </div>
+        }
+        @if (notice()) {
+            <div class="banner">
+                {{ notice() }}
+                <button (click)="notice.set('')">Dismiss</button>
+            </div>
+        }
+        @if (state()?.collector?.storage_error) {
+            <div class="banner">{{ state()?.collector?.storage_error }}</div>
+        }
+        @if (section() === 'Overview') {
+            <section class="metrics">
+                <article>
+				<span>COMPONENTS</span
+                ><strong>{{ state()?.components?.length ?? 0 }}</strong>
+                </article>
+                <article>
+				<span>RUNNING APPLICATIONS</span
+                ><strong>{{ runningCount() }}</strong>
+                </article>
+                <article>
+				<span>SESSION FILES</span
+                ><strong>{{ state()?.collector?.scanned_files ?? 0 }}</strong>
+                </article>
+            </section>
+            <section class="panel">
+                <div class="panel-heading"><h2>Component health</h2></div>
+                <div class="component-grid">
+                    @for (component of state()?.components ?? []; track
+                        component.id) {
+                        <article class="component-card">
+                            <h3>{{ component.label }}</h3>
+                            <span [attr.data-status]="component.health" class="badge"
+                            >{{ component.health }}</span
+                            >
+                            <p>{{ component.detail }}</p>
+                            <small>{{ component.last_event_ms | date:'medium' }}</small
+                            >@if (component.stale) {
+                            <p>Heartbeat is stale</p>
+                        }
+                        </article>
+                    }
+                </div>
+            </section>
+            <section class="panel">
+                <h2>Managed applications</h2>
+                @for (target of state()?.targets ?? []; track target.id) {
+                    <div class="process-target">
+                        <strong>{{ target.label }}</strong
+                        ><span class="muted"
+                    >{{
+                            target.available ? target.executable : 'Build executable
+                                first'
+                        }}</span
+                    >
+                        <button
+                                (click)="action('start_application', {id:target.id}, 'Start application')"
+                                [disabled]="!api.desktop || !target.available || !!running(target.id) || !!busy()"
+                        >
+                            Start
+                        </button
+                        >
+                        <button
+                                (click)="action('stop_application', {id:target.id}, 'Stop application')"
+                                [disabled]="!api.desktop || !running(target.id) || !!busy()"
+                        >
+                            Stop
+                        </button
+                        >
+                        <button
+                                (click)="action('restart_application', {id:target.id}, 'Restart application')"
+                                [disabled]="!api.desktop || !running(target.id) || !!busy()"
+                        >
+                            Restart
+                        </button>
+                    </div>
+                }
+            </section>
+            <section class="panel">
+                <h2>Process history</h2>
+                <table>
+                    <thead>
+                    <tr>
+                        <th>APPLICATION / PID</th>
+                        <th>STATUS</th>
+                        <th>DURATION</th>
+                        <th>EXIT</th>
+                        <th>SESSION</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                        @for (run of state()?.processes ?? []; track run.id) {
+                            <tr>
+                                <td>{{ run.application }} / {{ run.pid }}</td>
+                                <td>
+							<span [attr.data-status]="run.state" class="badge"
+                            >{{ run.state }}</span
+                            >
+                                </td>
+                                <td>{{ duration(run) }}</td>
+                                <td>{{ run.exit_code ?? '—' }}</td>
+                                <td>
+                                    <button
+                                            (click)="selectRun(run)"
+                                            [disabled]="!run.session_id"
+                                    >
+                                        Logs
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+            <details class="settings">
+                <summary>Workspace settings</summary>
+                <form (ngSubmit)="configure()">
+                    <label
+                    >Workspace<input
+                            [(ngModel)]="workspace"
+                            name="workspace"/></label
+                    ><label
+                >Log directory<input
+                        [(ngModel)]="logDirectory"
+                        name="logs"/></label
+                >
+                    <button [disabled]="!api.desktop || !!busy()">
+                        Save settings
+                    </button>
+                </form>
+                <p>
+                    Malformed lines: {{ state()?.collector?.malformed_lines }} ·
+                    History gaps: {{ state()?.collector?.history_gaps }} · Oversized
+                    lines: {{ state()?.collector?.oversized_lines }} · Output drops:
+                    {{ state()?.process_output_drops }}
+                </p>
+                @if (state()?.collector?.checkpoint_error) {
+                    <p>{{ state()?.collector?.checkpoint_error }}</p>
+                }
+                @if (state()?.process_storage_error) {
+                    <p>{{ state()?.process_storage_error }}</p>
+                }
+            </details>
+        } @else if (section() === 'Builds' || section() === 'Tests') {
+            <section class="panel settings">
+                <h2>
+                    {{
+                        section() === 'Builds' ? 'Build a package' : 'Run package
+                            tests'
+                    }}
+                </h2>
+                <p class="muted">
+                    Jobs run one at a time. Each run links its Cargo diagnostics and
+                    raw output. Test command outcomes do not imply structured test
+                    counts.
+                </p>
+                <form (ngSubmit)="queueJob()">
+                    <label
+                    >Package<select [(ngModel)]="jobPackage" name="package">
+                        @for (package of packages; track package) {
+                            <option [value]="package">{{ package }}</option>
+                        }
+                    </select></label
+                    ><label
+                >Profile<select [(ngModel)]="jobProfile" name="profile">
+                    <option value="dev">Development</option>
+                    <option value="release">Release</option>
+                </select></label
+                >
+                    <button [disabled]="!api.desktop || !!busy()" class="primary">
+                        Queue {{ section() === 'Builds' ? 'build' : 'tests' }}
+                    </button>
+                </form>
+            </section>
+            @if (state()?.job_storage_error) {
+                <div class="banner">{{ state()?.job_storage_error }}</div>
+            }
+            <section class="panel">
+                <h2>Run history</h2>
+                <table>
+                    <thead>
+                    <tr>
+                        <th>PACKAGE / PROFILE</th>
+                        <th>STATUS</th>
+                        <th>DURATION</th>
+                        <th>EXIT</th>
+                        <th>ACTIONS</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                        @for (run of jobRuns(); track run.id) {
+                            <tr>
+                                <td>
+                                    {{ run.package }} / {{ run.profile }}<small
+                                >{{ run.id }}</small
+                                >
+                                </td>
+                                <td>
+							<span [attr.data-status]="run.state" class="badge"
+                            >{{ run.state }}</span
+                            >@if (run.detail) {
+                                    <p>{{ run.detail }}</p>
+                                }
+                                </td>
+                                <td>
+                                    @if (run.started_ms) {
+                                        {{
+                                            (((run.ended_ms ??
+                                                    state()?.collector?.last_scan_ms ?? run.started_ms)
+                                                - run.started_ms) / 1000).toFixed(1)
+                                        }}s
+                                    } @else {
+                                        Queued
+                                    }
+                                </td>
+                                <td>{{ run.exit_code ?? '—' }}</td>
+                                <td>
+                                    <button (click)="selectJob(run)">Logs
+                                    </button>@if (run.state === 'QUEUED' || run.state === 'RUNNING') {
+                                    <button
+                                            (click)="action('cancel_job', {id:run.id}, 'Cancel job')"
+                                            [disabled]="!api.desktop || !!busy()"
+                                    >
+                                        Cancel
+                                    </button>
+                                }
+                                    @if (run.artifacts.length) {
+                                        <details>
+                                            <summary>Artifacts</summary>
+                                            <pre>{{ run.artifacts | json }}</pre>
+                                        </details>
+                                    }
+                                </td>
+                            </tr>
+                        } @empty {
+                            <tr>
+                                <td class="empty" colspan="5">No jobs yet</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        } @else if (section() === 'Logs') {
+            <section class="log-toolbar">
+                <input
+                        (ngModelChange)="filtersChanged()"
+                        [(ngModel)]="filter.search"
+                        aria-label="Search logs"
+                        placeholder="Search messages"
+                /><select
+                    (ngModelChange)="filtersChanged()"
+                    [(ngModel)]="filter.severity"
+                    aria-label="Severity"
+            >
+                <option [ngValue]="null">All levels</option>
+                @for (level of levels; track level) {
+                    <option [ngValue]="level">{{ level }}</option>
+                }</select
+            ><input
+                    (ngModelChange)="filtersChanged()"
+                    [(ngModel)]="filter.application"
+                    aria-label="Application filter"
+                    placeholder="Application"
+            />
+                <button (click)="paused.set(!paused()); refresh()">
+                    {{ paused() ? 'Resume' : 'Pause' }}
+                </button
+                >
+                <button (click)="exportLogs()" [disabled]="!api.desktop">
+                    Export
+                </button>
+            </section>
+            <details class="advanced-filters">
+                <summary>More filters</summary>
+                <div>
+                    <label
+                    >Component<input
+                            (ngModelChange)="filtersChanged()"
+                            [(ngModel)]="filter.component"/></label
+                    ><label
+                >Session<input
+                        (ngModelChange)="filtersChanged()"
+                        [(ngModel)]="filter.session_id"/></label
+                ><label
+                >Operation<input
+                        (ngModelChange)="filtersChanged()"
+                        [(ngModel)]="filter.operation_id"/></label
+                ><label
+                >From<input
+                        (ngModelChange)="datesChanged()"
+                        [(ngModel)]="from"
+                        type="datetime-local"/></label
+                ><label
+                >To<input
+                        (ngModelChange)="datesChanged()"
+                        [(ngModel)]="to"
+                        type="datetime-local"/></label
+                >
+                    <button (click)="clearFilters()">Clear filters</button>
+                </div>
+            </details>
+            <p class="log-summary">
+                {{ matching() }} matching retained records · showing {{
+                    logs().length
+                }} · {{
+                    paused() ? 'Display paused; collection
+                        continues' : 'Live'
+                }}
+            </p>
+            @if (historyGap()) {
+                <div class="banner">Older records have left retained history.</div>
+            }
+            <section [class.with-detail]="!!selected()" class="log-workspace">
+                <div class="panel log-list">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>TIME</th>
+                            <th>LEVEL</th>
+                            <th>COMPONENT / MESSAGE</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                            @for (record of logs(); track record.cursor) {
+                                <tr>
+                                    <td>
+                                        {{
+                                            record.entry.timestamp_ms |
+                                                date:'HH:mm:ss.SSS'
+                                        }}
+                                    </td>
+                                    <td>
+								<span
+                                        [attr.data-status]="record.entry.level"
+                                        class="badge"
+                                >{{ record.entry.level }}</span
+                                >
+                                    </td>
+                                    <td>
+                                        <button
+                                                (click)="selected.set(record)"
+                                                class="log-select"
+                                        >
+									<span class="log-component"
+                                    >{{ record.entry.application }} / {{
+                                            record.entry.component
+                                        }}</span
+                                    ><span class="log-message"
+                                        >{{ record.entry.message }}</span
+                                        >
+                                        </button>
+                                    </td>
+                                </tr>
+                            } @empty {
+                                <tr>
+                                    <td class="empty" colspan="3">
+                                        No matching diagnostics
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (selected(); as record) {
+                    <aside class="panel detail">
+                        <button
+                                (click)="selected.set(null)"
+                                aria-label="Close record details"
+                        >
+                            Close
+                        </button>
+                        <h3>{{ record.entry.message }}</h3>
+                        <dl>
+                            <dt>Session</dt>
+                            <dd>{{ record.entry.session_id }}</dd>
+                            <dt>Process / thread</dt>
+                            <dd>
+                                {{ record.entry.process_id }} / {{
+                                    record.entry.thread
+                                }}
+                            </dd>
+                            <dt>Source</dt>
+                            <dd>
+                                {{ record.entry.file ?? 'Unavailable' }}:{{
+                                    record.entry.line
+                                }}
+                            </dd>
+                        </dl>
+                        <button (click)="copySelected()">Copy record
+                        </button
+                        >
+                        <button
+                                (click)="createCard()"
+                                [disabled]="!api.desktop || !!busy()"
+                        >
+                            Create task
+                        </button
+                        >
+                        <button
+                                (click)="action('open_source', {cursor:record.cursor}, 'Open source')"
+                                [disabled]="!api.desktop || !record.entry.file"
+                        >
+                            Open source
+                        </button
+                        >@if (record.entry.error; as errorDetails) {
+                        <h4>Error causes</h4>
+                        <pre>{{ errorDetails | json }}</pre>
+                    }
+                        <h4>Stack trace</h4>
+                        @if (record.entry.stack_trace; as stack) {
+                            <span>{{ stack.capture_kind }}</span>
+                            <pre>{{ stack.text }}</pre>
+                        } @else {
+                            <p>No stack trace captured.</p>
+                        }
+                        <h4>Related operation</h4>
+                        <pre>{{ record.entry.correlation | json }}</pre>
+                        <h4>Attributes</h4>
+                        <pre>{{ record.entry.attributes | json }}</pre>
+                    </aside>
+                }
+            </section>
+        } @else if (section() === 'Board') {
+            <admin-board
+                    (changed)="refresh()"
+                    (viewLogs)="linkedLogs($event)"
+                    [state]="state()"
+            />
+        } @else if (section() === 'Project Builder') {
+            <admin-builder
+                    (changed)="refresh()"
+                    (viewLogs)="linkedLogs($event)"
+                    [state]="state()"
+            />
+        } @else {
+            <section class="panel future">
+                <h2>{{ section() }} is planned</h2>
+                <p>
+                    {{
+                        section() === 'Board' ? 'Kanban follows in steps 11–12.' :
+                            'Client project generation follows in steps 13–14.'
+                    }}
+                </p>
+            </section>
+        }
+        <footer class="page-footer">
+            Engine Admin / Client build remains separate
+        </footer>
+    </main>
+</div>

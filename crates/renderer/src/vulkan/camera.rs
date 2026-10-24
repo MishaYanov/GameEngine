@@ -1,225 +1,263 @@
 use std::{
-    error::Error,
-    fmt::{Display, Formatter},
-    mem::size_of,
+	error::Error,
+	fmt::{Display, Formatter},
+	mem::size_of,
 };
 
 use ash::{Device, Instance, vk};
 
 use glam::{
-    Vec3,
-    camera::rh::{proj::vulkan::perspective, view::look_at_mat4},
+	Vec3,
+	camera::rh::{proj::vulkan::perspective, view::look_at_mat4},
 };
 
-use super::{VulkanBuffer, VulkanBufferError, VulkanDevice};
+use super::{LightingUniform, VulkanBuffer, VulkanBufferError, VulkanDevice};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct CameraUniform {
-    pub view_projection: [f32; 16],
+	pub view_projection: [f32; 16],
 }
 
 pub struct VulkanCamera {
-    device: Device,
+	device: Device,
 
-    uniform_buffer: VulkanBuffer,
+	uniform_buffer: VulkanBuffer,
+	lighting_buffer: VulkanBuffer,
 
-    descriptor_set_layout: vk::DescriptorSetLayout,
+	descriptor_set_layout: vk::DescriptorSetLayout,
 
-    descriptor_pool: vk::DescriptorPool,
+	descriptor_pool: vk::DescriptorPool,
 
-    descriptor_set: vk::DescriptorSet,
+	descriptor_set: vk::DescriptorSet,
 }
 
 #[derive(Debug)]
 pub enum VulkanCameraError {
-    Vulkan(vk::Result),
-    Buffer(VulkanBufferError),
+	Vulkan(vk::Result),
+	Buffer(VulkanBufferError),
 }
 
 impl Display for VulkanCameraError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Vulkan(error) => {
-                write!(formatter, "Vulkan camera error: {error:?}",)
-            }
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Vulkan(error) => {
+				write!(formatter, "Vulkan camera error: {error:?}",)
+			}
 
-            Self::Buffer(error) => {
-                write!(formatter, "Vulkan camera buffer error: {error}",)
-            }
-        }
-    }
+			Self::Buffer(error) => {
+				write!(formatter, "Vulkan camera buffer error: {error}",)
+			}
+		}
+	}
 }
 
 impl Error for VulkanCameraError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Vulkan(error) => Some(error),
-            Self::Buffer(error) => Some(error),
-        }
-    }
+	fn source(&self) -> Option<&(dyn Error + 'static)> {
+		match self {
+			Self::Vulkan(error) => Some(error),
+			Self::Buffer(error) => Some(error),
+		}
+	}
 }
 
 impl From<vk::Result> for VulkanCameraError {
-    fn from(value: vk::Result) -> Self {
-        Self::Vulkan(value)
-    }
+	fn from(value: vk::Result) -> Self {
+		Self::Vulkan(value)
+	}
 }
 
 impl From<VulkanBufferError> for VulkanCameraError {
-    fn from(value: VulkanBufferError) -> Self {
-        Self::Buffer(value)
-    }
+	fn from(value: VulkanBufferError) -> Self {
+		Self::Buffer(value)
+	}
 }
 
 impl CameraUniform {
-    pub fn perspective(
-        position: [f32; 3],
-        target: [f32; 3],
-        up: [f32; 3],
+	pub fn perspective(
+		position: [f32; 3],
+		target: [f32; 3],
+		up: [f32; 3],
 
-        vertical_fov_radians: f32,
-        aspect_ratio: f32,
+		vertical_fov_radians: f32,
+		aspect_ratio: f32,
 
-        near: f32,
-        far: f32,
-    ) -> Self {
-        let position = Vec3::from_array(position);
+		near: f32,
+		far: f32,
+	) -> Self {
+		let position = Vec3::from_array(position);
 
-        let target = Vec3::from_array(target);
+		let target = Vec3::from_array(target);
 
-        let up = Vec3::from_array(up).normalize();
+		let up = Vec3::from_array(up).normalize();
 
-        let view = look_at_mat4(position, target, up);
+		let view = look_at_mat4(position, target, up);
 
-        let projection = perspective(vertical_fov_radians, aspect_ratio, near, far);
+		let projection = perspective(vertical_fov_radians, aspect_ratio, near, far);
 
-        let view_projection = projection * view;
+		let view_projection = projection * view;
 
-        Self {
-            view_projection: view_projection.to_cols_array(),
-        }
-    }
+		Self {
+			view_projection: view_projection.to_cols_array(),
+		}
+	}
 }
 
 impl VulkanCamera {
-    pub fn new(instance: &Instance, device: &VulkanDevice) -> Result<Self, VulkanCameraError> {
-        let ash_device = device.raw().clone();
+	pub fn new(instance: &Instance, device: &VulkanDevice) -> Result<Self, VulkanCameraError> {
+		let ash_device = device.raw().clone();
 
-        let uniform_size = size_of::<CameraUniform>() as vk::DeviceSize;
+		let uniform_size = size_of::<CameraUniform>() as vk::DeviceSize;
 
-        let uniform_buffer = VulkanBuffer::new(
-            instance,
-            device,
-            uniform_size,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+		let uniform_buffer = VulkanBuffer::new(
+			instance,
+			device,
+			uniform_size,
+			vk::BufferUsageFlags::UNIFORM_BUFFER,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		)?;
 
-        let bindings = [vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::VERTEX)];
+		let lighting_buffer = VulkanBuffer::new(
+			instance,
+			device,
+			size_of::<LightingUniform>() as u64,
+			vk::BufferUsageFlags::UNIFORM_BUFFER,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		)?;
+		lighting_buffer.write(&[LightingUniform::default()])?;
 
-        let layout_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+		let bindings = [
+			vk::DescriptorSetLayoutBinding::default()
+				.binding(0)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.descriptor_count(1)
+				.stage_flags(vk::ShaderStageFlags::VERTEX),
+			vk::DescriptorSetLayoutBinding::default()
+				.binding(1)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.descriptor_count(1)
+				.stage_flags(vk::ShaderStageFlags::FRAGMENT),
+		];
 
-        let descriptor_set_layout =
-            unsafe { ash_device.create_descriptor_set_layout(&layout_info, None)? };
+		let layout_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
 
-        let pool_sizes = [vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
+		let descriptor_set_layout =
+			unsafe { ash_device.create_descriptor_set_layout(&layout_info, None)? };
 
-            descriptor_count: 1,
-        }];
+		let pool_sizes = [vk::DescriptorPoolSize {
+			ty: vk::DescriptorType::UNIFORM_BUFFER,
 
-        let pool_info = vk::DescriptorPoolCreateInfo::default()
-            .pool_sizes(&pool_sizes)
-            .max_sets(1);
+			descriptor_count: 2,
+		}];
 
-        let descriptor_pool = match unsafe { ash_device.create_descriptor_pool(&pool_info, None) } {
-            Ok(pool) => pool,
+		let pool_info = vk::DescriptorPoolCreateInfo::default()
+			.pool_sizes(&pool_sizes)
+			.max_sets(1);
 
-            Err(error) => {
-                unsafe {
-                    ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                }
+		let descriptor_pool = match unsafe { ash_device.create_descriptor_pool(&pool_info, None) } {
+			Ok(pool) => pool,
 
-                return Err(error.into());
-            }
-        };
+			Err(error) => {
+				unsafe {
+					ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+				}
 
-        let layouts = [descriptor_set_layout];
+				return Err(error.into());
+			}
+		};
 
-        let allocate_info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&layouts);
+		let layouts = [descriptor_set_layout];
 
-        let descriptor_sets = match unsafe { ash_device.allocate_descriptor_sets(&allocate_info) } {
-            Ok(sets) => sets,
+		let allocate_info = vk::DescriptorSetAllocateInfo::default()
+			.descriptor_pool(descriptor_pool)
+			.set_layouts(&layouts);
 
-            Err(error) => {
-                unsafe {
-                    ash_device.destroy_descriptor_pool(descriptor_pool, None);
+		let descriptor_sets = match unsafe { ash_device.allocate_descriptor_sets(&allocate_info) } {
+			Ok(sets) => sets,
 
-                    ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                }
+			Err(error) => {
+				unsafe {
+					ash_device.destroy_descriptor_pool(descriptor_pool, None);
 
-                return Err(error.into());
-            }
-        };
+					ash_device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+				}
 
-        let descriptor_set = descriptor_sets[0];
+				return Err(error.into());
+			}
+		};
 
-        let buffer_info = [vk::DescriptorBufferInfo::default()
-            .buffer(uniform_buffer.raw())
-            .offset(0)
-            .range(uniform_size)];
+		let descriptor_set = descriptor_sets[0];
 
-        let writes = [vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_set)
-            .dst_binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .buffer_info(&buffer_info)];
+		let buffer_info = [vk::DescriptorBufferInfo::default()
+			.buffer(uniform_buffer.raw())
+			.offset(0)
+			.range(uniform_size)];
 
-        unsafe {
-            ash_device.update_descriptor_sets(&writes, &[]);
-        }
+		let lighting_info = [vk::DescriptorBufferInfo::default()
+			.buffer(lighting_buffer.raw())
+			.offset(0)
+			.range(size_of::<LightingUniform>() as u64)];
+		let writes = [
+			vk::WriteDescriptorSet::default()
+				.dst_set(descriptor_set)
+				.dst_binding(0)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.buffer_info(&buffer_info),
+			vk::WriteDescriptorSet::default()
+				.dst_set(descriptor_set)
+				.dst_binding(1)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.buffer_info(&lighting_info),
+		];
 
-        Ok(Self {
-            device: ash_device,
+		unsafe {
+			ash_device.update_descriptor_sets(&writes, &[]);
+		}
 
-            uniform_buffer,
+		Ok(Self {
+			device: ash_device,
 
-            descriptor_set_layout,
-            descriptor_pool,
-            descriptor_set,
-        })
-    }
+			uniform_buffer,
+			lighting_buffer,
 
-    pub fn update(&self, camera: &CameraUniform) -> Result<(), VulkanCameraError> {
-        self.uniform_buffer.write(std::slice::from_ref(camera))?;
+			descriptor_set_layout,
+			descriptor_pool,
+			descriptor_set,
+		})
+	}
 
-        Ok(())
-    }
+	pub fn update(&self, camera: &CameraUniform) -> Result<(), VulkanCameraError> {
+		self.uniform_buffer.write(std::slice::from_ref(camera))?;
 
-    pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.descriptor_set_layout
-    }
+		Ok(())
+	}
 
-    pub fn descriptor_set(&self) -> vk::DescriptorSet {
-        self.descriptor_set
-    }
+	/// The caller must finish the previous frame before updating uniforms.
+	pub(crate) fn update_lighting(
+		&self,
+		lighting: &LightingUniform,
+	) -> Result<(), VulkanCameraError> {
+		self.lighting_buffer.write(std::slice::from_ref(lighting))?;
+		Ok(())
+	}
+
+	pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+		self.descriptor_set_layout
+	}
+
+	pub fn descriptor_set(&self) -> vk::DescriptorSet {
+		self.descriptor_set
+	}
 }
 
 impl Drop for VulkanCamera {
-    fn drop(&mut self) {
-        unsafe {
-            self.device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
+	fn drop(&mut self) {
+		unsafe {
+			self.device
+				.destroy_descriptor_pool(self.descriptor_pool, None);
 
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-        }
-    }
+			self.device
+				.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+		}
+	}
 }

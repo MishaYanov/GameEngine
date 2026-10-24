@@ -67,8 +67,7 @@ impl GizmoOverlay {
 				let up = right
 					.cross(Vec3::from_array(camera.forward()))
 					.normalize_or_zero()
-					* thickness
-					* 3.0;
+					* thickness * 3.0;
 				let base = vertices.len() as u32;
 				for point in [
 					segment.b - right - up,

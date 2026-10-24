@@ -31,7 +31,10 @@ Cancellation of queued jobs does not launch them. Active cancellation stops the 
 
 The Board provides Backlog, In Progress, Blocked and Done. Create/edit/delete cards, drag between columns or use status selects and reorder buttons. Cards retain diagnostic session IDs and up to 100 job links. From Automation settings choose a package/profile, then build/test from a card or link an existing run. Suggestions describe the latest outcome; successful tests/builds never silently mark a task Done. Log details can create a diagnostic task. Limits are 1000 cards / 4 MiB; unreadable board storage is protected from automatic overwriting.
 
-**Current scene packaging gap:** the game now requires `assets/scenes/robots.json`, but the builder asset allowlist omits JSON. Source generation can compile successfully yet omit this required runtime file. Scene-based generated startup is not verified until the allowlist includes the scene. See [scene persistence](../../scene-persistence.md).
+The scene JSON asset allowlist gap is now fixed: bounded validated asset JSON is included with native model/image
+dependencies. Traversal is sorted and capped; unsafe/secret-like JSON and links are rejected rather than copying
+arbitrary metadata. Generated compilation remains separate from installed/runtime acceptance.
+See [packaging step22](../../editor-steps-21-35.md#step-22-json-aware-packaging).
 
 Project Builder v1 creates an independent **native game workspace on Windows**. It does not generate the Angular editor/client host. Enter a name, source and new absolute destination outside the source workspace; the destination parent must already exist. Preview the allowlisted sources/assets, then generate. Offline validation uses cached Cargo dependencies by default; disable the checkbox to permit downloads. Rust and Vulkan SDK/glslc are required.
 

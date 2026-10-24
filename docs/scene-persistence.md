@@ -5,45 +5,35 @@ introduces `runtime::scene_data`, `runtime::scene_io`, application save/reload, 
 `apps/game/assets/scenes/robots.json`. This is a first scene format and demo integration, not a completed editor
 authoring workflow.
 
-## Schema version 2 and persistent identity
+## Schema version 3 and persistent identity
 
-Current saves use schema version **2**: `schema_version`, `bindings`, ordered `entities`, and `camera`. Each entity now
-has a persistent `key` plus name, asset-relative model_path, and position/rotation/scale. Camera fields remain
-position/yaw/pitch/vertical_fov/near/far in radians where applicable. Names are labels and can repeat; keys must be
-unique within a scene.
+Current saves use version **3**, retaining entity keys/bindings/transforms/camera and adding optional parent keys,
+renderable state, selected mesh_index, tint material override, collider data, and a bounded scene light list.
+Nonrenderable entities can preserve imported transform-only nodes. Names are labels; keys provide document identity.
+Runtime EntityIds and GPU handles are not serialized.
 
-`EntityKey::new` requires a nonempty string without whitespace; `generate()` creates a UUID v4 string. Keys serialize as
-strings. `EntityId` remains a transient scene lookup value, not a persistent reference. `Scene::entity_by_key` resolves
-a key after loading; never reuse an old ID as a cross-scene reference.
+Version-1 and version-2 input migrates in memory to v3. V1 receives deterministic legacy keys; V2 preserves
+keys/bindings. New fields receive compatible defaults and older scenes receive a migrated default light. Reading alone
+does not rewrite files. Unknown future versions fail; the current to_json writes v3.
 
-`scene_data::parse_json` returns validated data and its original `source_schema_version`. Version-1 JSON is migrated in
-memory to version 2: keys become `legacy-entity-{index}` and bindings start empty. `SceneData::from_json` uses this
-migration path; `to_json` writes validated version 2. Other versions fail. Reading alone does not rewrite the original
-file.
+Validation rejects malformed identities/paths, duplicates, missing/cyclic parents, invalid world transforms, non-finite
+values, projection errors, and invalid materials/colliders/lights. The ceiling is 32 MiB scene JSON, 100,000 entities
+and 16 lights, not a tested real-time scene size. Local TRS remains the format: keep-world reparent can fail when a
+required transform contains shear or cannot be safely inverted.
 
-The game supplies a version-1 compatibility adapter: its first two loaded IDs get `robot_a`/`robot_b` bindings.
-Version-2 games require those bindings explicitly and do not infer roles from order or names. Robot simulation requires
-distinct roles when both are present; generic Edit scenes and Play without robot simulation do not require them. The
-application only adds version-1 compatibility roles when at least two entities exist. Saving then persists the migrated
-keys/bindings as version 2.
+## Document history and prefabs
 
-Validation rejects unknown fields, blank names/paths, duplicate or whitespace-containing keys, blank/dangling bindings,
-non-finite transform/camera values, invalid camera projection, and pitch beyond ±89 degrees. Model paths use '/' and
-reject absolute/drive/backslash/parent traversal syntax; asset loading checks actual containment. Scale validation
-checks finiteness, not positivity or nonsingularity.
+The authoritative Angular path edits CPU SceneData through runtime::editor::EditorSession and expected-revision
+commands. It provides multi-key selection, grouped transactions and bounded patch history (128 records / 16 MiB).
+Save/reload reject an active transaction; commit/cancel is explicit. Authored content is separate from the temporary
+Play copy and saving never implicitly adopts simulated changes.
 
-No GPU handles, Arc values, runtime IDs, current selection, history, animation pause, or controller settings are
-serialized. Persistent keys are scene identity, not a global cross-project reference system.
+PrefabData has its own schema version 1 and bounded isolated entity subtrees. Export detaches external roots while
+preserving placement; instantiation creates new keys and remaps internal parents as one edit. Prefabs are not
+live-linked overrides or copies of every referenced asset. See [steps 21–35](editor-steps-21-35.md).
 
-## Scene metadata and snapshots
-
-`spawn_keyed_model` accepts a validated unique key. `spawn_persistent_model` generates a fresh key; `duplicate` clones
-the source's shared model and transform, adds an offset and a ' Copy' label, and assigns a new key. `spawn_model` still
-records no persistent key, so it is insufficient for saving on its own. `spawn`/`spawn_named` also lack source paths.
-
-`Scene::to_data(&camera)` requires both a model path and key for every entity, preserves bindings, and validates the
-snapshot. `key`, `entity_by_key`, `set_binding`, and `binding` expose identity/role lookup. Removing an entity removes
-bindings that target its key. See [editing and history](scene-editing.md).
+The older GPU SceneEditor/Scene snapshot APIs remain for legacy demo compatibility, with a different history model. Do
+not carry their transient IDs/history across document replacement or treat them as the new Angular transport.
 
 ## Load and save APIs
 
@@ -54,27 +44,20 @@ traversal.
 
 `scene_io::save(path, &scene, &camera)` serializes first, creates an exclusive sibling temporary file, writes/syncs/closes it, then renames it over the destination. Failures clean up the temporary file where possible; the previous file is not deliberately deleted before replacement. The parent must exist. This replacement pattern is not a universal crash-durability guarantee or a multi-writer conflict policy.
 
-## Game integration and controls
+## Application ownership and packaging
 
-Startup reads `<asset root>/scenes/robots.json` into Edit mode and a generic SceneEditor. Robot simulation is optional
-and runs on a temporary cloned scene/camera during Play (F6). Model resources are shared through Arc. Stop restores
-authored state. Generic scenes need no robot bindings; a version-1 compatibility adapter uses the first two IDs only
-when available. Version-2 roles resolve through keys, not file order or names.
+Angular owns editor controls and the chosen game pane. Its service supplies open/execute/save/reload and prefab/import
+operations; no new layout or hardcoded keys were added. The host's EditorWorkspace resolves scoped project paths and
+owns CPU session data, while the Windows viewport worker owns render resources.
 
-F5 snapshots authored content even during Play. F9 reloads disk; success replaces scene/cache/camera/editor after GPU
-idle and exits Play, while failure preserves live/authored state. Command priority is **F9, F5, F6, Delete, C, N**.
-Save, reload, and mode transitions reset timing and suppress conflicting input. Their file operations are not undoable,
-while transforms, rename, spawn, duplicate, and delete now share a mixed undo history.
+The standalone game now normally runs without editor overlays. Historical native-demo F5/F6/F9 controls require the
+explicit legacy demo environment variable and are not the product editor contract. See [game modes](apps/game/README.md)
+and [Angular integration](apps/editor/README.md).
 
-The native game panel provides editable name/transform fields, a flat entity list, an asset catalog, and dirty state
-derived from exact authored content comparison. Current selection/history and Play state are not persisted. Development
-saves overwrite the checkout's scene asset file; no separate user-save folder or overwrite prompt exists. Installed mode
-loads its packaged scene but excludes development editing tools. See [editing and controls](scene-editing.md)
-and [steps 11–20](editor-steps-11-20.md).
-
-## Distribution limitation
-
-The compiler recursively copies the asset tree and its copy test now checks `scenes/robots.json` as well as the model/textures. The admin Project Builder is different: its asset extension allowlist currently omits JSON, so a generated workspace can compile while missing the scene required at startup. Do not treat successful generated-project compilation as runtime validation. Fix that allowlist in implementation before relying on generated output with the new scene-based startup.
+Compiler installation and admin source generation now include validated asset JSON, fixing the earlier missing-scene
+packaging omission. Copying is bounded and ordered with link/containment/format checks. Generated compilation, a
+successful save, or a hidden smoke run still does not prove installed execution outside the checkout or full user
+interaction.
 
 ## Checks
 
