@@ -1,4 +1,5 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {provideRouter} from '@angular/router';
 
 import {EditorHeader} from './editor-header';
 
@@ -9,6 +10,7 @@ describe('EditorHeader', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [EditorHeader],
+            providers: [provideRouter([])],
         }).compileComponents();
 
         fixture = TestBed.createComponent(EditorHeader);

@@ -1,0 +1,58 @@
+:host {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  min-height: var(--layout-portal-min-height);
+}
+
+.portal {
+  position: relative;
+  height: 100%;
+  min-height: inherit;
+  background: var(--color-pane);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-pane);
+  overflow: hidden;
+}
+
+.surface {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+}
+
+.fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: inherit;
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.fallback editor-icon {
+  --layout-icon-size: var(--space-8);
+  color: var(--color-text-muted);
+}
+
+p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.fallback span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.error {
+  position: absolute;
+  inset: auto 0 0;
+  padding: var(--space-3);
+  background: var(--color-dialog);
+  color: var(--color-danger);
+}

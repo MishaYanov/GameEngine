@@ -1,0 +1,20 @@
+[
+  {
+    "level": "info",
+    "message": "SUBJECT_STORE_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T17:29:57.986Z",
+    "url": "http://127.0.0.1:4300/design/chunk-ER5UUCDF.js"
+  },
+  {
+    "level": "info",
+    "message": "SUBJECT_STORE_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T17:30:31.836Z",
+    "url": "http://127.0.0.1:4300/design/chunk-ER5UUCDF.js"
+  },
+  {
+    "level": "info",
+    "message": "SUBJECT_STORE_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T17:33:09.226Z",
+    "url": "http://127.0.0.1:4300/design/chunk-ER5UUCDF.js"
+  }
+]

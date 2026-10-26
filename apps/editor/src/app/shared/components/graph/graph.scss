@@ -1,0 +1,233 @@
+:host {
+  display: block;
+  height: 100%;
+  min-height: var(--layout-graph-min-height);
+  min-width: 0;
+}
+
+.graph {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: inherit;
+  background: var(--color-graph-bg);
+  color: var(--color-text);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-graph-toolbar);
+  border-bottom: var(--border-width) solid var(--color-graph-node-edge);
+}
+
+.graph-title,
+.tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.graph-title {
+  font-size: var(--font-size-sm);
+}
+
+.graph-title editor-icon {
+  color: var(--color-action);
+}
+
+.domain {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: capitalize;
+}
+
+button,
+select {
+  min-height: var(--layout-subject-control-height);
+  border: var(--border-width) solid var(--color-graph-node-edge);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-graph-node);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: var(--cursor-action);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+button:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.icon-button {
+  width: var(--layout-subject-control-height);
+  padding: 0;
+  background: transparent;
+}
+
+.add {
+  background: var(--color-action);
+  border-color: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.add:hover {
+  background: var(--color-action-hover);
+}
+
+.zoom {
+  min-width: var(--space-10);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage {
+  background-size: calc(var(--layout-graph-grid-size) * var(--graph-zoom)) calc(var(--layout-graph-grid-size) * var(--graph-zoom));
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-image: radial-gradient(
+          circle,
+          var(--color-graph-grid) var(--border-width),
+          transparent var(--border-width)
+  );
+  cursor: var(--cursor-drag);
+  touch-action: none;
+}
+
+.stage:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.stage.interacting,
+.stage.interacting :is([data-node-handle], .port) {
+  cursor: var(--cursor-dragging);
+}
+
+.stage.connecting {
+  cursor: var(--cursor-connect);
+}
+
+.world {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+.connections {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.wire,
+.wire-hit {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.wire {
+  stroke: var(--color-action);
+  stroke-width: var(--layout-graph-wire-width);
+  pointer-events: none;
+}
+
+.wire[data-type='float'] {
+  stroke: var(--color-graph-float);
+}
+
+.wire[data-type='vector3'] {
+  stroke: var(--color-graph-vector);
+}
+
+.wire[data-type='pose'] {
+  stroke: var(--color-graph-pose);
+}
+
+.wire-hit {
+  stroke: transparent;
+  stroke-width: var(--layout-graph-wire-hit-area);
+  cursor: var(--cursor-action);
+  pointer-events: stroke;
+}
+
+.wire-hit:hover {
+  stroke: var(--color-graph-wire-hover);
+  outline: none;
+}
+
+.wire-hit:focus-visible {
+  stroke: var(--color-focus);
+  outline: none;
+}
+
+.draft {
+  stroke-dasharray: 6 5;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  font-size: var(--font-size-sm);
+}
+
+.empty editor-icon {
+  --layout-icon-size: var(--space-8);
+}
+
+.delete-node {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  background: var(--color-graph-toolbar);
+  border-top: var(--border-width) solid var(--color-graph-node-edge);
+}
+
+.notice {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  min-height: var(--space-6);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.notice.error {
+  color: var(--color-danger);
+}

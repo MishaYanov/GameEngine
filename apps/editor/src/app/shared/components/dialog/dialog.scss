@@ -1,0 +1,175 @@
+:host {
+  display: contents;
+}
+
+dialog {
+  width: var(--dialog-width);
+  height: var(--dialog-height);
+  min-width: min(var(--dialog-min-width), var(--layout-dialog-max-width));
+  min-height: min(var(--dialog-min-height), var(--layout-dialog-max-height));
+  max-width: min(var(--dialog-max-width), var(--layout-dialog-max-width));
+  max-height: min(var(--dialog-max-height), var(--layout-dialog-max-height));
+  padding: 0;
+  border: var(--border-width) solid var(--color-dialog-edge);
+  border-radius: var(--radius-dialog);
+  background: var(--color-dialog);
+  color: var(--color-text);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+}
+
+dialog::backdrop {
+  background: var(--color-dialog-backdrop);
+}
+
+dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.expanded {
+  width: var(--layout-dialog-max-width);
+  height: var(--layout-dialog-max-height);
+  max-width: var(--layout-dialog-max-width);
+  max-height: var(--layout-dialog-max-height);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-dialog-edge);
+  flex: none;
+}
+
+header.draggable {
+  cursor: var(--cursor-drag);
+  touch-action: none;
+  user-select: none;
+}
+
+header.draggable:active,
+.drag-handle:active {
+  cursor: var(--cursor-dragging);
+}
+
+h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: var(--cursor-drag);
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+button {
+  min-height: var(--layout-subject-control-height);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-subject-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-subject-toggle);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: var(--cursor-action);
+}
+
+button:hover {
+  background: var(--color-surface-hover);
+}
+
+button:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: var(--layout-subject-control-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.primary {
+  background: var(--color-action);
+  color: var(--color-on-action);
+  border-color: var(--color-action);
+}
+
+.primary:hover {
+  background: var(--color-action-hover);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-subject-gap);
+  padding: var(--space-3);
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: var(--border-width) solid var(--color-dialog-edge);
+  flex: none;
+}
+
+footer.resizable {
+  padding-inline-end: var(--space-10);
+}
+
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: var(--layout-dialog-resize-hit-area);
+  height: var(--layout-dialog-resize-hit-area);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.resize-handle:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}

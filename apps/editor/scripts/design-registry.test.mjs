@@ -68,8 +68,8 @@ test('detects aliased component decorators, required input aliases, and preview 
     await generateRegistry(f.root, f.output);
     const source = await f.source();
     assert.match(source, /requiredInputs: \["title","value"\]/);
-    assert.match(source, /pane\.design/);
-    assert.match(source, /\.\.\.preview.default/);
+    assert.match(source, /pane\.scss\.design/);
+    assert.match(source, /ComponentPreview = preview.default/);
 });
 
 test('supports default-exported components and explicit previews for multi-component folders', async (t) => {

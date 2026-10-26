@@ -1,0 +1,22 @@
+<section [attr.aria-label]="label()" class="portal">
+    @if (nativeAvailable) {
+        <div
+                #viewport="engineViewport"
+                (engineViewportError)="failed($event)"
+                (engineViewportInput)="viewportInput.emit($event)"
+                (engineViewportStatus)="statusChanged($event)"
+                [engineViewport]="active()"
+                class="surface"
+        ></div>
+        @if (error(); as message) {
+            <p class="error" role="alert">{{ message }}</p>
+        }
+    } @else {
+        <div class="fallback">
+            <editor-icon name="cube"/>
+            <p>Vulkan viewport</p>
+            <span>Available in the desktop editor</span>
+            <ng-content select="[portal-fallback]"/>
+        </div>
+    }
+</section>

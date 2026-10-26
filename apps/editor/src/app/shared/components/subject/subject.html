@@ -1,0 +1,50 @@
+<section
+        [attr.aria-busy]="form()().pending()"
+        [attr.aria-label]="title()"
+        class="subject"
+        role="group"
+>
+    <header (click)="toggleFromHeader($event)" role="presentation">
+        <h3 tabindex="-1">
+            <button
+                    [attr.aria-controls]="bodyId"
+                    [attr.aria-expanded]="!collapsed()"
+                    [attr.aria-label]="(collapsed() ? 'Expand ' : 'Minimize ') + title()"
+                    class="header-toggle"
+                    type="button"
+            >
+                <editor-icon [class.open]="!collapsed()" class="disclosure-icon" name="expand"/>
+                @if (icon(); as name) {
+                    <editor-icon [name]="name"/>
+                }
+                <span>{{ title() }}</span>
+            </button>
+        </h3>
+        <div class="subject-actions">
+            <ng-content select="[subject-actions]"/>
+        </div>
+    </header>
+    <div [hidden]="collapsed()" [id]="bodyId" class="subject-content">
+        <ng-content select="[subject-before-fields]"/>
+        <editor-subject-fields
+                [advancedTraits]="advancedTraits()"
+                [expanded]="expanded()"
+                [fields]="form()"
+                [id]="traitsId"
+                [path]="title()"
+        />
+        <ng-content/>
+    </div>
+    @if (expandable() && !collapsed()) {
+        <button
+                (click)="expanded.set(!expanded())"
+                [attr.aria-controls]="traitsId"
+                [attr.aria-expanded]="expanded()"
+                [attr.aria-label]="(expanded() ? 'Less ' : 'More ') + title() + ' traits'"
+                class="traits-toggle"
+                type="button"
+        >
+            <editor-icon [class.open]="expanded()" name="expand"/>
+        </button>
+    }
+</section>

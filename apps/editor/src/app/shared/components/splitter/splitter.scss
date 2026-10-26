@@ -1,0 +1,45 @@
+:host {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--layout-resize-hit-area) / -2);
+  width: var(--layout-resize-hit-area);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline-offset: 0;
+}
+
+:host::before {
+  content: '';
+  position: absolute;
+  inset: var(--space-3) calc((var(--layout-resize-hit-area) - var(--border-width)) / 2);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--duration-fast);
+}
+
+:host(:hover)::before {
+  background: var(--color-border-strong);
+}
+
+:host(:focus-visible)::before,
+:host(.dragging)::before {
+  background: var(--color-focus);
+}
+
+:host(.horizontal) {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: calc(var(--layout-resize-hit-area) / -2);
+  width: auto;
+  height: var(--layout-resize-hit-area);
+  cursor: row-resize;
+}
+
+:host(.horizontal)::before {
+  inset: calc((var(--layout-resize-hit-area) - var(--border-width)) / 2) var(--space-3);
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "level": "info",
+    "message": "SUBJECT_TRAITS_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T17:49:26.573Z",
+    "url": "http://127.0.0.1:4300/design/chunk-GYQGK7AO.js"
+  },
+  {
+    "level": "info",
+    "message": "SUBJECT_TRAITS_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T17:49:56.290Z",
+    "url": "http://127.0.0.1:4300/design/chunk-GYQGK7AO.js"
+  }
+]

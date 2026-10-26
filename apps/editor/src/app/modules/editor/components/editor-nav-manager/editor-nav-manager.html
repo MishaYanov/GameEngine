@@ -1,10 +1,38 @@
-<section class="nav-manager">
-    <app-drawer
-            [config]="drawerConfig"
-            [type]="'left'"
-            preferenceKey="editor.navigation"
-    >
-        heloooooooo
-
-    </app-drawer>
-</section>
+<app-drawer
+    #drawer
+    [config]="drawerConfig"
+    icon="cube"
+    label="Project drawer"
+    preferenceKey="editor.navigation"
+    resizeLabel="Resize Explorer"
+    type="left"
+>
+    <nav aria-label="Project explorer" class="explorer">
+        <header class="workspace-title">
+            <button
+                    (click)="drawer.toggleCollapsed()"
+                    aria-expanded="true"
+                    aria-label="Minimize Project drawer"
+                    class="drawer-toggle"
+                    data-drawer-toggle
+                    title="Minimize Project drawer"
+                    type="button"
+            >
+                <editor-icon name="cube"/>
+            </button>
+            <span>Game Engine</span>
+            <span class="workspace-badge">Editor</span>
+        </header>
+        <div class="explorer-heading">
+            <editor-icon name="folder"/>
+            <h2>Explorer</h2>
+        </div>
+        <div class="explorer-empty">
+            <p>No project open</p>
+            <a routerLink="/setup">Create project
+                <editor-icon name="arrowRight"/>
+            </a>
+        </div>
+        <footer>Project files</footer>
+    </nav>
+</app-drawer>

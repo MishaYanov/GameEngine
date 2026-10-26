@@ -1,3 +1,38 @@
-<div class="app-drawer">
+<div [hidden]="collapsed()" class="app-drawer">
     <ng-content></ng-content>
 </div>
+@if (collapsed()) {
+    <nav [attr.aria-label]="label() + ' subjects'" class="subject-rail">
+        <button
+                (click)="toggleCollapsed()"
+                [attr.aria-label]="'Expand ' + label()"
+                [title]="'Expand ' + label()"
+                aria-expanded="false"
+                class="rail-toggle"
+                type="button"
+        >
+            <editor-icon [name]="icon()"/>
+        </button>
+        @for (subject of subjects(); track subject.element) {
+            <button
+                    (click)="openSubject(subject)"
+                    [attr.aria-label]="'Show ' + subject.title()"
+                    [title]="subject.title()"
+                    type="button"
+            >
+                <editor-icon [name]="subject.icon() ?? 'object'"/>
+            </button>
+        }
+    </nav>
+} @else {
+    <app-splitter
+            (edge)="resizeTo($event)"
+            (reset)="resetSize()"
+            (resize)="resizeBy($event)"
+            [label]="resizeLabel()"
+            [maximum]="maximum()"
+            [minimum]="minimum()"
+            [orientation]="horizontal() ? 'vertical' : 'horizontal'"
+            [value]="size()"
+    />
+}

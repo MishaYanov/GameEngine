@@ -1,9 +1,8 @@
 @mixin pane {
-  background: var(--color-bg);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3);
+  background: var(--color-pane);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-pane);
   color: var(--color-text);
 
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-pane);
 }

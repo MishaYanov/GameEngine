@@ -1,5 +1,7 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
+import {By} from '@angular/platform-browser';
+import {Splitter} from '../splitter/splitter';
 import {LayoutPreferences} from '../../models/config.model';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../services/layout-preferences-storage';
 import {LayoutPreferencesService} from '../../services/layout-preferences.service';
@@ -114,5 +116,45 @@ describe('Drawer configuration', () => {
         expect(component.configReady()).toBe(false);
         expect(component.config()).toEqual(DEFAULT_DRAWER_SETTINGS);
         expect(save).not.toHaveBeenCalled();
+    });
+
+    it('clamps resizing to the configured limits and autosaves the new size', async () => {
+        fixture.componentRef.setInput('config', {
+            width: '240px',
+            minWidth: '192px',
+            maxWidth: '400px',
+        });
+        await initialize();
+        const element: HTMLElement = fixture.nativeElement;
+        vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 240, 600));
+        vi.spyOn(element.parentElement!, 'getBoundingClientRect').mockReturnValue(
+            new DOMRect(0, 0, 1000, 600),
+        );
+        const splitter: Splitter = fixture.debugElement.query(By.directive(Splitter)).componentInstance;
+        splitter.resize.emit(1000);
+        fixture.detectChanges();
+        expect(component.config().width).toBe('400px');
+        await preferences.flush();
+        expect(save.mock.calls.at(-1)?.[0].components['editor.navigation']['width']).toBe('400px');
+        splitter.edge.emit('min');
+        expect(component.config().width).toBe('192px');
+    });
+
+    it('resizes right drawers in the opposite direction', async () => {
+        fixture.componentRef.setInput('type', 'right');
+        fixture.componentRef.setInput('config', {
+            width: '240px',
+            minWidth: '192px',
+            maxWidth: '400px',
+        });
+        await initialize();
+        const element: HTMLElement = fixture.nativeElement;
+        vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 240, 600));
+        vi.spyOn(element.parentElement!, 'getBoundingClientRect').mockReturnValue(
+            new DOMRect(0, 0, 1000, 600),
+        );
+        const splitter: Splitter = fixture.debugElement.query(By.directive(Splitter)).componentInstance;
+        splitter.resize.emit(20);
+        expect(component.config().width).toBe('220px');
     });
 });

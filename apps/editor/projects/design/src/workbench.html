@@ -1,13 +1,15 @@
 <main>
     <h1>Components</h1>
     @for (section of sections(); track section.id) {
-        <section [attr.aria-labelledby]="'design-' + section.id">
+        <section [attr.aria-labelledby]="'design-' + section.id" [attr.data-component]="section.id">
             <h2 [id]="'design-' + section.id">{{ section.title }}</h2>
             @if (section.component; as component) {
-                <ng-container
-                        [ngComponentOutletInputs]="section.inputs ?? {}"
-                        [ngComponentOutlet]="component"
-                />
+                <div class="component-preview">
+                    <ng-container
+                            [ngComponentOutletInputs]="section.inputs ?? {}"
+                            [ngComponentOutlet]="component"
+                    />
+                </div>
             } @else if (section.message) {
                 <p>{{ section.message }}</p>
             }

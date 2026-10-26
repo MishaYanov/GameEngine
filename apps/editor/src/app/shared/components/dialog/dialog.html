@@ -1,0 +1,104 @@
+@if (open() || rendered()) {
+    <dialog
+        #surface
+        (cancel)="cancel($event)"
+        (click)="backdrop($event)"
+        (close)="didClose()"
+        (keydown)="trapFocus($event)"
+        (lostpointercapture)="finishDrag($event)"
+        (pointercancel)="finishDrag($event)"
+        (pointermove)="moveDrag($event)"
+        (pointerup)="finishDrag($event)"
+        [attr.aria-labelledby]="titleId"
+        [class.expanded]="expanded()"
+        [style.--dialog-height]="settings().height === 'auto' ? 'fit-content' : settings().height"
+        [style.--dialog-max-height]="settings().maxHeight"
+        [style.--dialog-max-width]="settings().maxWidth"
+        [style.--dialog-min-height]="settings().minHeight"
+        [style.--dialog-min-width]="settings().minWidth"
+        [style.--dialog-width]="settings().width"
+        [style.translate]="expanded() ? '0px 0px' : settings().x + 'px ' + settings().y + 'px'"
+    >
+        <header
+                (pointerdown)="startDrag($event)"
+                [class.draggable]="settings().draggable && !expanded()"
+                role="presentation"
+        >
+            <h2>
+                @if (settings().draggable && !expanded()) {
+                    <button
+                            (keydown)="moveWithKeyboard($event)"
+                            [attr.aria-label]="'Move ' + title() + ', use arrow keys'"
+                            class="drag-handle"
+                            type="button"
+                    >
+                        @if (icon(); as name) {
+                            <editor-icon [name]="name"/>
+                        }
+                        <span [id]="titleId">{{ title() }}</span>
+                    </button>
+                } @else {
+                    <span [id]="titleId">{{ title() }}</span>
+                }
+            </h2>
+            <div class="actions" data-dialog-action>
+                @if (settings().expandable) {
+                    <button
+                            (click)="toggleExpanded()"
+                            [attr.aria-expanded]="expanded()"
+                            [attr.aria-label]="(expanded() ? 'Restore ' : 'Expand ') + title()"
+                            class="icon-button"
+                            type="button"
+                    >
+                        <editor-icon [name]="expanded() ? 'restore' : 'maximize'"/>
+                    </button>
+                }
+                <button
+                        (click)="close()"
+                        [attr.aria-label]="'Close ' + title()"
+                        class="icon-button"
+                        type="button"
+                >
+                    <editor-icon name="close"/>
+                </button>
+            </div>
+        </header>
+        <form (submit)="submitForm($event)" [attr.aria-busy]="pending()" novalidate>
+            <div class="body">
+                @for (subject of subjects(); track subject.id) {
+                    <editor-subject
+                            [form]="subject.form"
+                            [icon]="subject.icon"
+                            [inputs]="subject.inputs ?? []"
+                            [title]="subject.title"
+                    />
+                } @empty {
+                    @if (renderFields()) {
+                        @if (form(); as fields) {
+                            <editor-subject-fields [fields]="fields" [path]="title()"/>
+                        }
+                    }
+                }
+                <ng-content/>
+            </div>
+            <footer [class.resizable]="settings().resizable && !expanded()" role="presentation">
+                <ng-content select="[dialog-actions]"/>
+                <button (click)="close()" type="button">Close</button>
+                @if (form() || subjects().length) {
+                    <button [disabled]="pending()" class="primary" type="submit">{{ submitLabel() }}</button>
+                }
+            </footer>
+        </form>
+        @if (settings().resizable && !expanded()) {
+            <button
+                    (keydown)="resizeWithKeyboard($event)"
+                    (pointerdown)="startDrag($event, 'resize')"
+                    [attr.aria-label]="'Resize ' + title() + ', use arrow keys'"
+                    class="resize-handle"
+                    type="button"
+            >
+                <editor-icon name="resize"/>
+            </button>
+        }
+    </dialog>
+}

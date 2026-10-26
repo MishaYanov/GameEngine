@@ -1,0 +1,105 @@
+<section [attr.aria-label]="label()" class="graph">
+    <header class="toolbar">
+        <div class="graph-title">
+            <editor-icon name="graph"/>
+            <strong>{{ label() }}</strong
+            ><span class="domain">{{ store.document().domain }}</span>
+        </div>
+        <div class="tools">
+            <select [formField]="paletteForm" aria-label="Node type">
+                @for (kind of palette(); track kind) {
+                    <option [value]="kind">{{ definition(kind).title }}</option>
+                }
+            </select>
+            <button (click)="add()" class="add" type="button">
+                <editor-icon name="plus"/>
+                Add node
+            </button>
+            <button (click)="zoomBy(0.8)" aria-label="Zoom out" class="icon-button" type="button">
+                <editor-icon name="minus"/>
+            </button>
+            <span aria-live="off" class="zoom">{{ percent() }}%</span>
+            <button (click)="zoomBy(1.25)" aria-label="Zoom in" class="icon-button" type="button">
+                <editor-icon name="plus"/>
+            </button>
+            <button (click)="fit()" aria-label="Fit graph" class="icon-button" type="button">
+                <editor-icon name="maximize"/>
+            </button>
+        </div>
+    </header>
+    <div
+        #stage
+        (keydown)="key($event)"
+        (lostpointercapture)="finish($event)"
+        (pointercancel)="finish($event)"
+        (pointerdown)="startPan($event)"
+        (pointermove)="move($event)"
+        (pointerup)="finish($event)"
+        (wheel)="wheel($event)"
+        [attr.aria-describedby]="instructionsId"
+        [attr.aria-label]="label() + ' canvas'"
+        [class.connecting]="pending()"
+        [class.interacting]="interacting()"
+        [style.--graph-zoom]="view().zoom"
+        [style.background-position]="view().x + 'px ' + view().y + 'px'"
+        class="stage"
+        tabindex="0"
+    >
+        <div [style.transform]="transform()" class="world">
+            <svg aria-label="Graph connections" class="connections" height="1" width="1">
+                @for (wire of wires(); track wire.id) {
+                    <path [attr.d]="wire.path" [attr.data-type]="wire.type" class="wire"/>
+                    <path
+                            (click)="store.disconnect(wire.id)"
+                            (keydown)="removeWire($event, wire.id)"
+                            [attr.aria-label]="wire.label"
+                            [attr.d]="wire.path"
+                            class="wire-hit"
+                            role="button"
+                            tabindex="0"
+                    />
+                }
+                @if (draft(); as path) {
+                    <path [attr.d]="path" class="wire draft"/>
+                }
+            </svg>
+            @for (node of store.document().nodes; track node.id) {
+                <editor-graph-node
+                        (moveStart)="startNode($event, node.id)"
+                        (portClick)="portClick($event)"
+                        (portPointer)="startPort($event)"
+                        (selectedChange)="store.select($event)"
+                        (valuesChange)="store.setValues(node.id, $event)"
+                        [connected]="connected()"
+                        [node]="node"
+                        [selected]="store.selected() === node.id"
+                />
+            }
+        </div>
+        @if (!store.document().nodes.length) {
+            <div class="empty">
+                <editor-icon name="graph"/>
+                <p>Add a node to start your {{ store.document().domain }} graph.</p>
+            </div>
+        }
+        @if (store.selected()) {
+            <button (click)="deleteSelected()" class="delete-node" type="button">
+                <editor-icon name="close"/>
+                Delete node
+            </button>
+        }
+    </div>
+    <footer>
+		<span [id]="instructionsId"
+        >Drag to pan · Wheel to zoom · Connect matching ports · Delete to remove</span
+        ><span
+    >{{ store.document().nodes.length }} nodes ·
+        {{ store.document().connections.length }} connections</span
+    >
+    </footer>
+    @if (store.error(); as error) {
+        <p class="notice error" role="alert">{{ error }}</p>
+    } @else {
+        <p class="notice" role="status">{{ message() || 'Ready' }}</p>
+    }
+</section>

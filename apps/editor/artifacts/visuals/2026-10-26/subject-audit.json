@@ -1,0 +1,15 @@
+{
+  "layout": {
+    "cards": 2,
+    "gap": "8px",
+    "measuredGap": 8
+  },
+  "audit": [
+    {
+      "level": "info",
+      "message": "SUBJECT_AUDIT {\"violations\":[]}",
+      "timestamp": "2026-10-26T16:58:24.702Z",
+      "url": "http://127.0.0.1:4300/design/chunk-GILIJRXE.js"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "level": "info",
+    "message": "COMPONENT_RESIZE_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T18:49:57.425Z",
+    "url": "http://127.0.0.1:4300/design/chunk-4LIDXQMV.js"
+  },
+  {
+    "level": "info",
+    "message": "COMPONENT_RESIZE_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T18:50:21.076Z",
+    "url": "http://127.0.0.1:4300/design/chunk-4LIDXQMV.js"
+  }
+]

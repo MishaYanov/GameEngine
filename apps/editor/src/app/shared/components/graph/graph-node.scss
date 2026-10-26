@@ -1,0 +1,145 @@
+:host {
+  position: absolute;
+  display: block;
+  width: var(--layout-graph-node-width);
+  border: var(--border-width) solid var(--color-graph-node-edge);
+  border-radius: var(--radius-lg);
+  background: var(--color-graph-node);
+  color: var(--color-text);
+  box-shadow: var(--shadow-graph-node);
+}
+
+:host(.selected) {
+  border-color: var(--color-action);
+  box-shadow: 0 0 0 var(--border-width) var(--color-action),
+  var(--shadow-graph-node);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-graph-node-edge);
+}
+
+header button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--layout-subject-control-height);
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+  cursor: var(--cursor-drag);
+  touch-action: none;
+}
+
+header button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+header button:active {
+  cursor: var(--cursor-dragging);
+}
+
+header editor-icon {
+  color: var(--color-action);
+}
+
+:host([data-domain='animation']) header editor-icon {
+  color: var(--color-graph-pose);
+}
+
+.category {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.input-ports,
+.output-ports {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.port {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--layout-graph-port-height);
+  min-width: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: var(--cursor-connect);
+  touch-action: none;
+  text-align: left;
+}
+
+.port:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+.output-ports .port {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.input-ports .port::before,
+.output-ports .port::after {
+  content: '';
+  flex: none;
+  width: var(--layout-graph-port-size);
+  height: var(--layout-graph-port-size);
+  border: var(--focus-width) solid var(--port-color);
+  border-radius: var(--radius-pill);
+  background: var(--color-graph-node);
+}
+
+.port.connected::before,
+.port.connected::after {
+  background: var(--port-color);
+}
+
+[data-type='float'] {
+  --port-color: var(--color-graph-float);
+}
+
+[data-type='vector3'] {
+  --port-color: var(--color-graph-vector);
+}
+
+[data-type='pose'] {
+  --port-color: var(--color-graph-pose);
+}
+
+.port:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+editor-graph-values {
+  display: block;
+  padding: var(--space-3);
+  border-top: var(--border-width) solid var(--color-graph-node-edge);
+}

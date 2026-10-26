@@ -1,0 +1,104 @@
+@use '../row/row-layout' as layout;
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+:host(.vector) {
+  @include layout.row(var(--layout-subject-control-min-width));
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.number-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+:host(.vector) .number-control > span {
+  text-transform: uppercase;
+}
+
+.number-control > span {
+  flex: none;
+}
+
+.text-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+  height: var(--layout-subject-control-height);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+input:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.boolean-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--layout-subject-control-height);
+}
+
+input[type='checkbox'] {
+  width: var(--layout-icon-size);
+  height: var(--layout-icon-size);
+  margin: 0;
+  accent-color: var(--color-action);
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+[hidden] {
+  display: none !important;
+}

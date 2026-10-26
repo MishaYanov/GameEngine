@@ -88,7 +88,7 @@ button {
   border: 0;
   border-radius: var(--radius-md);
   font-weight: var(--font-weight-semibold);
-  cursor: pointer;
+  cursor: var(--cursor-action);
   transition: background-color var(--duration-fast) var(--easing-standard);
 }
 

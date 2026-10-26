@@ -1,0 +1,14 @@
+@use './row-layout' as layout;
+
+editor-row {
+  @include layout.row;
+}
+
+editor-row[hidden] {
+  display: none;
+}
+
+editor-row > * {
+  min-width: 0;
+  max-width: 100%;
+}

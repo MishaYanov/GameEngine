@@ -12,6 +12,7 @@
     @include tokens.properties(tokens.layout(), 'layout-');
     @include tokens.properties(tokens.effects());
     @include tokens.properties(tokens.motion());
+    @include tokens.properties(tokens.cursors());
     @include tokens.properties(tokens.dark-theme());
     @include tokens.derived-colors;
     color-scheme: var(--color-scheme);

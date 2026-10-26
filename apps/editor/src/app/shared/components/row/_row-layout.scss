@@ -1,0 +1,7 @@
+@mixin row($minimum: var(--layout-row-control-min-width)) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, #{$minimum}), 1fr));
+  align-items: start;
+  gap: var(--layout-row-gap);
+  min-width: 0;
+}

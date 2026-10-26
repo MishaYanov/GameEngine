@@ -1,0 +1,20 @@
+[
+  {
+    "level": "info",
+    "message": "COMPONENT_DIALOG_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T18:30:30.541Z",
+    "url": "http://127.0.0.1:4300/design/chunk-CYE3CN5T.js"
+  },
+  {
+    "level": "info",
+    "message": "COMPONENT_DIALOG_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T18:30:30.877Z",
+    "url": "http://127.0.0.1:4300/design/chunk-CYE3CN5T.js"
+  },
+  {
+    "level": "info",
+    "message": "COMPONENT_DIALOG_AUDIT {\"violations\":[]}",
+    "timestamp": "2026-10-26T18:30:31.141Z",
+    "url": "http://127.0.0.1:4300/design/chunk-CYE3CN5T.js"
+  }
+]

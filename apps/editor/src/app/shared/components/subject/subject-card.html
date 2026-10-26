@@ -1,0 +1,46 @@
+@if (subject(); as subject) {
+    @switch (subject.kind) {
+        @case ('object') {
+            <editor-subject
+                    [form]="objectForm()"
+                    [icon]="store.definitions.object.icon"
+                    [inputs]="store.definitions.object.inputs"
+                    [title]="store.definitions.object.title"
+            />
+        }
+        @case ('transform') {
+            <editor-subject
+                    [form]="transformForm()"
+                    [icon]="store.definitions.transform.icon"
+                    [inputs]="store.definitions.transform.inputs"
+                    [title]="store.definitions.transform.title"
+            />
+        }
+        @case ('script') {
+            <editor-subject
+                    [form]="scriptForm()"
+                    [icon]="store.definitions.script.icon"
+                    [inputs]="scriptInputs()"
+                    [title]="script()?.className ?? store.definitions.script.title"
+            >
+                <div class="script-reference" subject-before-fields>
+                    <label
+                    ><span>Script</span>
+                        <select [formField]="assetForm()" aria-label="Script asset">
+                            <option value="">None</option>
+                            @if (missingAsset(); as missing) {
+                                <option [value]="missing.assetId" disabled>Missing: {{ missing.className }}</option>
+                            }
+                            @for (asset of store.scriptAssets(); track asset.assetId) {
+                                <option [value]="asset.assetId">{{ asset.className }}</option>
+                            }
+                        </select>
+                    </label>
+                    @if (script(); as script) {
+                        <p>{{ script.path }}</p>
+                    }
+                </div>
+            </editor-subject>
+        }
+    }
+}

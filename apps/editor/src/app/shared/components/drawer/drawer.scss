@@ -1,5 +1,92 @@
-@use '../../../styles/components/pane' as p;
+:host {
+	display: block;
+	flex: 0 0 auto;
+	position: relative;
+	width: var(--drawer-width);
+	height: 100%;
+	min-width: min(var(--drawer-min-width), var(--drawer-available-width));
+	max-width: min(var(--drawer-max-width), var(--drawer-available-width));
+	--drawer-available-width: max(0px, calc(100% - min(var(--layout-pane-min-width), 60%)));
+	--drawer-available-height: max(0px, calc(100% - min(var(--layout-pane-min-height), 60%)));
+}
 
+:host([hidden]) {
+	display: none;
+}
 .app-drawer {
-  @include p.pane;
+	height: 100%;
+	overflow: auto;
+	color: var(--color-text);
+	background: var(--color-drawer);
+	border-radius: var(--radius-pane);
+}
+
+.app-drawer[hidden] {
+	display: none;
+}
+
+:host(.collapsed) {
+	flex: 0 0 var(--layout-drawer-collapsed-width);
+	width: var(--layout-drawer-collapsed-width);
+	min-width: var(--layout-drawer-collapsed-width);
+	max-width: var(--layout-drawer-collapsed-width);
+}
+
+.subject-rail {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-1);
+	background: var(--color-drawer);
+	border-radius: var(--radius-pane);
+	overflow-y: auto;
+	overflow-x: hidden;
+}
+
+.subject-rail button {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 100%;
+	height: var(--layout-drawer-collapsed-width);
+	border: 0;
+	padding: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--color-text-muted);
+	cursor: var(--cursor-action);
+}
+
+.subject-rail button:hover {
+	color: var(--color-text);
+	background: var(--color-control-hover);
+}
+
+.subject-rail button:focus-visible {
+	outline-offset: calc(-1 * var(--focus-width));
+}
+
+.rail-toggle {
+	margin-bottom: var(--space-2);
+}
+
+:host([data-side='right']) app-splitter {
+	right: auto;
+	left: calc(var(--layout-resize-hit-area) / -2);
+}
+
+:host([data-side='top']),
+:host([data-side='bottom']) {
+	width: 100%;
+	min-width: 0;
+	max-width: none;
+	height: var(--drawer-height);
+	min-height: min(var(--drawer-min-height), var(--drawer-available-height));
+	max-height: min(var(--drawer-max-height), var(--drawer-available-height));
+}
+
+:host([data-side='bottom']) app-splitter {
+	bottom: auto;
+	top: calc(var(--layout-resize-hit-area) / -2);
 }

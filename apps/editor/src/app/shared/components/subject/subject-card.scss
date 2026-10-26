@@ -1,0 +1,36 @@
+:host {
+  display: block;
+  flex: none;
+  min-width: 0;
+}
+
+.script-reference {
+  margin-bottom: var(--space-3);
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+select {
+  width: 100%;
+  min-width: 0;
+  height: var(--layout-subject-control-height);
+  padding-inline: var(--space-2);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}

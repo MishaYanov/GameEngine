@@ -1,4 +1,5 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {provideRouter} from '@angular/router';
 
 import {EditorGridWrapper} from './editor-grid-wrapper';
 
@@ -9,6 +10,7 @@ describe('EditorGridWrapper', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [EditorGridWrapper],
+            providers: [provideRouter([])],
         }).compileComponents();
 
         fixture = TestBed.createComponent(EditorGridWrapper);

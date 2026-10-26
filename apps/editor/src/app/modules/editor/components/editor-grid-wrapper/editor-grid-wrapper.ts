@@ -1,17 +1,11 @@
 import {Component} from '@angular/core';
-import {LeftDrawer} from "./components/left-drawer/left-drawer";
-import {RightDrawer} from "./components/right-drawer/right-drawer";
-import {BottomDrawer} from "./components/bottom-drawer/bottom-drawer";
-import {TabsManager} from "./components/tabs-manager/tabs-manager";
+import {EditorPane} from '../../../../shared/components/pane/pane';
+import {EditorIcon} from '../../../../shared/icons/editor-icon';
+import {RouterLink} from '@angular/router';
 
 @Component({
     selector: 'editor-grid-wrapper',
-    imports: [
-        LeftDrawer,
-        RightDrawer,
-        BottomDrawer,
-        TabsManager
-    ],
+    imports: [EditorPane, EditorIcon, RouterLink],
     templateUrl: './editor-grid-wrapper.html',
     styleUrl: './editor-grid-wrapper.scss',
 })

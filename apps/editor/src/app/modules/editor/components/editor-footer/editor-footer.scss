@@ -1,0 +1,22 @@
+@use '../../../../styles/abstracts/variables' as tokens;
+
+:host {
+  display: block;
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--layout-statusbar-height);
+  padding: var(--space-1) var(--space-3) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: tokens.$breakpoint-compact) {
+  .resize-tip {
+    display: none;
+  }
+}

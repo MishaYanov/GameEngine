@@ -1,4 +1,5 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {provideRouter} from '@angular/router';
 
 import {EditorNavManager} from './editor-nav-manager';
 
@@ -9,6 +10,7 @@ describe('EditorNavManager', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [EditorNavManager],
+            providers: [provideRouter([])],
         }).compileComponents();
 
         fixture = TestBed.createComponent(EditorNavManager);

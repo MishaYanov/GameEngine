@@ -1,0 +1,29 @@
+{
+  "scope": "Design workbench, before opening dialogs",
+  "before": {
+    "closedDialogElements": [
+      40,
+      114
+    ],
+    "fieldRenderers": 18,
+    "inputs": 42,
+    "rows": 20,
+    "totalElements": 483
+  },
+  "after": {
+    "closedDialogElements": [
+      0,
+      0
+    ],
+    "fieldRenderers": 11,
+    "inputs": 28,
+    "rows": 2,
+    "totalElements": 315
+  },
+  "domReductionPercent": 35,
+  "notes": [
+    "Previously closed dialogs eagerly rendered their internal form trees.",
+    "Dialogs now mount their content once on first open, retaining controls across subsequent close/reopen.",
+    "Counts measure DOM elements, not JavaScript heap memory."
+  ]
+}

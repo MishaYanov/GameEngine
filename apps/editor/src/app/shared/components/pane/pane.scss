@@ -1,0 +1,83 @@
+@use '../../../styles/components/pane' as surfaces;
+
+:host {
+  display: block;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+.pane {
+  @include surfaces.pane;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--layout-toolbar-height);
+  padding-inline: var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-pane-edge);
+  gap: var(--space-3);
+}
+
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pane-title editor-icon {
+  color: var(--color-text-muted);
+}
+
+.drawer-toggle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--layout-subject-control-height);
+  height: var(--layout-subject-control-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: var(--cursor-action);
+}
+
+.drawer-toggle:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+h2 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.content.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-subject-gap);
+  padding: var(--space-2);
+}
