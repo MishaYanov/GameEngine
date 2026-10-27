@@ -10,6 +10,9 @@ Current project schema 2 and editor protocol 2 support retained multi-scene auth
 See [project lifecycle](project-lifecycle.md) for the current contract; earlier step reports describe historical
 milestones.
 
+For a method-level walkthrough with diagrams, read [Editor flow: startup to project builds](editor-flow.md).
+It distinguishes the current setup UI, the main editor shell, available native APIs, and admin Cargo rebuild jobs.
+
 ## Projects and boundaries
 
 | Source                     | Responsibility                                                                                                               | Guide                                     |

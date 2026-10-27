@@ -8,6 +8,7 @@ use ash::{Device, Instance, vk};
 use super::VulkanDevice;
 
 pub struct VulkanDepthBuffer {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 
 	image: vk::Image,
@@ -122,6 +123,15 @@ impl VulkanDepthBuffer {
 				return Err(error.into());
 			}
 		};
+		let allocation_metrics = crate::metrics::allocation(
+			device,
+			"depth_image",
+			image,
+			u64::from(extent.width) * u64::from(extent.height) * 4,
+			requirements.size,
+			memory_type_index,
+			&format!("{}x{} D32_SFLOAT", extent.width, extent.height),
+		);
 
 		if let Err(error) = unsafe { ash_device.bind_image_memory(image, memory, 0) } {
 			unsafe {
@@ -161,6 +171,10 @@ impl VulkanDepthBuffer {
 		};
 
 		Ok(Self {
+			_metrics: vec![
+				allocation_metrics,
+				crate::metrics::object(&ash_device, "image_view", view, "Depth image view", ""),
+			],
 			device: ash_device,
 
 			image,

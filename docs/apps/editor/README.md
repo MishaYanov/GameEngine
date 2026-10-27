@@ -4,6 +4,9 @@ Source: `apps/editor`. The Angular 22 app owns editor UI, input bindings and the
 editor behavior through a typed Tauri bridge. **This batch adds integration APIs, not a new UI layout, mock screen, or
 composed editor template.** The current setup/status screen has not been replaced with a finished scene editor.
 
+See [Editor flow: startup to project builds](../../editor-flow.md) for the current startup routes, setup action,
+document queue, and viewport graphs, including which APIs are not yet connected to the main editor UI.
+
 ## Run
 
 From the repository root after [setup](../../usage.md):

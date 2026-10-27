@@ -294,6 +294,13 @@ impl EditorSession {
 	pub fn is_playing(&self) -> bool {
 		self.play.is_some()
 	}
+
+	pub fn play_controlled_targets(&self) -> Option<&[EntityKey]> {
+		self.play
+			.as_ref()
+			.map(SimulationSession::controlled_targets)
+	}
+
 	pub fn is_paused(&self) -> bool {
 		self.play.as_ref().is_some_and(SimulationSession::paused)
 	}
@@ -550,10 +557,9 @@ impl EditorSession {
 			Command::StartPlay => {
 				self.require_edit()?;
 				self.require_no_transaction()?;
-				let mut runtime_project = (*self.project).clone();
-				runtime_project.startup_scene_id = self.active_scene_id.clone();
-				self.play = Some(SimulationSession::with_factory(
-					runtime_project,
+				self.play = Some(SimulationSession::with_factory_for_scene(
+					(*self.project).clone(),
+					self.active_scene_id.clone(),
 					Arc::clone(&self.data),
 					self.module_factory.as_ref(),
 				)?);
@@ -635,7 +641,7 @@ impl EditorSession {
 					&self.selection,
 					transaction.label.clone(),
 				)?
-					.in_scene(self.active_scene_id.clone());
+				.in_scene(self.active_scene_id.clone());
 				self.history.record(patch)?;
 				self.transaction = None;
 				self.bump();
@@ -726,7 +732,7 @@ impl EditorSession {
 				&selection,
 				label.into(),
 			)?
-				.in_scene(self.active_scene_id.clone());
+			.in_scene(self.active_scene_id.clone());
 			self.history.record(patch)?;
 		}
 		self.install_project(next, project, selection);

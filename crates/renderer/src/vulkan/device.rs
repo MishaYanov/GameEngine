@@ -15,6 +15,7 @@ pub struct QueueFamilies {
 }
 
 pub struct VulkanDevice {
+	_metrics: engine_logger::metrics::ResourceGuard,
 	device: Device,
 	physical_device: vk::PhysicalDevice,
 
@@ -108,7 +109,13 @@ impl VulkanDevice {
 
 		let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
+		let gpu_properties = unsafe { instance.get_physical_device_properties(physical_device) };
+		let gpu_name = unsafe { CStr::from_ptr(gpu_properties.device_name.as_ptr()) }
+			.to_string_lossy()
+			.into_owned();
+		let metrics = crate::metrics::register(&device, &gpu_name);
 		Ok(Self {
+			_metrics: metrics,
 			device,
 			physical_device,
 			memory_properties: unsafe {
@@ -178,7 +185,13 @@ impl VulkanDevice {
 
 		let present_queue = unsafe { device.get_device_queue(queue_families.present, 0) };
 
+		let gpu_properties = unsafe { instance.get_physical_device_properties(physical_device) };
+		let gpu_name = unsafe { CStr::from_ptr(gpu_properties.device_name.as_ptr()) }
+			.to_string_lossy()
+			.into_owned();
+		let metrics = crate::metrics::register(&device, &gpu_name);
 		Ok(Self {
+			_metrics: metrics,
 			device,
 			physical_device,
 			memory_properties: unsafe {
@@ -234,6 +247,7 @@ impl Drop for VulkanDevice {
 		unsafe {
 			self.device.destroy_device(None);
 		}
+		crate::metrics::finish(&self.device);
 	}
 }
 

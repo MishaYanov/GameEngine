@@ -7,6 +7,7 @@ pub mod health;
 #[cfg(windows)]
 mod job;
 pub mod jobs;
+pub mod metrics;
 pub mod processes;
 use collector::{Collector, LogFilter};
 use health::Registry;

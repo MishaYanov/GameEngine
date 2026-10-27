@@ -37,6 +37,11 @@ pub enum DrawStatus {
 }
 
 impl WindowRenderer {
+	/// Exact instrumented allocation sizes, including alignment and staging,
+	/// with driver-owned presentation memory explicitly excluded.
+	pub fn resource_metrics(&self) -> Option<engine_logger::metrics::MetricsSnapshot> {
+		crate::metrics::snapshot(self.device.raw())
+	}
 	pub fn create_dynamic_mesh(
 		&self,
 		vertices: usize,

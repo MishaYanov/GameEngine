@@ -9,6 +9,23 @@ use std::{
 };
 use tauri::State;
 type Service = Arc<Mutex<AdminService>>;
+#[tauri::command]
+async fn resource_metrics(
+	service: State<'_, Service>,
+	selected_id: Option<String>,
+) -> Result<crate::metrics::MetricsPage, String> {
+	let directory = service
+		.lock()
+		.map_err(|_| "Admin state lock is unavailable")?
+		.collector
+		.directory
+		.clone();
+	tauri::async_runtime::spawn_blocking(move || {
+		crate::metrics::read(&directory, selected_id.as_deref())
+	})
+	.await
+	.map_err(|_| "Resource metrics reader failed".into())
+}
 fn error(error: impl ToString) -> String {
 	error.to_string()
 }
@@ -265,6 +282,7 @@ pub fn run() {
 	let app = tauri::Builder::default()
 		.manage(service)
 		.invoke_handler(tauri::generate_handler![
+			resource_metrics,
 			dashboard_snapshot,
 			queue_job,
 			save_card,

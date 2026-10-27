@@ -1,7 +1,7 @@
-import { readFile, readdir, mkdir, writeFile, rm, copyFile } from 'node:fs/promises';
+import {copyFile, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { marked } from 'marked';
+import {fileURLToPath} from 'node:url';
+import {marked} from 'marked';
 import hljs from 'highlight.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -29,14 +29,19 @@ await rm(out, { recursive: true, force: true });
 await mkdir(path.join(out, 'assets'), { recursive: true });
 await copyFile(path.join(here, 'styles.css'), path.join(out, 'assets/styles.css'));
 await copyFile(path.join(here, 'app.js'), path.join(out, 'assets/app.js'));
+await copyFile(path.join(here, 'diagrams.js'), path.join(out, 'assets/diagrams.js'));
+await copyFile(path.join(here, 'node_modules/@mermaid-js/tiny/dist/mermaid.tiny.js'), path.join(out, 'assets/mermaid.tiny.js'));
 await copyFile(path.join(here, 'node_modules/highlight.js/styles/github-dark.css'), path.join(out, 'assets/highlight.css'));
 await writeFile(path.join(out, 'assets/search-index.json'), JSON.stringify(documents.map(d => ({title:d.title, description:d.description, route:d.route, text:d.markdown.replace(/[`#*]/g, '')}))));
 
 for (const doc of documents) {
   const toc = [];
   const slugs = new Map();
+  let diagramCount = 0;
+  let diagramHeading = doc.title;
   const renderer = new marked.Renderer();
   renderer.heading = function(token) {
+    if (token.depth <= 3) diagramHeading = token.text.replace(/[`*]/g, '');
     const text = this.parser.parseInline(token.tokens);
     const base = token.text.toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/\s+/g, '-') || 'section';
     const count = slugs.get(base) ?? 0;
@@ -48,6 +53,10 @@ for (const doc of documents) {
   renderer.code = token => {
     const language = (token.lang ?? '').split(/\s/)[0];
     const highlighted = hljs.getLanguage(language) ? hljs.highlight(token.text, {language}).value : escape(token.text);
+    if (language === 'mermaid') {
+      const id = `diagram-${++diagramCount}`;
+      return `<figure class="diagram" data-diagram aria-labelledby="${id}-caption"><figcaption id="${id}-caption">Diagram ${diagramCount}: ${escape(diagramHeading)}</figcaption><div class="diagram-toolbar"><button class="diagram-size" type="button" aria-pressed="false" aria-controls="${id}-canvas" hidden>Readable size</button></div><div class="diagram-canvas" id="${id}-canvas"><p class="diagram-status">The diagram source is available below. JavaScript renders the graph.</p></div><details class="diagram-source" open><summary>Diagram source</summary><div class="code-block"><div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div><pre><code class="hljs">${escape(token.text)}</code></pre></div></details></figure>`;
+    }
     return `<div class="code-block"><div class="code-toolbar"><span>${escape(language || 'text')}</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
   };
   const html = marked.parse(doc.markdown, { renderer, walkTokens(token) {
@@ -63,7 +72,8 @@ for (const doc of documents) {
   const cards = home ? `<div class="quick-links"><a href="${relative(doc.route, routes.get('docs/usage.md'))}"><span>01 / GET STARTED</span><strong>Run the engine</strong><p>Setup, launch, and common workflows.</p><b>Read the guide →</b></a><a href="${relative(doc.route, routes.get('docs/architecture.md'))}"><span>02 / UNDERSTAND</span><strong>Explore the architecture</strong><p>Follow the path from editor to GPU.</p><b>See how it fits →</b></a><a href="${relative(doc.route, routes.get('docs/graphics-and-assets.md'))}"><span>03 / BUILD</span><strong>Work with graphics</strong><p>Assets, shaders, and resource ownership.</p><b>Start developing →</b></a></div>` : '';
   const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escape(doc.description.replace(/[`*]/g,''))}"><title>${escape(doc.title)} · Game Engine</title><link rel="stylesheet" href="${relative(doc.route,'assets/styles.css')}"><link rel="stylesheet" href="${relative(doc.route,'assets/highlight.css')}"></head><body data-base="${relative(doc.route,'index.html').replace(/index\.html$/,'')}"><a class="skip" href="#content">Skip to content</a><aside class="sidebar" id="navigation"><a class="brand" href="${relative(doc.route,'index.html')}"><span class="brand-mark">△</span><span>GAME ENGINE<small>DEVELOPER DOCUMENTATION</small></span></a><nav class="space-switch" aria-label="Spaces"><a href="${relative(doc.route,'developer/index.html')}" aria-current="true">Engine Developer</a><a href="${relative(doc.route,'game-app-developer/index.html')}">Game App Developer</a><a class="all-spaces" href="${relative(doc.route,'index.html')}">All spaces ↗</a></nav><nav aria-label="Documentation">${nav}</nav><div class="sidebar-footer">Built from repository Markdown<br>Native graphics. Shared foundations.</div></aside><div class="page"><header class="topbar"><button id="menu-toggle" aria-controls="navigation" aria-expanded="false" aria-label="Toggle navigation">☰</button><div class="breadcrumb">Engine Developer <span>/</span> ${escape(group(doc.file))}</div><button id="search-open"><span>⌕</span> Search documentation <kbd>Ctrl K</kbd></button></header><div class="reading-layout"><main id="content" tabindex="-1"><div class="eyebrow">${home ? 'THE ENGINE WORKSPACE' : escape(group(doc.file).toUpperCase())}</div>${home ? '<div class="intro-label">From first launch to the rendering loop.</div>' : ''}${cards}<article>${html}</article><footer class="doc-footer"><span>Source: ${escape(doc.file)}</span><a href="${relative(doc.route,'developer/index.html')}">Developer home ↑</a></footer></main><aside class="toc" aria-label="On this page"><p>ON THIS PAGE</p>${toc.map(t=>`<a class="level-${t.depth}" href="#${t.id}">${escape(t.title)}</a>`).join('')}</aside></div></div><dialog id="search-dialog"><div class="search-header"><label class="sr-only" for="search-input">Search documentation</label><input id="search-input" type="search" placeholder="Search projects, commands, APIs…" autocomplete="off"><button id="search-close" aria-label="Close search">Esc</button></div><div id="search-results" aria-live="polite"></div><div class="search-hint">Search across every guide and design reference.</div></dialog><script src="${relative(doc.route,'assets/app.js')}" defer></script></body></html>`;
   await mkdir(path.dirname(path.join(out,doc.route)), {recursive:true});
-  await writeFile(path.join(out,doc.route),page);
+  const diagramScripts = diagramCount ? `<script src="${relative(doc.route, 'assets/mermaid.tiny.js')}" defer></script><script src="${relative(doc.route, 'assets/diagrams.js')}" defer></script>` : '';
+  await writeFile(path.join(out, doc.route), page.replace('</body>', `${diagramScripts}</body>`));
 }
 // Space pages deliberately contain no documentation from the other audience.
 function spacePage(route, empty = false) {

@@ -99,9 +99,16 @@ impl Writer {
 		};
 		let worker_health = health.clone();
 		let worker_completed = completed.clone();
+		let metrics_directory = config.directory.clone();
+		let metrics_application = session
+			.rsplitn(3, '-')
+			.last()
+			.unwrap_or(&session)
+			.to_owned();
 		std::thread::Builder::new()
 			.name("engine-log-writer".into())
 			.spawn(move || {
+				let mut metrics_written = Instant::now();
 				loop {
 					match receiver.recv_timeout(Duration::from_millis(100)) {
 						Ok(Command::Entry(entry)) => {
@@ -117,6 +124,13 @@ impl Writer {
 							}
 						}
 						Ok(Command::Flush(ack)) => {
+							if let Err(error) = crate::metrics::persist(
+								&metrics_directory,
+								&metrics_application,
+								&session,
+							) {
+								worker_health.error(error);
+							}
 							if let Some(sink) = sink.as_mut()
 								&& let Err(error) = sink.flush()
 							{
@@ -133,6 +147,21 @@ impl Writer {
 						}
 						Err(mpsc::RecvTimeoutError::Disconnected) => break,
 					}
+					if metrics_written.elapsed() >= Duration::from_secs(1) {
+						if let Err(error) = crate::metrics::persist(
+							&metrics_directory,
+							&metrics_application,
+							&session,
+						) {
+							worker_health.error(error);
+						}
+						metrics_written = Instant::now();
+					}
+				}
+				if let Err(error) =
+					crate::metrics::persist(&metrics_directory, &metrics_application, &session)
+				{
+					worker_health.error(error);
 				}
 				if let Some(sink) = sink.as_mut()
 					&& let Err(error) = sink.flush()
@@ -430,7 +459,7 @@ fn prune_sessions(config: &StorageConfig, current: &str) -> io::Result<()> {
 			let owned = stem.is_some_and(|s| {
 				numbered(s) || s == "errors" || s.strip_prefix("errors-").is_some_and(numbered)
 			});
-			if entry.file_type()?.is_file() && owned {
+			if entry.file_type()?.is_file() && (owned || crate::metrics::owned_file(&name)) {
 				fs::remove_file(entry.path())?;
 			}
 		}

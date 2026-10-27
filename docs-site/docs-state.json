@@ -1,9 +1,26 @@
 {
-  "last_checked_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+  "last_checked_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
   "last_checked_date": "2026-10-27",
-  "last_documentation_update_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+  "last_documentation_update_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "Inspection baseline only. Compared a377b1f87dcc2972851c1518e4fd3cf1dc1e8951 to a377b1f87dcc2972851c1518e4fd3cf1dc1e8951; HEAD has not advanced. Inspected recent Git history, tracked-tree inventory, staged/unstaged diffs and untracked status, plus current object, transform, command, bridge and UI source. Dirty source evolves independently of HEAD. This is the observed source commit, not a documentation commit or implementation acceptance.",
+  "baseline_note": "Pre-commit documentation diff review and explicit requested update. Compared recorded baseline fcb748b04853209b5e17e680c38c847c19f7f365 with current HEAD fcb748b04853209b5e17e680c38c847c19f7f365; no intervening commits. Inspected recent history, HEAD tree, index, working-tree and untracked files. HEAD remains unchanged while resource instrumentation, metrics dashboard, simulation and documentation evolve. This checkpoint records inspection, not a claim that all documentation matches HEAD or that staged contents match the tested working tree.",
+  "flow_inspection": {
+    "date": "2026-10-27",
+    "commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+    "previous_baseline": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+    "scope": "Conversational method-level graphs of desktop and Angular startup, setup create-and-launch, editor workspace APIs, save/reload, compiler packaging, viewport synchronization, simulation, and admin build jobs.",
+    "findings": [
+      "The current /editor route is a shell without document open/save/play/build controls; native EnginePortal is available in the design preview, not mounted by the editor shell.",
+      "ProjectSetup.createProject invokes create_project to package the bundled starter and launch its installed player; it does not open the result in the editor.",
+      "editor_build_project exists in the native host without an EditorService wrapper or current editor UI caller; it requires clean saved documents and installs to a new output folder.",
+      "Admin dashboard Builds queues repeatable Cargo builds of source packages; this is separate from editor project installation and viewport scene reconstruction."
+    ],
+    "verification_limits": [
+      "Static source inspection only; no native UI, GPU, Cargo package build, installed player, or application test execution was performed for this explanation.",
+      "No documentation update was requested; maintained Markdown and generated site output were not edited by this flow inspection, and the static site was not rebuilt.",
+      "Concurrent source and documentation changes were observed; this record preserves the prior documentation update metadata and verification history."
+    ]
+  },
   "reviewed_commits": [
     "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
     "a48ff6c5b84096b540f1401eff452c222e167493",
@@ -11,359 +28,280 @@
     "1a4c7634a8d568bea625b4afa279abef8524308f",
     "929bd28045c632951512e8842ea4bf30356c1a8d",
     "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
-    "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951"
+    "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+    "fcb748b04853209b5e17e680c38c847c19f7f365"
   ],
-  "documentation_report": "docs/adr/0003-rust-typescript-bridge.md",
+  "documentation_report": "docs/editor-flow.md",
   "documentation_reports": [
-    "docs/adr/0002-object-composition-and-components.md",
-    "docs/adr/0003-rust-typescript-bridge.md"
+    "docs/editor-flow.md",
+    "docs/main.md",
+    "docs/architecture.md",
+    "docs/project-lifecycle.md",
+    "docs/apps/editor/README.md",
+    "docs/static-site.md",
+    "docs/crates/logger/README.md",
+    "docs/crates/renderer/README.md",
+    "docs/apps/admin-dashboard/README.md",
+    "docs/crates/runtime/README.md"
   ],
-  "documentation_scope": "Explicit user request for object/props architecture and naming ADR, engine-definition/UI transfer ADR, and complete Rust-TypeScript bridge best-practice research. Added two Proposed ADRs and index links; rebuilt docs-site/dist and checked publication. Engine Developer only; Game App Developer remains empty. No production code, dependencies, staging or commits changed by this work.",
+  "documentation_scope": "Pre-commit diff review: update logger, renderer, admin and runtime guides for current resource metrics, snapshot privacy and controlled-input contracts. Preserve existing flow diagrams and proposed ADRs; rebuild docs-site/dist in Engine Developer and retain the empty Game App Developer space.",
   "documented_changes": [
-    "Common SceneObject authoring record, typed component composition, presets/roles, and Object/Component/Property/Subject/Controller/System/Asset/Prefab vocabulary",
-    "Object and component identity, hierarchy, defaults, registry/metadata ownership, strict schemas, runtime footprint and versioned scene/project/prefab migration plan",
-    "Dated primary-source research and current code inventory for Rust-owned DTOs, ts-rs versus Specta/schema generation, boundary validation and bidirectional contract fixtures",
-    "JSON commands/queries/receipts, bounded channel streams, raw binary alternatives, scoped queries and descriptor caching, with explicit numeric/null/enum/transform rules",
-    "JSON/XML/MessagePack/CBOR/Postcard/Protobuf/FlatBuffers/packed-array comparison; native benchmark matrix, correctness gates and implementation sequence",
-    "Both ADRs distinguish proposed behavior from current code; no codec speed ranking, zero-copy promise or repository latency measurements are asserted"
+    "Logger resource snapshot API, writer cadence, memory/detail/device/byte caps, retention, publication requirements and snapshot-boundary redaction, including resources created before initialization.",
+    "Renderer enablement via debug builds, ENGINE_LOG_MODE=debug and ENGINE_METRICS overrides; resource lifetime accounting, asset labels, API and allocation measurement exclusions.",
+    "Admin Metrics tab: session selection, one-second polling, filtering, recent releases, pagination, stale/closed semantics and bounded reader limits.",
+    "Simulation controlled-target cache and editor adapters; normalized MovementBindings WASD/ARROWS presets, distinct from proposed action mapping and possession."
   ],
   "pending_documentation_changes": [
-    "Resolve/adopt the proposed ADR-0002/0003 decisions and implement their contracts, migrations, generators and adapters before documenting them as available behavior",
-    "Run native Rust-Tauri-WebView2 performance experiments and cross-language generation/serialization compatibility proofs before choosing a production binary codec or claiming performance gains",
-    "Implement the accepted ADR direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior",
-    "Recent Angular/editor milestone changes outside the inspected integration surface were inventoried but existing frontend/architecture guides were not broadly reconciled",
-    "Concurrent animation graph models/store and untracked animation files appeared during this documentation pass and remain outside its implementation or validation scope",
-    "Existing prior pending verification limits remain archived with the previous checkpoint; this pass does not resolve runtime, native/GPU, compiler release or installed-player acceptance"
+    "Review and accept or revise Proposed ADR-0002 through ADR-0012; implement their contracts, migrations, runtime features and acceptance gates before documenting them as available behavior.",
+    "Implement the accepted ADR-0001 direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior.",
+    "Run the Rust-TypeScript generation/serialization proofs and native bridge benchmarks from ADR-0003; select scripting, graph compiler, physics, input-device and viewport-composition implementations only after their specified proofs.",
+    "Reconcile existing frontend, startup, build and architecture guides beyond the integration surfaces inspected here. The fcb748b editor milestone and newer working-tree changes are not comprehensively documented by these ADR drafts.",
+    "Prior runtime, native/GPU, compiler release and installed-player verification limits remain applicable and are preserved in historical checkpoints. Graph UI source was inspected for these proposals; native graph execution remains future work.",
+    "Concurrent ADR-0002 through ADR-0012 and their reading guide are separate proposals/documentation work; this update publishes the current Markdown but does not adopt those decisions or certify their proposed implementation",
+    "Native host/UI, player, GPU, real filesystem scene loading and broader downstream acceptance remain outside the scene-context core verification",
+    "Keep docs/editor-flow.md aligned when main editor document/build controls are connected or existing-folder packaging/rebuild behavior changes; the new guide does not broadly reconcile all historical frontend/architecture reports.",
+    "Native Vulkan resource accounting, interactive Metrics session switching, release tracking overhead and forced-exit/stale-device behavior require application acceptance; no such acceptance is inferred from source or site checks."
   ],
   "verification": [
-    "npm.cmd test --prefix docs-site: built and link-checked 33 pages across two spaces; all five site tests passed",
-    "Supplemental generated-site check: 606 local/cross-page fragment links resolved across 33 pages; both new ADR bodies, tables, Proposed status and search entries verified among 31 indexed documents",
-    "Game App Developer empty-space check passed; new ADRs are in Engine Developer",
-    "Focused git diff --check passed; new Markdown code fences and trailing whitespace checked",
-    "Independent read-only architecture/source review found no blocking mismatch; command naming and unsupported-plugin editing wording were aligned before the site build",
-    "Prior staged/unstaged/untracked work preserved, including a concurrent formatting diff to ADR-0001 that this work did not author"
+    "npm.cmd test --prefix docs-site: rebuilt and link-checked 44 pages across two spaces; all 7 tests passed, including section anchors, search, source copying, empty Game App Developer space and Mermaid syntax/fallback/controls.",
+    "git -c core.safecrlf=false diff --check -- docs docs-site passed; checkpoint JSON parsed successfully.",
+    "Source inspection reconciled the SECURITY snapshot-boundary redaction fix and confirmed the admin navigation label is Metrics.",
+    "TEST agent reported final cargo test --workspace --all-targets after SECURITY redaction fix: 469 passed, 0 failed, 2 existing ignored across 49 suites; no TEST source edits.",
+    "TEST/root agents reported editor 123/123, admin 13/13 and component registry 4/4 checks passing; admin production build and desktop cargo check passed. Editor-host 5/5 passed; initial temporary-directory failures passed on retry and in the final unskipped workspace run.",
+    "SECURITY agent reported cargo test -p engine-logger --test metrics passed (1 integration test), covering pre-initialization live/released resource redaction in returned and persisted snapshots."
   ],
   "verification_limits": [
-    "Research/documentation only: no generator integration, Rust/Angular implementation tests, native IPC benchmarks, GPU/runtime acceptance, compiler or installed-player checks run",
-    "Candidate tool versions and source guidance were researched on 2026-10-27; exact workspace compatibility remains a proof task, and optional dependencies were not installed",
-    "Size/rate examples and proposed benchmark fixtures are design inputs, not measured latency/throughput or accepted production budgets",
-    "Current source was inspected, not captured as an atomic filesystem snapshot; concurrent user/other-chat changes may continue after this checkpoint",
-    "Existing frontend/runtime guides were not comprehensively reconciled; pending scope from earlier checkpoints remains carried forward",
-    "npm emitted the existing global-ignore-file environment warning; site build/tests succeeded"
+    "DOCS directly ran site checks; application checks above are attributed to TEST, SECURITY and root reports. They verify the working tree, not the staged-only snapshot. No TEST source edits were reported.",
+    "No native UI/GPU, installed-player, compiler release packaging, release tracking performance, browser visual or exhaustive accessibility checks were performed in this pre-commit documentation pass. Prior browser results remain historical evidence.",
+    "The worktree is shared and may continue changing; index and worktree differ, including added-then-deleted empty editor abstract files. This is not staged-snapshot or commit certification.",
+    "Prior proposed ADRs remain proposals; this focused reconciliation does not accept them or comprehensively rewrite older milestone reports."
   ],
   "working_tree_at_check": [
-    " M Jenkinsfile",
-    " M apps/editor/angular.json",
-    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
-    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
-    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
-    " M apps/editor/package.json",
-    "AM apps/editor/projects/design-guide/scripts/design-registry.mjs",
-    "AM apps/editor/projects/design-guide/scripts/design-registry.test.mjs",
-    "AM apps/editor/projects/design-guide/scripts/design.mjs",
-    "A  apps/editor/projects/design-guide/src/component-registry.generated.ts",
-    "A  apps/editor/projects/design-guide/src/component-registry.ts",
-    "A  apps/editor/projects/design-guide/src/design.routes.ts",
-    "A  apps/editor/projects/design-guide/src/index.html",
-    "A  apps/editor/projects/design-guide/src/main.ts",
-    "A  apps/editor/projects/design-guide/src/previews/dialog.design.ts",
-    "A  apps/editor/projects/design-guide/src/previews/drawer.design.ts",
-    "AM apps/editor/projects/design-guide/src/previews/graph.design.ts",
-    "A  apps/editor/projects/design-guide/src/previews/pane.design.ts",
-    "A  apps/editor/projects/design-guide/src/previews/portal.design.ts",
-    "A  apps/editor/projects/design-guide/src/previews/row.design.ts",
-    "A  apps/editor/projects/design-guide/src/previews/subject.design.ts",
-    "A  apps/editor/projects/design-guide/src/workbench.html",
-    "A  apps/editor/projects/design-guide/src/workbench.scss",
-    "A  apps/editor/projects/design-guide/src/workbench.ts",
-    "A  apps/editor/projects/design-guide/tsconfig.app.json",
-    " D apps/editor/projects/design/src/component-registry.generated.ts",
-    " D apps/editor/projects/design/src/component-registry.ts",
-    " D apps/editor/projects/design/src/design.routes.ts",
-    " D apps/editor/projects/design/src/index.html",
-    " D apps/editor/projects/design/src/main.ts",
-    " D apps/editor/projects/design/src/workbench.html",
-    " D apps/editor/projects/design/src/workbench.scss",
-    " D apps/editor/projects/design/src/workbench.ts",
-    " D apps/editor/projects/design/tsconfig.app.json",
-    " M apps/editor/scripts/check-production.mjs",
-    " D apps/editor/scripts/design-registry.mjs",
-    " D apps/editor/scripts/design-registry.test.mjs",
-    " D apps/editor/scripts/design.mjs",
-    " M apps/editor/src/app/app.routes.development.ts",
-    "AM apps/editor/src/app/core/objects/index.ts",
-    "AM apps/editor/src/app/core/objects/object-api.models.ts",
-    "AM apps/editor/src/app/core/objects/object-api.spec.ts",
-    "AM apps/editor/src/app/core/objects/object-api.ts",
+    " M apps/admin-dashboard/src-tauri/src/desktop.rs",
+    " M apps/admin-dashboard/src-tauri/src/lib.rs",
+    "A  apps/admin-dashboard/src-tauri/src/metrics.rs",
+    "A  apps/admin-dashboard/src-tauri/src/tests_metrics.rs",
+    " M apps/admin-dashboard/src/api.ts",
+    " M apps/admin-dashboard/src/app.html",
+    " M apps/admin-dashboard/src/app.ts",
+    "A  apps/admin-dashboard/src/metrics.html",
+    "A  apps/admin-dashboard/src/metrics.models.ts",
+    "A  apps/admin-dashboard/src/metrics.spec.ts",
+    "A  apps/admin-dashboard/src/metrics.ts",
+    " M apps/admin-dashboard/src/styles.css",
+    " M apps/editor/projects/design-guide/src/component-registry.generated.ts",
     "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
     "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
     "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
-    " D apps/editor/src/app/shared/components/dialog/dialog.design.ts",
-    " D apps/editor/src/app/shared/components/drawer/drawer.design.ts",
-    " M apps/editor/src/app/shared/components/drawer/drawer.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
-    "AM apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
-    "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
-    "AM apps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
-    " M apps/editor/src/app/shared/components/graph/graph-node.scss",
-    " M apps/editor/src/app/shared/components/graph/graph-node.ts",
-    " D apps/editor/src/app/shared/components/graph/graph.design.ts",
-    " M apps/editor/src/app/shared/components/graph/graph.html",
-    " M apps/editor/src/app/shared/components/graph/graph.models.ts",
-    " M apps/editor/src/app/shared/components/graph/graph.scss",
-    " M apps/editor/src/app/shared/components/graph/graph.spec.ts",
-    " M apps/editor/src/app/shared/components/graph/graph.store.ts",
-    " M apps/editor/src/app/shared/components/graph/graph.ts",
-    " D apps/editor/src/app/shared/components/pane/pane.design.ts",
-    " D apps/editor/src/app/shared/components/portal/portal.design.ts",
-    " D apps/editor/src/app/shared/components/row/row.design.ts",
-    " M apps/editor/src/app/shared/components/subject/subject-fields.scss",
-    " D apps/editor/src/app/shared/components/subject/subject.design.ts",
-    " M apps/editor/src/app/shared/components/subject/subject.html",
-    " M apps/editor/src/app/shared/components/subject/subject.ts",
-    " M apps/editor/src/app/styles/abstracts/_layout.scss",
+    " M apps/game/examples/renderer_smoke.rs",
+    " M crates/engine-core/src/camera_controller.rs",
+    " M crates/engine-core/src/editor/mod.rs",
+    " M crates/engine-core/src/input.rs",
     " M crates/engine-core/src/simulation_session.rs",
+    " M crates/engine-core/tests/engine_api.rs",
+    " M crates/engine-core/tests/simulation_session_api.rs",
+    " M crates/logger/src/lib.rs",
+    "AM crates/logger/src/metrics.rs",
+    " M crates/logger/src/storage.rs",
+    "A  crates/logger/src/tests_metrics.rs",
+    " M crates/logger/src/tests_storage.rs",
+    "AM crates/logger/tests/metrics.rs",
+    " M crates/renderer/src/lib.rs",
+    "A  crates/renderer/src/metrics.rs",
+    " M crates/renderer/src/vulkan/buffer.rs",
+    " M crates/renderer/src/vulkan/camera.rs",
+    " M crates/renderer/src/vulkan/depth_buffer.rs",
+    " M crates/renderer/src/vulkan/device.rs",
+    " M crates/renderer/src/vulkan/frame.rs",
+    " M crates/renderer/src/vulkan/material_layout.rs",
+    " M crates/renderer/src/vulkan/mesh.rs",
+    " M crates/renderer/src/vulkan/pipeline.rs",
+    " M crates/renderer/src/vulkan/swapchain.rs",
+    " M crates/renderer/src/vulkan/texture.rs",
+    " M crates/renderer/src/window_renderer.rs",
+    " M crates/runtime/src/assets/asset_manager.rs",
+    " M crates/runtime/src/camera_controller.rs",
+    " M crates/runtime/src/lib.rs",
+    " M crates/runtime/src/scene_editor.rs",
+    " M docs-site/build.mjs",
+    "A  docs-site/diagrams.js",
     " M docs-site/docs-state.json",
-    "AM docs/adr/0001-editor-command-pipeline.md",
+    " M docs-site/package-lock.json",
+    " M docs-site/package.json",
+    " M docs-site/site.test.mjs",
+    " M docs-site/styles.css",
+    "A  docs/adr/0002-object-composition-and-components.md",
+    "A  docs/adr/0003-rust-typescript-bridge.md",
+    "A  docs/adr/0004-authoring-play-and-editor-state.md",
+    "A  docs/adr/0005-runtime-lifecycle-and-scheduling.md",
+    "A  docs/adr/0006-asset-identity-and-import-pipeline.md",
+    "A  docs/adr/0007-graph-assets-and-execution.md",
+    "A  docs/adr/0008-game-modules-and-scripting.md",
+    "A  docs/adr/0009-prefabs-and-instance-overrides.md",
+    "A  docs/adr/0010-input-actions-and-possession.md",
+    "A  docs/adr/0011-persistence-autosave-and-recovery.md",
+    "A  docs/adr/0012-native-viewport-composition.md",
+    "A  docs/adr/README.md",
+    " M docs/apps/admin-dashboard/README.md",
+    " M docs/apps/editor/README.md",
+    " M docs/architecture.md",
+    " M docs/crates/logger/README.md",
+    " M docs/crates/renderer/README.md",
+    " M docs/crates/runtime/README.md",
+    "A  docs/editor-flow.md",
     " M docs/main.md",
-    " M test_all.py",
+    " M docs/project-lifecycle.md",
+    " M docs/static-site.md",
     "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
     "?? crates/engine-core/tests/command_factory_api.rs~",
     "?? crates/renderer/src/vulkan/lighting.rs~",
-    "?? crates/renderer/src/vulkan/render_object.rs~",
-    "?? docs/adr/0002-object-composition-and-components.md",
-    "?? docs/adr/0003-rust-typescript-bridge.md"
+    "?? crates/renderer/src/vulkan/render_object.rs~"
   ],
   "staged_files_at_check": [
-    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
-    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
-    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
-    "A\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
-    "A\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
-    "A\tapps/editor/projects/design-guide/scripts/design.mjs",
-    "A\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
-    "A\tapps/editor/projects/design-guide/src/component-registry.ts",
-    "A\tapps/editor/projects/design-guide/src/design.routes.ts",
-    "A\tapps/editor/projects/design-guide/src/index.html",
-    "A\tapps/editor/projects/design-guide/src/main.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/dialog.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/drawer.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/pane.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/portal.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/row.design.ts",
-    "A\tapps/editor/projects/design-guide/src/previews/subject.design.ts",
-    "A\tapps/editor/projects/design-guide/src/workbench.html",
-    "A\tapps/editor/projects/design-guide/src/workbench.scss",
-    "A\tapps/editor/projects/design-guide/src/workbench.ts",
-    "A\tapps/editor/projects/design-guide/tsconfig.app.json",
-    "A\tapps/editor/src/app/core/objects/index.ts",
-    "A\tapps/editor/src/app/core/objects/object-api.models.ts",
-    "A\tapps/editor/src/app/core/objects/object-api.spec.ts",
-    "A\tapps/editor/src/app/core/objects/object-api.ts",
+    "A\tapps/admin-dashboard/src-tauri/src/metrics.rs",
+    "A\tapps/admin-dashboard/src-tauri/src/tests_metrics.rs",
+    "A\tapps/admin-dashboard/src/metrics.html",
+    "A\tapps/admin-dashboard/src/metrics.models.ts",
+    "A\tapps/admin-dashboard/src/metrics.spec.ts",
+    "A\tapps/admin-dashboard/src/metrics.ts",
     "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
     "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
     "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
-    "A\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
-    "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
-    "A\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
-    "A\tdocs/adr/0001-editor-command-pipeline.md"
+    "A\tcrates/logger/src/metrics.rs",
+    "A\tcrates/logger/src/tests_metrics.rs",
+    "A\tcrates/logger/tests/metrics.rs",
+    "A\tcrates/renderer/src/metrics.rs",
+    "A\tdocs-site/diagrams.js",
+    "A\tdocs/adr/0002-object-composition-and-components.md",
+    "A\tdocs/adr/0003-rust-typescript-bridge.md",
+    "A\tdocs/adr/0004-authoring-play-and-editor-state.md",
+    "A\tdocs/adr/0005-runtime-lifecycle-and-scheduling.md",
+    "A\tdocs/adr/0006-asset-identity-and-import-pipeline.md",
+    "A\tdocs/adr/0007-graph-assets-and-execution.md",
+    "A\tdocs/adr/0008-game-modules-and-scripting.md",
+    "A\tdocs/adr/0009-prefabs-and-instance-overrides.md",
+    "A\tdocs/adr/0010-input-actions-and-possession.md",
+    "A\tdocs/adr/0011-persistence-autosave-and-recovery.md",
+    "A\tdocs/adr/0012-native-viewport-composition.md",
+    "A\tdocs/adr/README.md",
+    "A\tdocs/editor-flow.md"
   ],
   "unstaged_files_at_check": [
-    "M\tJenkinsfile",
-    "M\tapps/editor/angular.json",
-    "M\tapps/editor/package.json",
-    "M\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
-    "M\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
-    "M\tapps/editor/projects/design-guide/scripts/design.mjs",
-    "M\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
-    "D\tapps/editor/projects/design/src/component-registry.generated.ts",
-    "D\tapps/editor/projects/design/src/component-registry.ts",
-    "D\tapps/editor/projects/design/src/design.routes.ts",
-    "D\tapps/editor/projects/design/src/index.html",
-    "D\tapps/editor/projects/design/src/main.ts",
-    "D\tapps/editor/projects/design/src/workbench.html",
-    "D\tapps/editor/projects/design/src/workbench.scss",
-    "D\tapps/editor/projects/design/src/workbench.ts",
-    "D\tapps/editor/projects/design/tsconfig.app.json",
-    "M\tapps/editor/scripts/check-production.mjs",
-    "D\tapps/editor/scripts/design-registry.mjs",
-    "D\tapps/editor/scripts/design-registry.test.mjs",
-    "D\tapps/editor/scripts/design.mjs",
-    "M\tapps/editor/src/app/app.routes.development.ts",
-    "M\tapps/editor/src/app/core/objects/index.ts",
-    "M\tapps/editor/src/app/core/objects/object-api.models.ts",
-    "M\tapps/editor/src/app/core/objects/object-api.spec.ts",
-    "M\tapps/editor/src/app/core/objects/object-api.ts",
+    "M\tapps/admin-dashboard/src-tauri/src/desktop.rs",
+    "M\tapps/admin-dashboard/src-tauri/src/lib.rs",
+    "M\tapps/admin-dashboard/src/api.ts",
+    "M\tapps/admin-dashboard/src/app.html",
+    "M\tapps/admin-dashboard/src/app.ts",
+    "M\tapps/admin-dashboard/src/styles.css",
+    "M\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
     "D\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
     "D\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
     "D\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
-    "D\tapps/editor/src/app/shared/components/dialog/dialog.design.ts",
-    "D\tapps/editor/src/app/shared/components/drawer/drawer.design.ts",
-    "M\tapps/editor/src/app/shared/components/drawer/drawer.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
-    "M\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
-    "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
-    "M\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
-    "M\tapps/editor/src/app/shared/components/graph/graph-node.scss",
-    "M\tapps/editor/src/app/shared/components/graph/graph-node.ts",
-    "D\tapps/editor/src/app/shared/components/graph/graph.design.ts",
-    "M\tapps/editor/src/app/shared/components/graph/graph.html",
-    "M\tapps/editor/src/app/shared/components/graph/graph.models.ts",
-    "M\tapps/editor/src/app/shared/components/graph/graph.scss",
-    "M\tapps/editor/src/app/shared/components/graph/graph.spec.ts",
-    "M\tapps/editor/src/app/shared/components/graph/graph.store.ts",
-    "M\tapps/editor/src/app/shared/components/graph/graph.ts",
-    "D\tapps/editor/src/app/shared/components/pane/pane.design.ts",
-    "D\tapps/editor/src/app/shared/components/portal/portal.design.ts",
-    "D\tapps/editor/src/app/shared/components/row/row.design.ts",
-    "M\tapps/editor/src/app/shared/components/subject/subject-fields.scss",
-    "D\tapps/editor/src/app/shared/components/subject/subject.design.ts",
-    "M\tapps/editor/src/app/shared/components/subject/subject.html",
-    "M\tapps/editor/src/app/shared/components/subject/subject.ts",
-    "M\tapps/editor/src/app/styles/abstracts/_layout.scss",
+    "M\tapps/game/examples/renderer_smoke.rs",
+    "M\tcrates/engine-core/src/camera_controller.rs",
+    "M\tcrates/engine-core/src/editor/mod.rs",
+    "M\tcrates/engine-core/src/input.rs",
     "M\tcrates/engine-core/src/simulation_session.rs",
+    "M\tcrates/engine-core/tests/engine_api.rs",
+    "M\tcrates/engine-core/tests/simulation_session_api.rs",
+    "M\tcrates/logger/src/lib.rs",
+    "M\tcrates/logger/src/metrics.rs",
+    "M\tcrates/logger/src/storage.rs",
+    "M\tcrates/logger/src/tests_storage.rs",
+    "M\tcrates/logger/tests/metrics.rs",
+    "M\tcrates/renderer/src/lib.rs",
+    "M\tcrates/renderer/src/vulkan/buffer.rs",
+    "M\tcrates/renderer/src/vulkan/camera.rs",
+    "M\tcrates/renderer/src/vulkan/depth_buffer.rs",
+    "M\tcrates/renderer/src/vulkan/device.rs",
+    "M\tcrates/renderer/src/vulkan/frame.rs",
+    "M\tcrates/renderer/src/vulkan/material_layout.rs",
+    "M\tcrates/renderer/src/vulkan/mesh.rs",
+    "M\tcrates/renderer/src/vulkan/pipeline.rs",
+    "M\tcrates/renderer/src/vulkan/swapchain.rs",
+    "M\tcrates/renderer/src/vulkan/texture.rs",
+    "M\tcrates/renderer/src/window_renderer.rs",
+    "M\tcrates/runtime/src/assets/asset_manager.rs",
+    "M\tcrates/runtime/src/camera_controller.rs",
+    "M\tcrates/runtime/src/lib.rs",
+    "M\tcrates/runtime/src/scene_editor.rs",
+    "M\tdocs-site/build.mjs",
     "M\tdocs-site/docs-state.json",
-    "M\tdocs/adr/0001-editor-command-pipeline.md",
+    "M\tdocs-site/package-lock.json",
+    "M\tdocs-site/package.json",
+    "M\tdocs-site/site.test.mjs",
+    "M\tdocs-site/styles.css",
+    "M\tdocs/apps/admin-dashboard/README.md",
+    "M\tdocs/apps/editor/README.md",
+    "M\tdocs/architecture.md",
+    "M\tdocs/crates/logger/README.md",
+    "M\tdocs/crates/renderer/README.md",
+    "M\tdocs/crates/runtime/README.md",
     "M\tdocs/main.md",
-    "M\ttest_all.py"
+    "M\tdocs/project-lifecycle.md",
+    "M\tdocs/static-site.md"
   ],
   "untracked_files_at_check": [
     "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
     "crates/engine-core/tests/command_factory_api.rs~",
     "crates/renderer/src/vulkan/lighting.rs~",
-    "crates/renderer/src/vulkan/render_object.rs~",
-    "docs/adr/0002-object-composition-and-components.md",
-    "docs/adr/0003-rust-typescript-bridge.md"
+    "crates/renderer/src/vulkan/render_object.rs~"
   ],
   "inspected_source_files": [
     {
-      "path": "AGENTS.md",
-      "sha256": "027158356fd720427e3717cbecf8bc35652055b531a5123e006ec65eadf824b7",
-      "bytes": 899
+      "path": "launcher.py",
+      "sha256": "1fc6fd7593902eed3f76abdb1c3d5d839919ce65b87dab0ffa40955af9423adf",
+      "bytes": 7325
     },
     {
-      "path": "apps/editor/AGENTS.md",
-      "sha256": "a6c8931c4949e641635bc2cce310df3874f3016f01414d5694a52cc3d1007ffd",
-      "bytes": 2907
+      "path": "dev.ps1",
+      "sha256": "275d2117c9212a84ba6c51dcef35efe2e59cc0fb12f8a4156eeab79f23cceac7",
+      "bytes": 1187
     },
     {
-      "path": "Cargo.toml",
-      "sha256": "2ca7a3db6b2c7048c34b61a2c561cc2a455702f6aeb8783a9c55d2b0859e5364",
-      "bytes": 281
+      "path": "apps/editor-host/src-tauri/tauri.conf.json",
+      "sha256": "66a50fb16522e00b5d674d55e762363242ce6380db65d927a2787274de5812c0",
+      "bytes": 821
     },
     {
-      "path": "Cargo.lock",
-      "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2",
-      "bytes": 142616
+      "path": "apps/editor/src/main.ts",
+      "sha256": "56194f570086fa0c05941fbe4e9e3bae2afd0ace733c00aa931279378ec1bb6e",
+      "bytes": 213
     },
     {
-      "path": "apps/editor/package.json",
-      "sha256": "212bd8205977d8185a8a865c770e504d8c716142700247d2f5420e6bbd4f87c0",
-      "bytes": 2398
+      "path": "apps/editor/src/app/app.routes.shared.ts",
+      "sha256": "4de6bd0021db558126259cc86b7ee6c1e6de49263e79b655e6d0046917206989",
+      "bytes": 341
     },
     {
-      "path": "apps/editor/package-lock.json",
-      "sha256": "3edaaad2ee978bb48c67f76e5c71dceac612a02f105d77da8a6f26db1993071f",
-      "bytes": 258288
+      "path": "apps/editor/src/app/app.routes.development.ts",
+      "sha256": "e6e4e6d1e3447d9025d647ca0b8e164cf2d852707783746224efc83f898e8b7d",
+      "bytes": 808
     },
     {
-      "path": "apps/editor-host/src-tauri/Cargo.toml",
-      "sha256": "8f8f25f82b7edbfbee7ffd6117ab2631a8671ff26304c5b7761d19cec67768fc",
-      "bytes": 876
+      "path": "apps/editor/src/app/app.routes.production.ts",
+      "sha256": "a56478178caeeaacf635750ff0a6771d13add8d3e59c68c7955568285d801ec7",
+      "bytes": 345
     },
     {
-      "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
-      "sha256": "cdc615c4f566c85c7c5ac2e8a814392cb089c947e7dfda8b8895df7d99d42e48",
-      "bytes": 15567
+      "path": "apps/editor/src/app/modules/project-setup/project-setup.ts",
+      "sha256": "8fff95115e60936ad681bcbce5650347ffdacefaf721a50e1168cbb30886952e",
+      "bytes": 2556
     },
     {
-      "path": "apps/editor-host/src-tauri/src/viewport.rs",
-      "sha256": "4437f3ff67f802b9299d55a759034508847faf052caeb906bcdb5e85cb19058b",
-      "bytes": 35063
+      "path": "apps/editor/src/app/modules/project-setup/project-setup.html",
+      "sha256": "62b062176c56365c13a3de92e4b5128e9ec1594da568d24c826ddae265ebae0f",
+      "bytes": 5303
     },
     {
-      "path": "apps/editor-host/src-tauri/capabilities/default.json",
-      "sha256": "3274cf173d071a9596b3a5a49273a3695cf74c97ba2ccee118c0c69a4e492cb3",
-      "bytes": 207
+      "path": "apps/editor/src/app/modules/editor/editor.ts",
+      "sha256": "7bb6a68d8ea813df5c232e98c73affa61f6d8a7a910ad7f08f6da3f2f9b5672a",
+      "bytes": 765
     },
     {
-      "path": "crates/bridge/Cargo.toml",
-      "sha256": "7d1e5766a00540f86c1591e90395f250f9d00b67421cdc06b40dc59e0660282b",
-      "bytes": 263
-    },
-    {
-      "path": "crates/bridge/src/editor.rs",
-      "sha256": "dade0b6bc8d44f39d19ec17d7f0057d4bcf20ea5b4695dd7bb8d29fdc0e79ed5",
-      "bytes": 1802
-    },
-    {
-      "path": "crates/bridge/tests/editor_contract.rs",
-      "sha256": "c0994c87de3efe9f1c144a6953752c707edf7854a5120ac9e39ac169c7762fbb",
-      "bytes": 6692
-    },
-    {
-      "path": "crates/engine-core/Cargo.toml",
-      "sha256": "d4d484884d5a93985814b9075ac3f060d01300b84495ac4346e19e6cbb9c0943",
-      "bytes": 218
-    },
-    {
-      "path": "crates/engine-core/src/command.rs",
-      "sha256": "da84f29f39b2c4cb1ce8c75007d7e83012b04bf6755f2c7efc7dcab8576111bb",
-      "bytes": 4725
-    },
-    {
-      "path": "crates/engine-core/src/engine.rs",
-      "sha256": "fc471bf8c7a640041abd9fa3c2a5d763d8ae6092d34bdb615492305df45fa66a",
-      "bytes": 13042
-    },
-    {
-      "path": "crates/engine-core/src/events.rs",
-      "sha256": "1a17334390fbebc6fe7857112e6e91d07de7ae60e2f3a4bf4c6e6a874801730b",
-      "bytes": 2742
-    },
-    {
-      "path": "crates/engine-core/src/entity_key.rs",
-      "sha256": "89367a278f4dc7c0d562aa1a55f18e4efc97e624a5885d93a85ab9f2ec962c03",
-      "bytes": 644
-    },
-    {
-      "path": "crates/engine-core/src/scene_data.rs",
-      "sha256": "689d8ade4eabab2d498216745fb1841413542de0959a3f6a83afdff9264c2ac7",
-      "bytes": 20084
-    },
-    {
-      "path": "crates/engine-core/src/transform.rs",
-      "sha256": "6e0cfba5ef0ab909d1b57ef7a59bc1268bfdec167c8120e23c2a1106a7e0e9c1",
-      "bytes": 1062
-    },
-    {
-      "path": "crates/engine-core/src/project.rs",
-      "sha256": "bdd588cb65c40b664c12abafb2579b9ede2c09e6a9c6e31eac6546e0bb3a1baf",
-      "bytes": 8457
-    },
-    {
-      "path": "crates/engine-core/src/simulation_session.rs",
-      "sha256": "0b4693107ca8b7ed223aa81b9022d2faf15370af516ed5f43c20781e0131aaa2",
-      "bytes": 12066
-    },
-    {
-      "path": "apps/editor/src/app/core/editor/editor.models.ts",
-      "sha256": "6581ceffff4949d6a97736874c1780c15c05dcfd25848383de0bc7bca7a084d5",
-      "bytes": 13712
+      "path": "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/editor-grid-wrapper.html",
+      "sha256": "0d0cdcb4a2867fb28be8eae7910154bfb256130903324ab82c5a47b39aa582d9",
+      "bytes": 411
     },
     {
       "path": "apps/editor/src/app/core/editor/editor.service.ts",
@@ -371,62 +309,187 @@
       "bytes": 20008
     },
     {
-      "path": "apps/editor/src/app/core/objects/object-api.models.ts",
-      "sha256": "2e677a85bad8ee3ff58a5b98569a5a88045903418a1b00e8c3e5e424e8f9506a",
-      "bytes": 3482
+      "path": "apps/editor/src/app/core/editor/engine-viewport.directive.ts",
+      "sha256": "4247719ff4f1c886368b9d62722d541d11ff987327dacafee7bb02004faa9646",
+      "bytes": 11992
     },
     {
-      "path": "apps/editor/src/app/core/objects/object-api.ts",
-      "sha256": "b7d3766d86a7979e5b617f087360ed2eea35a88128f2060283da48b0583ec735",
-      "bytes": 2237
+      "path": "apps/editor/src/app/shared/components/portal/portal.ts",
+      "sha256": "9dd8167674dd510dba01455e410fdc14e5683fe758f330894f7993379a3995ef",
+      "bytes": 3214
     },
     {
-      "path": "apps/editor/src/app/core/subjects/subject.models.ts",
-      "sha256": "a46057e40bda8079315899e52892b3539cad4b82acb6f983fc6a445049fd919b",
-      "bytes": 4920
+      "path": "apps/editor-host/src-tauri/src/lib.rs",
+      "sha256": "a845691f78a91bd7f78fbd6f13e93866a5ad315cc051bfb175c2c818527b1252",
+      "bytes": 2618
     },
     {
-      "path": "apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
-      "sha256": "3edffd88c16fa762153ded2b12e4de9cb4bc189926087ebbda5dcf3c898c3c4a",
-      "bytes": 9624
+      "path": "apps/editor-host/src-tauri/src/state.rs",
+      "sha256": "f9682f1c9bb1feb89cf3224e12974bb9e67244d168d80c51f1af4efee849143b",
+      "bytes": 558
     },
     {
-      "path": "docs/adr/0001-editor-command-pipeline.md",
-      "sha256": "5fbccf03918844d30505f42790579dd0fd64ca437d9d876e2f0f1bc7c4f4a9c6",
-      "bytes": 21973
+      "path": "apps/editor-host/src-tauri/src/project_location.rs",
+      "sha256": "2fe0d89861db36609256dd670c5971541e6e487ef41a9825f845fb852da4e6e3",
+      "bytes": 2976
     },
     {
-      "path": "docs/adr/0002-object-composition-and-components.md",
-      "sha256": "dd4276bbb25be220a5ad89f5c6cd4b7c3d3ff58c9345aa8ac7d1830857402889",
-      "bytes": 29303
+      "path": "apps/editor-host/src-tauri/src/editor.rs",
+      "sha256": "653384fe9c619e6ce87cedeb7f244a4ee605dd65dc81c84059cf9ea0a7a8dbfc",
+      "bytes": 31747
     },
     {
-      "path": "docs/adr/0003-rust-typescript-bridge.md",
-      "sha256": "7d72dd526c80497f48ff0d6caddcaa5d43db7e9357bd28b92beb2fb296022150",
-      "bytes": 37425
+      "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
+      "sha256": "cdc615c4f566c85c7c5ac2e8a814392cb089c947e7dfda8b8895df7d99d42e48",
+      "bytes": 15567
+    },
+    {
+      "path": "apps/editor-host/src-tauri/src/commands/project.rs",
+      "sha256": "725ee72b093af9d0c3c9fa2599169dd789bfdfb45653ff1300b01811c3e0a54a",
+      "bytes": 841
+    },
+    {
+      "path": "apps/editor-host/src-tauri/src/viewport.rs",
+      "sha256": "4437f3ff67f802b9299d55a759034508847faf052caeb906bcdb5e85cb19058b",
+      "bytes": 35063
+    },
+    {
+      "path": "crates/engine-core/src/engine.rs",
+      "sha256": "fc471bf8c7a640041abd9fa3c2a5d763d8ae6092d34bdb615492305df45fa66a",
+      "bytes": 13042
+    },
+    {
+      "path": "crates/engine-core/src/editor/mod.rs",
+      "sha256": "91578f4bd302a27b45687294dbf6f4eb93ec7f5cf5c729ef8ef9476115c4cfdc",
+      "bytes": 22826
+    },
+    {
+      "path": "crates/engine-core/src/simulation_session.rs",
+      "sha256": "5e2bd59acb424cc610c4cbffdab7274086785ac20515a97caac6b9ff2a729dc5",
+      "bytes": 12782
+    },
+    {
+      "path": "crates/runtime/src/scene_editor.rs",
+      "sha256": "eba8bfcce779df0b8f463aee526302f91f97da3efdf20677bb85539977b825d1",
+      "bytes": 15002
+    },
+    {
+      "path": "crates/runtime/src/scene.rs",
+      "sha256": "050f757f11f5619cdd4477bc5fa9349b0c0d8448a8741864199150df9c23cc22",
+      "bytes": 26339
+    },
+    {
+      "path": "crates/renderer/src/window_renderer.rs",
+      "sha256": "2d89eb1737276bbef9af3578b24a712e05ece0f4d9ec975e4ac1cfee5e52b19f",
+      "bytes": 6037
+    },
+    {
+      "path": "compiler/src/lib.rs",
+      "sha256": "91b800d19b1cc19d2fafe42d9f324e8b130125d05f097115e9ca3ca3bca31508",
+      "bytes": 17353
+    },
+    {
+      "path": "apps/game/src/main.rs",
+      "sha256": "a477489352603791e4a185ca27f71f0fbda530e98e971e4796fffa2f6f302489",
+      "bytes": 32198
+    },
+    {
+      "path": "apps/game/src/launch.rs",
+      "sha256": "c247ac17f47e490410ae7d71b74f6a69ad4c29dca8a71e800fa78e0e882105b1",
+      "bytes": 1471
+    },
+    {
+      "path": "apps/admin-dashboard/src/app.ts",
+      "sha256": "76d9eae0e0fb6a582c8c40d9cef2d655778a58ae54dd056b6d76d2bc82545995",
+      "bytes": 9171
+    },
+    {
+      "path": "apps/admin-dashboard/src/builder.ts",
+      "sha256": "18ff288bf683005e69b37431ba3d0e6ad9284d1bd29550cdd504e3f5b7c8bae6",
+      "bytes": 2354
+    },
+    {
+      "path": "apps/admin-dashboard/src-tauri/src/lib.rs",
+      "sha256": "994629e90dace701a4cd9e86970ecf7f519f74ef0da938f6fb4d4d5bf1f95633",
+      "bytes": 8040
+    },
+    {
+      "path": "apps/admin-dashboard/src-tauri/src/desktop.rs",
+      "sha256": "73c71c9cfacb7ff0efc72ef2c06b0662d111b3d61202cfd1e9a7b6f2f6ddb34f",
+      "bytes": 7951
+    },
+    {
+      "path": "apps/admin-dashboard/src-tauri/src/jobs.rs",
+      "sha256": "42c9ff0fc018ed7aa1d4cc4f36085ce4318f7f718b501ac2a2807aeb7d33f9be",
+      "bytes": 8196
+    },
+    {
+      "path": "apps/admin-dashboard/src-tauri/src/builder.rs",
+      "sha256": "8a448527912936a118008c23c862ef22ae08558f531e5453a1d8c0821e1db451",
+      "bytes": 17080
+    },
+    {
+      "path": "docs/editor-flow.md",
+      "sha256": "0895ab751da43534f951528387a1618da0aa65b194a602eafd5b17b0a8d3e807",
+      "bytes": 37264
     },
     {
       "path": "docs/main.md",
-      "sha256": "d243e8750e325283875aae5bfcd531bdd9d065eb59cb0199c5fe9639d4df062e",
-      "bytes": 5322
+      "sha256": "d3ac396410a8ffa46acf193b0beb820825a636543bd61de1c300c27ba69855b5",
+      "bytes": 5798
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "00bd459c251da03569cac853684f21a8a2415e61dbefac86e75d60d246de5bac",
+      "bytes": 7302
+    },
+    {
+      "path": "docs/project-lifecycle.md",
+      "sha256": "710ee2f9368e637142813e391f9fcce00b71de4ac63ce53ed1af7eca9733cd56",
+      "bytes": 14120
+    },
+    {
+      "path": "docs/apps/editor/README.md",
+      "sha256": "80e874fdbf5c0707c8bac6beaa907837c4eb5f15193bdf21dfb1cfbff00b305f",
+      "bytes": 4998
+    },
+    {
+      "path": "docs/static-site.md",
+      "sha256": "185bf157f88be2827bdd0f77f7d85f44f86c614323eac6f67957805152f5f8da",
+      "bytes": 3517
     },
     {
       "path": "docs-site/build.mjs",
-      "sha256": "301f4ab0efedf7b3dfffd1010669d6ee363d5f4cfdd3305c13d8c6f74d34b2b1",
-      "bytes": 11294
+      "sha256": "6396002361a2f6cd4d16deab7e86b913a0990318d0a6b1ccc138368d6e53e260",
+      "bytes": 12787
     },
     {
-      "path": "docs-site/site.test.mjs",
-      "sha256": "eec2e576668c0db8db31ee33f80c3fa304e79498f58ea27651577ccecba5b871",
-      "bytes": 4205
+      "path": "docs-site/diagrams.js",
+      "sha256": "dcabb50b803c006472c4135a6dbf03166f04e1ef07126d75d954132c2225ef6a",
+      "bytes": 2315
+    },
+    {
+      "path": "docs-site/styles.css",
+      "sha256": "2272d740a207f0000f072db610be38ba435d449500536e0956593316b66f351e",
+      "bytes": 10997
     },
     {
       "path": "docs-site/package.json",
-      "sha256": "7e93b8006e8b86f1ed6e4ca0703513d6b68c4cea52a34f3727a09e64bed02895",
-      "bytes": 361
+      "sha256": "2013704a9aeb7c2a26893375bab28f6ba9dd7b54511b21aed5f1180f60296f42",
+      "bytes": 397
+    },
+    {
+      "path": "docs-site/package-lock.json",
+      "sha256": "077eb2449c389b31442560996855526a5f2ee73957c7bc23162de8ba57d66848",
+      "bytes": 20081
+    },
+    {
+      "path": "docs-site/site.test.mjs",
+      "sha256": "acac4d71f7b82d99984d9992ec35ac26dfa2816166ec4ae0e4167c6e3caf7e30",
+      "bytes": 8607
     }
   ],
-  "working_tree_inventory_note": "Status captured after ADR/index creation and publication checks, before writing this checkpoint. Source hashes cover files inspected by the research/review team at checkpoint time and do not imply full subsystem testing. All other dirty paths are inventory only. Existing staged additions, deleted abstracts, moved design-guide files, graph work, backups and concurrent ADR-0001 formatting were preserved. This checkpoint is not self-hashed.",
+  "working_tree_inventory_note": "Captured after guide/site verification and before this checkpoint write. Source hashes identify observed files or reviewed sections, not exhaustive line-by-line review. Concurrent staging, source, runtime/project-lifecycle docs and ADR work were preserved. Checkpoint is not self-hashed.",
   "historical_documentation_updates": [
     {
       "documentation_report": "docs/editor-steps-21-35.md",
@@ -1353,6 +1416,1270 @@
         }
       ],
       "working_tree_inventory_note": "Inventory captured after ADR/index creation and site verification, before rewriting this checkpoint. Three pre-existing staged additions are absent in the working tree (AD); unrelated backups and concurrent graph work were preserved. This checkpoint is not self-hashed. Prior checkpoint evidence and limits are retained in historical_documentation_updates."
+    },
+    {
+      "last_checked_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "last_checked_date": "2026-10-27",
+      "last_documentation_update_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+      "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+      "baseline_note": "Inspection baseline only. The 2026-10-27 init-to-rebuild flow inspection compared a377b1f87dcc2972851c1518e4fd3cf1dc1e8951 with fcb748b04853209b5e17e680c38c847c19f7f365 and inspected current staged, unstaged, and untracked changes. Current source, including uncommitted active-scene simulation changes, informed the conversational graphs. Existing documentation has not been broadly reconciled to this commit; pending documentation changes remain applicable. Concurrent working-tree changes are not an atomic source snapshot.",
+      "flow_inspection": {
+        "date": "2026-10-27",
+        "commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+        "previous_baseline": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+        "scope": "Conversational method-level graphs of desktop and Angular startup, setup create-and-launch, editor workspace APIs, save/reload, compiler packaging, viewport synchronization, simulation, and admin build jobs.",
+        "findings": [
+          "The current /editor route is a shell without document open/save/play/build controls; native EnginePortal is available in the design preview, not mounted by the editor shell.",
+          "ProjectSetup.createProject invokes create_project to package the bundled starter and launch its installed player; it does not open the result in the editor.",
+          "editor_build_project exists in the native host without an EditorService wrapper or current editor UI caller; it requires clean saved documents and installs to a new output folder.",
+          "Admin dashboard Builds queues repeatable Cargo builds of source packages; this is separate from editor project installation and viewport scene reconstruction."
+        ],
+        "verification_limits": [
+          "Static source inspection only; no native UI, GPU, Cargo package build, installed player, or application test execution was performed for this explanation.",
+          "No documentation update was requested; maintained Markdown and generated site output were not edited by this flow inspection, and the static site was not rebuilt.",
+          "Concurrent source and documentation changes were observed; this record preserves the prior documentation update metadata and verification history."
+        ]
+      },
+      "reviewed_commits": [
+        "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "a48ff6c5b84096b540f1401eff452c222e167493",
+        "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+        "1a4c7634a8d568bea625b4afa279abef8524308f",
+        "929bd28045c632951512e8842ea4bf30356c1a8d",
+        "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
+        "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951"
+      ],
+      "documentation_report": "docs/adr/0003-rust-typescript-bridge.md",
+      "documentation_reports": [
+        "docs/adr/0002-object-composition-and-components.md",
+        "docs/adr/0003-rust-typescript-bridge.md"
+      ],
+      "documentation_scope": "Explicit user request for object/props architecture and naming ADR, engine-definition/UI transfer ADR, and complete Rust-TypeScript bridge best-practice research. Added two Proposed ADRs and index links; rebuilt docs-site/dist and checked publication. Engine Developer only; Game App Developer remains empty. No production code, dependencies, staging or commits changed by this work.",
+      "documented_changes": [
+        "Common SceneObject authoring record, typed component composition, presets/roles, and Object/Component/Property/Subject/Controller/System/Asset/Prefab vocabulary",
+        "Object and component identity, hierarchy, defaults, registry/metadata ownership, strict schemas, runtime footprint and versioned scene/project/prefab migration plan",
+        "Dated primary-source research and current code inventory for Rust-owned DTOs, ts-rs versus Specta/schema generation, boundary validation and bidirectional contract fixtures",
+        "JSON commands/queries/receipts, bounded channel streams, raw binary alternatives, scoped queries and descriptor caching, with explicit numeric/null/enum/transform rules",
+        "JSON/XML/MessagePack/CBOR/Postcard/Protobuf/FlatBuffers/packed-array comparison; native benchmark matrix, correctness gates and implementation sequence",
+        "Both ADRs distinguish proposed behavior from current code; no codec speed ranking, zero-copy promise or repository latency measurements are asserted"
+      ],
+      "pending_documentation_changes": [
+        "On a requested documentation update, reconcile startup and build guides with the inspected current UI wiring: setup starter installation, missing editor project/build controls, separate backend packaging, and admin Cargo rebuild jobs; the a377b1f-to-fcb748b milestone is not fully documented by this inspection.",
+        "Resolve/adopt the proposed ADR-0002/0003 decisions and implement their contracts, migrations, generators and adapters before documenting them as available behavior",
+        "Run native Rust-Tauri-WebView2 performance experiments and cross-language generation/serialization compatibility proofs before choosing a production binary codec or claiming performance gains",
+        "Implement the accepted ADR direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior",
+        "Recent Angular/editor milestone changes outside the inspected integration surface were inventoried but existing frontend/architecture guides were not broadly reconciled",
+        "Concurrent animation graph models/store and untracked animation files appeared during this documentation pass and remain outside its implementation or validation scope",
+        "Existing prior pending verification limits remain archived with the previous checkpoint; this pass does not resolve runtime, native/GPU, compiler release or installed-player acceptance"
+      ],
+      "verification": [
+        "npm.cmd test --prefix docs-site: built and link-checked 33 pages across two spaces; all five site tests passed",
+        "Supplemental generated-site check: 606 local/cross-page fragment links resolved across 33 pages; both new ADR bodies, tables, Proposed status and search entries verified among 31 indexed documents",
+        "Game App Developer empty-space check passed; new ADRs are in Engine Developer",
+        "Focused git diff --check passed; new Markdown code fences and trailing whitespace checked",
+        "Independent read-only architecture/source review found no blocking mismatch; command naming and unsupported-plugin editing wording were aligned before the site build",
+        "Prior staged/unstaged/untracked work preserved, including a concurrent formatting diff to ADR-0001 that this work did not author"
+      ],
+      "verification_limits": [
+        "Research/documentation only: no generator integration, Rust/Angular implementation tests, native IPC benchmarks, GPU/runtime acceptance, compiler or installed-player checks run",
+        "Candidate tool versions and source guidance were researched on 2026-10-27; exact workspace compatibility remains a proof task, and optional dependencies were not installed",
+        "Size/rate examples and proposed benchmark fixtures are design inputs, not measured latency/throughput or accepted production budgets",
+        "Current source was inspected, not captured as an atomic filesystem snapshot; concurrent user/other-chat changes may continue after this checkpoint",
+        "Existing frontend/runtime guides were not comprehensively reconciled; pending scope from earlier checkpoints remains carried forward",
+        "npm emitted the existing global-ignore-file environment warning; site build/tests succeeded"
+      ],
+      "working_tree_at_check": [
+        " M Jenkinsfile",
+        " M apps/editor/angular.json",
+        "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
+        "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
+        "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
+        " M apps/editor/package.json",
+        "AM apps/editor/projects/design-guide/scripts/design-registry.mjs",
+        "AM apps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+        "AM apps/editor/projects/design-guide/scripts/design.mjs",
+        "A  apps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "A  apps/editor/projects/design-guide/src/component-registry.ts",
+        "A  apps/editor/projects/design-guide/src/design.routes.ts",
+        "A  apps/editor/projects/design-guide/src/index.html",
+        "A  apps/editor/projects/design-guide/src/main.ts",
+        "A  apps/editor/projects/design-guide/src/previews/dialog.design.ts",
+        "A  apps/editor/projects/design-guide/src/previews/drawer.design.ts",
+        "AM apps/editor/projects/design-guide/src/previews/graph.design.ts",
+        "A  apps/editor/projects/design-guide/src/previews/pane.design.ts",
+        "A  apps/editor/projects/design-guide/src/previews/portal.design.ts",
+        "A  apps/editor/projects/design-guide/src/previews/row.design.ts",
+        "A  apps/editor/projects/design-guide/src/previews/subject.design.ts",
+        "A  apps/editor/projects/design-guide/src/workbench.html",
+        "A  apps/editor/projects/design-guide/src/workbench.scss",
+        "A  apps/editor/projects/design-guide/src/workbench.ts",
+        "A  apps/editor/projects/design-guide/tsconfig.app.json",
+        " D apps/editor/projects/design/src/component-registry.generated.ts",
+        " D apps/editor/projects/design/src/component-registry.ts",
+        " D apps/editor/projects/design/src/design.routes.ts",
+        " D apps/editor/projects/design/src/index.html",
+        " D apps/editor/projects/design/src/main.ts",
+        " D apps/editor/projects/design/src/workbench.html",
+        " D apps/editor/projects/design/src/workbench.scss",
+        " D apps/editor/projects/design/src/workbench.ts",
+        " D apps/editor/projects/design/tsconfig.app.json",
+        " M apps/editor/scripts/check-production.mjs",
+        " D apps/editor/scripts/design-registry.mjs",
+        " D apps/editor/scripts/design-registry.test.mjs",
+        " D apps/editor/scripts/design.mjs",
+        " M apps/editor/src/app/app.routes.development.ts",
+        "AM apps/editor/src/app/core/objects/index.ts",
+        "AM apps/editor/src/app/core/objects/object-api.models.ts",
+        "AM apps/editor/src/app/core/objects/object-api.spec.ts",
+        "AM apps/editor/src/app/core/objects/object-api.ts",
+        "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        " D apps/editor/src/app/shared/components/dialog/dialog.design.ts",
+        " D apps/editor/src/app/shared/components/drawer/drawer.design.ts",
+        " M apps/editor/src/app/shared/components/drawer/drawer.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+        "AM apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+        "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+        "AM apps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+        " M apps/editor/src/app/shared/components/graph/graph-node.scss",
+        " M apps/editor/src/app/shared/components/graph/graph-node.ts",
+        " D apps/editor/src/app/shared/components/graph/graph.design.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.html",
+        " M apps/editor/src/app/shared/components/graph/graph.models.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.scss",
+        " M apps/editor/src/app/shared/components/graph/graph.spec.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.store.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.ts",
+        " D apps/editor/src/app/shared/components/pane/pane.design.ts",
+        " D apps/editor/src/app/shared/components/portal/portal.design.ts",
+        " D apps/editor/src/app/shared/components/row/row.design.ts",
+        " M apps/editor/src/app/shared/components/subject/subject-fields.scss",
+        " D apps/editor/src/app/shared/components/subject/subject.design.ts",
+        " M apps/editor/src/app/shared/components/subject/subject.html",
+        " M apps/editor/src/app/shared/components/subject/subject.ts",
+        " M apps/editor/src/app/styles/abstracts/_layout.scss",
+        " M crates/engine-core/src/simulation_session.rs",
+        " M docs-site/docs-state.json",
+        "AM docs/adr/0001-editor-command-pipeline.md",
+        " M docs/main.md",
+        " M test_all.py",
+        "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~",
+        "?? docs/adr/0002-object-composition-and-components.md",
+        "?? docs/adr/0003-rust-typescript-bridge.md"
+      ],
+      "staged_files_at_check": [
+        "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
+        "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
+        "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
+        "A\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
+        "A\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+        "A\tapps/editor/projects/design-guide/scripts/design.mjs",
+        "A\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "A\tapps/editor/projects/design-guide/src/component-registry.ts",
+        "A\tapps/editor/projects/design-guide/src/design.routes.ts",
+        "A\tapps/editor/projects/design-guide/src/index.html",
+        "A\tapps/editor/projects/design-guide/src/main.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/dialog.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/drawer.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/pane.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/portal.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/row.design.ts",
+        "A\tapps/editor/projects/design-guide/src/previews/subject.design.ts",
+        "A\tapps/editor/projects/design-guide/src/workbench.html",
+        "A\tapps/editor/projects/design-guide/src/workbench.scss",
+        "A\tapps/editor/projects/design-guide/src/workbench.ts",
+        "A\tapps/editor/projects/design-guide/tsconfig.app.json",
+        "A\tapps/editor/src/app/core/objects/index.ts",
+        "A\tapps/editor/src/app/core/objects/object-api.models.ts",
+        "A\tapps/editor/src/app/core/objects/object-api.spec.ts",
+        "A\tapps/editor/src/app/core/objects/object-api.ts",
+        "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+        "A\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+        "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+        "A\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+        "A\tdocs/adr/0001-editor-command-pipeline.md"
+      ],
+      "unstaged_files_at_check": [
+        "M\tJenkinsfile",
+        "M\tapps/editor/angular.json",
+        "M\tapps/editor/package.json",
+        "M\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
+        "M\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+        "M\tapps/editor/projects/design-guide/scripts/design.mjs",
+        "M\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
+        "D\tapps/editor/projects/design/src/component-registry.generated.ts",
+        "D\tapps/editor/projects/design/src/component-registry.ts",
+        "D\tapps/editor/projects/design/src/design.routes.ts",
+        "D\tapps/editor/projects/design/src/index.html",
+        "D\tapps/editor/projects/design/src/main.ts",
+        "D\tapps/editor/projects/design/src/workbench.html",
+        "D\tapps/editor/projects/design/src/workbench.scss",
+        "D\tapps/editor/projects/design/src/workbench.ts",
+        "D\tapps/editor/projects/design/tsconfig.app.json",
+        "M\tapps/editor/scripts/check-production.mjs",
+        "D\tapps/editor/scripts/design-registry.mjs",
+        "D\tapps/editor/scripts/design-registry.test.mjs",
+        "D\tapps/editor/scripts/design.mjs",
+        "M\tapps/editor/src/app/app.routes.development.ts",
+        "M\tapps/editor/src/app/core/objects/index.ts",
+        "M\tapps/editor/src/app/core/objects/object-api.models.ts",
+        "M\tapps/editor/src/app/core/objects/object-api.spec.ts",
+        "M\tapps/editor/src/app/core/objects/object-api.ts",
+        "D\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "D\tapps/editor/src/app/shared/components/dialog/dialog.design.ts",
+        "D\tapps/editor/src/app/shared/components/drawer/drawer.design.ts",
+        "M\tapps/editor/src/app/shared/components/drawer/drawer.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+        "M\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+        "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+        "M\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+        "M\tapps/editor/src/app/shared/components/graph/graph-node.scss",
+        "M\tapps/editor/src/app/shared/components/graph/graph-node.ts",
+        "D\tapps/editor/src/app/shared/components/graph/graph.design.ts",
+        "M\tapps/editor/src/app/shared/components/graph/graph.html",
+        "M\tapps/editor/src/app/shared/components/graph/graph.models.ts",
+        "M\tapps/editor/src/app/shared/components/graph/graph.scss",
+        "M\tapps/editor/src/app/shared/components/graph/graph.spec.ts",
+        "M\tapps/editor/src/app/shared/components/graph/graph.store.ts",
+        "M\tapps/editor/src/app/shared/components/graph/graph.ts",
+        "D\tapps/editor/src/app/shared/components/pane/pane.design.ts",
+        "D\tapps/editor/src/app/shared/components/portal/portal.design.ts",
+        "D\tapps/editor/src/app/shared/components/row/row.design.ts",
+        "M\tapps/editor/src/app/shared/components/subject/subject-fields.scss",
+        "D\tapps/editor/src/app/shared/components/subject/subject.design.ts",
+        "M\tapps/editor/src/app/shared/components/subject/subject.html",
+        "M\tapps/editor/src/app/shared/components/subject/subject.ts",
+        "M\tapps/editor/src/app/styles/abstracts/_layout.scss",
+        "M\tcrates/engine-core/src/simulation_session.rs",
+        "M\tdocs-site/docs-state.json",
+        "M\tdocs/adr/0001-editor-command-pipeline.md",
+        "M\tdocs/main.md",
+        "M\ttest_all.py"
+      ],
+      "untracked_files_at_check": [
+        "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "crates/engine-core/tests/command_factory_api.rs~",
+        "crates/renderer/src/vulkan/lighting.rs~",
+        "crates/renderer/src/vulkan/render_object.rs~",
+        "docs/adr/0002-object-composition-and-components.md",
+        "docs/adr/0003-rust-typescript-bridge.md"
+      ],
+      "inspected_source_files": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "027158356fd720427e3717cbecf8bc35652055b531a5123e006ec65eadf824b7",
+          "bytes": 899
+        },
+        {
+          "path": "apps/editor/AGENTS.md",
+          "sha256": "a6c8931c4949e641635bc2cce310df3874f3016f01414d5694a52cc3d1007ffd",
+          "bytes": 2907
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "2ca7a3db6b2c7048c34b61a2c561cc2a455702f6aeb8783a9c55d2b0859e5364",
+          "bytes": 281
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2",
+          "bytes": 142616
+        },
+        {
+          "path": "apps/editor/package.json",
+          "sha256": "212bd8205977d8185a8a865c770e504d8c716142700247d2f5420e6bbd4f87c0",
+          "bytes": 2398
+        },
+        {
+          "path": "apps/editor/package-lock.json",
+          "sha256": "3edaaad2ee978bb48c67f76e5c71dceac612a02f105d77da8a6f26db1993071f",
+          "bytes": 258288
+        },
+        {
+          "path": "apps/editor-host/src-tauri/Cargo.toml",
+          "sha256": "8f8f25f82b7edbfbee7ffd6117ab2631a8671ff26304c5b7761d19cec67768fc",
+          "bytes": 876
+        },
+        {
+          "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
+          "sha256": "cdc615c4f566c85c7c5ac2e8a814392cb089c947e7dfda8b8895df7d99d42e48",
+          "bytes": 15567
+        },
+        {
+          "path": "apps/editor-host/src-tauri/src/viewport.rs",
+          "sha256": "4437f3ff67f802b9299d55a759034508847faf052caeb906bcdb5e85cb19058b",
+          "bytes": 35063
+        },
+        {
+          "path": "apps/editor-host/src-tauri/capabilities/default.json",
+          "sha256": "3274cf173d071a9596b3a5a49273a3695cf74c97ba2ccee118c0c69a4e492cb3",
+          "bytes": 207
+        },
+        {
+          "path": "crates/bridge/Cargo.toml",
+          "sha256": "7d1e5766a00540f86c1591e90395f250f9d00b67421cdc06b40dc59e0660282b",
+          "bytes": 263
+        },
+        {
+          "path": "crates/bridge/src/editor.rs",
+          "sha256": "dade0b6bc8d44f39d19ec17d7f0057d4bcf20ea5b4695dd7bb8d29fdc0e79ed5",
+          "bytes": 1802
+        },
+        {
+          "path": "crates/bridge/tests/editor_contract.rs",
+          "sha256": "c0994c87de3efe9f1c144a6953752c707edf7854a5120ac9e39ac169c7762fbb",
+          "bytes": 6692
+        },
+        {
+          "path": "crates/engine-core/Cargo.toml",
+          "sha256": "d4d484884d5a93985814b9075ac3f060d01300b84495ac4346e19e6cbb9c0943",
+          "bytes": 218
+        },
+        {
+          "path": "crates/engine-core/src/command.rs",
+          "sha256": "da84f29f39b2c4cb1ce8c75007d7e83012b04bf6755f2c7efc7dcab8576111bb",
+          "bytes": 4725
+        },
+        {
+          "path": "crates/engine-core/src/engine.rs",
+          "sha256": "fc471bf8c7a640041abd9fa3c2a5d763d8ae6092d34bdb615492305df45fa66a",
+          "bytes": 13042
+        },
+        {
+          "path": "crates/engine-core/src/events.rs",
+          "sha256": "1a17334390fbebc6fe7857112e6e91d07de7ae60e2f3a4bf4c6e6a874801730b",
+          "bytes": 2742
+        },
+        {
+          "path": "crates/engine-core/src/entity_key.rs",
+          "sha256": "89367a278f4dc7c0d562aa1a55f18e4efc97e624a5885d93a85ab9f2ec962c03",
+          "bytes": 644
+        },
+        {
+          "path": "crates/engine-core/src/scene_data.rs",
+          "sha256": "689d8ade4eabab2d498216745fb1841413542de0959a3f6a83afdff9264c2ac7",
+          "bytes": 20084
+        },
+        {
+          "path": "crates/engine-core/src/transform.rs",
+          "sha256": "6e0cfba5ef0ab909d1b57ef7a59bc1268bfdec167c8120e23c2a1106a7e0e9c1",
+          "bytes": 1062
+        },
+        {
+          "path": "crates/engine-core/src/project.rs",
+          "sha256": "bdd588cb65c40b664c12abafb2579b9ede2c09e6a9c6e31eac6546e0bb3a1baf",
+          "bytes": 8457
+        },
+        {
+          "path": "crates/engine-core/src/simulation_session.rs",
+          "sha256": "0b4693107ca8b7ed223aa81b9022d2faf15370af516ed5f43c20781e0131aaa2",
+          "bytes": 12066
+        },
+        {
+          "path": "apps/editor/src/app/core/editor/editor.models.ts",
+          "sha256": "6581ceffff4949d6a97736874c1780c15c05dcfd25848383de0bc7bca7a084d5",
+          "bytes": 13712
+        },
+        {
+          "path": "apps/editor/src/app/core/editor/editor.service.ts",
+          "sha256": "d6ec53b10a48fe69769726c5ecfe836e2f38a7c277d9b781fddb80553b3beaf9",
+          "bytes": 20008
+        },
+        {
+          "path": "apps/editor/src/app/core/objects/object-api.models.ts",
+          "sha256": "2e677a85bad8ee3ff58a5b98569a5a88045903418a1b00e8c3e5e424e8f9506a",
+          "bytes": 3482
+        },
+        {
+          "path": "apps/editor/src/app/core/objects/object-api.ts",
+          "sha256": "b7d3766d86a7979e5b617f087360ed2eea35a88128f2060283da48b0583ec735",
+          "bytes": 2237
+        },
+        {
+          "path": "apps/editor/src/app/core/subjects/subject.models.ts",
+          "sha256": "a46057e40bda8079315899e52892b3539cad4b82acb6f983fc6a445049fd919b",
+          "bytes": 4920
+        },
+        {
+          "path": "apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+          "sha256": "3edffd88c16fa762153ded2b12e4de9cb4bc189926087ebbda5dcf3c898c3c4a",
+          "bytes": 9624
+        },
+        {
+          "path": "docs/adr/0001-editor-command-pipeline.md",
+          "sha256": "5fbccf03918844d30505f42790579dd0fd64ca437d9d876e2f0f1bc7c4f4a9c6",
+          "bytes": 21973
+        },
+        {
+          "path": "docs/adr/0002-object-composition-and-components.md",
+          "sha256": "dd4276bbb25be220a5ad89f5c6cd4b7c3d3ff58c9345aa8ac7d1830857402889",
+          "bytes": 29303
+        },
+        {
+          "path": "docs/adr/0003-rust-typescript-bridge.md",
+          "sha256": "7d72dd526c80497f48ff0d6caddcaa5d43db7e9357bd28b92beb2fb296022150",
+          "bytes": 37425
+        },
+        {
+          "path": "docs/main.md",
+          "sha256": "d243e8750e325283875aae5bfcd531bdd9d065eb59cb0199c5fe9639d4df062e",
+          "bytes": 5322
+        },
+        {
+          "path": "docs-site/build.mjs",
+          "sha256": "301f4ab0efedf7b3dfffd1010669d6ee363d5f4cfdd3305c13d8c6f74d34b2b1",
+          "bytes": 11294
+        },
+        {
+          "path": "docs-site/site.test.mjs",
+          "sha256": "eec2e576668c0db8db31ee33f80c3fa304e79498f58ea27651577ccecba5b871",
+          "bytes": 4205
+        },
+        {
+          "path": "docs-site/package.json",
+          "sha256": "7e93b8006e8b86f1ed6e4ca0703513d6b68c4cea52a34f3727a09e64bed02895",
+          "bytes": 361
+        }
+      ],
+      "working_tree_inventory_note": "Status captured after ADR/index creation and publication checks, before writing this checkpoint. Source hashes cover files inspected by the research/review team at checkpoint time and do not imply full subsystem testing. All other dirty paths are inventory only. Existing staged additions, deleted abstracts, moved design-guide files, graph work, backups and concurrent ADR-0001 formatting were preserved. This checkpoint is not self-hashed."
+    },
+    {
+      "last_checked_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "last_checked_date": "2026-10-27",
+      "last_documentation_update_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+      "baseline_note": "Inspection baseline only. This requested ADR update began from checkpoint a377b1f87dcc2972851c1518e4fd3cf1dc1e8951 and inspected the fcb748b04853209b5e17e680c38c847c19f7f365 milestone, recent Git history, tracked tree, staged/unstaged diffs and untracked paths. It also inspected concurrent explicit-scene simulation and related documentation edits. The parallel flow_inspection record is preserved. This commit identifies observed source, not a documentation commit, full documentation reconciliation, implementation acceptance or an atomic working-tree snapshot.",
+      "flow_inspection": {
+        "date": "2026-10-27",
+        "commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+        "previous_baseline": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+        "scope": "Conversational method-level graphs of desktop and Angular startup, setup create-and-launch, editor workspace APIs, save/reload, compiler packaging, viewport synchronization, simulation, and admin build jobs.",
+        "findings": [
+          "The current /editor route is a shell without document open/save/play/build controls; native EnginePortal is available in the design preview, not mounted by the editor shell.",
+          "ProjectSetup.createProject invokes create_project to package the bundled starter and launch its installed player; it does not open the result in the editor.",
+          "editor_build_project exists in the native host without an EditorService wrapper or current editor UI caller; it requires clean saved documents and installs to a new output folder.",
+          "Admin dashboard Builds queues repeatable Cargo builds of source packages; this is separate from editor project installation and viewport scene reconstruction."
+        ],
+        "verification_limits": [
+          "Static source inspection only; no native UI, GPU, Cargo package build, installed player, or application test execution was performed for this explanation.",
+          "No documentation update was requested; maintained Markdown and generated site output were not edited by this flow inspection, and the static site was not rebuilt.",
+          "Concurrent source and documentation changes were observed; this record preserves the prior documentation update metadata and verification history."
+        ]
+      },
+      "reviewed_commits": [
+        "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "a48ff6c5b84096b540f1401eff452c222e167493",
+        "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+        "1a4c7634a8d568bea625b4afa279abef8524308f",
+        "929bd28045c632951512e8842ea4bf30356c1a8d",
+        "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
+        "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+        "fcb748b04853209b5e17e680c38c847c19f7f365"
+      ],
+      "documentation_report": "docs/adr/README.md",
+      "documentation_reports": [
+        "docs/adr/0002-object-composition-and-components.md",
+        "docs/adr/0003-rust-typescript-bridge.md",
+        "docs/adr/README.md",
+        "docs/adr/0004-authoring-play-and-editor-state.md",
+        "docs/adr/0005-runtime-lifecycle-and-scheduling.md",
+        "docs/adr/0006-asset-identity-and-import-pipeline.md",
+        "docs/adr/0007-graph-assets-and-execution.md",
+        "docs/adr/0008-game-modules-and-scripting.md",
+        "docs/adr/0009-prefabs-and-instance-overrides.md",
+        "docs/adr/0010-input-actions-and-possession.md",
+        "docs/adr/0011-persistence-autosave-and-recovery.md",
+        "docs/adr/0012-native-viewport-composition.md"
+      ],
+      "documentation_scope": "Explicit user instruction to write the nine additional ADR drafts discussed. Added ADR-0004 through ADR-0012 as Proposed, an architecture reading/dependency guide, and a docs/main.md link. Reviewed existing ADR-0001/0002/0003 boundaries. Rebuilt docs-site/dist and checked publication in Engine Developer; Game App Developer remains empty. This pass authored no production code or dependency changes and issued no staging or commit commands. Concurrent source, documentation and staging changes were preserved.",
+      "documented_changes": [
+        "Nine Proposed ADRs cover authored/Play/editor state, runtime lifecycle/scheduling, asset identity/import, graph execution, scripting, prefabs/overrides, input/possession, persistence/recovery and native viewport composition.",
+        "Every new ADR distinguishes current inspected source from proposed behavior, records assumptions/dependencies, alternatives, open choices, incremental implementation and acceptance gates.",
+        "The reading guide maps editor, bridge, authoring, runtime, content and presentation responsibilities; registers all twelve ADRs; explains dependency order through a possessed Guard prefab example.",
+        "Authoring and Play remain separate; movement has one authority; animation time advances once per step; script state belongs to each enabled component instance.",
+        "Asset IDs differ from runtime handles; prefab accepted-base snapshots remain durable authoring data; Play initially pins resolved asset/program revisions while independent previews may adopt new catalog products.",
+        "Persistence distinguishes ordinary authored-scene Save during Play from Edit-only SaveAs/project operations, partial multi-file saves, recovery snapshots and unproven power-loss durability.",
+        "Input and viewport contracts align shared Rust gameplay mapping with UI-owned editor shortcuts; Windows child-window limitations, native testing and future composition choices are explicit.",
+        "Primary-source guidance supports focused precedents without selecting an unmeasured scripting runtime, physics backend, shader frontend, device library or composition implementation."
+      ],
+      "pending_documentation_changes": [
+        "Review and accept or revise Proposed ADR-0002 through ADR-0012; implement their contracts, migrations, runtime features and acceptance gates before documenting them as available behavior.",
+        "Implement the accepted ADR-0001 direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior.",
+        "Run the Rust-TypeScript generation/serialization proofs and native bridge benchmarks from ADR-0003; select scripting, graph compiler, physics, input-device and viewport-composition implementations only after their specified proofs.",
+        "Reconcile existing frontend, startup, build and architecture guides beyond the integration surfaces inspected here. The fcb748b editor milestone and newer working-tree changes are not comprehensively documented by these ADR drafts.",
+        "Validate the concurrent explicit-scene simulation factory/caller/tests in their implementation task; this ADR pass inspected those changes but did not run their implementation checks.",
+        "On a requested documentation update, reconcile startup and build guides with the inspected current UI wiring: setup starter installation, missing editor project/build controls, separate backend packaging, and admin Cargo rebuild jobs; the a377b1f-to-fcb748b milestone is not fully documented by this inspection.",
+        "Prior runtime, native/GPU, compiler release and installed-player verification limits remain applicable and are preserved in historical checkpoints. Graph UI source was inspected for these proposals; native graph execution remains future work."
+      ],
+      "verification": [
+        "npm.cmd test --prefix docs-site: built and link-checked 43 pages across two spaces; all five site tests passed.",
+        "Supplemental generated-site check: 817 local/cross-page fragment links resolved; all nine new Proposed ADR bodies, dates and search entries verified among 41 indexed documents; reading guide registers twelve decisions.",
+        "Game App Developer remains empty. Generated search text matched all 41 current Markdown sources after the build, including concurrent runtime/project-lifecycle edits.",
+        "Focused git diff --check passed; all nine new ADRs and the reading guide passed trailing-whitespace, conflict-marker and balanced-fence checks.",
+        "Independent cross-group review resolved the active-Play asset-version gap by explicitly pinning revisions until restart and restricting initial graph replacement to independent previews. No remaining blocking contract mismatch was found.",
+        "Current source and documentation changes plus external staging were inventoried and preserved; checkpoint history and the parallel flow_inspection record remain intact."
+      ],
+      "verification_limits": [
+        "Documentation pass only: no Rust/Angular implementation suite, native UI/IPC/GPU test, scripting prototype, compiler packaging run or installed-player test was executed by this task.",
+        "Concurrent explicit-scene factory/caller/test changes were inspected as uncommitted work; their compilation and behavior are not certified by these documentation checks.",
+        "Scripting runtime, shader frontend, physics/device backends, composition architecture, cache budgets and filesystem guarantees remain proposed or evidence-gated. No performance or durability measurement is claimed.",
+        "Current source was not captured atomically. Other work changed source, docs, staging and checkpoint metadata during this pass; hashes record checkpoint observations and may cover partial source inspection rather than exhaustive subsystem review.",
+        "Existing guides outside this requested ADR scope were not comprehensively reconciled. Prior pending documentation work remains in the current list or historical checkpoints; flow_inspection retains its own narrower limits.",
+        "npm emitted the existing global-ignore-file environment warning; the documentation build and tests succeeded."
+      ],
+      "working_tree_at_check": [
+        " M apps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        " M crates/engine-core/src/editor/mod.rs",
+        " M crates/engine-core/src/simulation_session.rs",
+        " M crates/engine-core/tests/engine_api.rs",
+        " M crates/engine-core/tests/simulation_session_api.rs",
+        " M docs-site/docs-state.json",
+        "A  docs/adr/0002-object-composition-and-components.md",
+        "A  docs/adr/0003-rust-typescript-bridge.md",
+        "A  docs/adr/0004-authoring-play-and-editor-state.md",
+        "A  docs/adr/0005-runtime-lifecycle-and-scheduling.md",
+        "A  docs/adr/0006-asset-identity-and-import-pipeline.md",
+        "A  docs/adr/0007-graph-assets-and-execution.md",
+        "A  docs/adr/0008-game-modules-and-scripting.md",
+        "A  docs/adr/0009-prefabs-and-instance-overrides.md",
+        "A  docs/adr/0010-input-actions-and-possession.md",
+        "A  docs/adr/0011-persistence-autosave-and-recovery.md",
+        "A  docs/adr/0012-native-viewport-composition.md",
+        "A  docs/adr/README.md",
+        " M docs/crates/runtime/README.md",
+        " M docs/main.md",
+        " M docs/project-lifecycle.md",
+        "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~"
+      ],
+      "staged_files_at_check": [
+        "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "A\tdocs/adr/0002-object-composition-and-components.md",
+        "A\tdocs/adr/0003-rust-typescript-bridge.md",
+        "A\tdocs/adr/0004-authoring-play-and-editor-state.md",
+        "A\tdocs/adr/0005-runtime-lifecycle-and-scheduling.md",
+        "A\tdocs/adr/0006-asset-identity-and-import-pipeline.md",
+        "A\tdocs/adr/0007-graph-assets-and-execution.md",
+        "A\tdocs/adr/0008-game-modules-and-scripting.md",
+        "A\tdocs/adr/0009-prefabs-and-instance-overrides.md",
+        "A\tdocs/adr/0010-input-actions-and-possession.md",
+        "A\tdocs/adr/0011-persistence-autosave-and-recovery.md",
+        "A\tdocs/adr/0012-native-viewport-composition.md",
+        "A\tdocs/adr/README.md"
+      ],
+      "unstaged_files_at_check": [
+        "M\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "D\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "M\tcrates/engine-core/src/editor/mod.rs",
+        "M\tcrates/engine-core/src/simulation_session.rs",
+        "M\tcrates/engine-core/tests/engine_api.rs",
+        "M\tcrates/engine-core/tests/simulation_session_api.rs",
+        "M\tdocs-site/docs-state.json",
+        "M\tdocs/crates/runtime/README.md",
+        "M\tdocs/main.md",
+        "M\tdocs/project-lifecycle.md"
+      ],
+      "untracked_files_at_check": [
+        "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "crates/engine-core/tests/command_factory_api.rs~",
+        "crates/renderer/src/vulkan/lighting.rs~",
+        "crates/renderer/src/vulkan/render_object.rs~"
+      ],
+      "inspected_source_files": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "027158356fd720427e3717cbecf8bc35652055b531a5123e006ec65eadf824b7",
+          "bytes": 899
+        },
+        {
+          "path": "apps/editor-host/src-tauri/src/editor.rs",
+          "sha256": "653384fe9c619e6ce87cedeb7f244a4ee605dd65dc81c84059cf9ea0a7a8dbfc",
+          "bytes": 31747
+        },
+        {
+          "path": "apps/editor-host/src-tauri/src/layout_preferences.rs",
+          "sha256": "0873e1311b4997cf5d5b014b5eedd41d817b59ed53082806a0678a8fd5c76c7e",
+          "bytes": 4130
+        },
+        {
+          "path": "apps/editor-host/src-tauri/src/viewport.rs",
+          "sha256": "4437f3ff67f802b9299d55a759034508847faf052caeb906bcdb5e85cb19058b",
+          "bytes": 35063
+        },
+        {
+          "path": "apps/editor/src/app/core/editor/editor.service.ts",
+          "sha256": "d6ec53b10a48fe69769726c5ecfe836e2f38a7c277d9b781fddb80553b3beaf9",
+          "bytes": 20008
+        },
+        {
+          "path": "apps/editor/src/app/core/editor/engine-viewport.directive.ts",
+          "sha256": "4247719ff4f1c886368b9d62722d541d11ff987327dacafee7bb02004faa9646",
+          "bytes": 11992
+        },
+        {
+          "path": "apps/editor/src/app/core/subjects/subject.models.ts",
+          "sha256": "a46057e40bda8079315899e52892b3539cad4b82acb6f983fc6a445049fd919b",
+          "bytes": 4920
+        },
+        {
+          "path": "apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+          "sha256": "3edffd88c16fa762153ded2b12e4de9cb4bc189926087ebbda5dcf3c898c3c4a",
+          "bytes": 9624
+        },
+        {
+          "path": "apps/editor/src/app/shared/components/graph/graph.models.ts",
+          "sha256": "b5658c0e0f0545e0942037d92a3d1454fbcc984649f8ec0fa9d9edb48f4cff00",
+          "bytes": 13918
+        },
+        {
+          "path": "apps/editor/src/app/shared/components/graph/graph.store.ts",
+          "sha256": "57df16835b9fd2214b1a7b5e44a4692123a7dbeb5082e8c506d2656f155ed1ec",
+          "bytes": 9521
+        },
+        {
+          "path": "apps/editor/src/app/shared/components/portal/portal.ts",
+          "sha256": "9dd8167674dd510dba01455e410fdc14e5683fe758f330894f7993379a3995ef",
+          "bytes": 3214
+        },
+        {
+          "path": "apps/editor/src/app/shared/services/layout-preferences.service.ts",
+          "sha256": "7852d89bb8cdd027f8e6f7eeab80c7bc419e403c0b9fb1dea14fb7e002cebc09",
+          "bytes": 4810
+        },
+        {
+          "path": "compiler/src/lib.rs",
+          "sha256": "91b800d19b1cc19d2fafe42d9f324e8b130125d05f097115e9ca3ca3bca31508",
+          "bytes": 17353
+        },
+        {
+          "path": "crates/engine-core/src/asset_jobs.rs",
+          "sha256": "eba12bf1b374190a3a4fa841e25f56df5202d1917b0f4c582b3c968e65a32c99",
+          "bytes": 11872
+        },
+        {
+          "path": "crates/engine-core/src/asset_registry.rs",
+          "sha256": "1540eca7ebd99aaee1adf547d41d82a9000ccd1d7bc0696a64c51d6b3ed1b68b",
+          "bytes": 12225
+        },
+        {
+          "path": "crates/engine-core/src/command.rs",
+          "sha256": "da84f29f39b2c4cb1ce8c75007d7e83012b04bf6755f2c7efc7dcab8576111bb",
+          "bytes": 4725
+        },
+        {
+          "path": "crates/engine-core/src/editor/mod.rs",
+          "sha256": "79b6a3346176a1bdd7fca486869603c5d181289e57aee1bc120a5fbb8e92fdbe",
+          "bytes": 22684
+        },
+        {
+          "path": "crates/engine-core/src/editor/operations.rs",
+          "sha256": "c4474d84ac7960ab222669c769c8e1068b25b72744c779d49e5ac6dcaa6a9f20",
+          "bytes": 23361
+        },
+        {
+          "path": "crates/engine-core/src/editor/prefab.rs",
+          "sha256": "4b6d23a4004b245dba5f0365e49554411200772186d4e770ab13c298366450dc",
+          "bytes": 7476
+        },
+        {
+          "path": "crates/engine-core/src/editor/scene_documents.rs",
+          "sha256": "9972a93534f6b6cb3c82273d3c6d538be60e7902757eb369c271f5f1a99b63cb",
+          "bytes": 10083
+        },
+        {
+          "path": "crates/engine-core/src/input.rs",
+          "sha256": "2170a9ac999273d7fd93809da5516fac8b8036e8cc27e242a61fd14a0b40b0ee",
+          "bytes": 1388
+        },
+        {
+          "path": "crates/engine-core/src/project.rs",
+          "sha256": "bdd588cb65c40b664c12abafb2579b9ede2c09e6a9c6e31eac6546e0bb3a1baf",
+          "bytes": 8457
+        },
+        {
+          "path": "crates/engine-core/src/scene_data.rs",
+          "sha256": "689d8ade4eabab2d498216745fb1841413542de0959a3f6a83afdff9264c2ac7",
+          "bytes": 20084
+        },
+        {
+          "path": "crates/engine-core/src/simulation.rs",
+          "sha256": "f100998f5527329ac7614782922e70fe325d908ee3ac29d6254beb83fe6ea152",
+          "bytes": 1681
+        },
+        {
+          "path": "crates/engine-core/src/simulation_session.rs",
+          "sha256": "83fcfb35dce8fd3a080f6c7b637aadce2f73918387abd0868d4893b622a5c8a3",
+          "bytes": 12474
+        },
+        {
+          "path": "crates/engine-core/tests/engine_api.rs",
+          "sha256": "48525732bcc8708223a8eeb6a98e3680a9ecfc15298b4ac82526f8a6a1d35999",
+          "bytes": 11773
+        },
+        {
+          "path": "crates/engine-core/tests/simulation_session_api.rs",
+          "sha256": "8e335f8a2eccdf16d608e5f1e529499af2b83e5fb4342dda8474d2ae3721d232",
+          "bytes": 16071
+        },
+        {
+          "path": "crates/renderer/build.rs",
+          "sha256": "36785b4e01cd4d05f5aeb6c7c3044f93e02e196cdf0c29bd5660d95cc465ce5b",
+          "bytes": 1177
+        },
+        {
+          "path": "crates/runtime/src/assets/asset_manager.rs",
+          "sha256": "3c08fc0629bb64fcce7f78afbba51ae85e5e4f82c7a85d72af997f5acb9faf66",
+          "bytes": 17679
+        },
+        {
+          "path": "crates/runtime/src/assets/catalog.rs",
+          "sha256": "05767ee1b61c19e773410b22658b6d01d9f8ccc4160e34c0f4925c1a5e04c98b",
+          "bytes": 1877
+        },
+        {
+          "path": "crates/runtime/src/assets/metadata_import.rs",
+          "sha256": "596b0bc331270100b714584acd94fd838df7bbed95480dec7e55c4307ec4eeb2",
+          "bytes": 11019
+        },
+        {
+          "path": "crates/runtime/src/scene_io.rs",
+          "sha256": "59cff61ed516f4a76baa4268996aa247e6e1a05f221d5ce90b66022b0c3bbcc7",
+          "bytes": 6701
+        },
+        {
+          "path": "docs-site/build.mjs",
+          "sha256": "301f4ab0efedf7b3dfffd1010669d6ee363d5f4cfdd3305c13d8c6f74d34b2b1",
+          "bytes": 11294
+        },
+        {
+          "path": "docs-site/package.json",
+          "sha256": "7e93b8006e8b86f1ed6e4ca0703513d6b68c4cea52a34f3727a09e64bed02895",
+          "bytes": 361
+        },
+        {
+          "path": "docs-site/site.test.mjs",
+          "sha256": "eec2e576668c0db8db31ee33f80c3fa304e79498f58ea27651577ccecba5b871",
+          "bytes": 4205
+        },
+        {
+          "path": "docs/adr/0001-editor-command-pipeline.md",
+          "sha256": "5fbccf03918844d30505f42790579dd0fd64ca437d9d876e2f0f1bc7c4f4a9c6",
+          "bytes": 21973
+        },
+        {
+          "path": "docs/adr/0002-object-composition-and-components.md",
+          "sha256": "dd4276bbb25be220a5ad89f5c6cd4b7c3d3ff58c9345aa8ac7d1830857402889",
+          "bytes": 29303
+        },
+        {
+          "path": "docs/adr/0003-rust-typescript-bridge.md",
+          "sha256": "7d72dd526c80497f48ff0d6caddcaa5d43db7e9357bd28b92beb2fb296022150",
+          "bytes": 37425
+        },
+        {
+          "path": "docs/adr/0004-authoring-play-and-editor-state.md",
+          "sha256": "9902e7130e6530efb30e21fe20c28df7224ea5780b2d00f52361da843ebff397",
+          "bytes": 9745
+        },
+        {
+          "path": "docs/adr/0005-runtime-lifecycle-and-scheduling.md",
+          "sha256": "cc52196956e8b962fd5b0d485946af605fe72a89d11e8e9c7bd4122943605b18",
+          "bytes": 9929
+        },
+        {
+          "path": "docs/adr/0006-asset-identity-and-import-pipeline.md",
+          "sha256": "a2a9ef3decee3d2a0cb35ef51ade6a6ba6782586a7163f2d5989baf995c32f90",
+          "bytes": 9987
+        },
+        {
+          "path": "docs/adr/0007-graph-assets-and-execution.md",
+          "sha256": "4edf2fce0b09d6e59fdc528ad3f1a660de4942ba8dc830480dbd3d3d141bed4c",
+          "bytes": 9763
+        },
+        {
+          "path": "docs/adr/0008-game-modules-and-scripting.md",
+          "sha256": "84e87085cd5cccd51536406521b2055f7347d1c0201e913c79764caa107b82d2",
+          "bytes": 10046
+        },
+        {
+          "path": "docs/adr/0009-prefabs-and-instance-overrides.md",
+          "sha256": "2ff4d5a6cd4919395766ad89a3b1b45833c8f8d9eb5722fc5e11c978106198a7",
+          "bytes": 9784
+        },
+        {
+          "path": "docs/adr/0010-input-actions-and-possession.md",
+          "sha256": "7bb60f851eb23eb67c966ca6450dd8d30d1f68027ded52e31d50fc079c824d50",
+          "bytes": 10091
+        },
+        {
+          "path": "docs/adr/0011-persistence-autosave-and-recovery.md",
+          "sha256": "6b4df243315b192084d5bfbabe3578c28e3f0fef1668d15e1e9270d802f6cf6f",
+          "bytes": 10121
+        },
+        {
+          "path": "docs/adr/0012-native-viewport-composition.md",
+          "sha256": "47caec49ef122d58134de4570d8a7341b56dd6d4bb657afa40a5db0130bb77de",
+          "bytes": 9759
+        },
+        {
+          "path": "docs/adr/README.md",
+          "sha256": "75153c0f68f22db12ae2edb07e0834cc9cb9c8f57028ab7a17c98dc511ae3201",
+          "bytes": 8225
+        },
+        {
+          "path": "docs/crates/runtime/README.md",
+          "sha256": "8fffdda1c4bdd737891a8fbf3b99f1bcf29592409c89645e6587609215b1e203",
+          "bytes": 6035
+        },
+        {
+          "path": "docs/main.md",
+          "sha256": "7458fee484167a31ca311642bec268cf1978c66ccf3a027f0a2051722ba1bdab",
+          "bytes": 5509
+        },
+        {
+          "path": "docs/project-lifecycle.md",
+          "sha256": "b8deb4bc0096673bf33e83231b1dac95e676ce5243d29e4bdfa1bcd4c71254f7",
+          "bytes": 13858
+        },
+        {
+          "path": "docs/scene-persistence.md",
+          "sha256": "4ceb04d4980baec41a5d3e14508cd3e39e328ab00dfe04ed0e998826e0470866",
+          "bytes": 5120
+        },
+        {
+          "path": "docs/timing-input-camera.md",
+          "sha256": "dd38a52ba0702ec672b6f1081e0ce23071917822a8dadca4b7c96d6316d9a3d1",
+          "bytes": 6932
+        }
+      ],
+      "working_tree_inventory_note": "Captured after ADR/guide creation and publication checks, before this checkpoint write. Source hashes cover files or relevant sections inspected by the drafting/review team; other dirty paths are inventory only. External staging of ADRs, deleted abstract additions, generated registry formatting, backup files, scene-context implementation and runtime/project-lifecycle documentation were preserved. This checkpoint is not self-hashed. Previous checkpoint and concurrent flow-inspection metadata are retained."
+    },
+    {
+      "last_checked_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "last_checked_date": "2026-10-27",
+      "last_documentation_update_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+      "baseline_note": "Inspection baseline only. Observed HEAD fcb748b04853209b5e17e680c38c847c19f7f365 after inspecting history from prior documentation baseline fcb748b04853209b5e17e680c38c847c19f7f365 and the latest inspection checkpoint fcb748b04853209b5e17e680c38c847c19f7f365, plus current staged, unstaged and untracked changes. This update documents the completed dirty simulation scene-context batch. HEAD does not identify uncommitted contents or certify unrelated guides. last_documentation_update_commit records observed HEAD, not a new documentation commit. Final TESTER acceptance covers its captured source snapshot; later controlled-target cache edits in simulation_session.rs are pending. Prior flow-inspection and documentation records are preserved.",
+      "flow_inspection": {
+        "date": "2026-10-27",
+        "commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+        "previous_baseline": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+        "scope": "Conversational method-level graphs of desktop and Angular startup, setup create-and-launch, editor workspace APIs, save/reload, compiler packaging, viewport synchronization, simulation, and admin build jobs.",
+        "findings": [
+          "The current /editor route is a shell without document open/save/play/build controls; native EnginePortal is available in the design preview, not mounted by the editor shell.",
+          "ProjectSetup.createProject invokes create_project to package the bundled starter and launch its installed player; it does not open the result in the editor.",
+          "editor_build_project exists in the native host without an EditorService wrapper or current editor UI caller; it requires clean saved documents and installs to a new output folder.",
+          "Admin dashboard Builds queues repeatable Cargo builds of source packages; this is separate from editor project installation and viewport scene reconstruction."
+        ],
+        "verification_limits": [
+          "Static source inspection only; no native UI, GPU, Cargo package build, installed player, or application test execution was performed for this explanation.",
+          "No documentation update was requested; maintained Markdown and generated site output were not edited by this flow inspection, and the static site was not rebuilt.",
+          "Concurrent source and documentation changes were observed; this record preserves the prior documentation update metadata and verification history."
+        ]
+      },
+      "reviewed_commits": [
+        "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "a48ff6c5b84096b540f1401eff452c222e167493",
+        "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+        "1a4c7634a8d568bea625b4afa279abef8524308f",
+        "929bd28045c632951512e8842ea4bf30356c1a8d",
+        "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
+        "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+        "fcb748b04853209b5e17e680c38c847c19f7f365"
+      ],
+      "documentation_report": "docs/project-lifecycle.md",
+      "documentation_reports": [
+        "docs/project-lifecycle.md",
+        "docs/crates/runtime/README.md"
+      ],
+      "documentation_scope": "User-authorized DOC_MANAGER follow-up after the completed five-step explicit simulation scene-context feature. Updated project-lifecycle and runtime API guides plus checkpoint, regenerated docs-site/dist. Engine Developer only; Game App Developer stays empty. No production/test/config/staging/commit actions by documentation maintenance. Concurrent ADR/index/frontend work and the next controlled-target cache batch remain separate.",
+      "documented_changes": [
+        "Separated the running simulation scene_id from the authored project startup_scene_id; editor Play can run an active nonstartup scene while retaining launch configuration",
+        "Documented new/with_factory startup wrappers, with_factory_for_scene explicit construction, scene_id getter and validation before factory/runtime-world creation",
+        "Documented the required GameModuleFactory::create(&ProjectData, &SceneId) signature and configured behavior/input scoping to the supplied running scene",
+        "Kept constructor-time scene selection distinct from automatic scene transitions and persistent game-session state; preserved authored Play/Stop semantics"
+      ],
+      "pending_documentation_changes": [
+        "Review and accept or revise Proposed ADR-0002 through ADR-0012; implement their contracts, migrations, runtime features and acceptance gates before documenting them as available behavior.",
+        "Implement the accepted ADR-0001 direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior.",
+        "Run the Rust-TypeScript generation/serialization proofs and native bridge benchmarks from ADR-0003; select scripting, graph compiler, physics, input-device and viewport-composition implementations only after their specified proofs.",
+        "Reconcile existing frontend, startup, build and architecture guides beyond the integration surfaces inspected here. The fcb748b editor milestone and newer working-tree changes are not comprehensively documented by these ADR drafts.",
+        "Validate the concurrent explicit-scene simulation factory/caller/tests in their implementation task; this ADR pass inspected those changes but did not run their implementation checks.",
+        "On a requested documentation update, reconcile startup and build guides with the inspected current UI wiring: setup starter installation, missing editor project/build controls, separate backend packaging, and admin Cargo rebuild jobs; the a377b1f-to-fcb748b milestone is not fully documented by this inspection.",
+        "Prior runtime, native/GPU, compiler release and installed-player verification limits remain applicable and are preserved in historical checkpoints. Graph UI source was inspected for these proposals; native graph execution remains future work.",
+        "Finish and verify the next controlled-target cache batch before documenting it as complete; current simulation_session.rs has later controlled_targets storage/initialization edits outside the accepted scene-context TESTER snapshot",
+        "Concurrent ADR-0002 through ADR-0012 and their reading guide are separate proposals/documentation work; this update publishes the current Markdown but does not adopt those decisions or certify their proposed implementation",
+        "Native host/UI, player, GPU, real filesystem scene loading and broader downstream acceptance remain outside the scene-context core verification"
+      ],
+      "verification": [
+        "DOC_MANAGER local: npm.cmd test --prefix docs-site rebuilt and link-checked 43 pages; all five site tests passed",
+        "DOC_MANAGER local: supplemental audit resolved 817 local/cross-page anchors across 43 generated pages; both new guide sections exist; Game App Developer remains empty",
+        "DOC_MANAGER local: all 47 Markdown/site/build input hashes match before/after final site checks; generated output includes separately authored concurrent ADR pages",
+        "DOC_MANAGER inspected root/applicable instructions, Git history and tracked-tree inventory, full staged/unstaged/untracked inventory, current scene/context/input/factory/editor sources, final regression source and actual TESTER logs; unrelated work preserved",
+        "TESTER final actual logs and verification.json inspected: cargo test -p engine-core --all-targets --offline --locked passed 100 tests across 11 targets, zero failed/ignored; simulation_session_api passed 13 tests including four new scene-context regressions",
+        "TESTER regressions cover nonstartup behavior and both input paths, original project/explicit scene arguments at the factory, startup-wrapper defaults, unknown IDs and missing configured targets before factory invocation, editor active-scene Play/Stop and authored-state retention; prior motion/Stop coverage reused",
+        "TESTER final actual Clippy log inspected: cargo clippy -p engine-core --all-targets --offline --locked -- -D warnings passed; final Rust logs contain no compiler warnings",
+        "TESTER captured 44 core source/test/manifest/lock files unchanged across final verification. At checkpoint, 43/44 still match; simulation_session.rs contains later next-batch controlled-target cache work, so current partial source is not certified by that earlier acceptance",
+        "SECURITY final parent handoff: no actionable introduced issue in explicit scene-context change; source review checked catalog/target validation before construction, explicit factory scene identity, input scope and original project preservation. No dynamic runtime acceptance by SECURITY",
+        "Focused documentation/checkpoint whitespace checks passed; no documentation staging or commits performed"
+      ],
+      "verification_limits": [
+        "Core CPU API tests/Clippy apply to the captured completed scene-context snapshot. Subsequent partial controlled-target cache edits are pending and were not retested or changed by DOC_MANAGER",
+        "SceneData has no embedded SceneId: validation checks catalog membership, scene structure and configured target existence; it does not authenticate document origin or reject a structurally compatible document solely because it came from another scene",
+        "No downstream native host/Angular/UI, GPU, installed Player/release, real filesystem reopen, full workspace/Jenkins, performance or determinism acceptance was performed for this scene-context update",
+        "New/with_factory retain startup defaults; with_factory_for_scene selects the initial scene only. Automatic gameplay transitions, persistent session state and the proposed component/input/asset/bridge ADR systems are not established by this batch",
+        "Concurrent source/documentation/staging changes can continue after inspection. File fingerprints record bounded verification snapshots, not an atomic filesystem snapshot or current-tree certification",
+        "Existing flow-inspection and broader documentation pending scope remains preserved; unrelated frontend/startup/build guides and concurrent ADR proposals were not broadly reconciled",
+        "npm emitted the existing global-ignore-file environment warning; site build and tests succeeded"
+      ],
+      "working_tree_at_check": [
+        " M apps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        " M crates/engine-core/src/editor/mod.rs",
+        " M crates/engine-core/src/simulation_session.rs",
+        " M crates/engine-core/tests/engine_api.rs",
+        " M crates/engine-core/tests/simulation_session_api.rs",
+        " M docs-site/docs-state.json",
+        "A  docs/adr/0002-object-composition-and-components.md",
+        "A  docs/adr/0003-rust-typescript-bridge.md",
+        "A  docs/adr/0004-authoring-play-and-editor-state.md",
+        "A  docs/adr/0005-runtime-lifecycle-and-scheduling.md",
+        "A  docs/adr/0006-asset-identity-and-import-pipeline.md",
+        "A  docs/adr/0007-graph-assets-and-execution.md",
+        "A  docs/adr/0008-game-modules-and-scripting.md",
+        "A  docs/adr/0009-prefabs-and-instance-overrides.md",
+        "A  docs/adr/0010-input-actions-and-possession.md",
+        "A  docs/adr/0011-persistence-autosave-and-recovery.md",
+        "A  docs/adr/0012-native-viewport-composition.md",
+        "A  docs/adr/README.md",
+        " M docs/crates/runtime/README.md",
+        " M docs/main.md",
+        " M docs/project-lifecycle.md",
+        "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~"
+      ],
+      "staged_files_at_check": [
+        "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "A\tdocs/adr/0002-object-composition-and-components.md",
+        "A\tdocs/adr/0003-rust-typescript-bridge.md",
+        "A\tdocs/adr/0004-authoring-play-and-editor-state.md",
+        "A\tdocs/adr/0005-runtime-lifecycle-and-scheduling.md",
+        "A\tdocs/adr/0006-asset-identity-and-import-pipeline.md",
+        "A\tdocs/adr/0007-graph-assets-and-execution.md",
+        "A\tdocs/adr/0008-game-modules-and-scripting.md",
+        "A\tdocs/adr/0009-prefabs-and-instance-overrides.md",
+        "A\tdocs/adr/0010-input-actions-and-possession.md",
+        "A\tdocs/adr/0011-persistence-autosave-and-recovery.md",
+        "A\tdocs/adr/0012-native-viewport-composition.md",
+        "A\tdocs/adr/README.md"
+      ],
+      "unstaged_files_at_check": [
+        "M\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
+        "D\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "D\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "M\tcrates/engine-core/src/editor/mod.rs",
+        "M\tcrates/engine-core/src/simulation_session.rs",
+        "M\tcrates/engine-core/tests/engine_api.rs",
+        "M\tcrates/engine-core/tests/simulation_session_api.rs",
+        "M\tdocs-site/docs-state.json",
+        "M\tdocs/crates/runtime/README.md",
+        "M\tdocs/main.md",
+        "M\tdocs/project-lifecycle.md"
+      ],
+      "untracked_files_at_check": [
+        "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "crates/engine-core/tests/command_factory_api.rs~",
+        "crates/renderer/src/vulkan/lighting.rs~",
+        "crates/renderer/src/vulkan/render_object.rs~"
+      ],
+      "inspected_source_files": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "027158356fd720427e3717cbecf8bc35652055b531a5123e006ec65eadf824b7",
+          "bytes": 899
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "2ca7a3db6b2c7048c34b61a2c561cc2a455702f6aeb8783a9c55d2b0859e5364",
+          "bytes": 281
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2",
+          "bytes": 142616
+        },
+        {
+          "path": "crates/engine-core/Cargo.toml",
+          "sha256": "d4d484884d5a93985814b9075ac3f060d01300b84495ac4346e19e6cbb9c0943",
+          "bytes": 218
+        },
+        {
+          "path": "crates/engine-core/src/simulation_session.rs",
+          "sha256": "83fcfb35dce8fd3a080f6c7b637aadce2f73918387abd0868d4893b622a5c8a3",
+          "bytes": 12474
+        },
+        {
+          "path": "crates/engine-core/src/editor/mod.rs",
+          "sha256": "79b6a3346176a1bdd7fca486869603c5d181289e57aee1bc120a5fbb8e92fdbe",
+          "bytes": 22684
+        },
+        {
+          "path": "crates/engine-core/src/project.rs",
+          "sha256": "bdd588cb65c40b664c12abafb2579b9ede2c09e6a9c6e31eac6546e0bb3a1baf",
+          "bytes": 8457
+        },
+        {
+          "path": "crates/engine-core/src/scene_catalog.rs",
+          "sha256": "1e46c448fce60a9d882a462c5ac0b93b06794822f5bb83a45e98fffa6a98afce",
+          "bytes": 5612
+        },
+        {
+          "path": "crates/engine-core/tests/simulation_session_api.rs",
+          "sha256": "8e335f8a2eccdf16d608e5f1e529499af2b83e5fb4342dda8474d2ae3721d232",
+          "bytes": 16071
+        },
+        {
+          "path": "crates/engine-core/tests/engine_api.rs",
+          "sha256": "48525732bcc8708223a8eeb6a98e3680a9ecfc15298b4ac82526f8a6a1d35999",
+          "bytes": 11773
+        },
+        {
+          "path": "crates/runtime/src/lib.rs",
+          "sha256": "a9c97fc9ee2609eb68df5f823340e53995966452393b286847c2884f045d3f32",
+          "bytes": 977
+        },
+        {
+          "path": "docs/project-lifecycle.md",
+          "sha256": "b8deb4bc0096673bf33e83231b1dac95e676ce5243d29e4bdfa1bcd4c71254f7",
+          "bytes": 13858
+        },
+        {
+          "path": "docs/crates/runtime/README.md",
+          "sha256": "8fffdda1c4bdd737891a8fbf3b99f1bcf29592409c89645e6587609215b1e203",
+          "bytes": 6035
+        }
+      ],
+      "working_tree_inventory_note": "Inventory captured after guide/site verification and before checkpoint write. Concurrent ADR staging, unrelated frontend changes, AD entries and backup files were preserved. Prior inspection/documentation records remain in historical_documentation_updates, including the existing flow_inspection metadata. The checkpoint is not self-hashed; a later user batch may change source again.",
+      "verification_artifacts": [
+        "target/simulation-scene-context/verification.json",
+        "target/simulation-scene-context/engine-core-tests-final.log",
+        "target/simulation-scene-context/engine-core-clippy-final.log",
+        "target/simulation-scene-context/source-before.json",
+        "target/simulation-scene-context/source-after.json",
+        "target/simulation-scene-context/inspected-head.txt",
+        "target/simulation-scene-context/docs-site-final.log",
+        "target/simulation-scene-context/docs-anchor-final.log",
+        "target/simulation-scene-context/docs-source-before.json",
+        "target/simulation-scene-context/docs-source-after.json"
+      ],
+      "test_source_provenance": {
+        "captured_files": 44,
+        "before_after_changes": 0,
+        "matching_current_files": 43,
+        "current_differences": [
+          "D:\\Coding\\Game Engine\\crates\\engine-core\\src\\simulation_session.rs"
+        ],
+        "note": "Later controlled_targets cache edits are next-batch work. The completed scene-context test snapshot remains valid evidence of that snapshot only."
+      },
+      "documentation_source_provenance": {
+        "captured_inputs": 47,
+        "before_after_changes": 0,
+        "current_differences": [],
+        "generated_pages": 43,
+        "anchors_resolved": 817,
+        "game_app_developer_empty": true
+      },
+      "tracked_tree_count": 567
+    },
+    {
+      "date": "2026-10-27",
+      "commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+      "scope": "User explicitly requested adding the preceding detailed graphs to developer docs. Added a method-level flow guide with ten diagrams and crosslinks in Engine Developer. Added locally bundled Mermaid rendering with readable-size controls and source fallback, rebuilt docs-site/dist, and verified the site. Game App Developer remains empty. No engine production/test code, staging or commits were changed by this documentation task.",
+      "documented_changes": [
+        "Ten current-implementation graphs cover startup, setup create-and-launch, authored packaging, project opening, commands/recovery, persistence, viewport synchronization, player/Play, admin rebuild jobs and source generation.",
+        "Guide explicitly separates current UI wiring from available backend APIs, binary installation from source rebuilds, and native rendering from compilation.",
+        "Independent source review corrected viewport generation gating, completion/start ordering within one admin worker tick, and waiting for pending generation validation.",
+        "Pinned @mermaid-js/tiny 12.2.0 is copied into generated local assets; Mermaid fences render with strict security, captions, original copyable source, readable-size/fit-width controls and failure fallback. No runtime CDN dependency.",
+        "Linked the guide from the developer home, architecture, project lifecycle and frontend docs; documented diagram authoring and Node requirements in the static-site guide."
+      ],
+      "verification": [
+        "npm.cmd test --prefix docs-site: built and link-checked 44 pages across two spaces; all seven tests passed, including actual Mermaid syntax parsing of all ten diagrams and source/controls/failure coverage.",
+        "Supplemental generated-site audit resolved 846 local and cross-page fragment links across 42 indexed documents; all search-index text matched current Markdown sources; ten guide diagram figures published.",
+        "Real in-app browser loaded the local generated guide: all ten figures rendered SVG successfully and collapsed their source fallback. Readable size and Fit width toggled correctly.",
+        "Browser checked default desktop and 390px-wide layouts; enlarged graph overflow remained inside its diagram container rather than widening the page. Temporary viewport override was reset.",
+        "Game App Developer empty-space checks passed. All diagram runtime scripts are local assets.",
+        "Focused git diff --check and checkpoint JSON parsing passed. Independent read-only source review corrections were applied.",
+        "npm emitted the existing global-ignore-file configuration warning; build and tests succeeded."
+      ],
+      "verification_limits": [
+        "Documentation/site validation only: this task did not run Rust/Angular application tests, native IPC/GPU acceptance, compiler packaging or installed-player execution. Earlier implementation test evidence is preserved in historical checkpoints.",
+        "Current source was not captured atomically; concurrent controlled-target and related simulation changes continued. The guide records inspected call paths, not acceptance of that next implementation batch.",
+        "Browser checks verified all ten diagrams rendered plus representative desktop/narrow-layout sizing controls; they are not an exhaustive accessibility, print-layout or cross-browser certification.",
+        "Diagrams require JavaScript to render; full copyable Mermaid source stays available without it or if rendering fails. The bundled tiny renderer supports the used graph types but not every Mermaid feature."
+      ],
+      "documentation_source_provenance": {
+        "generated_pages": 44,
+        "indexed_documents": 42,
+        "anchors_resolved": 846,
+        "mermaid_diagrams": 10,
+        "browser_rendered_diagrams": 10,
+        "all_search_sources_current": true,
+        "game_app_developer_empty": true,
+        "source_commit": "fcb748b04853209b5e17e680c38c847c19f7f365"
+      }
     }
-  ]
+  ],
+  "verification_artifacts": [
+    "docs-site/dist/docs/editor-flow.html",
+    "docs-site/dist/assets/search-index.json"
+  ],
+  "documentation_source_provenance": {
+    "generated_pages": 44,
+    "mermaid_diagrams": 10,
+    "game_app_developer_empty": true,
+    "source_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+    "note": "Current site rebuild and 7 automated tests passed. Previous browser/anchor-count evidence is preserved in historical_documentation_updates."
+  },
+  "tracked_tree_count": 552,
+  "flow_documentation_update": {
+    "date": "2026-10-27",
+    "guide": "docs/editor-flow.md",
+    "published_route": "docs/editor-flow.html",
+    "initial_inspection_preserved": "flow_inspection",
+    "diagram_count": 10
+  },
+  "precommit_documentation_update": {
+    "date": "2026-10-27",
+    "previous_baseline": "fcb748b04853209b5e17e680c38c847c19f7f365",
+    "inspected_commit": "fcb748b04853209b5e17e680c38c847c19f7f365",
+    "intervening_commits": [],
+    "source_hashes": {
+      "apps/admin-dashboard/src-tauri/src/desktop.rs": "9b15104bc75bd67f50ac151467721f0dadd068a451446a4e626d8360e06fe9e3",
+      "apps/admin-dashboard/src-tauri/src/lib.rs": "cecd48545f8b6efc56c43a307fa97242d5ec8118a097044627e9e1f44d1e7d84",
+      "apps/admin-dashboard/src-tauri/src/metrics.rs": "753783ac55a4960a503ec0a5bdd9c1f883fe5597111bf04bbb9e36625011f85a",
+      "apps/admin-dashboard/src-tauri/src/tests_metrics.rs": "5abc3f06a06f1e2a4ac84bde85bc7bd2edc6624044f0d54d64779f3124005e39",
+      "apps/admin-dashboard/src/api.ts": "f1af86bf80ea46530672b4642d17118dae4640b0c0ba980007f527c3247bc42b",
+      "apps/admin-dashboard/src/app.html": "282ed76f01db4f6fad3d905402c9cce3b38a5238bad7e1e10324c0058eca0d25",
+      "apps/admin-dashboard/src/app.ts": "1ae17cd8e3e4fa73e897c7ce3af799bf17229259cc3fec60e5c4ff54f60aaec3",
+      "apps/admin-dashboard/src/metrics.html": "f82890c6adb75cb1649e88d831708e3a4df96837b9eeeefe1f0411ab75cda295",
+      "apps/admin-dashboard/src/metrics.models.ts": "489e9d3b4b42de7d171e18bda97ab75308d1773988183a7740ed7ee57c86e2fc",
+      "apps/admin-dashboard/src/metrics.spec.ts": "02e024517954d84ea8ceb649c22763f527bda29c755fa7e435ceebbc82e48a5d",
+      "apps/admin-dashboard/src/metrics.ts": "008703c377e393c3bd08e898cbd1038b807d87467cbaae782681dfd65e2a1208",
+      "apps/admin-dashboard/src/styles.css": "fd71cb2545709cc30dabace9fd520216123b5b5a2d957069fb2e77488f9ceb17",
+      "apps/editor/projects/design-guide/src/component-registry.generated.ts": "bdcab9af5d81dd61dd142c2866b7a2e160804915c5a7cbaf0bde750cf16e811c",
+      "apps/game/examples/renderer_smoke.rs": "df0cf257caff3a44155100f23750cb8fc004c32652b51ea1d8495844524024b1",
+      "crates/engine-core/src/camera_controller.rs": "ddd50ae1cd7aee22cd7fd5f0d5888a422f05b6cde7145f175808b3ef737893dc",
+      "crates/engine-core/src/editor/mod.rs": "91578f4bd302a27b45687294dbf6f4eb93ec7f5cf5c729ef8ef9476115c4cfdc",
+      "crates/engine-core/src/input.rs": "914e1bd20933000e83022dd5d39b8327687b67d2349258cbc525855cc381c8ad",
+      "crates/engine-core/src/simulation_session.rs": "5e2bd59acb424cc610c4cbffdab7274086785ac20515a97caac6b9ff2a729dc5",
+      "crates/engine-core/tests/engine_api.rs": "48525732bcc8708223a8eeb6a98e3680a9ecfc15298b4ac82526f8a6a1d35999",
+      "crates/engine-core/tests/simulation_session_api.rs": "8e335f8a2eccdf16d608e5f1e529499af2b83e5fb4342dda8474d2ae3721d232",
+      "crates/logger/src/lib.rs": "ceb30ff0a8d39195de84501d975db855665407be4c2f6b580439a80fad5812d3",
+      "crates/logger/src/metrics.rs": "40a979edb0c1d8de739437612db3bb3b37c3e6aca2dd22fcf0d9888b72b3cc70",
+      "crates/logger/src/storage.rs": "6fe08e7e237990b7c2db98af6f559f93fb3a34db7af574a1021e8c6236fe5354",
+      "crates/logger/src/tests_metrics.rs": "49261b6af20e6994b06e7a35fd49c332214f41eeb95d294a3b603079d18af3f5",
+      "crates/logger/src/tests_storage.rs": "52349f5e353dfd8af2a6f6579c6907f6d3279d3ede4e92750a8ca47000611de5",
+      "crates/logger/tests/metrics.rs": "3366e554c8bcd8367ea3c4725f48c22abd87af362b2197a368a2d5451e5b2a24",
+      "crates/renderer/src/lib.rs": "b1f253c6f838cfe25a7273d95504537fdf696405489357de2069ba731292ccad",
+      "crates/renderer/src/metrics.rs": "d1831d76918aba1d2929e690ad6411163f0a94768919986226f99f94aed3cc1f",
+      "crates/renderer/src/vulkan/buffer.rs": "c2ecd8b13694be918598aaf0c211bd94c56cbe27d9dc975f33b827471d83206b",
+      "crates/renderer/src/vulkan/camera.rs": "0820983195ff367babe60a85324d672f000631a049e4ac2cf1c6c8267c3a1b9e",
+      "crates/renderer/src/vulkan/depth_buffer.rs": "f8a80c331bc311c7e8f14372391ddd3bd734de803a7817806a3a54b519048648",
+      "crates/renderer/src/vulkan/device.rs": "b1dea0aa7cbc60cd8bcb0dd4393e14f1e12e117ade6b1a6a3ea4f12f449d6259",
+      "crates/renderer/src/vulkan/frame.rs": "f7cf7e7429291b8ba5345a53da779bd5d168ed416288789deb1f69aa286a9432",
+      "crates/renderer/src/vulkan/material_layout.rs": "90d7fafb35909e89253918eb10210ee3b21e92ca7abdf1e660e4430a5ec6665e",
+      "crates/renderer/src/vulkan/mesh.rs": "ded580b58111190fc5cd70a69bedef2383bc15b1d266fa9cf9c620a0cf9ae68a",
+      "crates/renderer/src/vulkan/pipeline.rs": "d2fbdb82c7ff16b0528817b180e03e3fffebb81457f34f605a3a83431d4310ae",
+      "crates/renderer/src/vulkan/swapchain.rs": "4360c37f4f97921ee703ef1b93fc048b27ee49b7800075fd6c720b92de707476",
+      "crates/renderer/src/vulkan/texture.rs": "2fc26b5adedbafcef463d347545f32dabbfbae6f5e69bd98ddde8c04107590a8",
+      "crates/renderer/src/window_renderer.rs": "8661021b2dd13332c39d9c45aff43f9a158df161bd5fe69044e58a7c15b77323",
+      "crates/runtime/src/assets/asset_manager.rs": "973c66cb2eb2598c9edbc2a035dea2b079ee9f0e1074558dd5081044b27c9133",
+      "crates/runtime/src/camera_controller.rs": "a2f79168c645ea545c4a09c8c304a23dcf24a6d3aa436cd5d136dbffa3bb3155",
+      "crates/runtime/src/lib.rs": "bb26767ee77baa543c6d725929ddd40f242b6345ed9d002466e0cbde7e3e4851",
+      "crates/runtime/src/scene_editor.rs": "ff1634dc89428ef05341d6a7ab7f1a319cd96e2456ff2960314d0005143f6869",
+      "docs-site/build.mjs": "6396002361a2f6cd4d16deab7e86b913a0990318d0a6b1ccc138368d6e53e260",
+      "docs-site/diagrams.js": "dcabb50b803c006472c4135a6dbf03166f04e1ef07126d75d954132c2225ef6a",
+      "docs-site/package-lock.json": "077eb2449c389b31442560996855526a5f2ee73957c7bc23162de8ba57d66848",
+      "docs-site/package.json": "2013704a9aeb7c2a26893375bab28f6ba9dd7b54511b21aed5f1180f60296f42",
+      "docs-site/site.test.mjs": "acac4d71f7b82d99984d9992ec35ac26dfa2816166ec4ae0e4167c6e3caf7e30",
+      "docs-site/styles.css": "2272d740a207f0000f072db610be38ba435d449500536e0956593316b66f351e",
+      "docs/adr/0002-object-composition-and-components.md": "dd4276bbb25be220a5ad89f5c6cd4b7c3d3ff58c9345aa8ac7d1830857402889",
+      "docs/adr/0003-rust-typescript-bridge.md": "7d72dd526c80497f48ff0d6caddcaa5d43db7e9357bd28b92beb2fb296022150",
+      "docs/adr/0004-authoring-play-and-editor-state.md": "9902e7130e6530efb30e21fe20c28df7224ea5780b2d00f52361da843ebff397",
+      "docs/adr/0005-runtime-lifecycle-and-scheduling.md": "cc52196956e8b962fd5b0d485946af605fe72a89d11e8e9c7bd4122943605b18",
+      "docs/adr/0006-asset-identity-and-import-pipeline.md": "a2a9ef3decee3d2a0cb35ef51ade6a6ba6782586a7163f2d5989baf995c32f90",
+      "docs/adr/0007-graph-assets-and-execution.md": "4edf2fce0b09d6e59fdc528ad3f1a660de4942ba8dc830480dbd3d3d141bed4c",
+      "docs/adr/0008-game-modules-and-scripting.md": "84e87085cd5cccd51536406521b2055f7347d1c0201e913c79764caa107b82d2",
+      "docs/adr/0009-prefabs-and-instance-overrides.md": "2ff4d5a6cd4919395766ad89a3b1b45833c8f8d9eb5722fc5e11c978106198a7",
+      "docs/adr/0010-input-actions-and-possession.md": "7bb60f851eb23eb67c966ca6450dd8d30d1f68027ded52e31d50fc079c824d50",
+      "docs/adr/0011-persistence-autosave-and-recovery.md": "6b4df243315b192084d5bfbabe3578c28e3f0fef1668d15e1e9270d802f6cf6f",
+      "docs/adr/0012-native-viewport-composition.md": "47caec49ef122d58134de4570d8a7341b56dd6d4bb657afa40a5db0130bb77de",
+      "docs/adr/README.md": "75153c0f68f22db12ae2edb07e0834cc9cb9c8f57028ab7a17c98dc511ae3201",
+      "docs/apps/admin-dashboard/README.md": "e140c17655eeecf9cfc6d0f9805dde8a5430de057bc4f4df5bf8c8b4c3a0cad9",
+      "docs/apps/editor/README.md": "80e874fdbf5c0707c8bac6beaa907837c4eb5f15193bdf21dfb1cfbff00b305f",
+      "docs/architecture.md": "00bd459c251da03569cac853684f21a8a2415e61dbefac86e75d60d246de5bac",
+      "docs/crates/logger/README.md": "673f3a9541d934777840c91dbb6a718b49da287f97ebc48d6181013fbe1928e1",
+      "docs/crates/renderer/README.md": "46c0c48b77d9f84241f852e1f6886f7e4c50d3f17ef21e08de8d164e88822897",
+      "docs/crates/runtime/README.md": "3225afe01e7ea1a226faf59712a400369894ab973610d8c9305aab8071aa6fa9",
+      "docs/editor-flow.md": "0895ab751da43534f951528387a1618da0aa65b194a602eafd5b17b0a8d3e807",
+      "docs/main.md": "d3ac396410a8ffa46acf193b0beb820825a636543bd61de1c300c27ba69855b5",
+      "docs/project-lifecycle.md": "710ee2f9368e637142813e391f9fcce00b71de4ac63ce53ed1af7eca9733cd56",
+      "docs/static-site.md": "185bf157f88be2827bdd0f77f7d85f44f86c614323eac6f67957805152f5f8da"
+    },
+    "note": "Hashes capture reviewed changed inputs after SECURITY update. Generated dist and the checkpoint itself are excluded; ongoing TEST changes may be newer. Untracked tilde backup headers/sizes were inspected, left untouched and excluded from maintained sources.",
+    "final_agent_verification": {
+      "rust_workspace": {
+        "command": "cargo test --workspace --all-targets",
+        "passed": 469,
+        "failed": 0,
+        "ignored": 2,
+        "suites": 49
+      },
+      "editor_tests": 123,
+      "admin_tests": 13,
+      "registry_tests": 4,
+      "editor_host_tests": 5,
+      "admin_production_build": "passed",
+      "admin_desktop_cargo_check": "passed",
+      "note": "Final workspace verification reported after SECURITY fix. Earlier transient temporary-directory failures were followed by passing targeted retries and the final complete workspace run. No test-agent source edits."
+    }
+  }
 }

@@ -1225,3 +1225,102 @@ textarea {
         grid-template-columns: 1fr;
     }
 }
+
+.resource-monitor {
+    padding: 24px;
+}
+
+.resource-monitor .panel-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 16px;
+}
+
+.resource-monitor select {
+    width: 100%;
+    margin: 8px 0 12px;
+}
+
+.resource-cards {
+    margin: 20px 0;
+}
+
+.resource-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 28px;
+    margin: 20px 0;
+}
+
+.resource-stats span {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.resource-kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 20px 0;
+}
+
+.resource-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 24px;
+    margin: 20px 0;
+}
+
+.resource-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.resource-controls .resource-checkbox {
+    flex-direction: row;
+    align-items: center;
+    padding-bottom: 10px;
+}
+
+.resource-checkbox input {
+    width: auto;
+}
+
+.resource-table-scroll {
+    overflow-x: auto;
+}
+
+.resource-table-scroll table {
+    min-width: 780px;
+}
+
+.resource-table-scroll td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    max-width: 360px;
+}
+
+.resource-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.resource-empty {
+    padding: 36px 0;
+    max-width: 760px;
+}
+
+.resource-monitor .badge[data-status="LIVE"] {
+    color: #89e3ac;
+}
+
+.resource-monitor .badge[data-status="STALE"] {
+    color: #ffd17c;
+}

@@ -163,6 +163,10 @@ fn inactive_sessions_are_pruned_but_active_sessions_survive() {
 	let mut error = entry();
 	error.level = crate::Level::Error;
 	first.write(&error).unwrap();
+	// Resource snapshots and interrupted atomic writes belong to the same
+	// session retention budget as the ordinary and error logs.
+	fs::write(fixture.0.join("fixture-123-1/vulkan-metrics-1.json"), "{}").unwrap();
+	fs::write(fixture.0.join("fixture-123-1/vulkan-metrics-1.tmp"), "{}").unwrap();
 	let second = Sink::new(config.clone(), "fixture-123-2", &health).unwrap();
 	assert!(fixture.0.join("fixture-123-1").exists());
 	drop(first);

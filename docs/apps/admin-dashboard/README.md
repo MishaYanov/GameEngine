@@ -23,6 +23,26 @@ Select a workspace and logger directory in Overview. Defaults use the current en
 
 Logs are incrementally collected from per-session JSONL. Retention is bounded to 5,000 records / 16 MiB; browser display retains 1,000. Pagination indicates lost history. Collection scans the newest 256 session directories and limits scan work. Incomplete trailing lines wait for completion. Malformed and oversized records have explicit counters. Pause freezes display while collection continues. Export writes retained matching JSONL into the admin data directory. Source navigation requires a file inside the configured workspace and a local VS Code installation.
 
+## Vulkan resource monitor
+
+Open **Metrics** to inspect persisted Vulkan resource snapshots from the configured logger directory. Run a debug
+game/editor viewport, or set `ENGINE_METRICS=1` in its environment, with the application logger initialized. The
+dashboard
+reads `vulkan-metrics-*.json` without initializing Vulkan itself; browser preview uses labelled sample data.
+
+The view refreshes every second. Select an application/device session, search kind/asset/handle/details, or switch to
+recent releases. Inventory pages contain 100 rows. Cards show live and peak allocation bytes, object counts, memory
+categories and latest frame samples. **STALE** means the last snapshot is over five seconds old; **CLOSED** preserves
+the final recorded state. Neither status proves that a process is currently running.
+
+The reader examines at most 64 recent session directories, returns at most 16 device snapshots and has a 16 MiB read
+budget. Each snapshot is limited to 4 MiB, schema 1, 2,048 live details and 128 recent releases. Storage errors and
+truncation appear explicitly. Aggregate totals can exceed the retained detail inventory. These values measure
+[engine-owned instrumented resources](../../crates/renderer/README.md#resource-accounting), excluding driver memory,
+presentation image backing allocations and CPU RAM; device-local and host-visible bytes can overlap.
+
+## Process and job management
+
 Component health uses explicit lifecycle events and heartbeats; errors alone do not imply component failure. Expected heartbeats become stale after 15 seconds. Start/stop/restart controls apply only to dashboard-owned processes. Windows job objects stop descendants and close them when the dashboard exits. Restored process history is interrupted and never adopts old PIDs.
 
 Builds and Tests queue allowlisted Cargo packages with development or release profiles. One active job serializes shared Cargo output directories; at most 50 unfinished jobs and 200 historical runs are retained. Each run records workspace, Cargo version, timestamps, exit code, artifacts and an operation ID. Logs links filter diagnostics by that operation. Supported Cargo JSON compiler messages expose primary source spans. Test command status is aggregate; stable Rust test harness text is retained without fabricated structured counts. Raw output lines are bounded to 8 KiB and the output queue to 1,024 lines, with drop counters. Exceptionally large Cargo JSON messages may therefore remain raw output rather than parsed diagnostics.

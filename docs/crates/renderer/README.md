@@ -47,6 +47,24 @@ GPU time excludes CPU update, acquisition, presentation and display pacing. None
 Implementation of timing/batching is not evidence of measured speedup, GPU utilization or a tested frame budget. The
 typed viewport status exposes these values to the Angular owner.
 
+## Resource accounting
+
+Instrumented logical devices, buffers, images, views, samplers, descriptors, pipelines, command objects, synchronization
+objects and swapchain objects report through `engine_logger::metrics`. Guards follow their owning resources, including
+upload staging resources and rebuild/release paths. AssetManager adds asset labels to uploaded meshes and textures.
+`WindowRenderer::resource_metrics()` returns an optional current snapshot for its device.
+
+Tracking defaults on in debug builds or with `ENGINE_LOG_MODE=debug`. Set `ENGINE_METRICS=1` to enable it in any build,
+or `ENGINE_METRICS=0` to disable it; invalid values warn and disable tracking. This selection is independent of the log
+severity filter. Initialize the application logger with persistent storage to expose snapshots to the
+[admin resource monitor](../../apps/admin-dashboard/README.md#vulkan-resource-monitor).
+
+Allocation bytes are the sizes requested from Vulkan, including alignment; payload bytes describe logical content.
+Device-local and host-visible categories can overlap. Swapchain images have no explicit engine allocation size, so
+their backing memory, driver overhead and CPU RAM are excluded. Object counts cover instrumented objects only.
+Frame counters and GPU timing accompany the inventory; a missing GPU timing sample stays unavailable. Closed devices
+retain final snapshots, while an unexpectedly stopped process may leave a stale last snapshot.
+
 ## Checks and learning
 
 ```powershell

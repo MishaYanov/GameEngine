@@ -5,6 +5,10 @@ service. This guide describes the inspected source, including uncommitted change
 interaction or the current engine test results. [PROJECT3 handoff](project3-handoff.md) remains the historical steps
 36–45 report and original next-step prompt.
 
+For the method-by-method path from UI startup through save/reload and packaging, see
+[Editor flow: startup to project builds](editor-flow.md). Its diagrams also distinguish admin Cargo rebuilds from
+new project installations and native viewport reconstruction.
+
 ## Project format and scene identity
 
 Project manifests now use **schema 2**, while individual scene documents remain **schema 3**. These versions are
@@ -88,6 +92,21 @@ Selection retention lasts only for the current session. Newly created or freshly
 selection, and reopening a workspace starts empty again. Selection is not serialized into scene/project files and does
 not contribute to scene/project dirty flags or change saved baselines.
 
+## Editor Play and simulation scene identity
+
+`SimulationSession::scene_id()` identifies the scene being simulated separately from the project's authored
+`startup_scene_id`. `new(project, document)` and `with_factory(project, document, factory)` select the startup scene.
+`with_factory_for_scene(project, scene_id, document, factory)` selects an explicit catalog scene and validates its
+document before creating the gameplay module or runtime world. The project configuration keeps its startup setting.
+
+Editor `StartPlay` passes the active scene ID and its current authored document to that explicit constructor. If the
+startup scene is A and the editor is displaying B, Play runs B while the project still names A as its launch default.
+Configured behaviors and movement-input validation both use the running scene ID, so equal entity keys in A and B do
+not select A's behavior configuration while playing B. Stopping Play returns to the retained authored state.
+
+Scene identity is fixed when the simulation session is constructed. This API selects the initial simulated scene; it
+does not add automatic gameplay transitions or a persistent game-session state layer.
+
 ## Save, Save As, register and reload
 
 | Operation               | Persistence and limits                                                                                                                                                                                                 |
@@ -157,6 +176,5 @@ diagnostic hashes. This authoring support does not add an automatic gameplay sce
 | `compiler/src/lib.rs`, `apps/admin-dashboard/src-tauri/src/builder.rs`, `apps/headless/src/main.rs` | All-scene preparation/validation and runner loading                          |
 
 Existing tests cover multi-scene history, project format, host lifecycle/path/persistence, frontend contract and
-headless/compiler behavior. This documentation update runs site checks, not engine/frontend/native tests; historical
-handoff test counts are not current-tree certification. See the checkpoint in `docs-site/docs-state.json` for actual
-checks and limits.
+headless/compiler behavior. See the checkpoint in `docs-site/docs-state.json` for checks against the inspected working
+tree and their limits; historical handoff test counts are not current-tree certification.

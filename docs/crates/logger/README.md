@@ -14,7 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-Game, editor-host, compiler, and the renderer's Vulkan probe initialize their own process sessions. All Rust workspace members depend on this shared API. Separate processes communicate through persisted records, not through a shared Rust static. Dashboard aggregation belongs to a later implementation step.
+Game, editor-host, compiler, and the renderer's Vulkan probe initialize their own process sessions. All Rust workspace
+members depend on this shared API. Separate processes communicate through persisted records, not through a shared Rust
+static. Engine Admin reads retained logs and resource snapshots from its configured logger directory.
 
 Logging before initialization is a no-op. Invalid configuration is rejected before installation; duplicate initialization is an error. A competing global logger is an error and requires fixing application startup rather than retrying installation. Do not initialize `tauri-plugin-log` alongside this logger.
 
@@ -96,6 +98,29 @@ Storage initialization failures keep the memory collector running. Runtime write
 
 Set `Config.redact` to known literal secrets before startup. Redaction applies to record text, metadata, error causes, traces, correlation IDs, and attributes before they enter console output, memory, or persistence. It also handles secrets crossing text truncation boundaries. It does not automatically identify credentials; producers must avoid logging secrets and configure required replacements. The previous panic hook is preserved and may independently print unredacted panic output.
 
+## Resource snapshots
+
+`engine_logger::metrics` accounts for instrumented Vulkan resources independently of severity filtering. A
+`ResourceMetrics` collector owns totals and frame samples; dropping a `ResourceGuard` releases its accounting entry.
+Producers update memory without file I/O. The existing logger writer publishes schema-1
+`vulkan-metrics-<device_id>.json` snapshots beside session logs about once per second, on flush and during shutdown.
+Publication requires an initialized logger with persistent storage; in-memory snapshots remain available without it.
+Temporary files are replaced with complete snapshots rather than appending resource events to the log queue.
+
+Each collector retains at most 2,048 live resource details and 128 recent releases. Aggregate counts and byte totals
+continue beyond the detail cap; `inventory_truncated` warns that the inventory is incomplete. The process registers
+at most 64 collectors, including closed collectors, and each serialized snapshot is bounded to 4 MiB. Resource text is
+bounded and uses configured literal redaction. Snapshot construction reapplies redaction to resource text and kind
+totals, including records created before logger initialization, before returning or persisting them. Logger health
+reports snapshot publication failures; a failed write is
+retried. Snapshot files share normal session retention.
+
+This is engine allocation accounting, not total GPU memory usage. See
+the [renderer guide](../renderer/README.md#resource-accounting)
+for enablement and measurement boundaries,
+and [Engine Admin](../../apps/admin-dashboard/README.md#vulkan-resource-monitor)
+for reading retained sessions.
+
 ## Panic and shutdown behavior
 
 The panic hook preserves the previous hook and makes a nonblocking attempt to collect a panic even when normal severity logging is disabled. If collection is already active on that thread or the history lock is busy, it increments a drop counter instead of recursively collecting or waiting. It does not wait for disk. Backtrace capture itself can take time and is controlled by `error_backtraces` for both errors and panics.
@@ -129,4 +154,7 @@ On October 3, 2026, a local Windows measurement with Rust 1.97.1, persistence en
 | 20,000 records across four burst threads | 87.60 ms | 61.09 ms |
 | Total dropped disk records across the run | 8,391 | 0 |
 
-Both runs reported zero dropped memory records and no storage errors. Burst overload remains possible; choose queue sizes and verbosity using measurements from the actual client workload. Metrics attributes and local storage are ready for later dashboard consumers; administrative APIs and dashboard UI are outside steps 1 through 5.
+Both runs reported zero dropped memory records and no storage errors. Burst overload remains possible; choose queue
+sizes and verbosity using measurements from the actual client workload. These historical measurements predate resource
+snapshots and do not measure their overhead. Engine Admin now consumes the persisted diagnostics and resource snapshots
+separately.

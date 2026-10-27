@@ -23,6 +23,7 @@ struct DrawBatch {
 }
 
 struct GpuTimer {
+	_metrics: engine_logger::metrics::ResourceGuard,
 	device: Device,
 	pool: vk::QueryPool,
 	valid_bits: u32,
@@ -41,6 +42,13 @@ impl GpuTimer {
 			.query_count(2);
 		let pool = unsafe { device.raw().create_query_pool(&info, None)? };
 		Ok(Some(Self {
+			_metrics: crate::metrics::object(
+				device.raw(),
+				"query_pool",
+				pool,
+				"GPU timestamp queries",
+				"count=2",
+			),
 			device: device.raw().clone(),
 			pool,
 			valid_bits,
@@ -87,6 +95,7 @@ impl Drop for GpuTimer {
 }
 
 pub struct VulkanFrame {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 
 	command_pool: vk::CommandPool,
@@ -224,6 +233,47 @@ impl VulkanFrame {
 		let in_flight = unsafe { ash_device.create_fence(&fence_info, None)? };
 
 		Ok(Self {
+			_metrics: vec![
+				crate::metrics::object(
+					&ash_device,
+					"command_pool",
+					command_pool,
+					"Frame command pool",
+					"",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"command_buffer",
+					command_buffer,
+					"Frame command buffer",
+					"",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"semaphore",
+					image_available,
+					"Image acquisition semaphore",
+					"",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"fence",
+					in_flight,
+					"Frame completion fence",
+					"",
+				),
+			]
+			.into_iter()
+			.chain(render_finished.iter().map(|&semaphore| {
+				crate::metrics::object(
+					&ash_device,
+					"semaphore",
+					semaphore,
+					"Presentation semaphore",
+					"",
+				)
+			}))
+			.collect(),
 			device: ash_device,
 
 			command_pool,
@@ -348,6 +398,7 @@ impl VulkanFrame {
 			gpu_timestamps_supported: self.timer.is_some(),
 		};
 
+		crate::metrics::frame(&self.device, self.metrics);
 		let present_suboptimal =
 			match swapchain.present(device.present_queue(), &signal_semaphores, image_index) {
 				Ok(suboptimal) => suboptimal,

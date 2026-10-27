@@ -4,6 +4,7 @@ pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
 pub use engine_core::simulation_session::SimulationSession;
 use std::collections::HashMap;
 
+use crate::input::MovementBindings;
 use crate::{
 	Camera, EntityKey, InputState, Key, Transform,
 	editor::{
@@ -81,9 +82,17 @@ impl SceneEditor {
 	pub fn is_playing(&self) -> bool {
 		self.session.as_ref().is_some_and(EditorSession::is_playing)
 	}
+
+	pub fn play_controlled_targets(&self) -> Option<&[EntityKey]> {
+		self.session
+			.as_ref()
+			.and_then(EditorSession::play_controlled_targets)
+	}
+
 	pub fn simulation_paused(&self) -> bool {
 		self.session.as_ref().is_some_and(EditorSession::is_paused)
 	}
+
 	pub fn needs_tick(&self) -> bool {
 		self.session.as_ref().is_some_and(EditorSession::needs_tick)
 	}
@@ -121,16 +130,14 @@ impl SceneEditor {
 				paused: !self.simulation_paused(),
 			})?;
 		}
-		let direction = movement_direction(input);
-		if self.project().is_some_and(|project| {
-			project
-				.behaviors_for(&project.startup_scene_id)
-				.any(|behavior| matches!(behavior, BehaviorSpec::ControlledMove { .. }))
-		}) {
-			self.execute_core(Command::SetPlayInput {
-				movement: [direction[0], direction[1], 0.0],
-			})?;
+		if self
+			.play_controlled_targets()
+			.is_some_and(|targets| !targets.is_empty())
+		{
+			let direction = movement_direction(input);
+			self.set_play_input([direction[0], direction[1], 0.0])?;
 		}
+
 		let session = self.session.as_mut().expect("initialized session");
 		let outcome = session.tick(elapsed as f64)?;
 		if !outcome.changes.is_empty()
@@ -144,6 +151,7 @@ impl SceneEditor {
 		}
 		Ok(())
 	}
+
 	pub fn from_scene(scene: &Scene) -> Self {
 		let mut editor = Self::default();
 		// The legacy constructor is infallible. Invalid transient content is
@@ -152,6 +160,23 @@ impl SceneEditor {
 			editor.refresh_selection(scene);
 		}
 		editor
+	}
+
+	pub fn set_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
+		self.execute_core(Command::SetPlayInput { movement })?;
+		Ok(())
+	}
+
+	pub fn set_entity_play_input(
+		&mut self,
+		entity: &EntityKey,
+		movement: [f32; 3],
+	) -> Result<(), String> {
+		self.execute_core(Command::SetEntityInput {
+			entity: entity.as_str().to_owned(),
+			movement,
+		})?;
+		Ok(())
 	}
 
 	fn initialize(&mut self, scene: &Scene) -> Result<(), String> {
@@ -538,23 +563,5 @@ impl SceneEditor {
 }
 
 pub fn movement_direction(input: &InputState) -> [f32; 2] {
-	let mut direction = [0.0_f32; 2];
-	if input.is_held(Key::W) {
-		direction[1] += 1.0;
-	}
-	if input.is_held(Key::S) {
-		direction[1] -= 1.0;
-	}
-	if input.is_held(Key::A) {
-		direction[0] -= 1.0;
-	}
-	if input.is_held(Key::D) {
-		direction[0] += 1.0;
-	}
-	let length = direction[0].hypot(direction[1]);
-	if length > 0.0 {
-		direction[0] /= length;
-		direction[1] /= length;
-	}
-	direction
+	MovementBindings::WASD.direction(input)
 }

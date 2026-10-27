@@ -4,6 +4,13 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [Editor flow: startup to project builds](editor-flow.md): Ten method-level graphs trace startup, setup creation,
+  project opening, command queues, save/reload, native rendering, Play, packaging, and admin rebuilds. Marks current
+  UI wiring separately from available backend APIs.
+
+- [Architecture decisions: reading guide and dependencies](adr/README.md):
+  Start here for the engine parts, all twelve ADRs, the proposed decision sequence, and unresolved choices.
+
 - [ADR-0002: Scene objects, components, presets, and inspector subjects](adr/0002-object-composition-and-components.md):
   Proposed common object model, capability composition, naming, defaults, and migration from existing scene data.
 

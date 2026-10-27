@@ -41,7 +41,9 @@
         @if (state()?.collector?.storage_error) {
             <div class="banner">{{ state()?.collector?.storage_error }}</div>
         }
-        @if (section() === 'Overview') {
+        @if (section() === 'Metrics') {
+            <resource-metrics/>
+        } @else if (section() === 'Overview') {
             <section class="metrics">
                 <article>
 				<span>COMPONENTS</span
@@ -82,8 +84,7 @@
                         <strong>{{ target.label }}</strong
                         ><span class="muted"
                     >{{
-                            target.available ? target.executable : 'Build executable
-                                first'
+                            target.available ? target.executable : 'Build executable first'
                         }}</span
                     >
                         <button
@@ -178,8 +179,7 @@
             <section class="panel settings">
                 <h2>
                     {{
-                        section() === 'Builds' ? 'Build a package' : 'Run package
-                            tests'
+                        section() === 'Builds' ? 'Build a package' : 'Run package tests'
                     }}
                 </h2>
                 <p class="muted">
@@ -336,8 +336,7 @@
                 {{ matching() }} matching retained records · showing {{
                     logs().length
                 }} · {{
-                    paused() ? 'Display paused; collection
-                        continues' : 'Live'
+                    paused() ? 'Display paused; collection continues' : 'Live'
                 }}
             </p>
             @if (historyGap()) {

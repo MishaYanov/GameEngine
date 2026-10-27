@@ -65,6 +65,41 @@ impl ApplicationHandler for Smoke {
 		)
 		.unwrap();
 		let model = Arc::new(assets.load_model(&renderer, "props/robot.glb").unwrap());
+		if let Some(metrics) = renderer.resource_metrics() {
+			assert!(!metrics.inventory_truncated);
+			assert!(metrics.totals.allocation_bytes >= assets.gpu_logical_bytes() as u64);
+			assert_eq!(
+				metrics
+					.resources
+					.iter()
+					.map(|r| r.allocation_bytes)
+					.sum::<u64>(),
+				metrics.totals.allocation_bytes
+			);
+			for kind in [
+				"buffer",
+				"depth_image",
+				"texture_image",
+				"pipeline",
+				"swapchain_image",
+			] {
+				assert!(
+					metrics
+						.totals
+						.by_kind
+						.get(kind)
+						.is_some_and(|count| *count > 0),
+					"missing {kind}"
+				);
+			}
+			assert!(
+				metrics
+					.resources
+					.iter()
+					.filter(|r| r.kind == "swapchain_image")
+					.all(|r| r.allocation_bytes == 0 && r.memory_type.is_none())
+			);
+		}
 		assert!(!model.parts().is_empty());
 		let resources = assets.gpu_resource_count();
 		let bytes = assets.gpu_logical_bytes();
@@ -291,6 +326,9 @@ fn main() {
 	let mut config = engine_logger::Config::new("renderer-smoke");
 	config.error_backtraces = false;
 	config.console = false;
+	if let Some(directory) = std::env::var_os("ENGINE_LOG_DIR") {
+		config.storage = Some(engine_logger::StorageConfig::new(directory));
+	}
 	let _logging = engine_logger::init(config).unwrap();
 	let events = EventLoop::new().unwrap();
 	events.set_control_flow(ControlFlow::Poll);

@@ -20,6 +20,7 @@ pub struct CameraUniform {
 }
 
 pub struct VulkanCamera {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 
 	uniform_buffer: VulkanBuffer,
@@ -215,6 +216,29 @@ impl VulkanCamera {
 		}
 
 		Ok(Self {
+			_metrics: vec![
+				crate::metrics::object(
+					&ash_device,
+					"descriptor_set_layout",
+					descriptor_set_layout,
+					"Camera/lighting layout",
+					"",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"descriptor_pool",
+					descriptor_pool,
+					"Camera/lighting descriptors",
+					"max_sets=1",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"descriptor_set",
+					descriptor_set,
+					"Camera/lighting descriptor",
+					"",
+				),
+			],
 			device: ash_device,
 
 			uniform_buffer,

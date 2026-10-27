@@ -11,6 +11,7 @@ use ash::{Device, Instance, vk};
 use super::{VulkanBuffer, VulkanBufferError, VulkanDevice};
 
 pub struct VulkanTexture {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 	image: vk::Image,
 	memory: vk::DeviceMemory,
@@ -83,6 +84,11 @@ impl From<VulkanBufferError> for VulkanTextureError {
 }
 
 impl VulkanTexture {
+	pub fn set_debug_label(&self, label: &str) {
+		for guard in &self._metrics {
+			guard.set_label(label);
+		}
+	}
 	pub fn checkerboard(
 		instance: &Instance,
 		device: &VulkanDevice,
@@ -215,6 +221,15 @@ impl VulkanTexture {
 				return Err(error.into());
 			}
 		};
+		let allocation_metrics = crate::metrics::allocation(
+			device,
+			"texture_image",
+			image,
+			image_size,
+			requirements.size,
+			memory_type_index,
+			&format!("{width}x{height} RGBA8_SRGB"),
+		);
 
 		if let Err(error) = unsafe { ash_device.bind_image_memory(image, memory, 0) } {
 			unsafe {
@@ -361,6 +376,25 @@ impl VulkanTexture {
 		}
 
 		Ok(Self {
+			_metrics: vec![
+				allocation_metrics,
+				crate::metrics::object(&ash_device, "image_view", view, "Texture image view", ""),
+				crate::metrics::object(&ash_device, "sampler", sampler, "Texture sampler", ""),
+				crate::metrics::object(
+					&ash_device,
+					"descriptor_pool",
+					descriptor_pool,
+					"Texture descriptors",
+					"max_sets=1",
+				),
+				crate::metrics::object(
+					&ash_device,
+					"descriptor_set",
+					descriptor_set,
+					"Texture descriptor",
+					"",
+				),
+			],
 			device: ash_device,
 
 			image,
@@ -416,6 +450,14 @@ fn upload_image(
 		.queue_family_index(device.queue_families().graphics);
 
 	let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
+	let pool_metrics = crate::metrics::object(
+		ash_device,
+		"command_pool",
+		command_pool,
+		"Image upload command pool",
+		"transient",
+	);
+	let mut command_metrics = None;
 
 	let result = (|| -> Result<(), VulkanTextureError> {
 		let allocate_info = vk::CommandBufferAllocateInfo::default()
@@ -424,6 +466,13 @@ fn upload_image(
 			.command_buffer_count(1);
 
 		let command_buffer = unsafe { ash_device.allocate_command_buffers(&allocate_info)? }[0];
+		command_metrics = Some(crate::metrics::object(
+			ash_device,
+			"command_buffer",
+			command_buffer,
+			"Image upload commands",
+			"transient",
+		));
 
 		let begin_info = vk::CommandBufferBeginInfo::default()
 			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
@@ -529,6 +578,8 @@ fn upload_image(
 	unsafe {
 		ash_device.destroy_command_pool(command_pool, None);
 	}
+	drop(command_metrics);
+	drop(pool_metrics);
 
 	result
 }

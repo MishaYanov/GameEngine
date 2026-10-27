@@ -8,6 +8,7 @@ use ash::{Device, Instance, khr::swapchain as khr_swapchain, vk};
 use super::{VulkanDevice, VulkanSurface, VulkanSurfaceError};
 
 pub struct VulkanSwapchain {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	loader: khr_swapchain::Device,
 	device: Device,
 	swapchain: vk::SwapchainKHR,
@@ -200,6 +201,35 @@ impl VulkanSwapchain {
 		let image_views = create_image_views(&ash_device, &images, surface_format.format)?;
 
 		Ok(Self {
+			_metrics: std::iter::once(crate::metrics::object(
+				&ash_device,
+				"swapchain",
+				swapchain,
+				"Presentation swapchain",
+				"Image memory is managed by the presentation system; excluded from allocation bytes",
+			))
+			.chain(images.iter().map(|&image| {
+				crate::metrics::object(
+					&ash_device,
+					"swapchain_image",
+					image,
+					"Presentation image",
+					&format!(
+						"{}x{} {:?}; allocation size unavailable",
+						extent.width, extent.height, surface_format.format
+					),
+				)
+			}))
+			.chain(image_views.iter().map(|&view| {
+				crate::metrics::object(
+					&ash_device,
+					"image_view",
+					view,
+					"Presentation image view",
+					"",
+				)
+			}))
+			.collect(),
 			loader,
 			device: ash_device,
 			swapchain,

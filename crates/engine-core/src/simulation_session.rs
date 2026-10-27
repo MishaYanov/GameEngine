@@ -1,4 +1,5 @@
 //! One simulation pipeline for editor Play, the derived player and headless runs.
+use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
 	collision::{CollisionStats, CollisionWorld},
@@ -9,6 +10,7 @@ use crate::{
 };
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Default)]
@@ -62,19 +64,31 @@ pub trait GameModule: Send {
 		output: &mut ActionWriter<'_>,
 	) -> Result<(), String>;
 }
+
 pub trait GameModuleFactory: Send + Sync {
-	fn create(&self, project: &ProjectData) -> Result<Box<dyn GameModule>, String>;
+	fn create(
+		&self,
+		project: &ProjectData,
+		scene_id: &SceneId,
+	) -> Result<Box<dyn GameModule>, String>;
 }
+
 #[derive(Default)]
 pub struct ConfiguredBehaviorFactory;
 impl GameModuleFactory for ConfiguredBehaviorFactory {
-	fn create(&self, project: &ProjectData) -> Result<Box<dyn GameModule>, String> {
+	fn create(
+		&self,
+		project: &ProjectData,
+		scene_id: &SceneId,
+	) -> Result<Box<dyn GameModule>, String> {
 		project.validate()?;
+		project
+			.scenes
+			.get(scene_id)
+			.map_err(|error| error.to_string())?;
+
 		Ok(Box::new(ProjectModule {
-			behaviors: project
-				.behaviors_for(&project.startup_scene_id)
-				.cloned()
-				.collect(),
+			behaviors: project.behaviors_for(scene_id).cloned().collect(),
 		}))
 	}
 }
@@ -162,6 +176,8 @@ pub struct SimulationSession {
 	paused: bool,
 	tick: u64,
 	actions: Vec<SimulationAction>,
+	scene_id: SceneId,
+	controlled_targets: Vec<EntityKey>,
 }
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
@@ -171,16 +187,39 @@ impl SimulationSession {
 	pub fn new(project: ProjectData, document: Arc<SceneData>) -> Result<Self, String> {
 		Self::with_factory(project, document, &ConfiguredBehaviorFactory)
 	}
+
 	pub fn with_factory(
 		project: ProjectData,
 		document: Arc<SceneData>,
 		factory: &dyn GameModuleFactory,
 	) -> Result<Self, String> {
-		project.validate_scene(&document)?;
-		let module = factory.create(&project)?;
+		let scene_id = project.startup_scene_id.clone();
+		Self::with_factory_for_scene(project, scene_id, document, factory)
+	}
+
+	pub fn with_factory_for_scene(
+		project: ProjectData,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		factory: &dyn GameModuleFactory,
+	) -> Result<Self, String> {
+		project.validate_scene_for(&scene_id, &document)?;
+		let module = factory.create(&project, &scene_id)?;
 		let world = RuntimeWorld::new(document)?;
 		let collisions = CollisionWorld::new(&world)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
+
+		let mut controlled_targets = Vec::new();
+		let mut seen = HashSet::new();
+
+		for behavior in project.behaviors_for(&scene_id) {
+			if let BehaviorSpec::ControlledMove { entity, .. } = behavior
+				&& seen.insert(entity.clone())
+			{
+				controlled_targets.push(entity.clone());
+			}
+		}
+
 		Ok(Self {
 			project,
 			world,
@@ -191,10 +230,18 @@ impl SimulationSession {
 			paused: false,
 			tick: 0,
 			actions: Vec::new(),
+			scene_id,
+			controlled_targets,
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
 		&self.project
+	}
+	pub fn scene_id(&self) -> &SceneId {
+		&self.scene_id
+	}
+	pub fn controlled_targets(&self) -> &[EntityKey] {
+		&self.controlled_targets
 	}
 	pub fn world(&self) -> &RuntimeWorld {
 		&self.world
@@ -225,49 +272,51 @@ impl SimulationSession {
 		}
 	}
 	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
-		if !self
-			.project
-			.behaviors_for(&self.project.startup_scene_id)
-			.any(|b| matches!(b,BehaviorSpec::ControlledMove{entity:target,..}if target==entity))
-		{
+		if !self.controlled_targets.contains(entity) {
 			return Err("Input target has no configured controlled movement behavior".into());
 		}
+
 		let movement = normalized_input(movement)?;
+		Ok(self.apply_input(entity, movement))
+	}
+
+	fn apply_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> bool {
 		let old = self.inputs.movement(entity);
 		if old == movement {
-			return Ok(false);
+			return false;
 		}
+
 		if old == [0.0; 3] || movement == [0.0; 3] {
 			self.clock.reset();
 		}
+
 		if movement == [0.0; 3] {
 			self.inputs.movement.remove(entity);
 		} else {
 			self.inputs.movement.insert(entity.clone(), movement);
 		}
-		Ok(true)
+
+		true
 	}
+
 	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
 		let movement = normalized_input(movement)?;
-		let targets = self
-			.project
-			.behaviors_for(&self.project.startup_scene_id)
-			.filter_map(|b| match b {
-				BehaviorSpec::ControlledMove { entity, .. } => Some(entity.clone()),
-				_ => None,
-			})
-			.collect::<Vec<_>>();
-		if targets.is_empty() && movement != [0.0; 3] {
+
+		if self.controlled_targets.is_empty() && movement != [0.0; 3] {
 			return Err(
 				"Configure a controlled movement behavior before supplying movement".into(),
 			);
 		}
+
 		let mut changed = false;
-		for entity in targets {
-			changed |= self.set_input(&entity, movement)?;
+		for index in 0..self.controlled_targets.len() {
+			let entity = self.controlled_targets[index].clone();
+			changed |= self.apply_input(&entity, movement);
 		}
+
 		Ok(changed)
 	}
+
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
 		if !elapsed.is_finite() || elapsed < 0.0 {
 			return Err("Elapsed time must be finite and nonnegative".into());

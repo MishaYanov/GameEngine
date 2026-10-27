@@ -4,6 +4,7 @@ import {FormsModule} from "@angular/forms";
 import {Board} from "./board";
 import {Builder} from "./builder";
 import {AdminApi} from "./api";
+import {ResourceMetrics} from "./metrics";
 import {
     type CollectedLog,
     type DashboardSnapshot,
@@ -17,13 +18,14 @@ import {
 @Component({
     selector: "admin-app",
     standalone: true,
-    imports: [CommonModule, FormsModule, Board, Builder],
+    imports: [CommonModule, FormsModule, Board, Builder, ResourceMetrics],
     templateUrl: "./app.html",
 })
 export class App {
     readonly api = inject(AdminApi);
     readonly nav = [
         "Overview",
+        "Metrics",
         "Logs",
         "Builds",
         "Tests",

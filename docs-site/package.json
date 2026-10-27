@@ -8,6 +8,7 @@
     "test": "npm run build && node --test site.test.mjs"
   },
   "dependencies": {
+    "@mermaid-js/tiny": "12.2.0",
     "highlight.js": "^11.11.1",
     "marked": "^16.4.0"
   },

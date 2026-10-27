@@ -37,6 +37,55 @@ pub struct InputState {
 	suppressed: HashSet<Key>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MovementBindings {
+	pub negative_x: Key,
+	pub positive_x: Key,
+	pub negative_y: Key,
+	pub positive_y: Key,
+}
+
+impl MovementBindings {
+	pub const WASD: Self = Self {
+		negative_x: Key::A,
+		positive_x: Key::D,
+		negative_y: Key::S,
+		positive_y: Key::W,
+	};
+
+	pub const ARROWS: Self = Self {
+		negative_x: Key::ArrowLeft,
+		positive_x: Key::ArrowRight,
+		negative_y: Key::ArrowDown,
+		positive_y: Key::ArrowUp,
+	};
+
+	pub fn direction(&self, input: &InputState) -> [f32; 2] {
+		let mut direction = [0.0_f32; 2];
+
+		if input.is_held(self.positive_x) {
+			direction[0] += 1.0;
+		}
+		if input.is_held(self.negative_x) {
+			direction[0] -= 1.0;
+		}
+		if input.is_held(self.positive_y) {
+			direction[1] += 1.0;
+		}
+		if input.is_held(self.negative_y) {
+			direction[1] -= 1.0;
+		}
+
+		let length = direction[0].hypot(direction[1]);
+		if length > 0.0 {
+			direction[0] /= length;
+			direction[1] /= length;
+		}
+
+		direction
+	}
+}
+
 impl InputState {
 	pub fn press(&mut self, key: Key) {
 		if self.suppressed.contains(&key) {

@@ -20,6 +20,18 @@ Edit the Markdown sources, then rebuild. The builder discovers all `.md` files u
 
 The build writes only `docs-site/dist`. It clears that generated directory before rebuilding; do not put hand-edited content there. Dependencies and build output are ignored by Git. The Markdown files, builder, styles, scripts, and package lockfile are the maintained sources.
 
+## Flow diagrams
+
+Fenced `mermaid` blocks render as SVG flowcharts and sequence diagrams. The pinned `@mermaid-js/tiny` renderer is copied
+into the generated site's local assets; rendering needs JavaScript but no CDN or network service. The dependency
+requires Node.js 22.12 or newer when installing/building the site. The tiny distribution supports the diagrams used
+here; it excludes Mermaid's mindmap, architecture, KaTeX and ELK features.
+
+Each graph keeps its original Markdown diagram source in an expandable section with a copy button. If JavaScript is
+disabled or rendering fails, that source stays open. Use **Readable size** for full-size labels and horizontal
+scrolling,
+or **Fit width** to return to the page width. Diagrams have accessible captions and use Mermaid's strict security mode.
+
 ## Check behavior
 
 ```powershell
@@ -27,6 +39,10 @@ npm.cmd test --prefix docs-site
 ```
 
 DOM checks cover search from a nested page, mobile-menu state, code copying, and section-anchor targets. The build checks page/asset links. Browser visual verification remains separate; check wide and narrow layouts, keyboard focus, search dialog interaction, and long code/table overflow.
+
+The checks also parse every Mermaid block with the bundled renderer and verify diagram publication, local assets,
+readable-size controls and source fallback. Real-browser rendering remains a separate check because DOM-only tests
+do not implement SVG text measurement.
 
 ## Hosting
 

@@ -1,6 +1,7 @@
 use ash::{Device, vk};
 
 pub struct VulkanMaterialLayout {
+	_metrics: engine_logger::metrics::ResourceGuard,
 	device: Device,
 	layout: vk::DescriptorSetLayout,
 }
@@ -18,6 +19,13 @@ impl VulkanMaterialLayout {
 		let layout = unsafe { device.create_descriptor_set_layout(&create_info, None)? };
 
 		Ok(Self {
+			_metrics: crate::metrics::object(
+				device,
+				"descriptor_set_layout",
+				layout,
+				"Material descriptor layout",
+				"",
+			),
 			device: device.clone(),
 			layout,
 		})

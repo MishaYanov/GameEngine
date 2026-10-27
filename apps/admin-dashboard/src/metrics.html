@@ -1,0 +1,127 @@
+<section aria-label="Vulkan resource monitor" class="panel resource-monitor">
+    <div class="panel-heading">
+        <div><h2>Vulkan resources</h2>
+            <p class="muted">Engine-owned allocations and instrumented Vulkan objects, refreshed every second.</p></div>
+        <span [attr.data-status]="status()" class="badge">{{ status() }}</span>
+    </div>
+    @if (error()) {
+        <p class="banner" role="alert">{{ error() }}</p>
+    }
+    @if (result()?.storage_error) {
+        <p class="banner" role="alert">{{ result()?.storage_error }}</p>
+    }
+    @if (result()?.truncated) {
+        <p class="banner">The reader limit was reached. The newest available device snapshots are shown.</p>
+    }
+    @if (result()?.devices?.length) {
+        <label for="metrics-device">Application / device session</label>
+        <select (change)="selectDevice($event)" [value]="selectedId()" id="metrics-device">
+            @for (device of result()?.devices ?? []; track device.id) {
+                <option [value]="device.id">{{ device.application }} · PID {{ device.process_id }}
+                    · {{ device.gpu_name }} · device {{ device.id }}
+                </option>
+            }
+        </select>
+    }
+    @if (snapshot(); as data) {
+        <p class="muted">{{ data.gpu_name }} · {{ data.session_id }} ·
+            updated {{ data.updated_ms | date:'mediumTime' }}</p>
+        @if (status() === 'STALE') {
+            <p class="banner">No recent sample. These are the last recorded values; the application may have stopped
+                unexpectedly.</p>
+        }
+        @if (data.closed) {
+            <p class="muted">The Vulkan device closed. Final totals and recent releases remain available.</p>
+        }
+        @if (data.inventory_truncated) {
+            <p class="banner">Resource detail exceeded 2,048 live entries. Aggregate counts and allocation bytes still
+                include all instrumented resources.</p>
+        }
+        <div class="metrics resource-cards">
+            <article>
+                <span>LIVE ALLOCATIONS</span><strong>{{ bytes(data.totals.allocation_bytes) }}</strong><small>{{ data.totals.allocation_bytes | number }}
+                bytes · {{ data.totals.live_allocations }} allocations</small></article>
+            <article>
+                <span>PEAK ALLOCATIONS</span><strong>{{ bytes(data.totals.peak_allocation_bytes) }}</strong><small>{{ data.totals.peak_allocation_bytes | number }}
+                bytes</small></article>
+            <article>
+                <span>LIVE OBJECTS</span><strong>{{ data.totals.live_resources | number }}</strong><small>{{ data.totals.created_resources | number }}
+                created · {{ data.totals.released_resources | number }} released</small></article>
+        </div>
+        <div class="resource-stats">
+            <span>Device-local allocations <strong>{{ bytes(data.totals.device_local_bytes) }}</strong></span>
+            <span>Host-visible allocations <strong>{{ bytes(data.totals.host_visible_bytes) }}</strong></span>
+            <span>Logical payload <strong>{{ bytes(data.totals.payload_bytes) }}</strong></span>
+            <span>Last frame draws <strong>{{ data.frame.draw_calls | number }}</strong></span>
+            <span>Instances <strong>{{ data.frame.instances | number }}</strong></span>
+            <span>Triangles <strong>{{ data.frame.triangles | number }}</strong></span>
+            <span>GPU time <strong>{{ data.frame.gpu_time_ms === null ? 'Unavailable' : (data.frame.gpu_time_ms | number:'1.2-3') + ' ms' }}</strong></span>
+        </div>
+        <p class="muted">Allocation bytes are the sizes passed to Vulkan memory allocation, including alignment.
+            Device-local and host-visible categories can overlap. Presentation image backing memory, driver overhead,
+            and CPU RAM are excluded. GPU time is the latest available completed sample.</p>
+        <div class="resource-kinds">
+            @for (kind of kinds(); track kind[0]) {
+                <span class="badge">{{ kind[0] }} · {{ kind[1] }}</span>
+            }
+        </div>
+        <div class="resource-controls">
+            <label>Find resource <input (input)="search($event)" [value]="filter()" placeholder="Kind, asset, handle…"
+                                        type="search"/></label>
+            <label class="resource-checkbox"><input (change)="showReleased($event)" [checked]="released()"
+                                                    type="checkbox"/> Recent releases (up to
+                128)</label>
+        </div>
+        <div aria-label="Resource inventory, horizontally scrollable" class="resource-table-scroll" tabindex="0">
+            <table>
+                <thead>
+                <tr>
+                    <th scope="col">RESOURCE</th>
+                    <th scope="col">PAYLOAD BYTES</th>
+                    <th scope="col">ALLOCATION BYTES</th>
+                    <th scope="col">MEMORY</th>
+                    <th scope="col">DETAILS</th>
+                </tr>
+                </thead>
+                <tbody>
+                    @for (row of visibleRows(); track row.id) {
+                        <tr>
+                            <td><strong>{{ row.kind }}</strong>
+                                <div>{{ row.label }}</div>
+                                <small class="muted">#{{ row.id }} · {{ row.handle }}</small></td>
+                            <td>{{ row.payload_bytes | number }}</td>
+                            <td>{{ row.allocation_bytes ? (row.allocation_bytes | number) : '—' }}</td>
+                            <td>@if (row.memory_type !== null) {
+                                type {{ row.memory_type }} · heap {{ row.memory_heap }}
+                                <div>{{ row.device_local ? 'Device local' : '' }} {{ row.host_visible ? 'Host visible' : '' }}</div>
+                            } @else {
+                                <span class="muted">No explicit allocation</span>
+                            }</td>
+                            <td>{{ row.details }}@if (row.released_ms !== null) {
+                                <div class="muted">Released {{ row.released_ms | date:'mediumTime' }}</div>
+                            }</td>
+                        </tr>
+                    } @empty {
+                        <tr>
+                            <td class="muted" colspan="5">No matching resources in this sample.</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="resource-pagination"><span>{{ rows().length }} matching entries · page {{ page() + 1 }}</span>
+            <button (click)="page.set(page() - 1)" [disabled]="page() === 0" type="button">Previous</button>
+            <button (click)="page.set(page() + 1)" [disabled]="(page() + 1) * 100 >= rows().length" type="button">Next
+            </button>
+        </div>
+    } @else {
+        <div class="resource-empty"><h3>Waiting for a Vulkan session</h3>
+            <p>Run the game or editor viewport in a debug build. Resource tracking starts when its Vulkan device is
+                created.</p>
+            <p>Set <code>ENGINE_METRICS=1</code> to enable it explicitly, including in release builds; use <code>ENGINE_METRICS=0</code>
+                to disable it. Debug logging also enables tracking. The application logger must be initialized to write
+                snapshots.</p>
+            <p class="muted">Snapshots appear beside the application’s session logs as
+                <code>vulkan-metrics-*.json</code>. Engine Admin reads its configured log directory.</p></div>
+    }
+</section>

@@ -27,6 +27,42 @@ all documents. Editor protocol 2 snapshots expose the catalog and dirty states.
 See [project lifecycle](../../project-lifecycle.md) for caps, commands, version rejection, host paths and save/reload
 semantics.
 
+## Simulation scene context
+
+`runtime::simulation_session` re-exports the CPU simulation API. `SimulationSession::new` and `with_factory` select the
+project's startup scene. Use `with_factory_for_scene(project, scene_id, document, factory)` to construct a session for
+another catalog scene. `scene_id()` reports that running scene; `project()` retains the original startup setting and
+other project configuration. The selected scene document is validated before the factory is called.
+
+Custom factories must implement the explicit scene argument:
+
+```rust
+pub trait GameModuleFactory: Send + Sync {
+	fn create(
+		&self,
+		project: &ProjectData,
+		scene_id: &SceneId,
+	) -> Result<Box<dyn GameModule>, String>;
+}
+```
+
+`ConfiguredBehaviorFactory` checks catalog membership and collects behaviors for the supplied ID. Movement-input
+validation uses the session's running scene ID as well. Editor Play supplies its active scene explicitly, so playing a
+nonstartup scene does not repurpose the project's launch setting. Scene identity remains fixed for that simulation
+session; [project lifecycle](../../project-lifecycle.md#editor-play-and-simulation-scene-identity) describes the
+authoring
+and startup distinction.
+
+The simulation caches distinct configured controlled-movement entity keys for its selected scene at construction.
+`controlled_targets()` exposes that fixed list; `EditorSession::play_controlled_targets()` and the GPU SceneEditor
+adapter expose it while Play is active. `set_controlled_input` supplies normalized movement to all those targets;
+`set_input` requires an individual target on that list. SceneEditor also provides `set_play_input` and
+`set_entity_play_input` adapters. These helpers preserve the existing input-transition clock reset behavior.
+
+`input::MovementBindings` centralizes normalized two-axis held-key input, with `WASD` and `ARROWS` presets. Camera
+movement uses arrows; SceneEditor's legacy Play input uses WASD. This helper does not implement the proposed action
+mapping and possession system in ADR-0010.
+
 ## Scene and asset modules
 
 | Module                          | Current role                                                                            |

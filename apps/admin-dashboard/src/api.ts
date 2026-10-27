@@ -1,6 +1,7 @@
 import {Injectable} from "@angular/core";
 import {invoke, isTauri} from "@tauri-apps/api/core";
 import type {DashboardSnapshot, LogEntry, LogFilter} from "./models";
+import {sampleMetrics} from './metrics.models';
 
 @Injectable({providedIn: "root"})
 export class AdminApi {
@@ -18,6 +19,7 @@ export class AdminApi {
                 "Desktop services are unavailable. Launch Engine Admin with npm run desktop.",
             );
         if (command === "dashboard_snapshot") return sampleSnapshot as T;
+        if (command === "resource_metrics") return sampleMetrics() as T;
         if (command === "log_page") {
             const after = Number(args["after"]);
             const filter = args["filter"] as LogFilter;

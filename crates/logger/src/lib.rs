@@ -1,4 +1,5 @@
 //! Shared process-wide diagnostics. Applications initialize; libraries only emit.
+pub mod metrics;
 mod storage;
 pub use log::{LevelFilter, debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};

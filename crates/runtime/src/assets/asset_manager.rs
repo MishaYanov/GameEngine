@@ -360,6 +360,7 @@ impl AssetManager {
 		self.check_gpu_budget(bytes, 1)?;
 
 		let texture = renderer.upload_rgba8(image.width(), image.height(), image.pixels())?;
+		texture.set_debug_label(&full_path.to_string_lossy());
 
 		let texture = Arc::new(texture);
 		self.gpu_allocations.push(GpuAllocation {
@@ -405,6 +406,7 @@ impl AssetManager {
 		self.check_gpu_budget(bytes, 1)?;
 
 		let mesh = renderer.upload_mesh(data.vertices(), data.indices())?;
+		mesh.set_debug_label(&id);
 
 		let mesh = Arc::new(mesh);
 		self.gpu_allocations.push(GpuAllocation {
@@ -500,6 +502,7 @@ impl AssetManager {
 
 		let texture =
 			Arc::new(renderer.upload_rgba8(image.width(), image.height(), image.pixels())?);
+		texture.set_debug_label(&id);
 		self.gpu_allocations.push(GpuAllocation {
 			resource: GpuReference::Texture(Arc::downgrade(&texture)),
 			bytes,

@@ -10,6 +10,7 @@ use ash::{Device, Instance, vk};
 use super::VulkanDevice;
 
 pub struct VulkanBuffer {
+	_metrics: engine_logger::metrics::ResourceGuard,
 	device: Device,
 	buffer: vk::Buffer,
 	memory: vk::DeviceMemory,
@@ -73,6 +74,9 @@ impl From<vk::Result> for VulkanBufferError {
 }
 
 impl VulkanBuffer {
+	pub(crate) fn set_debug_label(&self, label: &str) {
+		self._metrics.set_label(label);
+	}
 	pub fn new(
 		instance: &Instance,
 		device: &VulkanDevice,
@@ -147,6 +151,15 @@ impl VulkanBuffer {
 				return Err(error.into());
 			}
 		};
+		let allocation_metrics = crate::metrics::allocation(
+			device,
+			"buffer",
+			buffer,
+			size,
+			requirements.size,
+			memory_type_index,
+			&format!("usage={usage:?}"),
+		);
 
 		if let Err(error) = unsafe { ash_device.bind_buffer_memory(buffer, memory, 0) } {
 			unsafe {
@@ -159,6 +172,7 @@ impl VulkanBuffer {
 		}
 
 		Ok(Self {
+			_metrics: allocation_metrics,
 			device: ash_device,
 			buffer,
 			memory,
@@ -292,6 +306,14 @@ fn copy_buffer(
 		.queue_family_index(device.queue_families().graphics);
 
 	let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
+	let pool_metrics = crate::metrics::object(
+		ash_device,
+		"command_pool",
+		command_pool,
+		"Buffer upload command pool",
+		"transient",
+	);
+	let mut command_metrics = None;
 
 	let result = (|| -> Result<(), VulkanBufferError> {
 		let allocate_info = vk::CommandBufferAllocateInfo::default()
@@ -302,6 +324,13 @@ fn copy_buffer(
 		let command_buffers = unsafe { ash_device.allocate_command_buffers(&allocate_info)? };
 
 		let command_buffer = command_buffers[0];
+		command_metrics = Some(crate::metrics::object(
+			ash_device,
+			"command_buffer",
+			command_buffer,
+			"Buffer upload commands",
+			"transient",
+		));
 
 		let begin_info = vk::CommandBufferBeginInfo::default()
 			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
@@ -335,6 +364,8 @@ fn copy_buffer(
 	unsafe {
 		ash_device.destroy_command_pool(command_pool, None);
 	}
+	drop(command_metrics);
+	drop(pool_metrics);
 
 	result
 }

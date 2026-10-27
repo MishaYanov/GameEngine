@@ -49,6 +49,12 @@ impl From<VulkanBufferError> for VulkanMeshError {
 }
 
 impl VulkanMesh {
+	pub fn set_debug_label(&self, label: &str) {
+		self.vertex_buffer
+			.set_debug_label(&format!("{label} · vertices"));
+		self.index_buffer
+			.set_debug_label(&format!("{label} · indices"));
+	}
 	pub(crate) fn dynamic(
 		instance: &Instance,
 		device: &VulkanDevice,

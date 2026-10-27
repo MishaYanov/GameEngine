@@ -257,7 +257,11 @@ fn coordinator_journal_is_bounded_and_slow_consumers_receive_resync_marker() {
 
 struct BadFactory;
 impl GameModuleFactory for BadFactory {
-	fn create(&self, _p: &ProjectData) -> Result<Box<dyn GameModule>, String> {
+	fn create(
+		&self,
+		_p: &ProjectData,
+		_: &engine_core::scene_catalog::SceneId,
+	) -> Result<Box<dyn GameModule>, String> {
 		Ok(Box::new(BadModule))
 	}
 }

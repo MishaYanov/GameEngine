@@ -1,3 +1,4 @@
+mod metrics;
 mod renderer;
 mod window_renderer;
 

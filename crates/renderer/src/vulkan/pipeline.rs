@@ -3,6 +3,7 @@ use ash::{Device, util::read_spv, vk};
 use std::io::Cursor;
 
 pub struct VulkanGraphicsPipeline {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 	pipeline: vk::Pipeline,
 	layout: vk::PipelineLayout,
@@ -90,6 +91,13 @@ impl VulkanGraphicsPipeline {
 			device,
 			include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv")),
 		)?;
+		let _vertex_metrics = crate::metrics::object(
+			device,
+			"shader_module",
+			vertex_shader,
+			"Vertex shader",
+			"SPIR-V",
+		);
 
 		let fragment_shader = match create_shader_module(
 			device,
@@ -106,6 +114,13 @@ impl VulkanGraphicsPipeline {
 			}
 		};
 
+		let _fragment_metrics = crate::metrics::object(
+			device,
+			"shader_module",
+			fragment_shader,
+			"Fragment shader",
+			"SPIR-V",
+		);
 		let push_constant_ranges = [vk::PushConstantRange::default()
 			.stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
 			.offset(ModelPushConstants::OFFSET)
@@ -247,6 +262,22 @@ impl VulkanGraphicsPipeline {
 		Ok(Self {
 			device: device.clone(),
 			pipeline: pipelines[0],
+			_metrics: vec![
+				crate::metrics::object(
+					device,
+					"pipeline",
+					pipelines[0],
+					"Graphics pipeline",
+					&format!("double_sided={double_sided}, overlay={overlay}"),
+				),
+				crate::metrics::object(
+					device,
+					"pipeline_layout",
+					layout,
+					"Graphics pipeline layout",
+					"",
+				),
+			],
 			layout,
 		})
 	}

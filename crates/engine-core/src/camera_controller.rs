@@ -1,4 +1,4 @@
-use crate::{Camera, InputState, Key};
+use crate::{Camera, InputState, input::MovementBindings};
 
 #[derive(Debug)]
 pub struct CameraController {
@@ -17,26 +17,7 @@ impl Default for CameraController {
 
 impl CameraController {
 	pub fn update(&self, camera: &mut Camera, input: &InputState, delta_seconds: f32) {
-		let mut direction = [0.0_f32; 2];
-
-		if input.is_held(Key::ArrowUp) {
-			direction[1] += 1.0;
-		}
-		if input.is_held(Key::ArrowDown) {
-			direction[1] -= 1.0;
-		}
-		if input.is_held(Key::ArrowLeft) {
-			direction[0] -= 1.0;
-		}
-		if input.is_held(Key::ArrowRight) {
-			direction[0] += 1.0;
-		}
-
-		let length = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
-		if length > 0.0 {
-			direction[0] /= length;
-			direction[1] /= length;
-		}
+		let direction = MovementBindings::ARROWS.direction(input);
 
 		let forward = camera.forward();
 		let right = camera.right();
