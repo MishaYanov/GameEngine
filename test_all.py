@@ -16,7 +16,7 @@ def suites(native=False):
 		("Rust workspace", ROOT, rust),
 		("Rust documentation", ROOT, [cargo, "test", "--workspace", "--doc", "--offline", "--locked"]),
 		("Admin Angular", ROOT / "apps/admin-dashboard", [node, "node_modules/vitest/vitest.mjs", "run"]),
-		("Client Angular", ROOT / "apps/editor", [node, "node_modules/@angular/cli/bin/ng.js", "test", "--watch=false"]),
+		("Client Angular", ROOT / "apps/editor", [node, "node_modules/@angular/cli/bin/ng.js", "test", "editor", "--watch=false"]),
 		("Python tools", ROOT, [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]),
 	]
 	if native:

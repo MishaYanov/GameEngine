@@ -1,0 +1,127 @@
+<editor-subject
+        [form]="fields.blend"
+        [inputs]="[{ path: 'synchronize', type: 'boolean', underExpanded: true }]"
+        [options]="blendOptions"
+        icon="graph"
+        title="Blend"
+/>
+@if (!valid()) {
+    <p class="warning" role="alert">
+        Walk speed must be positive; run speed must be greater than walk speed.
+    </p>
+}
+<editor-subject [form]="fields.motions" [renderFields]="false" icon="layers" title="Motion slots">
+    <p class="hint">Assign a clip or expose a Pose input. A connected Pose overrides the clip.</p>
+    @for (slot of slots(); track slot.id) {
+        <div class="motion-slot">
+            <label
+            ><span>{{ slot.label }}</span>
+                <select [attr.aria-label]="slot.label + ' clip'" [formField]="fields.motions[slot.id]">
+                    <option value="">None · reference pose</option>
+                    @if (missing(draft().motions[slot.id])) {
+                        <option [value]="draft().motions[slot.id]">
+                            Missing: {{ draft().motions[slot.id] }}
+                        </option>
+                    }
+                    @for (asset of assets(); track asset.id) {
+                        <option [value]="asset.id">{{ asset.name }}</option>
+                    }
+                </select>
+            </label>
+            <label class="check"
+            ><input
+                    [attr.aria-label]="'Expose ' + slot.label + ' Pose input'"
+                    [formField]="fields.exposed[slot.id]"
+                    type="checkbox"
+            />
+                Pose input
+                @if (wired(slot.id)) {
+                    <span>· connected</span>
+                }
+            </label>
+        </div>
+    }
+</editor-subject>
+<editor-subject [form]="fields.air" icon="layers" title="Air motions"/>
+<editor-subject [form]="previewForm" [renderFields]="false" icon="graph" title="Blend preview">
+    <p class="hint">Local velocity in units/s. Weight preview only.</p>
+    @if (draft().blend.mode === 'direction2d') {
+        <div class="blend-space">
+			<span aria-hidden="true" class="axis-forward">Forward</span
+            ><span aria-hidden="true" class="axis-right">Right</span>
+            <button
+                    (click)="previewClick($event)"
+                    aria-label="Set blend velocity; use the numeric controls for keyboard adjustment"
+                    class="blend-surface"
+                    type="button"
+            >
+                <span [style.left.%]="point().x" [style.top.%]="point().y" class="blend-point"></span>
+            </button>
+        </div>
+    } @else if (draft().blend.mode === 'speed1d') {
+        <div class="thresholds">
+            <span>Idle · 0</span><span>Walk · {{ values().blend.walkSpeed }}</span
+        ><span>Run · {{ values().blend.runSpeed }}</span>
+        </div>
+    }
+    <editor-row [columns]="2">
+        <label
+        >Velocity X<input
+                [formField]="previewForm.x"
+                aria-label="Preview velocity X"
+                step="0.1"
+                type="number"
+        /></label>
+        <label
+        >Forward<input
+                [formField]="previewForm.forward"
+                aria-label="Preview velocity forward"
+                step="0.1"
+                type="number"
+        /></label>
+    </editor-row>
+    @for (weight of weights(); track weight.id) {
+        <div class="weight">
+			<span>{{ weight.label }}</span
+            >
+            <meter
+                    [attr.aria-label]="weight.label + ' weight'"
+                    [value]="weight.percent"
+                    max="100"
+                    min="0"
+            >
+                {{ weight.percent }}%
+            </meter
+            >
+            <span>{{ weight.percent }}%</span>
+        </div>
+    }
+</editor-subject>
+<editor-subject [form]="fields" [renderFields]="false" icon="layers" title="Output settings">
+    <label
+    >Skeleton ID<input
+            [formField]="fields.skeletonId"
+            aria-label="Locomotion skeleton ID"
+            type="text"
+    /></label>
+    <label
+    >Root motion<select [formField]="fields.rootMotion" aria-label="Root motion">
+        <option value="in_place">In place</option>
+        <option value="extract">Extract</option>
+    </select></label
+    >
+    <label class="check"
+    ><input [formField]="fields.emitEvents" aria-label="Emit animation events" type="checkbox"/>
+        Emit animation events</label
+    >
+    <p class="hint">Disconnect a port before disabling its setting.</p>
+    <button (click)="openMachine.emit()" type="button">Open state machine</button>
+</editor-subject>
+@if (warnings().length) {
+    <details class="warnings">
+        <summary>{{ warnings().length }} motion assignment warnings</summary>
+        @for (warning of warnings(); track warning) {
+            <p>{{ warning }}</p>
+        }
+    </details>
+}

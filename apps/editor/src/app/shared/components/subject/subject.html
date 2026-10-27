@@ -26,13 +26,16 @@
     </header>
     <div [hidden]="collapsed()" [id]="bodyId" class="subject-content">
         <ng-content select="[subject-before-fields]"/>
-        <editor-subject-fields
-                [advancedTraits]="advancedTraits()"
-                [expanded]="expanded()"
-                [fields]="form()"
-                [id]="traitsId"
-                [path]="title()"
-        />
+        @if (renderFields()) {
+            <editor-subject-fields
+                    [advancedTraits]="advancedTraits()"
+                    [expanded]="expanded()"
+                    [fields]="form()"
+                    [id]="traitsId"
+                    [options]="options()"
+                    [path]="title()"
+            />
+        }
         <ng-content/>
     </div>
     @if (expandable() && !collapsed()) {

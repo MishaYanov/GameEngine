@@ -6,7 +6,7 @@ const stats = JSON.parse(
 );
 const inputs = Object.keys(stats.inputs).map((path) => path.replaceAll('\\', '/'));
 const forbidden = inputs.filter((path) =>
-    /(?:projects\/design\/|\.design\.ts$|app\.routes\.development|environment\.(?:development|staging))/.test(
+    /(?:projects\/design(?:-guide)?\/|\.design\.ts$|app\.routes\.development|environment\.(?:development|staging))/.test(
         path,
     ),
 );

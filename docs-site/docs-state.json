@@ -1,233 +1,432 @@
 {
-  "last_checked_commit": "929bd28045c632951512e8842ea4bf30356c1a8d",
-  "last_checked_date": "2026-10-24",
-  "last_documentation_update_commit": "929bd28045c632951512e8842ea4bf30356c1a8d",
+  "last_checked_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+  "last_checked_date": "2026-10-27",
+  "last_documentation_update_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "Inspection baseline only. HEAD advanced from 1a4c7634a8d568bea625b4afa279abef8524308f to 929bd28045c632951512e8842ea4bf30356c1a8d, committing prior compiler/documentation and editor work. Inspected that history plus current staged, unstaged and untracked changes. This update documents dirty per-scene selection source/tests; HEAD does not identify dirty contents or certify unrelated guides. last_documentation_update_commit is observed HEAD, not a new documentation commit.",
+  "baseline_note": "Inspection baseline only. Compared a377b1f87dcc2972851c1518e4fd3cf1dc1e8951 to a377b1f87dcc2972851c1518e4fd3cf1dc1e8951; HEAD has not advanced. Inspected recent Git history, tracked-tree inventory, staged/unstaged diffs and untracked status, plus current object, transform, command, bridge and UI source. Dirty source evolves independently of HEAD. This is the observed source commit, not a documentation commit or implementation acceptance.",
   "reviewed_commits": [
     "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
     "a48ff6c5b84096b540f1401eff452c222e167493",
     "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
     "1a4c7634a8d568bea625b4afa279abef8524308f",
-    "929bd28045c632951512e8842ea4bf30356c1a8d"
+    "929bd28045c632951512e8842ea4bf30356c1a8d",
+    "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
+    "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951"
   ],
-  "documentation_report": "docs/project-lifecycle.md",
-  "documentation_scope": "User-authorized DOC_MANAGER follow-up after the completed five-step per-scene selection feature. Updated only project-lifecycle and scene-editing Markdown plus checkpoint, regenerated docs-site/dist. Engine Developer only; Game App Developer stays empty. No production/test/config changes, staging, commits or unrelated Angular reconciliation by documentation maintenance.",
+  "documentation_report": "docs/adr/0003-rust-typescript-bridge.md",
+  "documentation_reports": [
+    "docs/adr/0002-object-composition-and-components.md",
+    "docs/adr/0003-rust-typescript-bridge.md"
+  ],
+  "documentation_scope": "Explicit user request for object/props architecture and naming ADR, engine-definition/UI transfer ADR, and complete Rust-TypeScript bridge best-practice research. Added two Proposed ADRs and index links; rebuilt docs-site/dist and checked publication. Engine Developer only; Game App Developer remains empty. No production code, dependencies, staging or commits changed by this work.",
   "documented_changes": [
-    "Corrected scene-switching guides: each retained draft owns transient selection; activation retains the outgoing selection and restores the validated incoming selection",
-    "Documented scene-aware undo/redo restoring the history record selection after validation before history/activation mutation; navigation remains outside undo history",
-    "Documented empty selection for fresh created/loaded drafts and newly reopened sessions; selection is not serialized and does not affect scene/project dirty flags or saved baselines",
-    "Clarified resource accounting: 256 MiB logical authored/saved SceneData budget excludes selection vectors, history storage and allocator overhead; selections retain their separate 4096-entry bound",
-    "Preserved prior compiler documentation, historical evidence and unrelated concurrent Angular/deletion/rename/backups"
+    "Common SceneObject authoring record, typed component composition, presets/roles, and Object/Component/Property/Subject/Controller/System/Asset/Prefab vocabulary",
+    "Object and component identity, hierarchy, defaults, registry/metadata ownership, strict schemas, runtime footprint and versioned scene/project/prefab migration plan",
+    "Dated primary-source research and current code inventory for Rust-owned DTOs, ts-rs versus Specta/schema generation, boundary validation and bidirectional contract fixtures",
+    "JSON commands/queries/receipts, bounded channel streams, raw binary alternatives, scoped queries and descriptor caching, with explicit numeric/null/enum/transform rules",
+    "JSON/XML/MessagePack/CBOR/Postcard/Protobuf/FlatBuffers/packed-array comparison; native benchmark matrix, correctness gates and implementation sequence",
+    "Both ADRs distinguish proposed behavior from current code; no codec speed ranking, zero-copy promise or repository latency measurements are asserted"
   ],
   "pending_documentation_changes": [
-    "Extensive concurrent Angular design registry, routes, module/layout/components, storage/services and app/demo removal work is inventoried but outside this per-scene selection documentation scope and acceptance",
-    "Host filesystem reopen, Angular selection presentation and interactive native/GPU/UI, installed Player/release, clean-checkout reproducibility and Jenkins remain unverified by this update",
-    "No hardware cadence/performance/total process or driver memory acceptance; logical document accounting excludes selection/history/allocator overhead",
-    "Workspace-wide typed-error migration remains a proposed design; compiler and broader prior guide claims were not reverified for this selection update",
-    "Historical step reports preserve milestone behavior; unrelated feature guides were not broadly reconciled"
+    "Resolve/adopt the proposed ADR-0002/0003 decisions and implement their contracts, migrations, generators and adapters before documenting them as available behavior",
+    "Run native Rust-Tauri-WebView2 performance experiments and cross-language generation/serialization compatibility proofs before choosing a production binary codec or claiming performance gains",
+    "Implement the accepted ADR direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior",
+    "Recent Angular/editor milestone changes outside the inspected integration surface were inventoried but existing frontend/architecture guides were not broadly reconciled",
+    "Concurrent animation graph models/store and untracked animation files appeared during this documentation pass and remain outside its implementation or validation scope",
+    "Existing prior pending verification limits remain archived with the previous checkpoint; this pass does not resolve runtime, native/GPU, compiler release or installed-player acceptance"
   ],
   "verification": [
-    "DOC_MANAGER local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
-    "DOC_MANAGER local: 508 local/cross-page anchors resolved across 30 pages; stale switching-clears-selection claims removed from both affected guides; Game App Developer remains empty",
-    "DOC_MANAGER local: focused git diff --check passed for changed Markdown/checkpoint",
-    "Inspection local: root/applicable instruction inventory, history from prior checkpoint through 929bd28, complete Git tree inventory, staged/unstaged/untracked changes and current core selection/history implementation inspected; unrelated concurrent work preserved",
-    "TESTER final handoff and actual final logs inspected: cargo test -p engine-core --all-targets --offline --locked passed 96 tests across 11 targets, zero failed/ignored; multi_scene_api passed 13 tests including three new focused regressions",
-    "TESTER regressions cover independent per-scene selections without dirty/history changes, empty fresh/loaded/added/reconstructed sessions, and cross-scene delete undo/redo restoring patch selection while retaining outgoing selection; existing same-scene no-op coverage reused",
-    "TESTER final handoff and actual final log inspected: cargo clippy -p engine-core --all-targets --offline --locked -- -D warnings passed; test-file diffcheck passed; warnings limited to environmental incremental-cache hardlink fallback and a transient Cargo build-lock wait",
-    "TESTER source-before/source-after SHA256 inventories match each other and current 44 engine-core source/test/manifest/lock files; inspected HEAD matches 929bd28045c632951512e8842ea4bf30356c1a8d",
-    "SECURITY final scoped read-only review handoff: no actionable introduced issue; validated per-SceneId ownership and failure-preserving switch/history order, project replacement clearing selection/drafts, and separate selection/document bounds",
-    "DOC_MANAGER changed only two Markdown guides and docs-state.json; regenerated docs-site/dist; no production/test/config/staging/commit actions"
+    "npm.cmd test --prefix docs-site: built and link-checked 33 pages across two spaces; all five site tests passed",
+    "Supplemental generated-site check: 606 local/cross-page fragment links resolved across 33 pages; both new ADR bodies, tables, Proposed status and search entries verified among 31 indexed documents",
+    "Game App Developer empty-space check passed; new ADRs are in Engine Developer",
+    "Focused git diff --check passed; new Markdown code fences and trailing whitespace checked",
+    "Independent read-only architecture/source review found no blocking mismatch; command naming and unsupported-plugin editing wording were aligned before the site build",
+    "Prior staged/unstaged/untracked work preserved, including a concurrent formatting diff to ADR-0001 that this work did not author"
   ],
   "verification_limits": [
-    "Core test/Clippy acceptance belongs to TESTER final evidence for the hashed dirty source state; DOC_MANAGER independently executed documentation checks only",
-    "Reopen regression reconstructs EngineBuilder from authored scene/project values in memory; no real disk reopen or host filesystem acceptance is claimed",
-    "No downstream host/Angular/frontend/native/Player/GPU/UI, full-workspace, installed-release, clean-checkout or Jenkins checks were run for this feature",
-    "SECURITY is scoped static source review, not runtime or total-memory acceptance; the 256 MiB logical SceneData budget excludes retained selection vectors/clones, history storage and allocator overhead",
-    "Selection is separately bounded to 4096 distinct existing keys per scene, with retained scene count at most 64 and validated entity keys at most 256 bytes; these bounds do not measure total process/driver memory",
-    "HEAD is an inspection baseline; uncommitted core source/tests and extensive concurrent Angular changes are not identified by that SHA. Production/test/backups/staged state/commits were preserved by DOC_MANAGER",
-    "Local generated links/anchors were checked; preserved remote reading links were not revalidated"
+    "Research/documentation only: no generator integration, Rust/Angular implementation tests, native IPC benchmarks, GPU/runtime acceptance, compiler or installed-player checks run",
+    "Candidate tool versions and source guidance were researched on 2026-10-27; exact workspace compatibility remains a proof task, and optional dependencies were not installed",
+    "Size/rate examples and proposed benchmark fixtures are design inputs, not measured latency/throughput or accepted production budgets",
+    "Current source was inspected, not captured as an atomic filesystem snapshot; concurrent user/other-chat changes may continue after this checkpoint",
+    "Existing frontend/runtime guides were not comprehensively reconciled; pending scope from earlier checkpoints remains carried forward",
+    "npm emitted the existing global-ignore-file environment warning; site build/tests succeeded"
   ],
-  "user_reported_verification": [
-    "User confirmed tests, native smoke, visible game, resize, and minimize pass after runtime module move",
-    "Attached renderer extraction notes report RTX 4070 smoke pass with 640x360 resized extent and no logged errors"
-  ],
-  "previous_documentation_verification": {
-    "report": "docs/editor-steps-11-20.md",
-    "commit": "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
-    "verification": [
-      "Implementation/TESTER handoff: final runtime/game/renderer all-target offline locked tests: 183 passed, zero failed, one ignored; game suite 41 passed",
-      "Supplemental TESTER handoff: explicitly enabled ignored native Vulkan initialization: one passed",
-      "Supplemental TESTER handoff: renderer_smoke and scene_io_smoke passed hidden native draw/resize/save-reload/rollback/resource lifecycle checks",
-      "Implementation handoff: debug game build and full workspace all-target compile passed",
-      "Implementation handoff: focused runtime/game Clippy completed with existing argument-count/modulo/collapsible-if/cache-hardlink warnings",
-      "DOC_MANAGER local: npm.cmd test --prefix docs-site: 26 pages rebuilt/link-checked; five tests passed",
-      "DOC_MANAGER local: 372 cross-page/local anchor targets verified; report present in developer index",
-      "DOC_MANAGER local: git diff --check -- docs passed; authored robots.json SHA256 unchanged",
-      "Final implementation handoff: isolated build passed with --target-dir target/steps-11-20-verification; artifact debug/game.exe. Ordinary-target replacement encountered Windows access/file-lock error; no process terminated.",
-      "Final DOC_MANAGER rebuild after evidence updates: 26 pages built/link-checked"
-    ],
-    "limits": [
-      "User explicitly selected automated-only acceptance; no interactive visible native UI/gameplay/lighting checks or GPU-performance measurements",
-      "Hidden native smoke is execution/assertion evidence and not visual appearance acceptance",
-      "Engine test/build/Clippy/native results are attributed to implementation/TESTER handoffs, not independently rerun by DOC_MANAGER",
-      "HEAD alone does not identify the documented state; staged and unstaged production/test files remain",
-      "Earlier user-confirmed renderer extraction checks are historical and do not replace new visual acceptance",
-      "Repeated ordinary-target Windows error 5 prevented replacing target/debug/game.exe; verified final artifact uses target/steps-11-20-verification/debug/game.exe. No process terminated; cause not asserted beyond access/file-lock failure."
-    ]
-  },
   "working_tree_at_check": [
-    " M apps/editor-host/src-tauri/src/commands/mod.rs",
-    "?? apps/editor-host/src-tauri/src/commands/preferences.rs",
-    "?? apps/editor-host/src-tauri/src/layout_preferences.rs",
-    " M apps/editor-host/src-tauri/src/lib.rs",
+    " M Jenkinsfile",
+    " M apps/editor/angular.json",
+    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
+    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
+    "A  apps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
     " M apps/editor/package.json",
-    "AM apps/editor/projects/design/src/component-registry.generated.ts",
-    "AM apps/editor/projects/design/src/component-registry.ts",
-    " M apps/editor/projects/design/src/design.routes.ts",
-    " M apps/editor/projects/design/src/workbench.html",
-    " M apps/editor/projects/design/src/workbench.scss",
-    " M apps/editor/projects/design/src/workbench.ts",
+    "AM apps/editor/projects/design-guide/scripts/design-registry.mjs",
+    "AM apps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+    "AM apps/editor/projects/design-guide/scripts/design.mjs",
+    "A  apps/editor/projects/design-guide/src/component-registry.generated.ts",
+    "A  apps/editor/projects/design-guide/src/component-registry.ts",
+    "A  apps/editor/projects/design-guide/src/design.routes.ts",
+    "A  apps/editor/projects/design-guide/src/index.html",
+    "A  apps/editor/projects/design-guide/src/main.ts",
+    "A  apps/editor/projects/design-guide/src/previews/dialog.design.ts",
+    "A  apps/editor/projects/design-guide/src/previews/drawer.design.ts",
+    "AM apps/editor/projects/design-guide/src/previews/graph.design.ts",
+    "A  apps/editor/projects/design-guide/src/previews/pane.design.ts",
+    "A  apps/editor/projects/design-guide/src/previews/portal.design.ts",
+    "A  apps/editor/projects/design-guide/src/previews/row.design.ts",
+    "A  apps/editor/projects/design-guide/src/previews/subject.design.ts",
+    "A  apps/editor/projects/design-guide/src/workbench.html",
+    "A  apps/editor/projects/design-guide/src/workbench.scss",
+    "A  apps/editor/projects/design-guide/src/workbench.ts",
+    "A  apps/editor/projects/design-guide/tsconfig.app.json",
+    " D apps/editor/projects/design/src/component-registry.generated.ts",
+    " D apps/editor/projects/design/src/component-registry.ts",
+    " D apps/editor/projects/design/src/design.routes.ts",
+    " D apps/editor/projects/design/src/index.html",
+    " D apps/editor/projects/design/src/main.ts",
+    " D apps/editor/projects/design/src/workbench.html",
+    " D apps/editor/projects/design/src/workbench.scss",
+    " D apps/editor/projects/design/src/workbench.ts",
+    " D apps/editor/projects/design/tsconfig.app.json",
     " M apps/editor/scripts/check-production.mjs",
-    "AM apps/editor/scripts/design-registry.mjs",
-    "AM apps/editor/scripts/design-registry.test.mjs",
-    "AM apps/editor/scripts/design.mjs",
-    " D apps/editor/src/app/app.html",
-    "AM apps/editor/src/app/app.routes.development.spec.ts",
+    " D apps/editor/scripts/design-registry.mjs",
+    " D apps/editor/scripts/design-registry.test.mjs",
+    " D apps/editor/scripts/design.mjs",
     " M apps/editor/src/app/app.routes.development.ts",
-    " M apps/editor/src/app/app.routes.production.ts",
-    "AM apps/editor/src/app/app.routes.shared.ts",
-    " M apps/editor/src/app/app.routes.spec.ts",
-    " D apps/editor/src/app/app.scss",
-    " D apps/editor/src/app/app.spec.ts",
-    " D apps/editor/src/app/core/editor/editor-backend.ts",
-    " M apps/editor/src/app/core/editor/editor.service.ts",
-    " M apps/editor/src/app/core/editor/engine-viewport.directive.ts",
-    " D apps/editor/src/app/demo/demo-editor-backend.spec.ts",
-    " D apps/editor/src/app/demo/demo-editor-backend.ts",
-    " D apps/editor/src/app/demo/demo-project.ts",
-    " D apps/editor/src/app/demo/demo-workspace.html",
-    " D apps/editor/src/app/demo/demo-workspace.scss",
-    " D apps/editor/src/app/demo/demo-workspace.spec.ts",
-    " D apps/editor/src/app/demo/demo-workspace.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.html",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.scss",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.spec.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.html",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.scss",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.spec.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.html",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.scss",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.spec.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.html",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.scss",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.spec.ts",
-    "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.ts",
-    " M apps/editor/src/app/modules/editor/components/editor-grid-wrapper/editor-grid-wrapper.html",
-    " M apps/editor/src/app/modules/editor/components/editor-grid-wrapper/editor-grid-wrapper.ts",
-    "AM apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.html",
-    "A  apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.scss",
-    "A  apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.spec.ts",
-    "AM apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.ts",
-    " M apps/editor/src/app/modules/editor/editor.html",
-    " M apps/editor/src/app/modules/editor/editor.ts",
-    "A  apps/editor/src/app/modules/project-setup/project-setup.html",
-    "A  apps/editor/src/app/modules/project-setup/project-setup.scss",
-    "A  apps/editor/src/app/modules/project-setup/project-setup.spec.ts",
-    "A  apps/editor/src/app/modules/project-setup/project-setup.ts",
-    " D apps/editor/src/app/project-setup.ts",
+    "AM apps/editor/src/app/core/objects/index.ts",
+    "AM apps/editor/src/app/core/objects/object-api.models.ts",
+    "AM apps/editor/src/app/core/objects/object-api.spec.ts",
+    "AM apps/editor/src/app/core/objects/object-api.ts",
     "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
     "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
     "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
-    "AM apps/editor/src/app/shared/builder/models/builder-config.model.ts",
-    " M apps/editor/src/app/shared/builder/models/builder-form-options.model.ts",
-    "?? apps/editor/src/app/shared/components/drawer/drawer-settings.ts",
-    "?? apps/editor/src/app/shared/components/drawer/drawer.design.ts",
-    "A  apps/editor/src/app/shared/components/drawer/drawer.html",
-    "A  apps/editor/src/app/shared/components/drawer/drawer.scss",
-    "AM apps/editor/src/app/shared/components/drawer/drawer.spec.ts",
-    "AM apps/editor/src/app/shared/components/drawer/drawer.ts",
-    "R  apps/editor/src/app/shared/pane/model/signal-config.interface.ts -> apps/editor/src/app/shared/components/pane/model/signal-config.interface.ts",
-    "AM apps/editor/src/app/shared/components/pane/pane.design.ts",
-    "A  apps/editor/src/app/shared/components/pane/pane.scss",
-    "RM apps/editor/src/app/shared/pane/pane.ts -> apps/editor/src/app/shared/components/pane/pane.ts",
-    "A  apps/editor/src/app/shared/components/splitter/splitter.html",
-    "A  apps/editor/src/app/shared/components/splitter/splitter.scss",
-    "A  apps/editor/src/app/shared/components/splitter/splitter.spec.ts",
-    "A  apps/editor/src/app/shared/components/splitter/splitter.ts",
-    "?? apps/editor/src/app/shared/models/config.model.ts",
-    "D  apps/editor/src/app/shared/pane/pane.scss",
-    "?? apps/editor/src/app/shared/services/editor-component.service.ts",
-    "?? apps/editor/src/app/shared/services/layout-preferences-storage.spec.ts",
-    "?? apps/editor/src/app/shared/services/layout-preferences-storage.ts",
-    "?? apps/editor/src/app/shared/services/layout-preferences.service.spec.ts",
-    "?? apps/editor/src/app/shared/services/layout-preferences.service.ts",
-    "?? apps/editor/src/app/styles/components/pane.scss",
-    " M apps/editor/src/environments/environment.development.ts",
-    " M apps/editor/src/environments/environment.staging.ts",
-    " M apps/editor/src/environments/environment.ts",
-    " M crates/engine-core/src/editor/scene_documents.rs",
+    " D apps/editor/src/app/shared/components/dialog/dialog.design.ts",
+    " D apps/editor/src/app/shared/components/drawer/drawer.design.ts",
+    " M apps/editor/src/app/shared/components/drawer/drawer.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+    "AM apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+    "AM apps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+    "AM apps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+    " M apps/editor/src/app/shared/components/graph/graph-node.scss",
+    " M apps/editor/src/app/shared/components/graph/graph-node.ts",
+    " D apps/editor/src/app/shared/components/graph/graph.design.ts",
+    " M apps/editor/src/app/shared/components/graph/graph.html",
+    " M apps/editor/src/app/shared/components/graph/graph.models.ts",
+    " M apps/editor/src/app/shared/components/graph/graph.scss",
+    " M apps/editor/src/app/shared/components/graph/graph.spec.ts",
+    " M apps/editor/src/app/shared/components/graph/graph.store.ts",
+    " M apps/editor/src/app/shared/components/graph/graph.ts",
+    " D apps/editor/src/app/shared/components/pane/pane.design.ts",
+    " D apps/editor/src/app/shared/components/portal/portal.design.ts",
+    " D apps/editor/src/app/shared/components/row/row.design.ts",
+    " M apps/editor/src/app/shared/components/subject/subject-fields.scss",
+    " D apps/editor/src/app/shared/components/subject/subject.design.ts",
+    " M apps/editor/src/app/shared/components/subject/subject.html",
+    " M apps/editor/src/app/shared/components/subject/subject.ts",
+    " M apps/editor/src/app/styles/abstracts/_layout.scss",
+    " M crates/engine-core/src/simulation_session.rs",
+    " M docs-site/docs-state.json",
+    "AM docs/adr/0001-editor-command-pipeline.md",
+    " M docs/main.md",
+    " M test_all.py",
+    "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
     "?? crates/engine-core/tests/command_factory_api.rs~",
-    " M crates/engine-core/tests/multi_scene_api.rs",
     "?? crates/renderer/src/vulkan/lighting.rs~",
     "?? crates/renderer/src/vulkan/render_object.rs~",
-    " M docs/project-lifecycle.md",
-    " M docs/scene-editing.md"
+    "?? docs/adr/0002-object-composition-and-components.md",
+    "?? docs/adr/0003-rust-typescript-bridge.md"
   ],
   "staged_files_at_check": [
-    "apps/editor/projects/design/src/component-registry.generated.ts",
-    "apps/editor/projects/design/src/component-registry.ts",
-    "apps/editor/scripts/design-registry.mjs",
-    "apps/editor/scripts/design-registry.test.mjs",
-    "apps/editor/scripts/design.mjs",
-    "apps/editor/src/app/app.routes.development.spec.ts",
-    "apps/editor/src/app/app.routes.shared.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.html",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.scss",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.spec.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.html",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.scss",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.spec.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.html",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.scss",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.spec.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.html",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.scss",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.spec.ts",
-    "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.ts",
-    "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.html",
-    "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.scss",
-    "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.spec.ts",
-    "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.ts",
-    "apps/editor/src/app/modules/project-setup/project-setup.html",
-    "apps/editor/src/app/modules/project-setup/project-setup.scss",
-    "apps/editor/src/app/modules/project-setup/project-setup.spec.ts",
-    "apps/editor/src/app/modules/project-setup/project-setup.ts",
-    "apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
-    "apps/editor/src/app/shared/abstracts/editor-component.class.ts",
-    "apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
-    "apps/editor/src/app/shared/builder/models/builder-config.model.ts",
-    "apps/editor/src/app/shared/components/drawer/drawer.html",
-    "apps/editor/src/app/shared/components/drawer/drawer.scss",
-    "apps/editor/src/app/shared/components/drawer/drawer.spec.ts",
-    "apps/editor/src/app/shared/components/drawer/drawer.ts",
-    "apps/editor/src/app/shared/components/pane/model/signal-config.interface.ts",
-    "apps/editor/src/app/shared/components/pane/pane.design.ts",
-    "apps/editor/src/app/shared/components/pane/pane.scss",
-    "apps/editor/src/app/shared/components/pane/pane.ts",
-    "apps/editor/src/app/shared/components/splitter/splitter.html",
-    "apps/editor/src/app/shared/components/splitter/splitter.scss",
-    "apps/editor/src/app/shared/components/splitter/splitter.spec.ts",
-    "apps/editor/src/app/shared/components/splitter/splitter.ts",
-    "apps/editor/src/app/shared/pane/pane.scss"
+    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-audit.json",
+    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-inspector.png",
+    "A\tapps/editor/artifacts/visuals/2026-10-26/locomotion-state-machine.png",
+    "A\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
+    "A\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+    "A\tapps/editor/projects/design-guide/scripts/design.mjs",
+    "A\tapps/editor/projects/design-guide/src/component-registry.generated.ts",
+    "A\tapps/editor/projects/design-guide/src/component-registry.ts",
+    "A\tapps/editor/projects/design-guide/src/design.routes.ts",
+    "A\tapps/editor/projects/design-guide/src/index.html",
+    "A\tapps/editor/projects/design-guide/src/main.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/dialog.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/drawer.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/pane.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/portal.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/row.design.ts",
+    "A\tapps/editor/projects/design-guide/src/previews/subject.design.ts",
+    "A\tapps/editor/projects/design-guide/src/workbench.html",
+    "A\tapps/editor/projects/design-guide/src/workbench.scss",
+    "A\tapps/editor/projects/design-guide/src/workbench.ts",
+    "A\tapps/editor/projects/design-guide/tsconfig.app.json",
+    "A\tapps/editor/src/app/core/objects/index.ts",
+    "A\tapps/editor/src/app/core/objects/object-api.models.ts",
+    "A\tapps/editor/src/app/core/objects/object-api.spec.ts",
+    "A\tapps/editor/src/app/core/objects/object-api.ts",
+    "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+    "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+    "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+    "A\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+    "A\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+    "A\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+    "A\tdocs/adr/0001-editor-command-pipeline.md"
   ],
-  "preserved_scene_sha256": "63A13AC7E1B0FEC1E00C66A85DE3169897D01BF989842F7037B523140107AA42",
+  "unstaged_files_at_check": [
+    "M\tJenkinsfile",
+    "M\tapps/editor/angular.json",
+    "M\tapps/editor/package.json",
+    "M\tapps/editor/projects/design-guide/scripts/design-registry.mjs",
+    "M\tapps/editor/projects/design-guide/scripts/design-registry.test.mjs",
+    "M\tapps/editor/projects/design-guide/scripts/design.mjs",
+    "M\tapps/editor/projects/design-guide/src/previews/graph.design.ts",
+    "D\tapps/editor/projects/design/src/component-registry.generated.ts",
+    "D\tapps/editor/projects/design/src/component-registry.ts",
+    "D\tapps/editor/projects/design/src/design.routes.ts",
+    "D\tapps/editor/projects/design/src/index.html",
+    "D\tapps/editor/projects/design/src/main.ts",
+    "D\tapps/editor/projects/design/src/workbench.html",
+    "D\tapps/editor/projects/design/src/workbench.scss",
+    "D\tapps/editor/projects/design/src/workbench.ts",
+    "D\tapps/editor/projects/design/tsconfig.app.json",
+    "M\tapps/editor/scripts/check-production.mjs",
+    "D\tapps/editor/scripts/design-registry.mjs",
+    "D\tapps/editor/scripts/design-registry.test.mjs",
+    "D\tapps/editor/scripts/design.mjs",
+    "M\tapps/editor/src/app/app.routes.development.ts",
+    "M\tapps/editor/src/app/core/objects/index.ts",
+    "M\tapps/editor/src/app/core/objects/object-api.models.ts",
+    "M\tapps/editor/src/app/core/objects/object-api.spec.ts",
+    "M\tapps/editor/src/app/core/objects/object-api.ts",
+    "D\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+    "D\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+    "D\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+    "D\tapps/editor/src/app/shared/components/dialog/dialog.design.ts",
+    "D\tapps/editor/src/app/shared/components/drawer/drawer.design.ts",
+    "M\tapps/editor/src/app/shared/components/drawer/drawer.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/animation-inspector.scss",
+    "M\tapps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/animation.spec.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.html",
+    "M\tapps/editor/src/app/shared/components/graph/animation/locomotion-inspector.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/state-inspector.ts",
+    "M\tapps/editor/src/app/shared/components/graph/animation/transition-inspector.ts",
+    "M\tapps/editor/src/app/shared/components/graph/graph-node.scss",
+    "M\tapps/editor/src/app/shared/components/graph/graph-node.ts",
+    "D\tapps/editor/src/app/shared/components/graph/graph.design.ts",
+    "M\tapps/editor/src/app/shared/components/graph/graph.html",
+    "M\tapps/editor/src/app/shared/components/graph/graph.models.ts",
+    "M\tapps/editor/src/app/shared/components/graph/graph.scss",
+    "M\tapps/editor/src/app/shared/components/graph/graph.spec.ts",
+    "M\tapps/editor/src/app/shared/components/graph/graph.store.ts",
+    "M\tapps/editor/src/app/shared/components/graph/graph.ts",
+    "D\tapps/editor/src/app/shared/components/pane/pane.design.ts",
+    "D\tapps/editor/src/app/shared/components/portal/portal.design.ts",
+    "D\tapps/editor/src/app/shared/components/row/row.design.ts",
+    "M\tapps/editor/src/app/shared/components/subject/subject-fields.scss",
+    "D\tapps/editor/src/app/shared/components/subject/subject.design.ts",
+    "M\tapps/editor/src/app/shared/components/subject/subject.html",
+    "M\tapps/editor/src/app/shared/components/subject/subject.ts",
+    "M\tapps/editor/src/app/styles/abstracts/_layout.scss",
+    "M\tcrates/engine-core/src/simulation_session.rs",
+    "M\tdocs-site/docs-state.json",
+    "M\tdocs/adr/0001-editor-command-pipeline.md",
+    "M\tdocs/main.md",
+    "M\ttest_all.py"
+  ],
+  "untracked_files_at_check": [
+    "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+    "crates/engine-core/tests/command_factory_api.rs~",
+    "crates/renderer/src/vulkan/lighting.rs~",
+    "crates/renderer/src/vulkan/render_object.rs~",
+    "docs/adr/0002-object-composition-and-components.md",
+    "docs/adr/0003-rust-typescript-bridge.md"
+  ],
+  "inspected_source_files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "027158356fd720427e3717cbecf8bc35652055b531a5123e006ec65eadf824b7",
+      "bytes": 899
+    },
+    {
+      "path": "apps/editor/AGENTS.md",
+      "sha256": "a6c8931c4949e641635bc2cce310df3874f3016f01414d5694a52cc3d1007ffd",
+      "bytes": 2907
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "2ca7a3db6b2c7048c34b61a2c561cc2a455702f6aeb8783a9c55d2b0859e5364",
+      "bytes": 281
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "ae42df37c79cee5bdb737c7941161c987da22da646fa445c5aaaeec094e1c3b2",
+      "bytes": 142616
+    },
+    {
+      "path": "apps/editor/package.json",
+      "sha256": "212bd8205977d8185a8a865c770e504d8c716142700247d2f5420e6bbd4f87c0",
+      "bytes": 2398
+    },
+    {
+      "path": "apps/editor/package-lock.json",
+      "sha256": "3edaaad2ee978bb48c67f76e5c71dceac612a02f105d77da8a6f26db1993071f",
+      "bytes": 258288
+    },
+    {
+      "path": "apps/editor-host/src-tauri/Cargo.toml",
+      "sha256": "8f8f25f82b7edbfbee7ffd6117ab2631a8671ff26304c5b7761d19cec67768fc",
+      "bytes": 876
+    },
+    {
+      "path": "apps/editor-host/src-tauri/src/commands/editor.rs",
+      "sha256": "cdc615c4f566c85c7c5ac2e8a814392cb089c947e7dfda8b8895df7d99d42e48",
+      "bytes": 15567
+    },
+    {
+      "path": "apps/editor-host/src-tauri/src/viewport.rs",
+      "sha256": "4437f3ff67f802b9299d55a759034508847faf052caeb906bcdb5e85cb19058b",
+      "bytes": 35063
+    },
+    {
+      "path": "apps/editor-host/src-tauri/capabilities/default.json",
+      "sha256": "3274cf173d071a9596b3a5a49273a3695cf74c97ba2ccee118c0c69a4e492cb3",
+      "bytes": 207
+    },
+    {
+      "path": "crates/bridge/Cargo.toml",
+      "sha256": "7d1e5766a00540f86c1591e90395f250f9d00b67421cdc06b40dc59e0660282b",
+      "bytes": 263
+    },
+    {
+      "path": "crates/bridge/src/editor.rs",
+      "sha256": "dade0b6bc8d44f39d19ec17d7f0057d4bcf20ea5b4695dd7bb8d29fdc0e79ed5",
+      "bytes": 1802
+    },
+    {
+      "path": "crates/bridge/tests/editor_contract.rs",
+      "sha256": "c0994c87de3efe9f1c144a6953752c707edf7854a5120ac9e39ac169c7762fbb",
+      "bytes": 6692
+    },
+    {
+      "path": "crates/engine-core/Cargo.toml",
+      "sha256": "d4d484884d5a93985814b9075ac3f060d01300b84495ac4346e19e6cbb9c0943",
+      "bytes": 218
+    },
+    {
+      "path": "crates/engine-core/src/command.rs",
+      "sha256": "da84f29f39b2c4cb1ce8c75007d7e83012b04bf6755f2c7efc7dcab8576111bb",
+      "bytes": 4725
+    },
+    {
+      "path": "crates/engine-core/src/engine.rs",
+      "sha256": "fc471bf8c7a640041abd9fa3c2a5d763d8ae6092d34bdb615492305df45fa66a",
+      "bytes": 13042
+    },
+    {
+      "path": "crates/engine-core/src/events.rs",
+      "sha256": "1a17334390fbebc6fe7857112e6e91d07de7ae60e2f3a4bf4c6e6a874801730b",
+      "bytes": 2742
+    },
+    {
+      "path": "crates/engine-core/src/entity_key.rs",
+      "sha256": "89367a278f4dc7c0d562aa1a55f18e4efc97e624a5885d93a85ab9f2ec962c03",
+      "bytes": 644
+    },
+    {
+      "path": "crates/engine-core/src/scene_data.rs",
+      "sha256": "689d8ade4eabab2d498216745fb1841413542de0959a3f6a83afdff9264c2ac7",
+      "bytes": 20084
+    },
+    {
+      "path": "crates/engine-core/src/transform.rs",
+      "sha256": "6e0cfba5ef0ab909d1b57ef7a59bc1268bfdec167c8120e23c2a1106a7e0e9c1",
+      "bytes": 1062
+    },
+    {
+      "path": "crates/engine-core/src/project.rs",
+      "sha256": "bdd588cb65c40b664c12abafb2579b9ede2c09e6a9c6e31eac6546e0bb3a1baf",
+      "bytes": 8457
+    },
+    {
+      "path": "crates/engine-core/src/simulation_session.rs",
+      "sha256": "0b4693107ca8b7ed223aa81b9022d2faf15370af516ed5f43c20781e0131aaa2",
+      "bytes": 12066
+    },
+    {
+      "path": "apps/editor/src/app/core/editor/editor.models.ts",
+      "sha256": "6581ceffff4949d6a97736874c1780c15c05dcfd25848383de0bc7bca7a084d5",
+      "bytes": 13712
+    },
+    {
+      "path": "apps/editor/src/app/core/editor/editor.service.ts",
+      "sha256": "d6ec53b10a48fe69769726c5ecfe836e2f38a7c277d9b781fddb80553b3beaf9",
+      "bytes": 20008
+    },
+    {
+      "path": "apps/editor/src/app/core/objects/object-api.models.ts",
+      "sha256": "2e677a85bad8ee3ff58a5b98569a5a88045903418a1b00e8c3e5e424e8f9506a",
+      "bytes": 3482
+    },
+    {
+      "path": "apps/editor/src/app/core/objects/object-api.ts",
+      "sha256": "b7d3766d86a7979e5b617f087360ed2eea35a88128f2060283da48b0583ec735",
+      "bytes": 2237
+    },
+    {
+      "path": "apps/editor/src/app/core/subjects/subject.models.ts",
+      "sha256": "a46057e40bda8079315899e52892b3539cad4b82acb6f983fc6a445049fd919b",
+      "bytes": 4920
+    },
+    {
+      "path": "apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+      "sha256": "3edffd88c16fa762153ded2b12e4de9cb4bc189926087ebbda5dcf3c898c3c4a",
+      "bytes": 9624
+    },
+    {
+      "path": "docs/adr/0001-editor-command-pipeline.md",
+      "sha256": "5fbccf03918844d30505f42790579dd0fd64ca437d9d876e2f0f1bc7c4f4a9c6",
+      "bytes": 21973
+    },
+    {
+      "path": "docs/adr/0002-object-composition-and-components.md",
+      "sha256": "dd4276bbb25be220a5ad89f5c6cd4b7c3d3ff58c9345aa8ac7d1830857402889",
+      "bytes": 29303
+    },
+    {
+      "path": "docs/adr/0003-rust-typescript-bridge.md",
+      "sha256": "7d72dd526c80497f48ff0d6caddcaa5d43db7e9357bd28b92beb2fb296022150",
+      "bytes": 37425
+    },
+    {
+      "path": "docs/main.md",
+      "sha256": "d243e8750e325283875aae5bfcd531bdd9d065eb59cb0199c5fe9639d4df062e",
+      "bytes": 5322
+    },
+    {
+      "path": "docs-site/build.mjs",
+      "sha256": "301f4ab0efedf7b3dfffd1010669d6ee363d5f4cfdd3305c13d8c6f74d34b2b1",
+      "bytes": 11294
+    },
+    {
+      "path": "docs-site/site.test.mjs",
+      "sha256": "eec2e576668c0db8db31ee33f80c3fa304e79498f58ea27651577ccecba5b871",
+      "bytes": 4205
+    },
+    {
+      "path": "docs-site/package.json",
+      "sha256": "7e93b8006e8b86f1ed6e4ca0703513d6b68c4cea52a34f3727a09e64bed02895",
+      "bytes": 361
+    }
+  ],
+  "working_tree_inventory_note": "Status captured after ADR/index creation and publication checks, before writing this checkpoint. Source hashes cover files inspected by the research/review team at checkpoint time and do not imply full subsystem testing. All other dirty paths are inventory only. Existing staged additions, deleted abstracts, moved design-guide files, graph work, backups and concurrent ADR-0001 formatting were preserved. This checkpoint is not self-hashed.",
   "historical_documentation_updates": [
     {
       "documentation_report": "docs/editor-steps-21-35.md",
@@ -724,65 +923,436 @@
         "dirty_or_untracked_paths": 62,
         "staged_paths": 31
       }
+    },
+    {
+      "last_checked_commit": "929bd28045c632951512e8842ea4bf30356c1a8d",
+      "last_checked_date": "2026-10-24",
+      "last_documentation_update_commit": "929bd28045c632951512e8842ea4bf30356c1a8d",
+      "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+      "baseline_note": "Inspection baseline only. HEAD advanced from 1a4c7634a8d568bea625b4afa279abef8524308f to 929bd28045c632951512e8842ea4bf30356c1a8d, committing prior compiler/documentation and editor work. Inspected that history plus current staged, unstaged and untracked changes. This update documents dirty per-scene selection source/tests; HEAD does not identify dirty contents or certify unrelated guides. last_documentation_update_commit is observed HEAD, not a new documentation commit.",
+      "reviewed_commits": [
+        "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "a48ff6c5b84096b540f1401eff452c222e167493",
+        "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+        "1a4c7634a8d568bea625b4afa279abef8524308f",
+        "929bd28045c632951512e8842ea4bf30356c1a8d"
+      ],
+      "documentation_report": "docs/project-lifecycle.md",
+      "documentation_scope": "User-authorized DOC_MANAGER follow-up after the completed five-step per-scene selection feature. Updated only project-lifecycle and scene-editing Markdown plus checkpoint, regenerated docs-site/dist. Engine Developer only; Game App Developer stays empty. No production/test/config changes, staging, commits or unrelated Angular reconciliation by documentation maintenance.",
+      "documented_changes": [
+        "Corrected scene-switching guides: each retained draft owns transient selection; activation retains the outgoing selection and restores the validated incoming selection",
+        "Documented scene-aware undo/redo restoring the history record selection after validation before history/activation mutation; navigation remains outside undo history",
+        "Documented empty selection for fresh created/loaded drafts and newly reopened sessions; selection is not serialized and does not affect scene/project dirty flags or saved baselines",
+        "Clarified resource accounting: 256 MiB logical authored/saved SceneData budget excludes selection vectors, history storage and allocator overhead; selections retain their separate 4096-entry bound",
+        "Preserved prior compiler documentation, historical evidence and unrelated concurrent Angular/deletion/rename/backups"
+      ],
+      "pending_documentation_changes": [
+        "Extensive concurrent Angular design registry, routes, module/layout/components, storage/services and app/demo removal work is inventoried but outside this per-scene selection documentation scope and acceptance",
+        "Host filesystem reopen, Angular selection presentation and interactive native/GPU/UI, installed Player/release, clean-checkout reproducibility and Jenkins remain unverified by this update",
+        "No hardware cadence/performance/total process or driver memory acceptance; logical document accounting excludes selection/history/allocator overhead",
+        "Workspace-wide typed-error migration remains a proposed design; compiler and broader prior guide claims were not reverified for this selection update",
+        "Historical step reports preserve milestone behavior; unrelated feature guides were not broadly reconciled"
+      ],
+      "verification": [
+        "DOC_MANAGER local: npm.cmd test --prefix docs-site rebuilt/link-checked 30 pages; all five site tests passed",
+        "DOC_MANAGER local: 508 local/cross-page anchors resolved across 30 pages; stale switching-clears-selection claims removed from both affected guides; Game App Developer remains empty",
+        "DOC_MANAGER local: focused git diff --check passed for changed Markdown/checkpoint",
+        "Inspection local: root/applicable instruction inventory, history from prior checkpoint through 929bd28, complete Git tree inventory, staged/unstaged/untracked changes and current core selection/history implementation inspected; unrelated concurrent work preserved",
+        "TESTER final handoff and actual final logs inspected: cargo test -p engine-core --all-targets --offline --locked passed 96 tests across 11 targets, zero failed/ignored; multi_scene_api passed 13 tests including three new focused regressions",
+        "TESTER regressions cover independent per-scene selections without dirty/history changes, empty fresh/loaded/added/reconstructed sessions, and cross-scene delete undo/redo restoring patch selection while retaining outgoing selection; existing same-scene no-op coverage reused",
+        "TESTER final handoff and actual final log inspected: cargo clippy -p engine-core --all-targets --offline --locked -- -D warnings passed; test-file diffcheck passed; warnings limited to environmental incremental-cache hardlink fallback and a transient Cargo build-lock wait",
+        "TESTER source-before/source-after SHA256 inventories match each other and current 44 engine-core source/test/manifest/lock files; inspected HEAD matches 929bd28045c632951512e8842ea4bf30356c1a8d",
+        "SECURITY final scoped read-only review handoff: no actionable introduced issue; validated per-SceneId ownership and failure-preserving switch/history order, project replacement clearing selection/drafts, and separate selection/document bounds",
+        "DOC_MANAGER changed only two Markdown guides and docs-state.json; regenerated docs-site/dist; no production/test/config/staging/commit actions"
+      ],
+      "verification_limits": [
+        "Core test/Clippy acceptance belongs to TESTER final evidence for the hashed dirty source state; DOC_MANAGER independently executed documentation checks only",
+        "Reopen regression reconstructs EngineBuilder from authored scene/project values in memory; no real disk reopen or host filesystem acceptance is claimed",
+        "No downstream host/Angular/frontend/native/Player/GPU/UI, full-workspace, installed-release, clean-checkout or Jenkins checks were run for this feature",
+        "SECURITY is scoped static source review, not runtime or total-memory acceptance; the 256 MiB logical SceneData budget excludes retained selection vectors/clones, history storage and allocator overhead",
+        "Selection is separately bounded to 4096 distinct existing keys per scene, with retained scene count at most 64 and validated entity keys at most 256 bytes; these bounds do not measure total process/driver memory",
+        "HEAD is an inspection baseline; uncommitted core source/tests and extensive concurrent Angular changes are not identified by that SHA. Production/test/backups/staged state/commits were preserved by DOC_MANAGER",
+        "Local generated links/anchors were checked; preserved remote reading links were not revalidated"
+      ],
+      "user_reported_verification": [
+        "User confirmed tests, native smoke, visible game, resize, and minimize pass after runtime module move",
+        "Attached renderer extraction notes report RTX 4070 smoke pass with 640x360 resized extent and no logged errors"
+      ],
+      "previous_documentation_verification": {
+        "report": "docs/editor-steps-11-20.md",
+        "commit": "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "verification": [
+          "Implementation/TESTER handoff: final runtime/game/renderer all-target offline locked tests: 183 passed, zero failed, one ignored; game suite 41 passed",
+          "Supplemental TESTER handoff: explicitly enabled ignored native Vulkan initialization: one passed",
+          "Supplemental TESTER handoff: renderer_smoke and scene_io_smoke passed hidden native draw/resize/save-reload/rollback/resource lifecycle checks",
+          "Implementation handoff: debug game build and full workspace all-target compile passed",
+          "Implementation handoff: focused runtime/game Clippy completed with existing argument-count/modulo/collapsible-if/cache-hardlink warnings",
+          "DOC_MANAGER local: npm.cmd test --prefix docs-site: 26 pages rebuilt/link-checked; five tests passed",
+          "DOC_MANAGER local: 372 cross-page/local anchor targets verified; report present in developer index",
+          "DOC_MANAGER local: git diff --check -- docs passed; authored robots.json SHA256 unchanged",
+          "Final implementation handoff: isolated build passed with --target-dir target/steps-11-20-verification; artifact debug/game.exe. Ordinary-target replacement encountered Windows access/file-lock error; no process terminated.",
+          "Final DOC_MANAGER rebuild after evidence updates: 26 pages built/link-checked"
+        ],
+        "limits": [
+          "User explicitly selected automated-only acceptance; no interactive visible native UI/gameplay/lighting checks or GPU-performance measurements",
+          "Hidden native smoke is execution/assertion evidence and not visual appearance acceptance",
+          "Engine test/build/Clippy/native results are attributed to implementation/TESTER handoffs, not independently rerun by DOC_MANAGER",
+          "HEAD alone does not identify the documented state; staged and unstaged production/test files remain",
+          "Earlier user-confirmed renderer extraction checks are historical and do not replace new visual acceptance",
+          "Repeated ordinary-target Windows error 5 prevented replacing target/debug/game.exe; verified final artifact uses target/steps-11-20-verification/debug/game.exe. No process terminated; cause not asserted beyond access/file-lock failure."
+        ]
+      },
+      "working_tree_at_check": [
+        " M apps/editor-host/src-tauri/src/commands/mod.rs",
+        "?? apps/editor-host/src-tauri/src/commands/preferences.rs",
+        "?? apps/editor-host/src-tauri/src/layout_preferences.rs",
+        " M apps/editor-host/src-tauri/src/lib.rs",
+        " M apps/editor/package.json",
+        "AM apps/editor/projects/design/src/component-registry.generated.ts",
+        "AM apps/editor/projects/design/src/component-registry.ts",
+        " M apps/editor/projects/design/src/design.routes.ts",
+        " M apps/editor/projects/design/src/workbench.html",
+        " M apps/editor/projects/design/src/workbench.scss",
+        " M apps/editor/projects/design/src/workbench.ts",
+        " M apps/editor/scripts/check-production.mjs",
+        "AM apps/editor/scripts/design-registry.mjs",
+        "AM apps/editor/scripts/design-registry.test.mjs",
+        "AM apps/editor/scripts/design.mjs",
+        " D apps/editor/src/app/app.html",
+        "AM apps/editor/src/app/app.routes.development.spec.ts",
+        " M apps/editor/src/app/app.routes.development.ts",
+        " M apps/editor/src/app/app.routes.production.ts",
+        "AM apps/editor/src/app/app.routes.shared.ts",
+        " M apps/editor/src/app/app.routes.spec.ts",
+        " D apps/editor/src/app/app.scss",
+        " D apps/editor/src/app/app.spec.ts",
+        " D apps/editor/src/app/core/editor/editor-backend.ts",
+        " M apps/editor/src/app/core/editor/editor.service.ts",
+        " M apps/editor/src/app/core/editor/engine-viewport.directive.ts",
+        " D apps/editor/src/app/demo/demo-editor-backend.spec.ts",
+        " D apps/editor/src/app/demo/demo-editor-backend.ts",
+        " D apps/editor/src/app/demo/demo-project.ts",
+        " D apps/editor/src/app/demo/demo-workspace.html",
+        " D apps/editor/src/app/demo/demo-workspace.scss",
+        " D apps/editor/src/app/demo/demo-workspace.spec.ts",
+        " D apps/editor/src/app/demo/demo-workspace.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.html",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.scss",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.spec.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.html",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.scss",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.spec.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.html",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.scss",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.spec.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.html",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.scss",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.spec.ts",
+        "A  apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.ts",
+        " M apps/editor/src/app/modules/editor/components/editor-grid-wrapper/editor-grid-wrapper.html",
+        " M apps/editor/src/app/modules/editor/components/editor-grid-wrapper/editor-grid-wrapper.ts",
+        "AM apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.html",
+        "A  apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.scss",
+        "A  apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.spec.ts",
+        "AM apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.ts",
+        " M apps/editor/src/app/modules/editor/editor.html",
+        " M apps/editor/src/app/modules/editor/editor.ts",
+        "A  apps/editor/src/app/modules/project-setup/project-setup.html",
+        "A  apps/editor/src/app/modules/project-setup/project-setup.scss",
+        "A  apps/editor/src/app/modules/project-setup/project-setup.spec.ts",
+        "A  apps/editor/src/app/modules/project-setup/project-setup.ts",
+        " D apps/editor/src/app/project-setup.ts",
+        "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "AM apps/editor/src/app/shared/builder/models/builder-config.model.ts",
+        " M apps/editor/src/app/shared/builder/models/builder-form-options.model.ts",
+        "?? apps/editor/src/app/shared/components/drawer/drawer-settings.ts",
+        "?? apps/editor/src/app/shared/components/drawer/drawer.design.ts",
+        "A  apps/editor/src/app/shared/components/drawer/drawer.html",
+        "A  apps/editor/src/app/shared/components/drawer/drawer.scss",
+        "AM apps/editor/src/app/shared/components/drawer/drawer.spec.ts",
+        "AM apps/editor/src/app/shared/components/drawer/drawer.ts",
+        "R  apps/editor/src/app/shared/pane/model/signal-config.interface.ts -> apps/editor/src/app/shared/components/pane/model/signal-config.interface.ts",
+        "AM apps/editor/src/app/shared/components/pane/pane.design.ts",
+        "A  apps/editor/src/app/shared/components/pane/pane.scss",
+        "RM apps/editor/src/app/shared/pane/pane.ts -> apps/editor/src/app/shared/components/pane/pane.ts",
+        "A  apps/editor/src/app/shared/components/splitter/splitter.html",
+        "A  apps/editor/src/app/shared/components/splitter/splitter.scss",
+        "A  apps/editor/src/app/shared/components/splitter/splitter.spec.ts",
+        "A  apps/editor/src/app/shared/components/splitter/splitter.ts",
+        "?? apps/editor/src/app/shared/models/config.model.ts",
+        "D  apps/editor/src/app/shared/pane/pane.scss",
+        "?? apps/editor/src/app/shared/services/editor-component.service.ts",
+        "?? apps/editor/src/app/shared/services/layout-preferences-storage.spec.ts",
+        "?? apps/editor/src/app/shared/services/layout-preferences-storage.ts",
+        "?? apps/editor/src/app/shared/services/layout-preferences.service.spec.ts",
+        "?? apps/editor/src/app/shared/services/layout-preferences.service.ts",
+        "?? apps/editor/src/app/styles/components/pane.scss",
+        " M apps/editor/src/environments/environment.development.ts",
+        " M apps/editor/src/environments/environment.staging.ts",
+        " M apps/editor/src/environments/environment.ts",
+        " M crates/engine-core/src/editor/scene_documents.rs",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        " M crates/engine-core/tests/multi_scene_api.rs",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~",
+        " M docs/project-lifecycle.md",
+        " M docs/scene-editing.md"
+      ],
+      "staged_files_at_check": [
+        "apps/editor/projects/design/src/component-registry.generated.ts",
+        "apps/editor/projects/design/src/component-registry.ts",
+        "apps/editor/scripts/design-registry.mjs",
+        "apps/editor/scripts/design-registry.test.mjs",
+        "apps/editor/scripts/design.mjs",
+        "apps/editor/src/app/app.routes.development.spec.ts",
+        "apps/editor/src/app/app.routes.shared.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.html",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.scss",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.spec.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/bottom-drawer/bottom-drawer.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.html",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.scss",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.spec.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/left-drawer/left-drawer.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.html",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.scss",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.spec.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/right-drawer/right-drawer.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.html",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.scss",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.spec.ts",
+        "apps/editor/src/app/modules/editor/components/editor-grid-wrapper/components/tabs-manager/tabs-manager.ts",
+        "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.html",
+        "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.scss",
+        "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.spec.ts",
+        "apps/editor/src/app/modules/editor/components/editor-nav-manager/editor-nav-manager.ts",
+        "apps/editor/src/app/modules/project-setup/project-setup.html",
+        "apps/editor/src/app/modules/project-setup/project-setup.scss",
+        "apps/editor/src/app/modules/project-setup/project-setup.spec.ts",
+        "apps/editor/src/app/modules/project-setup/project-setup.ts",
+        "apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        "apps/editor/src/app/shared/builder/models/builder-config.model.ts",
+        "apps/editor/src/app/shared/components/drawer/drawer.html",
+        "apps/editor/src/app/shared/components/drawer/drawer.scss",
+        "apps/editor/src/app/shared/components/drawer/drawer.spec.ts",
+        "apps/editor/src/app/shared/components/drawer/drawer.ts",
+        "apps/editor/src/app/shared/components/pane/model/signal-config.interface.ts",
+        "apps/editor/src/app/shared/components/pane/pane.design.ts",
+        "apps/editor/src/app/shared/components/pane/pane.scss",
+        "apps/editor/src/app/shared/components/pane/pane.ts",
+        "apps/editor/src/app/shared/components/splitter/splitter.html",
+        "apps/editor/src/app/shared/components/splitter/splitter.scss",
+        "apps/editor/src/app/shared/components/splitter/splitter.spec.ts",
+        "apps/editor/src/app/shared/components/splitter/splitter.ts",
+        "apps/editor/src/app/shared/pane/pane.scss"
+      ],
+      "preserved_scene_sha256": "63A13AC7E1B0FEC1E00C66A85DE3169897D01BF989842F7037B523140107AA42",
+      "verification_logs": [
+        "target/scene-selection-retention/engine-core-tests-final.log",
+        "target/scene-selection-retention/engine-core-clippy-final.log",
+        "target/scene-selection-retention/source-before.json",
+        "target/scene-selection-retention/source-after.json",
+        "target/scene-selection-retention/inspected-head.txt"
+      ],
+      "inspected_working_tree_files": [
+        {
+          "status": " M",
+          "path": "crates/engine-core/src/editor/scene_documents.rs",
+          "sha256": "977d0640f44998c3b2fadbd17e59a22b656bdc25b479cecc617153f3b23cf275",
+          "bytes": 10080
+        },
+        {
+          "status": "??",
+          "path": "crates/engine-core/tests/command_factory_api.rs~",
+          "sha256": "6dfcb0ef94d50fb3c0198300d4f2a30a7d6f820dd8a85ade31f3423f2a434a6a",
+          "bytes": 2883
+        },
+        {
+          "status": " M",
+          "path": "crates/engine-core/tests/multi_scene_api.rs",
+          "sha256": "67183bdcd95769724f7c40098fa88b60108b7bf7c3f9c750ea9006d41f0cb27a",
+          "bytes": 18138
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/lighting.rs~",
+          "sha256": "96b94b736dd492ce623dd9bf89d6a324066a8d76e052ed15140deeeb9e4bffd4",
+          "bytes": 3069
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/render_object.rs~",
+          "sha256": "cea9aa5f7920a76cdf7cb69b8f1976b61638649fa6507e8ed8922f4137a53f23",
+          "bytes": 1093
+        },
+        {
+          "status": " M",
+          "path": "docs/project-lifecycle.md",
+          "sha256": "05b7ec86720e56a91e8935ae5a41ed3990f8f8a26f84fde955222a210bbe542f",
+          "bytes": 12732
+        },
+        {
+          "status": " M",
+          "path": "docs/scene-editing.md",
+          "sha256": "3355de3d63bd5513515f87594b16a2af347e4e42cb77220cbc3d4313d5d3651f",
+          "bytes": 4846
+        }
+      ],
+      "working_tree_inventory_note": "All dirty/untracked statuses, including renames/deletions, are recorded. Scoped source/test/Markdown and preserved backup hashes appear below; the complete TESTER core source inventory is linked separately. Unrelated concurrent work is inventoried without claiming acceptance.",
+      "verified_engine_core_source_inventory": {
+        "source_before": "target/scene-selection-retention/source-before.json",
+        "source_after": "target/scene-selection-retention/source-after.json",
+        "file_count": 44,
+        "source_after_sha256": "2a656dc335311041c2a284e6df1de53727121639ccda7a3c51662b8e510c9883",
+        "scope": "All engine-core source/tests .rs files plus root/crate manifests and Cargo.lock; before, after and current contents match."
+      }
+    },
+    {
+      "last_checked_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+      "last_checked_date": "2026-10-26",
+      "last_documentation_update_commit": "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951",
+      "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
+      "baseline_note": "Inspection baseline only. Inspected history from 929bd28045c632951512e8842ea4bf30356c1a8d through a377b1f87dcc2972851c1518e4fd3cf1dc1e8951, current tracked-tree inventory, and staged/unstaged/untracked changes. The ADR records accepted architectural direction with implementation planned. HEAD does not certify current documentation or dirty source contents; this is the observed source commit, not a documentation commit.",
+      "reviewed_commits": [
+        "b8c230110f8b17cb6f3f91b49d20a42b73994ae0",
+        "a48ff6c5b84096b540f1401eff452c222e167493",
+        "706f87a867ecb0f8694a2a8aa8c20faa7d1671b8",
+        "1a4c7634a8d568bea625b4afa279abef8524308f",
+        "929bd28045c632951512e8842ea4bf30356c1a8d",
+        "8bd50ffcf36e684e7c62c60bd6353555e55bf67b",
+        "a377b1f87dcc2972851c1518e4fd3cf1dc1e8951"
+      ],
+      "documentation_report": "docs/adr/0001-editor-command-pipeline.md",
+      "documentation_scope": "Explicit user request to write an ADR for the typed Tauri/bridge/editor interface, UI command/message recording, runtime updates, and project builds. Added ADR-0001 and developer-index link, rebuilt docs-site/dist, and updated this checkpoint. Engine Developer only; Game App Developer remains empty. No implementation, staging, or commits.",
+      "documented_changes": [
+        "Accepted architectural direction with planned implementation; separates inspected existing code from target contracts and migration work",
+        "Typed injectable editor client, Rust-owned generated contracts, backend-owned mutation/undo, queue ordering, scene/session targeting and bounded command lifecycle recording",
+        "Receipts and cursor synchronization, consistent snapshot baseline, missed-event recovery, unknown outcomes, post-commit synchronization errors, and explicit numeric/protocol compatibility",
+        "Selective runtime synchronization and explicit saved-input build jobs with correlation, bounded status/progress, captured revision and stale-input handling",
+        "Alternatives, consequences, staged implementation sequence, acceptance requirements, and related guides"
+      ],
+      "pending_documentation_changes": [
+        "Implement the accepted ADR direction before documenting its client, versioned envelopes, recorder, cursor handshake or build jobs as available behavior",
+        "Recent Angular/editor milestone changes outside the inspected integration surface were inventoried but existing frontend/architecture guides were not broadly reconciled",
+        "Concurrent animation graph models/store and untracked animation files appeared during this documentation pass and remain outside its implementation or validation scope",
+        "Existing prior pending verification limits remain archived with the previous checkpoint; this pass does not resolve runtime, native/GPU, compiler release or installed-player acceptance"
+      ],
+      "verification": [
+        "npm.cmd test --prefix docs-site: built and link-checked 31 pages across two spaces; all five site tests passed",
+        "Supplemental generated-site check: 538 local/cross-page fragment links resolved; ADR content and search-index entry verified among 29 indexed documents; two additional space pages account for the total 31",
+        "Site space-separation test passed: Game App Developer remains empty",
+        "Focused git diff --check and new-ADR whitespace check passed",
+        "Inspected Git history since recorded baseline, tracked-tree inventory, staged/unstaged diffs, untracked backups, and current commands/receipts/events/runtime/build source; unrelated changes preserved"
+      ],
+      "verification_limits": [
+        "Documentation-only change; no frontend, Rust, runtime/GPU, compiler, installed-player, full-workspace or Jenkins tests run",
+        "ADR API names, message recorder, versioned envelopes, consistent snapshot/cursor handshake and build job lifecycle are planned contracts, not implementation acceptance",
+        "Source inspection verifies architecture statements only; no atomic filesystem snapshot, persistent audit, replay, exactly-once execution or performance guarantee is claimed",
+        "Concurrent working-tree edits can continue after this inventory; hashes identify only files read at inspection time",
+        "npm emitted an existing global-ignore-file environment configuration warning; site build/tests still succeeded"
+      ],
+      "working_tree_at_check": [
+        "AD apps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "AD apps/editor/src/app/shared/abstracts/lifecycle.class.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.models.ts",
+        " M apps/editor/src/app/shared/components/graph/graph.store.ts",
+        " M docs/main.md",
+        "?? apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+        "?? apps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+        "?? apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+        "?? crates/engine-core/tests/command_factory_api.rs~",
+        "?? crates/renderer/src/vulkan/lighting.rs~",
+        "?? crates/renderer/src/vulkan/render_object.rs~",
+        "?? docs/adr/0001-editor-command-pipeline.md"
+      ],
+      "staged_files_at_check": [
+        "A\tapps/editor/src/app/shared/abstracts/Destroyable.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/editor-component.class.ts",
+        "A\tapps/editor/src/app/shared/abstracts/lifecycle.class.ts"
+      ],
+      "inspected_working_tree_files": [
+        {
+          "status": "AD",
+          "path": "apps/editor/src/app/shared/abstracts/Destroyable.class.ts"
+        },
+        {
+          "status": "AD",
+          "path": "apps/editor/src/app/shared/abstracts/editor-component.class.ts"
+        },
+        {
+          "status": "AD",
+          "path": "apps/editor/src/app/shared/abstracts/lifecycle.class.ts"
+        },
+        {
+          "status": " M",
+          "path": "apps/editor/src/app/shared/components/graph/graph.models.ts",
+          "sha256": "6db8b20af31edaa67cc12be4a91afc64d8f2b8e33257ce41f7a7133feba8d8a9",
+          "bytes": 11768
+        },
+        {
+          "status": " M",
+          "path": "apps/editor/src/app/shared/components/graph/graph.store.ts",
+          "sha256": "a52e35e6679b9bdbafa023ff6bb567ad20e9a2eec30b17dfc9c31fce78f5d96f",
+          "bytes": 7847
+        },
+        {
+          "status": " M",
+          "path": "docs/main.md",
+          "sha256": "e94fa3aef7897e6f8a1b0eae0a0ffc112221601a0ef97d9ec4ff5cc473a49f96",
+          "bytes": 4857
+        },
+        {
+          "status": "??",
+          "path": "apps/editor/src/app/shared/components/graph/animation/animation.models.ts",
+          "sha256": "b858e2e299b3290c2334aa824b1b28eb38c21e1287900f1f62a255c867898fff",
+          "bytes": 8425
+        },
+        {
+          "status": "??",
+          "path": "apps/editor/src/app/shared/components/graph/animation/animation.nodes.ts",
+          "sha256": "32c0aca0b4c36aca794bad36949a65e712224c3206766f4fd6fda0e6ded00cea",
+          "bytes": 5949
+        },
+        {
+          "status": "??",
+          "path": "apps/editor/src/app/shared/components/splitter/splitter.spec.ts~",
+          "sha256": "2127670ee70f006f86cdea4fa2cd56d8eb40a91e5959e32c5d6b46c0e17af194",
+          "bytes": 2976
+        },
+        {
+          "status": "??",
+          "path": "crates/engine-core/tests/command_factory_api.rs~",
+          "sha256": "6dfcb0ef94d50fb3c0198300d4f2a30a7d6f820dd8a85ade31f3423f2a434a6a",
+          "bytes": 2883
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/lighting.rs~",
+          "sha256": "96b94b736dd492ce623dd9bf89d6a324066a8d76e052ed15140deeeb9e4bffd4",
+          "bytes": 3069
+        },
+        {
+          "status": "??",
+          "path": "crates/renderer/src/vulkan/render_object.rs~",
+          "sha256": "cea9aa5f7920a76cdf7cb69b8f1976b61638649fa6507e8ed8922f4137a53f23",
+          "bytes": 1093
+        },
+        {
+          "status": "??",
+          "path": "docs/adr/0001-editor-command-pipeline.md",
+          "sha256": "64ca004da2582fbe0be125548da96750dcde1d7ec04630ff77b212e247a63cfe",
+          "bytes": 19191
+        }
+      ],
+      "working_tree_inventory_note": "Inventory captured after ADR/index creation and site verification, before rewriting this checkpoint. Three pre-existing staged additions are absent in the working tree (AD); unrelated backups and concurrent graph work were preserved. This checkpoint is not self-hashed. Prior checkpoint evidence and limits are retained in historical_documentation_updates."
     }
-  ],
-  "verification_logs": [
-    "target/scene-selection-retention/engine-core-tests-final.log",
-    "target/scene-selection-retention/engine-core-clippy-final.log",
-    "target/scene-selection-retention/source-before.json",
-    "target/scene-selection-retention/source-after.json",
-    "target/scene-selection-retention/inspected-head.txt"
-  ],
-  "inspected_working_tree_files": [
-    {
-      "status": " M",
-      "path": "crates/engine-core/src/editor/scene_documents.rs",
-      "sha256": "977d0640f44998c3b2fadbd17e59a22b656bdc25b479cecc617153f3b23cf275",
-      "bytes": 10080
-    },
-    {
-      "status": "??",
-      "path": "crates/engine-core/tests/command_factory_api.rs~",
-      "sha256": "6dfcb0ef94d50fb3c0198300d4f2a30a7d6f820dd8a85ade31f3423f2a434a6a",
-      "bytes": 2883
-    },
-    {
-      "status": " M",
-      "path": "crates/engine-core/tests/multi_scene_api.rs",
-      "sha256": "67183bdcd95769724f7c40098fa88b60108b7bf7c3f9c750ea9006d41f0cb27a",
-      "bytes": 18138
-    },
-    {
-      "status": "??",
-      "path": "crates/renderer/src/vulkan/lighting.rs~",
-      "sha256": "96b94b736dd492ce623dd9bf89d6a324066a8d76e052ed15140deeeb9e4bffd4",
-      "bytes": 3069
-    },
-    {
-      "status": "??",
-      "path": "crates/renderer/src/vulkan/render_object.rs~",
-      "sha256": "cea9aa5f7920a76cdf7cb69b8f1976b61638649fa6507e8ed8922f4137a53f23",
-      "bytes": 1093
-    },
-    {
-      "status": " M",
-      "path": "docs/project-lifecycle.md",
-      "sha256": "05b7ec86720e56a91e8935ae5a41ed3990f8f8a26f84fde955222a210bbe542f",
-      "bytes": 12732
-    },
-    {
-      "status": " M",
-      "path": "docs/scene-editing.md",
-      "sha256": "3355de3d63bd5513515f87594b16a2af347e4e42cb77220cbc3d4313d5d3651f",
-      "bytes": 4846
-    }
-  ],
-  "working_tree_inventory_note": "All dirty/untracked statuses, including renames/deletions, are recorded. Scoped source/test/Markdown and preserved backup hashes appear below; the complete TESTER core source inventory is linked separately. Unrelated concurrent work is inventoried without claiming acceptance.",
-  "verified_engine_core_source_inventory": {
-    "source_before": "target/scene-selection-retention/source-before.json",
-    "source_after": "target/scene-selection-retention/source-after.json",
-    "file_count": 44,
-    "source_after_sha256": "2a656dc335311041c2a284e6df1de53727121639ccda7a3c51662b8e510c9883",
-    "scope": "All engine-core source/tests .rs files plus root/crate manifests and Cargo.lock; before, after and current contents match."
-  }
+  ]
 }

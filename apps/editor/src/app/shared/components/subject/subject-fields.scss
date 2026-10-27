@@ -58,7 +58,8 @@ label {
   gap: var(--space-2);
 }
 
-input:not([type='checkbox']) {
+input:not([type='checkbox']),
+select {
   width: 100%;
   min-width: 0;
   height: var(--layout-subject-control-height);
@@ -70,7 +71,8 @@ input:not([type='checkbox']) {
   font-size: var(--font-size-sm);
 }
 
-input:disabled {
+input:disabled,
+select:disabled {
   opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }

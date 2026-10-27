@@ -3,9 +3,9 @@ import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {generateRegistry, watchRegistry} from './design-registry.mjs';
 
-const workspace = fileURLToPath(new URL('..', import.meta.url));
+const workspace = fileURLToPath(new URL('../../..', import.meta.url));
 const components = join(workspace, 'src/app/shared/components');
-const registry = join(workspace, 'projects/design/src/component-registry.generated.ts');
+const registry = join(workspace, 'projects/design-guide/src/component-registry.generated.ts');
 const args = process.argv.slice(2);
 
 await generateRegistry(components, registry);

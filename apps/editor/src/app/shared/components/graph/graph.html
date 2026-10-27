@@ -27,66 +27,134 @@
             </button>
         </div>
     </header>
-    <div
-        #stage
-        (keydown)="key($event)"
-        (lostpointercapture)="finish($event)"
-        (pointercancel)="finish($event)"
-        (pointerdown)="startPan($event)"
-        (pointermove)="move($event)"
-        (pointerup)="finish($event)"
-        (wheel)="wheel($event)"
-        [attr.aria-describedby]="instructionsId"
-        [attr.aria-label]="label() + ' canvas'"
-        [class.connecting]="pending()"
-        [class.interacting]="interacting()"
-        [style.--graph-zoom]="view().zoom"
-        [style.background-position]="view().x + 'px ' + view().y + 'px'"
-        class="stage"
-        tabindex="0"
-    >
-        <div [style.transform]="transform()" class="world">
-            <svg aria-label="Graph connections" class="connections" height="1" width="1">
-                @for (wire of wires(); track wire.id) {
-                    <path [attr.d]="wire.path" [attr.data-type]="wire.type" class="wire"/>
-                    <path
-                            (click)="store.disconnect(wire.id)"
-                            (keydown)="removeWire($event, wire.id)"
-                            [attr.aria-label]="wire.label"
-                            [attr.d]="wire.path"
-                            class="wire-hit"
-                            role="button"
-                            tabindex="0"
+    <div class="workspace">
+        <div
+            #stage
+            (keydown)="key($event)"
+            (lostpointercapture)="finish($event)"
+            (pointercancel)="finish($event)"
+            (pointerdown)="startPan($event)"
+            (pointermove)="move($event)"
+            (pointerup)="finish($event)"
+            (wheel)="wheel($event)"
+            [attr.aria-describedby]="instructionsId"
+            [attr.aria-label]="label() + ' canvas'"
+            [class.connecting]="pending()"
+            [class.interacting]="interacting()"
+            [style.--graph-zoom]="view().zoom"
+            [style.background-position]="view().x + 'px ' + view().y + 'px'"
+            class="stage"
+            tabindex="0"
+        >
+            <div [style.transform]="transform()" class="world">
+                <svg aria-label="Graph connections" class="connections" height="1" width="1">
+                    <defs>
+                        <marker
+                                [id]="instructionsId + '-arrow'"
+                                markerHeight="6"
+                                markerWidth="6"
+                                orient="auto-start-reverse"
+                                refX="9"
+                                refY="5"
+                                viewBox="0 0 10 10"
+                        >
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+                        </marker>
+                    </defs>
+                    @for (wire of wires(); track wire.id) {
+                        <path
+                                [attr.d]="wire.path"
+                                [attr.data-type]="wire.type"
+                                [attr.marker-end]="
+								wire.kind === 'transition' ? 'url(#' + instructionsId + '-arrow)' : null
+							"
+                                [class.selected-wire]="store.selectedConnection() === wire.id"
+                                class="wire"
+                        />
+                        <path
+                                (click)="activateWire(wire.id)"
+                                (keydown)="removeWire($event, wire.id)"
+                                [attr.aria-label]="wire.label"
+                                [attr.d]="wire.path"
+                                class="wire-hit"
+                                role="button"
+                                tabindex="0"
+                        />
+                    }
+                    @if (draft(); as path) {
+                        <path [attr.d]="path" class="wire draft"/>
+                    }
+                </svg>
+                @for (node of store.document().nodes; track node.id) {
+                    <editor-graph-node
+                            (inspect)="store.select(node.id)"
+                            (moveStart)="startNode($event, node.id)"
+                            (openMachine)="openMachine(node.id)"
+                            (portClick)="portClick($event)"
+                            (portPointer)="startPort($event)"
+                            (selectedChange)="store.select($event)"
+                            (valuesChange)="store.setValues(node.id, $event)"
+                            [connected]="connected()"
+                            [node]="node"
+                            [selected]="store.selected() === node.id"
                     />
                 }
-                @if (draft(); as path) {
-                    <path [attr.d]="path" class="wire draft"/>
-                }
-            </svg>
-            @for (node of store.document().nodes; track node.id) {
-                <editor-graph-node
-                        (moveStart)="startNode($event, node.id)"
-                        (portClick)="portClick($event)"
-                        (portPointer)="startPort($event)"
-                        (selectedChange)="store.select($event)"
-                        (valuesChange)="store.setValues(node.id, $event)"
-                        [connected]="connected()"
-                        [node]="node"
-                        [selected]="store.selected() === node.id"
-                />
+            </div>
+            @if (!store.document().nodes.length) {
+                <div class="empty">
+                    <editor-icon name="graph"/>
+                    <p>Add a node to start your {{ store.document().domain }} graph.</p>
+                </div>
+            }
+            @if (store.selected()) {
+                <button (click)="deleteSelected()" class="delete-node" type="button">
+                    <editor-icon name="close"/>
+                    Delete node
+                </button>
             }
         </div>
-        @if (!store.document().nodes.length) {
-            <div class="empty">
-                <editor-icon name="graph"/>
-                <p>Add a node to start your {{ store.document().domain }} graph.</p>
-            </div>
-        }
-        @if (store.selected()) {
-            <button (click)="deleteSelected()" class="delete-node" type="button">
-                <editor-icon name="close"/>
-                Delete node
-            </button>
+        @if (inspecting()) {
+            <app-drawer
+                    [(config)]="inspectorConfig"
+                    [preferenceKey]="'graph-inspector:' + label()"
+                    label="Graph inspector"
+                    resizeLabel="Resize graph inspector"
+                    type="right"
+            >
+                <editor-pane [title]="label() + ' inspector'" icon="graph" layout="cards">
+                    <button
+                            (click)="closeInspector()"
+                            aria-label="Close graph inspector"
+                            pane-actions
+                            type="button"
+                    >
+                        <editor-icon name="close"/>
+                    </button>
+                    @if (selectedLocomotion(); as node) {
+                        <editor-locomotion-inspector
+                                (changed)="store.setValues(node.id, $event)"
+                                (openMachine)="openMachine(node.id)"
+                                [assets]="clipAssets()"
+                                [connected]="connected()"
+                                [nodeId]="node.id"
+                                [values]="node.values"
+                        />
+                    }
+                    @if (selectedTransition(); as edge) {
+                        <editor-transition-inspector
+                                (changed)="store.setTransition(edge.id, $event)"
+                                (removed)="store.disconnect(edge.id)"
+                                [settings]="edge.settings"
+                        />
+                    }
+                    @if (selectedState(); as node) {
+                        <editor-state-inspector
+                                (changed)="store.setValues(node.id, $event)"
+                                [values]="node.values"
+                        />
+                    }
+                </editor-pane>
+            </app-drawer>
         }
     </div>
     <footer>
@@ -103,3 +171,21 @@
         <p class="notice" role="status">{{ message() || 'Ready' }}</p>
     }
 </section>
+@if (machineOpen()) {
+    @if (machineNode(); as node) {
+        <editor-dialog
+                [(open)]="machineOpen"
+                [config]="machineConfig"
+                [renderFields]="false"
+                icon="graph"
+                title="Locomotion / State machine"
+        >
+            <editor-graph
+                    (graphChange)="saveMachine($event)"
+                    [clipAssets]="clipAssets()"
+                    [graph]="machineDocument()"
+                    label="Locomotion / State machine"
+            />
+        </editor-dialog>
+    }
+}

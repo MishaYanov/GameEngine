@@ -11,7 +11,7 @@ export function developmentRoutes(startInEditor: boolean): Routes {
         {
             path: 'design',
             loadChildren: () =>
-                import('../../projects/design/src/design.routes').then((m) => m.designRoutes),
+                import('../../projects/design-guide/src/design.routes').then((m) => m.designRoutes),
         },
         {path: '**', redirectTo: 'setup'},
     ];

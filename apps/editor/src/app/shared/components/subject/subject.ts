@@ -10,6 +10,9 @@ interface SubjectField {
     readonly field: FieldTree<unknown>;
 }
 
+type SubjectChoice = string | { readonly value: string; readonly label: string };
+export type SubjectOptions = Readonly<Record<string, readonly SubjectChoice[]>>;
+
 let nextTraitsId = 0;
 
 function fieldEntries(node: FieldTree<unknown>): readonly SubjectField[] {
@@ -44,6 +47,7 @@ function labelFor(key: string): string {
                                 [fieldPath]="entryPath(entry.key)"
                                 [advancedTraits]="advancedTraits()"
                                 [expanded]="expanded()"
+                                [options]="options()"
                         />
                     </fieldset>
                 } @else {
@@ -74,13 +78,21 @@ function labelFor(key: string): string {
                         } @else if (text(entry.field); as field) {
                             <label class="text-control">
                                 <span>{{ entry.label }}</span>
-                                <input
-                                        type="text"
-                                        [formField]="field"
-                                        [attr.aria-label]="path() + ' ' + entry.label"
-                                        [attr.aria-describedby]="errorId(entry.field)"
-                                        [attr.aria-invalid]="errorId(entry.field) ? 'true' : null"
-                                />
+                                @if (options()[entryPath(entry.key)]; as choices) {
+                                    <select [formField]="field" [attr.aria-label]="path() + ' ' + entry.label">
+                                        @for (choice of choices; track choiceValue(choice)) {
+                                            <option [value]="choiceValue(choice)">{{ choiceLabel(choice) }}</option>
+                                        }
+                                    </select>
+                                } @else {
+                                    <input
+                                            type="text"
+                                            [formField]="field"
+                                            [attr.aria-label]="path() + ' ' + entry.label"
+                                            [attr.aria-describedby]="errorId(entry.field)"
+                                            [attr.aria-invalid]="errorId(entry.field) ? 'true' : null"
+                                    />
+                                }
                             </label>
                         }
                         @if (errorId(entry.field); as id) {
@@ -95,6 +107,16 @@ function labelFor(key: string): string {
     host: {'[class.vector]': 'vector()'},
 })
 export class SubjectFields {
+    readonly options = input<SubjectOptions>({});
+
+    protected choiceValue(choice: SubjectChoice): string {
+        return typeof choice === 'string' ? choice : choice.value;
+    }
+
+    protected choiceLabel(choice: SubjectChoice): string {
+        return typeof choice === 'string' ? choice : choice.label;
+    }
+
     readonly fields = input.required<FieldTree<unknown>>();
     readonly path = input.required<string>();
     readonly fieldPath = input('');
@@ -174,6 +196,8 @@ export class SubjectFields {
     host: {'[hidden]': 'form()().hidden()'},
 })
 export class EditorSubject {
+    readonly renderFields = input(true);
+    readonly options = input<SubjectOptions>({});
     readonly title = input.required<string>();
     readonly icon = input<EditorIconName>();
     readonly form = input.required<FieldTree<unknown>>();
@@ -187,7 +211,9 @@ export class EditorSubject {
     );
     protected readonly traitsId = `subject-traits-${nextTraitsId++}`;
     protected readonly bodyId = `${this.traitsId}-body`;
-    protected readonly expandable = computed(() => this.advancedTraits().length > 0);
+    protected readonly expandable = computed(
+        () => this.renderFields() && this.advancedTraits().length > 0,
+    );
 
     constructor() {
         const registry = inject(SubjectRegistry, {optional: true});

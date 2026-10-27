@@ -116,16 +116,16 @@
     },
     "design": {
       "projectType": "application",
-      "root": "projects/design",
-      "sourceRoot": "projects/design/src",
+      "root": "projects/design-guide",
+      "sourceRoot": "projects/design-guide/src",
       "prefix": "design",
       "architect": {
         "build": {
           "builder": "@angular/build:application",
           "options": {
-            "browser": "projects/design/src/main.ts",
-            "index": "projects/design/src/index.html",
-            "tsConfig": "projects/design/tsconfig.app.json",
+            "browser": "projects/design-guide/src/main.ts",
+            "index": "projects/design-guide/src/index.html",
+            "tsConfig": "projects/design-guide/tsconfig.app.json",
             "outputPath": "dist/design",
             "baseHref": "/design/",
             "inlineStyleLanguage": "scss",

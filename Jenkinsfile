@@ -32,9 +32,42 @@ pipeline {
                 stage('Admin') {
                     steps { dir('apps/admin-dashboard') { sh 'npm run build' } }
                 }
-                stage('Editor') {
-                    steps { dir('apps/editor') { sh 'npm run build' } }
+                stage('Editor apps') {
+                    stages {
+                        stage('Editor design registry tests') {
+                            steps { dir('apps/editor') { sh 'npm run test:design-registry' } }
+                        }
+                        stage('Editor development and staging builds') {
+                            steps {
+                                dir('apps/editor') {
+                                    sh 'npm run build:dev'
+                                    sh 'npm run build:staging'
+                                }
+                            }
+                        }
+                        stage('Editor design guide builds') {
+                            steps {
+                                dir('apps/editor') {
+                                    sh 'npm run build:design'
+                                    sh 'npm run build:design:staging'
+                                }
+                            }
+                        }
+                        stage('Editor production build and isolation check') {
+                            steps { dir('apps/editor') { sh 'npm run check:production' } }
+                        }
+                    }
                 }
+            }
+        }
+        stage('Rust app builds') {
+            steps {
+                sh 'cargo build --workspace --all-targets --features engine-admin/desktop --offline --locked'
+            }
+        }
+        stage('Admin desktop tests') {
+            steps {
+                sh 'cargo test -p engine-admin --features desktop --all-targets --offline --locked'
             }
         }
         stage('Documentation site checks') {

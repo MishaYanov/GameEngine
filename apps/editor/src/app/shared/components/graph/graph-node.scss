@@ -15,6 +15,30 @@
   var(--shadow-graph-node);
 }
 
+:host([data-kind='animation.state']) {
+  width: var(--layout-graph-state-width);
+}
+
+:host([data-kind='animation.entry']),
+:host([data-kind='animation.any']),
+:host([data-kind='animation.exit']) {
+  width: var(--layout-graph-flow-width);
+}
+
+:host([data-kind='animation.entry']) .category,
+:host([data-kind='animation.any']) .category,
+:host([data-kind='animation.exit']) .category {
+  display: none;
+}
+
+.state-motion {
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: capitalize;
+}
+
 header {
   display: flex;
   align-items: center;
@@ -142,4 +166,38 @@ editor-graph-values {
   display: block;
   padding: var(--space-3);
   border-top: var(--border-width) solid var(--color-graph-node-edge);
+}
+
+.composite-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.composite-summary button {
+  background: var(--color-input);
+  color: var(--color-text-secondary);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  cursor: var(--cursor-action);
+  font: inherit;
+}
+
+[data-type='transition'],
+[data-type='rootMotion'] {
+  --port-color: var(--color-text-secondary);
+}
+
+[data-type='bool'],
+[data-type='trigger'],
+[data-type='events'] {
+  --port-color: var(--color-graph-vector);
+}
+
+[data-type='int'] {
+  --port-color: var(--color-graph-float);
 }

@@ -21,7 +21,13 @@ async function fixture(t) {
         await mkdir(resolve(file, '..'), {recursive: true});
         await writeFile(file, source);
     };
-    return {root, output, add, source: () => readFile(output, 'utf8')};
+    const preview = async (name, source) => {
+        const file = join(directory, 'design/previews', `${name}.design.ts`);
+        await mkdir(resolve(file, '..'), {recursive: true});
+        await writeFile(file, source);
+        return file;
+    };
+    return {root, output, add, preview, source: () => readFile(output, 'utf8')};
 }
 
 test('each direct folder becomes a sorted section, including folders without a component', async (t) => {
@@ -64,7 +70,7 @@ test('detects aliased component decorators, required input aliases, and preview 
             readonly value = model.required<number>();
         }`,
     );
-    await f.add('pane.scss/pane.scss.design.ts', 'export default {inputs: {title: "Pane", value: 0}};');
+    await f.preview('pane.scss', 'export default {inputs: {title: "Pane", value: 0}};');
     await generateRegistry(f.root, f.output);
     const source = await f.source();
     assert.match(source, /requiredInputs: \["title","value"\]/);
@@ -82,9 +88,9 @@ test('supports default-exported components and explicit previews for multi-compo
         'custom/parts.ts',
         "import {Component} from '@angular/core'; @Component({}) export class A {} @Component({}) export class B {}",
     );
-    await f.add(
-        'custom/custom.design.ts',
-        "import {B} from './parts'; export default {component: B};",
+    await f.preview(
+        'custom',
+        "import {B} from '../../components/custom/parts'; export default {component: B};",
     );
     await generateRegistry(f.root, f.output);
     const source = await f.source();
@@ -111,6 +117,13 @@ test('watch mode adds and removes sections while serving', async (t) => {
             "import {Component} from '@angular/core'; @Component({}) export class NewPane {}",
         );
         await until((source) => source.includes('module["NewPane"]'));
+        const preview = await f.preview(
+            'new-pane.scss',
+            'export default {inputs: {title: "Preview"}};',
+        );
+        await until((source) => source.includes('previews/new-pane.scss.design'));
+        await removeFixture(preview);
+        await until((source) => !source.includes('previews/new-pane.scss.design'));
         await removeFixture(join(f.root, 'new-pane.scss'));
         await until((source) => !source.includes('id: "new-pane.scss"'));
         assert.deepEqual(errors, []);

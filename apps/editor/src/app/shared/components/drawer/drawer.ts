@@ -136,7 +136,7 @@ export class Drawer {
 			(Number.parseFloat(parentStyle?.paddingBottom ?? '') || 0);
 		const available = Math.max(0, (parent?.getBoundingClientRect()[dimension] ?? 0) - padding);
 		const style = getComputedStyle(this.element);
-		const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+		const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 		const pixels = (value: string) => this.pixels(value, available, style, rootFontSize);
 		const reserve = pixels(`var(--layout-pane-min-${dimension})`);
 		const limit = Math.max(0, available - Math.min(reserve, available * 0.6));
@@ -177,7 +177,7 @@ export class Drawer {
 		const amount = Number.parseFloat(value) || 0;
 		if (value.endsWith('%')) return (available * amount) / 100;
 		if (value.endsWith('rem')) return amount * rootFontSize;
-		if (value.endsWith('em')) return amount * Number.parseFloat(style.fontSize);
+		if (value.endsWith('em')) return amount * (Number.parseFloat(style.fontSize) || rootFontSize);
 		if (value.endsWith('vw')) return (innerWidth * amount) / 100;
 		if (value.endsWith('vh')) return (innerHeight * amount) / 100;
 		return amount;

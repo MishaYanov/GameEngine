@@ -7,6 +7,7 @@ import {
     DOCUMENT,
     effect,
     ElementRef,
+    forwardRef,
     inject,
     Injector,
     input,
@@ -28,8 +29,19 @@ import {
     GraphEndpoint,
     GraphNodeKind,
     GraphPoint,
+    graphPorts,
+    nodeAllowed,
 } from './graph.models';
 import {GraphStore} from './graph.store';
+import {EditorDialog} from '../dialog/dialog';
+import {Drawer} from '../drawer/drawer';
+import {EditorPane} from '../pane/pane';
+import {DrawerSettings} from '../drawer/drawer-settings';
+import {Config} from '../../models/config.model';
+import {AnimationClipAsset} from './animation/animation.models';
+import {LocomotionInspector} from './animation/locomotion-inspector';
+import {TransitionInspector} from './animation/transition-inspector';
+import {StateInspector} from './animation/state-inspector';
 
 interface GraphView {
     readonly x: number;
@@ -50,7 +62,18 @@ let nextGraphId = 0;
 
 @Component({
     selector: 'editor-graph',
-    imports: [EditorIcon, GraphNodeCard, FormField],
+    imports: [
+        EditorIcon,
+        GraphNodeCard,
+        FormField,
+        LocomotionInspector,
+        TransitionInspector,
+        StateInspector,
+        EditorDialog,
+        Drawer,
+        EditorPane,
+        forwardRef(() => EditorGraph),
+    ],
     providers: [GraphStore],
     templateUrl: './graph.html',
     styleUrl: './graph.scss',
@@ -58,6 +81,59 @@ let nextGraphId = 0;
 export class EditorGraph {
     readonly graph = model<GraphDocument>(emptyGraph());
     readonly label = input('Node graph');
+    readonly clipAssets = input<readonly AnimationClipAsset[]>([]);
+    protected readonly inspectorConfig = signal<Config<DrawerSettings>>({
+        width: 'var(--layout-inspector-width)',
+        minWidth: '16rem',
+        maxWidth: '70%',
+    });
+    protected readonly selectedLocomotion = computed(() => {
+        const node = this.store.nodeById().get(this.store.selected() ?? '');
+        return node?.kind === 'animation.locomotion' ? node : null;
+    });
+    protected readonly selectedState = computed(() => {
+        const node = this.store.nodeById().get(this.store.selected() ?? '');
+        return node?.kind === 'animation.state' ? node : null;
+    });
+    protected readonly selectedTransition = computed(() => {
+        const edge = this.store
+            .document()
+            .connections.find((edge) => edge.id === this.store.selectedConnection());
+        return edge?.kind === 'transition' ? edge : null;
+    });
+    protected readonly inspecting = computed(
+        () => !!this.selectedLocomotion() || !!this.selectedTransition() || !!this.selectedState(),
+    );
+    protected readonly machineOpen = signal(false);
+    protected readonly machineDocument = signal<GraphDocument>(emptyGraph('animation'));
+    protected readonly machineConfig = {
+        width: 'var(--layout-graph-machine-width)',
+        height: 'var(--layout-graph-machine-height)',
+    };
+    protected readonly wires = computed(() =>
+        this.connections().flatMap((edge) => {
+            const from = this.anchor(edge.from, 'output');
+            const to = this.anchor(edge.to, 'input');
+            const source = this.store.nodeById().get(edge.from.node);
+            const port =
+                source && graphPorts(source, 'output').find((port) => port.id === edge.from.port);
+            return from && to && port
+                ? [
+                    {
+                        ...edge,
+                        path: edge.from.node === edge.to.node ? this.loop(from, to) : this.curve(from, to),
+                        type: port.type,
+                        label: `${edge.kind === 'transition' ? 'Edit transition' : 'Remove connection'} ${edge.from.node} ${edge.from.port} to ${edge.to.node} ${edge.to.port}`,
+                    },
+                ]
+                : [];
+        }),
+    );
+    private readonly machineOwner = signal<string | null>(null);
+    protected readonly machineNode = computed(() => {
+        const node = this.store.nodeById().get(this.machineOwner() ?? '');
+        return node?.kind === 'animation.locomotion' ? node : null;
+    });
     protected readonly store = inject(GraphStore);
     protected readonly instructionsId = `graph-instructions-${nextGraphId++}`;
     protected readonly view = signal<GraphView>({x: 40, y: 40, zoom: 1});
@@ -65,12 +141,25 @@ export class EditorGraph {
     protected readonly transform = computed(
         () => `translate(${this.view().x}px, ${this.view().y}px) scale(${this.view().zoom})`,
     );
-    protected readonly palette = computed(() =>
-        (Object.keys(GRAPH_NODES) as GraphNodeKind[]).filter(
-            (kind) =>
-                graphDefinition(kind).domain === 'both' ||
-                graphDefinition(kind).domain === this.store.document().domain,
-        ),
+    private readonly portSignature = computed(() =>
+        this.store
+            .document()
+            .nodes.map(
+            (node) =>
+                `${node.id}:${graphPorts(node, 'input')
+                    .map((port) => port.id)
+                    .join(',')}:${graphPorts(node, 'output')
+                    .map((port) => port.id)
+                    .join(',')}`,
+        )
+            .join('|'),
+    );
+    private readonly graphContext = computed(
+        () => {
+            const document = this.store.document();
+            return {domain: document.domain, kind: document.kind};
+        },
+        {equal: (previous, next) => previous.domain === next.domain && previous.kind === next.kind},
     );
     protected readonly definition = graphDefinition;
     protected readonly pending = signal<GraphEndpoint | null>(null);
@@ -88,24 +177,10 @@ export class EditorGraph {
                 ]),
             ),
     );
-    protected readonly wires = computed(() =>
-        this.connections().flatMap((edge) => {
-            const from = this.anchor(edge.from, 'output');
-            const to = this.anchor(edge.to, 'input');
-            const source = this.store.nodeById().get(edge.from.node);
-            const port =
-                source && graphDefinition(source.kind).outputs.find((port) => port.id === edge.from.port);
-            return from && to && port
-                ? [
-                    {
-                        ...edge,
-                        path: this.curve(from, to),
-                        type: port.type,
-                        label: `Remove connection ${edge.from.node} ${edge.from.port} to ${edge.to.node} ${edge.to.port}`,
-                    },
-                ]
-                : [];
-        }),
+    protected readonly palette = computed(() =>
+        (Object.keys(GRAPH_NODES) as GraphNodeKind[]).filter((kind) =>
+            nodeAllowed(kind, this.graphContext()),
+        ),
     );
     private readonly anchors = signal<ReadonlyMap<string, GraphPoint>>(new Map());
     private readonly loaded = signal(0);
@@ -132,6 +207,7 @@ export class EditorGraph {
             if (source !== untracked(this.store.document)) {
                 this.stop();
                 if (this.store.load(source)) {
+                    this.machineOpen.set(false);
                     this.pending.set(null);
                     this.fitOnMeasure = true;
                     this.loaded.update((revision) => revision + 1);
@@ -144,6 +220,7 @@ export class EditorGraph {
         });
         afterRenderEffect((onCleanup) => {
             this.loaded();
+            this.portSignature();
             const cards = this.cards();
             const observer = untracked(() => {
                 const measure = () => this.measure(cards);
@@ -155,7 +232,38 @@ export class EditorGraph {
             });
             if (observer) onCleanup(() => observer.disconnect());
         });
+        afterRenderEffect(() => {
+            const inspecting = this.inspecting();
+            untracked(() => {
+                if (inspecting && !this.gesture) this.fit();
+            });
+        });
         inject(DestroyRef).onDestroy(() => this.stop());
+    }
+
+    protected openMachine(id: string): void {
+        const node = this.store.nodeById().get(id);
+        if (node?.kind !== 'animation.locomotion') return;
+        this.machineDocument.set(node.values.machine);
+        this.machineOwner.set(id);
+        this.machineOpen.set(true);
+    }
+
+    protected saveMachine(document: GraphDocument): void {
+        this.machineDocument.set(document);
+        const node = this.machineNode();
+        if (node && document !== node.values.machine)
+            this.store.setValues(node.id, {...node.values, machine: document});
+    }
+
+    protected activateWire(id: string): void {
+        if (this.store.document().kind === 'stateMachine') this.store.selectConnection(id);
+        else this.store.disconnect(id);
+    }
+
+    protected closeInspector(): void {
+        this.store.select(null);
+        this.stage()?.nativeElement.focus();
     }
 
     protected add(): void {
@@ -294,7 +402,10 @@ export class EditorGraph {
             const port = this.document
                 .elementFromPoint(event.clientX, event.clientY)
                 ?.closest<HTMLElement>('[data-port-direction="input"]');
-            const node = port?.closest<HTMLElement>('[data-node]')?.dataset['node'];
+            const node =
+                port?.closest('.stage') === this.stage()?.nativeElement
+                    ? port?.closest<HTMLElement>('[data-node]')?.dataset['node']
+                    : undefined;
             const id = port?.dataset['portId'];
             if (node && id && this.store.connect(this.pending()!, {node, port: id})) {
                 this.pending.set(null);
@@ -313,6 +424,12 @@ export class EditorGraph {
             this.store.clearError();
             this.message.set('');
             this.stop();
+            return;
+        }
+        const transition = this.store.selectedConnection();
+        if (transition && (event.key === 'Delete' || event.key === 'Backspace')) {
+            event.preventDefault();
+            this.store.disconnect(transition);
             return;
         }
         const selected =
@@ -344,8 +461,10 @@ export class EditorGraph {
         ) {
             event.preventDefault();
             event.stopPropagation();
-            this.store.disconnect(id);
-            this.stage()?.nativeElement.focus();
+            if (event.key === 'Delete' || event.key === 'Backspace') {
+                this.store.disconnect(id);
+                this.stage()?.nativeElement.focus();
+            } else this.activateWire(id);
         }
     }
 
@@ -400,6 +519,10 @@ export class EditorGraph {
     private curve(from: GraphPoint, to: GraphPoint): string {
         const bend = Math.max(60, Math.abs(to.x - from.x) * 0.5);
         return `M ${from.x} ${from.y} C ${from.x + bend} ${from.y}, ${to.x - bend} ${to.y}, ${to.x} ${to.y}`;
+    }
+
+    private loop(from: GraphPoint, to: GraphPoint): string {
+        return `M ${from.x} ${from.y} C ${from.x + 100} ${from.y - 160}, ${to.x - 100} ${to.y - 160}, ${to.x} ${to.y}`;
     }
 
     private start(event: PointerEvent, mode: GraphGesture['mode'], node?: string): void {

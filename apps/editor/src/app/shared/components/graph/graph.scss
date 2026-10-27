@@ -100,6 +100,7 @@ button:hover {
 }
 
 .stage {
+  min-width: 0;
   background-size: calc(var(--layout-graph-grid-size) * var(--graph-zoom)) calc(var(--layout-graph-grid-size) * var(--graph-zoom));
   position: relative;
   flex: 1;
@@ -112,6 +113,41 @@ button:hover {
   );
   cursor: var(--cursor-drag);
   touch-action: none;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace app-drawer {
+  min-height: 0;
+}
+
+.workspace editor-pane {
+  height: 100%;
+  min-height: 0;
+}
+
+.wire[data-type='transition'] {
+  stroke: var(--color-text-secondary);
+  stroke-dasharray: 6 3;
+}
+
+.wire.selected-wire {
+  stroke: var(--color-action);
+}
+
+.wire[data-type='bool'],
+.wire[data-type='trigger'],
+.wire[data-type='events'] {
+  stroke: var(--color-graph-vector);
+}
+
+.wire[data-type='int'] {
+  stroke: var(--color-graph-float);
 }
 
 .stage:focus-visible {

@@ -4,6 +4,16 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [ADR-0002: Scene objects, components, presets, and inspector subjects](adr/0002-object-composition-and-components.md):
+  Proposed common object model, capability composition, naming, defaults, and migration from existing scene data.
+
+- [ADR-0003: Lightweight Rust–TypeScript contracts and transport](adr/0003-rust-typescript-bridge.md):
+  Research and proposed JSON/typed IPC architecture, generated contracts, binary alternatives, and measurement plan.
+
+- [ADR-0001: Typed editor commands, change messages, and project builds](adr/0001-editor-command-pipeline.md):
+  Accepted architecture for the editor client, recorded UI intent, runtime synchronization, and explicit build jobs;
+  implementation is planned.
+
 - [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 2, protocol 2, scene IDs, retained
   drafts/history, save/reload policies, Angular helpers and all-scene build validation.
 

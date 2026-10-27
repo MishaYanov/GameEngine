@@ -7,21 +7,31 @@ import {
     GraphConnection,
     graphDefinition,
     GraphDocument,
+    graphDocumentError,
     GraphEndpoint,
     GraphNodeKind,
     GraphPoint,
+    graphPorts,
     GraphValues,
+    nodeAllowed,
     validGraphValues,
 } from './graph.models';
+import {DEFAULT_TRANSITION, TransitionSettings, validTransition,} from './animation/animation.models';
 
 interface GraphState {
     document: GraphDocument;
     selected: string | null;
+    selectedConnection: string | null;
     error: string | null;
 }
 
 export const GraphStore = signalStore(
-    withState<GraphState>({document: emptyGraph(), selected: null, error: null}),
+    withState<GraphState>({
+        document: emptyGraph(),
+        selected: null,
+        selectedConnection: null,
+        error: null,
+    }),
     withComputed((store) => ({
         nodeById: computed(() => new Map(store.document().nodes.map((node) => [node.id, node]))),
     })),
@@ -33,39 +43,49 @@ export const GraphStore = signalStore(
         };
         return {
             load(document: GraphDocument): boolean {
-                if (document.version !== 1 || !['animation', 'shader'].includes(document.domain))
-                    return fail('Unsupported graph document.');
-                if (new Set(document.nodes.map((node) => node.id)).size !== document.nodes.length)
-                    return fail('Node IDs must be unique.');
-                for (const node of document.nodes) {
-                    const definition = graphDefinition(node.kind);
-                    if (
-                        !definition ||
-                        !node.id ||
-                        (definition.domain !== 'both' && definition.domain !== document.domain) ||
-                        !Number.isFinite(node.position.x) ||
-                        !Number.isFinite(node.position.y) ||
-                        !validGraphValues(node.kind, node.values)
-                    )
-                        return fail('Invalid node for this graph.');
-                }
-                const accepted: GraphConnection[] = [];
-                const ids = new Set<string>();
-                const inputs = new Set<string>();
-                for (const edge of document.connections) {
-                    const key = `${edge.to.node}:${edge.to.port}`;
-                    const error = connectionError({...document, connections: accepted}, edge.from, edge.to);
-                    if (!edge.id || ids.has(edge.id) || inputs.has(key) || error)
-                        return fail(error ?? 'Connections must have unique IDs and input ports.');
-                    accepted.push(edge);
-                    ids.add(edge.id);
-                    inputs.add(key);
-                }
-                patchState(store, {document: structuredClone(document), selected: null, error: null});
+                const error = graphDocumentError(document);
+                if (error) return fail(error);
+                patchState(store, {
+                    document: structuredClone(document),
+                    selected: null,
+                    selectedConnection: null,
+                    error: null,
+                });
                 return true;
             },
             select(id: string | null): void {
-                patchState(store, {selected: id && store.nodeById().has(id) ? id : null});
+                patchState(store, {
+                    selected: id && store.nodeById().has(id) ? id : null,
+                    selectedConnection: null,
+                });
+            },
+            selectConnection(id: string | null): void {
+                patchState(store, {
+                    selected: null,
+                    selectedConnection:
+                        id && store.document().connections.some((edge) => edge.id === id) ? id : null,
+                });
+            },
+            setTransition(id: string, settings: TransitionSettings): boolean {
+                if (!validTransition(settings)) return fail('Enter valid transition settings.');
+                if (
+                    !store.document().connections.some((edge) => edge.id === id && edge.kind === 'transition')
+                )
+                    return fail('Transition not found.');
+                patchState(store, {
+                    document: {
+                        ...store.document(),
+                        connections: store
+                            .document()
+                            .connections.map((edge) =>
+                                edge.id === id && edge.kind === 'transition'
+                                    ? {...edge, settings: structuredClone(settings)}
+                                    : edge,
+                            ),
+                    },
+                    error: null,
+                });
+                return true;
             },
             clearError(): void {
                 patchState(store, {error: null});
@@ -76,7 +96,7 @@ export const GraphStore = signalStore(
                     fail('Invalid node position.');
                     return null;
                 }
-                if (definition.domain !== 'both' && definition.domain !== store.document().domain) {
+                if (!nodeAllowed(kind, store.document())) {
                     fail('This node belongs to another graph type.');
                     return null;
                 }
@@ -85,9 +105,17 @@ export const GraphStore = signalStore(
                     id = `node-${++nextId}`;
                 } while (store.nodeById().has(id));
                 const node = createGraphNode(kind, id, position);
+                if (
+                    kind === 'animation.entry' &&
+                    store.document().nodes.some((node) => node.kind === kind)
+                ) {
+                    fail('A state machine has one entry node.');
+                    return null;
+                }
                 patchState(store, {
                     document: {...store.document(), nodes: [...store.document().nodes, node]},
                     selected: id,
+                    selectedConnection: null,
                     error: null,
                 });
                 return id;
@@ -114,11 +142,24 @@ export const GraphStore = signalStore(
                 const node = store.nodeById().get(id);
                 if (!node || !validGraphValues(node.kind, values)) return fail('Enter valid node values.');
                 const updated = {...node, values: structuredClone(values)} as typeof node;
+                const document = {
+                    ...store.document(),
+                    nodes: store.document().nodes.map((node) => (node.id === id ? updated : node)),
+                };
+                if (node.kind === 'animation.locomotion') {
+                    const inputs = new Set(graphPorts(updated, 'input').map((port) => port.id));
+                    const outputs = new Set(graphPorts(updated, 'output').map((port) => port.id));
+                    if (
+                        document.connections.some(
+                            (edge) =>
+                                (edge.from.node === id && !outputs.has(edge.from.port)) ||
+                                (edge.to.node === id && !inputs.has(edge.to.port)),
+                        )
+                    )
+                        return fail('Disconnect the affected ports before hiding them.');
+                }
                 patchState(store, {
-                    document: {
-                        ...store.document(),
-                        nodes: store.document().nodes.map((node) => (node.id === id ? updated : node)),
-                    },
+                    document,
                     error: null,
                 });
                 return true;
@@ -141,12 +182,21 @@ export const GraphStore = signalStore(
                 do {
                     id = `wire-${++nextId}`;
                 } while (previous.some((edge) => edge.id === id));
+                const edge: GraphConnection =
+                    store.document().kind === 'stateMachine'
+                        ? {id, kind: 'transition', from, to, settings: structuredClone(DEFAULT_TRANSITION)}
+                        : {id, kind: 'data', from, to};
                 patchState(store, {
                     document: {
                         ...store.document(),
                         connections: [
-                            ...previous.filter((edge) => edge.to.node !== to.node || edge.to.port !== to.port),
-                            {id, from, to},
+                            ...previous.filter(
+                                (edge) =>
+                                    store.document().kind === 'stateMachine' ||
+                                    edge.to.node !== to.node ||
+                                    edge.to.port !== to.port,
+                            ),
+                            edge,
                         ],
                     },
                     error: null,
@@ -155,6 +205,7 @@ export const GraphStore = signalStore(
             },
             disconnect(id: string): void {
                 patchState(store, {
+                    selectedConnection: store.selectedConnection() === id ? null : store.selectedConnection(),
                     document: {
                         ...store.document(),
                         connections: store.document().connections.filter((edge) => edge.id !== id),
@@ -171,6 +222,7 @@ export const GraphStore = signalStore(
                             .connections.filter((edge) => edge.from.node !== id && edge.to.node !== id),
                     },
                     selected: store.selected() === id ? null : store.selected(),
+                    selectedConnection: null,
                 });
             },
         };

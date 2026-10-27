@@ -1,0 +1,26 @@
+{
+  "verifiedAt": "2026-10-26T20:43:18.266Z",
+  "audits": [
+    {
+      "view": "stateMachine",
+      "violations": []
+    },
+    {
+      "view": "graph",
+      "violations": []
+    },
+    {
+      "view": "stateMachine",
+      "violations": []
+    }
+  ],
+  "checks": [
+    "Signal Forms settings and clip assignments",
+    "Pose connection override and disconnect fallback",
+    "1D/2D blend weight preview",
+    "Nested transition timing and conditions",
+    "State loops and self transitions",
+    "Keyboard editing and focus preservation"
+  ],
+  "nativeEvaluation": "Not implemented; preview displays weights only"
+}
