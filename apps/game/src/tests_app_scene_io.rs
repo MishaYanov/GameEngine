@@ -480,6 +480,33 @@ fn f6_is_edge_triggered_resets_input_clock_and_blocks_structural_edits_during_pl
 }
 
 #[test]
+fn play_mode_boundaries_suppress_mouse_buttons_until_release() {
+	use runtime::MouseButton;
+	let (mut app, _) = fixture();
+	for button in [MouseButton::Left, MouseButton::Other(7)] {
+		app.input.press(button);
+	}
+	app.start_play().unwrap();
+	for button in [MouseButton::Left, MouseButton::Other(7)] {
+		assert!(!app.input.is_held(button));
+		assert!(!app.input.just_pressed(button));
+		app.input.press(button);
+		assert!(!app.input.is_held(button));
+		app.input.release(button);
+		app.input.press(button);
+		assert!(app.input.is_held(button));
+	}
+	app.stop_play().unwrap();
+	for button in [MouseButton::Left, MouseButton::Other(7)] {
+		app.input.press(button);
+		assert!(!app.input.is_held(button));
+		app.input.release(button);
+		app.input.press(button);
+		assert!(app.input.just_pressed(button));
+	}
+}
+
+#[test]
 fn failed_reload_during_play_preserves_mode_authored_snapshot_editor_history_and_disk() {
 	let directory = TestDirectory::new();
 	let (mut app, [left, _]) = fixture();
@@ -1143,7 +1170,7 @@ fn saving_current_scene_preserves_catalog_ids_and_inactive_scene_behaviors() {
 		"scenes/secondary.json",
 		&app.scene.to_data(&app.camera).unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let secondary_id = secondary.startup_scene_id.clone();
 	project
 		.scenes

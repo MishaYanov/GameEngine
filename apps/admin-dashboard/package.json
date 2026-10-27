@@ -1,1 +1,31 @@
-{"name":"engine-admin-dashboard","version":"0.1.0","private":true,"scripts":{"start":"ng serve --host 127.0.0.1 --port 4300","build":"ng build","test":"vitest run","desktop":"tauri dev --features desktop","package":"tauri build --features desktop"},"dependencies":{"@angular/common":"^22.1.0","@angular/compiler":"^22.1.0","@angular/core":"^22.1.0","@angular/forms":"^22.1.0","@angular/platform-browser":"^22.1.0","@tauri-apps/api":"^2.11.1","rxjs":"~7.8.0","tslib":"^2.3.0"},"devDependencies":{"@angular/build":"^22.1.4","@angular/cli":"^22.1.4","@angular/compiler-cli":"^22.1.0","@tauri-apps/cli":"^2.11.4","typescript":"~6.0.2","vitest":"^4.0.8","jsdom":"^28.0.0"}}
+{
+  "name": "engine-admin-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "ng serve admin-dashboard --host 127.0.0.1 --port 4301",
+    "build": "ng build",
+    "test": "vitest run",
+    "desktop": "tauri dev --features desktop",
+    "package": "tauri build --features desktop"
+  },
+  "dependencies": {
+    "@angular/common": "^22.1.0",
+    "@angular/compiler": "^22.1.0",
+    "@angular/core": "^22.1.0",
+    "@angular/forms": "^22.1.0",
+    "@angular/platform-browser": "^22.1.0",
+    "@tauri-apps/api": "^2.11.1",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^22.1.4",
+    "@angular/cli": "^22.1.4",
+    "@angular/compiler-cli": "^22.1.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "typescript": "~6.0.2",
+    "vitest": "^4.0.8",
+    "jsdom": "^28.0.0"
+  }
+}

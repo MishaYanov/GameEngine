@@ -115,6 +115,12 @@ pub struct VulkanFrame {
 	lighting: LightingUniform,
 }
 
+/// Borrowed color and depth targets used together for a frame.
+pub struct FrameTargets<'a> {
+	pub swapchain: &'a VulkanSwapchain,
+	pub depth_buffer: &'a VulkanDepthBuffer,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameStatus {
 	Rendered,
@@ -305,13 +311,14 @@ impl VulkanFrame {
 	pub fn draw(
 		&mut self,
 		device: &VulkanDevice,
-		swapchain: &VulkanSwapchain,
-		depth_buffer: &VulkanDepthBuffer,
+		targets: FrameTargets<'_>,
 		pipelines: &VulkanMaterialPipelines,
 		camera: &VulkanCamera,
 		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<FrameStatus, VulkanFrameError> {
+		let swapchain = targets.swapchain;
+
 		unsafe {
 			self.device
 				.wait_for_fences(&[self.in_flight], true, u64::MAX)?;
@@ -345,11 +352,8 @@ impl VulkanFrame {
 		}
 
 		self.record_draw_commands(
-			swapchain.images()[image_index as usize],
-			swapchain.image_views()[image_index as usize],
-			swapchain.extent(),
-			depth_buffer.image(),
-			depth_buffer.view(),
+			targets,
+			image_index,
 			pipelines,
 			camera.descriptor_set(),
 			objects,
@@ -476,15 +480,18 @@ impl VulkanFrame {
 
 	fn record_draw_commands(
 		&self,
-		image: vk::Image,
-		image_view: vk::ImageView,
-		extent: vk::Extent2D,
-		depth_image: vk::Image,
-		depth_view: vk::ImageView,
+		targets: FrameTargets<'_>,
+		image_index: u32,
 		pipelines: &VulkanMaterialPipelines,
 		camera_descriptor_set: vk::DescriptorSet,
 		objects: &[RenderObject<'_>],
 	) -> Result<(), VulkanFrameError> {
+		let image = targets.swapchain.images()[image_index as usize];
+		let image_view = targets.swapchain.image_views()[image_index as usize];
+		let extent = targets.swapchain.extent();
+		let depth_image = targets.depth_buffer.image();
+		let depth_view = targets.depth_buffer.view();
+
 		let begin_info = vk::CommandBufferBeginInfo::default()
 			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 

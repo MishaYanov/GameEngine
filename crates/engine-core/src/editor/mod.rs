@@ -10,6 +10,7 @@ use crate::command::{
 	CommandDescriptorDto, EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto,
 	SnapSettingsDto,
 };
+use crate::simulation_session::MovementTarget;
 use crate::{
 	Bounds3, EntityKey,
 	project::ProjectData,
@@ -393,14 +394,33 @@ impl EditorSession {
 		self.bounds.clear();
 	}
 	pub fn snapshot(&self) -> Result<EditorSnapshotDto, String> {
+		let state = self.state();
 		Ok(EditorSnapshotDto {
+			active_scene_id: state.active_scene_id,
+			project_dirty: state.project_dirty,
+			scenes: state.scenes,
+			revision: state.revision,
+			scene_revision: state.scene_revision,
+			document: self.data.as_ref().clone(),
+			project: self.project.as_ref().clone(),
+			selection: state.selection,
+			mode: state.mode,
+			paused: state.paused,
+			dirty: state.dirty,
+			can_undo: state.can_undo,
+			can_redo: state.can_redo,
+			transaction: state.transaction,
+			snap: state.snap,
+		})
+	}
+	/// Authoritative editor controls without cloning the scene or project.
+	pub fn state(&self) -> crate::command::EditorStateDto {
+		crate::command::EditorStateDto {
 			active_scene_id: self.active_scene_id.clone(),
 			project_dirty: self.project != self.saved_project,
 			scenes: self.scene_states(),
 			revision: self.revision,
 			scene_revision: self.scene_revision,
-			document: self.data.as_ref().clone(),
-			project: self.project.as_ref().clone(),
 			selection: self
 				.selection
 				.iter()
@@ -413,7 +433,7 @@ impl EditorSession {
 			can_redo: self.history.can_redo(),
 			transaction: self.transaction.as_ref().map(|t| t.label.clone()),
 			snap: self.snap.clone(),
-		})
+		}
 	}
 
 	pub fn execute(&mut self, request: EditorCommandRequest) -> Result<EditorSnapshotDto, String> {
@@ -581,14 +601,14 @@ impl EditorSession {
 			}
 			Command::SetPlayInput { movement } => {
 				let play = self.play.as_mut().ok_or("Play mode is not active")?;
-				if play.set_controlled_input(movement)? {
+				if play.set_targeted_input(&MovementTarget::AllControlled, movement)? {
 					self.bump();
 				}
 			}
 			Command::SetEntityInput { entity, movement } => {
 				let entity = EntityKey::new(entity)?;
 				let play = self.play.as_mut().ok_or("Play mode is not active")?;
-				if play.set_input(&entity, movement)? {
+				if play.set_targeted_input(&MovementTarget::Entity(entity), movement)? {
 					self.bump();
 				}
 			}

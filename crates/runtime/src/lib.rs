@@ -30,7 +30,7 @@ pub use camera_controller::CameraController;
 pub use engine::{GraphicsProbe, GraphicsProbeError};
 pub use engine_core::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineBuilder};
 pub use entity_key::EntityKey;
-pub use input::{InputState, Key};
+pub use input::{InputButton, InputState, Key, MouseButton, NativeKeyCode};
 pub use scene_data::SceneData;
 pub use scene_editor::SceneEditor;
 pub use selection::EntitySelection;

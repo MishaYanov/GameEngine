@@ -1,70 +1,44 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet(
-            "editor",
-            "game",
-            "vulkan-probe"
-    )]
-    [string]$Project = "editor"
+    [ValidateSet("editor", "admin", "game", "workspace", "all", "launcher", "vulkan-probe", "check")]
+    [string]$Project = "launcher",
+    [switch]$DryRun
 )
 
-$Root = $PSScriptRoot
-
-function Run-InDirectory
-{
-    param(
-        [string]$Path,
-        [scriptblock]$Command
-    )
-
-    Push-Location $Path
-
-    try
-    {
-        & $Command
-
-        if ($LASTEXITCODE -ne 0)
-        {
-            throw "Command failed with exit code $LASTEXITCODE"
-        }
-    }
-    finally
-    {
-        Pop-Location
-    }
+$ErrorActionPreference = "Stop"
+$launcherPath = Join-Path $PSScriptRoot "launcher.py"
+$launchActions = @{
+    editor = "client"
+    admin = "dashboard"
+    game = "engine"
+    workspace = "workspace"
+    all = "all"
+    "vulkan-probe" = "vulkan-probe"
+    check = "check"
 }
 
-switch ($Project)
+$pythonCommand = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+$pythonArguments = @()
+if (!$pythonCommand)
 {
-
-    "editor" {
-        Write-Host "Starting Game Engine Editor..."
-
-        $TauriCli =
-        Join-Path `
-				$Root `
-				"apps\editor\node_modules\.bin\tauri.cmd"
-
-        Run-InDirectory "$Root\apps\editor-host" {
-            & $TauriCli dev
-        }
-    }
-
-    "game" {
-        Write-Host "Starting Game..."
-
-        Run-InDirectory $Root {
-            cargo run -p game
-        }
-    }
-
-    "vulkan-probe" {
-        Write-Host "Starting Vulkan probe..."
-
-        Run-InDirectory $Root {
-            cargo run `
-				-p renderer `
-				--example vulkan_probe
-        }
-    }
+    $pythonCommand = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $pythonArguments += "-3"
 }
+if (!$pythonCommand)
+{
+    throw "Python 3 is unavailable. Install it and add python or py to PATH."
+}
+
+# Keep all project commands in the shared launcher, including their working directories.
+$pythonArguments += @($launcherPath, "--no-pause")
+if ($Project -ne "launcher")
+{
+    $pythonArguments += @("--run", $launchActions[$Project])
+}
+if ($DryRun)
+{
+    $pythonArguments += "--dry-run"
+}
+
+& $pythonCommand.Source @pythonArguments
+exit $LASTEXITCODE

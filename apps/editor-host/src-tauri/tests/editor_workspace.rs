@@ -4,6 +4,7 @@ mod editor;
 #[path = "../src/project_location.rs"]
 mod project_location;
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest};
+use bridge::editor::{EditorCommandUpdateDto, EditorSnapshotDto};
 use editor::{EditorWorkspace, ReloadPolicy};
 use project_location::{ProjectLocation, ProjectOpenError};
 use runtime::scene_catalog::{SceneDescriptor, SceneId};
@@ -173,7 +174,7 @@ fn project_open_uses_canonical_selected_manifest_startup_scene_and_notifier() {
 	let location =
 		ProjectLocation::from_manifest(&fixture.0.join("scenes/../../project.json")).unwrap();
 	assert_eq!(
-		location.root(),
+		location.manifest().parent().unwrap(),
 		manifest.parent().unwrap().canonicalize().unwrap()
 	);
 	let (notify, ready) = std::sync::mpsc::channel();
@@ -748,14 +749,18 @@ fn workspace_save_reload_revision_and_generation_preserve_consistent_baselines()
 			name: "Unsaved".into(),
 		},
 	);
-	let reloaded = w.reload(w.backend.session().revision()).unwrap();
+	let reloaded = w
+		.reload_with_policy(w.backend.session().revision(), ReloadPolicy::DiscardUnsaved)
+		.unwrap();
 	assert_eq!(reloaded.document.entities[0].name, "Saved");
 	assert!(!reloaded.can_undo);
 	assert!(!reloaded.dirty);
 	let source = w.backend.session().authored_document();
 	fs::write(&w.scene_path, "{bad json").unwrap();
 	let revision = w.backend.session().revision();
-	assert!(w.reload(revision).is_err());
+	assert!(w
+		.reload_with_policy(revision, ReloadPolicy::DiscardUnsaved)
+		.is_err());
 	assert_eq!(w.backend.session().authored_document(), source);
 	assert_eq!(w.backend.session().revision(), revision);
 }
@@ -780,7 +785,9 @@ fn grouped_edits_block_save_reload_and_failed_save_does_not_mark_document_clean(
 	);
 	let revision = w.backend.session().revision();
 	assert!(w.save(revision).is_err());
-	assert!(w.reload(revision).is_err());
+	assert!(w
+		.reload_with_policy(revision, ReloadPolicy::DiscardUnsaved)
+		.is_err());
 	assert_eq!(fs::read(&w.scene_path).unwrap(), original);
 	assert!(w.backend.session().has_transaction());
 	run(&mut w, Command::CommitTransaction);
@@ -906,7 +913,8 @@ fn saving_in_play_persists_authored_document_and_reloading_stops_simulation() {
 	let disk = runtime::scene_io::load_data(&w.scene_path).unwrap().data;
 	assert_eq!(&disk, authored.as_ref());
 	assert!(w.backend.session().is_playing());
-	w.reload(w.backend.session().revision()).unwrap();
+	w.reload_with_policy(w.backend.session().revision(), ReloadPolicy::DiscardUnsaved)
+		.unwrap();
 	assert!(!w.backend.session().is_playing());
 	assert_eq!(w.backend.session().render_document(), authored);
 	assert!(!w.backend.session().snapshot().unwrap().can_undo);
@@ -1024,7 +1032,8 @@ fn authored_project_and_scene_save_independently_and_prepare_build_requires_both
 	external.name = "External edits".into();
 	fs::write(&w.project_path, external.to_json().unwrap()).unwrap();
 	assert!(w.prepare_build(w.backend.session().revision()).is_err());
-	w.reload(w.backend.session().revision()).unwrap();
+	w.reload_with_policy(w.backend.session().revision(), ReloadPolicy::DiscardUnsaved)
+		.unwrap();
 	assert_eq!(w.backend.session().project().name, "External edits");
 	assert!(!w.backend.session().is_dirty());
 }
@@ -1073,7 +1082,9 @@ fn project_reload_failure_preserves_open_workspace_project_scene_and_history() {
 	let before = serde_json::to_value(w.backend.snapshot().unwrap()).unwrap();
 	let path = w.scene_path.clone();
 	fs::write(&w.project_path, "{bad json").unwrap();
-	assert!(w.reload(w.backend.session().revision()).is_err());
+	assert!(w
+		.reload_with_policy(w.backend.session().revision(), ReloadPolicy::DiscardUnsaved)
+		.is_err());
 	assert_eq!(
 		serde_json::to_value(w.backend.snapshot().unwrap()).unwrap(),
 		before
@@ -1112,7 +1123,9 @@ fn assert_missing_manifest_reload_preserves_edits(workspace: &mut EditorWorkspac
 	assert!(workspace.backend.session().is_dirty());
 	fs::remove_file(&workspace.project_path).unwrap();
 	assert!(
-		workspace.reload(revision).is_err(),
+		workspace
+			.reload_with_policy(revision, ReloadPolicy::DiscardUnsaved)
+			.is_err(),
 		"A manifest-backed workspace must not reload without its manifest"
 	);
 	assert_eq!(
@@ -1188,7 +1201,10 @@ fn standalone_reload_works_without_manifest_and_failed_save_does_not_promote_it(
 		.is_err());
 	workspace.project_path = manifest;
 	let reloaded = workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	assert_eq!(reloaded.document.entities[0].name, "Original");
 	assert!(!reloaded.dirty);
@@ -1212,15 +1228,24 @@ fn standalone_adopts_discovered_manifest_only_after_successful_reload() {
 	let mut workspace = fixture.open();
 	fixture.write_project("scenes/missing.json");
 	assert!(workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved
+		)
 		.is_err());
 	fs::remove_file(&workspace.project_path).unwrap();
 	workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	fixture.write_project("scenes/main.json");
 	workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	assert_eq!(
 		workspace.backend.session().project().name,
@@ -1279,7 +1304,10 @@ fn successful_reload_renews_generation_and_rejects_old_job_tickets_at_zero_scene
 		)
 		.unwrap();
 	let reloaded = workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	assert_eq!(reloaded.scene_revision, 0);
 	assert_ne!(workspace.generation, old_generation);
@@ -1527,7 +1555,8 @@ fn accepted_async_import_registers_only_selected_meshes_and_reload_invalidates_t
 		w.backend.session().authored_document().entities[1].mesh_index,
 		Some(1)
 	);
-	w.reload(w.backend.session().revision()).unwrap();
+	w.reload_with_policy(w.backend.session().revision(), ReloadPolicy::DiscardUnsaved)
+		.unwrap();
 	assert!(w.backend.assets().get(handle).is_none());
 	assert!(w.backend.assets().is_empty());
 	assert_eq!(w.backend.session().authored_document().entities.len(), 1);
@@ -1568,7 +1597,10 @@ fn step46_manual_lifecycle_flow_is_automated() {
 		assert!(!held.exists());
 		fs::rename(&workspace.project_path, &held).unwrap();
 		let error = workspace
-			.reload(workspace.backend.session().revision())
+			.reload_with_policy(
+				workspace.backend.session().revision(),
+				ReloadPolicy::DiscardUnsaved,
+			)
 			.unwrap_err();
 		assert!(error.contains("Cannot read project:"), "{error}");
 		assert_eq!(snapshot(workspace), before);
@@ -1680,7 +1712,10 @@ fn step46_manual_lifecycle_flow_is_automated() {
 	assert!(workspace.backend.session().is_dirty());
 	fs::rename(held, &manifest).unwrap();
 	let restored = workspace
-		.reload(workspace.backend.session().revision())
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	assert_eq!(restored.document.entities[0].name, "Saved scene name");
 	assert_eq!(restored.project.name, "Saved project name");
@@ -1693,7 +1728,10 @@ fn step46_manual_lifecycle_flow_is_automated() {
 	assert!(!standalone.project_path.exists());
 	rename(&mut standalone, "Temporary standalone edit");
 	let reloaded = standalone
-		.reload(standalone.backend.session().revision())
+		.reload_with_policy(
+			standalone.backend.session().revision(),
+			ReloadPolicy::DiscardUnsaved,
+		)
 		.unwrap();
 	assert_eq!(reloaded.document.entities[0].name, "Original");
 	assert!(!reloaded.dirty);
@@ -1714,4 +1752,191 @@ fn step46_manual_lifecycle_flow_is_automated() {
 		"Keep promoted project edit"
 	);
 	assert!(standalone.backend.snapshot().unwrap().can_undo);
+}
+
+fn incremental(workspace: &mut EditorWorkspace, command: Command) -> EditorCommandUpdateDto {
+	workspace
+		.execute_incremental(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command,
+		})
+		.unwrap()
+}
+
+// Reconstruct exactly what the frontend receives and compare every field with
+// the authoritative snapshot, including history, dirty flags and selection.
+fn apply_incremental(
+	previous: EditorSnapshotDto,
+	update: &EditorCommandUpdateDto,
+) -> EditorSnapshotDto {
+	match update {
+		EditorCommandUpdateDto::Snapshot { snapshot, .. } => snapshot.clone(),
+		EditorCommandUpdateDto::Delta {
+			state,
+			entities,
+			camera,
+			lights,
+			..
+		} => {
+			let mut document = previous.document;
+			for changed in entities {
+				let target = document
+					.entities
+					.iter_mut()
+					.find(|e| e.key == changed.key)
+					.unwrap();
+				*target = changed.clone();
+			}
+			if let Some(camera) = camera {
+				document.camera = camera.clone();
+			}
+			if let Some(lights) = lights {
+				document.lights = lights.clone();
+			}
+			let mut json = serde_json::to_value(state).unwrap();
+			json["document"] = serde_json::to_value(document).unwrap();
+			json["project"] = serde_json::to_value(previous.project).unwrap();
+			serde_json::from_value(json).unwrap()
+		}
+	}
+}
+
+#[test]
+fn incremental_commands_match_snapshots_through_edit_history_and_play() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let mut client = workspace.backend.snapshot().unwrap();
+	let mut camera = client.document.camera.clone();
+	camera.position[0] += 2.0;
+	let commands = vec![
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+		Command::Rename {
+			key: "a".into(),
+			name: "Renamed".into(),
+		},
+		Command::TranslateSelection {
+			delta: [1.0, 0.0, 0.0],
+			snap: false,
+		},
+		Command::SetCamera { camera },
+		Command::UpsertLight {
+			light: runtime::scene_data::LightData {
+				key: EntityKey::new("sun").unwrap(),
+				name: "Sun".into(),
+				kind: runtime::scene_data::LightKind::Directional,
+				position: [0.0; 3],
+				direction: [0.0, -1.0, 0.0],
+				color: [1.0; 3],
+				intensity: 1.0,
+				range: 10.0,
+			},
+		},
+		Command::RemoveLight { key: "sun".into() },
+		Command::BeginTransaction {
+			label: "Drag".into(),
+		},
+		Command::TranslateSelection {
+			delta: [2.0, 0.0, 0.0],
+			snap: false,
+		},
+		Command::CancelTransaction,
+		Command::Undo,
+		Command::Redo,
+		Command::DuplicateSelection {
+			offset: [1.0, 0.0, 0.0],
+		},
+		Command::DeleteSelection,
+		Command::Undo,
+		Command::StartPlay,
+		Command::StopPlay,
+	];
+	for command in commands {
+		let update = incremental(&mut workspace, command);
+		// The actual JSON contract must survive transport as well as the Rust enum.
+		let wire = serde_json::to_vec(&update).unwrap();
+		let update = serde_json::from_slice(&wire).unwrap();
+		client = apply_incremental(client, &update);
+		assert_eq!(
+			serde_json::to_value(&client).unwrap(),
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+		);
+	}
+}
+
+#[test]
+fn incremental_selection_and_rename_payloads_do_not_scale_with_scene_size() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let mut data = (*workspace.backend.session().authored_document()).clone();
+	for index in 0..1000 {
+		let mut entity = data.entities[0].clone();
+		entity.key = EntityKey::new(format!("extra-{index}")).unwrap();
+		data.entities.push(entity);
+	}
+	let project = workspace.backend.session().project().clone();
+	workspace.backend = runtime::Engine::new(data, project).unwrap();
+	let full_bytes = serde_json::to_vec(&workspace.backend.snapshot().unwrap())
+		.unwrap()
+		.len();
+	for command in [
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+		Command::Rename {
+			key: "a".into(),
+			name: "Small update".into(),
+		},
+		Command::Rename {
+			key: "a".into(),
+			name: "Small update".into(),
+		},
+	] {
+		let update = incremental(&mut workspace, command);
+		let EditorCommandUpdateDto::Delta { entities, .. } = &update else {
+			panic!("expected compact update")
+		};
+		assert!(entities.len() <= 1);
+		let bytes = serde_json::to_vec(&update).unwrap().len();
+		assert!(bytes < 4096, "compact update was {bytes} bytes");
+		assert!(bytes * 20 < full_bytes);
+	}
+}
+
+#[test]
+fn incremental_structural_and_project_changes_resync_and_conflicts_preserve_state() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	incremental(
+		&mut workspace,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	let update = incremental(
+		&mut workspace,
+		Command::DuplicateSelection {
+			offset: [1.0, 0.0, 0.0],
+		},
+	);
+	assert!(matches!(update, EditorCommandUpdateDto::Snapshot { .. }));
+	let mut project = workspace.backend.session().project().clone();
+	project.name = "New name".into();
+	assert!(matches!(
+		incremental(&mut workspace, Command::SetProject { project }),
+		EditorCommandUpdateDto::Snapshot { .. }
+	));
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let error = workspace
+		.execute_incremental(EditorCommandRequest {
+			expected_revision: 0,
+			command: Command::DeleteSelection,
+		})
+		.unwrap_err();
+	assert_eq!(error.code, runtime::BackendErrorCode::Conflict);
+	assert_eq!(
+		before,
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+	);
 }

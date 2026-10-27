@@ -1,6 +1,6 @@
 use engine_logger::LogEntry;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HealthState {
@@ -10,7 +10,7 @@ pub enum HealthState {
 	Failed,
 	Stopped,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Component {
 	pub id: String,
 	pub label: String,
@@ -27,11 +27,17 @@ pub struct Component {
 #[derive(Serialize, Deserialize)]
 pub struct Registry {
 	components: BTreeMap<String, Component>,
+	#[serde(skip)]
+	dirty: bool,
+	#[serde(skip)]
+	persistence_error: Option<String>,
 }
 impl Registry {
 	pub fn new() -> Self {
 		let mut result = Self {
 			components: BTreeMap::new(),
+			dirty: true,
+			persistence_error: None,
 		};
 		for (id, label) in [
 			("runtime", "Runtime"),
@@ -76,6 +82,7 @@ impl Registry {
 		{
 			return;
 		}
+		let before = component.clone();
 		if component
 			.session_id
 			.as_ref()
@@ -101,6 +108,7 @@ impl Registry {
 				.get("heartbeat_expected")
 				.is_some_and(|v| v == "true");
 		}
+		self.dirty |= *component != before;
 	}
 	pub fn snapshot(&self, now: u64) -> Vec<Component> {
 		self.components
@@ -137,20 +145,43 @@ impl Registry {
 			if component.last_event_ms.is_some_and(|last| last > timestamp) {
 				continue;
 			}
-			component.reported_health = if unexpected {
+			let health = if unexpected {
 				HealthState::Failed
 			} else {
 				HealthState::Stopped
 			};
-			component.heartbeat_expected = false;
-			component.last_event_ms = Some(timestamp);
-			component.detail = if unexpected {
+			let detail = if unexpected {
 				"Managed application exited unexpectedly"
 			} else {
 				"Managed application stopped"
+			};
+			if component.reported_health != health
+				|| component.heartbeat_expected
+				|| component.last_event_ms != Some(timestamp)
+				|| component.detail != detail
+			{
+				component.reported_health = health;
+				component.heartbeat_expected = false;
+				component.last_event_ms = Some(timestamp);
+				component.detail = detail.into();
+				self.dirty = true;
 			}
-			.into();
 		}
+	}
+	pub(crate) fn persist(&mut self, path: &Path) {
+		if !self.dirty {
+			return;
+		}
+		match crate::save_json(path, self) {
+			Ok(()) => {
+				self.dirty = false;
+				self.persistence_error = None;
+			}
+			Err(error) => self.persistence_error = Some(error.to_string()),
+		}
+	}
+	pub(crate) fn persistence_error(&self) -> Option<&str> {
+		self.persistence_error.as_deref()
 	}
 }
 impl Default for Registry {

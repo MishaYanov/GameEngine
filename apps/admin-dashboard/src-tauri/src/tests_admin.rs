@@ -167,6 +167,7 @@ fn filtered_pagination_retention_and_export() {
 		..Default::default()
 	};
 	let page = collector.page(0, 1, &filter);
+	assert_eq!(page.matching_count, 2500);
 	assert!(page.history_gap);
 	assert!(page.has_more);
 	assert_eq!(page.entries[0].entry.level, Level::Error);
@@ -177,6 +178,150 @@ fn filtered_pagination_retention_and_export() {
 	let exported = engine_logger::read_jsonl(path, 512 * 1024).unwrap();
 	assert_eq!(exported.len(), count);
 	assert!(exported.iter().all(|e| e.level == Level::Error));
+	assert_eq!(collector.page(0, usize::MAX, &filter).entries.len(), 500);
+}
+#[test]
+fn pagination_preserves_filtered_counts_cursor_boundaries_and_unicode_search() {
+	let fixture = Fixture::new();
+	let mut collector = Collector::new(fixture.logs(), &fixture.data());
+	assert_eq!(collector.page(0, 0, &LogFilter::default()).next_cursor, 0);
+	for sequence in 1..=7 {
+		let mut entry = record("game-123-1", sequence);
+		if sequence % 2 == 0 {
+			entry.message = "Scene ÄbC loaded".into();
+			entry.level = Level::Error;
+		}
+		entry.correlation.operation_id = Some("load".into());
+		collector.ingest(entry);
+	}
+	let filter = LogFilter {
+		search: Some("ÄBC".into()),
+		severity: Some(Level::Error),
+		application: Some("game".into()),
+		component: Some("game".into()),
+		session_id: Some("game-123-1".into()),
+		operation_id: Some("load".into()),
+		from_ms: Some(102),
+		to_ms: Some(106),
+	};
+	let first = collector.page(0, 0, &filter);
+	assert_eq!(first.matching_count, 3);
+	assert_eq!(first.entries.len(), 1);
+	assert_eq!(first.next_cursor, 2);
+	assert!(first.has_more);
+	let tail = collector.page(first.next_cursor, 2, &filter);
+	assert_eq!(tail.matching_count, 3);
+	assert_eq!(
+		tail.entries.iter().map(|e| e.cursor).collect::<Vec<_>>(),
+		[4, 6]
+	);
+	assert!(!tail.has_more);
+	assert_eq!(tail.next_cursor, 7);
+	assert_eq!(tail.latest_cursor, 7);
+	let end = collector.page(tail.next_cursor, 2, &filter);
+	assert!(end.entries.is_empty());
+	assert!(!end.has_more);
+	assert_eq!(end.matching_count, 3);
+	assert_eq!(end.next_cursor, 7);
+	let no_matches = collector.page(
+		0,
+		2,
+		&LogFilter {
+			search: Some("not found".into()),
+			..Default::default()
+		},
+	);
+	assert!(no_matches.entries.is_empty());
+	assert_eq!(no_matches.matching_count, 0);
+	assert_eq!(no_matches.next_cursor, 7);
+	let (path, count) = collector.export(&fixture.data(), &filter).unwrap();
+	assert_eq!(count, 3);
+	assert!(
+		engine_logger::read_jsonl(path, 512 * 1024)
+			.unwrap()
+			.iter()
+			.all(|e| filter.matches(e))
+	);
+}
+#[test]
+fn registry_skips_unchanged_writes_and_retries_failed_changes() {
+	let fixture = Fixture::new();
+	let path = fixture.data().join("components.json");
+	let mut registry = Registry::new();
+	let mut entry = record("game-123-1", 1);
+	entry.attributes = [
+		("event".into(), "component_health".into()),
+		("health".into(), "HEALTHY".into()),
+	]
+	.into();
+	registry.accept(&entry);
+	registry.persist(&path);
+	let original = fs::read(&path).unwrap();
+	// Block any new write without relying on filesystem timestamp resolution.
+	let temporary = path.with_extension("tmp");
+	fs::create_dir(&temporary).unwrap();
+	registry.accept(&entry);
+	registry.persist(&path);
+	assert!(registry.persistence_error().is_none());
+	assert_eq!(fs::read(&path).unwrap(), original);
+	registry.stopped(&entry.session_id, 200, false);
+	registry.persist(&path);
+	assert!(registry.persistence_error().is_some());
+	assert_eq!(fs::read(&path).unwrap(), original);
+	fs::remove_dir(&temporary).unwrap();
+	registry.persist(&path);
+	assert!(registry.persistence_error().is_none());
+	let restored = fs::read(&path).unwrap();
+	assert_ne!(restored, original);
+	fs::create_dir(&temporary).unwrap();
+	registry.stopped(&entry.session_id, 200, false);
+	registry.persist(&path);
+	assert!(registry.persistence_error().is_none());
+	let mut registry: Registry = serde_json::from_slice(&restored).unwrap();
+	registry.persist(&path);
+	assert!(registry.persistence_error().is_none());
+	assert_eq!(fs::read(&path).unwrap(), restored);
+}
+#[test]
+fn failed_log_checkpoint_retries_and_retains_restart_deduplication() {
+	let fixture = Fixture::new();
+	let path = fixture.data().join("logs.json");
+	fs::create_dir_all(&path).unwrap();
+	let mut collector = Collector::new(fixture.logs(), &fixture.data());
+	collector.ingest(record("game-123-1", 1));
+	collector.persist();
+	assert!(collector.health.checkpoint_error.is_some());
+	fs::remove_dir(&path).unwrap();
+	collector.persist();
+	assert!(collector.health.checkpoint_error.is_none());
+	let mut restored = Collector::new(fixture.logs(), &fixture.data());
+	assert!(!restored.ingest(record("game-123-1", 1)));
+	assert!(restored.ingest(record("game-123-1", 2)));
+	assert_eq!(restored.page(0, 2, &LogFilter::default()).entries.len(), 2);
+}
+#[test]
+fn registry_checkpoint_recovery_preserves_independent_collector_failure() {
+	let fixture = Fixture::new();
+	let mut service = AdminService::new(fixture.0.clone(), fixture.logs(), fixture.data());
+	let temporary = fixture.data().join("components.tmp");
+	fs::create_dir(&temporary).unwrap();
+	let mut entry = record("game-123-1", 1);
+	entry.attributes = [("event".into(), "heartbeat".into())].into();
+	service.registry.accept(&entry);
+	service.tick();
+	let registry_error = service.registry.persistence_error().unwrap().to_owned();
+	assert_eq!(
+		service.snapshot().collector.checkpoint_error,
+		Some(registry_error)
+	);
+	service.collector.health.checkpoint_error = Some("Existing log checkpoint failure".into());
+	fs::remove_dir(&temporary).unwrap();
+	service.tick();
+	assert!(service.registry.persistence_error().is_none());
+	assert_eq!(
+		service.snapshot().collector.checkpoint_error.as_deref(),
+		Some("Existing log checkpoint failure")
+	);
 }
 #[test]
 fn health_uses_explicit_events_and_stale_heartbeats() {

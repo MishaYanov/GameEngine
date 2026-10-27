@@ -9,7 +9,9 @@ npm.cmd install
 npm.cmd run desktop
 ```
 
-Requires Rust 1.89+, Cargo, Node compatible with Angular 22, and the existing Windows Tauri prerequisites. `npm.cmd start` serves frontend only at port 4300. Visit `http://127.0.0.1:4300/?preview` for explicitly labelled read-only sample data; browser-only mode cannot manage processes or execute jobs.
+Requires Rust 1.89+, Cargo, Node compatible with Angular 22, and the existing Windows Tauri prerequisites.
+`npm.cmd start` serves frontend only at port 4301. Visit `http://127.0.0.1:4301/?preview` for explicitly labelled
+read-only sample data; browser-only mode cannot manage processes or execute jobs.
 
 ```powershell
 npm.cmd run build
@@ -22,6 +24,12 @@ cargo check -p engine-admin --features desktop --offline
 Select a workspace and logger directory in Overview. Defaults use the current engine checkout and the shared logger directory. `ENGINE_WORKSPACE_DIR`, `ENGINE_LOG_DIR`, and `ENGINE_ADMIN_DATA_DIR` override defaults. Administration history lives separately from client logs.
 
 Logs are incrementally collected from per-session JSONL. Retention is bounded to 5,000 records / 16 MiB; browser display retains 1,000. Pagination indicates lost history. Collection scans the newest 256 session directories and limits scan work. Incomplete trailing lines wait for completion. Malformed and oversized records have explicit counters. Pause freezes display while collection continues. Export writes retained matching JSONL into the admin data directory. Source navigation requires a file inside the configured workspace and a local VS Code installation.
+
+Filtered pages count all retained matches in one scan and clone only the returned page, capped at 500 records. Log
+checkpoint serialization borrows retained history. Component registry persistence writes only when its stored state
+changes; a failed write stays dirty for retry and appears as a checkpoint error. Stale heartbeat status remains a
+snapshot-time calculation, so an unchanged registry need not be rewritten every polling tick. JSON writes are buffered.
+These implementation changes preserve the cursor/storage contracts; no measured throughput improvement is claimed.
 
 ## Vulkan resource monitor
 

@@ -10,7 +10,7 @@ export type BehaviorSpec =
     readonly kind: 'controlled_move';
     readonly entity: string;
     readonly speed: number;
-    readonly space: 'local' | 'world'
+    readonly space: 'local' | 'world';
 }
     | { readonly kind: 'spin'; readonly entity: string; readonly angular_velocity: Vec3 };
 
@@ -121,7 +121,7 @@ export type EditorCommand =
     readonly type: 'add_scene';
     readonly id: SceneId;
     readonly asset_path: string;
-    readonly document: SceneDocument
+    readonly document: SceneDocument;
 }
     | { readonly type: 'switch_scene'; readonly scene_id: SceneId }
     | { readonly type: 'remove_scene'; readonly scene_id: SceneId }
@@ -207,6 +207,44 @@ export interface EditorSnapshot {
     readonly snap: SnapSettings;
 }
 
+/** Authoritative UI state without copying the authored document or project. */
+export type EditorState = Omit<EditorSnapshot, 'document' | 'project'>;
+
+export interface WorldChange {
+    readonly changed_entities: readonly EntityKey[];
+    readonly removed_entities: readonly EntityKey[];
+    readonly camera_changed: boolean;
+    readonly lights_changed: boolean;
+    readonly topology_changed: boolean;
+    readonly full_resync: boolean;
+}
+
+export interface CommandReceipt {
+    readonly revision: number;
+    readonly scene_revision: number;
+    readonly change_cursor: number;
+    readonly changes: WorldChange;
+    readonly state_changed: boolean;
+    readonly project_changed: boolean;
+    readonly active_scene_id: SceneId;
+    readonly affected_scenes: readonly SceneId[];
+}
+
+export type EditorCommandUpdate =
+    | {
+    readonly kind: 'snapshot';
+    readonly receipt: CommandReceipt;
+    readonly snapshot: EditorSnapshot;
+}
+    | {
+    readonly kind: 'delta';
+    readonly receipt: CommandReceipt;
+    readonly state: EditorState;
+    readonly entities: readonly SceneEntity[];
+    readonly camera: Camera | null;
+    readonly lights: readonly Light[] | null;
+};
+
 export interface CommandDescriptor {
     readonly name: EditorCommand['type'];
     readonly label: string;
@@ -223,6 +261,7 @@ export interface EditorCapabilities {
     readonly max_history_entries: number;
     readonly history_budget_bytes: number;
     readonly embedded_viewport_supported: boolean;
+    readonly incremental_commands?: boolean;
 }
 
 export interface ModelAsset {

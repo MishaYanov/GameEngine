@@ -19,6 +19,12 @@ See [project lifecycle](../../project-lifecycle.md) for incompatible project-v1 
 Command descriptors report categories, undoability and Play availability so UI owners need
 not hardcode backend assumptions.
 
+The optional `incremental_commands` capability defaults to false when absent. Supporting hosts expose
+`EditorCommandUpdateDto`, tagged by `kind`: `snapshot` carries a receipt and full snapshot; `delta` carries the receipt,
+`EditorStateDto`, changed entity records and optional camera/lights. State excludes document/project copies. Structural,
+binding, entity-order and project changes use the full snapshot fallback. The response is captured atomically with
+command execution; it is not a later journal query. Angular validates and merges it before publishing accepted state.
+
 Viewport status includes draw/instance/triangle counts and optional asynchronous GPU time with a support flag.
 Unsupported/unavailable timing is not zero GPU cost. Native input/status/error events support the Angular game-pane
 owner. No shortcuts or mock document state are defined by this transport.

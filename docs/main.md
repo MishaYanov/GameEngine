@@ -9,7 +9,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
   UI wiring separately from available backend APIs.
 
 - [Architecture decisions: reading guide and dependencies](adr/README.md):
-  Start here for the engine parts, all twelve ADRs, the proposed decision sequence, and unresolved choices.
+  Start here for the engine parts, the ADR register, the proposed decision sequence, and unresolved choices.
 
 - [ADR-0002: Scene objects, components, presets, and inspector subjects](adr/0002-object-composition-and-components.md):
   Proposed common object model, capability composition, naming, defaults, and migration from existing scene data.

@@ -123,4 +123,68 @@ describe('LayoutPreferencesService', () => {
         expect(service.error()).toBeNull();
         expect(save).toHaveBeenCalledTimes(2);
     });
+
+    it('skips unchanged loaded and saved configurations without postponing a pending save', async () => {
+        vi.useFakeTimers();
+        load.mockResolvedValue({schema_version: 1, components: {left: {width: '30%'}}});
+        await service.load();
+        service.saveConfig('left', {width: '30%'});
+        expect(service.dirty()).toBe(false);
+        service.saveConfig('left', {width: '40%'});
+        await vi.advanceTimersByTimeAsync(200);
+        service.saveConfig('left', {width: '40%'});
+        await vi.advanceTimersByTimeAsync(100);
+        expect(save).toHaveBeenCalledExactlyOnceWith({
+            schema_version: 1,
+            components: {left: {width: '40%'}},
+        });
+        service.saveConfig('left', {width: '40%'});
+        await service.flush();
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(service.dirty()).toBe(false);
+    });
+
+    it('reuses a component baseline without persisting defaults until they change', async () => {
+        await service.load();
+        let baseline = JSON.stringify({width: '30%'});
+        baseline = service.saveConfig('left', {width: '30%'}, baseline);
+        expect(service.dirty()).toBe(false);
+        baseline = service.saveConfig('left', {width: '40%'}, baseline);
+        service.saveConfig('left', {width: '40%'}, baseline);
+        await service.flush();
+        expect(save).toHaveBeenCalledExactlyOnceWith({
+            schema_version: 1,
+            components: {left: {width: '40%'}},
+        });
+    });
+
+    it('isolates nested loaded and returned settings so cached comparisons cannot become stale', async () => {
+        const loaded = {schema_version: 1, components: {left: {nested: {width: 30}}}};
+        load.mockResolvedValue(loaded);
+        await service.load();
+        service.saveConfig('left', {nested: {width: 30}});
+        const decode = (value: unknown) => value as { nested: { width: number } };
+        const settings = await service.initialize('left', {nested: {width: 10}}, decode);
+        loaded.components.left.nested.width = 80;
+        settings.nested.width = 90;
+        service.saveConfig('right', {expanded: false});
+        await service.flush();
+        expect(save.mock.calls[0][0].components['left']).toEqual({nested: {width: 30}});
+        service.saveConfig('left', settings);
+        settings.nested.width = 100;
+        await service.flush();
+        expect(save.mock.calls[1][0].components['left']).toEqual({nested: {width: 90}});
+    });
+
+    it('does not lose dirty state when an unchanged configuration follows a failed save', async () => {
+        save.mockRejectedValueOnce(new Error('Disk full'));
+        await service.load();
+        const baseline = service.saveConfig('left', {width: '30%'});
+        await expect(service.flush()).rejects.toThrow('Disk full');
+        service.saveConfig('left', {width: '30%'}, baseline);
+        expect(service.dirty()).toBe(true);
+        await service.flush();
+        expect(save).toHaveBeenCalledTimes(2);
+        expect(service.dirty()).toBe(false);
+    });
 });

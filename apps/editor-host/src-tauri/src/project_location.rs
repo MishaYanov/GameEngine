@@ -41,7 +41,6 @@ impl std::error::Error for ProjectOpenError {
 }
 
 pub struct ProjectLocation {
-	root: PathBuf,
 	manifest: PathBuf,
 	assets: PathBuf,
 }
@@ -97,15 +96,7 @@ impl ProjectLocation {
 			return Err(ProjectOpenError::AssetsNotInProjectDirectory);
 		}
 
-		Ok(Self {
-			root,
-			manifest,
-			assets,
-		})
-	}
-
-	pub fn root(&self) -> &Path {
-		&self.root
+		Ok(Self { manifest, assets })
 	}
 
 	pub fn manifest(&self) -> &Path {

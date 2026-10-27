@@ -110,7 +110,7 @@ Set-Location 'D:\Coding\Game Engine'
 python launcher.py --run client
 ```
 
-Without the Python launcher, use:
+The PowerShell wrapper uses the same launcher commands:
 
 ```powershell
 .\dev.ps1 editor
@@ -143,9 +143,22 @@ Set-Location 'D:\Coding\Game Engine\apps\admin-dashboard'
 npm.cmd run desktop
 ```
 
-This starts the Angular development server on port 4300 and opens the Engine Admin desktop window. Keep its terminal open while working. Press Ctrl+C in that terminal to stop the development session.
+This starts the Angular development server on port 4301 and opens the Engine Admin desktop window. Keep its terminal
+open while working. Press Ctrl+C in that terminal to stop the development session.
 
-For the four-button launcher, run `python launcher.py` from the repository root. Select **Run the dashboard**, **Run Angular app in Tauri**, **Run backend graphics engine**, or **Check Rust for issues**. Each button opens its own terminal. Closing the launcher leaves those terminals running; stop them individually with Ctrl+C.
+For the interactive launcher, run `python launcher.py` or `.\dev.ps1` from the repository root. Use **Select apps** to
+choose Editor, Engine Admin, Game, Vulkan probe or Rust checks. Arrange their order with **Move up** / **Move down**,
+then **Run queue**. A **Terminal open** result means the command started; it does not certify a completed build or
+healthy app. **Cancel remaining** leaves already started apps running. **Stop app**, **Start / restart app** and
+**Stop all** manage only this launcher's process trees. Closing the launcher stops its owned apps and dev servers.
+
+Select a running Editor or Engine Admin and use **Open in Chrome** after its server is ready. The launcher checks
+the application's HTML identity marker on the expected port; Chrome previews lack native desktop features and stay
+open independently. The dashboard preview uses sample data. Occupied dev-server ports are rejected instead of attaching
+to another server. See [launcher details](../designs/terminal-launcher.md) for groups, ownership and CLI behavior.
+
+To start Editor and Engine Admin together, use `.\dev.ps1 workspace` or `python launcher.py --run workspace`.
+`all` adds Game. Group commands retain their parent terminal; Ctrl+C stops the owned app trees.
 
 For a read-only dashboard preview:
 
@@ -154,13 +167,16 @@ Set-Location 'D:\Coding\Game Engine\apps\admin-dashboard'
 npm.cmd start
 ```
 
-Open `http://127.0.0.1:4300/?preview`. This displays sample data; process controls and job execution require the desktop app.
+Open `http://127.0.0.1:4301/?preview`. This displays sample data; process controls and job execution require the desktop
+app.
 
 ### Overview: configure and manage applications
 
 Open **Overview → Workspace settings**. Set the engine workspace path and log directory, then click **Save settings**. Defaults point to the development checkout and shared logger directory. On Windows the logger normally uses `%LOCALAPPDATA%\GameEngine\logs`; `ENGINE_LOG_DIR` can override it.
 
-Under **Managed applications**, use **Start**, **Stop**, and **Restart**. If an application says **Build executable first**, build its package in **Builds** using the Development profile. These controls manage applications started by the dashboard. The separate Python launcher terminals have their own lifetime.
+Under **Managed applications**, use **Start**, **Stop**, and **Restart**. If an application says **Build executable
+first**, build its package in **Builds** using the Development profile. These controls manage applications started by
+the dashboard. The Python launcher separately owns apps it starts, and stops them when it closes.
 
 **Component health** shows lifecycle and heartbeat information. **Process history → Logs** opens records for a run. Stop applications and finish or cancel active jobs before changing the workspace. Closing the dashboard stops its owned application processes.
 
@@ -222,18 +238,18 @@ Keep the generated workspace layout and read its generated README for details. T
 
 ## 5. Common problems
 
-| Problem | Action |
-| --- | --- |
-| Cargo, Node or Python is unavailable | Install the required tool, check PATH and reopen the terminal. |
-| Launcher reports missing frontend dependencies | Run the corresponding `npm.cmd ci --prefix ...` command from first-time setup. |
-| Shader build cannot execute `glslc` | Install the Vulkan SDK; set `VULKAN_SDK` to its installation folder or add its `Bin` directory to PATH. |
-| Destination validation fails | Use an absolute path and follow the parent-folder versus full-folder rules above. |
-| Project folder already exists | Choose a fresh project name/path; neither workflow overwrites an existing project. |
-| Offline builder validation fails on dependencies | Clear the offline checkbox and retry with network access. |
-| Preview was invalidated | Click Preview files again after changing fields or source files. |
-| Dashboard controls are disabled in a browser | Start the desktop app with `npm.cmd run desktop`. |
-| Managed application executable is missing | Queue a Development build for its package, then return to Overview. |
-| Game exits or cannot initialize Vulkan | Check console/dashboard logs and GPU driver support; confirm assets remain alongside the installed runtime. |
-| Frontend development port is occupied | Stop the earlier development session; editor uses 4200 and admin dashboard uses 4300. |
+| Problem                                          | Action                                                                                                                       |
+|--------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| Cargo, Node or Python is unavailable             | Install the required tool, check PATH and reopen the terminal.                                                               |
+| Launcher reports missing frontend dependencies   | Run the corresponding `npm.cmd ci --prefix ...` command from first-time setup.                                               |
+| Shader build cannot execute `glslc`              | Install the Vulkan SDK; set `VULKAN_SDK` to its installation folder or add its `Bin` directory to PATH.                      |
+| Destination validation fails                     | Use an absolute path and follow the parent-folder versus full-folder rules above.                                            |
+| Project folder already exists                    | Choose a fresh project name/path; neither workflow overwrites an existing project.                                           |
+| Offline builder validation fails on dependencies | Clear the offline checkbox and retry with network access.                                                                    |
+| Preview was invalidated                          | Click Preview files again after changing fields or source files.                                                             |
+| Dashboard controls are disabled in a browser     | Start the desktop app with `npm.cmd run desktop`.                                                                            |
+| Managed application executable is missing        | Queue a Development build for its package, then return to Overview.                                                          |
+| Game exits or cannot initialize Vulkan           | Check console/dashboard logs and GPU driver support; confirm assets remain alongside the installed runtime.                  |
+| Frontend development port is occupied            | Stop the earlier development session; editor uses 4200 and admin dashboard uses 4301. The launcher rejects an occupied port. |
 
 Additional references: [launcher details](../designs/terminal-launcher.md), [installation pipeline](../designs/project-installation.md), and [admin dashboard technical notes](apps/admin-dashboard/README.md).

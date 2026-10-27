@@ -21,7 +21,7 @@ pub use buffer::{VulkanBuffer, VulkanBufferError};
 pub use camera::{CameraUniform, VulkanCamera, VulkanCameraError};
 pub use depth_buffer::{VulkanDepthBuffer, VulkanDepthBufferError};
 pub use device::{QueueFamilies, VulkanDevice, VulkanDeviceError};
-pub use frame::{FrameStatus, VulkanFrame, VulkanFrameError};
+pub use frame::{FrameStatus, FrameTargets, VulkanFrame, VulkanFrameError};
 pub use instance::{PhysicalDeviceInfo, VulkanInitError, VulkanInstance, format_api_version};
 pub use instancing::DrawMetrics;
 pub use lighting::{Light, LightingUniform};

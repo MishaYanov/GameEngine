@@ -1,6 +1,7 @@
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
+import {applyEditorUpdate} from './editor-updates';
 import type {
     CollisionSnapshot,
     EditorCapabilities,
@@ -150,10 +151,20 @@ export class EditorService {
 
     execute(command: EditorCommand): Promise<EditorSnapshot> {
         return this.enqueue(
-            'editor_execute',
+            'editor_execute_incremental',
             async () => {
                 const request: EditorCommandRequest = {expected_revision: this.revision(), command};
-                return this.accept(await this.native<EditorSnapshot>('editor_execute', {request}));
+                const capabilities = await this.loadCapabilities();
+                if (!capabilities.incremental_commands) {
+                    try {
+                        return this.accept(await this.native<EditorSnapshot>('editor_execute', {request}));
+                    } catch (cause: unknown) {
+                        throw this.recordError('editor_execute', cause);
+                    }
+                }
+                const previous = this.snapshotState()!;
+                const update = await this.native<unknown>('editor_execute_incremental', {request});
+                return this.accept(applyEditorUpdate(previous, update));
             },
             true,
         );
@@ -482,8 +493,18 @@ export class EditorService {
     }
 
     private recordError(operation: string, cause: unknown): EditorClientError {
-        const message =
-            cause instanceof Error
+        const backend =
+            typeof cause === 'object' &&
+            cause !== null &&
+            'code' in cause &&
+            typeof cause.code === 'string' &&
+            'message' in cause &&
+            typeof cause.message === 'string'
+                ? {code: cause.code, message: cause.message}
+                : null;
+        const message = backend
+            ? backend.message
+            : cause instanceof Error
                 ? cause.message
                 : typeof cause === 'string'
                     ? cause
@@ -492,7 +513,13 @@ export class EditorService {
             cause instanceof EditorClientError
                 ? cause
                 : new EditorClientError(
-                    /revision conflict/i.test(message) ? 'conflict' : 'backend',
+                    backend
+                        ? backend.code === 'conflict'
+                            ? 'conflict'
+                            : 'backend'
+                        : operation !== 'editor_execute_incremental' && /revision conflict/i.test(message)
+                            ? 'conflict'
+                            : 'backend',
                     operation,
                     message,
                     cause,

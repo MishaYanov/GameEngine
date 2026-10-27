@@ -28,7 +28,7 @@ pub use camera::Camera;
 pub use camera_controller::CameraController;
 pub use engine::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineBuilder};
 pub use entity_key::EntityKey;
-pub use input::{InputState, Key};
+pub use input::{InputButton, InputState, Key, MouseButton, NativeKeyCode};
 pub use picking::CpuCameraRay;
 pub use scene_data::SceneData;
 pub use time::FrameClock;

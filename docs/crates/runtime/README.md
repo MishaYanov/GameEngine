@@ -59,9 +59,27 @@ adapter expose it while Play is active. `set_controlled_input` supplies normaliz
 `set_input` requires an individual target on that list. SceneEditor also provides `set_play_input` and
 `set_entity_play_input` adapters. These helpers preserve the existing input-transition clock reset behavior.
 
-`input::MovementBindings` centralizes normalized two-axis held-key input, with `WASD` and `ARROWS` presets. Camera
-movement uses arrows; SceneEditor's legacy Play input uses WASD. This helper does not implement the proposed action
-mapping and possession system in ADR-0010.
+`MovementTarget::{AllControlled, Entity(key)}` routes normalized movement through `set_targeted_input`. SceneEditor
+starts Play with `AllControlled`; `set_play_input_target(target, input)` validates a selected controlled entity, clears
+old movement and suppresses held buttons until release. Replacing the project or starting/stopping Play resets the
+target. `set_play_movement_bindings(bindings, input)` likewise clears old movement and suppresses held buttons when
+the mapping changes. This is explicit movement routing, not a general possession or player-controller system.
+
+## Physical input and movement profiles
+
+`input::InputState` tracks keyboard and mouse buttons via `InputButton::{Key, Mouse}`. `press`, `release`, `is_held`,
+`just_pressed` and `just_released` accept either button type. Repeated presses keep one pressed edge; `end_frame`
+clears edges, `suppress_held` prevents held buttons from rearming until release, and `reset` clears all input state.
+`Key` identifies physical positions, including named international/media/function keys and platform-tagged
+`NativeKeyCode` values for unidentified keys. Mouse buttons include left/right/middle/back/forward and numeric extras.
+These types are independent of winit and do not represent typed text, IME input, cursor positions or analog axes.
+
+`input::MovementBindings` provides normalized two-axis held-key input with `WASD` and `ARROWS` presets. Camera movement
+uses arrows; SceneEditor's Play input defaults to WASD and accepts a replacement mapping. `InputProfile` serializes
+schema version 1 and four keyboard movement bindings as bounded JSON, rejecting unknown fields, unsupported versions
+and input over 4 KiB. The native game exposes [profile loading](../../apps/game/README.md#movement-input-profiles).
+Mouse support in InputState does not make mouse buttons valid movement-profile keys. General action mapping,
+contexts, gamepad support and possession remain proposed in ADR-0010.
 
 ## Scene and asset modules
 

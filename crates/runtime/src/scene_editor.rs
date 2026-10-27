@@ -1,9 +1,5 @@
 //! Compatibility adapter for the native development harness. Authoring and
 //! undo/redo are delegated to the same CPU EditorSession used by Tauri.
-pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
-pub use engine_core::simulation_session::SimulationSession;
-use std::collections::HashMap;
-
 use crate::input::MovementBindings;
 use crate::{
 	Camera, EntityKey, InputState, Key, Transform,
@@ -18,6 +14,9 @@ use crate::{
 	picking::{self, CameraRay},
 	scene::{EntityId, EntitySnapshot, MAX_SCENE_RENDER_OBJECTS, Scene},
 };
+pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
+pub use engine_core::simulation_session::{MovementTarget, SimulationSession};
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct SceneEditor {
@@ -25,6 +24,8 @@ pub struct SceneEditor {
 	resources: HashMap<EntityKey, EntitySnapshot>,
 	selected: Option<EntityId>,
 	movement_entity: Option<EntityId>,
+	play_input_target: MovementTarget,
+	play_movement_bindings: MovementBindings,
 }
 
 impl SceneEditor {
@@ -76,6 +77,7 @@ impl SceneEditor {
 			},
 		})?;
 		self.session = Some(next);
+		self.play_input_target = MovementTarget::default();
 		Ok(())
 	}
 
@@ -101,6 +103,7 @@ impl SceneEditor {
 		self.initialize(scene)?;
 		self.finish_gesture()?;
 		self.execute_core(Command::StartPlay)?;
+		self.play_input_target = MovementTarget::default();
 		let session = self.session.as_ref().expect("initialized session");
 		scene.synchronize(&session.render_document())?;
 		Ok(())
@@ -108,6 +111,7 @@ impl SceneEditor {
 
 	pub fn stop_play(&mut self, scene: &mut Scene) -> Result<(), String> {
 		self.execute_core(Command::StopPlay)?;
+		self.play_input_target = MovementTarget::default();
 		let document = self
 			.session
 			.as_ref()
@@ -134,8 +138,8 @@ impl SceneEditor {
 			.play_controlled_targets()
 			.is_some_and(|targets| !targets.is_empty())
 		{
-			let direction = movement_direction(input);
-			self.set_play_input([direction[0], direction[1], 0.0])?;
+			let direction = self.play_movement_bindings.direction(input);
+			self.route_play_input([direction[0], direction[1], 0.0])?;
 		}
 
 		let session = self.session.as_mut().expect("initialized session");
@@ -167,6 +171,25 @@ impl SceneEditor {
 		Ok(())
 	}
 
+	pub fn set_play_movement_bindings(
+		&mut self,
+		bindings: MovementBindings,
+		input: &mut InputState,
+	) -> bool {
+		if self.play_movement_bindings == bindings {
+			return false;
+		}
+
+		if let Some(session) = self.session.as_mut() {
+			session.clear_play_input();
+		}
+
+		input.suppress_held();
+		self.play_movement_bindings = bindings;
+
+		true
+	}
+
 	pub fn set_entity_play_input(
 		&mut self,
 		entity: &EntityKey,
@@ -177,6 +200,10 @@ impl SceneEditor {
 			movement,
 		})?;
 		Ok(())
+	}
+
+	pub fn play_movement_bindings(&self) -> &MovementBindings {
+		&self.play_movement_bindings
 	}
 
 	fn initialize(&mut self, scene: &Scene) -> Result<(), String> {
@@ -559,6 +586,57 @@ impl SceneEditor {
 			self.select(scene, id)?;
 		}
 		Ok(())
+	}
+
+	pub fn play_input_target(&self) -> &MovementTarget {
+		&self.play_input_target
+	}
+
+	pub fn set_play_input_target(
+		&mut self,
+		target: MovementTarget,
+		input: &mut InputState,
+	) -> Result<bool, String> {
+		let session = self
+			.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?;
+
+		let targets = session
+			.play_controlled_targets()
+			.ok_or("Play mode is not active")?;
+
+		if let MovementTarget::Entity(entity) = &target
+			&& !targets.contains(entity)
+		{
+			return Err("Input target has no configured controlled movement behavior".into());
+		}
+
+		if self.play_input_target == target {
+			return Ok(false);
+		}
+
+		session.clear_play_input();
+		input.suppress_held();
+		self.play_input_target = target;
+
+		Ok(true)
+	}
+
+	pub fn play_movement_held(&self, input: &InputState) -> bool {
+		self.is_playing()
+			&& !self.simulation_paused()
+			&& self
+				.play_controlled_targets()
+				.is_some_and(|targets| !targets.is_empty())
+			&& self.play_movement_bindings.any_held(input)
+	}
+
+	fn route_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
+		match self.play_input_target.clone() {
+			MovementTarget::AllControlled => self.set_play_input(movement),
+			MovementTarget::Entity(entity) => self.set_entity_play_input(&entity, movement),
+		}
 	}
 }
 

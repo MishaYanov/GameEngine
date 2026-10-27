@@ -28,28 +28,45 @@ pub struct LogFilter {
 }
 impl LogFilter {
 	pub fn matches(&self, entry: &LogEntry) -> bool {
-		self.operation_id
+		self.prepare().matches(entry)
+	}
+	fn prepare(&self) -> PreparedFilter<'_> {
+		PreparedFilter {
+			filter: self,
+			search: self.search.as_ref().map(|query| query.to_lowercase()),
+		}
+	}
+}
+struct PreparedFilter<'a> {
+	filter: &'a LogFilter,
+	search: Option<String>,
+}
+impl PreparedFilter<'_> {
+	fn matches(&self, entry: &LogEntry) -> bool {
+		let filter = self.filter;
+		filter
+			.operation_id
 			.as_ref()
 			.is_none_or(|v| entry.correlation.operation_id.as_ref() == Some(v))
-			&& self.severity.is_none_or(|v| v == entry.level)
-			&& self
+			&& filter.severity.is_none_or(|v| v == entry.level)
+			&& filter
 				.application
 				.as_ref()
 				.is_none_or(|v| v == &entry.application)
-			&& self
+			&& filter
 				.component
 				.as_ref()
 				.is_none_or(|v| v == &entry.component)
-			&& self
+			&& filter
 				.session_id
 				.as_ref()
 				.is_none_or(|v| v == &entry.session_id)
-			&& self.from_ms.is_none_or(|v| entry.timestamp_ms >= v)
-			&& self.to_ms.is_none_or(|v| entry.timestamp_ms <= v)
+			&& filter.from_ms.is_none_or(|v| entry.timestamp_ms >= v)
+			&& filter.to_ms.is_none_or(|v| entry.timestamp_ms <= v)
 			&& self
 				.search
 				.as_ref()
-				.is_none_or(|v| entry.message.to_lowercase().contains(&v.to_lowercase()))
+				.is_none_or(|v| entry.message.to_lowercase().contains(v))
 	}
 }
 #[derive(Clone, Debug, Serialize)]
@@ -80,6 +97,14 @@ struct Checkpoint {
 	next: u64,
 	entries: VecDeque<CollectedLog>,
 	highwater: BTreeMap<String, u64>,
+}
+#[derive(Serialize)]
+struct CheckpointRef<'a> {
+	version: u32,
+	id: &'a str,
+	next: u64,
+	entries: &'a VecDeque<CollectedLog>,
+	highwater: &'a BTreeMap<String, u64>,
 }
 #[derive(Default)]
 struct FileCursor {
@@ -320,22 +345,24 @@ impl Collector {
 		true
 	}
 	pub fn page(&self, after: u64, limit: usize, filter: &LogFilter) -> LogPage {
-		let matching_count = self
-			.entries
-			.iter()
-			.filter(|e| filter.matches(&e.entry))
-			.count();
-		let pending: Vec<_> = self
-			.entries
-			.iter()
-			.filter(|e| e.cursor > after && filter.matches(&e.entry))
-			.collect();
-		let entries = pending
-			.iter()
-			.take(limit.clamp(1, 500))
-			.map(|e| (*e).clone())
-			.collect::<Vec<_>>();
-		let has_more = pending.len() > entries.len();
+		let filter = filter.prepare();
+		let limit = limit.clamp(1, 500);
+		let mut matching_count = 0;
+		let mut entries = Vec::with_capacity(limit.min(self.entries.len()));
+		let mut has_more = false;
+		for entry in &self.entries {
+			if !filter.matches(&entry.entry) {
+				continue;
+			}
+			matching_count += 1;
+			if entry.cursor > after {
+				if entries.len() < limit {
+					entries.push(entry.clone());
+				} else {
+					has_more = true;
+				}
+			}
+		}
 		let next_cursor = if has_more {
 			entries.last().map_or(after, |e| e.cursor)
 		} else {
@@ -358,12 +385,12 @@ impl Collector {
 		if !self.dirty {
 			return;
 		}
-		let state = Checkpoint {
+		let state = CheckpointRef {
 			version: 1,
-			id: self.id.clone(),
+			id: &self.id,
 			next: self.next,
-			entries: self.entries.clone(),
-			highwater: self.highwater.clone(),
+			entries: &self.entries,
+			highwater: &self.highwater,
 		};
 		match save_json(&self.checkpoint, &state) {
 			Ok(()) => {
@@ -380,6 +407,7 @@ impl Collector {
 			.map(|e| &e.entry)
 	}
 	pub fn export(&self, directory: &Path, filter: &LogFilter) -> io::Result<(PathBuf, usize)> {
+		let filter = filter.prepare();
 		fs::create_dir_all(directory)?;
 		let path = directory.join(format!("logs-{}-{}.jsonl", now_ms(), self.next));
 		let mut file = fs::OpenOptions::new()

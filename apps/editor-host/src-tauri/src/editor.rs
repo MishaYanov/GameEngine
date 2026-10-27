@@ -362,6 +362,52 @@ impl EditorWorkspace {
 		self.execute_receipt(request).map_err(|e| e.to_string())?;
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
+	pub fn execute_incremental(
+		&mut self,
+		request: EditorCommandRequest,
+	) -> Result<bridge::editor::EditorCommandUpdateDto, runtime::BackendError> {
+		use bridge::editor::EditorCommandUpdateDto;
+		let before = self.backend.session().authored_document();
+		let receipt = self.execute_receipt(request)?;
+		let after = self.backend.session().authored_document();
+		let document_changed = !std::sync::Arc::ptr_eq(&before, &after);
+		// The change journal is a notification contract. Bindings and entity order
+		// are not represented by its key lists, so explicitly resync those cases.
+		let requires_snapshot = receipt.changes.full_resync
+			|| receipt.changes.topology_changed
+			|| receipt.project_changed
+			|| (document_changed
+				&& (before.bindings != after.bindings
+					|| !before
+						.entities
+						.iter()
+						.map(|e| &e.key)
+						.eq(after.entities.iter().map(|e| &e.key))));
+		if requires_snapshot {
+			return Ok(EditorCommandUpdateDto::Snapshot {
+				receipt,
+				snapshot: self.backend.snapshot()?,
+			});
+		}
+		let changed: HashSet<_> = receipt.changes.changed_entities.iter().collect();
+		let entities = if changed.is_empty() {
+			Vec::new()
+		} else {
+			after
+				.entities
+				.iter()
+				.filter(|e| changed.contains(&e.key))
+				.cloned()
+				.collect()
+		};
+		Ok(EditorCommandUpdateDto::Delta {
+			state: self.backend.session().state(),
+			entities,
+			camera: receipt.changes.camera_changed.then(|| after.camera.clone()),
+			lights: receipt.changes.lights_changed.then(|| after.lights.clone()),
+			receipt,
+		})
+	}
 	pub fn execute_receipt(
 		&mut self,
 		request: EditorCommandRequest,
@@ -468,11 +514,6 @@ impl EditorWorkspace {
 		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
 		engine_logger::info!(target: "editor", "Scene saved: generation={}, revision={}", self.generation, self.backend.session().revision());
 		self.backend.snapshot().map_err(|e| e.to_string())
-	}
-
-	/// Compatibility API: calling reload explicitly discards workspace edits.
-	pub fn reload(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
-		self.reload_with_policy(revision, ReloadPolicy::DiscardUnsaved)
 	}
 
 	pub fn reload_with_policy(

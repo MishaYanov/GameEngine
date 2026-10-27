@@ -46,11 +46,7 @@ export class EditorComponentService {
         const save = () => {
             if (!this.initialized() || activeKey !== key()) return;
             const current = {...defaults, ...decode(config())};
-            const serialized = JSON.stringify(current);
-            if (serialized !== baseline) {
-                this.preferences.saveConfig(activeKey, current);
-                baseline = serialized;
-            }
+            baseline = this.preferences.saveConfig(activeKey, current, baseline);
         };
         effect(save);
         this.destroyRef.onDestroy(() => {

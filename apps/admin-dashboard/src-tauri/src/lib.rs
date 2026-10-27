@@ -51,7 +51,7 @@ pub fn save_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
 		.ok_or_else(|| io::Error::other("Missing data directory"))?;
 	fs::create_dir_all(parent)?;
 	let temporary = path.with_extension("tmp");
-	let mut file = fs::File::create(&temporary)?;
+	let mut file = io::BufWriter::new(fs::File::create(&temporary)?);
 	serde_json::to_writer(&mut file, value)?;
 	file.flush()?;
 	drop(file);
@@ -143,16 +143,18 @@ impl AdminService {
 			}
 		}
 		self.collector.persist();
-		if let Err(error) = save_json(&self.data.join("components.json"), &self.registry) {
-			self.collector.health.checkpoint_error = Some(error.to_string());
-		}
+		self.registry.persist(&self.data.join("components.json"));
 	}
 	pub fn snapshot(&self) -> DashboardSnapshot {
+		let mut collector = self.collector.health.clone();
+		if let Some(error) = self.registry.persistence_error() {
+			collector.checkpoint_error = Some(error.into());
+		}
 		DashboardSnapshot {
 			workspace: self.workspace.to_string_lossy().into_owned(),
 			log_directory: self.collector.directory.to_string_lossy().into_owned(),
 			data_directory: self.data.to_string_lossy().into_owned(),
-			collector: self.collector.health.clone(),
+			collector,
 			components: self.registry.snapshot(now_ms()),
 			processes: self
 				.processes

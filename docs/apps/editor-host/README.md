@@ -27,6 +27,7 @@ for opening the shell.
 |---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
 | editor_capabilities / editor_open / editor_snapshot                                               | Protocol/schema descriptors and authoritative document             |
 | editor_execute / editor_save / editor_reload                                                      | Revision-aware command dispatch, authored persistence, replacement |
+| editor_execute_incremental                                                                        | Atomic receipt plus changed UI data or full snapshot fallback      |
 | editor_assets / editor_import_model                                                               | Catalog and static glTF scene import                               |
 | editor_export_prefab / editor_instantiate_prefab / editor_save_prefab / editor_load_prefab        | Prefab data and scoped files                                       |
 | editor_collisions                                                                                 | Validated collision snapshot                                       |
@@ -39,6 +40,13 @@ owner to interpret; it is not a domain command by itself.
 
 The existing engine_status/create_project commands remain for status and the setup installer; they are separate from the
 new editor document API.
+
+`editor_execute_incremental` executes and captures its response under the same workspace lock. It returns
+`EditorCommandUpdateDto::Delta` with lightweight editor state, changed authored entities and optional camera/lights.
+Full resync, topology, project, binding or entity-order changes return `Snapshot` instead. Capability negotiation
+advertises `incremental_commands: true`; the legacy full-snapshot command remains available. The handler emits
+`editor://changes-ready` with the receipt cursor after execution. This reduces returned data for compatible edits;
+command/history processing may still clone full scene data.
 
 ## Project lifecycle and multi-scene persistence
 

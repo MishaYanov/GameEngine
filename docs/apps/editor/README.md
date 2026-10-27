@@ -26,6 +26,7 @@ demand in the host, not unconditionally before the window opens.
 |--------------------------------|----------------------------------------------------------------------------------------------------------------|
 | `editor.models.ts`             | Typed scene3 documents, commands, snapshot/capability/error and viewport metrics/input shapes                  |
 | `editor.service.ts`            | Read-only signals, native command queues, revision-aware edits, imports/prefabs/collisions, viewport lifecycle |
+| `editor-updates.ts`            | Validate incremental command replies and merge authoritative deltas before publishing signals                  |
 | `engine-viewport.directive.ts` | Attach a native child to one existing Angular DOM pane; observe bounds/visibility and emit input/status/errors |
 
 EditorService exposes document, selection, dirty, playing, pending/busy, capabilities, assets, collisions and viewport
@@ -33,6 +34,25 @@ signals. Open a project, load capabilities, execute typed intent, and accept the
 Commands use expected_revision; errors are reported and recover the in-memory snapshot where possible, with no silent
 replay or disk reload. The document queue is bounded at 256 pending operations; continuous input should be coalesced by
 its owner.
+
+When capabilities advertise `incremental_commands`, `execute()` uses `editor_execute_incremental`. The host returns a
+receipt and authoritative state with changed entities, optional camera/lights, or a complete snapshot for structural
+changes. The client validates receipt/state consistency and entity coverage before accepting the whole response.
+Unchanged document parts retain their references. Missing capability support uses the older `editor_execute`
+full-snapshot route; failed incremental edits are recovered by querying state, never by replaying the command.
+
+The viewport lifecycle uses a separate serialized queue, capped at 32 regular operations. Repeated pending bounds,
+status and detach requests are coalesced; an attach creates a lifecycle boundary for subsequent bounds. A coalesced
+detach can exceed the regular cap so teardown can finish. Listener cleanup disables local callbacks even if the native
+window has already closed.
+
+## Layout preferences
+
+`LayoutPreferencesService` retains schema-1 component configs under stable keys. Load and initialization return cloned
+values so a component cannot mutate retained preferences through a decoded object. `saveConfig(key, value, baseline?)`
+returns the serialized comparison baseline; unchanged configs avoid another write. EditorComponentService reuses this
+baseline when connecting a component. Changed configs are cloned through JSON, debounced for 300 ms and flushed in
+order. Layout settings remain separate from authored project/scene state.
 
 The core service does not assign shortcuts. Future UI controls and key bindings use the same execute path. Do not mutate
 signal snapshots or duplicate runtime scene semantics in components.

@@ -7,6 +7,7 @@ import {LAYOUT_PREFERENCES_STORAGE} from './layout-preferences-storage';
 export class LayoutPreferencesService {
     private readonly storage = inject(LAYOUT_PREFERENCES_STORAGE);
     private preferences: LayoutPreferences = {schema_version: 1, components: {}};
+    private readonly serializedComponents = new Map<string, string>();
     private loadRequest: Promise<void> | undefined;
     private timer: ReturnType<typeof setTimeout> | undefined;
     private queue: Promise<void> = Promise.resolve();
@@ -42,9 +43,11 @@ export class LayoutPreferencesService {
                 }
                 this.preferences = {
                     schema_version: 1,
-                    components: Object.fromEntries(
-                        Object.entries(value['components']).filter(
-                            (entry): entry is [string, Record<string, unknown>] => isConfigObject(entry[1]),
+                    components: structuredClone(
+                        Object.fromEntries(
+                            Object.entries(value['components']).filter(
+                                (entry): entry is [string, Record<string, unknown>] => isConfigObject(entry[1]),
+                            ),
                         ),
                     ),
                 };
@@ -62,26 +65,36 @@ export class LayoutPreferencesService {
         decode: (value: unknown) => Config<T>,
     ): Promise<T> {
         await this.load();
-        return {...defaults, ...decode(this.preferences.components[key])};
+        return {...defaults, ...decode(structuredClone(this.preferences.components[key]))};
     }
 
-    saveConfig<T extends object>(key: string, value: T): void {
+    /** Return the comparison baseline so component owners can reuse this serialization. */
+    saveConfig<T extends object>(key: string, value: T, baseline?: string): string {
         if (!this.ready()) throw new Error('Initialize layout preferences before changing them.');
         if (!key.trim()) throw new Error('A stable layout preference key is required.');
         const serialized = JSON.stringify(value);
-        if (serialized === JSON.stringify(this.preferences.components[key])) return;
+        if (serialized === undefined) throw new Error('Layout config must be a JSON object.');
+        if (serialized === baseline) return serialized;
+        let previous = this.serializedComponents.get(key);
+        if (previous === undefined && this.preferences.components[key] !== undefined) {
+            previous = JSON.stringify(this.preferences.components[key]);
+            this.serializedComponents.set(key, previous);
+        }
+        if (serialized === previous) return serialized;
         const copy: unknown = JSON.parse(serialized);
         if (!isConfigObject(copy)) throw new Error('Layout config must be a JSON object.');
         this.preferences = {
             ...this.preferences,
             components: {...this.preferences.components, [key]: copy},
         };
+        this.serializedComponents.set(key, serialized);
         this.version += 1;
         this.dirtyState.set(true);
         clearTimeout(this.timer);
         this.timer = setTimeout(() => {
             void this.flush().catch(() => undefined);
         }, 300);
+        return serialized;
     }
 
     flush(): Promise<void> {

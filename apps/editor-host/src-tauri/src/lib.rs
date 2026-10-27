@@ -62,6 +62,7 @@ pub fn run() {
 			editor_save_scene_as,
 			editor_snapshot,
 			editor_execute,
+			editor_execute_incremental,
 			editor_execute_receipt,
 			editor_changes,
 			editor_save_project,

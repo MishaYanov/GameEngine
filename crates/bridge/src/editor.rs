@@ -4,6 +4,24 @@ pub use engine_core::events::{BackendEvent, BackendEventKind, ChangePage};
 pub use engine_core::{BackendError, BackendErrorCode, CommandReceipt};
 use serde::{Deserialize, Serialize};
 
+/// A command receipt and its authoritative UI data captured under one host lock.
+/// Structural changes use snapshots so entity order and scene identity stay exact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EditorCommandUpdateDto {
+	Snapshot {
+		receipt: CommandReceipt,
+		snapshot: EditorSnapshotDto,
+	},
+	Delta {
+		receipt: CommandReceipt,
+		state: EditorStateDto,
+		entities: Vec<engine_core::scene_data::EntityData>,
+		camera: Option<engine_core::scene_data::CameraData>,
+		lights: Option<Vec<engine_core::scene_data::LightData>>,
+	},
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewportBoundsDto {

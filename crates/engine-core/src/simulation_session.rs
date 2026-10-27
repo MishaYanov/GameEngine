@@ -13,6 +13,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::{collections::HashMap, sync::Arc};
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MovementTarget {
+	#[default]
+	AllControlled,
+	Entity(EntityKey),
+}
+
 #[derive(Default)]
 pub struct InputFrame {
 	movement: HashMap<EntityKey, [f32; 3]>,
@@ -278,6 +285,17 @@ impl SimulationSession {
 
 		let movement = normalized_input(movement)?;
 		Ok(self.apply_input(entity, movement))
+	}
+
+	pub fn set_targeted_input(
+		&mut self,
+		target: &MovementTarget,
+		movement: [f32; 3],
+	) -> Result<bool, String> {
+		match target {
+			MovementTarget::AllControlled => self.set_controlled_input(movement),
+			MovementTarget::Entity(entity) => self.set_input(entity, movement),
+		}
 	}
 
 	fn apply_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> bool {

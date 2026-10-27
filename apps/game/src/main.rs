@@ -2,6 +2,7 @@ mod editor_panel;
 mod editor_tools;
 mod game;
 mod gizmo_overlay;
+mod native_input;
 mod selection_overlay;
 
 use editor_panel::PanelView;
@@ -17,10 +18,13 @@ use ::game::launch::{LaunchMode, LaunchOptions};
 use engine_logger::ResultLogExt;
 use renderer::{WindowRenderer, vulkan::CameraUniform};
 use runtime::assets::AssetManager;
+use runtime::input::{InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
 use runtime::scene_editor::ProjectData;
 use runtime::scene_io;
 use std::{
-	path::PathBuf,
+	fs::File,
+	io::Read,
+	path::{Path, PathBuf},
 	sync::Arc,
 	time::{Duration, Instant},
 };
@@ -28,7 +32,7 @@ use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
 	event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-	keyboard::{KeyCode, PhysicalKey},
+	keyboard::PhysicalKey,
 	window::{CursorGrabMode, Window, WindowId},
 };
 
@@ -155,6 +159,7 @@ impl GameApp {
 		if self.window_occluded {
 			return false;
 		}
+
 		if self
 			.window
 			.as_ref()
@@ -162,20 +167,13 @@ impl GameApp {
 		{
 			return false;
 		}
+
 		self.editor.needs_tick()
+			|| self.editor.play_movement_held(&self.input)
 			|| (!self.standalone_runtime
 				&& self.authored.is_none()
-				&& [Key::W, Key::A, Key::S, Key::D]
-					.into_iter()
-					.any(|key| self.input.is_held(key)))
-			|| [
-				Key::ArrowUp,
-				Key::ArrowDown,
-				Key::ArrowLeft,
-				Key::ArrowRight,
-			]
-			.into_iter()
-			.any(|key| self.input.is_held(key))
+				&& MovementBindings::WASD.any_held(&self.input))
+			|| MovementBindings::ARROWS.any_held(&self.input)
 	}
 
 	fn request_input_frame(&mut self) {
@@ -361,6 +359,8 @@ impl GameApp {
 		self.scene = loaded.scene;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
+		let bindings = *self.editor.play_movement_bindings();
+		editor.set_play_movement_bindings(bindings, &mut self.input);
 		self.editor = editor;
 		self.tools = tools;
 		self.selection_overlay = overlay;
@@ -589,6 +589,8 @@ impl GameApp {
 		self.tools.templates.clear();
 		self.tools.drag = None;
 		self.tools.saved = Some(saved);
+		let bindings = *self.editor.play_movement_bindings();
+		editor.set_play_movement_bindings(bindings, &mut self.input);
 		self.editor = editor;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
@@ -758,6 +760,19 @@ impl GameApp {
 			window.set_cursor_visible(true);
 		}
 	}
+
+	fn set_play_movement_bindings(&mut self, bindings: MovementBindings) -> bool {
+		let changed = self
+			.editor
+			.set_play_movement_bindings(bindings, &mut self.input);
+
+		if changed {
+			self.clock.reset();
+			self.request_input_frame();
+		}
+
+		changed
+	}
 }
 
 impl ApplicationHandler for GameApp {
@@ -807,23 +822,32 @@ impl ApplicationHandler for GameApp {
 			WindowEvent::CursorLeft { .. } => {
 				self.cursor_position = None;
 			}
-			WindowEvent::MouseInput {
-				state: ElementState::Pressed,
-				button: MouseButton::Left,
-				..
-			} if !self.standalone_runtime => {
-				if let Err(error) = self.left_press() {
-					self.report_editor_error(error);
+			WindowEvent::MouseInput { state, button, .. } => {
+				// Record first so editor mode/property changes can suppress the click.
+				let input_button = native_input::mouse_button(button);
+				match state {
+					ElementState::Pressed => self.input.press(input_button),
+					ElementState::Released => self.input.release(input_button),
 				}
-				self.request_input_frame();
-			}
-			WindowEvent::MouseInput {
-				state: ElementState::Released,
-				button: MouseButton::Left,
-				..
-			} if !self.standalone_runtime => {
-				if let Err(error) = self.finish_drag() {
-					self.report_editor_error(error);
+				match (button, state) {
+					(MouseButton::Left, ElementState::Pressed) if !self.standalone_runtime => {
+						if let Err(error) = self.left_press() {
+							self.report_editor_error(error);
+						}
+					}
+					(MouseButton::Left, ElementState::Released) if !self.standalone_runtime => {
+						if let Err(error) = self.finish_drag() {
+							self.report_editor_error(error);
+						}
+					}
+					(MouseButton::Right, ElementState::Pressed) => {
+						if !self.standalone_runtime {
+							self.cancel_drag();
+							self.tools.panel.edit = None;
+						}
+						self.set_mouse_capture(true);
+					}
+					_ => {}
 				}
 				self.request_input_frame();
 			}
@@ -841,70 +865,20 @@ impl ApplicationHandler for GameApp {
 					self.request_input_frame();
 				}
 			}
-			WindowEvent::MouseInput {
-				state: ElementState::Pressed,
-				button: MouseButton::Right,
-				..
-			} => {
-				if !self.standalone_runtime {
-					self.cancel_drag();
-					self.tools.panel.edit = None;
-				}
-				self.set_mouse_capture(true);
-				self.request_input_frame();
-			}
 			WindowEvent::KeyboardInput { event, .. } => {
-				let PhysicalKey::Code(code) = event.physical_key else {
-					return;
-				};
 				if !self.standalone_runtime
 					&& event.state == ElementState::Pressed
+					&& let PhysicalKey::Code(code) = event.physical_key
 					&& self.editor_key(code, &event)
 				{
 					self.request_input_frame();
 					return;
 				}
 
-				let key = match code {
-					KeyCode::KeyW => Key::W,
-					KeyCode::KeyA => Key::A,
-					KeyCode::KeyS => Key::S,
-					KeyCode::KeyD => Key::D,
-					KeyCode::KeyQ => Key::Q,
-					KeyCode::KeyE => Key::E,
-					KeyCode::KeyR => Key::R,
-					KeyCode::KeyF => Key::F,
-					KeyCode::KeyN => Key::N,
-					KeyCode::KeyC => Key::C,
-					KeyCode::KeyZ => Key::Z,
-					KeyCode::KeyY => Key::Y,
-					KeyCode::ControlLeft => Key::ControlLeft,
-					KeyCode::ControlRight => Key::ControlRight,
-					KeyCode::Delete => Key::Delete,
-					KeyCode::Space => Key::Space,
-					KeyCode::Escape => Key::Escape,
-					KeyCode::ArrowUp => Key::ArrowUp,
-					KeyCode::ArrowDown => Key::ArrowDown,
-					KeyCode::ArrowLeft => Key::ArrowLeft,
-					KeyCode::ArrowRight => Key::ArrowRight,
-					KeyCode::Tab => Key::Tab,
-					KeyCode::F5 => Key::F5,
-					KeyCode::F6 => Key::F6,
-					KeyCode::F9 => Key::F9,
-					_ => return,
+				let Some(key) = native_input::keyboard_key(event.physical_key) else {
+					return;
 				};
 
-				if self.standalone_runtime
-					&& !matches!(
-						key,
-						Key::W
-							| Key::A | Key::S | Key::D
-							| Key::Space | Key::Escape
-							| Key::ArrowUp | Key::ArrowDown
-							| Key::ArrowLeft | Key::ArrowRight
-					) {
-					return;
-				}
 				self.request_input_frame();
 
 				match event.state {
@@ -1024,6 +998,28 @@ impl ApplicationHandler for GameApp {
 		}
 	}
 
+	fn device_event(
+		&mut self,
+		_event_loop: &ActiveEventLoop,
+		_device_id: DeviceId,
+		event: DeviceEvent,
+	) {
+		if !self.mouse_captured
+			|| self
+				.window
+				.as_ref()
+				.is_none_or(|window| !window.has_focus())
+		{
+			return;
+		}
+
+		if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+			self.request_input_frame();
+			self.camera_controller
+				.mouse_motion(&mut self.camera, dx, dy);
+		}
+	}
+
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
 		let Some(window) = self.window.as_ref() else {
 			event_loop.set_control_flow(ControlFlow::Wait);
@@ -1045,28 +1041,6 @@ impl ApplicationHandler for GameApp {
 				window.request_redraw();
 				event_loop.set_control_flow(ControlFlow::Wait);
 			}
-		}
-	}
-
-	fn device_event(
-		&mut self,
-		_event_loop: &ActiveEventLoop,
-		_device_id: DeviceId,
-		event: DeviceEvent,
-	) {
-		if !self.mouse_captured
-			|| self
-				.window
-				.as_ref()
-				.is_none_or(|window| !window.has_focus())
-		{
-			return;
-		}
-
-		if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
-			self.request_input_frame();
-			self.camera_controller
-				.mouse_motion(&mut self.camera, dx, dy);
 		}
 	}
 
@@ -1136,7 +1110,14 @@ fn run() -> Result<(), String> {
 		app.installed_project,
 		std::env::var("GAME_ENGINE_NATIVE_EDITOR_DEMO").as_deref() == Ok("1"),
 	)?;
+
+	let input_profile = match options.input_profile.as_deref() {
+		Some(path) => load_input_profile(path)?,
+		None => InputProfile::default(),
+	};
+
 	app.standalone_runtime = options.mode == LaunchMode::Player;
+	app.set_play_movement_bindings(input_profile.movement);
 	engine_logger::debug!(target: "game", "Launch configuration selected: mode={:?}, installed={}", options.mode, app.installed_project);
 
 	// Validate launch configuration before creating platform/GPU resources.
@@ -1165,6 +1146,35 @@ fn report_update_result(operation: &'static str, result: Result<(), String>, rep
 		*reported = false;
 		engine_logger::debug!(target: "game", "Game update recovered: operation={operation}");
 	}
+}
+
+fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
+	let file =
+		File::open(path).map_err(|error| format!("Cannot open input profile {path:?}: {error}"))?;
+
+	let metadata = file
+		.metadata()
+		.map_err(|error| format!("Cannot inspect input profile {path:?}: {error}"))?;
+
+	if !metadata.is_file() {
+		return Err(format!("Input profile {path:?} must be a regular file"));
+	}
+
+	let mut bytes = Vec::new();
+	file.take((MAX_INPUT_PROFILE_BYTES + 1) as u64)
+		.read_to_end(&mut bytes)
+		.map_err(|error| format!("Cannot read input profile {path:?}: {error}"))?;
+
+	if bytes.len() > MAX_INPUT_PROFILE_BYTES {
+		return Err(format!(
+			"Input profile {path:?} exceeds {MAX_INPUT_PROFILE_BYTES} bytes"
+		));
+	}
+
+	let json = std::str::from_utf8(&bytes)
+		.map_err(|error| format!("Input profile {path:?} is not valid UTF-8: {error}"))?;
+
+	InputProfile::from_json(json).map_err(|error| format!("Input profile {path:?}: {error}"))
 }
 
 #[cfg(test)]

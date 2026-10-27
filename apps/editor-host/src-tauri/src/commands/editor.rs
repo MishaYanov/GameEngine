@@ -75,6 +75,7 @@ async fn workspace<T: Send + 'static>(
 pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDto, String> {
 	trusted_window(&window)?;
 	Ok(EditorCapabilitiesDto {
+		incremental_commands: true,
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 		commands: CommandFactory::capabilities(),
@@ -151,7 +152,7 @@ pub async fn editor_open(
 	open_workspace(window, state, move |on_ready| {
 		EditorWorkspace::open_with_notifier(&asset_root, &scene_path, on_ready)
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -165,7 +166,7 @@ pub async fn editor_open_project(
 			.map_err(|error| error.to_string())?;
 		EditorWorkspace::open_project_with_notifier(location, on_ready)
 	})
-		.await
+	.await
 }
 #[tauri::command]
 pub async fn editor_snapshot(
@@ -193,6 +194,27 @@ fn backend_boundary(message: String) -> runtime::BackendError {
 		message,
 		current_revision: None,
 	}
+}
+/// Atomically execute and capture only the changed UI data. A separate query
+/// could observe another edit or workspace between receipt and synchronization.
+#[tauri::command]
+pub async fn editor_execute_incremental(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	request: EditorCommandRequest,
+) -> Result<bridge::editor::EditorCommandUpdateDto, runtime::BackendError> {
+	trusted_window(&window).map_err(backend_boundary)?;
+	let update = workspace(state, true, Some("execute_incremental"), move |w| {
+		Ok(w.execute_incremental(request))
+	})
+	.await
+	.map_err(backend_boundary)??;
+	let cursor = match &update {
+		bridge::editor::EditorCommandUpdateDto::Snapshot { receipt, .. }
+		| bridge::editor::EditorCommandUpdateDto::Delta { receipt, .. } => receipt.change_cursor,
+	};
+	let _ = window.emit("editor://changes-ready", cursor);
+	Ok(update)
 }
 /// Small typed response for frequent commands. Full snapshots remain an
 /// explicit query, so pointer motion and play input do not serialize the scene.
@@ -332,7 +354,7 @@ pub async fn editor_reload(
 	workspace(state, true, Some("reload"), move |w| {
 		w.reload_with_policy(expected_revision, policy.unwrap_or_default())
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -346,7 +368,7 @@ pub async fn editor_register_scene(
 	workspace(state, true, Some("register_scene"), move |w| {
 		w.register_scene(&path, expected_revision)
 	})
-		.await
+	.await
 }
 #[tauri::command]
 pub async fn editor_save_scene_as(

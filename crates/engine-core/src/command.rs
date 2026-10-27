@@ -194,6 +194,22 @@ pub struct SceneStateDto {
 	pub dirty: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorStateDto {
+	pub active_scene_id: SceneId,
+	pub project_dirty: bool,
+	pub scenes: Vec<SceneStateDto>,
+	pub revision: u64,
+	pub scene_revision: u64,
+	pub selection: Vec<String>,
+	pub mode: String,
+	pub paused: bool,
+	pub dirty: bool,
+	pub can_undo: bool,
+	pub can_redo: bool,
+	pub transaction: Option<String>,
+	pub snap: SnapSettingsDto,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSnapshotDto {
 	pub active_scene_id: SceneId,
 	pub project_dirty: bool,
@@ -221,6 +237,8 @@ pub struct CommandDescriptorDto {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorCapabilitiesDto {
+	#[serde(default)]
+	pub incremental_commands: bool,
 	pub protocol_version: u32,
 	pub scene_schema_version: u32,
 	pub commands: Vec<CommandDescriptorDto>,

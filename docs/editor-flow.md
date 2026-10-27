@@ -70,7 +70,8 @@ flowchart TD
   constructing the long-lived viewport renderer. A probe failure does not block the setup form.
 - Layout configuration follows `EditorComponentService.connectConfig()` → `LayoutPreferencesService.initialize()`.
   Later edits use `saveConfig()` and a 300 ms debounce before serialized `flush()` calls. This restores UI preferences,
-  not project documents.
+  not project documents. Config reads return clones; `saveConfig()` returns a reusable serialized baseline so unchanged
+  values avoid repeated persistence.
 - Production defaults to `/setup`; the development route factory uses `environment.startInEditor`. Explicit `/setup`
   and `/editor` deep links remain valid. Development also provides the design preview routes.
 - The Angular/Tauri development-server toolchain is distinct from the compiler's authored-project packaging flow.
@@ -269,9 +270,10 @@ sequenceDiagram
     Client->>Client: enqueue(), pending++, busy=true
     Note over Client: Serialized queue, maximum 256 pending operations
     Client->>Client: Read revision when queued action executes
-    Client->>Host: invoke editor_execute with revision and command
+    Client->>Client: loadCapabilities(): incremental_commands?
+    Client->>Host: invoke editor_execute_incremental with revision and command
     Host->>Host: trusted_window(), spawn_blocking(), lock editor
-    Host->>Workspace: execute(request)
+    Host->>Workspace: execute_incremental(request)
     Workspace->>Workspace: execute_receipt(): check_revision(), validate
     Workspace->>Engine: execute(request)
     Engine->>Engine: Verify revision, CommandFactory::validate()
@@ -285,12 +287,18 @@ sequenceDiagram
         Session-->>Engine: Accepted state
         Engine->>Engine: WorldChange::between(), publish journal events
         Engine-->>Workspace: CommandReceipt
-        Workspace->>Engine: snapshot()
-        Engine-->>Workspace: EditorSnapshot
-        Workspace-->>Host: EditorSnapshot
+        alt Structural, project, binding, order or full-resync change
+            Workspace->>Engine: snapshot()
+            Engine-->>Workspace: EditorSnapshot
+        else Compatible edit
+            Workspace->>Session: state() and changed authored entity records
+            Session-->>Workspace: EditorState plus optional camera/lights
+        end
+        Workspace-->>Host: Receipt and atomic snapshot or delta
         Host->>Host: Release editor lock
         Host->>Viewport: invalidate()
-        Host-->>Client: EditorSnapshot
+        Host-->>Client: EditorCommandUpdateDto
+        Client->>Client: applyEditorUpdate(): validate and merge
         Client->>Client: accept(), clear error, pending--
         Client-->>Caller: Resolve with snapshot
     else Rejected command / revision conflict
@@ -312,9 +320,15 @@ Recovery reads authoritative **in-memory** state using `editor_snapshot`; it doe
 itself fails, the last accepted snapshot remains. `recordError()` classifies revision conflicts and preserves explicit
 client errors. A rejected mutation is still rejected after recovery.
 
-The native host also exposes the smaller-response route `editor_execute_receipt()` → `editor://changes-ready` →
-`editor_changes(cursor)`. The current `EditorService.execute()` uses the full-snapshot route in the diagram. Merely
-receiving raw viewport input does not execute a command; its owner must map input to intent.
+The diagram shows the capability-enabled incremental route. Hosts without `incremental_commands` use the existing
+`editor_execute` full-snapshot route instead. Incremental replies capture the receipt and UI data under one workspace
+lock; the frontend verifies receipt/state revisions, scene identity and entity coverage before publishing anything.
+An invalid reply follows the recovery path without replaying the accepted command. Compatible deltas preserve
+unchanged document references; they do not remove full-scene cloning from every mutation/history operation.
+
+The host also exposes `editor_execute_receipt()` → `editor://changes-ready` → `editor_changes(cursor)` for journal
+consumers; incremental execution emits the same cursor notification. Merely receiving raw viewport input does not
+execute a command; its owner must map input to intent.
 
 | Identity                              | What it controls                                                      |
 |---------------------------------------|-----------------------------------------------------------------------|
@@ -324,7 +338,8 @@ receiving raw viewport input does not execute a command; its owner must map inpu
 | Journal `change_cursor`               | Position from which a consumer requests retained backend events.      |
 
 Source: `apps/editor/src/app/core/editor/editor.service.ts`,
-`apps/editor-host/src-tauri/src/editor.rs`, `crates/engine-core/src/engine.rs`,
+`apps/editor/src/app/core/editor/editor-updates.ts`, `apps/editor-host/src-tauri/src/editor.rs`,
+`crates/engine-core/src/engine.rs`,
 and `crates/engine-core/src/editor/{mod,operations,history}.rs`.
 
 ## 6. Save, reload, and build eligibility

@@ -181,8 +181,10 @@ impl WindowRenderer {
 			.frame
 			.draw(
 				&self.device,
-				&targets.swapchain,
-				&targets.depth,
+				FrameTargets {
+					swapchain: &targets.swapchain,
+					depth_buffer: &targets.depth,
+				},
 				&targets.pipelines,
 				&self.camera,
 				camera,

@@ -37,6 +37,38 @@ and [runtime](../../crates/runtime/README.md).
 Multi-scene authoring is not automatic gameplay scene transitions. Keep the manifest, scenes, models and asset
 dependencies together in an installed project.
 
+## Movement input profiles
+
+The native window adapter maps winit physical keyboard keys and mouse buttons into platform-independent runtime
+input types, preserving unidentified platform scan codes and extra mouse-button IDs. The default gameplay movement
+mapping is WASD. To choose another four-key mapping, pass a UTF-8 JSON file:
+
+```powershell
+cargo run -p game -- --player --input-profile .\movement.json
+```
+
+```json
+{
+  "schema_version": 1,
+  "movement": {
+    "negative_x": "arrow_left",
+    "positive_x": "arrow_right",
+    "negative_y": "arrow_down",
+    "positive_y": "arrow_up"
+  }
+}
+```
+
+`--input-profile` is accepted once in either launch mode; the default profile is used when omitted. The loader requires
+a regular file, reads at most 4 KiB plus one overflow byte and rejects invalid UTF-8, unknown fields or unsupported
+schema versions before opening platform/GPU resources. Relative paths follow the process working directory. Profiles
+are explicit launch inputs; scene/project files do not automatically store or select them.
+
+The profile changes controlled gameplay movement, including the native development harness's Play path. Camera arrows
+and editor tool shortcuts retain their own controls and may overlap a chosen mapping. Held configured movement keys
+can wake a static Play session; changing bindings or a movement target clears old movement and suppresses held input
+until release. See [runtime input contracts](../../crates/runtime/README.md#physical-input-and-movement-profiles).
+
 ## Resource and timing limits
 
 WindowRenderer owns GPU device/presentation resources; uploaded scene/cache owners must still release after idle and
