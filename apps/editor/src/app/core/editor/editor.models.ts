@@ -12,16 +12,22 @@ export type BehaviorSpec =
     readonly speed: number;
     readonly space: 'local' | 'world';
 }
-    | { readonly kind: 'spin'; readonly entity: string; readonly angular_velocity: Vec3 };
+    | { readonly kind: 'spin'; readonly entity: string; readonly angular_velocity: Vec3 }
+    | { readonly kind: 'shared'; readonly entity: string; readonly definition: string };
+
+export type BehaviorSettings =
+    | { readonly kind: 'controlled_move'; readonly speed: number; readonly space: 'local' | 'world' }
+    | { readonly kind: 'spin'; readonly angular_velocity: Vec3 };
 
 export interface ProjectData {
-    readonly schema_version: 2;
+    readonly schema_version: 3;
     readonly name: string;
     readonly scenes: readonly SceneDescriptor[];
     readonly startup_scene_id: SceneId;
     readonly fixed_hz: number;
     readonly max_catchup_steps: number;
     readonly behaviors: readonly { readonly scene_id: SceneId; readonly behavior: BehaviorSpec }[];
+    readonly behavior_definitions: readonly { readonly id: string; readonly settings: BehaviorSettings }[];
 }
 
 export interface SceneState extends SceneDescriptor {

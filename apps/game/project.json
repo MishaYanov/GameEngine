@@ -1,16 +1,33 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "Game Engine Robot Demo",
   "fixed_hz": 60,
   "max_catchup_steps": 8,
+  "behavior_definitions": [
+    {
+      "id": "player_move",
+      "settings": {
+        "kind": "controlled_move",
+        "speed": 1.0,
+        "space": "world"
+      }
+    }
+  ],
   "behaviors": [
+    {
+      "scene_id": "courtyard",
+      "behavior": {
+        "kind": "shared",
+        "entity": "courtyard-player",
+        "definition": "player_move"
+      }
+    },
     {
       "scene_id": "7c33e4b1-5820-4d24-952b-91eb41d35c86",
       "behavior": {
-        "kind": "controlled_move",
+        "kind": "shared",
         "entity": "robot-left",
-        "speed": 1.0,
-        "space": "world"
+        "definition": "player_move"
       }
     },
     {
@@ -39,6 +56,10 @@
     }
   ],
   "scenes": [
+    {
+      "id": "courtyard",
+      "asset_path": "scenes/courtyard.json"
+    },
     {
       "id": "7c33e4b1-5820-4d24-952b-91eb41d35c86",
       "asset_path": "scenes/robots.json"

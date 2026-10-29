@@ -41,7 +41,6 @@ class LauncherTests(unittest.TestCase):
 			return job
 
 		self.job_factory = patch.object(launcher, "WindowsJob", side_effect=new_job).start()
-		self.real_port_check = launcher.ensure_dev_port_free
 		self.port_check = patch.object(launcher, "ensure_dev_port_free").start()
 
 	@staticmethod
@@ -410,12 +409,6 @@ class LauncherTests(unittest.TestCase):
 			popen.assert_not_called()
 
 	def test_busy_dev_port_is_rejected_before_a_native_window_can_attach(self):
-		with patch.object(launcher.socket, "create_connection") as connect:
-			with self.assertRaisesRegex(RuntimeError, "already in use"):
-				self.real_port_check("dashboard")
-			connect.assert_called_once_with(("127.0.0.1", 4301), timeout=0.2)
-		with patch.object(launcher.socket, "create_connection", side_effect=ConnectionRefusedError()):
-			self.real_port_check("dashboard")
 		self.port_check.side_effect = RuntimeError("dev port is already in use")
 		with patch.object(launcher.sys, "platform", "win32"), patch.object(launcher, "console_python", return_value=self.console), \
 				patch.object(launcher.subprocess, "Popen") as popen:

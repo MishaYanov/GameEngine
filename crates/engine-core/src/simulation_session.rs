@@ -1,12 +1,13 @@
 //! One simulation pipeline for editor Play, the derived player and headless runs.
+use crate::game_progress::{GameProgress, ProgressAction, ProgressState, ProgressView};
 use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
 	collision::{CollisionStats, CollisionWorld},
-	project::{BehaviorSpace, BehaviorSpec, ProjectData},
+	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
 	scene_data::{SceneData, TransformData},
 	simulation::FixedStepper,
-	world::{RuntimeWorld, WorldChange},
+	world::{ChangeAccumulator, RuntimeWorld, WorldChange},
 };
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ impl InputFrame {
 	}
 }
 pub enum SimulationAction {
+	Progress(ProgressAction),
 	Move {
 		entity: EntityKey,
 		world_delta: [f32; 3],
@@ -51,9 +53,23 @@ pub struct ActionWriter<'a> {
 }
 impl ActionWriter<'_> {
 	pub const MAX_ACTIONS: usize = 4096;
+	pub fn push_progress<P: GameProgress>(&mut self, action: P::Action) -> Result<(), String> {
+		self.push(SimulationAction::Progress(ProgressAction::new::<P>(
+			action,
+		)?))
+	}
 	pub fn push(&mut self, action: SimulationAction) -> Result<(), String> {
 		if self.actions.len() >= Self::MAX_ACTIONS {
 			return Err("Simulation action budget exceeded".into());
+		}
+		if matches!(&action, SimulationAction::Progress(_))
+			&& self
+				.actions
+				.iter()
+				.filter(|action| matches!(action, SimulationAction::Progress(_)))
+				.count() >= crate::game_progress::MAX_PROGRESS_ACTIONS
+		{
+			return Err("Game progress action budget exceeded".into());
 		}
 		self.actions.push(action);
 		Ok(())
@@ -61,7 +77,29 @@ impl ActionWriter<'_> {
 }
 /// Modules plan bounded actions from a read-only world. Mutation and collision
 /// policy remain in the engine, so a game module cannot bypass world validation.
+pub struct GameplayContext<'a> {
+	pub world: &'a RuntimeWorld,
+	pub input: &'a InputFrame,
+	pub step_seconds: f32,
+	pub progress: ProgressView<'a>,
+}
+
 pub trait GameModule: Send {
+	fn needs_tick_with_progress(
+		&self,
+		_world: &RuntimeWorld,
+		input: &InputFrame,
+		_progress: ProgressView<'_>,
+	) -> bool {
+		self.needs_tick(input)
+	}
+	fn plan_with_progress(
+		&self,
+		context: GameplayContext<'_>,
+		output: &mut ActionWriter<'_>,
+	) -> Result<(), String> {
+		self.plan(context.world, context.input, context.step_seconds, output)
+	}
 	fn needs_tick(&self, input: &InputFrame) -> bool;
 	fn plan(
 		&self,
@@ -73,11 +111,43 @@ pub trait GameModule: Send {
 }
 
 pub trait GameModuleFactory: Send + Sync {
+	/// Called once per game run, never while preparing an ordinary scene change.
+	fn create_progress(&self) -> Result<ProgressState, String> {
+		Ok(ProgressState::empty())
+	}
 	fn create(
 		&self,
 		project: &ProjectData,
 		scene_id: &SceneId,
 	) -> Result<Box<dyn GameModule>, String>;
+
+	/// Called after the engine validates the project, scene and behavior targets.
+	/// Existing factories retain their original checked creation path by default.
+	fn create_prepared(
+		&self,
+		config: PreparedModuleConfig<'_>,
+	) -> Result<Box<dyn GameModule>, String> {
+		self.create(config.project, config.scene_id)
+	}
+}
+
+/// Engine-prepared module input. Only the engine can construct this validated
+/// context; custom factories can inspect it or keep implementing `create` only.
+pub struct PreparedModuleConfig<'a> {
+	project: &'a ProjectData,
+	scene_id: &'a SceneId,
+	behaviors: Vec<ResolvedBehavior>,
+}
+impl PreparedModuleConfig<'_> {
+	pub fn project(&self) -> &ProjectData {
+		self.project
+	}
+	pub fn scene_id(&self) -> &SceneId {
+		self.scene_id
+	}
+	pub fn behaviors(&self) -> &[ResolvedBehavior] {
+		&self.behaviors
+	}
 }
 
 #[derive(Default)]
@@ -88,30 +158,49 @@ impl GameModuleFactory for ConfiguredBehaviorFactory {
 		project: &ProjectData,
 		scene_id: &SceneId,
 	) -> Result<Box<dyn GameModule>, String> {
-		project.validate()?;
-		project
-			.scenes
-			.get(scene_id)
-			.map_err(|error| error.to_string())?;
+		Ok(Box::new(ProjectModule::new(
+			project.resolved_behaviors_for(scene_id)?,
+		)))
+	}
 
-		Ok(Box::new(ProjectModule {
-			behaviors: project.behaviors_for(scene_id).cloned().collect(),
-		}))
+	fn create_prepared(
+		&self,
+		config: PreparedModuleConfig<'_>,
+	) -> Result<Box<dyn GameModule>, String> {
+		Ok(Box::new(ProjectModule::new(config.behaviors)))
 	}
 }
 struct ProjectModule {
-	behaviors: Vec<BehaviorSpec>,
+	behaviors: Vec<ResolvedBehavior>,
+	has_nonzero_spin: bool,
+}
+impl ProjectModule {
+	fn new(behaviors: Vec<ResolvedBehavior>) -> Self {
+		let has_nonzero_spin = behaviors.iter().any(|behavior| {
+			matches!(&behavior.settings, BehaviorSettings::Spin { angular_velocity } if *angular_velocity != [0.0; 3])
+		});
+		Self {
+			behaviors,
+			has_nonzero_spin,
+		}
+	}
 }
 impl GameModule for ProjectModule {
 	fn needs_tick(&self, input: &InputFrame) -> bool {
-		self.behaviors.iter().any(|behavior| match behavior {
-			BehaviorSpec::Spin {
-				angular_velocity, ..
-			} => *angular_velocity != [0.0; 3],
-			BehaviorSpec::ControlledMove { entity, speed, .. } => {
-				*speed > 0.0 && input.movement(entity) != [0.0; 3]
-			}
-		})
+		if self.has_nonzero_spin {
+			return true;
+		}
+		if input.is_idle() {
+			return false;
+		}
+		self.behaviors
+			.iter()
+			.any(|behavior| match &behavior.settings {
+				BehaviorSettings::Spin { .. } => false,
+				BehaviorSettings::ControlledMove { speed, .. } => {
+					*speed > 0.0 && input.movement(&behavior.entity) != [0.0; 3]
+				}
+			})
 	}
 	fn plan(
 		&self,
@@ -121,16 +210,12 @@ impl GameModule for ProjectModule {
 		output: &mut ActionWriter<'_>,
 	) -> Result<(), String> {
 		for behavior in &self.behaviors {
-			let entity = behavior.entity();
+			let entity = &behavior.entity;
 			let index = world
 				.entity_index(entity)
 				.ok_or("Configured behavior target is missing")?;
-			match behavior {
-				BehaviorSpec::ControlledMove {
-					entity,
-					speed,
-					space,
-				} => {
+			match &behavior.settings {
+				BehaviorSettings::ControlledMove { speed, space } => {
 					let mut direction = Vec3::from_array(input.movement(entity));
 					if direction == Vec3::ZERO || *speed == 0.0 {
 						continue;
@@ -148,10 +233,7 @@ impl GameModule for ProjectModule {
 						world_delta: (direction * *speed * step).to_array(),
 					})?;
 				}
-				BehaviorSpec::Spin {
-					entity,
-					angular_velocity,
-				} => {
+				BehaviorSettings::Spin { angular_velocity } => {
 					if *angular_velocity == [0.0; 3] {
 						continue;
 					}
@@ -172,9 +254,13 @@ pub struct TickOutcome {
 	pub steps: u32,
 	pub dropped_seconds: f64,
 	pub changes: WorldChange,
+	#[serde(default)]
+	pub progress_changed: bool,
+	#[serde(default)]
+	pub progress_revision: u64,
 }
 pub struct SimulationSession {
-	project: ProjectData,
+	project: Arc<ProjectData>,
 	world: RuntimeWorld,
 	collisions: CollisionWorld,
 	clock: FixedStepper,
@@ -185,6 +271,7 @@ pub struct SimulationSession {
 	actions: Vec<SimulationAction>,
 	scene_id: SceneId,
 	controlled_targets: Vec<EntityKey>,
+	controlled_target_set: HashSet<EntityKey>,
 }
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
@@ -210,22 +297,40 @@ impl SimulationSession {
 		document: Arc<SceneData>,
 		factory: &dyn GameModuleFactory,
 	) -> Result<Self, String> {
-		project.validate_scene_for(&scene_id, &document)?;
-		let module = factory.create(&project, &scene_id)?;
-		let world = RuntimeWorld::new(document)?;
-		let collisions = CollisionWorld::new(&world)?;
-		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
+		Self::with_shared_project_for_scene(Arc::new(project), scene_id, document, factory)
+	}
 
+	pub(crate) fn with_shared_project_for_scene(
+		project: Arc<ProjectData>,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		factory: &dyn GameModuleFactory,
+	) -> Result<Self, String> {
+		let behaviors = project.resolved_behaviors_for(&scene_id)?;
+		let world = RuntimeWorld::new(document)?;
 		let mut controlled_targets = Vec::new();
 		let mut seen = HashSet::new();
 
-		for behavior in project.behaviors_for(&scene_id) {
-			if let BehaviorSpec::ControlledMove { entity, .. } = behavior
-				&& seen.insert(entity.clone())
+		for (index, behavior) in behaviors.iter().enumerate() {
+			if world.entity_index(&behavior.entity).is_none() {
+				return Err(format!(
+					"Behavior {index} targets missing entity {:?}",
+					behavior.entity.as_str()
+				));
+			}
+			if matches!(&behavior.settings, BehaviorSettings::ControlledMove { .. })
+				&& seen.insert(behavior.entity.clone())
 			{
-				controlled_targets.push(entity.clone());
+				controlled_targets.push(behavior.entity.clone());
 			}
 		}
+		let module = factory.create_prepared(PreparedModuleConfig {
+			project: &project,
+			scene_id: &scene_id,
+			behaviors,
+		})?;
+		let collisions = CollisionWorld::new(&world)?;
+		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 
 		Ok(Self {
 			project,
@@ -239,6 +344,7 @@ impl SimulationSession {
 			actions: Vec::new(),
 			scene_id,
 			controlled_targets,
+			controlled_target_set: seen,
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
@@ -265,6 +371,12 @@ impl SimulationSession {
 	pub fn needs_tick(&self) -> bool {
 		!self.paused && self.module.needs_tick(&self.inputs)
 	}
+	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
+		!self.paused
+			&& self
+				.module
+				.needs_tick_with_progress(&self.world, &self.inputs, progress)
+	}
 	pub fn collision_stats(&self) -> CollisionStats {
 		self.collisions.stats()
 	}
@@ -279,12 +391,17 @@ impl SimulationSession {
 		}
 	}
 	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
-		if !self.controlled_targets.contains(entity) {
+		if !self.controlled_target_set.contains(entity) {
 			return Err("Input target has no configured controlled movement behavior".into());
 		}
 
 		let movement = normalized_input(movement)?;
-		Ok(self.apply_input(entity, movement))
+		Ok(Self::apply_input(
+			&mut self.inputs,
+			&mut self.clock,
+			entity,
+			movement,
+		))
 	}
 
 	pub fn set_targeted_input(
@@ -298,22 +415,27 @@ impl SimulationSession {
 		}
 	}
 
-	fn apply_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> bool {
-		let old = self.inputs.movement(entity);
-		if old == movement {
-			return false;
+	fn apply_input(
+		inputs: &mut InputFrame,
+		clock: &mut FixedStepper,
+		entity: &EntityKey,
+		movement: [f32; 3],
+	) -> bool {
+		match inputs.movement.get_mut(entity) {
+			Some(old) if *old == movement => return false,
+			Some(old) if movement != [0.0; 3] => {
+				*old = movement;
+				return true;
+			}
+			Some(_) => {
+				inputs.movement.remove(entity);
+			}
+			None if movement == [0.0; 3] => return false,
+			None => {
+				inputs.movement.insert(entity.clone(), movement);
+			}
 		}
-
-		if old == [0.0; 3] || movement == [0.0; 3] {
-			self.clock.reset();
-		}
-
-		if movement == [0.0; 3] {
-			self.inputs.movement.remove(entity);
-		} else {
-			self.inputs.movement.insert(entity.clone(), movement);
-		}
-
+		clock.reset();
 		true
 	}
 
@@ -327,23 +449,31 @@ impl SimulationSession {
 		}
 
 		let mut changed = false;
-		for index in 0..self.controlled_targets.len() {
-			let entity = self.controlled_targets[index].clone();
-			changed |= self.apply_input(&entity, movement);
+		for entity in &self.controlled_targets {
+			changed |= Self::apply_input(&mut self.inputs, &mut self.clock, entity, movement);
 		}
 
 		Ok(changed)
 	}
 
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
+		self.tick_with_progress(elapsed, &mut ProgressState::empty())
+	}
+
+	pub(crate) fn tick_with_progress(
+		&mut self,
+		elapsed: f64,
+		progress: &mut ProgressState,
+	) -> Result<TickOutcome, String> {
 		if !elapsed.is_finite() || elapsed < 0.0 {
 			return Err("Elapsed time must be finite and nonnegative".into());
 		}
 		let mut outcome = TickOutcome {
 			tick: self.tick,
+			progress_revision: progress.view().revision(),
 			..TickOutcome::default()
 		};
-		if self.paused || !self.needs_tick() {
+		if !self.needs_tick_with_progress(progress.view()) {
 			self.clock.reset();
 			return Ok(outcome);
 		}
@@ -353,16 +483,21 @@ impl SimulationSession {
 			return Err("Simulation tick counter is exhausted".into());
 		}
 		let mut before = HashMap::<EntityKey, TransformData>::new();
+		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
 		let initial_matrix_updates = self.world.matrix_updates();
 		let mut collision_candidates_remaining = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
+		let mut progress_transaction = progress.transaction();
 		let result = (|| -> Result<(), String> {
 			for _ in 0..report.steps {
 				self.actions.clear();
-				self.module.plan(
-					&self.world,
-					&self.inputs,
-					report.step_seconds,
+				self.module.plan_with_progress(
+					GameplayContext {
+						world: &self.world,
+						input: &self.inputs,
+						step_seconds: report.step_seconds,
+						progress: progress_transaction.view(),
+					},
 					&mut ActionWriter {
 						actions: &mut self.actions,
 					},
@@ -382,7 +517,14 @@ impl SimulationSession {
 					// Count attempted actions too: blocked moves still perform
 					// collision work and must not reset their allowance per step.
 					actions_applied += 1;
+					if let SimulationAction::Progress(action) = &action {
+						progress_transaction.apply(action)?;
+						continue;
+					}
 					let entity = match &action {
+						SimulationAction::Progress(_) => {
+							return Err("Progress action reached world mutation".into());
+						}
 						SimulationAction::Move { entity, .. }
 						| SimulationAction::Rotate { entity, .. }
 						| SimulationAction::SetTransform { entity, .. } => entity,
@@ -395,6 +537,9 @@ impl SimulationSession {
 						.entry(entity.clone())
 						.or_insert_with(|| self.world.data().entities[index].transform.clone());
 					let change = match action {
+						SimulationAction::Progress(_) => {
+							return Err("Progress action reached world mutation".into());
+						}
 						SimulationAction::Move {
 							entity,
 							world_delta,
@@ -434,7 +579,7 @@ impl SimulationSession {
 					{
 						return Err("Simulation tick matrix update budget exceeded".into());
 					}
-					outcome.changes.merge(change);
+					changes.merge(change);
 				}
 			}
 			Ok(())
@@ -455,11 +600,14 @@ impl SimulationSession {
 			self.actions.clear();
 			return Err(format!("Simulation paused after rejected actions: {error}"));
 		}
+		outcome.progress_changed = progress_transaction.commit();
+		outcome.progress_revision = progress.view().revision();
 		self.clock = clock;
 		self.tick += report.steps as u64;
 		outcome.tick = self.tick;
 		outcome.steps = report.steps;
 		outcome.dropped_seconds = report.dropped_seconds;
+		outcome.changes = changes.finish();
 		Ok(outcome)
 	}
 }

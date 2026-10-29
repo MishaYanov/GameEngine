@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import errno
 from html.parser import HTMLParser
 import http.client
 import os
@@ -84,14 +85,20 @@ def ensure_dev_port_free(key: str) -> None:
 		return
 	url = urlsplit(action.browser_url)
 	try:
-		with socket.create_connection((url.hostname, url.port), timeout=0.2):
-			raise RuntimeError(
-				f"{action.label}: {url.scheme}://{url.netloc} is already in use. "
-				"Stop the existing server first; the launcher will not attach to another app."
-			)
-	except ConnectionRefusedError:
-		return
+		addresses = socket.getaddrinfo(url.hostname, url.port, type=socket.SOCK_STREAM)
+		for family, kind, protocol, _, address in addresses:
+			# Test local ownership without connecting. Windows can take longer than
+			# a short connection timeout to report that no server is listening.
+			with socket.socket(family, kind, protocol) as probe:
+				if sys.platform == "win32":
+					probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+				probe.bind(address)
 	except OSError as error:
+		if error.errno in (errno.EADDRINUSE, errno.EACCES):
+			raise RuntimeError(
+				f"{action.label}: {url.scheme}://{url.netloc} is already in use or unavailable. "
+				"Stop the existing server first; the launcher will not attach to another app."
+			) from error
 		raise RuntimeError(f"Could not check {action.label}'s dev-server port: {error}") from error
 
 

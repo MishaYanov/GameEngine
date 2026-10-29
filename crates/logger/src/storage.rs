@@ -73,7 +73,7 @@ impl Health {
 	}
 }
 enum Command {
-	Entry(Box<LogEntry>),
+	Entry(Arc<LogEntry>),
 	Flush(mpsc::Sender<()>),
 }
 pub(crate) struct Writer {
@@ -180,7 +180,7 @@ impl Writer {
 			completed,
 		})
 	}
-	pub(crate) fn enqueue(&self, entry: &LogEntry) {
+	pub(crate) fn enqueue(&self, entry: &Arc<LogEntry>) {
 		// Try-lock is also used by panic reporting; never wait on the sender mutex.
 		let sent = self
 			.sender
@@ -189,7 +189,7 @@ impl Writer {
 			.and_then(|sender| {
 				sender
 					.as_ref()
-					.map(|sender| sender.try_send(Command::Entry(Box::new(entry.clone()))))
+					.map(|sender| sender.try_send(Command::Entry(Arc::clone(entry))))
 			})
 			.is_some_and(|result| result.is_ok());
 		if !sent {
@@ -248,6 +248,7 @@ impl Drop for Writer {
 struct Sink {
 	ordinary: Option<Segment>,
 	errors: Option<Segment>,
+	output: ByteLimit,
 	_lock: File,
 }
 impl Sink {
@@ -277,23 +278,46 @@ impl Sink {
 		Ok(Self {
 			ordinary,
 			errors,
+			output: ByteLimit {
+				bytes: Vec::new(),
+				limit: config.max_record_bytes - 1,
+			},
 			_lock: lock,
 		})
 	}
 	fn write(&mut self, entry: &LogEntry) -> io::Result<()> {
-		let ordinary = Self::write_stream(&mut self.ordinary, entry);
-		let errors = if entry.level == crate::Level::Error {
-			Self::write_stream(&mut self.errors, entry)
+		let error_record = entry.level == crate::Level::Error;
+		let ordinary_missing = self.ordinary.is_none();
+		if ordinary_missing && (!error_record || self.errors.is_none()) {
+			return Err(io::Error::other("log stream unavailable"));
+		}
+		// Encode once on the writer thread; both streams consume the same bounded bytes.
+		self.output.bytes.clear();
+		if let Err(error) = serde_json::to_writer(&mut self.output, entry) {
+			self.ordinary.take();
+			if error_record {
+				self.errors.take();
+			}
+			return Err(if ordinary_missing {
+				io::Error::other("log stream unavailable")
+			} else {
+				error.into()
+			});
+		}
+		self.output.bytes.push(b'\n');
+		let ordinary = Self::write_stream(&mut self.ordinary, &self.output.bytes, error_record);
+		let errors = if error_record {
+			Self::write_stream(&mut self.errors, &self.output.bytes, true)
 		} else {
 			Ok(())
 		};
 		ordinary.and(errors)
 	}
-	fn write_stream(stream: &mut Option<Segment>, entry: &LogEntry) -> io::Result<()> {
+	fn write_stream(stream: &mut Option<Segment>, bytes: &[u8], flush: bool) -> io::Result<()> {
 		let result = stream
 			.as_mut()
 			.ok_or_else(|| io::Error::other("log stream unavailable"))?
-			.write(entry);
+			.write(bytes, flush);
 		if result.is_err() {
 			// A partial write can leave a fragment. Never append to a damaged stream.
 			stream.take();
@@ -346,15 +370,8 @@ impl Segment {
 			paths: [file_path].into(),
 		})
 	}
-	fn write(&mut self, entry: &LogEntry) -> io::Result<()> {
-		// Serialization occurs only on the background thread and is size bounded.
-		let mut output = ByteLimit {
-			bytes: Vec::new(),
-			limit: self.config.max_record_bytes - 1,
-		};
-		serde_json::to_writer(&mut output, entry)?;
-		output.bytes.push(b'\n');
-		if self.bytes + output.bytes.len() > self.config.max_file_bytes {
+	fn write(&mut self, bytes: &[u8], flush: bool) -> io::Result<()> {
+		if self.bytes + bytes.len() > self.config.max_file_bytes {
 			self.flush()?;
 			// Remove before creation so even a failed rotation cannot grow beyond the limit.
 			while self.paths.len() >= self.config.max_files {
@@ -380,9 +397,9 @@ impl Segment {
 		self.file
 			.as_mut()
 			.ok_or_else(|| io::Error::other("log segment unavailable"))?
-			.write_all(&output.bytes)?;
-		self.bytes += output.bytes.len();
-		if entry.level == crate::Level::Error {
+			.write_all(bytes)?;
+		self.bytes += bytes.len();
+		if flush {
 			self.flush()?;
 		}
 		Ok(())

@@ -1,7 +1,7 @@
 //! Authored player configuration. Behavior targets use persistent scene keys;
 //! no engine policy depends on demo roles, keyboard mappings, or editor layout.
 use std::{
-	collections::HashSet,
+	collections::{HashMap, HashSet},
 	fs::File,
 	io::{Read, Write},
 	path::Path,
@@ -15,9 +15,10 @@ use crate::{
 	scene_data::SceneData,
 };
 
-pub const PROJECT_SCHEMA_VERSION: u32 = 2;
+pub const PROJECT_SCHEMA_VERSION: u32 = 3;
 pub const MAX_PROJECT_BYTES: usize = 1024 * 1024;
 pub const MAX_BEHAVIORS: usize = 1024;
+pub const MAX_BEHAVIOR_DEFINITIONS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,43 +41,44 @@ pub enum BehaviorSpec {
 		entity: EntityKey,
 		angular_velocity: [f32; 3],
 	},
+	Shared {
+		entity: EntityKey,
+		definition: String,
+	},
 }
 
 impl BehaviorSpec {
 	pub fn entity(&self) -> &EntityKey {
 		match self {
-			Self::ControlledMove { entity, .. } | Self::Spin { entity, .. } => entity,
+			Self::ControlledMove { entity, .. }
+			| Self::Spin { entity, .. }
+			| Self::Shared { entity, .. } => entity,
 		}
 	}
+
 	pub fn validate(&self) -> Result<(), String> {
-		let entity = self.entity();
-		if entity.as_str().is_empty()
-			|| entity.as_str().len() > 256
-			|| entity
-				.as_str()
-				.chars()
-				.any(|c| c.is_whitespace() || c.is_control())
+		let entity = self.entity().as_str();
+
+		if entity.is_empty()
+			|| entity.len() > 256
+			|| entity.chars().any(|c| c.is_whitespace() || c.is_control())
 		{
 			return Err("Behavior target must be a valid persistent entity key".into());
 		}
+
 		match self {
-			Self::ControlledMove { speed, .. }
-				if !speed.is_finite() || !(0.0..=1_000_000.0).contains(speed) =>
-			{
-				Err("Controlled movement speed must be finite and within 0..=1000000".into())
+			Self::ControlledMove { speed, space, .. } => BehaviorSettings::ControlledMove {
+				speed: *speed,
+				space: *space,
 			}
+			.validate(),
 			Self::Spin {
 				angular_velocity, ..
-			} if angular_velocity
-				.iter()
-				.any(|v| !v.is_finite() || v.abs() > 1_000_000.0) =>
-			{
-				Err(
-					"Spin angular velocity must contain finite radians per second within ±1000000"
-						.into(),
-				)
+			} => BehaviorSettings::Spin {
+				angular_velocity: *angular_velocity,
 			}
-			_ => Ok(()),
+			.validate(),
+			Self::Shared { definition, .. } => validate_definition_id(definition),
 		}
 	}
 }
@@ -109,6 +111,8 @@ pub struct ProjectData {
 	pub max_catchup_steps: u32,
 	#[serde(default)]
 	pub behaviors: Vec<SceneBehavior>,
+	#[serde(default)]
+	pub behavior_definitions: Vec<BehaviorDefinition>,
 }
 
 fn default_hz() -> u32 {
@@ -149,12 +153,17 @@ impl ProjectData {
 			fixed_hz: default_hz(),
 			max_catchup_steps: default_catchup(),
 			behaviors: Vec::new(),
+			behavior_definitions: Vec::new(),
 		};
 		project.validate_scene(scene)?;
 		Ok(project)
 	}
 
 	pub fn validate(&self) -> Result<(), String> {
+		self.validated_definitions().map(|_| ())
+	}
+
+	fn validated_definitions(&self) -> Result<HashMap<&str, &BehaviorSettings>, String> {
 		if self.schema_version != PROJECT_SCHEMA_VERSION {
 			return Err(format!(
 				"Unsupported project schema version: {}",
@@ -185,6 +194,26 @@ impl ProjectData {
 		if self.behaviors.len() > MAX_BEHAVIORS {
 			return Err(format!("Project exceeds {MAX_BEHAVIORS} behaviors"));
 		}
+		if self.behavior_definitions.len() > MAX_BEHAVIOR_DEFINITIONS {
+			return Err(format!(
+				"Project exceeds {MAX_BEHAVIOR_DEFINITIONS} behavior definitions"
+			));
+		}
+		let mut definitions = HashMap::with_capacity(self.behavior_definitions.len());
+		for (index, definition) in self.behavior_definitions.iter().enumerate() {
+			definition
+				.validate()
+				.map_err(|error| format!("Behavior definition {index}: {error}"))?;
+			if definitions
+				.insert(definition.id.as_str(), &definition.settings)
+				.is_some()
+			{
+				return Err(format!(
+					"Duplicate behavior definition ID {:?}",
+					definition.id
+				));
+			}
+		}
 		for (index, behavior) in self.behaviors.iter().enumerate() {
 			self.scenes
 				.get(&behavior.scene_id)
@@ -192,10 +221,17 @@ impl ProjectData {
 			behavior
 				.validate()
 				.map_err(|error| format!("Behavior {index}: {error}"))?;
+			if let BehaviorSpec::Shared { definition, .. } = &behavior.behavior
+				&& !definitions.contains_key(definition.as_str())
+			{
+				return Err(format!(
+					"Behavior {index} references unknown behavior definition {definition:?}"
+				));
+			}
 		}
 		serde_json::to_writer(SizeBudget(0), self)
 			.map_err(|error| format!("Project size validation failed: {error}"))?;
-		Ok(())
+		Ok(definitions)
 	}
 
 	pub fn startup_scene_path(&self) -> Result<&str, String> {
@@ -210,11 +246,78 @@ impl ProjectData {
 	pub fn behaviors_for<'a>(
 		&'a self,
 		id: &'a SceneId,
-	) -> impl Iterator<Item=&'a BehaviorSpec> + 'a {
+	) -> impl Iterator<Item = &'a BehaviorSpec> + 'a {
 		self.behaviors
 			.iter()
 			.filter(move |b| &b.scene_id == id)
 			.map(|b| &b.behavior)
+	}
+	pub fn resolve_behavior(&self, behavior: &BehaviorSpec) -> Result<ResolvedBehavior, String> {
+		behavior.validate()?;
+		let settings = match behavior {
+			BehaviorSpec::ControlledMove { speed, space, .. } => BehaviorSettings::ControlledMove {
+				speed: *speed,
+				space: *space,
+			},
+			BehaviorSpec::Spin {
+				angular_velocity, ..
+			} => BehaviorSettings::Spin {
+				angular_velocity: *angular_velocity,
+			},
+			BehaviorSpec::Shared { definition, .. } => {
+				let mut definitions = self
+					.behavior_definitions
+					.iter()
+					.filter(|candidate| &candidate.id == definition);
+				let shared = definitions
+					.next()
+					.ok_or_else(|| format!("Unknown behavior definition {definition:?}"))?;
+				if definitions.next().is_some() {
+					return Err(format!("Duplicate behavior definition ID {definition:?}"));
+				}
+				shared.validate()?;
+				shared.settings.clone()
+			}
+		};
+		Ok(ResolvedBehavior {
+			entity: behavior.entity().clone(),
+			settings,
+		})
+	}
+	pub fn resolved_behaviors_for(
+		&self,
+		scene_id: &SceneId,
+	) -> Result<Vec<ResolvedBehavior>, String> {
+		let definitions = self.validated_definitions()?;
+		self.scenes
+			.get(scene_id)
+			.map_err(|error| error.to_string())?;
+		Ok(self
+			.behaviors_for(scene_id)
+			.map(|behavior| {
+				let settings = match behavior {
+					BehaviorSpec::ControlledMove { speed, space, .. } => {
+						BehaviorSettings::ControlledMove {
+							speed: *speed,
+							space: *space,
+						}
+					}
+					BehaviorSpec::Spin {
+						angular_velocity, ..
+					} => BehaviorSettings::Spin {
+						angular_velocity: *angular_velocity,
+					},
+					BehaviorSpec::Shared { definition, .. } => {
+						// The index and every reference were validated together above.
+						(*definitions[definition.as_str()]).clone()
+					}
+				};
+				ResolvedBehavior {
+					entity: behavior.entity().clone(),
+					settings,
+				}
+			})
+			.collect())
 	}
 	pub fn add_behavior(&mut self, behavior: BehaviorSpec) {
 		self.behaviors.push(SceneBehavior {
@@ -251,14 +354,30 @@ impl ProjectData {
 		}
 		let header: crate::project_format::VersionHeader =
 			serde_json::from_str(source).map_err(|e| format!("Invalid project JSON: {e}"))?;
-		if header.schema_version != PROJECT_SCHEMA_VERSION {
+		if header.schema_version != 2 && header.schema_version != PROJECT_SCHEMA_VERSION {
 			return Err(format!(
 				"Unsupported project schema version: {}",
 				header.schema_version
 			));
 		}
-		let value: Self = serde_json::from_str(source)
+		let mut value: Self = serde_json::from_str(source)
 			.map_err(|error| format!("Invalid project JSON: {error}"))?;
+		if header.schema_version == 2 {
+			let fields: serde_json::Value = serde_json::from_str(source)
+				.map_err(|error| format!("Invalid project JSON: {error}"))?;
+			if fields.get("behavior_definitions").is_some()
+				|| value
+					.behaviors
+					.iter()
+					.any(|entry| matches!(&entry.behavior, BehaviorSpec::Shared { .. }))
+			{
+				return Err(
+					"Shared behaviors and behavior_definitions require project schema version 3"
+						.into(),
+				);
+			}
+			value.schema_version = PROJECT_SCHEMA_VERSION;
+		}
 		value.validate()?;
 		Ok(value)
 	}
@@ -288,6 +407,68 @@ impl ProjectData {
 			.map_err(|error| error.to_string())?;
 		Self::from_json(&source)
 	}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BehaviorSettings {
+	ControlledMove {
+		speed: f32,
+		#[serde(default)]
+		space: BehaviorSpace,
+	},
+	Spin {
+		angular_velocity: [f32; 3],
+	},
+}
+
+impl BehaviorSettings {
+	pub fn validate(&self) -> Result<(), String> {
+		match self {
+			Self::ControlledMove { speed, .. } => {
+				if !speed.is_finite() || !(0.0..=1_000_000.0).contains(speed) {
+					return Err("Movement speed must be finite and within 0..=1000000".into());
+				}
+			}
+			Self::Spin { angular_velocity } => {
+				if angular_velocity
+					.iter()
+					.any(|value| !value.is_finite() || value.abs() > 1_000_000.0)
+				{
+					return Err("Angular velocity must be finite and within ±1000000".into());
+				}
+			}
+		}
+
+		Ok(())
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BehaviorDefinition {
+	pub id: String,
+	pub settings: BehaviorSettings,
+}
+
+impl BehaviorDefinition {
+	pub fn validate(&self) -> Result<(), String> {
+		validate_definition_id(&self.id)?;
+		self.settings.validate()
+	}
+}
+
+fn validate_definition_id(id: &str) -> Result<(), String> {
+	if id.is_empty() || id.len() > 256 || id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+		return Err("Behavior definition ID must be nonempty, at most 256 bytes, and contain no whitespace or control characters".into());
+	}
+	Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedBehavior {
+	pub entity: EntityKey,
+	pub settings: BehaviorSettings,
 }
 
 struct SizeBudget(usize);

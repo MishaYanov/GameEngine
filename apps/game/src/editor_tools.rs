@@ -216,15 +216,13 @@ impl GameApp {
 		let Some((pixel, extent)) = self.cursor_geometry()? else {
 			return Ok(());
 		};
-		if let Some(entity) = self.editor.selected_entity()
-			&& let Some(instance) = self.scene.get(entity)
-		{
-			let before = *instance.transform();
+		if let Some(entity) = self.editor.selected_entity() {
+			let pose = gizmo::GizmoPose::from_scene(&self.scene, entity)?;
 			let mode = self.tools.panel.mode;
-			if let Some(axis) = gizmo::hit_test(&self.camera, extent, before, mode, pixel) {
-				self.tools.drag = Some(GizmoDrag::begin(
+			if let Some(axis) = gizmo::hit_test_parented(&self.camera, extent, pose, mode, pixel) {
+				self.tools.drag = Some(GizmoDrag::begin_parented(
 					entity,
-					before,
+					pose,
 					&self.camera,
 					extent,
 					pixel,

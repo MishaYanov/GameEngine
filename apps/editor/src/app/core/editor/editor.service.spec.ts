@@ -30,13 +30,14 @@ function snapshot(revision: number): EditorSnapshot {
         active_scene_id: 'main',
         scenes: [{id: 'main', asset_path: 'scenes/main.json', loaded: true, dirty: false}],
         project: {
-            schema_version: 2,
+            schema_version: 3,
             name: 'Service fixture',
             scenes: [{id: 'main', asset_path: 'scenes/main.json'}],
             startup_scene_id: 'main',
             fixed_hz: 60,
             max_catchup_steps: 8,
             behaviors: [],
+            behavior_definitions: [],
         },
         can_undo: false,
         can_redo: false,
@@ -261,11 +262,16 @@ describe('EditorService native command and viewport queues', () => {
         ]);
     });
 
-    it('accepts a complete fallback snapshot for topology and project changes in the same reply', async () => {
+    it('accepts schema 3 shared behaviors in a fallback snapshot for topology and project changes', async () => {
         const current = snapshot(3);
-        const next = {
+        const next: EditorSnapshot = {
             ...snapshot(4),
-            project: {...current.project, name: 'Changed project'},
+            project: {
+                ...current.project,
+                name: 'Changed project',
+                behavior_definitions: [{id: 'walk', settings: {kind: 'controlled_move', speed: 2, space: 'world'}}],
+                behaviors: [{scene_id: 'main', behavior: {kind: 'shared', entity: 'new', definition: 'walk'}}],
+            },
             document: {...current.document, entities: [entity('new')]},
         };
         const result = receipt(next);
@@ -286,6 +292,7 @@ describe('EditorService native command and viewport queues', () => {
         expect(await service.execute({type: 'undo'})).toBe(next);
         expect(service.snapshot()?.document.entities[0].key).toBe('new');
         expect(service.snapshot()?.project.name).toBe('Changed project');
+        expect(service.snapshot()?.project.behavior_definitions[0].id).toBe('walk');
         expect(vi.mocked(invoke).mock.calls.map(([operation]) => operation)).toEqual([
             'editor_open',
             'editor_capabilities',
@@ -492,7 +499,7 @@ describe('EditorService native command and viewport queues', () => {
                         ...(malformed === 'document'
                             ? {document: {entities: []}}
                             : {project: {schema_version: 2}}),
-                    } as EditorSnapshot);
+                    } as unknown as EditorSnapshot);
             const recovered = snapshot(4);
             vi.mocked(invoke)
                 .mockResolvedValueOnce(current)

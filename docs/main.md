@@ -8,6 +8,9 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
   project opening, command queues, save/reload, native rendering, Play, packaging, and admin rebuilds. Marks current
   UI wiring separately from available backend APIs.
 
+- [Resolved architecture decisions](adr/resolved/README.md): Accepted core lifetimes/prepared activation, serial
+  scheduling/rollback and native typed game progress; implementation and verification are separately scoped.
+
 - [Architecture decisions: reading guide and dependencies](adr/README.md):
   Start here for the engine parts, the ADR register, the proposed decision sequence, and unresolved choices.
 
@@ -21,7 +24,8 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
   Accepted architecture for the editor client, recorded UI intent, runtime synchronization, and explicit build jobs;
   implementation is planned.
 
-- [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 2, protocol 2, scene IDs, retained
+- [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 3, protocol 2, shared settings,
+  scene IDs, retained
   drafts/history, save/reload policies, Angular helpers and all-scene build validation.
 
 - [PROJECT3 backend handoff](project3-handoff.md): Authored project-to-player workflow, steps 36–45 foundations, limits,

@@ -15,6 +15,21 @@ const TARGET_API_VERSION: u32 = vk::API_VERSION_1_3;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 
+// Only populated after an unrecoverable upload wait. A live child device must
+// retain its parent instance and loader as well, even during owner teardown.
+static RETAINED_PARENTS: std::sync::OnceLock<
+	std::sync::Mutex<std::collections::HashSet<vk::Instance>>,
+> = std::sync::OnceLock::new();
+pub(super) fn retain_parent(instance: vk::Instance) {
+	if instance != vk::Instance::null() {
+		RETAINED_PARENTS
+			.get_or_init(Default::default)
+			.lock()
+			.unwrap_or_else(|error| error.into_inner())
+			.insert(instance);
+	}
+}
+
 pub struct VulkanInstance {
 	entry: Entry,
 	instance: Instance,
@@ -165,16 +180,20 @@ impl VulkanInstance {
 		}
 
 		let instance = unsafe { entry.create_instance(&instance_create_info, None)? };
+		let instance = super::rollback::Rollback::new(instance, |instance: Instance| unsafe {
+			instance.destroy_instance(None);
+		});
+		let mut instance = instance;
 
 		let debug_messenger = if VALIDATION_ENABLED {
-			Some(create_debug_messenger(&entry, &instance)?)
+			Some(create_debug_messenger(&entry, instance.value_mut())?)
 		} else {
 			None
 		};
 
 		Ok(Self {
 			entry,
-			instance,
+			instance: instance.into_inner(),
 			debug_messenger,
 		})
 	}
@@ -219,6 +238,15 @@ impl VulkanInstance {
 
 impl Drop for VulkanInstance {
 	fn drop(&mut self) {
+		if RETAINED_PARENTS.get().is_some_and(|parents| {
+			parents
+				.lock()
+				.unwrap_or_else(|error| error.into_inner())
+				.remove(&self.instance.handle())
+		}) {
+			std::mem::forget(self.entry.clone());
+			return;
+		}
 		unsafe {
 			if let Some(debug) = &self.debug_messenger {
 				debug

@@ -9,6 +9,7 @@ use std::{
 	hash::{Hash, Hasher},
 	io::{self, Read},
 	path::{Path, PathBuf},
+	sync::{Arc, Weak},
 };
 const LIMIT: u64 = 512 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -63,6 +64,32 @@ pub struct Builder {
 	path: PathBuf,
 	plans: BTreeMap<String, Preview>,
 	sequence: u64,
+	preview_preparations: BTreeMap<String, Weak<()>>,
+	generation_preparation: Option<(String, Weak<()>)>,
+	preparation_admission: Weak<()>,
+}
+// Owning the token reserves an operation. Dropping an abandoned task (including
+// unwinding a worker panic) releases it without needing the service mutex.
+struct Preparation {
+	id: String,
+	token: Arc<()>,
+}
+pub struct PreviewPreparation {
+	reservation: Preparation,
+	input: Input,
+}
+pub struct PreparedPreview {
+	reservation: Preparation,
+	preview: Preview,
+}
+pub struct GenerationPreparation {
+	reservation: Preparation,
+	plan: Preview,
+}
+pub struct PreparedGeneration {
+	reservation: Preparation,
+	run: Generation,
+	offline: bool,
 }
 fn fingerprint(bytes: &[u8]) -> u64 {
 	let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -274,6 +301,9 @@ impl Builder {
 			path,
 			plans: BTreeMap::new(),
 			sequence: 0,
+			preview_preparations: BTreeMap::new(),
+			generation_preparation: None,
+			preparation_admission: Weak::new(),
 		}
 	}
 	fn persist(&mut self) {
@@ -286,7 +316,50 @@ impl Builder {
 			.err()
 			.map(|e| e.to_string());
 	}
-	pub fn preview(&mut self, mut input: Input) -> io::Result<Preview> {
+	pub fn has_preparation(&self) -> bool {
+		self.preparation_admission.strong_count() != 0
+	}
+	pub fn clear_previews(&mut self) {
+		// Invalidating publication does not release the memory allowance of a
+		// worker that still owns its ticket and may still be reading files.
+		self.plans.clear();
+		self.preview_preparations.clear();
+		self.generation_preparation = None;
+	}
+	pub fn begin_preview(&mut self, input: Input) -> io::Result<PreviewPreparation> {
+		self.preview_preparations
+			.retain(|_, token| token.strong_count() != 0);
+		if self.has_preparation() {
+			return Err(io::Error::other(
+				"A project preparation is already in progress",
+			));
+		}
+		self.sequence += 1;
+		let id = format!(
+			"project-{}-{}-{}",
+			std::process::id(),
+			now_ms(),
+			self.sequence
+		);
+		let token = Arc::new(());
+		self.preparation_admission = Arc::downgrade(&token);
+		self.preview_preparations
+			.insert(id.clone(), Arc::downgrade(&token));
+		Ok(PreviewPreparation {
+			reservation: Preparation { id, token },
+			input,
+		})
+	}
+	pub fn preview(&mut self, input: Input) -> io::Result<Preview> {
+		let request = self.begin_preview(input)?;
+		let prepared = Self::prepare_preview(request)?;
+		self.finish_preview(prepared)
+	}
+	pub fn prepare_preview(request: PreviewPreparation) -> io::Result<PreparedPreview> {
+		let PreviewPreparation {
+			reservation,
+			mut input,
+		} = request;
 		if input.name.is_empty()
 			|| input.name.len() > 64
 			|| !input
@@ -347,14 +420,8 @@ impl Builder {
 			validate_project_template(&source, &project)?;
 		}
 		files.sort_by(|a, b| a.path.cmp(&b.path));
-		self.sequence += 1;
 		let preview = Preview {
-			id: format!(
-				"project-{}-{}-{}",
-				std::process::id(),
-				now_ms(),
-				self.sequence
-			),
+			id: reservation.id.clone(),
 			input,
 			files,
 			total_bytes: total,
@@ -365,6 +432,25 @@ impl Builder {
 			],
 			template_version: 1,
 		};
+		Ok(PreparedPreview {
+			reservation,
+			preview,
+		})
+	}
+	pub fn finish_preview(&mut self, prepared: PreparedPreview) -> io::Result<Preview> {
+		let PreparedPreview {
+			reservation,
+			preview,
+		} = prepared;
+		if !self
+			.preview_preparations
+			.get(&reservation.id)
+			.and_then(Weak::upgrade)
+			.is_some_and(|token| Arc::ptr_eq(&token, &reservation.token))
+		{
+			return Err(io::Error::other("Project preview preparation expired"));
+		}
+		self.preview_preparations.remove(&reservation.id);
 		if self.plans.len() >= 16 {
 			self.plans.clear();
 		}
@@ -372,12 +458,17 @@ impl Builder {
 		Ok(preview)
 	}
 	pub fn generate(&mut self, id: &str, jobs: &mut Jobs) -> io::Result<Generation> {
+		let request = self.begin_generation(id)?;
+		let prepared = Self::prepare_generation(request)?;
+		self.finish_generation(prepared, jobs)
+	}
+	pub fn begin_generation(&mut self, id: &str) -> io::Result<GenerationPreparation> {
 		if self.storage_error.is_some() {
 			return Err(io::Error::other(
 				"Recover project history storage before generating",
 			));
 		}
-		if self.runs.iter().any(|r| r.state == "VALIDATING") {
+		if self.has_preparation() || self.runs.iter().any(|r| r.state == "VALIDATING") {
 			return Err(io::Error::other("A project is already being validated"));
 		}
 		let plan = self
@@ -385,6 +476,19 @@ impl Builder {
 			.get(id)
 			.cloned()
 			.ok_or_else(|| io::Error::other("Preview expired; preview again"))?;
+		let token = Arc::new(());
+		self.preparation_admission = Arc::downgrade(&token);
+		self.generation_preparation = Some((id.to_owned(), Arc::downgrade(&token)));
+		Ok(GenerationPreparation {
+			reservation: Preparation {
+				id: id.to_owned(),
+				token,
+			},
+			plan,
+		})
+	}
+	pub fn prepare_generation(request: GenerationPreparation) -> io::Result<PreparedGeneration> {
+		let GenerationPreparation { reservation, plan } = request;
 		let destination = PathBuf::from(&plan.input.destination);
 		if destination.exists() {
 			return Err(io::Error::other("Destination is occupied"));
@@ -451,13 +555,6 @@ impl Builder {
 				.ok()
 				.filter(|o| o.status.success())
 				.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
-			let job = jobs.queue(
-				&staging,
-				Kind::Build,
-				"game".into(),
-				plan.input.profile.clone(),
-			)?;
-			jobs.set_offline(&job.id, plan.input.offline);
 			let run = Generation {
 				id: plan.id.clone(),
 				name: plan.input.name.clone(),
@@ -465,7 +562,7 @@ impl Builder {
 				staging: staging.clone(),
 				source,
 				state: "VALIDATING".into(),
-				job_id: job.id,
+				job_id: String::new(),
 				detail: None,
 				created_ms: now_ms(),
 				finished_ms: None,
@@ -476,19 +573,70 @@ impl Builder {
 			};
 			Ok(run)
 		})();
-		match result {
-			Ok(run) => {
-				self.runs.insert(0, run.clone());
-				self.runs.truncate(50);
-				self.plans.remove(id);
-				self.persist();
-				Ok(run)
-			}
-			Err(e) => Err(io::Error::other(format!(
-				"{e}; staging retained at {}",
+		let run = result.map_err(|error| {
+			io::Error::other(format!(
+				"{error}; staging retained at {}",
 				staging.display()
-			))),
+			))
+		})?;
+		Ok(PreparedGeneration {
+			reservation,
+			run,
+			offline: plan.input.offline,
+		})
+	}
+	pub fn finish_generation(
+		&mut self,
+		prepared: PreparedGeneration,
+		jobs: &mut Jobs,
+	) -> io::Result<Generation> {
+		let PreparedGeneration {
+			reservation,
+			mut run,
+			offline,
+		} = prepared;
+		if !self
+			.generation_preparation
+			.as_ref()
+			.is_some_and(|(id, token)| {
+				id == &reservation.id
+					&& token
+						.upgrade()
+						.is_some_and(|token| Arc::ptr_eq(&token, &reservation.token))
+			}) {
+			return Err(io::Error::other("Project generation preparation expired"));
 		}
+		self.generation_preparation = None;
+		let result = (|| {
+			if self.storage_error.is_some() {
+				return Err(io::Error::other(
+					"Recover project history storage before generating",
+				));
+			}
+			if run.destination.exists() {
+				return Err(io::Error::other("Destination is occupied"));
+			}
+			let job = jobs.queue(
+				&run.staging,
+				Kind::Build,
+				"game".into(),
+				run.profile.clone(),
+			)?;
+			jobs.set_offline(&job.id, offline);
+			run.job_id = job.id;
+			self.runs.insert(0, run.clone());
+			self.runs.truncate(50);
+			self.plans.remove(&reservation.id);
+			self.persist();
+			Ok(())
+		})();
+		result.map_err(|error: io::Error| {
+			io::Error::other(format!(
+				"{error}; staging retained at {}",
+				run.staging.display()
+			))
+		})?;
+		Ok(run)
 	}
 	pub fn tick(&mut self, jobs: &mut Jobs) {
 		let mut changed = false;

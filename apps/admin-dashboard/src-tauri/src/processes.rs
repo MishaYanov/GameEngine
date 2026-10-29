@@ -374,6 +374,9 @@ impl Processes {
 	pub fn history(&self) -> Vec<ProcessRun> {
 		self.history.clone()
 	}
+	pub fn history_ref(&self) -> &[ProcessRun] {
+		&self.history
+	}
 	fn persist(&mut self) {
 		match save_json(&self.checkpoint, &self.history) {
 			Ok(()) => self.persistence_error = None,

@@ -10,7 +10,7 @@ use crate::commands::engine::engine_status;
 use crate::commands::preferences::{
 	editor_layout_preferences_load, editor_layout_preferences_save,
 };
-use crate::commands::project::create_project;
+use crate::commands::project::{choose_project_destination, create_project};
 use state::EditorState;
 use tauri::Manager;
 
@@ -22,6 +22,7 @@ pub fn run() {
 	engine_logger::component_health("editor-host", "HEALTHY", false, "Client host initialized");
 
 	tauri::Builder::default()
+		.plugin(tauri_plugin_dialog::init())
 		.manage(EditorState::default())
 		.setup(|app| {
 			let parent = app
@@ -53,6 +54,7 @@ pub fn run() {
 		.invoke_handler(tauri::generate_handler![
 			engine_status,
 			create_project,
+			choose_project_destination,
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
 			editor_capabilities,

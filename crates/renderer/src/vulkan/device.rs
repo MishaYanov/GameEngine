@@ -2,6 +2,7 @@ use std::{
 	error::Error,
 	ffi::CStr,
 	fmt::{Display, Formatter},
+	sync::Mutex,
 };
 
 use ash::{Device, Instance, khr::swapchain, vk};
@@ -18,6 +19,7 @@ pub struct VulkanDevice {
 	_metrics: engine_logger::metrics::ResourceGuard,
 	device: Device,
 	physical_device: vk::PhysicalDevice,
+	instance: vk::Instance,
 
 	graphics_queue: vk::Queue,
 	present_queue: vk::Queue,
@@ -26,6 +28,7 @@ pub struct VulkanDevice {
 	memory_properties: vk::PhysicalDeviceMemoryProperties,
 	timestamp_valid_bits: u32,
 	timestamp_period: f32,
+	pub(super) upload_retirements: Mutex<Vec<Box<dyn Send>>>,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,32 @@ impl From<VulkanSurfaceError> for VulkanDeviceError {
 }
 
 impl VulkanDevice {
+	#[cfg(test)]
+	pub(super) fn for_test(device: Device) -> Self {
+		let mut memory_properties = vk::PhysicalDeviceMemoryProperties {
+			memory_type_count: 1,
+			..Default::default()
+		};
+		memory_properties.memory_types[0].property_flags = vk::MemoryPropertyFlags::HOST_VISIBLE
+			| vk::MemoryPropertyFlags::HOST_COHERENT
+			| vk::MemoryPropertyFlags::DEVICE_LOCAL;
+		Self {
+			_metrics: engine_logger::metrics::ResourceGuard::disabled(),
+			device,
+			physical_device: vk::PhysicalDevice::null(),
+			instance: vk::Instance::null(),
+			graphics_queue: vk::Queue::null(),
+			present_queue: vk::Queue::null(),
+			queue_families: QueueFamilies {
+				graphics: 0,
+				present: 0,
+			},
+			memory_properties,
+			timestamp_valid_bits: 0,
+			timestamp_period: 0.0,
+			upload_retirements: Mutex::new(Vec::new()),
+		}
+	}
 	pub(crate) fn headless_physical_device(
 		instance: &Instance,
 	) -> Result<vk::PhysicalDevice, VulkanDeviceError> {
@@ -115,9 +144,11 @@ impl VulkanDevice {
 			.into_owned();
 		let metrics = crate::metrics::register(&device, &gpu_name);
 		Ok(Self {
+			upload_retirements: Mutex::new(Vec::new()),
 			_metrics: metrics,
 			device,
 			physical_device,
+			instance: instance.handle(),
 			memory_properties: unsafe {
 				instance.get_physical_device_memory_properties(physical_device)
 			},
@@ -191,9 +222,11 @@ impl VulkanDevice {
 			.into_owned();
 		let metrics = crate::metrics::register(&device, &gpu_name);
 		Ok(Self {
+			upload_retirements: Mutex::new(Vec::new()),
 			_metrics: metrics,
 			device,
 			physical_device,
+			instance: instance.handle(),
 			memory_properties: unsafe {
 				instance.get_physical_device_memory_properties(physical_device)
 			},
@@ -244,6 +277,25 @@ impl VulkanDevice {
 
 impl Drop for VulkanDevice {
 	fn drop(&mut self) {
+		let retired = self
+			.upload_retirements
+			.get_mut()
+			.unwrap_or_else(|error| error.into_inner());
+		if !retired.is_empty() {
+			match unsafe { self.device.device_wait_idle() } {
+				Ok(()) | Err(vk::Result::ERROR_DEVICE_LOST) => retired.clear(),
+				Err(error) => {
+					// Completion could not be established. Releasing these allocations
+					// (or their device) would free resources still used by the GPU.
+					engine_logger::error!(
+						"Retaining Vulkan device and upload resources after unrecoverable wait failure: {error:?}"
+					);
+					std::mem::forget(std::mem::take(retired));
+					super::instance::retain_parent(self.instance);
+					return;
+				}
+			}
+		}
 		unsafe {
 			self.device.destroy_device(None);
 		}

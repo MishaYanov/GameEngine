@@ -162,6 +162,62 @@ fn imports_all_parts_with_their_own_materials() {
 }
 
 #[test]
+fn shared_images_are_converted_once_and_survive_other_primitives() {
+	let mut value: serde_json::Value = serde_json::from_str(MODEL).unwrap();
+	value["images"] = serde_json::json!([{"uri":"shared.png"}]);
+	value["textures"] = serde_json::json!([{"source":0}]);
+	value["buffers"][0]["byteLength"] = serde_json::json!(68);
+	value["bufferViews"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"buffer":0,"byteOffset":44,"byteLength":24}));
+	value["accessors"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"}));
+	for primitive in value["meshes"][0]["primitives"].as_array_mut().unwrap() {
+		primitive["attributes"]["TEXCOORD_0"] = serde_json::json!(2);
+	}
+	for material in value["materials"].as_array_mut().unwrap() {
+		material["pbrMetallicRoughness"]["baseColorTexture"] = serde_json::json!({"index":0});
+	}
+	let document = gltf::Gltf::from_slice(value.to_string().as_bytes())
+		.unwrap()
+		.document;
+	let mut buffers = geometry();
+	buffers[0].0.resize(68, 0);
+	for (format, pixels) in [
+		(gltf::image::Format::R8G8B8, vec![1, 2, 3]),
+		(gltf::image::Format::R8G8B8A8, vec![1, 2, 3, 255]),
+	] {
+		let images = [gltf::image::Data {
+			width: 1,
+			height: 1,
+			format,
+			pixels,
+		}];
+		let mut parts = import_first_mesh(&document, &buffers, &images).unwrap();
+		let first = parts[0].material.base_color_image.as_ref().unwrap();
+		let second = parts[1].material.base_color_image.as_ref().unwrap();
+		assert_eq!(first.pixels().as_ptr(), second.pixels().as_ptr());
+		assert_ne!(
+			parts[0].material.base_color_factor,
+			parts[1].material.base_color_factor
+		);
+		parts.remove(0);
+		assert_eq!(
+			parts[0]
+				.material
+				.base_color_image
+				.as_ref()
+				.unwrap()
+				.pixels(),
+			&[1, 2, 3, 255]
+		);
+	}
+}
+
+#[test]
 fn rejects_unsupported_parts_instead_of_silently_skipping_them() {
 	let model = MODEL.replacen("\"mode\":4", "\"mode\":1", 1);
 	let document = gltf::Gltf::from_slice(model.as_bytes()).unwrap().document;

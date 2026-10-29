@@ -106,6 +106,71 @@ fn concurrent_sequences_are_unique_and_ordered() {
 		(1..=800).collect::<Vec<_>>()
 	);
 }
+
+#[test]
+fn pagination_handles_wrapped_history_empty_pages_and_future_cursors() {
+	let logger = collector(5);
+	for index in 0..12 {
+		emit(&logger, &format!("entry {index}"));
+	}
+	for after in [0, 7, 8, 11, 12, u64::MAX] {
+		for limit in [0, 1, 2, 2000, usize::MAX] {
+			let page = logger.snapshot(SnapshotRequest {
+				after_sequence: after,
+				limit,
+				..Default::default()
+			});
+			let expected: Vec<_> = (8..=12)
+				.filter(|sequence| *sequence > after)
+				.take(limit.min(2000))
+				.collect();
+			assert_eq!(
+				page.entries
+					.iter()
+					.map(|entry| entry.sequence)
+					.collect::<Vec<_>>(),
+				expected
+			);
+			assert_eq!(page.oldest_sequence, 8);
+			assert_eq!(page.latest_sequence, 12);
+			assert_eq!(page.next_cursor, expected.last().copied().unwrap_or(after));
+			assert_eq!(page.history_gap, after < 7);
+			assert_eq!(page.has_more, page.next_cursor < 12);
+		}
+	}
+}
+
+#[test]
+fn concurrent_snapshots_keep_one_history_view_while_producers_evict_records() {
+	let logger = Arc::new(collector(32));
+	let start = std::sync::Barrier::new(2);
+	std::thread::scope(|scope| {
+		scope.spawn(|| {
+			start.wait();
+			for _ in 0..2000 {
+				emit(&logger, "concurrent snapshot payload");
+			}
+		});
+		start.wait();
+		for _ in 0..2000 {
+			let page = logger.snapshot(SnapshotRequest {
+				limit: 32,
+				..Default::default()
+			});
+			if let Some(first) = page.entries.first() {
+				assert_eq!(first.sequence, page.oldest_sequence);
+				assert_eq!(page.entries.last().unwrap().sequence, page.latest_sequence);
+				assert_eq!(page.next_cursor, page.latest_sequence);
+				assert_eq!(
+					page.entries.len() as u64,
+					page.latest_sequence - page.oldest_sequence + 1
+				);
+				assert!(!page.has_more);
+			}
+		}
+	});
+	assert_eq!(logger.snapshot(Default::default()).latest_sequence, 2000);
+}
 #[test]
 fn bounds_context_and_redaction() {
 	let mut config = Config::new("redaction");

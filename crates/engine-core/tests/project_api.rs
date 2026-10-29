@@ -1,6 +1,7 @@
 mod support;
 use engine_core::project::{
-	BehaviorSpace, BehaviorSpec, MAX_BEHAVIORS, MAX_PROJECT_BYTES, ProjectData, SceneBehavior,
+	BehaviorDefinition, BehaviorSettings, BehaviorSpace, BehaviorSpec, MAX_BEHAVIOR_DEFINITIONS,
+	MAX_BEHAVIORS, MAX_PROJECT_BYTES, PROJECT_SCHEMA_VERSION, ProjectData, SceneBehavior,
 };
 use engine_core::scene_catalog::{SceneDescriptor, SceneId};
 use serde_json::json;
@@ -25,6 +26,55 @@ fn a_new_authored_project_has_no_implicit_demo_behavior_and_roundtrips_without_s
 	assert!(defaults.behaviors.is_empty());
 	assert_eq!(defaults.fixed_hz, 60);
 	assert_eq!(defaults.startup_scene_path().unwrap(), "scenes/main.json");
+}
+
+#[test]
+fn indexed_shared_resolution_preserves_scene_order_and_revalidates_public_mutations() {
+	let data = scene(vec![entity("actor", [0.0; 3])]);
+	let mut project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
+	for index in 0..MAX_BEHAVIOR_DEFINITIONS {
+		project.behavior_definitions.push(BehaviorDefinition {
+			id: format!("definition-{index}"),
+			settings: BehaviorSettings::Spin {
+				angular_velocity: [0.0, index as f32, 0.0],
+			},
+		});
+	}
+	for index in (0..MAX_BEHAVIORS).rev() {
+		project.add_behavior(BehaviorSpec::Shared {
+			entity: key("actor"),
+			definition: format!("definition-{index}"),
+		});
+	}
+	let resolved = project
+		.resolved_behaviors_for(&project.startup_scene_id)
+		.unwrap();
+	assert_eq!(resolved.len(), MAX_BEHAVIORS);
+	for (behavior, resolved) in project
+		.behaviors_for(&project.startup_scene_id)
+		.zip(resolved)
+	{
+		assert_eq!(project.resolve_behavior(behavior).unwrap(), resolved);
+	}
+	project.behavior_definitions[0].settings = BehaviorSettings::Spin {
+		angular_velocity: [1.0; 3],
+	};
+	let resolved = project
+		.resolved_behaviors_for(&project.startup_scene_id)
+		.unwrap();
+	assert_eq!(
+		resolved.last().unwrap().settings,
+		BehaviorSettings::Spin {
+			angular_velocity: [1.0; 3]
+		}
+	);
+	project.behavior_definitions[0].id = project.behavior_definitions[1].id.clone();
+	assert!(
+		project
+			.resolved_behaviors_for(&project.startup_scene_id)
+			.unwrap_err()
+			.contains("Duplicate")
+	);
 }
 
 #[test]
@@ -226,4 +276,137 @@ fn project_loader_bounds_reads_and_preserves_the_source_file() {
 	assert!(ProjectData::load(&path).is_err());
 	assert!(ProjectData::load(&directory.0).is_err());
 	assert!(ProjectData::load(directory.0.join("missing.json")).is_err());
+}
+
+#[test]
+fn v2_migration_preserves_inline_behaviors_and_rejects_v3_only_fields() {
+	let data = scene(vec![entity("actor", [0.0; 3])]);
+	let mut project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
+	project.add_behavior(BehaviorSpec::ControlledMove {
+		entity: key("actor"),
+		speed: 2.5,
+		space: BehaviorSpace::Local,
+	});
+	let mut legacy = serde_json::to_value(&project).unwrap();
+	legacy["schema_version"] = json!(2);
+	legacy
+		.as_object_mut()
+		.unwrap()
+		.remove("behavior_definitions");
+	let migrated = ProjectData::from_json(&legacy.to_string()).unwrap();
+	assert_eq!(migrated, project);
+	assert_eq!(migrated.schema_version, PROJECT_SCHEMA_VERSION);
+	assert_eq!(
+		ProjectData::from_json(&migrated.to_json().unwrap()).unwrap(),
+		migrated
+	);
+	for definitions in [
+		json!([]),
+		json!([{"id":"move","settings":{"kind":"controlled_move","speed":1}}]),
+	] {
+		let mut invalid = legacy.clone();
+		invalid["behavior_definitions"] = definitions;
+		assert!(
+			ProjectData::from_json(&invalid.to_string())
+				.unwrap_err()
+				.contains("require project schema version 3")
+		);
+	}
+	legacy["behaviors"][0]["behavior"] =
+		json!({"kind":"shared","entity":"actor","definition":"move"});
+	assert!(
+		ProjectData::from_json(&legacy.to_string())
+			.unwrap_err()
+			.contains("require project schema version 3")
+	);
+}
+
+#[test]
+fn shared_definitions_reject_unknown_duplicate_and_unbounded_configuration() {
+	let data = scene(vec![entity("actor", [0.0; 3])]);
+	let mut project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
+	project.add_behavior(BehaviorSpec::Shared {
+		entity: key("actor"),
+		definition: "move".into(),
+	});
+	assert!(
+		project
+			.validate()
+			.unwrap_err()
+			.contains("unknown behavior definition")
+	);
+	let valid = BehaviorDefinition {
+		id: "move".into(),
+		settings: BehaviorSettings::ControlledMove {
+			speed: 2.5,
+			space: BehaviorSpace::Local,
+		},
+	};
+	project.behavior_definitions = vec![valid.clone()];
+	project.validate_scene(&data).unwrap();
+	assert_eq!(
+		ProjectData::from_json(&project.to_json().unwrap()).unwrap(),
+		project
+	);
+	project.behavior_definitions.push(valid.clone());
+	assert!(
+		project
+			.validate()
+			.unwrap_err()
+			.contains("Duplicate behavior definition ID")
+	);
+	for settings in [
+		BehaviorSettings::ControlledMove {
+			speed: -1.0,
+			space: BehaviorSpace::World,
+		},
+		BehaviorSettings::ControlledMove {
+			speed: f32::NAN,
+			space: BehaviorSpace::World,
+		},
+		BehaviorSettings::ControlledMove {
+			speed: 1_000_001.0,
+			space: BehaviorSpace::World,
+		},
+		BehaviorSettings::Spin {
+			angular_velocity: [0.0, f32::INFINITY, 0.0],
+		},
+		BehaviorSettings::Spin {
+			angular_velocity: [0.0, -1_000_001.0, 0.0],
+		},
+	] {
+		project.behavior_definitions = vec![BehaviorDefinition {
+			settings,
+			..valid.clone()
+		}];
+		assert!(project.validate().is_err());
+	}
+	for id in [
+		String::new(),
+		"invalid id".into(),
+		"invalid\n".into(),
+		"x".repeat(257),
+	] {
+		project.behavior_definitions = vec![BehaviorDefinition {
+			id,
+			..valid.clone()
+		}];
+		assert!(project.validate().is_err());
+	}
+	project.behavior_definitions = (0..=MAX_BEHAVIOR_DEFINITIONS)
+		.map(|index| BehaviorDefinition {
+			id: format!("definition-{index}"),
+			..valid.clone()
+		})
+		.collect();
+	assert!(
+		project
+			.validate()
+			.unwrap_err()
+			.contains("behavior definitions")
+	);
+	project.behavior_definitions = vec![valid];
+	let mut unknown = serde_json::to_value(project).unwrap();
+	unknown["behavior_definitions"][0]["settings"]["unexpected"] = json!(true);
+	assert!(ProjectData::from_json(&unknown.to_string()).is_err());
 }

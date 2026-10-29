@@ -448,7 +448,7 @@ fn source(options: &Options) -> Result<Source, String> {
 				engine_core::scene_data::parse_json(&read_bounded(&path, MAX_SCENE_BYTES)?)?;
 			project.validate_scene_for(entry.id(), &document.data)?;
 			document_bytes = document_bytes
-				.saturating_add(document.data.to_json()?.len().saturating_mul(4))
+				.saturating_add(document.data.serialized_size()?.saturating_mul(4))
 				.saturating_add(std::mem::size_of::<SceneData>());
 			if document_bytes > engine_core::editor::EditorSession::MAX_RETAINED_DOCUMENT_BYTES {
 				return Err("Retained scene document byte budget exceeded".into());

@@ -27,6 +27,106 @@ struct Smoke {
 	started: Option<Instant>,
 	expected_parts: u64,
 	expected_triangles: u64,
+	pipeline_ids: Option<Vec<u64>>,
+}
+
+fn pipeline_ids(renderer: &WindowRenderer) -> Option<Vec<u64>> {
+	renderer.resource_metrics().map(|metrics| {
+		let mut ids = metrics
+			.resources
+			.iter()
+			.filter(|resource| resource.kind == "pipeline")
+			.map(|resource| resource.id)
+			.collect::<Vec<_>>();
+		ids.sort_unstable();
+		ids
+	})
+}
+
+fn check_upload_batch(renderer: &WindowRenderer) {
+	use renderer::{MeshUpload, Rgba8Upload, vulkan::Vertex};
+	let vertices = [Vertex::new([0.0; 3], [0.0; 2]); 3];
+	let indices = [0, 1, 2];
+	let mesh = MeshUpload {
+		vertices: &vertices,
+		indices: &indices,
+	};
+	let baseline = renderer.resource_metrics();
+	let empty = renderer.upload_batch(&[], &[]).unwrap();
+	assert!(empty.meshes.is_empty() && empty.textures.is_empty());
+	assert!(
+		renderer
+			.upload_batch(
+				&[mesh],
+				&[Rgba8Upload {
+					width: 1,
+					height: 1,
+					pixels: &[255; 3]
+				}]
+			)
+			.is_err()
+	);
+	if let (Some(before), Some(after)) = (&baseline, renderer.resource_metrics()) {
+		assert_eq!(
+			before.totals.created_resources, after.totals.created_resources,
+			"batch validation must precede GPU allocation"
+		);
+	}
+	let batch = renderer
+		.upload_batch(
+			&[
+				mesh,
+				MeshUpload {
+					vertices: &vertices,
+					indices: &[0, 1, 2, 0, 2, 1],
+				},
+			],
+			&[
+				Rgba8Upload {
+					width: 1,
+					height: 1,
+					pixels: &[255; 4],
+				},
+				Rgba8Upload {
+					width: 2,
+					height: 1,
+					pixels: &[128; 8],
+				},
+			],
+		)
+		.unwrap();
+	assert_eq!(
+		batch
+			.meshes
+			.iter()
+			.map(|mesh| mesh.index_count())
+			.collect::<Vec<_>>(),
+		[3, 6]
+	);
+	assert_eq!(batch.textures.len(), 2);
+	// Ready-on-return permits immediate release without an additional idle wait.
+	drop(batch);
+	let mut dynamic = renderer.create_dynamic_mesh(3, 3).unwrap();
+	renderer
+		.write_dynamic_mesh(&mut dynamic, &vertices, &indices)
+		.unwrap();
+	assert_eq!(dynamic.index_count(), 3);
+	assert!(
+		renderer
+			.write_dynamic_mesh(&mut dynamic, &[vertices[0]; 4], &indices)
+			.is_err()
+	);
+	assert_eq!(dynamic.index_count(), 3);
+	renderer.write_dynamic_mesh(&mut dynamic, &[], &[]).unwrap();
+	assert_eq!(dynamic.index_count(), 0);
+	drop(dynamic);
+	if let (Some(before), Some(after)) = (baseline, renderer.resource_metrics()) {
+		assert_eq!(before.totals.live_resources, after.totals.live_resources);
+		assert_eq!(
+			before.totals.allocation_bytes,
+			after.totals.allocation_bytes
+		);
+	}
 }
 
 impl ApplicationHandler for Smoke {
@@ -60,6 +160,8 @@ impl ApplicationHandler for Smoke {
 				},
 			])
 			.unwrap();
+		check_upload_batch(&renderer);
+		self.pipeline_ids = pipeline_ids(&renderer);
 		let mut assets = assets::AssetManager::new(
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
 		)
@@ -305,6 +407,11 @@ impl ApplicationHandler for Smoke {
 		}
 		if self.frames == 5 {
 			assert_eq!([width, height], [640, 360], "resized surface extent");
+			assert_eq!(
+				pipeline_ids(renderer),
+				self.pipeline_ids,
+				"extent-only resize must retain graphics pipelines"
+			);
 			renderer.wait_idle().unwrap();
 			self.assets = None;
 			self.renderer = None;

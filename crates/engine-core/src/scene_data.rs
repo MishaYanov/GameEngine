@@ -511,31 +511,65 @@ impl SceneData {
 	}
 	pub fn to_json(&self) -> Result<String, String> {
 		self.validate()?;
-		let mut writer = SceneJsonWriter { bytes: Vec::new() };
+		let mut writer = SceneJsonWriter::new(Vec::new());
 		serde_json::to_writer_pretty(&mut writer, self)
 			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
-		String::from_utf8(writer.bytes).map_err(|error| format!("Failed to encode scene: {error}"))
+		String::from_utf8(writer.output).map_err(|error| format!("Failed to encode scene: {error}"))
+	}
+	/// Exact pretty-JSON length, with the same validation and size limit as `to_json`.
+	pub fn serialized_size(&self) -> Result<usize, String> {
+		self.validate()?;
+		let mut writer = SceneJsonWriter::new(std::io::sink());
+		serde_json::to_writer_pretty(&mut writer, self)
+			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
+		Ok(writer.bytes)
+	}
+	/// Validate once while an immutable borrow keeps the checked content unchanged.
+	pub fn validated(&self) -> Result<ValidatedScene<'_>, String> {
+		self.validate()?;
+		Ok(ValidatedScene::from_validated(self))
+	}
+}
+
+/// An immutable view of scene data whose domain invariants have been checked.
+#[derive(Clone, Copy)]
+pub struct ValidatedScene<'a> {
+	data: &'a SceneData,
+}
+impl<'a> ValidatedScene<'a> {
+	pub fn data(self) -> &'a SceneData {
+		self.data
+	}
+	pub(crate) fn from_validated(data: &'a SceneData) -> Self {
+		Self { data }
 	}
 }
 
 // Stop serialization at the same limit accepted by the loader, instead of
 // constructing a potentially huge String and rejecting it after allocation.
-struct SceneJsonWriter {
-	bytes: Vec<u8>,
+struct SceneJsonWriter<W> {
+	output: W,
+	bytes: usize,
 }
-impl std::io::Write for SceneJsonWriter {
+impl<W> SceneJsonWriter<W> {
+	fn new(output: W) -> Self {
+		Self { output, bytes: 0 }
+	}
+}
+impl<W: std::io::Write> std::io::Write for SceneJsonWriter<W> {
 	fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
 		// Atomic scene saves append one conventional trailing newline.
-		if bytes.len() > (MAX_SCENE_BYTES - 1).saturating_sub(self.bytes.len()) {
+		if bytes.len() > (MAX_SCENE_BYTES - 1).saturating_sub(self.bytes) {
 			return Err(std::io::Error::other(
 				"Scene JSON exceeds the 32 MiB size limit",
 			));
 		}
-		self.bytes.extend_from_slice(bytes);
-		Ok(bytes.len())
+		let written = self.output.write(bytes)?;
+		self.bytes += written;
+		Ok(written)
 	}
 	fn flush(&mut self) -> std::io::Result<()> {
-		Ok(())
+		self.output.flush()
 	}
 }
 
@@ -704,4 +738,28 @@ pub fn resolve_world_matrices(
 		}
 	}
 	Ok(world)
+}
+
+#[cfg(test)]
+mod serialization_tests {
+	use super::*;
+	use std::io::Write;
+
+	#[test]
+	fn counting_and_buffered_writers_reserve_the_same_newline_byte() {
+		let mut count = SceneJsonWriter::new(std::io::sink());
+		let mut buffered = SceneJsonWriter::new(Vec::new());
+		count.bytes = MAX_SCENE_BYTES - 2;
+		buffered.bytes = MAX_SCENE_BYTES - 2;
+		for writer in [&mut count as &mut dyn Write, &mut buffered] {
+			writer.write_all(b"a").unwrap();
+			assert_eq!(
+				writer.write_all(b"b").unwrap_err().to_string(),
+				"Scene JSON exceeds the 32 MiB size limit"
+			);
+		}
+		assert_eq!(count.bytes, MAX_SCENE_BYTES - 1);
+		assert_eq!(buffered.bytes, count.bytes);
+		assert_eq!(buffered.output, b"a");
+	}
 }

@@ -56,6 +56,8 @@ pub const PACKAGES: &[&str] = &[
 	"bridge",
 	"engine-logger",
 	"engine-admin",
+	"engine-core",
+	"engine-headless",
 ];
 pub struct Jobs {
 	pub runs: Vec<Run>,
@@ -173,7 +175,7 @@ impl Jobs {
 		Ok(())
 	}
 	pub fn tick(&mut self, processes: &mut Processes, logs: &Path) {
-		let history = processes.history();
+		let history = processes.history_ref();
 		let mut changed = false;
 		for run in &mut self.runs {
 			if run.state == Status::Running

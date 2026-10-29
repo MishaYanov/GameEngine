@@ -105,6 +105,20 @@ impl CameraUniform {
 }
 
 impl VulkanCamera {
+	#[cfg(test)]
+	pub(super) fn for_test(device: &VulkanDevice) -> Self {
+		Self {
+			_metrics: Vec::new(),
+			device: device.raw().clone(),
+			uniform_buffer: VulkanBuffer::host_vertex(device, size_of::<CameraUniform>() as u64)
+				.unwrap(),
+			lighting_buffer: VulkanBuffer::host_vertex(device, size_of::<LightingUniform>() as u64)
+				.unwrap(),
+			descriptor_set_layout: vk::DescriptorSetLayout::null(),
+			descriptor_pool: vk::DescriptorPool::null(),
+			descriptor_set: vk::DescriptorSet::null(),
+		}
+	}
 	pub fn new(instance: &Instance, device: &VulkanDevice) -> Result<Self, VulkanCameraError> {
 		let ash_device = device.raw().clone();
 

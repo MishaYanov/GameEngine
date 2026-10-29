@@ -127,7 +127,7 @@ pub struct Context {
 	pub attributes: BTreeMap<String, String>,
 }
 struct State {
-	entries: VecDeque<LogEntry>,
+	entries: VecDeque<Arc<LogEntry>>,
 	next: u64,
 }
 struct Logger {
@@ -451,13 +451,14 @@ impl Logger {
 		let mut entry = entry;
 		entry.sequence = state.next;
 		state.next += 1;
+		let entry = Arc::new(entry);
 		if let Some(writer) = &self.writer {
 			writer.enqueue(&entry);
 		}
 		if state.entries.len() == self.config.capacity {
 			state.entries.pop_front();
 		}
-		state.entries.push_back(entry.clone());
+		state.entries.push_back(Arc::clone(&entry));
 		drop(state);
 		if self.config.console && !event.panic {
 			use std::io::Write;
@@ -479,22 +480,33 @@ impl Logger {
 			.as_ref()
 			.is_some_and(|id| *id != self.session);
 		let after = if reset { 0 } else { request.after_sequence };
-		let entries: Vec<_> = state
+		let start = state
+			.entries
+			.partition_point(|entry| entry.sequence <= after);
+		let retained: Vec<_> = state
 			.entries
 			.iter()
-			.filter(|e| e.sequence > after)
+			.skip(start)
 			.take(request.limit.min(2000))
 			.cloned()
 			.collect();
 		let oldest = state.entries.front().map_or(0, |e| e.sequence);
-		let next_cursor = entries.last().map_or(after, |e| e.sequence);
+		let latest = state.next - 1;
+		drop(state);
+		// Retained records survive eviction while DTO strings are copied outside
+		// the producer lock. Cursors still describe the same captured history.
+		let next_cursor = retained.last().map_or(after, |e| e.sequence);
+		let entries = retained
+			.iter()
+			.map(|entry| entry.as_ref().clone())
+			.collect();
 		Snapshot {
 			session_id: Some(self.session.clone()),
 			oldest_sequence: oldest,
-			latest_sequence: state.next - 1,
+			latest_sequence: latest,
 			history_gap: oldest > after.saturating_add(1),
 			session_reset: reset,
-			has_more: state.next - 1 > next_cursor,
+			has_more: latest > next_cursor,
 			next_cursor,
 			entries,
 			health: self.health.snapshot(),

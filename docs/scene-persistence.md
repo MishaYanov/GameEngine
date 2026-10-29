@@ -1,7 +1,7 @@
 # Scene data, save, and reload — in progress
 
 Scene documents are owned by engine-core and exposed through runtime adapters. Current authoring retains multiple drafts
-under project schema 2, while scene saves remain schema 3. Read [project lifecycle](project-lifecycle.md) for scene IDs,
+under project schema 3, while scene saves remain schema 3. Read [project lifecycle](project-lifecycle.md) for scene IDs,
 project opening, per-scene dirty state, Save As, register, reload policies and catalog-wide build checks. Native visual
 acceptance remains separate.
 

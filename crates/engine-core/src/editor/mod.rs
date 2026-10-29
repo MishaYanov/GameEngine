@@ -3,22 +3,22 @@ mod factory;
 mod history;
 mod scene_documents;
 pub use factory::CommandRequestBuilder;
-use scene_documents::SceneDraft;
+use scene_documents::{DocumentCostCache, SceneDraft};
 mod operations;
 mod prefab;
 use crate::command::{
 	CommandDescriptorDto, EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto,
 	SnapSettingsDto,
 };
+use crate::game_progress::{GameProgress, ProgressAction};
+use crate::game_session::{GameSession, PreparedScene};
 use crate::simulation_session::MovementTarget;
 use crate::{
 	Bounds3, EntityKey,
 	project::ProjectData,
 	scene_catalog::SceneId,
 	scene_data::SceneData,
-	simulation_session::{
-		ConfiguredBehaviorFactory, GameModuleFactory, SimulationSession, TickOutcome,
-	},
+	simulation_session::{ConfiguredBehaviorFactory, GameModuleFactory, TickOutcome},
 };
 use history::{History, Patch};
 pub use prefab::PrefabData;
@@ -33,6 +33,7 @@ pub struct EditorSession {
 	active_scene_id: SceneId,
 	saved_path: Option<String>,
 	drafts: HashMap<SceneId, SceneDraft>,
+	document_costs: DocumentCostCache,
 	data: Arc<SceneData>,
 	project: Arc<ProjectData>,
 	saved_project: Arc<ProjectData>,
@@ -41,7 +42,7 @@ pub struct EditorSession {
 	selection: Vec<EntityKey>,
 	history: History,
 	transaction: Option<Transaction>,
-	play: Option<SimulationSession>,
+	play: Option<GameSession>,
 	snap: SnapSettingsDto,
 	revision: u64,
 	scene_revision: u64,
@@ -198,6 +199,7 @@ impl EditorSession {
 			active_scene_id,
 			saved_path,
 			drafts: HashMap::new(),
+			document_costs: DocumentCostCache::default(),
 			saved_project: Arc::clone(&project),
 			project,
 			module_factory: Arc::new(ConfiguredBehaviorFactory),
@@ -222,9 +224,9 @@ impl EditorSession {
 	pub fn simulation_stats(&self) -> Option<(u64, u64, crate::collision::CollisionStats)> {
 		self.play.as_ref().map(|play| {
 			(
-				play.tick_index(),
-				play.world().matrix_updates(),
-				play.collision_stats(),
+				play.active().tick_index(),
+				play.active().world().matrix_updates(),
+				play.active().collision_stats(),
 			)
 		})
 	}
@@ -236,12 +238,15 @@ impl EditorSession {
 		self.module_factory = factory;
 		Ok(())
 	}
+
 	pub fn render_world(&self) -> Option<&crate::world::RuntimeWorld> {
-		self.play.as_ref().map(SimulationSession::world)
+		self.play.as_ref().map(|session| session.active().world())
 	}
+
 	pub fn revision(&self) -> u64 {
 		self.revision
 	}
+
 	/// A new project/session must not accept requests addressed to the previous
 	/// document that happened to have the same numeric revision.
 	pub fn supersede_revision(&mut self, previous: u64) -> Result<(), String> {
@@ -278,6 +283,7 @@ impl EditorSession {
 		self.active_scene_id = project.startup_scene_id.clone();
 		self.saved_path = Some(project.startup_scene_path()?.to_owned());
 		self.drafts.clear();
+		self.document_costs = DocumentCostCache::default();
 		self.data = Arc::new(data);
 		self.saved = Arc::clone(&self.data);
 		self.project = Arc::new(project);
@@ -299,27 +305,30 @@ impl EditorSession {
 	pub fn play_controlled_targets(&self) -> Option<&[EntityKey]> {
 		self.play
 			.as_ref()
-			.map(SimulationSession::controlled_targets)
+			.map(|session| session.active().controlled_targets())
 	}
 
 	pub fn is_paused(&self) -> bool {
-		self.play.as_ref().is_some_and(SimulationSession::paused)
+		self.play
+			.as_ref()
+			.is_some_and(|play| play.active().paused())
 	}
 	/// Native lifecycle neutralization is transient input state, not an edit or
 	/// a keyboard binding, so it does not advance the command revision.
 	pub fn clear_play_input(&mut self) {
 		if let Some(play) = self.play.as_mut() {
-			play.clear_input();
+			play.active_mut().clear_input();
 		}
 	}
+
 	pub fn needs_tick(&self) -> bool {
-		self.play
-			.as_ref()
-			.is_some_and(SimulationSession::needs_tick)
+		self.play.as_ref().is_some_and(GameSession::needs_tick)
 	}
+
 	pub fn selection(&self) -> &[EntityKey] {
 		&self.selection
 	}
+
 	/// GPU adapters retain resources only while current content or bounded undo
 	/// records can restore an entity. The core never owns those GPU resources.
 	pub fn retained_entity_keys(&self) -> HashSet<EntityKey> {
@@ -344,19 +353,26 @@ impl EditorSession {
 	pub fn authored_document(&self) -> Arc<SceneData> {
 		Arc::clone(&self.data)
 	}
+	/// Every authored replacement is validated before this session installs it.
+	pub fn validated_authored_document(&self) -> crate::scene_data::ValidatedScene<'_> {
+		crate::scene_data::ValidatedScene::from_validated(&self.data)
+	}
+
 	pub fn render_document(&self) -> Arc<SceneData> {
 		self.play
 			.as_ref()
-			.map_or_else(|| Arc::clone(&self.data), SimulationSession::document)
+			.map_or_else(|| Arc::clone(&self.data), |play| play.active().document())
 	}
+
 	pub fn has_transaction(&self) -> bool {
 		self.transaction.is_some()
 	}
+
 	pub fn mark_saved(&mut self) -> Result<(), String> {
 		if self.has_transaction() {
 			return Err("Commit or cancel the current edit before saving".into());
 		}
-		if self.active_scene_dirty() || self.saved_project != self.project {
+		if self.active_scene_dirty() || self.project_dirty() {
 			self.ensure_revision_capacity()?;
 			self.saved_path = Some(self.project.scene_path(&self.active_scene_id)?.to_owned());
 			self.saved = Arc::clone(&self.data);
@@ -365,9 +381,20 @@ impl EditorSession {
 		}
 		Ok(())
 	}
+
 	pub fn is_dirty(&self) -> bool {
-		self.project != self.saved_project || self.scene_states().iter().any(|s| s.dirty)
+		self.project_dirty()
+			|| self
+				.project
+				.scenes
+				.iter()
+				.any(|entry| self.scene_dirty(entry).unwrap_or(false))
 	}
+
+	fn project_dirty(&self) -> bool {
+		snapshots_differ(&self.project, &self.saved_project)
+	}
+
 	pub fn mark_scene_saved(&mut self) -> Result<(), String> {
 		self.require_no_transaction()?;
 		if self.active_scene_dirty() {
@@ -378,18 +405,21 @@ impl EditorSession {
 		}
 		Ok(())
 	}
+
 	pub fn mark_project_saved(&mut self) -> Result<(), String> {
 		self.require_no_transaction()?;
-		if self.saved_project != self.project {
+		if self.project_dirty() {
 			self.ensure_revision_capacity()?;
 			self.saved_project = Arc::clone(&self.project);
 			self.bump();
 		}
 		Ok(())
 	}
+
 	pub fn set_model_bounds(&mut self, path: String, mesh: usize, bounds: Bounds3) {
 		self.bounds.insert((path, mesh), bounds);
 	}
+
 	pub(crate) fn clear_model_bounds(&mut self) {
 		self.bounds.clear();
 	}
@@ -413,12 +443,16 @@ impl EditorSession {
 			snap: state.snap,
 		})
 	}
+
 	/// Authoritative editor controls without cloning the scene or project.
 	pub fn state(&self) -> crate::command::EditorStateDto {
+		let scenes = self.scene_states();
+		let project_dirty = self.project_dirty();
+		let dirty = project_dirty || scenes.iter().any(|scene| scene.dirty);
 		crate::command::EditorStateDto {
 			active_scene_id: self.active_scene_id.clone(),
-			project_dirty: self.project != self.saved_project,
-			scenes: self.scene_states(),
+			project_dirty,
+			scenes,
 			revision: self.revision,
 			scene_revision: self.scene_revision,
 			selection: self
@@ -427,8 +461,11 @@ impl EditorSession {
 				.map(|key| key.as_str().to_owned())
 				.collect(),
 			mode: if self.is_playing() { "play" } else { "edit" }.into(),
-			paused: self.play.as_ref().is_some_and(SimulationSession::paused),
-			dirty: self.is_dirty(),
+			paused: self
+				.play
+				.as_ref()
+				.is_some_and(|play| play.active().paused()),
+			dirty,
 			can_undo: self.history.can_undo(),
 			can_redo: self.history.can_redo(),
 			transaction: self.transaction.as_ref().map(|t| t.label.clone()),
@@ -447,6 +484,7 @@ impl EditorSession {
 		CommandFactory::validate(&request.command)?;
 		self.execute_validated_command(request)
 	}
+
 	pub(crate) fn execute_validated_command(
 		&mut self,
 		request: EditorCommandRequest,
@@ -541,7 +579,7 @@ impl EditorSession {
 				let document = self
 					.play
 					.as_ref()
-					.map_or(self.data.as_ref(), |play| play.world().data());
+					.map_or(self.data.as_ref(), |play| play.active().world().data());
 				let available: HashSet<_> = document
 					.entities
 					.iter()
@@ -577,11 +615,11 @@ impl EditorSession {
 			Command::StartPlay => {
 				self.require_edit()?;
 				self.require_no_transaction()?;
-				self.play = Some(SimulationSession::with_factory_for_scene(
-					(*self.project).clone(),
+				self.play = Some(GameSession::with_factory_for_scene(
+					Arc::clone(&self.project),
 					self.active_scene_id.clone(),
 					Arc::clone(&self.data),
-					self.module_factory.as_ref(),
+					Arc::clone(&self.module_factory),
 				)?);
 				self.scene_revision += 1;
 				self.bump();
@@ -594,21 +632,27 @@ impl EditorSession {
 			}
 			Command::SetPaused { paused } => {
 				let play = self.play.as_mut().ok_or("Play mode is not active")?;
-				if play.paused() != paused {
-					play.set_paused(paused);
+				if play.active().paused() != paused {
+					play.active_mut().set_paused(paused);
 					self.bump();
 				}
 			}
 			Command::SetPlayInput { movement } => {
 				let play = self.play.as_mut().ok_or("Play mode is not active")?;
-				if play.set_targeted_input(&MovementTarget::AllControlled, movement)? {
+				if play
+					.active_mut()
+					.set_targeted_input(&MovementTarget::AllControlled, movement)?
+				{
 					self.bump();
 				}
 			}
 			Command::SetEntityInput { entity, movement } => {
 				let entity = EntityKey::new(entity)?;
 				let play = self.play.as_mut().ok_or("Play mode is not active")?;
-				if play.set_targeted_input(&MovementTarget::Entity(entity), movement)? {
+				if play
+					.active_mut()
+					.set_targeted_input(&MovementTarget::Entity(entity), movement)?
+				{
 					self.bump();
 				}
 			}
@@ -736,7 +780,14 @@ impl EditorSession {
 		label: &str,
 	) -> Result<(), String> {
 		self.validate_project_documents(&project, &self.active_scene_id, &next)?;
-		self.check_document_budget(Some((&self.active_scene_id, &next)))?;
+		Self::document_budget(
+			&self.active_scene_id,
+			&self.data,
+			&self.saved,
+			&self.drafts,
+			Some((&self.active_scene_id, &next)),
+			&mut self.document_costs,
+		)?;
 		validate_selection(&next, &selection)?;
 		if next == *self.data && project == *self.project && selection == self.selection {
 			return Ok(());
@@ -813,6 +864,73 @@ impl EditorSession {
 		}
 		Ok(outcome)
 	}
+}
+
+impl EditorSession {
+	pub fn play_progress<P: GameProgress>(&self) -> Option<&P> {
+		self.play.as_ref()?.progress::<P>()
+	}
+	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		if self
+			.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.apply_progress_actions(actions)?
+		{
+			self.bump();
+		}
+		Ok(())
+	}
+	pub fn prepare_new_game(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		self.play
+			.as_ref()
+			.ok_or("Play mode is not active")?
+			.prepare_new_game(scene_id, document)
+	}
+	pub fn play_scene_id(&self) -> Option<&SceneId> {
+		self.play.as_ref().map(|play| play.active().scene_id())
+	}
+
+	pub fn prepare_play_scene(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+
+		self.play
+			.as_ref()
+			.ok_or("Play mode is not active")?
+			.prepare_scene(scene_id, document)
+	}
+
+	pub fn commit_play_scene(&mut self, prepared: PreparedScene) -> Result<(), String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.commit_scene(prepared)?;
+
+		self.scene_revision += 1;
+		self.bump();
+
+		Ok(())
+	}
+}
+
+fn snapshots_differ<T: PartialEq>(current: &Arc<T>, saved: &Arc<T>) -> bool {
+	!Arc::ptr_eq(current, saved) && current != saved
 }
 
 fn validate_selection(data: &SceneData, selection: &[EntityKey]) -> Result<(), String> {

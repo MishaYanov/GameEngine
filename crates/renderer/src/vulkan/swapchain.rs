@@ -87,6 +87,22 @@ impl From<VulkanSurfaceError> for VulkanSwapchainError {
 }
 
 impl VulkanSwapchain {
+	#[cfg(test)]
+	pub(super) fn for_test(device: &Device) -> Self {
+		Self {
+			_metrics: Vec::new(),
+			loader: khr_swapchain::Device::new(&super::test_driver::instance(), device),
+			device: device.clone(),
+			swapchain: vk::SwapchainKHR::null(),
+			images: vec![vk::Image::null()],
+			image_views: vec![vk::ImageView::null()],
+			format: vk::Format::B8G8R8A8_SRGB,
+			extent: vk::Extent2D {
+				width: 1,
+				height: 1,
+			},
+		}
+	}
 	pub fn new(
 		instance: &Instance,
 		device: &VulkanDevice,
@@ -193,12 +209,16 @@ impl VulkanSwapchain {
 		let loader = khr_swapchain::Device::new(instance, device.raw());
 
 		let swapchain = unsafe { loader.create_swapchain(&create_info, None)? };
+		let owned_swapchain = super::rollback::Rollback::new(swapchain, |handle| unsafe {
+			loader.destroy_swapchain(handle, None);
+		});
 
 		let images = unsafe { loader.get_swapchain_images(swapchain)? };
 
 		let ash_device = device.raw().clone();
 
 		let image_views = create_image_views(&ash_device, &images, surface_format.format)?;
+		let swapchain = owned_swapchain.into_inner();
 
 		Ok(Self {
 			_metrics: std::iter::once(crate::metrics::object(
@@ -312,7 +332,14 @@ fn create_image_views(
 	images: &[vk::Image],
 	format: vk::Format,
 ) -> Result<Vec<vk::ImageView>, VulkanSwapchainError> {
-	let mut views = Vec::with_capacity(images.len());
+	let mut views = super::rollback::Rollback::new(
+		Vec::with_capacity(images.len()),
+		|views: Vec<vk::ImageView>| unsafe {
+			for view in views {
+				device.destroy_image_view(view, None);
+			}
+		},
+	);
 
 	for &image in images {
 		let subresource_range = vk::ImageSubresourceRange::default()
@@ -330,10 +357,10 @@ fn create_image_views(
 
 		let view = unsafe { device.create_image_view(&create_info, None)? };
 
-		views.push(view);
+		views.value_mut().push(view);
 	}
 
-	Ok(views)
+	Ok(views.into_inner())
 }
 
 fn choose_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {

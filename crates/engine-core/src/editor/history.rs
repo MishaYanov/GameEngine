@@ -142,10 +142,26 @@ impl Patch {
 						project
 							.behaviors
 							.capacity()
-							.saturating_mul(size_of::<crate::project::BehaviorSpec>()),
+							.saturating_mul(size_of::<crate::project::SceneBehavior>()),
+					)
+					.saturating_add(
+						project
+							.behavior_definitions
+							.capacity()
+							.saturating_mul(size_of::<crate::project::BehaviorDefinition>()),
 					);
 				for behavior in &project.behaviors {
-					bytes = bytes.saturating_add(behavior.entity().as_str().len());
+					bytes = bytes
+						.saturating_add(behavior.entity().as_str().len())
+						.saturating_add(behavior.scene_id.as_str().len());
+					if let crate::project::BehaviorSpec::Shared { definition, .. } =
+						&behavior.behavior
+					{
+						bytes = bytes.saturating_add(definition.capacity());
+					}
+				}
+				for definition in &project.behavior_definitions {
+					bytes = bytes.saturating_add(definition.id.capacity());
 				}
 			}
 		}
@@ -290,7 +306,7 @@ impl History {
 		} else {
 			self.undo.back()
 		}
-			.map(|p| &p.scene_id)
+		.map(|p| &p.scene_id)
 	}
 	pub fn retained_scene_ids(&self) -> HashSet<SceneId> {
 		let mut ids = HashSet::new();
@@ -363,26 +379,15 @@ impl History {
 		self.undo.push_back(patch);
 		Ok(())
 	}
-	pub fn restore(
-		&mut self,
-		current: &SceneData,
-		current_project: &ProjectData,
-		redo: bool,
-	) -> Result<Option<(SceneData, ProjectData, Vec<EntityKey>)>, String> {
-		let record = if redo {
-			self.redo.last()
-		} else {
-			self.undo.back()
-		};
-		let Some(record) = record else {
-			return Ok(None);
-		};
-		let next = record.apply(current, current_project, redo)?;
+	/// Move the record only after its prepared restoration passes workspace checks.
+	/// The caller holds the session exclusively between preview and commit.
+	pub fn commit_restore(&mut self, redo: bool) {
 		if redo {
-			self.undo.push_back(self.redo.pop().expect("record exists"));
+			self.undo
+				.push_back(self.redo.pop().expect("prepared redo record exists"));
 		} else {
-			self.redo.push(self.undo.pop_back().expect("record exists"));
+			self.redo
+				.push(self.undo.pop_back().expect("prepared undo record exists"));
 		}
-		Ok(Some(next))
 	}
 }

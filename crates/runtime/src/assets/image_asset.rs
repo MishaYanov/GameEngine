@@ -3,14 +3,16 @@ use std::{
 	fmt::{Display, Formatter},
 	io,
 	path::Path,
+	sync::Arc,
 };
 
 use image::{ImageError, ImageReader};
 
+#[derive(Clone)]
 pub struct ImageAsset {
 	width: u32,
 	height: u32,
-	pixels: Vec<u8>,
+	pixels: Arc<[u8]>,
 }
 
 #[derive(Debug)]
@@ -102,7 +104,7 @@ impl ImageAsset {
 		Ok(Self {
 			width,
 			height,
-			pixels,
+			pixels: pixels.into(),
 		})
 	}
 

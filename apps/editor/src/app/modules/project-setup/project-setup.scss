@@ -69,6 +69,17 @@ input[aria-invalid='true'] {
   border-color: var(--color-danger);
 }
 
+.destination-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+
+  .browse {
+    width: auto;
+    margin-top: 0;
+  }
+}
+
 .hint {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);

@@ -51,9 +51,17 @@ pub(super) fn apply(
 			space,
 			snap: enabled,
 		} => {
+			// A single edit is cheaper to scan; batches share one borrowed lookup.
+			let indices = (edits.len() > 1).then(|| entity_indices(data));
 			let mut targets = HashMap::with_capacity(edits.len());
 			for edit in edits {
-				let index = entity_index(data, &edit.key)?;
+				let index = match &indices {
+					Some(indices) => indices
+						.get(edit.key.as_str())
+						.copied()
+						.ok_or_else(|| format!("Entity key {:?} does not exist", edit.key))?,
+					None => entity_index(data, &edit.key)?,
+				};
 				let mut transform = transform_from_dto(edit.transform)?;
 				if snapping(snap, enabled)? {
 					snap_transform(&mut transform, snap);
@@ -65,6 +73,7 @@ pub(super) fn apply(
 					));
 				}
 			}
+			drop(indices);
 			match space {
 				TransformSpace::Local => {
 					for (index, transform) in targets {
@@ -88,16 +97,16 @@ pub(super) fn apply(
 			if snapping(snap, enabled)? {
 				delta = snap_vec(delta, snap.translation);
 			}
-			let roots = selection_roots(data, selection)?;
+			let hierarchy = hierarchy(data)?;
+			let roots = selection_roots(&hierarchy, selection)?;
 			if delta == Vec3::ZERO {
 				return Ok(());
 			}
 			let world = data.world_matrices()?;
-			let (_, parents) = hierarchy(data)?;
 			let mut positions = Vec::with_capacity(roots.len());
 			for index in roots {
 				let target = world[index].w_axis.truncate() + delta;
-				let position = match parents[index] {
+				let position = match hierarchy.parents[index] {
 					Some(parent) => inverse(world[parent])?.transform_point3(target),
 					None => target,
 				};
@@ -119,7 +128,8 @@ pub(super) fn apply(
 			if snapping(snap, enabled)? {
 				radians = snap_vec(radians, snap.rotation_radians);
 			}
-			let roots = selection_roots(data, selection)?;
+			let hierarchy = hierarchy(data)?;
+			let roots = selection_roots(&hierarchy, selection)?;
 			if radians == Vec3::ZERO {
 				return Ok(());
 			}
@@ -145,13 +155,18 @@ pub(super) fn apply(
 					let change = Mat4::from_translation(pivot)
 						* Mat4::from_quat(delta)
 						* Mat4::from_translation(-pivot);
-					set_world_targets(
+					let locals = world_target_locals(
 						data,
 						roots
 							.into_iter()
 							.map(|index| (index, change * world[index]))
 							.collect(),
+						&world,
+						Some(&hierarchy.parents),
 					)?;
+					for (index, transform) in locals {
+						data.entities[index].transform = transform;
+					}
 				}
 			}
 		}
@@ -161,7 +176,8 @@ pub(super) fn apply(
 		} => {
 			let factor = finite_vec(factor, "Scale factor")?;
 			let use_snap = snapping(snap, enabled)?;
-			let roots = selection_roots(data, selection)?;
+			let hierarchy = hierarchy(data)?;
+			let roots = selection_roots(&hierarchy, selection)?;
 			for index in roots {
 				let mut scale = Vec3::from_array(data.entities[index].transform.scale) * factor;
 				if use_snap {
@@ -177,7 +193,9 @@ pub(super) fn apply(
 			duplicate(data, selection, finite_vec(offset, "Duplicate offset")?)?
 		}
 		EditorCommandDto::DeleteSelection => {
-			let selected = selected_subtree(data, selection)?;
+			let hierarchy = hierarchy(data)?;
+			let roots = selection_roots(&hierarchy, selection)?;
+			let selected = selected_subtree(&hierarchy, &roots);
 			let removed: HashSet<_> = selected
 				.into_iter()
 				.map(|index| data.entities[index].key.clone())
@@ -245,6 +263,15 @@ fn entity_index(data: &SceneData, key: &str) -> Result<usize, String> {
 		.iter()
 		.position(|entity| entity.key.as_str() == key)
 		.ok_or_else(|| format!("Entity key {key:?} does not exist"))
+}
+
+fn entity_indices(data: &SceneData) -> HashMap<&str, usize> {
+	let mut indices = HashMap::with_capacity(data.entities.len());
+	for (index, entity) in data.entities.iter().enumerate() {
+		// Match the single-entity scan even before scene validation rejects duplicates.
+		indices.entry(entity.key.as_str()).or_insert(index);
+	}
+	indices
 }
 
 fn finite_scalar(value: f32, label: &str) -> Result<(), String> {
@@ -318,15 +345,13 @@ fn snap_transform(transform: &mut TransformData, settings: &SnapSettingsDto) {
 	transform.scale = snap_vec(Vec3::from_array(transform.scale), settings.scale).to_array();
 }
 
-type Hierarchy = (HashMap<EntityKey, usize>, Vec<Option<usize>>);
+struct Hierarchy<'a> {
+	indices: HashMap<&'a str, usize>,
+	parents: Vec<Option<usize>>,
+}
 
-fn hierarchy(data: &SceneData) -> Result<Hierarchy, String> {
-	let indices: HashMap<_, _> = data
-		.entities
-		.iter()
-		.enumerate()
-		.map(|(index, entity)| (entity.key.clone(), index))
-		.collect();
+fn hierarchy(data: &SceneData) -> Result<Hierarchy<'_>, String> {
+	let indices = entity_indices(data);
 	if indices.len() != data.entities.len() {
 		return Err("Scene contains duplicate entity keys".into());
 	}
@@ -339,23 +364,26 @@ fn hierarchy(data: &SceneData) -> Result<Hierarchy, String> {
 				.as_ref()
 				.map(|key| {
 					indices
-						.get(key)
+						.get(key.as_str())
 						.copied()
 						.ok_or_else(|| format!("Parent {:?} does not exist", key.as_str()))
 				})
 				.transpose()
 		})
 		.collect::<Result<Vec<_>, _>>()?;
-	Ok((indices, parents))
+	Ok(Hierarchy { indices, parents })
 }
 
-fn selection_roots(data: &SceneData, selection: &[EntityKey]) -> Result<Vec<usize>, String> {
-	let (indices, parents) = hierarchy(data)?;
+fn selection_roots(
+	hierarchy: &Hierarchy<'_>,
+	selection: &[EntityKey],
+) -> Result<Vec<usize>, String> {
+	let Hierarchy { indices, parents } = hierarchy;
 	let selected: HashSet<_> = selection
 		.iter()
 		.map(|key| {
 			indices
-				.get(key)
+				.get(key.as_str())
 				.copied()
 				.ok_or_else(|| format!("Selected entity {:?} no longer exists", key.as_str()))
 		})
@@ -363,10 +391,10 @@ fn selection_roots(data: &SceneData, selection: &[EntityKey]) -> Result<Vec<usiz
 	if selected.is_empty() {
 		return Err("Select at least one entity first".into());
 	}
-	let mut has_selected_ancestor = vec![false; data.entities.len()];
-	let mut state = vec![0_u8; data.entities.len()];
+	let mut has_selected_ancestor = vec![false; parents.len()];
+	let mut state = vec![0_u8; parents.len()];
 	let mut path = Vec::new();
-	for index in 0..data.entities.len() {
+	for index in 0..parents.len() {
 		let mut current = Some(index);
 		while let Some(node) = current {
 			match state[node] {
@@ -385,22 +413,21 @@ fn selection_roots(data: &SceneData, selection: &[EntityKey]) -> Result<Vec<usiz
 			state[node] = 2;
 		}
 	}
-	Ok((0..data.entities.len())
+	Ok((0..parents.len())
 		.filter(|index| selected.contains(index) && !has_selected_ancestor[*index])
 		.collect())
 }
 
-fn selected_subtree(data: &SceneData, selection: &[EntityKey]) -> Result<Vec<usize>, String> {
-	let roots = selection_roots(data, selection)?;
-	let (_, parents) = hierarchy(data)?;
-	let mut children = vec![Vec::new(); data.entities.len()];
+fn selected_subtree(hierarchy: &Hierarchy<'_>, roots: &[usize]) -> Vec<usize> {
+	let parents = &hierarchy.parents;
+	let mut children = vec![Vec::new(); parents.len()];
 	for (index, parent) in parents.iter().enumerate() {
 		if let Some(parent) = parent {
 			children[*parent].push(index);
 		}
 	}
-	let mut included = vec![false; data.entities.len()];
-	let mut stack = roots;
+	let mut included = vec![false; parents.len()];
+	let mut stack = roots.to_vec();
 	while let Some(index) = stack.pop() {
 		if included[index] {
 			continue;
@@ -408,24 +435,44 @@ fn selected_subtree(data: &SceneData, selection: &[EntityKey]) -> Result<Vec<usi
 		included[index] = true;
 		stack.extend(children[index].iter().copied());
 	}
-	Ok(included
+	included
 		.into_iter()
 		.enumerate()
 		.filter_map(|(index, selected)| selected.then_some(index))
-		.collect())
+		.collect()
 }
 
 /// Resolve every desired world target against the resulting parent world,
 /// including edited ancestors. Work is iterative and independent of Vec order.
 fn set_world_targets(data: &mut SceneData, targets: HashMap<usize, Mat4>) -> Result<(), String> {
 	let original = data.world_matrices()?;
+	let locals = world_target_locals(data, targets, &original, None)?;
+	for (index, transform) in locals {
+		data.entities[index].transform = transform;
+	}
+	Ok(())
+}
+
+fn world_target_locals(
+	data: &SceneData,
+	targets: HashMap<usize, Mat4>,
+	original: &[Mat4],
+	parents: Option<&[Option<usize>]>,
+) -> Result<Vec<(usize, TransformData)>, String> {
 	if targets
 		.iter()
 		.all(|(&index, &matrix)| matrix == original[index])
 	{
-		return Ok(());
+		return Ok(Vec::new());
 	}
-	let (_, parents) = hierarchy(data)?;
+	let resolved_hierarchy;
+	let parents = match parents {
+		Some(parents) => parents,
+		None => {
+			resolved_hierarchy = hierarchy(data)?;
+			&resolved_hierarchy.parents
+		}
+	};
 	let mut resolved = vec![None; data.entities.len()];
 	let mut locals = Vec::with_capacity(targets.len());
 	let mut path = Vec::new();
@@ -459,10 +506,7 @@ fn set_world_targets(data: &mut SceneData, targets: HashMap<usize, Mat4>) -> Res
 			resolved[node] = Some(world);
 		}
 	}
-	for (index, transform) in locals {
-		data.entities[index].transform = transform;
-	}
-	Ok(())
+	Ok(locals)
 }
 
 fn inverse(matrix: Mat4) -> Result<Mat4, String> {
@@ -504,8 +548,10 @@ fn duplicate(
 	selection: &mut Vec<EntityKey>,
 	offset: Vec3,
 ) -> Result<(), String> {
-	let roots: HashSet<_> = selection_roots(data, selection)?.into_iter().collect();
-	let indices = selected_subtree(data, selection)?;
+	let hierarchy = hierarchy(data)?;
+	let roots = selection_roots(&hierarchy, selection)?;
+	let indices = selected_subtree(&hierarchy, &roots);
+	let roots: HashSet<_> = roots.into_iter().collect();
 	if data
 		.entities
 		.len()
@@ -515,7 +561,6 @@ fn duplicate(
 		return Err("Duplicating this selection would exceed the scene entity limit".into());
 	}
 	let original_world = data.world_matrices()?;
-	let (_, parents) = hierarchy(data)?;
 	let mut keys = HashMap::with_capacity(indices.len());
 	let mut used: HashSet<_> = data
 		.entities
@@ -542,7 +587,7 @@ fn duplicate(
 			.map(|key| keys.get(&key).cloned().unwrap_or(key));
 		if roots.contains(&index) && offset != Vec3::ZERO {
 			let target = original_world[index].w_axis.truncate() + offset;
-			let position = match parents[index] {
+			let position = match hierarchy.parents[index] {
 				Some(parent) => inverse(original_world[parent])?.transform_point3(target),
 				None => target,
 			};
@@ -567,7 +612,7 @@ fn reparent(
 	if data.entities[index].parent.as_ref().map(EntityKey::as_str) == parent {
 		return Ok(());
 	}
-	let (_, parents) = hierarchy(data)?;
+	let hierarchy = hierarchy(data)?;
 	let mut ancestor = parent_index;
 	let mut remaining = data.entities.len();
 	while let Some(parent) = ancestor {
@@ -578,7 +623,7 @@ fn reparent(
 			return Err("Scene hierarchy contains a parent cycle".into());
 		}
 		remaining -= 1;
-		ancestor = parents[parent];
+		ancestor = hierarchy.parents[parent];
 	}
 	let transform = if keep_world {
 		let world = data.world_matrices()?;
@@ -602,7 +647,9 @@ fn selection_bounds(
 	selection: &[EntityKey],
 	bounds: &HashMap<(String, usize), Bounds3>,
 ) -> Result<Bounds3, String> {
-	let indices = selected_subtree(data, selection)?;
+	let hierarchy = hierarchy(data)?;
+	let roots = selection_roots(&hierarchy, selection)?;
+	let indices = selected_subtree(&hierarchy, &roots);
 	let world = data.world_matrices()?;
 	let mut combined: Option<Bounds3> = None;
 	for &index in &indices {
@@ -770,4 +817,81 @@ fn dolly(
 	data.camera.position =
 		finite_result(pivot + direction * distance, "Dolly position")?.to_array();
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn selection_operations_preserve_hierarchy_error_order_before_mutation_or_noop() {
+		let camera = crate::Camera::default();
+		let key = |value: &str| EntityKey::new(value).unwrap();
+		let original = SceneData {
+			schema_version: crate::scene_data::CURRENT_SCHEMA_VERSION,
+			bindings: Default::default(),
+			entities: vec![
+				EntityData::new(key("a"), "A", "model.glb"),
+				EntityData::new(key("b"), "B", "model.glb"),
+			],
+			camera: CameraData {
+				position: camera.position,
+				yaw: camera.yaw,
+				pitch: camera.pitch,
+				vertical_fov: camera.vertical_fov,
+				near_plane: camera.near,
+				far_plane: camera.far,
+			},
+			lights: vec![],
+		};
+		let mut duplicate = original.clone();
+		duplicate.entities[1].key = key("a");
+		duplicate.entities[0].parent = Some(key("missing-parent"));
+		let mut missing_parent = original.clone();
+		missing_parent.entities[0].parent = Some(key("missing-parent"));
+		let mut cycle = original.clone();
+		cycle.entities[0].parent = Some(key("b"));
+		cycle.entities[1].parent = Some(key("a"));
+		for (data, selected, expected) in [
+			(
+				duplicate,
+				"missing-selection",
+				"Scene contains duplicate entity keys",
+			),
+			(
+				missing_parent,
+				"missing-selection",
+				"Parent \"missing-parent\" does not exist",
+			),
+			(
+				cycle.clone(),
+				"missing-selection",
+				"Selected entity \"missing-selection\" no longer exists",
+			),
+			(cycle, "a", "Scene hierarchy contains a parent cycle"),
+		] {
+			for command in [
+				EditorCommandDto::DuplicateSelection { offset: [0.0; 3] },
+				EditorCommandDto::DeleteSelection,
+				EditorCommandDto::TranslateSelection {
+					delta: [0.0; 3],
+					snap: false,
+				},
+			] {
+				let mut candidate = data.clone();
+				let mut selection = vec![key(selected)];
+				let error = apply(
+					&mut candidate,
+					&mut selection,
+					&SnapSettingsDto::default(),
+					&HashMap::new(),
+					command,
+				)
+				.unwrap_err();
+				assert_eq!(error, expected);
+				assert_eq!(candidate, data);
+				assert_eq!(selection, vec![key(selected)]);
+			}
+		}
+	}
 }

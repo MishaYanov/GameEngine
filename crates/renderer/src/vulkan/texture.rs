@@ -31,6 +31,7 @@ pub enum VulkanTextureError {
 	NoSuitableMemoryType,
 
 	InvalidPixelData { expected: usize, actual: usize },
+	InvalidDimensions,
 }
 
 impl Display for VulkanTextureError {
@@ -57,6 +58,10 @@ impl Display for VulkanTextureError {
 					"invalid RGBA texture data: expected {expected} bytes, got {actual}",
 				)
 			}
+			Self::InvalidDimensions => write!(
+				formatter,
+				"RGBA texture dimensions must be nonzero and fit in host memory"
+			),
 		}
 	}
 }
@@ -137,7 +142,25 @@ impl VulkanTexture {
 
 		pixels: &[u8],
 	) -> Result<Self, VulkanTextureError> {
-		let expected_size = (width as usize) * (height as usize) * 4;
+		let resources =
+			Self::prepare_upload(instance, device, material_layout, width, height, pixels)?;
+		let (texture, _) =
+			super::upload::submit(device, resources, |(texture, staging), raw, command| {
+				texture.record_upload(raw, command, staging, width, height);
+			})?;
+		Ok(texture)
+	}
+
+	pub(super) fn validate_upload(
+		width: u32,
+		height: u32,
+		pixels: &[u8],
+	) -> Result<usize, VulkanTextureError> {
+		let expected_size = (width as usize)
+			.checked_mul(height as usize)
+			.and_then(|size| size.checked_mul(4))
+			.filter(|_| width != 0 && height != 0)
+			.ok_or(VulkanTextureError::InvalidDimensions)?;
 
 		if pixels.len() != expected_size {
 			return Err(VulkanTextureError::InvalidPixelData {
@@ -146,6 +169,18 @@ impl VulkanTexture {
 				actual: pixels.len(),
 			});
 		}
+		Ok(expected_size)
+	}
+
+	pub(super) fn prepare_upload(
+		instance: &Instance,
+		device: &VulkanDevice,
+		material_layout: Arc<VulkanMaterialLayout>,
+		width: u32,
+		height: u32,
+		pixels: &[u8],
+	) -> Result<(Self, VulkanBuffer), VulkanTextureError> {
+		Self::validate_upload(width, height, pixels)?;
 
 		let ash_device = device.raw().clone();
 
@@ -239,16 +274,6 @@ impl VulkanTexture {
 			}
 
 			return Err(error.into());
-		}
-
-		if let Err(error) = upload_image(device, staging.raw(), image, width, height) {
-			unsafe {
-				ash_device.free_memory(memory, None);
-
-				ash_device.destroy_image(image, None);
-			}
-
-			return Err(error);
 		}
 
 		let range = vk::ImageSubresourceRange::default()
@@ -375,37 +400,57 @@ impl VulkanTexture {
 			ash_device.update_descriptor_sets(&writes, &[]);
 		}
 
-		Ok(Self {
-			_metrics: vec![
-				allocation_metrics,
-				crate::metrics::object(&ash_device, "image_view", view, "Texture image view", ""),
-				crate::metrics::object(&ash_device, "sampler", sampler, "Texture sampler", ""),
-				crate::metrics::object(
-					&ash_device,
-					"descriptor_pool",
-					descriptor_pool,
-					"Texture descriptors",
-					"max_sets=1",
-				),
-				crate::metrics::object(
-					&ash_device,
-					"descriptor_set",
-					descriptor_set,
-					"Texture descriptor",
-					"",
-				),
-			],
-			device: ash_device,
+		Ok((
+			Self {
+				_metrics: vec![
+					allocation_metrics,
+					crate::metrics::object(
+						&ash_device,
+						"image_view",
+						view,
+						"Texture image view",
+						"",
+					),
+					crate::metrics::object(&ash_device, "sampler", sampler, "Texture sampler", ""),
+					crate::metrics::object(
+						&ash_device,
+						"descriptor_pool",
+						descriptor_pool,
+						"Texture descriptors",
+						"max_sets=1",
+					),
+					crate::metrics::object(
+						&ash_device,
+						"descriptor_set",
+						descriptor_set,
+						"Texture descriptor",
+						"",
+					),
+				],
+				device: ash_device,
 
-			image,
-			memory,
-			view,
-			sampler,
+				image,
+				memory,
+				view,
+				sampler,
 
-			material_layout,
-			descriptor_pool,
-			descriptor_set,
-		})
+				material_layout,
+				descriptor_pool,
+				descriptor_set,
+			},
+			staging,
+		))
+	}
+
+	pub(super) fn record_upload(
+		&self,
+		raw: &Device,
+		command: vk::CommandBuffer,
+		staging: &VulkanBuffer,
+		width: u32,
+		height: u32,
+	) {
+		record_upload(raw, command, staging.raw(), self.image, width, height);
 	}
 
 	pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
@@ -434,154 +479,93 @@ impl Drop for VulkanTexture {
 	}
 }
 
-fn upload_image(
-	device: &VulkanDevice,
-
+fn record_upload(
+	ash_device: &Device,
+	command_buffer: vk::CommandBuffer,
 	staging_buffer: vk::Buffer,
 	image: vk::Image,
 
 	width: u32,
 	height: u32,
-) -> Result<(), VulkanTextureError> {
-	let ash_device = device.raw();
+) {
+	let range = vk::ImageSubresourceRange::default()
+		.aspect_mask(vk::ImageAspectFlags::COLOR)
+		.base_mip_level(0)
+		.level_count(1)
+		.base_array_layer(0)
+		.layer_count(1);
 
-	let pool_info = vk::CommandPoolCreateInfo::default()
-		.flags(vk::CommandPoolCreateFlags::TRANSIENT)
-		.queue_family_index(device.queue_families().graphics);
-
-	let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
-	let pool_metrics = crate::metrics::object(
-		ash_device,
-		"command_pool",
-		command_pool,
-		"Image upload command pool",
-		"transient",
-	);
-	let mut command_metrics = None;
-
-	let result = (|| -> Result<(), VulkanTextureError> {
-		let allocate_info = vk::CommandBufferAllocateInfo::default()
-			.command_pool(command_pool)
-			.level(vk::CommandBufferLevel::PRIMARY)
-			.command_buffer_count(1);
-
-		let command_buffer = unsafe { ash_device.allocate_command_buffers(&allocate_info)? }[0];
-		command_metrics = Some(crate::metrics::object(
-			ash_device,
-			"command_buffer",
-			command_buffer,
-			"Image upload commands",
-			"transient",
-		));
-
-		let begin_info = vk::CommandBufferBeginInfo::default()
-			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-		unsafe {
-			ash_device.begin_command_buffer(command_buffer, &begin_info)?;
-		}
-
-		let range = vk::ImageSubresourceRange::default()
-			.aspect_mask(vk::ImageAspectFlags::COLOR)
-			.base_mip_level(0)
-			.level_count(1)
-			.base_array_layer(0)
-			.layer_count(1);
-
-		let to_transfer = vk::ImageMemoryBarrier::default()
-			.src_access_mask(vk::AccessFlags::empty())
-			.dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-			.old_layout(vk::ImageLayout::UNDEFINED)
-			.new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-			.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.image(image)
-			.subresource_range(range);
-
-		unsafe {
-			ash_device.cmd_pipeline_barrier(
-				command_buffer,
-				vk::PipelineStageFlags::TOP_OF_PIPE,
-				vk::PipelineStageFlags::TRANSFER,
-				vk::DependencyFlags::empty(),
-				&[],
-				&[],
-				&[to_transfer],
-			);
-		}
-
-		let subresource = vk::ImageSubresourceLayers::default()
-			.aspect_mask(vk::ImageAspectFlags::COLOR)
-			.mip_level(0)
-			.base_array_layer(0)
-			.layer_count(1);
-
-		let regions = [vk::BufferImageCopy::default()
-			.buffer_offset(0)
-			.buffer_row_length(0)
-			.buffer_image_height(0)
-			.image_subresource(subresource)
-			.image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-			.image_extent(vk::Extent3D {
-				width,
-				height,
-				depth: 1,
-			})];
-
-		unsafe {
-			ash_device.cmd_copy_buffer_to_image(
-				command_buffer,
-				staging_buffer,
-				image,
-				vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-				&regions,
-			);
-		}
-
-		let to_shader = vk::ImageMemoryBarrier::default()
-			.src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-			.dst_access_mask(vk::AccessFlags::SHADER_READ)
-			.old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-			.new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-			.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.image(image)
-			.subresource_range(range);
-
-		unsafe {
-			ash_device.cmd_pipeline_barrier(
-				command_buffer,
-				vk::PipelineStageFlags::TRANSFER,
-				vk::PipelineStageFlags::FRAGMENT_SHADER,
-				vk::DependencyFlags::empty(),
-				&[],
-				&[],
-				&[to_shader],
-			);
-
-			ash_device.end_command_buffer(command_buffer)?;
-		}
-
-		let command_buffers = [command_buffer];
-
-		let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
-
-		unsafe {
-			ash_device.queue_submit(device.graphics_queue(), &[submit_info], vk::Fence::null())?;
-
-			ash_device.queue_wait_idle(device.graphics_queue())?;
-		}
-
-		Ok(())
-	})();
+	let to_transfer = vk::ImageMemoryBarrier::default()
+		.src_access_mask(vk::AccessFlags::empty())
+		.dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+		.old_layout(vk::ImageLayout::UNDEFINED)
+		.new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+		.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+		.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+		.image(image)
+		.subresource_range(range);
 
 	unsafe {
-		ash_device.destroy_command_pool(command_pool, None);
+		ash_device.cmd_pipeline_barrier(
+			command_buffer,
+			vk::PipelineStageFlags::TOP_OF_PIPE,
+			vk::PipelineStageFlags::TRANSFER,
+			vk::DependencyFlags::empty(),
+			&[],
+			&[],
+			&[to_transfer],
+		);
 	}
-	drop(command_metrics);
-	drop(pool_metrics);
 
-	result
+	let subresource = vk::ImageSubresourceLayers::default()
+		.aspect_mask(vk::ImageAspectFlags::COLOR)
+		.mip_level(0)
+		.base_array_layer(0)
+		.layer_count(1);
+
+	let regions = [vk::BufferImageCopy::default()
+		.buffer_offset(0)
+		.buffer_row_length(0)
+		.buffer_image_height(0)
+		.image_subresource(subresource)
+		.image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+		.image_extent(vk::Extent3D {
+			width,
+			height,
+			depth: 1,
+		})];
+
+	unsafe {
+		ash_device.cmd_copy_buffer_to_image(
+			command_buffer,
+			staging_buffer,
+			image,
+			vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+			&regions,
+		);
+	}
+
+	let to_shader = vk::ImageMemoryBarrier::default()
+		.src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+		.dst_access_mask(vk::AccessFlags::SHADER_READ)
+		.old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+		.new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+		.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+		.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+		.image(image)
+		.subresource_range(range);
+
+	unsafe {
+		ash_device.cmd_pipeline_barrier(
+			command_buffer,
+			vk::PipelineStageFlags::TRANSFER,
+			vk::PipelineStageFlags::FRAGMENT_SHADER,
+			vk::DependencyFlags::empty(),
+			&[],
+			&[],
+			&[to_shader],
+		);
+	}
 }
 
 fn find_memory_type(

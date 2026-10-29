@@ -3,6 +3,7 @@ use std::{
 	fmt::{Display, Formatter},
 	mem::size_of_val,
 	ptr,
+	sync::Mutex,
 };
 
 use ash::{Device, Instance, vk};
@@ -15,7 +16,13 @@ pub struct VulkanBuffer {
 	buffer: vk::Buffer,
 	memory: vk::DeviceMemory,
 	size: vk::DeviceSize,
+	mapping: Mutex<Option<MappedMemory>>,
 }
+
+struct MappedMemory(std::ptr::NonNull<u8>);
+// The allocation outlives this pointer. All host accesses are serialized by
+// VulkanBuffer::mapping; callers must still finish GPU reads before writing.
+unsafe impl Send for MappedMemory {}
 
 #[derive(Debug)]
 pub enum VulkanBufferError {
@@ -109,6 +116,9 @@ impl VulkanBuffer {
 		memory_properties: vk::MemoryPropertyFlags,
 		physical_memory_properties: &vk::PhysicalDeviceMemoryProperties,
 	) -> Result<Self, VulkanBufferError> {
+		if size == 0 {
+			return Err(VulkanBufferError::EmptyData);
+		}
 		let ash_device = device.raw().clone();
 
 		let create_info = vk::BufferCreateInfo::default()
@@ -171,13 +181,31 @@ impl VulkanBuffer {
 			return Err(error.into());
 		}
 
-		Ok(Self {
+		let mut result = Self {
 			_metrics: allocation_metrics,
 			device: ash_device,
 			buffer,
 			memory,
 			size,
-		})
+			mapping: Mutex::new(None),
+		};
+		if memory_properties.contains(
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		) {
+			let pointer = unsafe {
+				result
+					.device
+					.map_memory(memory, 0, size, vk::MemoryMapFlags::empty())?
+			};
+			*result
+				.mapping
+				.get_mut()
+				.unwrap_or_else(|error| error.into_inner()) = Some(MappedMemory(
+				std::ptr::NonNull::new(pointer.cast())
+					.expect("successful Vulkan mapping is nonnull"),
+			));
+		}
+		Ok(result)
 	}
 
 	pub fn vertex<T>(
@@ -202,6 +230,19 @@ impl VulkanBuffer {
 		data: &[T],
 		final_usage: vk::BufferUsageFlags,
 	) -> Result<Self, VulkanBufferError> {
+		let buffers = Self::prepare_static(instance, device, data, final_usage)?;
+		let (_, gpu) = super::upload::submit(device, buffers, |(staging, gpu), raw, command| {
+			super::upload::copy_buffer(raw, command, staging, gpu);
+		})?;
+		Ok(gpu)
+	}
+
+	pub(super) fn prepare_static<T>(
+		instance: &Instance,
+		device: &VulkanDevice,
+		data: &[T],
+		final_usage: vk::BufferUsageFlags,
+	) -> Result<(Self, Self), VulkanBufferError> {
 		let size = size_of_val(data) as vk::DeviceSize;
 
 		if size == 0 {
@@ -232,13 +273,7 @@ impl VulkanBuffer {
 			vk::MemoryPropertyFlags::DEVICE_LOCAL,
 		)?;
 
-		copy_buffer(device, staging.raw(), gpu_buffer.raw(), size)?;
-
-		/*
-		 * staging is dropped here after the GPU
-		 * copy has completed.
-		 */
-		Ok(gpu_buffer)
+		Ok((staging, gpu_buffer))
 	}
 
 	pub fn write<T>(&self, data: &[T]) -> Result<(), VulkanBufferError> {
@@ -256,9 +291,17 @@ impl VulkanBuffer {
 			return Ok(());
 		}
 
-		let mapped = unsafe {
-			self.device
-				.map_memory(self.memory, 0, data_size, vk::MemoryMapFlags::empty())?
+		let mapping = self
+			.mapping
+			.lock()
+			.unwrap_or_else(|error| error.into_inner());
+		let mapped = match mapping.as_ref() {
+			Some(memory) => memory.0.as_ptr(),
+			None => unsafe {
+				self.device
+					.map_memory(self.memory, 0, data_size, vk::MemoryMapFlags::empty())?
+					.cast()
+			},
 		};
 
 		unsafe {
@@ -268,7 +311,9 @@ impl VulkanBuffer {
 				data_size as usize,
 			);
 
-			self.device.unmap_memory(self.memory);
+			if mapping.is_none() {
+				self.device.unmap_memory(self.memory);
+			}
 		}
 
 		Ok(())
@@ -286,88 +331,19 @@ impl VulkanBuffer {
 impl Drop for VulkanBuffer {
 	fn drop(&mut self) {
 		unsafe {
+			if self
+				.mapping
+				.get_mut()
+				.unwrap_or_else(|error| error.into_inner())
+				.is_some()
+			{
+				self.device.unmap_memory(self.memory);
+			}
 			self.device.destroy_buffer(self.buffer, None);
 
 			self.device.free_memory(self.memory, None);
 		}
 	}
-}
-
-fn copy_buffer(
-	device: &VulkanDevice,
-	source: vk::Buffer,
-	destination: vk::Buffer,
-	size: vk::DeviceSize,
-) -> Result<(), VulkanBufferError> {
-	let ash_device = device.raw();
-
-	let pool_info = vk::CommandPoolCreateInfo::default()
-		.flags(vk::CommandPoolCreateFlags::TRANSIENT)
-		.queue_family_index(device.queue_families().graphics);
-
-	let command_pool = unsafe { ash_device.create_command_pool(&pool_info, None)? };
-	let pool_metrics = crate::metrics::object(
-		ash_device,
-		"command_pool",
-		command_pool,
-		"Buffer upload command pool",
-		"transient",
-	);
-	let mut command_metrics = None;
-
-	let result = (|| -> Result<(), VulkanBufferError> {
-		let allocate_info = vk::CommandBufferAllocateInfo::default()
-			.command_pool(command_pool)
-			.level(vk::CommandBufferLevel::PRIMARY)
-			.command_buffer_count(1);
-
-		let command_buffers = unsafe { ash_device.allocate_command_buffers(&allocate_info)? };
-
-		let command_buffer = command_buffers[0];
-		command_metrics = Some(crate::metrics::object(
-			ash_device,
-			"command_buffer",
-			command_buffer,
-			"Buffer upload commands",
-			"transient",
-		));
-
-		let begin_info = vk::CommandBufferBeginInfo::default()
-			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-		unsafe {
-			ash_device.begin_command_buffer(command_buffer, &begin_info)?;
-		}
-
-		let copy_regions = [vk::BufferCopy::default()
-			.src_offset(0)
-			.dst_offset(0)
-			.size(size)];
-
-		unsafe {
-			ash_device.cmd_copy_buffer(command_buffer, source, destination, &copy_regions);
-
-			ash_device.end_command_buffer(command_buffer)?;
-		}
-
-		let command_buffers = [command_buffer];
-		let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
-
-		unsafe {
-			ash_device.queue_submit(device.graphics_queue(), &[submit_info], vk::Fence::null())?;
-			ash_device.queue_wait_idle(device.graphics_queue())?;
-		}
-
-		Ok(())
-	})();
-
-	unsafe {
-		ash_device.destroy_command_pool(command_pool, None);
-	}
-	drop(command_metrics);
-	drop(pool_metrics);
-
-	result
 }
 
 fn find_memory_type(
@@ -390,4 +366,51 @@ fn find_memory_type(
 	}
 
 	None
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::vulkan::test_driver::{device, reset, state};
+
+	#[test]
+	fn coherent_buffer_maps_once_keeps_writes_bounded_and_unmaps_before_free() {
+		reset();
+		let device = device();
+		let buffer = VulkanBuffer::host_vertex(&device, 4).unwrap();
+		buffer.write(&[1u8, 2, 3, 4]).unwrap();
+		buffer.write(&[9u8, 8]).unwrap();
+		buffer.write::<u8>(&[]).unwrap();
+		assert!(matches!(
+			buffer.write(&[0u8; 5]),
+			Err(VulkanBufferError::DataTooLarge { .. })
+		));
+		state(|state| {
+			assert_eq!(state.calls["map_memory"], 1);
+			assert_eq!(
+				state.memory.values().next().unwrap().as_ref(),
+				&[9, 8, 3, 4]
+			);
+			assert!(state.released.is_empty());
+		});
+		drop(buffer);
+		state(|state| {
+			assert_eq!(state.released, ["unmap", "buffer", "memory"]);
+			assert!(state.memory.is_empty());
+		});
+		fn assert_send_sync<T: Send + Sync>() {}
+		assert_send_sync::<VulkanBuffer>();
+	}
+
+	#[test]
+	fn failed_persistent_map_releases_the_bound_buffer_and_memory() {
+		reset();
+		state(|state| state.fail = Some(("map_memory", 1)));
+		let device = device();
+		assert!(VulkanBuffer::host_vertex(&device, 4).is_err());
+		state(|state| {
+			assert_eq!(state.released, ["buffer", "memory"]);
+			assert!(state.memory.is_empty());
+		});
+	}
 }

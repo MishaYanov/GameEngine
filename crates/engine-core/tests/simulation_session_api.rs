@@ -7,7 +7,7 @@ use engine_core::{
 	scene_data::{ColliderData, TransformData},
 	simulation_session::{
 		ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, InputFrame,
-		SimulationAction, SimulationSession,
+		PreparedModuleConfig, SimulationAction, SimulationSession,
 	},
 	world::RuntimeWorld,
 };
@@ -523,4 +523,163 @@ fn aggregate_subtree_matrix_and_collision_work_limits_restore_all_earlier_moves(
 		assert_eq!(session.tick_index(), 0);
 		assert_eq!(session.document(), data);
 	}
+}
+
+#[test]
+fn broadcast_input_preserves_target_order_and_partial_ticks_for_unchanged_or_held_motion() {
+	let data = Arc::new(scene(vec![entity("a", [0.0; 3]), entity("b", [0.0; 3])]));
+	let mut session = SimulationSession::new(
+		project(
+			&data,
+			vec![
+				controlled("b", 1.0, BehaviorSpace::World),
+				controlled("a", 1.0, BehaviorSpace::World),
+				controlled("b", 0.0, BehaviorSpace::World),
+			],
+		),
+		data,
+	)
+	.unwrap();
+	assert_eq!(session.controlled_targets(), &[key("b"), key("a")]);
+	assert!(!session.set_controlled_input([0.0; 3]).unwrap());
+	assert!(session.set_input(&key("b"), [1.0, 0.0, 0.0]).unwrap());
+	assert!(session.set_controlled_input([1.0, 0.0, 0.0]).unwrap());
+	assert_eq!(session.tick(1.0 / 120.0).unwrap().steps, 0);
+	assert!(!session.set_controlled_input([1.0, 0.0, 0.0]).unwrap());
+	assert_eq!(session.tick(1.0 / 120.0).unwrap().steps, 1);
+	assert_eq!(session.tick(1.0 / 120.0).unwrap().steps, 0);
+	assert!(session.set_controlled_input([0.0, 1.0, 0.0]).unwrap());
+	assert_eq!(session.tick(1.0 / 120.0).unwrap().steps, 1);
+	for entity in &session.document().entities {
+		close(entity.transform.position[0], 1.0 / 60.0);
+		close(entity.transform.position[1], 1.0 / 60.0);
+	}
+	assert!(session.set_input(&key("unknown"), [1.0, 0.0, 0.0]).is_err());
+	assert!(session.set_controlled_input([0.0; 3]).unwrap());
+	assert!(!session.set_controlled_input([0.0; 3]).unwrap());
+	assert!(!session.needs_tick());
+}
+
+#[test]
+fn configured_scheduler_distinguishes_idle_input_disabled_controls_and_nonzero_spins() {
+	for (speed, angular_velocity, idle_ticks, active_ticks) in [
+		(0.0, 0.0, false, false),
+		(1.0, 0.0, false, true),
+		(0.0, 1.0, true, true),
+	] {
+		let data = Arc::new(scene(vec![entity("actor", [0.0; 3])]));
+		let mut session = SimulationSession::new(
+			project(
+				&data,
+				vec![
+					controlled("actor", speed, BehaviorSpace::World),
+					BehaviorSpec::Spin {
+						entity: key("actor"),
+						angular_velocity: [0.0, angular_velocity, 0.0],
+					},
+				],
+			),
+			data,
+		)
+		.unwrap();
+		assert_eq!(session.needs_tick(), idle_ticks);
+		session.set_controlled_input([1.0, 0.0, 0.0]).unwrap();
+		assert_eq!(session.needs_tick(), active_ticks);
+		session.clear_input();
+		assert_eq!(session.needs_tick(), idle_ticks);
+		session.set_paused(true);
+		assert!(!session.needs_tick());
+	}
+}
+
+struct PreparedFactory {
+	project: ProjectData,
+	scene_id: SceneId,
+	calls: Mutex<usize>,
+}
+impl GameModuleFactory for PreparedFactory {
+	fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+		panic!("The opted-in prepared path should receive validated constructor data")
+	}
+	fn create_prepared(
+		&self,
+		config: PreparedModuleConfig<'_>,
+	) -> Result<Box<dyn GameModule>, String> {
+		assert_eq!(config.project(), &self.project);
+		assert_eq!(config.scene_id(), &self.scene_id);
+		assert_eq!(
+			config.behaviors(),
+			self.project.resolved_behaviors_for(&self.scene_id).unwrap()
+		);
+		*self.calls.lock().unwrap() += 1;
+		ConfiguredBehaviorFactory.create_prepared(config)
+	}
+}
+
+#[test]
+fn prepared_factory_hook_runs_only_after_project_scene_and_target_validation() {
+	let (project, scene_id, wrong_scene, chosen_scene) = scene_context_fixture();
+	let factory = PreparedFactory {
+		project: project.clone(),
+		scene_id: scene_id.clone(),
+		calls: Mutex::new(0),
+	};
+	let mut invalid_scene = chosen_scene.as_ref().clone();
+	invalid_scene.camera.near_plane = -1.0;
+	for document in [wrong_scene, Arc::new(invalid_scene)] {
+		assert!(
+			SimulationSession::with_factory_for_scene(
+				project.clone(),
+				scene_id.clone(),
+				document,
+				&factory
+			)
+			.is_err()
+		);
+	}
+	let mut invalid_project = project.clone();
+	invalid_project.fixed_hz = 0;
+	assert!(
+		SimulationSession::with_factory_for_scene(
+			invalid_project,
+			scene_id.clone(),
+			Arc::clone(&chosen_scene),
+			&factory
+		)
+		.is_err()
+	);
+	assert_eq!(*factory.calls.lock().unwrap(), 0);
+	let mut session =
+		SimulationSession::with_factory_for_scene(project, scene_id, chosen_scene, &factory)
+			.unwrap();
+	assert_eq!(*factory.calls.lock().unwrap(), 1);
+	session.set_controlled_input([1.0, 0.0, 0.0]).unwrap();
+	assert_eq!(session.tick(1.0 / 60.0).unwrap().steps, 1);
+}
+
+#[test]
+fn catchup_changes_preserve_first_action_order_and_deduplicate_across_steps() {
+	let data = Arc::new(scene(
+		(0..32)
+			.map(|index| entity(&format!("actor-{index}"), [0.0; 3]))
+			.collect(),
+	));
+	let targets: Vec<_> = data
+		.entities
+		.iter()
+		.rev()
+		.map(|entity| entity.key.clone())
+		.collect();
+	let behaviors = targets
+		.iter()
+		.map(|entity| BehaviorSpec::Spin {
+			entity: entity.clone(),
+			angular_velocity: [0.0, 0.0, 1.0],
+		})
+		.collect();
+	let mut session = SimulationSession::new(project(&data, behaviors), data).unwrap();
+	let outcome = session.tick(3.0 / 60.0).unwrap();
+	assert_eq!(outcome.steps, 3);
+	assert_eq!(outcome.changes.changed_entities, targets);
+	assert!(!outcome.changes.full_resync);
 }

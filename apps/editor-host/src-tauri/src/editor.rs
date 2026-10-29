@@ -8,10 +8,11 @@ use runtime::{
 	assets::{AssetImportService, AssetManager, ImportedScene},
 	editor::PrefabData,
 	project::ProjectData,
-	scene_data::EntityData,
+	scene_data::{EntityData, SceneData},
 	Engine, EntityKey,
 };
 use std::{
+	borrow::Cow,
 	collections::{HashMap, HashSet, VecDeque},
 	fs::{self, File, OpenOptions},
 	io::{Read, Write},
@@ -40,6 +41,10 @@ pub struct EditorWorkspace {
 	jobs: AssetImportService,
 	pending: HashMap<AssetJobId, PendingAsset>,
 	bounds_seen: HashSet<AssetRef>,
+	bounds_references: HashSet<AssetRef>,
+	bounds_queue: VecDeque<AssetRef>,
+	#[cfg(test)]
+	bounds_reference_scans: usize,
 	completions: VecDeque<AssetCompletion>,
 	completion_bytes: usize,
 }
@@ -127,7 +132,7 @@ impl EditorWorkspace {
 				WorkspaceKind::StandaloneScene,
 			)
 		};
-		let documents = load_project_documents(&asset_root, &project)?;
+		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
 			.build()
@@ -166,7 +171,7 @@ impl EditorWorkspace {
 
 		let parsed = file_operation("load_scene", runtime::scene_io::load_data(&scene_path))?;
 
-		let documents = load_project_documents(&asset_root, &project)?;
+		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
 			.build()
@@ -196,8 +201,12 @@ impl EditorWorkspace {
 	}
 
 	fn cache_bounds(&mut self) {
+		#[cfg(test)]
+		{
+			self.bounds_reference_scans += 1;
+		}
 		let data = self.backend.session().authored_document();
-		let references: HashSet<_> = data
+		self.bounds_references = data
 			.entities
 			.iter()
 			.filter(|e| e.renderable)
@@ -210,8 +219,12 @@ impl EditorWorkspace {
 			})
 			.collect();
 		self.bounds_seen
-			.retain(|reference| references.contains(reference));
-		for reference in references {
+			.retain(|reference| self.bounds_references.contains(reference));
+		self.bounds_queue = self.bounds_references.iter().cloned().collect();
+		self.refill_bounds();
+	}
+	fn refill_bounds(&mut self) {
+		while let Some(reference) = self.bounds_queue.pop_front() {
 			if self.bounds_seen.contains(&reference)
 				|| self.backend.assets().find(&reference).is_some()
 			{
@@ -220,6 +233,11 @@ impl EditorWorkspace {
 			if let Ok(id) = self.jobs.try_submit(reference.clone(), 64 * 1024 * 1024) {
 				self.pending.insert(id, PendingAsset::Bounds);
 				self.bounds_seen.insert(reference);
+			} else {
+				// Capacity is released when completed jobs are drained. Keep the
+				// remaining references without rescanning the authored document.
+				self.bounds_queue.push_front(reference);
+				break;
 			}
 		}
 	}
@@ -322,7 +340,7 @@ impl EditorWorkspace {
 			self.completions.push_back(completion.clone());
 			completions.push(completion);
 		}
-		self.cache_bounds();
+		self.refill_bounds();
 		completions
 	}
 	fn cache_imported_bounds(
@@ -419,13 +437,18 @@ impl EditorWorkspace {
 				message,
 				current_revision: Some(self.backend.session().revision()),
 			})?;
-		runtime::editor::CommandFactory::validate(&request.command).map_err(|message| {
-			runtime::BackendError {
-				code: runtime::BackendErrorCode::InvalidCommand,
-				message,
-				current_revision: Some(self.backend.session().revision()),
-			}
-		})?;
+		if matches!(
+			&request.command,
+			Command::AddScene { .. } | Command::ChangeScenePath { .. }
+		) {
+			runtime::editor::CommandFactory::validate(&request.command).map_err(|message| {
+				runtime::BackendError {
+					code: runtime::BackendErrorCode::InvalidCommand,
+					message,
+					current_revision: Some(self.backend.session().revision()),
+				}
+			})?;
+		}
 		// Prepare filesystem-dependent intent before the coordinator mutates.
 		let preflight: Result<(), String> = (|| {
 			match &request.command {
@@ -548,7 +571,7 @@ impl EditorWorkspace {
 		};
 		let scene_path = resolve_existing(&self.asset_root, project.startup_scene_path()?)?;
 		let data = file_operation("reload_scene", runtime::scene_io::load_data(&scene_path))?.data;
-		let documents = load_project_documents(&self.asset_root, &project)?;
+		let documents = load_project_documents(&self.asset_root, &project, &data)?;
 		let mut candidate = runtime::EngineBuilder::new(data, project)
 			.with_scenes(documents)
 			.build()
@@ -567,6 +590,8 @@ impl EditorWorkspace {
 		self.metadata.clear();
 		self.pending.clear();
 		self.bounds_seen.clear();
+		self.bounds_references.clear();
+		self.bounds_queue.clear();
 		self.completions.clear();
 		self.completion_bytes = 0;
 		self.cache_bounds();
@@ -782,6 +807,7 @@ impl EditorWorkspace {
 				Self::imported_metadata(path, imported)?,
 			)
 			.map_err(|e| e.to_string())?;
+		self.cache_bounds();
 		engine_logger::info!(target: "editor", "Model scene imported: generation={}, nodes={}, meshes={}", self.generation, imported.nodes.len(), imported.mesh_bounds.len());
 		Ok(())
 	}
@@ -851,6 +877,10 @@ impl EditorWorkspace {
 			jobs,
 			pending: HashMap::new(),
 			bounds_seen: HashSet::new(),
+			bounds_references: HashSet::new(),
+			bounds_queue: VecDeque::new(),
+			#[cfg(test)]
+			bounds_reference_scans: 0,
 			completions: VecDeque::new(),
 			completion_bytes: 0,
 		}
@@ -990,6 +1020,7 @@ fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String>
 fn load_project_documents(
 	root: &Path,
 	project: &ProjectData,
+	startup: &SceneData,
 ) -> Result<Vec<(SceneId, runtime::scene_data::SceneData)>, String> {
 	let mut seen = HashSet::new();
 	let mut documents = Vec::new();
@@ -999,11 +1030,14 @@ fn load_project_documents(
 		if !seen.insert(path.clone()) {
 			return Err("Catalog entries resolve to the same scene file".into());
 		}
-		let document = file_operation("load_scene", runtime::scene_io::load_data(&path))?.data;
+		let document = if entry.id() == &project.startup_scene_id {
+			Cow::Borrowed(startup)
+		} else {
+			Cow::Owned(file_operation("load_scene", runtime::scene_io::load_data(&path))?.data)
+		};
 		retained_bytes = retained_bytes.saturating_add(
 			document
-				.to_json()?
-				.len()
+				.serialized_size()?
 				.saturating_mul(4)
 				.saturating_add(std::mem::size_of::<runtime::scene_data::SceneData>()),
 		);
@@ -1012,8 +1046,12 @@ fn load_project_documents(
 		}
 		project.validate_scene_for(entry.id(), &document)?;
 		if entry.id() != &project.startup_scene_id {
-			documents.push((entry.id().clone(), document));
+			documents.push((entry.id().clone(), document.into_owned()));
 		}
 	}
 	Ok(documents)
 }
+
+#[cfg(test)]
+#[path = "tests_editor_optimizations.rs"]
+mod optimization_tests;

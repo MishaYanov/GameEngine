@@ -101,11 +101,11 @@ impl AdminService {
 			workspace,
 			data,
 		};
-		for run in service.processes.history() {
+		for run in service.processes.history_ref() {
 			if run.state == processes::ProcessState::Interrupted
-				&& let Some(session) = run.session_id
+				&& let Some(session) = &run.session_id
 			{
-				service.registry.stopped(&session, now_ms(), true);
+				service.registry.stopped(session, now_ms(), true);
 			}
 		}
 		service.tick();
@@ -126,13 +126,13 @@ impl AdminService {
 		self.builder.tick(&mut self.jobs);
 		for run in self
 			.processes
-			.history()
-			.into_iter()
+			.history_ref()
+			.iter()
 			.filter(|run| run.state != processes::ProcessState::Running)
 		{
-			if let Some(session) = run.session_id {
+			if let Some(session) = &run.session_id {
 				self.registry.stopped(
-					&session,
+					session,
 					run.ended_ms.unwrap_or_else(now_ms),
 					!run.intentional_stop
 						&& matches!(
@@ -158,9 +158,10 @@ impl AdminService {
 			components: self.registry.snapshot(now_ms()),
 			processes: self
 				.processes
-				.history()
-				.into_iter()
+				.history_ref()
+				.iter()
 				.filter(|r| !r.application.starts_with("job-"))
+				.cloned()
 				.collect(),
 			jobs: self.jobs.runs.clone(),
 			cards: self.board.cards.clone(),
@@ -177,6 +178,11 @@ impl AdminService {
 		}
 	}
 	pub fn configure(&mut self, workspace: &str, logs: &str) -> io::Result<()> {
+		if self.builder.has_preparation() {
+			return Err(io::Error::other(
+				"Finish project preparation before changing workspace",
+			));
+		}
 		if self
 			.jobs
 			.runs
@@ -189,7 +195,7 @@ impl AdminService {
 		}
 		if self
 			.processes
-			.history()
+			.history_ref()
 			.iter()
 			.any(|r| r.state == processes::ProcessState::Running)
 		{
@@ -211,6 +217,7 @@ impl AdminService {
 		self.collector = Collector::new(logs.clone(), &self.data);
 		self.registry = Registry::new();
 		self.workspace = workspace.clone();
+		self.builder.clear_previews();
 		save_json(
 			&self.data.join("settings.json"),
 			&serde_json::json!({"workspace":workspace,"logs":logs}),

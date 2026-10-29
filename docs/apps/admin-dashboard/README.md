@@ -49,6 +49,10 @@ truncation appear explicitly. Aggregate totals can exceed the retained detail in
 [engine-owned instrumented resources](../../crates/renderer/README.md#resource-accounting), excluding driver memory,
 presentation image backing allocations and CPU RAM; device-local and host-visible bytes can overlap.
 
+The shared 16 MiB allowance charges bytes actually read, including malformed snapshots and partial read failures.
+Cached scan metadata is only a scheduling hint; replacing/growing a file between scan and open cannot enlarge that
+aggregate allowance. Opening each snapshot retains its own size/schema/detail checks.
+
 ## Process and job management
 
 Component health uses explicit lifecycle events and heartbeats; errors alone do not imply component failure. Expected heartbeats become stale after 15 seconds. Start/stop/restart controls apply only to dashboard-owned processes. Windows job objects stop descendants and close them when the dashboard exits. Restored process history is interrupted and never adopts old PIDs.
@@ -75,6 +79,14 @@ executable-relative asset paths remain valid. The manifest records copied inputs
 operation and relative output artifacts; local source modifications are included and labelled as a working tree
 snapshot.
 
+Desktop preview/generation reserve a token under the service lock, perform filesystem preparation on a blocking
+worker without that lock, then reacquire it to finish and queue validation. Up to 16 previews may be preparing; only
+one generation preparation/validation may be active. Tokens reject expired results; abandoning a task releases its
+reservation. Workspace changes are blocked during preparation, and successful reconfiguration clears old previews.
+Preparation failures retain staging where created; a terminal-open or preparation-complete result does not certify a
+successful native game build. Metrics collection caches file metadata per scan instead of querying it repeatedly
+during sorting; existing read budgets and last-snapshot semantics remain.
+
 Verification includes a full error → card → failed build → successful rerun → generated project fixture, source-independent fixture compilation, publication collisions, source navigation after moving staging and the actual copied native game build. Existing logger tests cover redaction before persistence; exports preserve retained records, while raw process output is not automatically redacted. Add redaction at the emitting source before logging sensitive output.
 
 ```powershell
@@ -87,5 +99,5 @@ The full native template smoke test is opt-in because it compiles Vulkan/game de
 
 For step-by-step CLI, editor and dashboard instructions, see [the usage guide](../../usage.md).
 
-Native template validation now checks every project-schema-2 catalog scene and its scene-scoped behaviors, not only the
+Native template validation checks every project catalog scene and its scene-scoped behaviors, not only the
 startup file. See [project lifecycle](../../project-lifecycle.md) for catalog and packaging contracts.

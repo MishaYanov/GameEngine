@@ -11,6 +11,14 @@ prepare defers zero-size rendering and rebuilds dirty targets after idle; resize
 must still be released before their owning device. Native viewport shutdown and scene replacement respect that lifetime
 order; Arc handles are not backend-independent resource ownership.
 
+The lower-level `VulkanFrame::draw` accepts borrowed color/depth resources together as `FrameTargets`;
+WindowRenderer supplies that pair from its current presentation targets.
+
+`draw` returns `DrawStatus::{Rendered, Suspended, NeedsRedraw}`. Zero-size targets suspend rendering; out-of-date or
+suboptimal presentation requests another redraw/rebuild. Resize recreates swapchain/depth/frame targets after idle,
+retiring old targets before a failed replacement can be reused. Material pipelines survive extent-only changes while
+their color/depth formats and renderer-owned descriptor layouts remain compatible.
+
 FIFO remains the presentation policy. Native Edit waits for invalidation rather than continuously submitting identical
 frames. Fixed-step simulation scheduling is separate from presentation pacing.
 
@@ -36,6 +44,13 @@ overlay/unlit/alpha objects form order barriers and cannot be sorted through arb
 instance buffer grows only as needed up to a limit; capacity growth is still an allocation. Dynamic legacy UI/gizmo
 buffers synchronize writes with frame completion, and the Angular product path renders no forked native editor overlay
 UI.
+
+`WindowRenderer::upload_batch` accepts `MeshUpload` and `Rgba8Upload` inputs, preserving order in `UploadedBatch`.
+One synchronous transfer submission handles at most 256 resources and 64 MiB of payload; returned resources are ready
+for drawing. Staging resources, command pool and completion fence stay owned until GPU completion. If fence and queue
+waits both fail without device loss, the device retains the submission and blocks another upload until it can drain
+outstanding work. Failure/rollback owners release partially created resources. This is bounded synchronous batching,
+not asynchronous streaming or a measured loading-speed claim.
 
 ## Actual GPU measurements
 

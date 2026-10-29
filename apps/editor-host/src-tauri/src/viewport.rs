@@ -748,7 +748,7 @@ mod windows {
 							{
 								if gpu.revision == revision {
 									synchronized = true;
-								} else if let Some(world) = session.render_world() {
+								} else {
 									let page = workspace
 										.backend
 										.changes_since(gpu.change_cursor)
@@ -773,7 +773,14 @@ mod windows {
 									if changes.is_empty() {
 										changes.full_resync = true;
 									}
-									synchronized = gpu.scene.synchronize_world(world, &changes)?;
+									synchronized = if let Some(world) = session.render_world() {
+										gpu.scene.synchronize_world(world, &changes)?
+									} else {
+										gpu.scene.synchronize_authored(
+											session.validated_authored_document(),
+											&changes,
+										)?
+									};
 									lights_changed = changes.lights_changed || changes.full_resync;
 								}
 								if synchronized {
@@ -873,7 +880,9 @@ mod windows {
 							Err(error) => {
 								drop(data);
 								gpu.renderer.wait_idle().map_err(|wait_error| {
-									format!("{error}; failed to retire rejected candidate GPU resources: {wait_error}")
+									format!(
+										"{error}; failed to retire rejected candidate GPU resources: {wait_error}"
+									)
 								})?;
 								gpu.assets.prune_unused();
 								return Err(error);

@@ -1,8 +1,11 @@
 # ADR-0005: Runtime lifecycle, scheduling, and transform authority
 
-Status: Proposed; existing fixed-step simulation remains in place until incremental implementation is verified.
+Status: Accepted core direction for serial ordering, movement authority, bounded actions and explicit commit/failure
+scope; expanded scheduling and lifecycle systems remain proposed. Existing simulation remains the implementation base.
 
 Date: 2026-10-27
+
+Decision update: 2026-10-29, following explicit user acceptance of the researched recommendations.
 
 Scope: Runtime initialization/teardown, simulation phases, bounded work, movement ownership, and execution ordering.
 
@@ -11,6 +14,9 @@ Dependencies: [ADR-0002](0002-object-composition-and-components.md) defines comp
 [ADR-0007](0007-graph-assets-and-execution.md), module lifecycle with
 [ADR-0008](0008-game-modules-and-scripting.md), and action sampling with
 [ADR-0010](0010-input-actions-and-possession.md). No ECS, physics, or job-system library is selected here.
+
+Authoritative accepted core: [Resolved decision](resolved/0005-serial-scheduling-and-rollback.md). This original URL
+retains research, history and remaining proposals; those extensions are not resolved by the core implementation.
 
 ## Context and example
 
@@ -24,8 +30,9 @@ player, and headless tests without Angular determining simulation timing.
 
 ## Existing implementation inspected
 
-The baseline is `fcb748b04853209b5e17e680c38c847c19f7f365` plus the working tree inspected on 2026-10-27.
-Concurrent edits in `simulation_session.rs` and its tests change factory scene targeting; they were read and preserved.
+The current inspection baseline is `b6ec4ba5a88c5ef66eff82fa61eb5747b940400d` plus staged, unstaged, and untracked
+changes on 2026-10-29. The drafting baseline was `fcb748b`. Current optimization and transition changes were inspected
+again and preserved; source presence is separate from current native or behavioral verification.
 
 `crates/engine-core/src/simulation.rs` already separates fixed stepping from rendering. Its default is 60 Hz with at
 most
@@ -35,7 +42,8 @@ reports dropped time, and retains a fractional interpolation value. These are cu
 targets.
 
 `crates/engine-core/src/simulation_session.rs` owns the world, collision state, input, clock, module, and action buffer.
-`GameModule::plan` reads a runtime world and emits bounded `Move`, `Rotate`, or `SetTransform` actions. Built-in
+`GameModule::plan` reads a runtime world and emits bounded `Move`, `Rotate`, `SetTransform` and typed `Progress` actions
+through progress-aware compatibility hooks. Built-in
 behavior
 currently covers controlled movement and spin, not a general physics or animation scheduler. Action, matrix, and
 collision
@@ -45,6 +53,12 @@ input is cleared, and the batch does not advance its tick.
 That rollback does not prove rollback of arbitrary module interior state or external effects. `plan(&self, ...)` alone
 cannot prevent interior mutation. A broader runtime must define those guarantees explicitly.
 
+The optimized path shares `Arc<ProjectData>`, prepares resolved behaviors once for scene construction, and supplies
+`PreparedModuleConfig` to `GameModuleFactory::create_prepared`. A `ChangeAccumulator` collects world changes during
+the catch-up batch. `GameSession` owns the scene lifetime and rejects stale/foreign transition candidates. There is
+now a typed candidate progress transaction across the aggregate tick. A general structural action buffer, animation
+evaluator and expanded phase scheduler remain unimplemented.
+
 ## Research rationale
 
 Separating fixed simulation from variable-rate presentation is an established engine pattern. Godot documents fixed
@@ -52,7 +66,41 @@ physics processing independently from frame-driven processing, supporting this s
 phase order or
 guarantees. [Godot processing documentation](https://docs.godotengine.org/en/stable/tutorials/scripting/idle_and_physics_processing.html).
 
-## Proposed decision
+## Accepted core decisions
+
+Use a small serial pipeline: consume input, plan bounded gameplay actions from committed read-only state, resolve
+movement/collision, commit supported state changes, then publish results. One declared movement authority resolves an
+entity's motion. Additional scheduling machinery follows actual systems and measured need.
+
+Unreal tick groups/prerequisites and Bevy's deferred commands demonstrate explicit ordering and synchronization.
+Deferred command application alone does not provide all-or-nothing rollback. The failure guarantee below is this
+engine's chosen contract, not a property inferred from those mechanisms.
+[Unreal actor ticking](https://dev.epicgames.com/documentation/en-us/unreal-engine/actor-ticking-in-unreal-engine),
+[Bevy deferred commands](https://docs.rs/bevy/latest/bevy/ecs/prelude/struct.Commands.html).
+
+### State commit and failure boundary
+
+Preserve the current aggregate `SimulationSession::tick(elapsed)` failure boundary, which can contain several fixed
+catch-up steps. Typed game progress now stages across that same call: later steps may
+read earlier candidate values, but observers receive only committed results. Rejecting any covered action discards
+the candidate progress and restores the covered transforms across the batch. A host/debug progress command can apply
+as its own atomic batch between simulation updates; it must use the same domain validation and declared work bounds.
+
+Emit rewards, notifications and other publishable gameplay events only after successful commit. A collected-item
+operation must not commit its reward while restoring the item's covered world change. Unsupported topology changes,
+arbitrary module interior mutations, filesystem/network writes and other external effects are outside the current
+rollback guarantee. Stop or pause on unsupported failure according to a visible development policy.
+
+Progress staging uses a bounded lazy candidate, retaining `ChangeAccumulator` for world changes. Progress changes have
+their own result/read model and do not invent entity-transform changes. Preserve
+shared project ownership and document-cost caching; avoid full project/world copies in the steady update path.
+The resolved pages describe the current typed-state API and attributed evidence with snapshot limits; arbitrary native
+effects remain outside rollback.
+
+## Remaining lifecycle and scheduling proposals
+
+The core ordering, authority and failure rules above are accepted. Detailed component callbacks, structural mutation,
+animation/root-motion phases, parallel execution and new physics backends below remain proposals.
 
 ### World and component lifecycle
 
@@ -70,8 +118,9 @@ Module-specific hooks and reload policy belong to ADR-0008 rather than an invent
 
 ### Fixed-step phase contract
 
-Start with serial, ordered phases. Explicit dependency declarations may refine their internals without changing
-ownership.
+The accepted minimal pipeline starts serially. The following expanded phase table is a future integration model for
+animation and other systems, not a requirement to implement empty phases now. Explicit dependencies may refine it
+without changing ownership.
 
 | Phase                        | Responsibility                                                                                               |
 |------------------------------|--------------------------------------------------------------------------------------------------------------|
@@ -142,9 +191,10 @@ An unrestricted per-component update callback is easy to expose but hides orderi
 framework could enforce access rules, but adopting one before workload evidence adds migration risk. Retain the current
 module/action seam and introduce phases incrementally.
 
-Open gates include the physics backend, root-motion collision policy, state-staging cost, event delivery semantics on
-failure, and job-system thresholds. Implement lifecycle/phase tracing first, then action input and movement authority,
-then graph preparation/finalization, then structural commands and staged mutable state. Benchmark before parallelizing.
+Open gates include the physics backend, root-motion collision policy, general post-commit event delivery API and
+job-system thresholds. Typed native progress and its supported aggregate failure boundary are now implemented. Add
+structural/animation phases only with their corresponding features,
+then measure before parallelizing. Existing optimized construction and change collection remain the base.
 
 ## Acceptance and verification limits
 
@@ -154,7 +204,11 @@ then graph preparation/finalization, then structural commands and staged mutable
 - A blocked root-motion character cannot bypass the movement authority; competing transform owners fail validation.
 - Spawn/despawn/reparent during execution respect boundaries and invalidate stale handles.
 - Fault injection verifies the promised rollback scope, clears input, and avoids publishing effects from rejected work.
+- A failed later catch-up step discards covered progress and world changes from earlier steps in the same update;
+  host/debug batches are atomic, and no reward or notification escapes rejected work.
 - Stop/restart releases resources and rejects old completions; headless and native hosts use the same simulation phases.
 
-These are future acceptance gates. No new scheduler, root-motion implementation, native timing benchmark, or determinism
-test was executed in this documentation pass.
+These gates cover their respective scopes, including proposed structural/animation features. The native typed-state
+transaction is present; this documentation resolution does not execute it or establish root-motion, benchmark or
+determinism acceptance. Documentation-site checks establish publication
+only; runtime and native verification remain separate.

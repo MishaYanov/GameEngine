@@ -105,6 +105,10 @@ pub struct VulkanFrame {
 	render_finished: Vec<vk::Semaphore>,
 
 	in_flight: vk::Fence,
+	acquisition_fence: vk::Fence,
+	acquisition_pending: bool,
+	submission_pending: bool,
+	invalidated: bool,
 	instance_buffer: VulkanBuffer,
 	instance_capacity: usize,
 	instance_data: Vec<InstanceData>,
@@ -185,15 +189,38 @@ impl From<VulkanBufferError> for VulkanFrameError {
 
 impl VulkanFrame {
 	pub fn wait_complete(&self) -> Result<(), VulkanFrameError> {
-		unsafe {
-			self.device
-				.wait_for_fences(&[self.in_flight], true, u64::MAX)?;
+		self.wait_complete_raw().map_err(Into::into)
+	}
+
+	pub(crate) fn wait_complete_raw(&self) -> Result<(), vk::Result> {
+		let mut fences = [vk::Fence::null(); 2];
+		let mut count = 0;
+		if self.acquisition_pending {
+			fences[count] = self.acquisition_fence;
+			count += 1;
+		}
+		if self.submission_pending {
+			fences[count] = self.in_flight;
+			count += 1;
+		}
+		if count != 0 {
+			unsafe {
+				self.device
+					.wait_for_fences(&fences[..count], true, u64::MAX)?;
+			}
 		}
 		Ok(())
 	}
 	pub fn new(
 		device: &VulkanDevice,
 		swapchain: &VulkanSwapchain,
+	) -> Result<Self, VulkanFrameError> {
+		Self::with_image_count(device, swapchain.images().len())
+	}
+
+	fn with_image_count(
+		device: &VulkanDevice,
+		image_count: usize,
 	) -> Result<Self, VulkanFrameError> {
 		let ash_device = device.raw().clone();
 		let instance_capacity = 64;
@@ -212,6 +239,9 @@ impl VulkanFrame {
 			.queue_family_index(device.queue_families().graphics);
 
 		let command_pool = unsafe { ash_device.create_command_pool(&pool_create_info, None)? };
+		let owned_pool = super::rollback::Rollback::new(command_pool, |pool| unsafe {
+			ash_device.destroy_command_pool(pool, None);
+		});
 
 		let allocate_info = vk::CommandBufferAllocateInfo::default()
 			.command_pool(command_pool)
@@ -225,18 +255,37 @@ impl VulkanFrame {
 		let semaphore_info = vk::SemaphoreCreateInfo::default();
 
 		let image_available = unsafe { ash_device.create_semaphore(&semaphore_info, None)? };
+		let owned_available = super::rollback::Rollback::new(image_available, |semaphore| unsafe {
+			ash_device.destroy_semaphore(semaphore, None);
+		});
 
-		let mut render_finished = Vec::with_capacity(swapchain.images().len());
+		let mut render_finished = super::rollback::Rollback::new(
+			Vec::with_capacity(image_count),
+			|semaphores: Vec<vk::Semaphore>| unsafe {
+				for semaphore in semaphores {
+					ash_device.destroy_semaphore(semaphore, None);
+				}
+			},
+		);
 
-		for _ in swapchain.images() {
+		for _ in 0..image_count {
 			let semaphore = unsafe { ash_device.create_semaphore(&semaphore_info, None)? };
 
-			render_finished.push(semaphore);
+			render_finished.value_mut().push(semaphore);
 		}
 
 		let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
 		let in_flight = unsafe { ash_device.create_fence(&fence_info, None)? };
+		let owned_in_flight = super::rollback::Rollback::new(in_flight, |fence| unsafe {
+			ash_device.destroy_fence(fence, None);
+		});
+		let acquisition_fence =
+			unsafe { ash_device.create_fence(&vk::FenceCreateInfo::default(), None)? };
+		let in_flight = owned_in_flight.into_inner();
+		let command_pool = owned_pool.into_inner();
+		let image_available = owned_available.into_inner();
+		let render_finished = render_finished.into_inner();
 
 		Ok(Self {
 			_metrics: vec![
@@ -268,6 +317,13 @@ impl VulkanFrame {
 					"Frame completion fence",
 					"",
 				),
+				crate::metrics::object(
+					&ash_device,
+					"fence",
+					acquisition_fence,
+					"Image acquisition completion fence",
+					"",
+				),
 			]
 			.into_iter()
 			.chain(render_finished.iter().map(|&semaphore| {
@@ -289,6 +345,10 @@ impl VulkanFrame {
 			render_finished,
 
 			in_flight,
+			acquisition_fence,
+			acquisition_pending: false,
+			submission_pending: false,
+			invalidated: false,
 			instance_buffer,
 			instance_capacity,
 			instance_data: Vec::with_capacity(instance_capacity),
@@ -317,12 +377,32 @@ impl VulkanFrame {
 		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<FrameStatus, VulkanFrameError> {
+		if self.invalidated {
+			return Ok(FrameStatus::SwapchainNeedsRebuild);
+		}
+		let result = self.draw_once(device, targets, pipelines, camera, camera_uniform, objects);
+		// Acquisition can leave its semaphore signaled even when recording or
+		// submission fails. Only a fresh frame may acquire another image.
+		if !matches!(result, Ok(FrameStatus::Rendered)) {
+			self.invalidated = true;
+		}
+		result
+	}
+
+	fn draw_once(
+		&mut self,
+		device: &VulkanDevice,
+		targets: FrameTargets<'_>,
+		pipelines: &VulkanMaterialPipelines,
+		camera: &VulkanCamera,
+		camera_uniform: &CameraUniform,
+		objects: &[RenderObject<'_>],
+	) -> Result<FrameStatus, VulkanFrameError> {
 		let swapchain = targets.swapchain;
 
-		unsafe {
-			self.device
-				.wait_for_fences(&[self.in_flight], true, u64::MAX)?;
-		}
+		self.wait_complete()?;
+		self.acquisition_pending = false;
+		self.submission_pending = false;
 
 		if let Some(timer) = &mut self.timer {
 			timer.collect()?;
@@ -332,19 +412,27 @@ impl VulkanFrame {
 
 		camera.update(camera_uniform)?;
 		camera.update_lighting(&self.lighting)?;
+		unsafe {
+			self.device
+				.reset_fences(&[self.acquisition_fence, self.in_flight])?;
+		}
 
-		let (image_index, acquire_suboptimal) =
-			match swapchain.acquire_next_image(u64::MAX, self.image_available, vk::Fence::null()) {
-				Ok(result) => result,
+		let (image_index, acquire_suboptimal) = match swapchain.acquire_next_image(
+			u64::MAX,
+			self.image_available,
+			self.acquisition_fence,
+		) {
+			Ok(result) => result,
 
-				Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-					return Ok(FrameStatus::SwapchainNeedsRebuild);
-				}
+			Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+				return Ok(FrameStatus::SwapchainNeedsRebuild);
+			}
 
-				Err(error) => {
-					return Err(error.into());
-				}
-			};
+			Err(error) => {
+				return Err(error.into());
+			}
+		};
+		self.acquisition_pending = true;
 
 		unsafe {
 			self.device
@@ -358,10 +446,6 @@ impl VulkanFrame {
 			camera.descriptor_set(),
 			objects,
 		)?;
-
-		unsafe {
-			self.device.reset_fences(&[self.in_flight])?;
-		}
 
 		let wait_semaphores = [self.image_available];
 
@@ -383,6 +467,7 @@ impl VulkanFrame {
 			self.device
 				.queue_submit(device.graphics_queue(), &[submit_info], self.in_flight)?;
 		}
+		self.submission_pending = true;
 		if let Some(timer) = &mut self.timer {
 			timer.pending = true;
 		}
@@ -817,8 +902,198 @@ impl Drop for VulkanFrame {
 			self.device.destroy_semaphore(self.image_available, None);
 
 			self.device.destroy_fence(self.in_flight, None);
+			self.device.destroy_fence(self.acquisition_fence, None);
 
 			self.device.destroy_command_pool(self.command_pool, None);
+		}
+	}
+}
+
+#[cfg(test)]
+mod construction_tests {
+	use super::*;
+	use crate::vulkan::test_driver::{device, reset, state};
+
+	#[test]
+	fn successive_draws_wait_and_reset_acquisition_and_render_fences_together() {
+		reset();
+		let device = device();
+		let swapchain = VulkanSwapchain::for_test(device.raw());
+		let camera = VulkanCamera::for_test(&device);
+		let depth = VulkanDepthBuffer::for_test(device.raw());
+		let pipelines = VulkanMaterialPipelines::for_test(device.raw());
+		let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
+		let uniform = CameraUniform {
+			view_projection: glam::Mat4::IDENTITY.to_cols_array(),
+		};
+		for _ in 0..2 {
+			assert_eq!(
+				frame
+					.draw(
+						&device,
+						FrameTargets {
+							swapchain: &swapchain,
+							depth_buffer: &depth
+						},
+						&pipelines,
+						&camera,
+						&uniform,
+						&[]
+					)
+					.unwrap(),
+				FrameStatus::Rendered
+			);
+		}
+		state(|state| {
+			let pair = vec![frame.acquisition_fence.as_raw(), frame.in_flight.as_raw()];
+			assert_eq!(
+				state.waited_fences.as_slice(),
+				std::slice::from_ref(&pair),
+				"one combined wait before the second frame"
+			);
+			assert_eq!(
+				state.reset_fence_groups,
+				[pair.clone(), pair],
+				"one combined reset per frame"
+			);
+			assert_eq!(state.calls["acquire"], 2);
+			assert_eq!(state.calls["submit"], 2);
+			assert_eq!(state.calls["present"], 2);
+		});
+		frame.wait_complete().unwrap();
+	}
+
+	#[test]
+	fn failed_public_draw_never_reuses_an_acquired_semaphore_or_unsubmitted_fence() {
+		for call in [
+			"acquire",
+			"reset_pool",
+			"begin_commands",
+			"end_commands",
+			"reset_fences",
+			"submit",
+			"present",
+		] {
+			reset();
+			let device = device();
+			let swapchain = VulkanSwapchain::for_test(device.raw());
+			let camera = VulkanCamera::for_test(&device);
+			let depth = VulkanDepthBuffer::for_test(device.raw());
+			let pipelines = VulkanMaterialPipelines::for_test(device.raw());
+			let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
+			let uniform = CameraUniform {
+				view_projection: glam::Mat4::IDENTITY.to_cols_array(),
+			};
+			let draw = |frame: &mut VulkanFrame| {
+				frame.draw(
+					&device,
+					FrameTargets {
+						swapchain: &swapchain,
+						depth_buffer: &depth,
+					},
+					&pipelines,
+					&camera,
+					&uniform,
+					&[],
+				)
+			};
+			state(|state| state.fail = Some((call, 1)));
+			assert!(
+				matches!(
+					draw(&mut frame),
+					Err(VulkanFrameError::Vulkan(
+						vk::Result::ERROR_OUT_OF_HOST_MEMORY
+					))
+				),
+				"{call}"
+			);
+			let before_retry = state(|state| state.calls.clone());
+			assert_eq!(
+				draw(&mut frame).unwrap(),
+				FrameStatus::SwapchainNeedsRebuild
+			);
+			state(|state| {
+				assert_eq!(
+					state.calls, before_retry,
+					"invalidated frame must not issue more Vulkan calls after {call}"
+				)
+			});
+			frame.wait_complete().unwrap();
+			state(|state| {
+				let expected = match call {
+					"acquire" | "reset_fences" => vec![],
+					"present" => vec![vec![
+						frame.acquisition_fence.as_raw(),
+						frame.in_flight.as_raw(),
+					]],
+					_ => vec![vec![frame.acquisition_fence.as_raw()]],
+				};
+				assert_eq!(
+					state.waited_fences, expected,
+					"wait only for genuinely pending acquisition/submission after {call}"
+				);
+			});
+			// WindowRenderer waits device-idle before replacing failed targets.
+			unsafe {
+				device.raw().device_wait_idle().unwrap();
+			}
+			drop(frame);
+			let mut fresh = VulkanFrame::new(&device, &swapchain).unwrap();
+			assert_eq!(
+				draw(&mut fresh).unwrap(),
+				FrameStatus::Rendered,
+				"fresh synchronization must recover after {call}"
+			);
+			fresh.wait_complete().unwrap();
+		}
+	}
+
+	#[test]
+	fn every_partial_frame_allocation_releases_preceding_handles() {
+		for (call, nth, semaphores, pools) in [
+			("create_pool", 1, 0, 0),
+			("allocate_commands", 1, 0, 1),
+			("create_semaphore", 1, 0, 1),
+			("create_semaphore", 2, 1, 1),
+			("create_semaphore", 3, 2, 1),
+			("create_semaphore", 4, 3, 1),
+			("create_fence", 1, 4, 1),
+			("create_fence", 2, 4, 1),
+		] {
+			reset();
+			state(|state| state.fail = Some((call, nth)));
+			let device = device();
+			assert!(
+				VulkanFrame::with_image_count(&device, 3).is_err(),
+				"{call} {nth}"
+			);
+			state(|state| {
+				assert_eq!(
+					state
+						.released
+						.iter()
+						.filter(|&&name| name == "semaphore")
+						.count(),
+					semaphores
+				);
+				assert_eq!(
+					state
+						.released
+						.iter()
+						.filter(|&&name| name == "pool")
+						.count(),
+					pools
+				);
+				assert!(state.memory.is_empty());
+				assert_eq!(
+					state
+						.released
+						.iter()
+						.filter(|&&name| name == "fence")
+						.count(),
+					usize::from(call == "create_fence" && nth == 2)
+				);
+			});
 		}
 	}
 }

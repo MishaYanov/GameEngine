@@ -86,15 +86,9 @@ impl RobotGame {
 		left_robot: EntityId,
 		right_robot: EntityId,
 	) -> Result<Self, String> {
-		let controlled = project
-			.behaviors_for(&project.startup_scene_id)
-			.filter_map(|behavior| match behavior {
-				BehaviorSpec::ControlledMove { entity, .. } => Some(entity.clone()),
-				_ => None,
-			})
-			.collect();
 		let simulation =
 			SimulationSession::new(project, Arc::new(scene.to_data(&Camera::default())?))?;
+		let controlled = simulation.controlled_targets().to_vec();
 		Ok(Self {
 			left_robot,
 			right_robot,

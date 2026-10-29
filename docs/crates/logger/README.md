@@ -92,6 +92,11 @@ Use `Config::new` for custom settings; it defaults to memory and console logging
 
 The background writer uses a bounded queue and buffered output. Queue overload drops the new disk record, increments `dropped_persistence`, and retains normal in-memory history. No disk writes occur on emitting threads. Ordered sequence assignment and queue submission share a short memory lock. Console output is synchronous; disable it for rendering performance measurements or production if appropriate.
 
+Memory history and the writer queue share immutable `Arc<LogEntry>` records; public snapshot pages still return owned
+entries. The writer reuses a bounded serialization buffer and encodes each record once for ordinary/error streams.
+These allocation changes retain existing redaction, ordering, record limits, independent stream failure and flush
+semantics. Historical timing measurements below do not measure their effect.
+
 Old inactive sessions are pruned at session startup. Session locks protect active applications from deletion. Active sessions can temporarily exceed the session retention count; subsequent starts prune them once inactive. Cleanup only removes recognized numeric segment files and logger-owned session directories. Unknown files cause cleanup to report an error rather than delete unrelated data.
 
 Storage initialization failures keep the memory collector running. Runtime write failures disable that session's disk sink, preventing later records from appending after a partial JSON fragment. Health preserves the error and counts subsequent disk drops. Restart or start a new process session after correcting storage; automatic sink recovery is not implemented.

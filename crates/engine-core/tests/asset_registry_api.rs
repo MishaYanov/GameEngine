@@ -4,6 +4,112 @@ use engine_core::{
 };
 
 #[test]
+fn empty_and_single_entry_batches_preserve_handles_limits_and_accounting() {
+	let mut registry = AssetRegistry::new(AssetRegistryLimits {
+		max_assets: 1,
+		max_metadata_bytes: 1024,
+		max_estimated_bytes: 10,
+	})
+	.unwrap();
+	let reference = AssetRef::new("a.glb", None).unwrap();
+	let handle = registry
+		.register_batch(vec![(
+			reference.clone(),
+			AssetMetadata {
+				estimated_bytes: 10,
+				..Default::default()
+			},
+		)])
+		.unwrap()[0];
+	let before = registry.get(handle).unwrap().clone();
+	let metadata_bytes = registry.metadata_bytes();
+	assert!(registry.register_batch(Vec::new()).unwrap().is_empty());
+	for entry in [
+		(
+			reference.clone(),
+			AssetMetadata {
+				estimated_bytes: 11,
+				..Default::default()
+			},
+		),
+		(
+			AssetRef::new("b.glb", None).unwrap(),
+			AssetMetadata::default(),
+		),
+		(
+			AssetRef {
+				path: "../a.glb".into(),
+				mesh_index: None,
+			},
+			AssetMetadata::default(),
+		),
+	] {
+		assert!(registry.register_batch(vec![entry]).is_err());
+		assert_eq!(registry.get(handle), Some(&before));
+		assert_eq!(registry.len(), 1);
+		assert_eq!(registry.metadata_bytes(), metadata_bytes);
+		assert_eq!(registry.estimated_bytes(), 10);
+	}
+	assert_eq!(
+		registry
+			.register_batch(vec![(reference.clone(), AssetMetadata::default())])
+			.unwrap(),
+		vec![handle]
+	);
+	assert_eq!(registry.estimated_bytes(), 0);
+	assert_eq!(registry.metadata_bytes(), metadata_bytes);
+	registry.remove(handle).unwrap();
+	let replacement = registry
+		.register_batch(vec![(reference, AssetMetadata::default())])
+		.unwrap()[0];
+	assert_eq!(replacement.index(), handle.index());
+	assert_ne!(replacement.generation(), handle.generation());
+	assert!(registry.get(handle).is_none());
+}
+
+#[test]
+fn single_entry_batch_preserves_metadata_and_overflow_rejections() {
+	let mut small = AssetRegistry::new(AssetRegistryLimits {
+		max_metadata_bytes: 1,
+		..Default::default()
+	})
+	.unwrap();
+	let reference = AssetRef::new("a.glb", None).unwrap();
+	assert_eq!(
+		small
+			.register_batch(vec![(reference.clone(), AssetMetadata::default())])
+			.unwrap_err(),
+		"Asset registration batch exceeds the metadata budget"
+	);
+	assert!(small.is_empty());
+	let mut registry = AssetRegistry::default();
+	let handle = registry
+		.register(
+			reference.clone(),
+			AssetMetadata {
+				estimated_bytes: 1,
+				..Default::default()
+			},
+		)
+		.unwrap();
+	assert_eq!(
+		registry
+			.register_batch(vec![(
+				AssetRef::new("b.glb", None).unwrap(),
+				AssetMetadata {
+					estimated_bytes: u64::MAX,
+					..Default::default()
+				}
+			)])
+			.unwrap_err(),
+		"Asset byte estimate overflow"
+	);
+	assert_eq!(registry.len(), 1);
+	assert_eq!(registry.find(&reference), Some(handle));
+	assert_eq!(registry.estimated_bytes(), 1);
+}
+
+#[test]
 fn batch_registration_rolls_back_existing_updates_and_new_handles_on_every_rejection() {
 	let mut registry = AssetRegistry::new(AssetRegistryLimits {
 		max_assets: 2,

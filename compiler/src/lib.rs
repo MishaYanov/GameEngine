@@ -1,5 +1,5 @@
 use std::{
-	collections::{HashSet, hash_map::DefaultHasher},
+	collections::{HashMap, HashSet, hash_map::DefaultHasher},
 	fs,
 	hash::Hasher,
 	io::{self, Read, Write},
@@ -9,7 +9,7 @@ use std::{
 
 use engine_core::{
 	project::{BehaviorSpace, BehaviorSpec, ProjectData},
-	scene_catalog::SceneDescriptor,
+	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::SceneData,
 };
 
@@ -441,13 +441,23 @@ fn validate_catalog_scenes(
 	root: &Path,
 	files: &[PackageAsset],
 ) -> Result<(), String> {
+	// Keep one validated project and target index for this immutable catalog pass.
+	project.validate()?;
+	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
+	for behavior in &project.behaviors {
+		targets
+			.entry(&behavior.scene_id)
+			.or_default()
+			.push(behavior.entity());
+	}
 	let packaged: HashSet<&Path> = files.iter().map(|asset| asset.relative.as_path()).collect();
 
 	let mut report = String::new();
 	let mut truncated = false;
 
 	for entry in ordered_scenes(project) {
-		if let Err(error) = validate_catalog_scene(project, root, entry, &packaged) {
+		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
+		if let Err(error) = validate_catalog_scene(scene_targets, root, entry, &packaged) {
 			append_scene_error(&mut report, &error, &mut truncated);
 		}
 	}
@@ -494,7 +504,7 @@ fn validate_model_references(
 }
 
 fn validate_catalog_scene(
-	project: &ProjectData,
+	targets: &[&engine_core::EntityKey],
 	root: &Path,
 	entry: &SceneDescriptor,
 	packaged: &HashSet<&Path>,
@@ -503,9 +513,22 @@ fn validate_catalog_scene(
 		.map_err(|cause| scene_error(entry, cause))?;
 	let scene = read_scene_file(&path).map_err(|cause| scene_error(entry, cause))?;
 
-	project
-		.validate_scene_for(entry.id(), &scene)
-		.map_err(|cause| scene_error(entry, cause))?;
+	// read_scene_file parses and validates the document before returning it.
+	// Only cross-document target membership remains to check here.
+	if !targets.is_empty() {
+		let keys: HashSet<_> = scene.entities.iter().map(|entity| &entity.key).collect();
+		for (index, target) in targets.iter().enumerate() {
+			if !keys.contains(target) {
+				return Err(scene_error(
+					entry,
+					format!(
+						"Behavior {index} targets missing entity {:?}",
+						target.as_str()
+					),
+				));
+			}
+		}
+	}
 
 	validate_model_references(&scene, root, packaged).map_err(|cause| scene_error(entry, cause))?;
 

@@ -2,7 +2,7 @@
 //! undo/redo are delegated to the same CPU EditorSession used by Tauri.
 use crate::input::MovementBindings;
 use crate::{
-	Camera, EntityKey, InputState, Key, Transform,
+	Camera, EntityKey, InputState, Key, SceneData, Transform,
 	editor::{
 		EditorSession,
 		command::{
@@ -12,16 +12,21 @@ use crate::{
 	},
 	model_instance::ModelInstance,
 	picking::{self, CameraRay},
-	scene::{EntityId, EntitySnapshot, MAX_SCENE_RENDER_OBJECTS, Scene},
+	scene::{EntityId, MAX_SCENE_RENDER_OBJECTS, RetainedEntity, Scene},
 };
+use engine_core::game_progress::{GameProgress, ProgressAction};
+pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
+use engine_core::scene_catalog::SceneId;
+use engine_core::simulation_session::GameModuleFactory;
 pub use engine_core::simulation_session::{MovementTarget, SimulationSession};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct SceneEditor {
 	session: Option<EditorSession>,
-	resources: HashMap<EntityKey, EntitySnapshot>,
+	resources: HashMap<EntityKey, RetainedEntity>,
 	selected: Option<EntityId>,
 	movement_entity: Option<EntityId>,
 	play_input_target: MovementTarget,
@@ -84,11 +89,73 @@ impl SceneEditor {
 	pub fn is_playing(&self) -> bool {
 		self.session.as_ref().is_some_and(EditorSession::is_playing)
 	}
+	pub fn set_module_factory(
+		&mut self,
+		factory: Arc<dyn GameModuleFactory>,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.set_module_factory(factory)
+	}
+	pub fn play_progress<P: GameProgress>(&self) -> Option<&P> {
+		self.session.as_ref()?.play_progress::<P>()
+	}
+	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.apply_play_progress(actions)
+	}
+	pub fn prepare_new_game(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native authoring session is not initialized")?
+			.prepare_new_game(scene_id, document)
+	}
 
 	pub fn play_controlled_targets(&self) -> Option<&[EntityKey]> {
 		self.session
 			.as_ref()
 			.and_then(EditorSession::play_controlled_targets)
+	}
+
+	pub fn play_scene_id(&self) -> Option<&SceneId> {
+		self.session.as_ref().and_then(EditorSession::play_scene_id)
+	}
+
+	pub fn prepare_play_scene(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native authoring session is not initialized")?
+			.prepare_play_scene(scene_id, document)
+	}
+
+	/// Player-only installation boundary. The caller must finish GPU work before
+	/// releasing retained snapshots and replace the rendered scene after success.
+	pub fn commit_play_scene(
+		&mut self,
+		prepared: PreparedScene,
+		input: &mut InputState,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.commit_play_scene(prepared)?;
+		self.play_input_target = MovementTarget::AllControlled;
+		self.selected = None;
+		self.movement_entity = None;
+		self.resources.clear();
+		input.suppress_held();
+		Ok(())
 	}
 
 	pub fn simulation_paused(&self) -> bool {
@@ -234,7 +301,7 @@ impl SceneEditor {
 				.key(id)
 				.ok_or("Native authoring entity needs a persistent key")?;
 			if !self.resources.contains_key(key) {
-				self.resources.insert(key.clone(), scene.snapshot(id)?);
+				self.resources.insert(key.clone(), scene.retain_entity(id)?);
 			}
 		}
 		Ok(())

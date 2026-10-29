@@ -41,6 +41,10 @@ owner to interpret; it is not a domain command by itself.
 The existing engine_status/create_project commands remain for status and the setup installer; they are separate from the
 new editor document API.
 
+Setup also exposes `choose_project_destination` to the trusted main window. It opens a parented native folder dialog
+on a blocking worker and returns a selected path or null on cancellation. An existing absolute initial directory can
+seed the dialog. Choosing a folder does not install anything; the compiler still validates the final destination.
+
 `editor_execute_incremental` executes and captures its response under the same workspace lock. It returns
 `EditorCommandUpdateDto::Delta` with lightweight editor state, changed authored entities and optional camera/lights.
 Full resync, topology, project, binding or entity-order changes return `Snapshot` instead. Capability negotiation
@@ -51,7 +55,8 @@ command/history processing may still clone full scene data.
 ## Project lifecycle and multi-scene persistence
 
 `editor_open_project` uses ProjectLocation and prepares every catalog scene before installing a candidate. Project
-schema 2 uses stable scene IDs and scene-scoped behaviors; capabilities advertise protocol 2 / scene schema 3.
+schema 3 uses stable scene IDs, scene-scoped behaviors and shared settings; inline-only schema-2 JSON upgrades on load.
+Capabilities advertise protocol 2 / scene schema 3.
 `editor_register_scene` registers an existing file, while `editor_save_scene_as` writes a new destination and changes
 the active scene path. `editor_save` saves only the active scene; `editor_save_project` saves the manifest.
 

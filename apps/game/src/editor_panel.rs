@@ -236,8 +236,8 @@ impl EditorPanel {
 				("2 ROTATE", GizmoMode::Rotate),
 				("3 SCALE", GizmoMode::Scale),
 			]
-				.into_iter()
-				.enumerate()
+			.into_iter()
+			.enumerate()
 			{
 				self.button(
 					&mut draw,
@@ -250,10 +250,10 @@ impl EditorPanel {
 		}
 		draw.rect([0.0, 48.0, 258.0, height - 78.0], BG);
 		draw.text(14.0, 60.0, "HIERARCHY", ACCENT);
-		let ids: Vec<_> = view.scene.entity_ids().collect();
+		let ids = view.scene.entity_ids();
 		let rows = ((height * 0.5 - 98.0) / 26.0).max(1.0) as usize;
 		self.entity_scroll = self.entity_scroll.min(ids.len().saturating_sub(rows));
-		for (row, &id) in ids.iter().skip(self.entity_scroll).take(rows).enumerate() {
+		for (row, id) in ids.skip(self.entity_scroll).take(rows).enumerate() {
 			let name = clipped(view.scene.name(id).unwrap_or("Entity"), 19);
 			let y = 86.0 + row as f32 * 26.0;
 			if view.playing {
@@ -516,7 +516,7 @@ impl Draw {
 					],
 					[u, v],
 				)
-					.with_normal(color),
+				.with_normal(color),
 			);
 		}
 		self.indices

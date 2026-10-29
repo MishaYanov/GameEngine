@@ -66,12 +66,13 @@ function validDocument(value: unknown): boolean {
 function project(value: unknown): boolean {
     return (
         record(value) &&
-        value['schema_version'] === 2 &&
+        value['schema_version'] === 3 &&
         typeof value['name'] === 'string' &&
         typeof value['startup_scene_id'] === 'string' &&
         Number.isFinite(value['fixed_hz']) &&
         integer(value['max_catchup_steps']) &&
         Array.isArray(value['behaviors']) &&
+        Array.isArray(value['behavior_definitions']) &&
         Array.isArray(value['scenes']) &&
         value['scenes'].every(
             (scene: unknown) =>

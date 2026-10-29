@@ -5,7 +5,7 @@ dependencies first.
 
 ## Current project lifecycle changes
 
-The [project lifecycle guide](project-lifecycle.md) covers project schema 2 / editor protocol 2: root validation,
+The [project lifecycle guide](project-lifecycle.md) covers project schema 3 / editor protocol 2: root validation,
 retained drafts, scene-aware history, save/reload policies and catalog-wide build/headless preparation. Focused tests
 exist in engine-core/tests/multi_scene_api.rs, host editor_workspace.rs, frontend editor.service.spec.ts and
 compiler/headless tests. This documentation update executes site checks only. Earlier engine counts below are

@@ -80,3 +80,62 @@ fn corrupt_or_unsupported_snapshots_are_visible_without_hiding_valid_devices() {
 	assert!(read(&root.join("missing"), None).devices.is_empty());
 	fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn metadata_sort_keeps_newest_devices_and_observes_replacement() {
+	let root = crate::tests::test_directory("metrics-order");
+	let session = root.join("hyphenated-game-1-100");
+	fs::create_dir(&session).unwrap();
+	for id in 1..=18 {
+		let path = session.join(format!("vulkan-metrics-{id}.json"));
+		fs::write(&path, serde_json::to_vec(&snapshot(id, true)).unwrap()).unwrap();
+		fs::File::options()
+			.write(true)
+			.open(&path)
+			.unwrap()
+			.set_times(fs::FileTimes::new().set_modified(
+				std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000 + id),
+			))
+			.unwrap();
+	}
+	let page = read(&root, None);
+	assert!(page.truncated);
+	assert_eq!(page.devices.len(), MAX_DEVICES);
+	assert!(
+		!page
+			.devices
+			.iter()
+			.any(|device| device.id.ends_with(":1") || device.id.ends_with(":2"))
+	);
+	let path = session.join("vulkan-metrics-1.json");
+	fs::write(path, serde_json::to_vec(&snapshot(1, false)).unwrap()).unwrap();
+	let page = read(&root, None);
+	assert_eq!(page.selected.unwrap().device_id, 1);
+	assert_eq!(page.devices.len(), MAX_DEVICES);
+	fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn actual_reads_share_a_budget_even_when_files_grow_or_contain_invalid_json() {
+	let root = crate::tests::test_directory("metrics-read-budget");
+	let path = root.join("vulkan-metrics-1.json");
+	let original = serde_json::to_vec(&snapshot(1, false)).unwrap();
+	fs::write(&path, &original).unwrap();
+	let mut remaining = original.len() + 32;
+	assert_eq!(load(&path, &mut remaining).unwrap().device_id, 1);
+	assert_eq!(remaining, 32);
+
+	// Simulate a publication replacing a file after directory metadata was
+	// cached: the loader must obey the remaining allowance, not that old size.
+	fs::write(&path, vec![b' '; 1024]).unwrap();
+	assert!(load(&path, &mut remaining).is_err());
+	assert_eq!(remaining, 0);
+	assert!(load(&path, &mut remaining).is_err());
+	assert_eq!(remaining, 0);
+
+	fs::write(&path, "{broken").unwrap();
+	remaining = 32;
+	assert!(load(&path, &mut remaining).is_err());
+	assert_eq!(remaining, 32 - "{broken".len());
+	fs::remove_dir_all(root).unwrap();
+}

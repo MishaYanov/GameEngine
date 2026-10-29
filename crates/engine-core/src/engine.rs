@@ -177,6 +177,9 @@ impl Engine {
 				return Err(self.error(BackendErrorCode::SimulationRejected, message));
 			}
 		};
+		if outcome.progress_changed {
+			self.publish(BackendEventKind::StateChanged)?;
+		}
 		if outcome.steps > 0 {
 			self.publish(BackendEventKind::SimulationAdvanced {
 				tick: outcome.tick,
@@ -188,6 +191,12 @@ impl Engine {
 
 	pub fn replace_document(&mut self, data: SceneData) -> Result<CommandReceipt, BackendError> {
 		self.mutate_session(|session| session.replace_document(data))
+	}
+	pub fn apply_play_progress(
+		&mut self,
+		actions: &[crate::game_progress::ProgressAction],
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|session| session.apply_play_progress(actions))
 	}
 	pub fn replace_project_document(
 		&mut self,
@@ -351,9 +360,9 @@ impl Engine {
 					.find(|s| s.id == state.id)
 					.map(|s| (&s.asset_path, s.dirty, s.loaded))
 					!= after_states
-					.iter()
-					.find(|s| s.id == state.id)
-					.map(|s| (&s.asset_path, s.dirty, s.loaded))
+						.iter()
+						.find(|s| s.id == state.id)
+						.map(|s| (&s.asset_path, s.dirty, s.loaded))
 			})
 			.map(|s| s.id.clone())
 			.collect();
@@ -361,10 +370,23 @@ impl Engine {
 			affected_scenes.push(self.session.active_scene_id().clone());
 		}
 		if project_changed {
+			let definitions_changed =
+				before_project.behavior_definitions != after_project.behavior_definitions;
 			for state in before_states.iter().chain(after_states.iter()) {
+				// Shared configuration changes affect referencing scenes even when
+				// their authored attachments are unchanged. This is deliberately
+				// conservative and cannot fail after the command has committed.
+				let shared_configuration_changed = definitions_changed
+					&& before_project
+						.behaviors_for(&state.id)
+						.chain(after_project.behaviors_for(&state.id))
+						.any(|behavior| {
+							matches!(behavior, crate::project::BehaviorSpec::Shared { .. })
+						});
 				if !before_project
 					.behaviors_for(&state.id)
 					.eq(after_project.behaviors_for(&state.id))
+					|| shared_configuration_changed
 				{
 					affected_scenes.push(state.id.clone());
 				}

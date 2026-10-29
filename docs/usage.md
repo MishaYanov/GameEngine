@@ -119,7 +119,8 @@ The PowerShell wrapper uses the same launcher commands:
 In the setup screen:
 
 1. Enter a **Project name**, such as `My Game`.
-2. Enter an existing **Destination folder**, such as `D:\Projects`.
+2. Enter an existing **Destination folder**, such as `D:\Projects`, or use **Browse…** to choose one in the native
+   folder dialog. Cancelling keeps the current path. Browsing and creation cannot run at the same time.
 3. Click **Create & launch project**.
 4. Wait for the build and installation. The form disables submission while working.
 5. Read the installed path and launch status. The host attempts to open the graphics window after installation. Process-spawn success does not certify that the child subsequently initialized Vulkan or rendered successfully.

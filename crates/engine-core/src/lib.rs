@@ -10,6 +10,8 @@ pub mod editor;
 pub mod engine;
 pub mod entity_key;
 pub mod events;
+pub mod game_progress;
+pub mod game_session;
 pub mod input;
 pub mod picking;
 pub mod project;

@@ -19,6 +19,7 @@ interface ProjectResult {
 export class ProjectSetup {
     protected readonly status = signal<EngineStatus | null>(null);
     protected readonly busy = signal(false);
+    protected readonly choosingDestination = signal(false);
     protected readonly error = signal('');
     protected readonly result = signal<ProjectResult | null>(null);
     protected readonly desktop = isTauri();
@@ -48,8 +49,27 @@ export class ProjectSetup {
         }
     }
 
+    protected async chooseDestination(): Promise<void> {
+        if (!this.desktop || this.busy() || this.choosingDestination()) return;
+        this.choosingDestination.set(true);
+        this.error.set('');
+        try {
+            const destination = await invoke<string | null>('choose_project_destination', {
+                initialDirectory: this.form.controls.destination.value.trim() || null,
+            });
+            if (destination !== null) {
+                this.form.controls.destination.setValue(destination);
+                this.form.controls.destination.markAsDirty();
+            }
+        } catch (error: unknown) {
+            this.error.set(String(error));
+        } finally {
+            this.choosingDestination.set(false);
+        }
+    }
+
     protected async createProject(): Promise<void> {
-        if (this.busy()) return;
+        if (this.busy() || this.choosingDestination()) return;
         this.form.markAllAsTouched();
         if (this.form.invalid || !this.desktop) return;
         this.busy.set(true);

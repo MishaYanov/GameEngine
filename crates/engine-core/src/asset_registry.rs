@@ -221,8 +221,35 @@ impl AssetRegistry {
 	/// and all of its byte/count accounting unchanged.
 	pub fn register_batch(
 		&mut self,
-		entries: Vec<(AssetRef, AssetMetadata)>,
+		mut entries: Vec<(AssetRef, AssetMetadata)>,
 	) -> Result<Vec<AssetHandle>, String> {
+		if entries.is_empty() {
+			return Ok(Vec::new());
+		}
+		if entries.len() == 1 {
+			let (reference, metadata) = entries.pop().expect("one batch entry");
+			let reference = reference.canonical()?;
+			if metadata_cost(&reference)? > self.limits.max_metadata_bytes {
+				return Err("Asset registration batch exceeds the metadata budget".into());
+			}
+			let previous_bytes = self
+				.find(&reference)
+				.and_then(|handle| self.get(handle))
+				.map_or(0, |record| record.metadata.estimated_bytes);
+			let projected_bytes = self
+				.estimated_bytes
+				.checked_sub(previous_bytes)
+				.ok_or("Asset byte estimate underflow")?
+				.checked_add(metadata.estimated_bytes)
+				.ok_or("Asset byte estimate overflow")?;
+			if projected_bytes > self.limits.max_estimated_bytes {
+				return Err("Asset registry count or byte budget exceeded".into());
+			}
+			// A single register validates all limits before mutating any slot.
+			return self
+				.register(reference, metadata)
+				.map(|handle| vec![handle]);
+		}
 		let (staged, handles) = self.staged_with_batch(entries)?;
 		*self = staged;
 		Ok(handles)

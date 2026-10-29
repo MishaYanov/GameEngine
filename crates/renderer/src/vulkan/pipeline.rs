@@ -12,12 +12,30 @@ pub struct VulkanGraphicsPipeline {
 /// Opaque-material pipeline variants with identical descriptor/push layouts.
 /// Recreate the whole set when attachment formats change with the swapchain.
 pub struct VulkanMaterialPipelines {
+	color_format: vk::Format,
+	depth_format: vk::Format,
 	single_sided: VulkanGraphicsPipeline,
 	double_sided: VulkanGraphicsPipeline,
 	overlay: VulkanGraphicsPipeline,
 }
 
 impl VulkanMaterialPipelines {
+	#[cfg(test)]
+	pub(super) fn for_test(device: &Device) -> Self {
+		let pipeline = || VulkanGraphicsPipeline {
+			_metrics: Vec::new(),
+			device: device.clone(),
+			pipeline: vk::Pipeline::null(),
+			layout: vk::PipelineLayout::null(),
+		};
+		Self {
+			color_format: vk::Format::B8G8R8A8_SRGB,
+			depth_format: vk::Format::D32_SFLOAT,
+			single_sided: pipeline(),
+			double_sided: pipeline(),
+			overlay: pipeline(),
+		}
+	}
 	pub fn new(
 		device: &Device,
 		color_format: vk::Format,
@@ -53,10 +71,16 @@ impl VulkanMaterialPipelines {
 			true,
 		)?;
 		Ok(Self {
+			color_format,
+			depth_format,
 			single_sided,
 			double_sided,
 			overlay,
 		})
+	}
+
+	pub(crate) fn supports_formats(&self, color: vk::Format, depth: vk::Format) -> bool {
+		self.color_format == color && self.depth_format == depth
 	}
 
 	pub fn for_material(&self, double_sided: bool) -> &VulkanGraphicsPipeline {

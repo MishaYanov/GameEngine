@@ -1,4 +1,5 @@
 use std::{
+	collections::HashMap,
 	error::Error,
 	fmt::{self, Display, Formatter},
 	path::Path,
@@ -377,6 +378,7 @@ pub(super) fn import_mesh(
 	}
 	let mut parts = Vec::new();
 	let mut budget = IMPORT_LIMIT;
+	let mut shared_images = HashMap::new();
 	for primitive in mesh.primitives() {
 		// Accessor counts are checked before allocating decoded vertex buffers.
 		let vertices = primitive
@@ -395,15 +397,14 @@ pub(super) fn import_mesh(
 				.checked_add(index_bytes)
 				.ok_or_else(|| rejected("geometry size overflow"))?,
 		)?;
-		if let Some(image) = primitive
-			.material()
-			.pbr_metallic_roughness()
-			.base_color_texture()
-			.and_then(|info| images.get(info.texture().source().index()))
-		{
-			charge(&mut budget, image.pixels.len())?;
-		}
-		parts.push(import_primitive(mesh.index(), primitive, buffers, images)?);
+		parts.push(import_primitive(
+			mesh.index(),
+			primitive,
+			buffers,
+			images,
+			&mut shared_images,
+			&mut budget,
+		)?);
 	}
 	if parts.is_empty() {
 		return Err(GltfLoaderError::NoPrimitives);
@@ -478,6 +479,8 @@ fn import_primitive(
 	primitive: gltf::Primitive<'_>,
 	buffers: &[gltf::buffer::Data],
 	images: &[gltf::image::Data],
+	shared_images: &mut HashMap<usize, ImageAsset>,
+	budget: &mut usize,
 ) -> Result<ImportedPrimitive, GltfLoaderError> {
 	if primitive.mode() != Mode::Triangles {
 		return Err(GltfLoaderError::UnsupportedMode(primitive.mode()));
@@ -513,12 +516,20 @@ fn import_primitive(
 		.map(|info| info.texture().source().index());
 
 	let base_color_image = match base_color_texture {
+		Some(info) if shared_images.contains_key(&info.texture().source().index()) => {
+			Some(shared_images[&info.texture().source().index()].clone())
+		}
 		Some(info) => {
 			let image_index = info.texture().source().index();
 
 			let image = images
 				.get(image_index)
 				.ok_or(GltfLoaderError::InvalidImageReference(image_index))?;
+			let rgba_bytes = (image.width as usize)
+				.checked_mul(image.height as usize)
+				.and_then(|pixels| pixels.checked_mul(4))
+				.ok_or_else(|| rejected("image size overflow"))?;
+			charge(budget, rgba_bytes)?;
 
 			let rgba_pixels = match image.format {
 				gltf::image::Format::R8G8B8 => {
@@ -526,7 +537,7 @@ fn import_primitive(
 						return Err(GltfLoaderError::InvalidRgbByteCount(image.pixels.len()));
 					}
 
-					let mut rgba = Vec::new();
+					let mut rgba = Vec::with_capacity(rgba_bytes);
 
 					for rgb in image.pixels.chunks_exact(3) {
 						rgba.extend_from_slice(rgb);
@@ -555,6 +566,7 @@ fn import_primitive(
 				tex_coord_set,
 			);
 
+			shared_images.insert(image_index, image_asset.clone());
 			Some(image_asset)
 		}
 

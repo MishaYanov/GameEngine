@@ -2,7 +2,7 @@
 
 Source: `compiler`. The tool builds the native game in release mode and packages an authored manifest plus its validated
 assets. CPU project/scene types come from engine-core. See [project lifecycle](../project-lifecycle.md) for project
-schema 2 and multi-scene authoring.
+schema 3, shared behavior settings and multi-scene authoring.
 
 ## CLI and library
 
@@ -28,10 +28,15 @@ absolute.
 
 ## Multi-scene preparation and installation
 
-Project schema 2 identifies catalog entries by stable SceneId, startup_scene_id and scene-scoped behaviors. Preparation
+Project schema 3 identifies catalog entries by stable SceneId, startup_scene_id and scene-scoped behaviors, including
+shared configuration references. Inline-only schema-2 files upgrade through ProjectData::from_json. Preparation
 captures the asset file list, then validates every catalog scene and its referenced models. A shared resolver requires
 each scene/model path to resolve to a regular file within the canonical asset root and to belong to that captured list.
 One path index serves the whole catalog pass; scene membership is checked before reading/parsing the file.
+
+Project validation and per-scene behavior target indexing are prepared once for the immutable catalog pass. Parsed
+documents already carry scene validation; the remaining cross-document checks verify target membership and packaged
+model references. This avoids repeated whole-project work without relaxing containment, file or diagnostic limits.
 
 Captured membership identifies paths. Prepared inputs also retain their byte lengths and fingerprints for the
 pre-build recheck and verified copying below. Detailed glTF geometry validation remains with the runtime importer.

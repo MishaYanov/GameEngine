@@ -93,6 +93,12 @@ sequenceDiagram
     participant Compiler as compiler
     participant OS as Operating system
 
+    opt User browses for a destination in the desktop app
+        User->>UI: Browse → chooseDestination()
+        UI->>IPC: choose_project_destination(initialDirectory)
+        IPC-->>UI: Native folder selection or null on cancel
+        UI->>UI: Update selected path and block creation while choosing
+    end
     User->>UI: Submit form → createProject()
     UI->>UI: Check busy, form validity, isTauri()
     UI->>UI: busy=true, clear error/result, disable form
@@ -426,7 +432,7 @@ flowchart TD
     O -->|"Missing / root changed"| P["WindowRenderer::new()<br/>AssetManager::new()<br/>scene_io::instantiate()"]
     O -->|"Existing"| Q{"Same generation and scene revision?"}
     Q -->|"Yes"| R["Reuse GPU scene"]
-    Q -->|"Same generation; changed revision;<br/>runtime world available"| S["backend.changes_since(cursor)<br/>Scene::synchronize_world()"]
+    Q -->|"Same generation; changed revision"| S["backend.changes_since(cursor)<br/>Play: synchronize_world()<br/>Edit: synchronize_authored(validated_document)"]
     S -->|"Synchronized"| R
     S -->|"Full document needed"| T["session.render_document()<br/>Scene::synchronize()"]
     Q -->|"Generation changed / authored document needed"| T
@@ -487,40 +493,56 @@ flowchart TD
     I --> J["SceneEditor::start_play()<br/>execute_core(StartPlay)<br/>EditorSession::execute_command()"]
 
     K["Editor API caller<br/>EditorService.execute(CommandBuilder.play())"]
-    K --> L["editor_execute()<br/>Engine::execute()"]
+    K --> L["editor_execute_incremental()<br/>Engine::execute()"]
     L --> M["EditorSession::execute_validated_command(StartPlay)"]
     J --> M
     M --> N["require_edit(); require_no_transaction()"]
-    N --> O["SimulationSession::with_factory_for_scene()<br/>Project + active scene ID + authored document"]
-    O --> P["validate_scene_for()<br/>factory.create(project, scene_id)"]
+    N --> O["GameSession::with_factory_for_scene()<br/>Factory creates run progress<br/>SimulationSession::with_shared_project_for_scene()"]
+    O --> P["Validate project + selected document<br/>factory.create_prepared(config)"]
     P --> Q["RuntimeWorld::new()<br/>CollisionWorld::new()<br/>FixedStepper::new()"]
     Q --> R["Play session ready"]
     R --> S["Installed player frame<br/>GameApp::update() → update_player()<br/>SceneEditor::update_play()"]
     R --> T["Editor viewport scheduling<br/>Worker::about_to_wait()<br/>Engine::tick(elapsed)"]
-    S --> U["EditorSession::tick()<br/>SimulationSession::tick()"]
+    S --> U["EditorSession::tick()<br/>GameSession::tick()<br/>SimulationSession::tick_with_progress()"]
     T --> U
-    U --> V["FixedStepper::advance()<br/>module.plan()"]
-    V --> W["Apply bounded movement / rotation / transform actions<br/>Update collision state and WorldChange"]
+    U --> V["FixedStepper::advance()<br/>module.plan_with_progress(context)"]
+    V --> W["Apply bounded world + typed progress actions atomically<br/>Update collision state and WorldChange"]
     W --> X["Synchronize render scene<br/>Render next frame"]
     R --> Y["Editor StopPlay"]
-    Y --> Z["Drop simulation session<br/>Resynchronize authored scene"]
+    Y --> Z["Drop run and progress<br/>Resynchronize authored scene"]
+
+    S -->|"Player F8"| AA["cycle_player_scene()<br/>Next sorted catalog scene ID"]
+    AA --> AB["Contained path + scene_io::load_data()<br/>prepare_play_scene(): candidate simulation"]
+    AB --> AC["New AssetManager<br/>scene_io::instantiate(): candidate GPU scene/camera"]
+    AC --> AD["renderer.wait_idle()<br/>commit_play_scene(): verify owner/generation"]
+    AD --> AE["Replace scene/assets/camera<br/>Reset input target and frame schedule"]
+    AE --> S
+    S -->|"Player F10"| AF["prepare_new_game(startup ID)<br/>Prepare scene and fresh progress"]
+    AF --> AC
 ```
 
 The player discovers installed configuration beside its executable and uses the sibling `assets` directory. Explicit
 `--player` / `--development` arguments override the default mode. Initialization installs the loaded state only after
 its fallible setup steps succeed. Source Development mode retains the separate native learning harness.
 
-The inspected working tree passes the active editor scene ID into `with_factory_for_scene()` without rewriting the
-project's authored `startup_scene_id`. Configured behavior creation and movement validation use the simulated scene
-identity. The installed player initially selects the configured startup scene. This is not an automatic gameplay
-scene-transition system.
+The inspected working tree creates GameSession from the active editor scene ID without rewriting the project's
+authored `startup_scene_id`. Configured behavior creation resolves inline/shared settings for that simulated scene;
+movement validation uses its controlled-target list. The installed player initially selects the configured startup
+scene. Player F8 explicitly cycles sorted catalog IDs and prepares matching CPU/GPU state before replacement. Failed
+preparation leaves the old scene installed; commit preserves current pause state, clears input and rejects stale or
+foreign prepared candidates. Cycling back starts a fresh simulation rather than resuming the outgoing state. These
+Rust APIs do not add an Angular transition control or automatic gameplay triggers.
+
+Run progress survives ordinary scene replacement even if it changes after preparation; only the simulated scene world
+is recreated. Player F7 awards demo score and F10 prepares fresh progress plus the startup scene. New Game resets run
+identity/generation so older candidates cannot commit. Progress is game-defined native data in memory, not disk saves.
 
 Simulation uses fixed steps with bounded actions, matrix work, and collision work. It updates a temporary runtime
 world. Stopping editor Play drops that world and resynchronizes the retained authored state. For the detailed contract,
 see [simulation scene identity](project-lifecycle.md#editor-play-and-simulation-scene-identity).
 
 Source: `apps/game/src/{main,launch}.rs`, `crates/runtime/src/scene_editor.rs`,
-`crates/engine-core/src/editor/mod.rs`, and `crates/engine-core/src/simulation_session.rs`.
+`crates/engine-core/src/editor/mod.rs`, `game_session.rs`, `project.rs` and `simulation_session.rs`.
 
 ## 9. Repeated Cargo builds in the admin UI
 
@@ -588,13 +610,13 @@ into staging, validates it with the shared Cargo job system, and publishes only 
 ```mermaid
 flowchart TD
     A["Builder.preview()"]
-    A --> B["preview_project()<br/>Rust Builder::preview()"]
-    B --> C["Validate new destination<br/>Enumerate template files and fingerprints"]
-    C --> D["Return preview plan ID"]
+    A --> B["preview_project()<br/>begin_preview(): reserve under service lock"]
+    B --> C["spawn_blocking: prepare_preview()<br/>Validate destination and enumerate fingerprints without service lock"]
+    C --> D["finish_preview(): validate token under lock<br/>Return preview plan ID"]
     D --> E["Builder.generate()<br/>generate_project(plan ID)"]
-    E --> F["Rust Builder::generate()<br/>Create staging workspace"]
-    F --> G["Recheck fingerprints; copy sources/assets<br/>Write generated Cargo.toml and README"]
-    G --> H["Jobs::queue(staging, Build, game, profile)<br/>Generation state: VALIDATING"]
+    E --> F["begin_generation(): reserve under lock<br/>spawn_blocking: prepare_generation()"]
+    F --> G["Without service lock: create staging<br/>Recheck fingerprints; copy sources/assets<br/>Write Cargo.toml and README"]
+    G --> H["finish_generation(): validate token and destination under lock<br/>Jobs::queue(); state VALIDATING"]
     H --> I["Shared Jobs::tick() Cargo build"]
     I --> J["Builder::tick(jobs)"]
     J --> K{"Validation job state?"}

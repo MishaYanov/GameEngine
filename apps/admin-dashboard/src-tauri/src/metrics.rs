@@ -5,10 +5,17 @@ use std::{
 	fs,
 	io::{self, Read},
 	path::{Path, PathBuf},
+	time::SystemTime,
 };
 
 const MAX_DEVICES: usize = 16;
 const READ_BUDGET: usize = 16 * 1024 * 1024;
+
+struct SnapshotFile {
+	path: PathBuf,
+	modified: Option<SystemTime>,
+	bytes: usize,
+}
 
 #[derive(Serialize)]
 pub struct DeviceSummary {
@@ -35,14 +42,19 @@ fn snapshot_file(name: &str) -> bool {
 		.and_then(|s| s.strip_suffix(".json"))
 		.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
 }
-fn load(path: &Path) -> io::Result<MetricsSnapshot> {
+fn load(path: &Path, remaining: &mut usize) -> io::Result<MetricsSnapshot> {
 	let file = fs::File::open(path)?;
 	if file.metadata()?.len() > MAX_SNAPSHOT_BYTES as u64 {
 		return Err(io::Error::other("Resource snapshot exceeds 4 MiB"));
 	}
 	let mut bytes = Vec::new();
-	file.take(MAX_SNAPSHOT_BYTES as u64 + 1)
-		.read_to_end(&mut bytes)?;
+	// Directory metadata is only a scheduling hint: a publisher can replace or
+	// grow the file before it is opened. Bound and charge the actual read too,
+	// including partial data from failed reads and invalid JSON.
+	let limit = (*remaining).min(MAX_SNAPSHOT_BYTES + 1);
+	let result = file.take(limit as u64).read_to_end(&mut bytes);
+	*remaining -= bytes.len();
+	result?;
 	if bytes.len() > MAX_SNAPSHOT_BYTES {
 		return Err(io::Error::other("Resource snapshot grew beyond its limit"));
 	}
@@ -65,7 +77,7 @@ pub fn read(directory: &Path, selected_id: Option<&str>) -> MetricsPage {
 		storage_error: None,
 		truncated: false,
 	};
-	let result = (|| -> io::Result<Vec<PathBuf>> {
+	let result = (|| -> io::Result<Vec<SnapshotFile>> {
 		let mut sessions = Vec::new();
 		for entry in fs::read_dir(directory)?.take(4096) {
 			let entry = entry?;
@@ -73,16 +85,16 @@ pub fn read(directory: &Path, selected_id: Option<&str>) -> MetricsPage {
 				sessions.push(entry.path());
 			}
 		}
-		sessions.sort_by_key(|path| std::cmp::Reverse(path.file_name().map(|s| s.to_owned())));
 		// Select by timestamp suffix, including hyphenated application names.
-		sessions.sort_by_key(|path| {
-			std::cmp::Reverse(
+		sessions.sort_by_cached_key(|path| {
+			std::cmp::Reverse((
 				path.file_name()
 					.and_then(|n| n.to_str())
 					.and_then(|n| n.rsplit('-').next())
 					.and_then(|n| n.parse::<u128>().ok())
 					.unwrap_or(0),
-			)
+				path.file_name().map(|name| name.to_owned()),
+			))
 		});
 		if sessions.len() > 64 {
 			page.truncated = true;
@@ -95,13 +107,16 @@ pub fn read(directory: &Path, selected_id: Option<&str>) -> MetricsPage {
 				if entry.file_type()?.is_file()
 					&& snapshot_file(&entry.file_name().to_string_lossy())
 				{
-					files.push(entry.path());
+					let metadata = entry.metadata().ok();
+					files.push(SnapshotFile {
+						path: entry.path(),
+						modified: metadata.as_ref().and_then(|m| m.modified().ok()),
+						bytes: metadata.map_or(MAX_SNAPSHOT_BYTES + 1, |m| m.len() as usize),
+					});
 				}
 			}
 		}
-		files.sort_by_key(|path| {
-			std::cmp::Reverse(fs::metadata(path).and_then(|m| m.modified()).ok())
-		});
+		files.sort_by_key(|file| std::cmp::Reverse(file.modified));
 		Ok(files)
 	})();
 	let paths = match result {
@@ -112,16 +127,15 @@ pub fn read(directory: &Path, selected_id: Option<&str>) -> MetricsPage {
 			return page;
 		}
 	};
-	let mut bytes = 0usize;
+	let mut remaining = READ_BUDGET;
 	let mut snapshots = Vec::new();
-	for path in paths {
-		let size = fs::metadata(&path).map_or(MAX_SNAPSHOT_BYTES + 1, |m| m.len() as usize);
-		if snapshots.len() == MAX_DEVICES || bytes.saturating_add(size) > READ_BUDGET {
+	for file in paths {
+		let size = file.bytes;
+		if snapshots.len() == MAX_DEVICES || remaining == 0 || size > remaining {
 			page.truncated = true;
 			break;
 		}
-		bytes += size;
-		match load(&path) {
+		match load(&file.path, &mut remaining) {
 			Ok(snapshot) => snapshots.push(snapshot),
 			Err(error) => {
 				page.storage_error = Some(format!("Resource snapshot could not be read: {error}"))

@@ -1,0 +1,64 @@
+{
+  "schema_version": 3,
+  "bindings": {},
+  "entities": [
+    {
+      "key": "courtyard-player",
+      "name": "Courtyard Player",
+      "model_path": "props/robot.glb",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      }
+    }
+  ],
+  "lights": [
+    {
+      "key": "courtyard-sun",
+      "name": "Courtyard Sun",
+      "kind": "directional",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1.0,
+        0.95,
+        0.85
+      ],
+      "intensity": 0.75,
+      "range": 10.0
+    }
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      0.0,
+      5.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "vertical_fov": 1.0471976,
+    "near": 0.1,
+    "far": 100.0
+  }
+}

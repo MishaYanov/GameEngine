@@ -59,7 +59,9 @@ signal snapshots or duplicate runtime scene semantics in components.
 
 ## Project and scene operations
 
-The service requires editor protocol 2 / scene schema 3; ProjectData mirrors project schema 2.
+The service requires editor protocol 2 / scene schema 3; ProjectData mirrors project schema 3, including reusable
+behavior definitions and scene/entity attachments. Incremental snapshot validation accepts that schema; schema-2
+project files are upgraded by the native JSON loader before reaching the frontend.
 `openProject(manifestPath)`, `registerScene(path)`, `switchScene(id)`, `saveSceneAs(path)` and `saveProject()` wrap the
 host APIs. Snapshots expose active scene identity, project state and per-scene dirty flags. `save()` persists only the
 active scene; `saveProject()` persists only the manifest. `reload()` explicitly sends `discard_unsaved`, while

@@ -58,6 +58,21 @@ impl From<vk::Result> for VulkanDepthBufferError {
 }
 
 impl VulkanDepthBuffer {
+	#[cfg(test)]
+	pub(super) fn for_test(device: &Device) -> Self {
+		Self {
+			_metrics: Vec::new(),
+			device: device.clone(),
+			image: vk::Image::null(),
+			memory: vk::DeviceMemory::null(),
+			view: vk::ImageView::null(),
+			extent: vk::Extent2D {
+				width: 1,
+				height: 1,
+			},
+			format: Self::FORMAT,
+		}
+	}
 	pub const FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 
 	pub fn new(

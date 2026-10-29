@@ -3,6 +3,7 @@ mod editor_tools;
 mod game;
 mod gizmo_overlay;
 mod native_input;
+mod progress;
 mod selection_overlay;
 
 use editor_panel::PanelView;
@@ -19,6 +20,7 @@ use engine_logger::ResultLogExt;
 use renderer::{WindowRenderer, vulkan::CameraUniform};
 use runtime::assets::AssetManager;
 use runtime::input::{InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
+use runtime::scene_catalog::SceneId;
 use runtime::scene_editor::ProjectData;
 use runtime::scene_io;
 use std::{
@@ -143,6 +145,39 @@ impl GameApp {
 	}
 
 	fn update_player(&mut self, delta_seconds: f32) {
+		if self.input.just_pressed(Key::F10) {
+			let result = self.restart_player_game();
+			report_update_result(
+				"player_new_game",
+				result,
+				&mut self.play_update_error_reported,
+			);
+			self.clock.reset();
+			return;
+		}
+		if self.input.just_pressed(Key::F8) {
+			let result = self.cycle_player_scene();
+			report_update_result(
+				"player_scene_switch",
+				result,
+				&mut self.play_update_error_reported,
+			);
+			self.clock.reset();
+			return;
+		}
+		if self.input.just_pressed(Key::F7) {
+			let result = runtime::game_progress::ProgressAction::new::<progress::CampaignProgress>(
+				progress::ProgressAction::AwardScore { amount: 1 },
+			)
+			.and_then(|action| self.editor.apply_play_progress(&[action]));
+			report_update_result(
+				"player_progress",
+				result,
+				&mut self.play_update_error_reported,
+			);
+			self.clock.reset();
+			return;
+		}
 		self.camera_controller
 			.update(&mut self.camera, &self.input, delta_seconds);
 		let result = self
@@ -242,9 +277,16 @@ impl GameApp {
 
 	fn update_selection_title(&mut self) {
 		if self.standalone_runtime {
+			let progress = self.editor.play_progress::<progress::CampaignProgress>();
 			let title = format!(
-				"{}{}",
+				"{} | Score: {} | Courtyard key: {}{}",
 				self.project_name.as_deref().unwrap_or("Game Engine Player"),
+				progress.map_or(0, |value| value.score),
+				if progress.is_some_and(|value| value.has_courtyard_key) {
+					"yes"
+				} else {
+					"no"
+				},
 				if self.editor.simulation_paused() {
 					" | Paused"
 				} else {
@@ -330,6 +372,7 @@ impl GameApp {
 			)?,
 		};
 		editor.set_initial_project(project.clone())?;
+		editor.set_module_factory(Arc::new(progress::CampaignFactory))?;
 		let overlay = if !self.standalone_runtime {
 			Some(SelectionOverlay::new(&renderer, &mut loaded.assets)?)
 		} else {
@@ -406,7 +449,7 @@ impl GameApp {
 					.map(|root| root.join("project.json"))
 			})
 			.ok_or("Project path is not initialized")?;
-		scene_io::save(path, scene, camera)?;
+		scene_io::save_data(path, &data)?;
 		scene_io::save_project_data(&project_path, &project).map_err(|error| {
 			format!(
 				"Scene was saved, but project settings were not saved: {error}. The document remains dirty."
@@ -546,6 +589,110 @@ impl GameApp {
 		self.update_selection_title();
 	}
 
+	fn cycle_player_scene(&mut self) -> Result<(), String> {
+		let current = self
+			.editor
+			.play_scene_id()
+			.cloned()
+			.ok_or("Play mode is not active")?;
+		let project = self
+			.editor
+			.project()
+			.ok_or("Project configuration is not initialized")?;
+		let mut scene_ids: Vec<_> = project
+			.scenes
+			.iter()
+			.map(|scene| scene.id().clone())
+			.collect();
+		scene_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+		if scene_ids.len() < 2 {
+			return Ok(());
+		}
+		let current_index = scene_ids
+			.iter()
+			.position(|id| id == &current)
+			.ok_or("Running scene is absent from the project catalog")?;
+		let next = scene_ids[(current_index + 1) % scene_ids.len()].clone();
+		self.switch_player_scene(next)
+	}
+
+	fn switch_player_scene(&mut self, scene_id: SceneId) -> Result<(), String> {
+		self.install_player_scene(scene_id, false)
+	}
+
+	fn restart_player_game(&mut self) -> Result<(), String> {
+		let startup = self
+			.editor
+			.project()
+			.ok_or("Project configuration is not initialized")?
+			.startup_scene_id
+			.clone();
+		self.install_player_scene(startup, true)
+	}
+
+	fn install_player_scene(&mut self, scene_id: SceneId, new_game: bool) -> Result<(), String> {
+		if !self.standalone_runtime {
+			return Err("Runtime scene switching requires Player mode".into());
+		}
+		let current = self
+			.editor
+			.play_scene_id()
+			.ok_or("Play mode is not active")?;
+		if !new_game && current == &scene_id {
+			return Ok(());
+		}
+		let project = self
+			.editor
+			.project()
+			.ok_or("Project configuration is not initialized")?;
+		let relative_path = project.scene_path(&scene_id)?;
+		let asset_root = self
+			.asset_root
+			.as_ref()
+			.ok_or("Asset root is not initialized")?
+			.canonicalize()
+			.map_err(|error| error.to_string())?;
+		let scene_path = asset_root
+			.join(relative_path)
+			.canonicalize()
+			.map_err(|error| error.to_string())?;
+		if !scene_path.starts_with(&asset_root) {
+			return Err("Scene path is outside the project asset root".into());
+		}
+		let parsed = scene_io::load_data(&scene_path)?;
+		let document = Arc::new(parsed.data);
+		let prepared = if new_game {
+			self.editor
+				.prepare_new_game(scene_id, Arc::clone(&document))?
+		} else {
+			self.editor
+				.prepare_play_scene(scene_id, Arc::clone(&document))?
+		};
+		let renderer = self
+			.renderer
+			.as_ref()
+			.ok_or("Renderer is not initialized")?;
+		let mut assets = AssetManager::new(&asset_root).map_err(|error| error.to_string())?;
+		let (scene, camera) = scene_io::instantiate(&document, &mut assets, renderer)?;
+
+		// The old scene remains installed until CPU/GPU preparation succeeds.
+		renderer.wait_idle()?;
+		self.editor.commit_play_scene(prepared, &mut self.input)?;
+		// No fallible operations between committing the CPU world and its view.
+		self.scene = scene;
+		self.asset_manager = Some(assets);
+		self.camera = camera;
+		self.scene_path = Some(scene_path);
+		self.clock.reset();
+		self.next_frame_deadline = None;
+		self.play_update_error_reported = false;
+		self.update_selection_title();
+		if let Some(window) = self.window.as_ref() {
+			window.request_redraw();
+		}
+		Ok(())
+	}
+
 	fn reload_scene(&mut self) -> Result<(), String> {
 		let old_path = self
 			.scene_path
@@ -575,6 +722,7 @@ impl GameApp {
 		if let Some(project) = project.as_ref() {
 			editor.set_initial_project(project.clone())?;
 		}
+		editor.set_module_factory(Arc::new(progress::CampaignFactory))?;
 		if self.standalone_runtime {
 			editor.start_play(&mut loaded.scene)?;
 		}
@@ -644,8 +792,8 @@ impl GameApp {
 				&& let Some(transform) = self
 					.editor
 					.selected_entity()
-					.and_then(|id| self.scene.get(id))
-					.map(|instance| *instance.transform())
+					.map(|id| runtime::gizmo::GizmoPose::from_scene(&self.scene, id))
+					.transpose()?
 				&& let Some(gizmo) = self.tools.gizmo.as_mut()
 			{
 				gizmo.prepare(

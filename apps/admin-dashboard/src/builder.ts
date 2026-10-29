@@ -17,6 +17,7 @@ export class Builder {
     readonly plan = signal<ProjectPreview | null>(null);
     readonly busy = signal(false);
     readonly error = signal("");
+    private draftGeneration = 0;
     draft: ProjectInput = {
         name: "my-game",
         source: "",
@@ -27,6 +28,7 @@ export class Builder {
     };
 
     invalidate(): void {
+        this.draftGeneration++;
         this.plan.set(null);
     }
 
@@ -35,18 +37,17 @@ export class Builder {
         this.busy.set(true);
         this.error.set("");
         this.plan.set(null);
+        const generation = this.draftGeneration;
         try {
-            this.plan.set(
-                await this.api.call<ProjectPreview>("preview_project", {
-                    input: {
-                        ...this.draft,
-                        source:
-                            this.draft.source || this.state()?.workspace || "",
-                    },
-                }),
-            );
+            const plan = await this.api.call<ProjectPreview>("preview_project", {
+                input: {
+                    ...this.draft,
+                    source: this.draft.source || this.state()?.workspace || "",
+                },
+            });
+            if (generation === this.draftGeneration) this.plan.set(plan);
         } catch (error) {
-            this.error.set(String(error));
+            if (generation === this.draftGeneration) this.error.set(String(error));
         } finally {
             this.busy.set(false);
         }

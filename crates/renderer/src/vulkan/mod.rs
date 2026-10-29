@@ -12,9 +12,14 @@ pub mod mesh;
 pub mod pipeline;
 pub mod push_constants;
 pub mod render_object;
+mod rollback;
 mod surface;
 mod swapchain;
+#[cfg(test)]
+mod test_driver;
 pub mod texture;
+mod upload;
+pub(crate) mod upload_batch;
 pub mod vertex;
 
 pub use buffer::{VulkanBuffer, VulkanBufferError};

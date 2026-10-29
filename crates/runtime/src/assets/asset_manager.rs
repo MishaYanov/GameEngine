@@ -64,6 +64,7 @@ pub enum AssetManagerError {
 	Gltf(GltfLoaderError),
 	OutsideAssetRoot { path: PathBuf, root: PathBuf },
 	ResourceBudget(String),
+	Upload(String),
 }
 
 impl Display for AssetManagerError {
@@ -97,6 +98,7 @@ impl Display for AssetManagerError {
 			Self::ResourceBudget(message) => {
 				write!(formatter, "GPU asset budget exceeded: {message}")
 			}
+			Self::Upload(message) => write!(formatter, "GPU asset upload failed: {message}"),
 		}
 	}
 }
@@ -109,7 +111,7 @@ impl Error for AssetManagerError {
 			Self::Texture(error) => Some(error),
 			Self::Mesh(error) => Some(error),
 			Self::Gltf(error) => Some(error),
-			Self::OutsideAssetRoot { .. } | Self::ResourceBudget(_) => None,
+			Self::OutsideAssetRoot { .. } | Self::ResourceBudget(_) | Self::Upload(_) => None,
 		}
 	}
 }
@@ -195,6 +197,7 @@ impl AssetManager {
 		let (resources, _) = &self.resource_cache[&full_path];
 		let imported_parts = import_mesh(&resources.0, &resources.1, &resources.2, mesh_index)?;
 		self.preflight_model_upload(&full_path, &imported_parts)?;
+		self.upload_model_resources(renderer, &full_path, &imported_parts)?;
 		let mut parts = Vec::with_capacity(imported_parts.len());
 		let mut bounds: Option<crate::Bounds3> = None;
 
@@ -522,8 +525,12 @@ impl AssetManager {
 		let texture = match data.base_color_image.as_ref() {
 			Some(image) => self.load_image_texture(renderer, image_id, image)?,
 			None => {
-				let white = ImageAsset::from_rgba8(1, 1, vec![255, 255, 255, 255])?;
-				self.load_image_texture(renderer, "builtin:white", &white)?
+				if let Some(texture) = self.image_textures.get("builtin:white") {
+					Arc::clone(texture)
+				} else {
+					let white = ImageAsset::from_rgba8(1, 1, vec![255, 255, 255, 255])?;
+					self.load_image_texture(renderer, "builtin:white", &white)?
+				}
 			}
 		};
 
@@ -558,17 +565,13 @@ impl AssetManager {
 	}
 
 	fn check_gpu_budget(&mut self, bytes: usize, entries: usize) -> Result<(), AssetManagerError> {
+		// Cached totals are conservative when callers have dropped their last Arc.
+		// Most uploads fit without traversing every previously loaded resource.
+		if self.gpu_budget_fits(bytes, entries) {
+			return Ok(());
+		}
 		self.reap_gpu_allocations();
-		if self
-			.gpu_bytes
-			.checked_add(bytes)
-			.is_none_or(|total| total > Self::GPU_LOGICAL_BYTE_LIMIT)
-			|| self
-				.gpu_allocations
-				.len()
-				.checked_add(entries)
-				.is_none_or(|count| count > Self::GPU_RESOURCE_LIMIT)
-		{
+		if !self.gpu_budget_fits(bytes, entries) {
 			return Err(AssetManagerError::ResourceBudget(format!(
 				"request needs {bytes} logical bytes and {entries} resources; {} bytes/{} resources remain live (limits: {} bytes and {}). Release unused scene resources and prune the cache before retrying",
 				self.gpu_bytes,
@@ -578,6 +581,17 @@ impl AssetManager {
 			)));
 		}
 		Ok(())
+	}
+
+	fn gpu_budget_fits(&self, bytes: usize, entries: usize) -> bool {
+		self.gpu_bytes
+			.checked_add(bytes)
+			.is_some_and(|total| total <= Self::GPU_LOGICAL_BYTE_LIMIT)
+			&& self
+				.gpu_allocations
+				.len()
+				.checked_add(entries)
+				.is_some_and(|count| count <= Self::GPU_RESOURCE_LIMIT)
 	}
 
 	fn preflight_model_upload(
@@ -621,6 +635,152 @@ impl AssetManager {
 		}
 		self.check_gpu_budget(bytes, entries)
 	}
+
+	fn upload_model_resources(
+		&mut self,
+		renderer: &WindowRenderer,
+		path: &Path,
+		parts: &[ImportedPrimitive],
+	) -> Result<(), AssetManagerError> {
+		let white = ImageAsset::from_rgba8(1, 1, vec![255; 4])?;
+		let mut pending = Vec::new();
+		let mut images = HashSet::new();
+		for part in parts {
+			let mesh_id = format!(
+				"{}#mesh:{}#primitive:{}",
+				path.display(),
+				part.mesh_index,
+				part.primitive_index
+			);
+			if !self.meshes.contains_key(&mesh_id) {
+				pending.push(PendingUpload::Mesh {
+					id: mesh_id,
+					data: &part.mesh,
+					bytes: mesh_bytes(&part.mesh)?,
+				});
+			}
+			let image_id = part.base_color_image_index.map_or_else(
+				|| "builtin:white".to_owned(),
+				|index| format!("{}#image:{index}", path.display()),
+			);
+			if !self.image_textures.contains_key(&image_id) && images.insert(image_id.clone()) {
+				pending.push(PendingUpload::Texture {
+					id: image_id,
+					image: part.material.base_color_image.as_ref().unwrap_or(&white),
+				});
+			}
+		}
+		let mut remaining = pending.as_slice();
+		while !remaining.is_empty() {
+			let count = next_upload_batch_len(remaining.iter().map(PendingUpload::bytes));
+			let (batch, tail) = remaining.split_at(count);
+			if batch[0].bytes() > renderer::MAX_UPLOAD_BATCH_BYTES {
+				// A single asset retains the established larger upload allowance.
+				match &batch[0] {
+					PendingUpload::Mesh { id, data, .. } => {
+						self.load_mesh(renderer, id.clone(), data)?;
+					}
+					PendingUpload::Texture { id, image } => {
+						self.load_image_texture(renderer, id.clone(), image)?;
+					}
+				}
+			} else {
+				let meshes: Vec<_> = batch
+					.iter()
+					.filter_map(|upload| match upload {
+						PendingUpload::Mesh { data, .. } => Some(renderer::MeshUpload {
+							vertices: data.vertices(),
+							indices: data.indices(),
+						}),
+						_ => None,
+					})
+					.collect();
+				let textures: Vec<_> = batch
+					.iter()
+					.filter_map(|upload| match upload {
+						PendingUpload::Texture { image, .. } => Some(renderer::Rgba8Upload {
+							width: image.width(),
+							height: image.height(),
+							pixels: image.pixels(),
+						}),
+						_ => None,
+					})
+					.collect();
+				let uploaded = renderer
+					.upload_batch(&meshes, &textures)
+					.map_err(AssetManagerError::Upload)?;
+				let mut meshes = uploaded.meshes.into_iter();
+				let mut textures = uploaded.textures.into_iter();
+				// Upload completion owns all staging/fence handling; only completed
+				// resources become visible in caches. Earlier chunks stay reusable if
+				// a later chunk fails, matching individual-upload cache semantics.
+				for upload in batch {
+					let bytes = upload.bytes();
+					match upload {
+						PendingUpload::Mesh { id, .. } => {
+							let mesh = Arc::new(meshes.next().expect("one mesh per upload"));
+							mesh.set_debug_label(id);
+							self.gpu_allocations.push(GpuAllocation {
+								resource: GpuReference::Mesh(Arc::downgrade(&mesh)),
+								bytes,
+							});
+							self.meshes.insert(id.clone(), mesh);
+						}
+						PendingUpload::Texture { id, .. } => {
+							let texture =
+								Arc::new(textures.next().expect("one texture per upload"));
+							texture.set_debug_label(id);
+							self.gpu_allocations.push(GpuAllocation {
+								resource: GpuReference::Texture(Arc::downgrade(&texture)),
+								bytes,
+							});
+							self.image_textures.insert(id.clone(), texture);
+						}
+					}
+					self.gpu_bytes += bytes;
+				}
+			}
+			remaining = tail;
+		}
+		Ok(())
+	}
+}
+
+enum PendingUpload<'a> {
+	Mesh {
+		id: String,
+		data: &'a MeshData,
+		bytes: usize,
+	},
+	Texture {
+		id: String,
+		image: &'a ImageAsset,
+	},
+}
+
+impl PendingUpload<'_> {
+	fn bytes(&self) -> usize {
+		match self {
+			Self::Mesh { bytes, .. } => *bytes,
+			Self::Texture { image, .. } => image.pixels().len(),
+		}
+	}
+}
+
+fn next_upload_batch_len(sizes: impl Iterator<Item = usize>) -> usize {
+	let mut bytes = 0usize;
+	let mut count = 0;
+	for size in sizes.take(renderer::MAX_UPLOAD_BATCH_RESOURCES) {
+		if size > renderer::MAX_UPLOAD_BATCH_BYTES {
+			return count.max(1);
+		}
+		if bytes > renderer::MAX_UPLOAD_BATCH_BYTES - size {
+			break;
+		}
+		bytes += size;
+		count += 1;
+	}
+	count
 }
 
 fn mesh_bytes(data: &MeshData) -> Result<usize, AssetManagerError> {
@@ -634,4 +794,50 @@ fn mesh_bytes(data: &MeshData) -> Result<usize, AssetManagerError> {
 				.and_then(|indices| vertices.checked_add(indices))
 		})
 		.ok_or_else(|| AssetManagerError::ResourceBudget("mesh byte count overflow".into()))
+}
+
+#[cfg(test)]
+mod accounting_tests {
+	use super::*;
+	#[test]
+	fn upload_chunks_bound_staging_and_resource_counts_and_isolate_large_assets() {
+		let limit = renderer::MAX_UPLOAD_BATCH_BYTES;
+		assert_eq!(
+			next_upload_batch_len([limit / 2, limit / 2, 4].into_iter()),
+			2
+		);
+		assert_eq!(next_upload_batch_len([4, limit + 1].into_iter()), 1);
+		assert_eq!(next_upload_batch_len([limit + 1, 4].into_iter()), 1);
+		assert_eq!(
+			next_upload_batch_len(std::iter::repeat(4)),
+			renderer::MAX_UPLOAD_BATCH_RESOURCES
+		);
+		assert_eq!(next_upload_batch_len([].into_iter()), 0);
+	}
+	#[test]
+	fn conservative_budget_skips_sweeps_until_pressure_and_rejects_oversized_requests() {
+		let mut assets = AssetManager::new(env!("CARGO_MANIFEST_DIR")).unwrap();
+		assets.gpu_allocations.push(GpuAllocation {
+			resource: GpuReference::Mesh(Weak::new()),
+			bytes: 4,
+		});
+		assets.gpu_bytes = 4;
+		assets.check_gpu_budget(4, 1).unwrap();
+		assert_eq!(
+			assets.gpu_allocations.len(),
+			1,
+			"ordinary upload must not sweep allocations"
+		);
+		assets
+			.check_gpu_budget(AssetManager::GPU_LOGICAL_BYTE_LIMIT, 1)
+			.unwrap();
+		assert!(assets.gpu_allocations.is_empty());
+		assert_eq!(assets.gpu_bytes, 0);
+		assert!(assets.check_gpu_budget(usize::MAX, 1).is_err());
+		assert!(
+			assets
+				.check_gpu_budget(0, AssetManager::GPU_RESOURCE_LIMIT + 1)
+				.is_err()
+		);
+	}
 }

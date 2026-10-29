@@ -410,10 +410,11 @@ impl Collector {
 		let filter = filter.prepare();
 		fs::create_dir_all(directory)?;
 		let path = directory.join(format!("logs-{}-{}.jsonl", now_ms(), self.next));
-		let mut file = fs::OpenOptions::new()
+		let file = fs::OpenOptions::new()
 			.write(true)
 			.create_new(true)
 			.open(&path)?;
+		let mut file = io::BufWriter::new(file);
 		let mut count = 0;
 		for entry in self.entries.iter().filter(|e| filter.matches(&e.entry)) {
 			serde_json::to_writer(&mut file, &entry.entry)?;

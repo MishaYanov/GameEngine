@@ -1,5 +1,20 @@
 use super::*;
 #[test]
+fn core_and_headless_packages_can_be_queued() {
+	let data = crate::tests::test_directory("package-coverage");
+	let mut jobs = Jobs::new(&data);
+	for package in ["engine-core", "engine-headless"] {
+		for kind in [Kind::Build, Kind::Test] {
+			let run = jobs
+				.queue(&data, kind.clone(), package.into(), "dev".into())
+				.unwrap();
+			assert_eq!(run.package, package);
+			assert_eq!(run.kind, kind);
+			assert_eq!(run.state, Status::Queued);
+		}
+	}
+}
+#[test]
 fn queue_validation_cancellation_and_restart() {
 	let data = crate::tests::test_directory("jobs");
 	std::fs::create_dir_all(&data).unwrap();

@@ -69,6 +69,8 @@ export class App {
         "bridge",
         "engine-logger",
         "engine-admin",
+        "engine-core",
+        "engine-headless",
     ];
     filter: LogFilter = emptyFilter();
     workspace = "";

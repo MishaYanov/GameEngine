@@ -3,7 +3,7 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
-use ash::{Instance, vk};
+use ash::{vk, Instance};
 
 use super::{Vertex, VulkanBuffer, VulkanBufferError, VulkanDevice};
 
@@ -107,18 +107,47 @@ impl VulkanMesh {
 		vertices: &[Vertex],
 		indices: &[u32],
 	) -> Result<Self, VulkanMeshError> {
+		let resources = Self::prepare_upload(instance, device, vertices, indices)?;
+		let (mesh, _) =
+			super::upload::submit(device, resources, |(mesh, staging), raw, command| {
+				super::upload::copy_buffer(raw, command, &staging[0], mesh.vertex_buffer());
+				super::upload::copy_buffer(raw, command, &staging[1], mesh.index_buffer());
+			})
+				.map_err(VulkanBufferError::from)?;
+		Ok(mesh)
+	}
+
+	pub(super) fn prepare_upload(
+		instance: &Instance,
+		device: &VulkanDevice,
+		vertices: &[Vertex],
+		indices: &[u32],
+	) -> Result<(Self, [VulkanBuffer; 2]), VulkanMeshError> {
 		let index_count =
 			u32::try_from(indices.len()).map_err(|_| VulkanMeshError::TooManyIndices)?;
 
-		let vertex_buffer = VulkanBuffer::vertex(instance, device, vertices)?;
+		let (vertices, vertex_buffer) = VulkanBuffer::prepare_static(
+			instance,
+			device,
+			vertices,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+		)?;
 
-		let index_buffer = VulkanBuffer::index(instance, device, indices)?;
+		let (indices, index_buffer) = VulkanBuffer::prepare_static(
+			instance,
+			device,
+			indices,
+			vk::BufferUsageFlags::INDEX_BUFFER,
+		)?;
 
-		Ok(Self {
-			vertex_buffer,
-			index_buffer,
-			index_count,
-		})
+		Ok((
+			Self {
+				vertex_buffer,
+				index_buffer,
+				index_count,
+			},
+			[vertices, indices],
+		))
 	}
 
 	pub fn vertex_buffer(&self) -> &VulkanBuffer {

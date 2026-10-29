@@ -7,7 +7,8 @@ scene mutation, filesystem access, or GPU lifecycle.
 
 `bridge::editor` adds typed command requests, snapshots, capabilities, transforms, snapping, prefab/collision and
 viewport status/input DTOs. Current capability negotiation is protocol version 2 with scene schema 3; project manifests
-use schema 2. Core command/snapshot DTOs are re-exported from engine-core, while viewport DTOs remain bridge-owned. The
+use schema 3, including shared behavior definitions; the native parser upgrades inline-only schema-2 files. Core
+command/snapshot DTOs are re-exported from engine-core, while viewport DTOs remain bridge-owned. The
 Angular
 mirrors live under apps/editor/src/app/core/editor/editor.models.ts; update both sides together.
 

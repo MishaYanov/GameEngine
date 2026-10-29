@@ -45,7 +45,7 @@ toolbar, or prefab browser is claimed.
 
 ## Multi-scene documents and native adapter
 
-Project schema 2 retains independent authored/saved scene drafts and transient per-scene selections. Switching requires
+Project schema 3 retains independent authored/saved scene drafts and transient per-scene selections. Switching requires
 Edit/no transaction, keeps unsaved drafts and the outgoing selection, and restores the incoming scene's selection after
 validating it. Cross-scene undo/redo can activate the scene owning an earlier edit and restores that history record's
 selection; it validates the restored selection before changing history or activation. Structural catalog changes share

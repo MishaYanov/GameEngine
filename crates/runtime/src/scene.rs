@@ -1,6 +1,6 @@
 use std::{
 	cell::{Ref, RefCell},
-	collections::{BTreeMap, HashMap},
+	collections::{BTreeMap, HashMap, HashSet},
 };
 
 use crate::entity_key::EntityKey;
@@ -41,6 +41,7 @@ pub struct Scene {
 	id_indices: HashMap<EntityId, usize>,
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
+	authored_children: Option<Vec<Vec<usize>>>,
 }
 
 #[derive(Clone)]
@@ -49,6 +50,10 @@ pub struct EntitySnapshot {
 	index: usize,
 	bindings: BTreeMap<String, EntityKey>,
 }
+
+/// Resource retention does not need the binding/history payload of a snapshot.
+#[derive(Clone)]
+pub(crate) struct RetainedEntity(SceneEntry);
 
 impl EntitySnapshot {
 	pub fn id(&self) -> EntityId {
@@ -66,6 +71,13 @@ impl EntitySnapshot {
 }
 
 impl Scene {
+	pub(crate) fn retain_entity(&self, id: EntityId) -> Result<RetainedEntity, String> {
+		let index = self
+			.id_indices
+			.get(&id)
+			.ok_or("Cannot retain a missing entity")?;
+		Ok(RetainedEntity(self.entries[*index].clone()))
+	}
 	pub fn rename(&mut self, id: EntityId, name: impl Into<String>) -> Result<(), String> {
 		let name = name.into();
 		if name.trim().is_empty() || name.chars().any(char::is_control) {
@@ -171,6 +183,7 @@ impl Scene {
 		}
 		*self.world_cache.get_mut() = None;
 		self.bindings.extend(snapshot.bindings.clone());
+		self.authored_children = None;
 		self.next_id = self.next_id.max(next_id);
 		Ok(entry.id)
 	}
@@ -269,6 +282,7 @@ impl Scene {
 			mesh_index: None,
 			renderable: true,
 		});
+		self.authored_children = None;
 
 		id
 	}
@@ -292,6 +306,7 @@ impl Scene {
 			return None;
 		}
 		let entry = self.entries.remove(index);
+		self.authored_children = None;
 		self.id_indices.remove(&id);
 		for (position, entry) in self.entries.iter().enumerate().skip(index) {
 			self.id_indices.insert(entry.id, position);
@@ -447,7 +462,7 @@ impl Scene {
 		self.id_indices.contains_key(&id)
 	}
 
-	pub fn entity_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
+	pub fn entity_ids(&self) -> impl ExactSizeIterator<Item = EntityId> + DoubleEndedIterator + '_ {
 		self.entries.iter().map(|entry| entry.id)
 	}
 
@@ -537,6 +552,7 @@ impl Scene {
 		entry.collider = data.collider.clone();
 		entry.mesh_index = data.mesh_index;
 		entry.renderable = data.renderable;
+		self.authored_children = None;
 		*self.world_cache.get_mut() = None;
 		Ok(())
 	}
@@ -576,9 +592,137 @@ impl Scene {
 			entry.material.clone_from(&entity.material);
 			entry.collider.clone_from(&entity.collider);
 		}
+		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
 		true
+	}
+
+	/// Apply a complete dirty set from the same validated authored revision.
+	/// The caller must request a full resync after lost events or document replacement.
+	/// Parent/asset/topology changes return false before changing scene contents.
+	pub fn synchronize_authored(
+		&mut self,
+		document: engine_core::scene_data::ValidatedScene<'_>,
+		changes: &engine_core::world::WorldChange,
+	) -> Result<bool, String> {
+		let data = document.data();
+		if changes.full_resync
+			|| changes.topology_changed
+			|| !changes.removed_entities.is_empty()
+			|| self.entries.len() != data.entities.len()
+		{
+			return Ok(false);
+		}
+		let mut changed = Vec::with_capacity(changes.changed_entities.len());
+		for key in &changes.changed_entities {
+			let Some(index) = self
+				.entity_by_key(key)
+				.and_then(|id| self.id_indices.get(&id))
+				.copied()
+			else {
+				return Ok(false);
+			};
+			let entity = &data.entities[index];
+			let entry = &self.entries[index];
+			if entry.key.as_ref() != Some(&entity.key)
+				|| entry.parent != entity.parent
+				|| entry.model_path.as_deref() != Some(entity.model_path.as_str())
+				|| entry.mesh_index != entity.mesh_index
+				|| entry.renderable != entity.renderable
+			{
+				return Ok(false);
+			}
+			changed.push(index);
+		}
+		// A hierarchy index is rebuilt only after structural/full synchronization.
+		if self.authored_children.is_none() {
+			let mut children = vec![Vec::new(); self.entries.len()];
+			for (index, entry) in self.entries.iter().enumerate() {
+				if let Some(parent) = entry.parent.as_ref() {
+					let parent = self
+						.entity_by_key(parent)
+						.and_then(|id| self.id_indices.get(&id))
+						.ok_or("Native scene parent is missing")?;
+					children[*parent].push(index);
+				}
+			}
+			self.authored_children = Some(children);
+		}
+		let children = self
+			.authored_children
+			.as_ref()
+			.expect("hierarchy initialized");
+		let mut affected = HashSet::new();
+		let mut pending = Vec::new();
+		for &index in &changed {
+			let old = self.entries[index].instance.transform();
+			let new = &data.entities[index].transform;
+			if old.position != new.position
+				|| old.rotation != new.rotation
+				|| old.scale != new.scale
+			{
+				pending.push(index);
+			}
+		}
+		while let Some(index) = pending.pop() {
+			if affected.insert(index) {
+				pending.extend_from_slice(&children[index]);
+			}
+		}
+		let mut matrices = HashMap::with_capacity(affected.len());
+		if !affected.is_empty() {
+			let cached = self.cached_world_matrices()?;
+			for &index in &affected {
+				let mut chain = Vec::new();
+				let mut node = index;
+				while affected.contains(&node) && !matrices.contains_key(&node) {
+					if self.entries[node].key.as_ref() != Some(&data.entities[node].key)
+						|| self.entries[node].parent != data.entities[node].parent
+					{
+						return Ok(false);
+					}
+					chain.push(node);
+					let Some(parent) = self.entries[node].parent.as_ref() else {
+						break;
+					};
+					node = self.id_indices[&self.key_ids[parent]];
+				}
+				while let Some(node) = chain.pop() {
+					let local = data.entities[node].transform.matrix();
+					let matrix = self.entries[node].parent.as_ref().map_or(local, |parent| {
+						let parent = self.id_indices[&self.key_ids[parent]];
+						matrices.get(&parent).copied().unwrap_or(cached[parent]) * local
+					});
+					matrices.insert(node, matrix);
+				}
+			}
+		}
+		for index in changed {
+			let entity = &data.entities[index];
+			let entry = &mut self.entries[index];
+			*entry.instance.transform_mut() = crate::Transform {
+				position: entity.transform.position,
+				rotation: entity.transform.rotation,
+				scale: entity.transform.scale,
+			};
+			entry.name.clone_from(&entity.name);
+			entry.material.clone_from(&entity.material);
+			entry.collider.clone_from(&entity.collider);
+		}
+		if let Some(cache) = self.world_cache.get_mut() {
+			for (index, matrix) in matrices {
+				cache[index] = matrix;
+			}
+		}
+		// Binding changes currently have no dedicated WorldChange flag.
+		if self.bindings != data.bindings {
+			self.bindings.clone_from(&data.bindings);
+		}
+		if changes.lights_changed {
+			self.lights.clone_from(&data.lights);
+		}
+		Ok(true)
 	}
 
 	/// Consume a RuntimeWorld dirty set without rebuilding hierarchy matrices
@@ -699,13 +843,14 @@ impl Scene {
 	pub(crate) fn synchronize_retained(
 		&mut self,
 		data: &SceneData,
-		retained: &HashMap<EntityKey, EntitySnapshot>,
+		retained: &HashMap<EntityKey, RetainedEntity>,
 		supplied_model: Option<&ModelInstance>,
 	) -> Result<(), String> {
-		if self.synchronize(data)? {
+		let world = data.validated_world_matrices()?;
+		if self.synchronize_entries(data) {
+			*self.world_cache.get_mut() = Some(world);
 			return Ok(());
 		}
-		let world = data.validated_world_matrices()?;
 		let mut next = Scene {
 			next_id: self.next_id,
 			bindings: data.bindings.clone(),
@@ -718,7 +863,7 @@ impl Scene {
 				.entity_by_key(&entity.key)
 				.and_then(|id| self.id_indices.get(&id))
 				.map(|&index| &self.entries[index])
-				.or_else(|| retained.get(&entity.key).map(|snapshot| &snapshot.entry));
+				.or_else(|| retained.get(&entity.key).map(|retained| &retained.0));
 			let mut entry = if let Some(entry) = existing {
 				if entry.model_path.as_deref() != Some(entity.model_path.as_str())
 					|| entry.mesh_index != entity.mesh_index
@@ -728,14 +873,11 @@ impl Scene {
 				}
 				entry.clone()
 			} else {
-				let template = retained
-					.values()
-					.map(|snapshot| &snapshot.entry)
-					.find(|entry| {
-						entry.model_path.as_deref() == Some(entity.model_path.as_str())
-							&& entry.mesh_index == entity.mesh_index
-							&& entry.renderable == entity.renderable
-					});
+				let template = retained.values().map(|retained| &retained.0).find(|entry| {
+					entry.model_path.as_deref() == Some(entity.model_path.as_str())
+						&& entry.mesh_index == entity.mesh_index
+						&& entry.renderable == entity.renderable
+				});
 				let instance = if let Some(instance) = supplied_model {
 					instance.clone()
 				} else if let Some(template) = template {

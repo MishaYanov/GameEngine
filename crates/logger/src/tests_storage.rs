@@ -35,6 +35,78 @@ fn entry() -> LogEntry {
 }
 
 #[test]
+fn queued_records_remain_intact_after_history_eviction() {
+	let (sender, receiver) = mpsc::sync_channel(2);
+	let mut config = Config::new("shared-records");
+	config.capacity = 1;
+	config.console = false;
+	config.error_backtraces = false;
+	let mut logger = Logger::new(config).unwrap();
+	logger.writer = Some(Writer {
+		sender: Mutex::new(Some(sender)),
+		health: Arc::clone(&logger.health),
+		completed: Arc::new((Mutex::new(true), Condvar::new())),
+	});
+	crate::tests::emit(&logger, "first");
+	crate::tests::emit(&logger, "second");
+	let snapshot = logger.snapshot(SnapshotRequest::default());
+	assert_eq!(snapshot.entries.len(), 1);
+	assert_eq!(snapshot.entries[0].message, "second");
+	for (sequence, message) in [(1, "first"), (2, "second")] {
+		let Command::Entry(record) = receiver.try_recv().unwrap() else {
+			panic!("expected queued record");
+		};
+		assert_eq!(record.sequence, sequence);
+		assert_eq!(record.message, message);
+	}
+	assert_eq!(logger.health.snapshot().dropped_persistence, 0);
+}
+
+#[test]
+fn reused_encoding_drops_old_suffix_and_preserves_identical_error_streams() {
+	let fixture = Fixture::new();
+	let mut sink = Sink::new(
+		StorageConfig::new(&fixture.0),
+		"fixture-123-encoding",
+		&Health::default(),
+	)
+	.unwrap();
+	let mut record = entry();
+	record.level = crate::Level::Error;
+	record.message = "long record ".repeat(256);
+	sink.write(&record).unwrap();
+	let first = record.clone();
+	record.sequence += 1;
+	record.message = "short".into();
+	sink.write(&record).unwrap();
+	sink.flush().unwrap();
+	let ordinary = fixture.0.join("fixture-123-encoding/000000.jsonl");
+	let errors = fixture.0.join("fixture-123-encoding/errors.jsonl");
+	assert_eq!(fs::read(&ordinary).unwrap(), fs::read(&errors).unwrap());
+	assert_eq!(read_jsonl(&ordinary, 8192).unwrap(), vec![first, record]);
+}
+
+#[test]
+fn oversized_error_disables_both_streams_before_any_bytes_are_written() {
+	let fixture = Fixture::new();
+	let mut config = StorageConfig::new(&fixture.0);
+	config.max_record_bytes = 64;
+	let mut sink = Sink::new(config, "fixture-123-oversize", &Health::default()).unwrap();
+	let mut record = entry();
+	record.level = crate::Level::Error;
+	assert!(sink.write(&record).is_err());
+	assert!(sink.ordinary.is_none() && sink.errors.is_none());
+	for name in ["000000.jsonl", "errors.jsonl"] {
+		assert_eq!(
+			fs::metadata(fixture.0.join("fixture-123-oversize").join(name))
+				.unwrap()
+				.len(),
+			0
+		);
+	}
+}
+
+#[test]
 fn reader_rejects_malformed_complete_records_and_future_schemas() {
 	let fixture = Fixture::new();
 	let path = fixture.0.join("corrupt.jsonl");
@@ -102,7 +174,7 @@ fn unavailable_storage_and_oversized_records_are_observable() {
 		health.clone(),
 	)
 	.unwrap();
-	writer.enqueue(&entry());
+	writer.enqueue(&Arc::new(entry()));
 	assert!(writer.flush(Duration::from_secs(2)));
 	assert!(health.snapshot().persistence_error.is_some());
 	assert_eq!(health.snapshot().dropped_persistence, 1);
@@ -122,8 +194,8 @@ fn full_queue_is_nonblocking_and_counts_drops() {
 		health: health.clone(),
 		completed: Arc::new((Mutex::new(true), Condvar::new())),
 	};
-	writer.enqueue(&entry());
-	writer.enqueue(&entry());
+	writer.enqueue(&Arc::new(entry()));
+	writer.enqueue(&Arc::new(entry()));
 	assert_eq!(health.snapshot().dropped_persistence, 1);
 	let start = Instant::now();
 	assert!(!writer.flush(Duration::from_millis(5)));
@@ -140,7 +212,7 @@ fn shutdown_drains_and_stopped_writers_count_drops() {
 	)
 	.unwrap();
 	for _ in 0..20 {
-		writer.enqueue(&entry());
+		writer.enqueue(&Arc::new(entry()));
 	}
 	assert!(writer.shutdown(Duration::from_secs(2)));
 	assert!(health.snapshot().writer_stopped);
@@ -150,7 +222,7 @@ fn shutdown_drains_and_stopped_writers_count_drops() {
 			.len(),
 		20
 	);
-	writer.enqueue(&entry());
+	writer.enqueue(&Arc::new(entry()));
 	assert_eq!(health.snapshot().dropped_persistence, 1);
 }
 #[test]
@@ -224,8 +296,8 @@ fn writer_reports_rotation_failure_after_startup() {
 	let health = Arc::new(Health::default());
 	let writer = Writer::start(config, "fixture-123-6".into(), health.clone()).unwrap();
 	fs::write(fixture.0.join("fixture-123-6/000001.jsonl"), "occupied").unwrap();
-	writer.enqueue(&record);
-	writer.enqueue(&record);
+	writer.enqueue(&Arc::new(record.clone()));
+	writer.enqueue(&Arc::new(record.clone()));
 	assert!(writer.flush(Duration::from_secs(2)));
 	assert!(health.snapshot().persistence_error.is_some());
 	assert_eq!(health.snapshot().dropped_persistence, 1);
@@ -276,7 +348,7 @@ fn failed_stream_does_not_disable_the_other_stream() {
 		let directory = fixture.0.join("fixture-123-8");
 		fs::write(directory.join(Segment::name(fail_errors, 1)), "occupied").unwrap();
 		for _ in 0..3 {
-			writer.enqueue(&record);
+			writer.enqueue(&Arc::new(record.clone()));
 		}
 		assert!(writer.shutdown(Duration::from_secs(2)));
 		assert!(health.snapshot().persistence_error.is_some());

@@ -7,7 +7,11 @@
             <p class="intro">
                 Give it a name and a home. We’ll build a starter project and open its graphics window.
             </p>
-            <form (ngSubmit)="createProject()" [attr.aria-busy]="busy()" [formGroup]="form">
+            <form
+                    (ngSubmit)="createProject()"
+                    [attr.aria-busy]="busy() || choosingDestination()"
+                    [formGroup]="form"
+            >
                 <label for="project-name">Project name</label>
                 <input
                         [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
@@ -20,19 +24,31 @@
                 />
                 <p class="hint" id="name-help">Letters, numbers, spaces, hyphens and underscores.</p>
                 <label for="destination">Destination folder</label>
-                <input
+                <div class="destination-picker">
+                    <input
                         [attr.aria-invalid]="
-						form.controls.destination.touched && form.controls.destination.invalid
-					"
+                            form.controls.destination.touched && form.controls.destination.invalid
+                        "
                         aria-describedby="destination-help"
                         autocomplete="off"
                         formControlName="destination"
                         id="destination"
+                        [readOnly]="choosingDestination()"
                         placeholder="D:\Projects"
-                />
+                    />
+                    <button
+                            (click)="chooseDestination()"
+                            [disabled]="busy() || choosingDestination() || !desktop"
+                            aria-label="Browse for destination folder"
+                            class="browse"
+                            type="button"
+                    >
+                        {{ choosingDestination() ? 'Choosing…' : 'Browse…' }}
+                    </button>
+                </div>
                 <p class="hint" id="destination-help">
-                    Enter an existing absolute folder path. A new folder named after your project will be
-                    created inside it.
+                    Browse for a folder or enter its absolute path. A new folder named after your project will
+                    be created inside it.
                 </p>
                 @if (form.touched && form.invalid) {
                     <p class="error" role="alert">Enter a valid project name and destination.</p>
@@ -40,7 +56,7 @@
                 @if (!desktop) {
                     <p class="notice">Open the desktop editor to build and launch projects.</p>
                 }
-                <button [disabled]="busy() || !desktop" type="submit">
+                <button [disabled]="busy() || choosingDestination() || !desktop" type="submit">
                     {{ buttonLabel() }} <span aria-hidden="true">↗</span>
                 </button>
                 <p class="hint">

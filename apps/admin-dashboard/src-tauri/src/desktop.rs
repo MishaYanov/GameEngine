@@ -183,25 +183,49 @@ fn queue_card_job(
 	Ok(job)
 }
 #[tauri::command]
-fn preview_project(
-	service: State<Service>,
+async fn preview_project(
+	service: State<'_, Service>,
 	input: crate::builder::Input,
 ) -> Result<crate::builder::Preview, String> {
+	let request = service
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.builder
+		.begin_preview(input)
+		.map_err(error)?;
+	let prepared = tauri::async_runtime::spawn_blocking(move || {
+		crate::builder::Builder::prepare_preview(request)
+	})
+	.await
+	.map_err(|_| "Project preview worker failed".to_owned())?
+	.map_err(error)?;
 	service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
 		.builder
-		.preview(input)
+		.finish_preview(prepared)
 		.map_err(error)
 }
 #[tauri::command]
-fn generate_project(
-	service: State<Service>,
+async fn generate_project(
+	service: State<'_, Service>,
 	id: String,
 ) -> Result<crate::builder::Generation, String> {
+	let request = service
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.builder
+		.begin_generation(&id)
+		.map_err(error)?;
+	let prepared = tauri::async_runtime::spawn_blocking(move || {
+		crate::builder::Builder::prepare_generation(request)
+	})
+	.await
+	.map_err(|_| "Project generation worker failed; staging retained".to_owned())?
+	.map_err(error)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
 	let AdminService { builder, jobs, .. } = &mut *service;
-	builder.generate(&id, jobs).map_err(error)
+	builder.finish_generation(prepared, jobs).map_err(error)
 }
 #[derive(serde::Serialize)]
 struct ExportResult {
@@ -306,6 +330,7 @@ pub fn run() {
 	app.run(move |_, event| {
 		if matches!(event, tauri::RunEvent::Exit) {
 			let mut service = owned.lock().unwrap_or_else(|e| e.into_inner());
+			service.builder.clear_previews();
 			service.jobs.interrupt();
 			service.processes.shutdown();
 			service.tick();

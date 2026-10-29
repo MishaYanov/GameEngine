@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn partial_image_view_failure_releases_every_preceding_view() {
+	use crate::vulkan::test_driver::{raw, reset, state};
+	for nth in 1..=3 {
+		reset();
+		state(|state| state.fail = Some(("create_view", nth)));
+		assert!(
+			create_image_views(&raw(), &[vk::Image::null(); 3], vk::Format::B8G8R8A8_SRGB).is_err()
+		);
+		state(|state| assert_eq!(state.released, vec!["view"; nth - 1]));
+	}
+}
+
+#[test]
 fn extent_uses_surface_size_or_clamps_requested_dimensions() {
 	let mut capabilities = vk::SurfaceCapabilitiesKHR {
 		current_extent: vk::Extent2D {

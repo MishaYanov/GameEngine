@@ -6,7 +6,9 @@ batch implements integration APIs and engine
 foundations, not a finished editor layout. Start with [usage](usage.md) and
 the [steps 21–35 learning report](editor-steps-21-35.md).
 
-Current project schema 2 and editor protocol 2 support retained multi-scene authoring.
+Current project schema 3 and editor protocol 2 support retained multi-scene authoring and reusable behavior settings.
+GameSession adds explicit prepared replacement of a running simulation and game-owned in-memory progress across scene
+changes. It does not retain outgoing simulation worlds or write progress save files.
 See [project lifecycle](project-lifecycle.md) for the current contract; earlier step reports describe historical
 milestones.
 
