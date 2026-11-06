@@ -706,6 +706,78 @@ impl EditorWorkspace {
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
 
+	/// Persist dirty authored documents without changing the active scene.
+	/// Successful replacements advance their own baselines before the next write.
+	pub fn save_all(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
+		self.check_revision(revision)?;
+		let session = self.backend.session();
+		if session.is_playing() || session.has_transaction() {
+			return Err("Stop Play and finish the grouped edit before saving all".into());
+		}
+		session.validate_all_documents()?;
+		let state = session.state();
+		let mut scenes = Vec::new();
+		// Preflight every output before writing, including unsaved paths and aliases.
+		for scene in state.scenes {
+			let output = self.scene_output(&scene.asset_path, Some(&scene.id))?;
+			if scene.dirty {
+				let document = session.scene_document(&scene.id)?;
+				document.to_json()?;
+				scenes.push((scene.id, output, document));
+			}
+		}
+		let manifest_exists = match fs::symlink_metadata(&self.project_path) {
+			Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => true,
+			Ok(_) => return Err("Project manifest must be a regular file".into()),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+			Err(error) => return Err(error.to_string()),
+		};
+		let write_manifest = state.project_dirty || !manifest_exists;
+		let project = session.project_document();
+		if write_manifest {
+			project.to_json()?;
+			let parent = self
+				.project_path
+				.parent()
+				.ok_or("Project manifest has no parent")?;
+			if !parent.is_dir() {
+				return Err("Project folder is unavailable".into());
+			}
+		}
+		let writes = scenes.len() as u64 + u64::from(write_manifest);
+		if writes > 0
+			&& (session.revision().checked_add(writes + 1).is_none()
+				|| session.scene_revision() == u64::MAX
+				|| self
+					.backend
+					.change_cursor()
+					.checked_add((writes + 1) * 2)
+					.is_none())
+		{
+			return Err("Workspace revision/event space is exhausted".into());
+		}
+		for (id, output, document) in scenes {
+			file_operation(
+				"save_all_scene",
+				runtime::scene_io::save_data(&output, &document),
+			)?;
+			self.backend
+				.mark_scene_saved_by_id(&id)
+				.map_err(|e| e.to_string())?;
+		}
+		if write_manifest {
+			file_operation(
+				"save_all_project",
+				atomic_json(&self.project_path, project.as_ref()),
+			)?;
+			self.workspace_kind = WorkspaceKind::ManifestBacked;
+			self.backend
+				.mark_project_saved()
+				.map_err(|e| e.to_string())?;
+		}
+		self.backend.snapshot().map_err(|e| e.to_string())
+	}
+
 	/// Capture validated saved inputs under the workspace lock. Compilation and
 	/// installation run after the caller releases that lock.
 	pub fn prepare_build(&self, revision: u64) -> Result<compiler::PreparedProject, String> {

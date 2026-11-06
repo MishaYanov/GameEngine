@@ -2,6 +2,7 @@ import {Component, computed, input} from '@angular/core';
 
 export const EDITOR_ICONS = {
     cube: 'm12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9L4 7.5m8 4.5 8-4.5M12 12v9',
+    play: 'm8 5 12 7-12 7V5Z',
     folder: 'M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z',
     layers: 'm12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5',
     arrowRight: 'M5 12h14m-5-5 5 5-5 5',

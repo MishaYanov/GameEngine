@@ -20,7 +20,10 @@
 		"build:design": "node projects/design-guide/scripts/design.mjs build design --configuration development",
 		"build:design:staging": "node projects/design-guide/scripts/design.mjs build design --configuration staging",
 		"generate:design": "node projects/design-guide/scripts/design.mjs",
-		"test:design-registry": "node --test projects/design-guide/scripts/design-registry.test.mjs"
+      "generate:ui": "ng generate ./projects/editor-schematics/collection.json:ui-component",
+      "generate:panel": "ng generate ./projects/editor-schematics/collection.json:editor-panel",
+      "test:design-registry": "node --test projects/design-guide/scripts/design-registry.test.mjs",
+      "test:schematics": "node --test projects/editor-schematics/component.test.cjs"
 	},
 	"private": true,
 	"packageManager": "npm@10.3.0",
@@ -37,6 +40,7 @@
 		"tslib": "^2.3.0"
 	},
 	"devDependencies": {
+      "@angular-devkit/schematics": "^22.1.4",
 		"@angular/build": "^22.1.4",
 		"@angular/cli": "^22.1.4",
 		"@angular/compiler-cli": "^22.1.0",

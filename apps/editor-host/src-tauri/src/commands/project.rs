@@ -1,7 +1,51 @@
 use serde::Serialize;
 use std::path::PathBuf;
-use std::process::Command;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+#[tauri::command]
+pub async fn choose_project_manifest(
+	window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+	super::editor::trusted_window(&window)?;
+	tauri::async_runtime::spawn_blocking(move || {
+		window
+			.dialog()
+			.file()
+			.set_parent(&window)
+			.set_title("Open project.json")
+			.add_filter("Project manifest", &["json"])
+			.set_file_name("project.json")
+			.blocking_pick_file()
+			.map(|file| {
+				file.into_path()
+					.map(|path| path.to_string_lossy().into_owned())
+					.map_err(|error| error.to_string())
+			})
+			.transpose()
+	})
+	.await
+	.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn confirm_project_discard(window: tauri::WebviewWindow) -> Result<bool, String> {
+	super::editor::trusted_window(&window)?;
+	tauri::async_runtime::spawn_blocking(move || {
+		window
+			.dialog()
+			.message("Opening another project will discard all unsaved scene and project changes.")
+			.title("Discard unsaved changes?")
+			.parent(&window)
+			.kind(MessageDialogKind::Warning)
+			.buttons(MessageDialogButtons::OkCancelCustom(
+				"Discard and open".into(),
+				"Keep current project".into(),
+			))
+			.blocking_show()
+	})
+	.await
+	.map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 pub async fn choose_project_destination(
@@ -39,20 +83,21 @@ pub async fn choose_project_destination(
 #[serde(rename_all = "camelCase")]
 pub struct ProjectResult {
 	path: String,
-	launched: bool,
-	launch_error: Option<String>,
+	manifest_path: String,
 }
 
 #[tauri::command]
-pub async fn create_project(name: String, destination: String) -> Result<ProjectResult, String> {
+pub async fn create_project(
+	window: tauri::WebviewWindow,
+	name: String,
+	destination: String,
+) -> Result<ProjectResult, String> {
+	super::editor::trusted_window(&window)?;
 	tauri::async_runtime::spawn_blocking(move || {
-		let path = compiler::install_project(&name, &destination)?;
-		let executable = path.join(format!("game{}", std::env::consts::EXE_SUFFIX));
-		let launch = Command::new(executable).current_dir(&path).spawn();
+		let path = compiler::create_authoring_project(&name, &destination)?;
 		Ok(ProjectResult {
+			manifest_path: path.join("project.json").to_string_lossy().into_owned(),
 			path: path.to_string_lossy().into_owned(),
-			launched: launch.is_ok(),
-			launch_error: launch.err().map(|error| error.to_string()),
 		})
 	})
 	.await

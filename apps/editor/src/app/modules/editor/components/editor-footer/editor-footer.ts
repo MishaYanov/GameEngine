@@ -1,4 +1,4 @@
-import {Component} from '@angular/core';
+import {Component, input} from '@angular/core';
 
 @Component({
     selector: 'editor-footer',
@@ -7,4 +7,5 @@ import {Component} from '@angular/core';
     styleUrl: './editor-footer.scss',
 })
 export class EditorFooter {
+    readonly projectName = input<string | null>(null);
 }

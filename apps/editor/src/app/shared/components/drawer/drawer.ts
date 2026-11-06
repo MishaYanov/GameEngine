@@ -46,12 +46,20 @@ export class Drawer {
 	readonly label = input('Drawer');
 	readonly resizeLabel = input('Resize drawer');
 	readonly icon = input<EditorIconName>('layers');
+    readonly maxWidth = input<string>();
 	readonly config = model<Config<DrawerSettings>>({...DEFAULT_DRAWER_SETTINGS});
 	readonly builderOptions = input<BuilderConfig>();
 	readonly isExpanded = computed(() => this.config().expanded ?? DEFAULT_DRAWER_SETTINGS.expanded);
 	readonly collapsed = computed(() => this.config().collapsed ?? DEFAULT_DRAWER_SETTINGS.collapsed);
 	protected readonly subjects = inject(SubjectRegistry).subjects;
-	protected readonly settings = computed(() => ({...DEFAULT_DRAWER_SETTINGS, ...this.config()}));
+    protected readonly settings = computed(() => {
+        const config = this.config();
+        return {
+            ...DEFAULT_DRAWER_SETTINGS,
+            ...config,
+            maxWidth: this.maxWidth() ?? config.maxWidth ?? DEFAULT_DRAWER_SETTINGS.maxWidth,
+        };
+    });
 	protected readonly horizontal = computed(() => this.type() === 'left' || this.type() === 'right');
 	protected readonly size = signal(0);
 	protected readonly minimum = signal(0);
@@ -141,11 +149,8 @@ export class Drawer {
 		const reserve = pixels(`var(--layout-pane-min-${dimension})`);
 		const limit = Math.max(0, available - Math.min(reserve, available * 0.6));
 		const settings = this.settings();
-		const minimum = Math.min(limit, pixels(horizontal ? settings.minWidth : settings.minHeight));
-		const maximum = Math.max(
-			minimum,
-			Math.min(limit, pixels(horizontal ? settings.maxWidth : settings.maxHeight)),
-		);
+        const maximum = Math.min(limit, pixels(horizontal ? settings.maxWidth : settings.maxHeight));
+        const minimum = Math.min(maximum, pixels(horizontal ? settings.minWidth : settings.minHeight));
 		this.minimum.set(Math.round(minimum));
 		this.maximum.set(Math.round(maximum));
 		this.size.set(Math.round(this.element.getBoundingClientRect()[dimension]));

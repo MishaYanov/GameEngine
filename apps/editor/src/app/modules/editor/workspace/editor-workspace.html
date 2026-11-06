@@ -1,0 +1,81 @@
+<section class="workspace-layout">
+    <div class="workspace-controls">
+        <workspace-toolbar (viewSelected)="selectView($event)" [opening]="opening()"/>
+        <editor-scene-actions [opening]="opening()"/>
+        <editor-project-build [opening]="opening()"/>
+    </div>
+    <workspace-tabs #tabs (viewSelected)="selectView($event)" [activeViewKind]="activeViewKind()"/>
+
+    <div class="workspace-main">
+        <scene-entities-panel
+                [scene]="sceneEntities()"
+                [selectedKeys]="editorService.selection()"
+                [disabled]="!sceneEditing.ready()"
+                [sceneLabel]="sceneLabel()"
+                [contextKey]="sceneContext()"
+                [actionError]="hierarchyError()"
+                (selectionRequested)="sceneEditing.select($event)"
+                (reparentRequested)="reparentEntity($event)"
+        />
+        <section aria-label="Workspace" class="workspace-center">
+            @if (!gameView()) { <editor-viewport-toolbar [opening]="opening()"/> }
+            <div
+                    [attr.aria-labelledby]="tabs.panelId + '-tab-' + activeViewKind()"
+                    [id]="tabs.panelId"
+                    class="workspace-panel"
+                    role="tabpanel"
+                    tabindex="0"
+            >
+                <editor-pane [icon]="gameView() ? 'play' : 'cube'" [title]="gameView() ? 'Game Preview' : 'Scene'">
+                    @if (editorService.snapshot(); as snapshot) {
+                        <scene-viewport
+                                [enabled]="showingViewport() && !opening()"
+                                [hidden]="!showingViewport()"
+                                [label]="gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
+                        />
+                        @if (!showingViewport()) {
+                            <div class="empty-scene">
+                                <div class="empty-content">
+                                    <h3>{{ gameView() ? 'Game preview is stopped' : 'Game preview is running' }}</h3>
+                                    <p>{{ gameView() ? 'Select Play to start the preview.' : 'Select Stop to return to scene editing.' }}</p>
+                                </div>
+                            </div>
+                        }
+                    } @else {
+                        <div class="empty-scene">
+                            <div class="empty-content">
+                                <editor-icon [name]="gameView() ? 'play' : 'cube'" class="scene-icon"/>
+                                <h3>No scene open</h3>
+                                <p>Use the File menu to create or open a project.</p>
+                                @if (editorService.nativeAvailable) {
+                                    <button
+                                            (click)="openProjectRequested.emit()"
+                                            [disabled]="!canOpenProject()"
+                                            class="empty-open"
+                                            type="button"
+                                    >Open Project…
+                                    </button>
+                                } @else {
+                                    <p>Opening projects requires the desktop editor.</p>
+                                }
+                            </div>
+                        </div>
+                    }
+                </editor-pane>
+            </div>
+        </section>
+        <inspector-panel
+                [entity]="sceneEditing.entity()"
+                [contextKey]="sceneContext()"
+                [editable]="sceneEditing.editable()"
+                [editError]="sceneEditing.error()"
+                (editStarted)="sceneEditing.begin($event)"
+                (nameChanged)="sceneEditing.rename($event)"
+                (transformChanged)="sceneEditing.transform($event)"
+                (editCommitted)="sceneEditing.commit()"
+                (editCancelled)="sceneEditing.cancel()"
+        />
+    </div>
+    <editor-assets-panel [opening]="opening()"/>
+    @if (assetDrag.message(); as message) { <p class="drag-status" role="status">{{ message }}</p> }
+</section>

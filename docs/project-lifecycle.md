@@ -72,8 +72,7 @@ operation checks.
 
 `editor_open_project` prepares and validates a candidate before replacing the active workspace. It loads the catalog's
 documents and starts at `startup_scene_id`. Candidate failure preserves the previous workspace; replacement advances
-revision identity, scopes new jobs and invalidates viewport state. Opening another project is not a save operation: the
-UI owner must decide how to handle unsaved work before explicitly replacing it.
+revision identity, scopes new jobs and invalidates viewport state. Opening another project does not save. The current File Open flow requests discard confirmation for a dirty snapshot and supplies its reviewed revision. The host checks that revision, mode, transaction and discard permission under the installation mutex before replacement. `EditorService.openProject(manifest, options)` captures the revision before queue execution; an omitted/null expected revision does not authorize replacing an existing workspace. The older editor_open compatibility API is not protected by this new project-specific guard. See [workspace workflow](editor-workspace.md).
 
 The compatibility `editor_open(assetRoot, scenePath)` can create a standalone scene workspace when no manifest exists.
 If a manifest exists, opening must agree with its configured startup scene. Successfully saving project settings

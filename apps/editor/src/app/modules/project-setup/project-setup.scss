@@ -19,6 +19,18 @@
   padding: var(--space-2) var(--space-3);
 }
 
+.back-to-editor {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-underline-offset: 0.2em;
+}
+
+.back-to-editor:hover {
+  color: var(--color-text);
+}
+
 h1 {
   font-size: var(--font-size-display);
   font-weight: var(--font-weight-semibold);
@@ -118,6 +130,32 @@ ol {
   color: var(--color-text-secondary);
   line-height: var(--font-line-height-relaxed);
   font-size: var(--font-size-md);
+}
+
+.project-contents {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  line-height: 2;
+
+  ul {
+    padding-left: var(--space-5);
+    list-style: none;
+    border-left: var(--border-width) solid var(--color-border);
+  }
+
+  small {
+    margin-left: var(--space-2);
+    color: var(--color-text-secondary);
+    font-family: var(--font-family-sans);
+  }
+}
+
+.open-created {
+  margin-top: var(--space-3);
 }
 
 @include panes.project-setup;

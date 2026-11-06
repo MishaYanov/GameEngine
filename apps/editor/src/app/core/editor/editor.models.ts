@@ -275,6 +275,21 @@ export interface ModelAsset {
     readonly path: string;
 }
 
+export interface ProjectBuildResult {
+    readonly path: string;
+    readonly asset_count: number;
+    readonly asset_bytes: number;
+}
+
+export interface ProjectBuildPreparation extends ProjectBuildResult {
+    readonly build_id: number;
+}
+
+export interface BuildLaunchResult {
+    readonly path: string;
+    readonly process_id: number;
+}
+
 export interface CollisionContact {
     readonly a: EntityKey;
     readonly b: EntityKey;

@@ -2,10 +2,13 @@
     <header><span class="brand">△ GAME ENGINE</span><span class="badge">PROJECT SETUP</span></header>
     <div class="workspace">
         <section aria-labelledby="setup-title" class="setup">
+            @if (fromEditor) {
+                <a class="back-to-editor" routerLink="/editor"><span aria-hidden="true">←</span> Back to Editor</a>
+            }
             <p class="eyebrow">START SOMETHING NEW</p>
             <h1 id="setup-title">Create your project.</h1>
             <p class="intro">
-                Give it a name and a home. We’ll build a starter project and open its graphics window.
+                Give it a name and a home. We’ll create starter scenes and assets, then open your project in the editor.
             </p>
             <form
                     (ngSubmit)="createProject()"
@@ -38,7 +41,7 @@
                     />
                     <button
                             (click)="chooseDestination()"
-                            [disabled]="busy() || choosingDestination() || !desktop"
+                            [disabled]="busy() || choosingDestination() || !desktop || result() !== null"
                             aria-label="Browse for destination folder"
                             class="browse"
                             type="button"
@@ -54,74 +57,61 @@
                     <p class="error" role="alert">Enter a valid project name and destination.</p>
                 }
                 @if (!desktop) {
-                    <p class="notice">Open the desktop editor to build and launch projects.</p>
+                    <p class="notice">Open the desktop editor to create projects.</p>
                 }
-                <button [disabled]="busy() || choosingDestination() || !desktop" type="submit">
+                <button [disabled]="busy() || choosingDestination() || !desktop || result() !== null" type="submit">
                     {{ buttonLabel() }} <span aria-hidden="true">↗</span>
                 </button>
                 <p class="hint">
-                    First builds can take several minutes. Requires Rust/Cargo and a Vulkan-capable GPU.
+                    Includes starter scenes, models, and textures. Export a playable game from the editor when you’re ready.
                 </p>
             </form>
             <div aria-live="polite" role="status">
-                @if (busy()) {
-                    <p class="notice">
-                        Building the runtime, installing assets, then opening the triangle demo…
-                    </p>
-                }
-                @if (result(); as project) {
-                    <div class="success">
-                        <strong>Project installed</strong>
-                        <p>{{ project.path }}</p>
-                        <p>
-                            {{
-                                project.launched
-                                    ? 'Graphics window launched.'
-                                    : 'Installed, but the graphics window could not be launched: ' +
-                                    project.launchError
-                            }}
-                        </p>
-                        <p>Run game.exe from this folder to open it again.</p>
-                    </div>
+                @if (openMessage()) {
+                    <p class="notice">{{ openMessage() }}</p>
                 }
             </div>
+            @if (result(); as project) {
+                <section class="success" aria-labelledby="created-project-title">
+                    <strong id="created-project-title">Project created</strong>
+                    <p>{{ project.path }}</p>
+                    <p>Project manifest: <code>{{ project.manifestPath }}</code></p>
+                    <button
+                            class="open-created"
+                            type="button"
+                            [disabled]="busy() || choosingDestination() || !desktop"
+                            (click)="openCreatedProject()"
+                    >Open in Editor <span aria-hidden="true">↗</span></button>
+                </section>
+            }
             @if (error()) {
                 <pre class="error" role="alert">{{ error() }}</pre>
             }
         </section>
         <aside aria-label="Starter project preview">
-            <div class="preview">
-                <svg aria-label="Preview of two triangles" role="img" viewBox="0 0 500 320">
-                    <defs>
-                        <linearGradient id="a" x2="1" y2="1">
-                            <stop style="stop-color: var(--color-text-secondary)"/>
-                            <stop offset="1" style="stop-color: var(--color-secondary)"/>
-                        </linearGradient>
-                        <linearGradient id="b" x2="1" y2="1">
-                            <stop style="stop-color: var(--color-success)"/>
-                            <stop offset="1" style="stop-color: var(--color-info)"/>
-                        </linearGradient>
-                    </defs>
-                    <path d="M145 78 L52 239 L238 239 Z" fill="url(#a)"/>
-                    <path d="M355 78 L262 239 L448 239 Z" fill="url(#b)"/>
-                </svg
-                >
-                <span>STARTER SCENE / 01</span>
+            <div class="preview" role="group" aria-label="Starter project contents">
+                <span>YOUR AUTHORING PROJECT</span>
+                <ul class="project-contents">
+                    <li>project.json</li>
+                    <li>assets/
+                        <ul>
+                            <li>scenes/ <small>Starter scenes</small></li>
+                            <li>props/ <small>Models</small></li>
+                            <li>textures/ <small>Textures</small></li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
-            <h2>A window. Two triangles.</h2>
+            <h2>A project ready to edit.</h2>
             <p>
-                Your first build uses the engine’s Vulkan renderer with a simple textured triangle scene.
+                Start with sample scenes and reusable assets. Arrange entities, edit their properties,
+                and preview your game in the editor.
             </p>
             <ol>
-                <li>Build the starter runtime</li>
-                <li>Install executable and assets</li>
-                <li>Launch your graphics window</li>
+                <li>Create your project folder</li>
+                <li>Copy starter scenes and assets</li>
+                <li>Open the project in the editor</li>
             </ol>
-            @if (status(); as engine) {
-                <p class="gpu">
-                    {{ engine.renderer }} · {{ engine.gpuName }} · Vulkan {{ engine.vulkanApi }}
-                </p>
-            }
         </aside>
     </div>
 </main>

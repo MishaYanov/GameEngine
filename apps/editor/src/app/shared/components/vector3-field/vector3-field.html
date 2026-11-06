@@ -1,0 +1,26 @@
+<fieldset [disabled]="disabled()">
+    <legend>{{ label() }} @if (unit()) { <span class="unit">({{ unit() }})</span> }</legend>
+    <div class="axis-fields">
+        @for (axis of axes; track axis.index) {
+            <label class="axis-field">
+                <span>{{ axis.name }}</span>
+                <input
+                        #numberInput
+                        type="number"
+                        step="any"
+                        [value]="displayValue(axis.index)"
+                        [attr.aria-label]="label() + ' ' + axis.name + (unit() ? ' (' + unit() + ')' : '')"
+                        [attr.aria-invalid]="invalidAxis() === axis.index ? 'true' : null"
+                        [attr.aria-describedby]="invalidAxis() === axis.index ? errorId : null"
+                        (focus)="start(numberInput, axis.index)"
+                        (input)="change(numberInput, axis.index)"
+                        (blur)="finish(numberInput, axis.index)"
+                        (keydown)="keydown($event, numberInput, axis.index)"
+                />
+            </label>
+        }
+    </div>
+    @if (invalidAxis() !== null) {
+        <p class="error" [id]="errorId" role="status">Enter a finite number.</p>
+    }
+</fieldset>

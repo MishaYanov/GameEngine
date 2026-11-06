@@ -1,0 +1,123 @@
+:host {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-layout {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspace-main {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.workspace-controls > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workspace-center {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.empty-scene {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--space-6);
+}
+
+.empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: var(--layout-sidebar-width);
+}
+
+.empty-open {
+  min-height: var(--layout-control-height);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.empty-open:disabled {
+  opacity: var(--opacity-disabled);
+}
+
+.scene-icon {
+  --layout-icon-size: var(--space-8);
+  margin-bottom: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+h3 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+}
+
+p {
+  margin: var(--space-2) 0 var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+scene-viewport {
+  height: 100%;
+  min-height: 0;
+}
+
+scene-viewport[hidden] {
+  display: none;
+}
+
+.drag-status { margin: 0; padding: var(--space-1) var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-xs); }
+
+@container (max-width: 45rem) {
+  .workspace-main {
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow: auto;
+  }
+
+  .workspace-center {
+    order: -1;
+    flex: 1 0 100%;
+    min-height: 24rem;
+  }
+}

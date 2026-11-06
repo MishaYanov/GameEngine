@@ -1,6 +1,7 @@
-//! Native Vulkan child viewport. Angular decides every tool/input binding.
+//! Native Vulkan child viewport and spatial input; Angular supplies adjacent controls.
 //! GPU ownership stays on one worker; idle Edit mode waits for invalidation.
-use std::sync::{Arc, Mutex};
+use bridge::viewport::{ViewportActionDto, ViewportEditorStateDto};
+use std::sync::{mpsc, Arc, Mutex};
 
 use bridge::editor::{ViewportBoundsDto, ViewportStatusDto};
 
@@ -11,6 +12,7 @@ type Workspace = Arc<Mutex<Option<EditorWorkspace>>>;
 pub struct ViewportHost {
 	shared: Workspace,
 	status: Arc<Mutex<ViewportStatusDto>>,
+	editor_state: Arc<Mutex<ViewportEditorStateDto>>,
 	shutting_down: bool,
 	#[cfg(windows)]
 	worker_started: bool,
@@ -23,6 +25,7 @@ impl ViewportHost {
 		Self {
 			shared,
 			status: Arc::new(Mutex::new(ViewportStatusDto::default())),
+			editor_state: Arc::new(Mutex::new(ViewportEditorStateDto::default())),
 			shutting_down: false,
 			#[cfg(windows)]
 			worker_started: false,
@@ -87,6 +90,7 @@ impl ViewportHost {
 				Arc::clone(&self.shared),
 				Arc::clone(&control),
 				Arc::clone(&self.status),
+				Arc::clone(&self.editor_state),
 			)?;
 			self.worker_started = true;
 			*running = Some(windows::Running {
@@ -136,6 +140,50 @@ impl ViewportHost {
 			if let Some(running) = running.as_ref() {
 				running.control.invalidate();
 			}
+		}
+	}
+
+	pub fn editor_state(&self) -> Result<ViewportEditorStateDto, String> {
+		self.editor_state
+			.lock()
+			.map(|state| state.clone())
+			.map_err(|_| "Viewport editor state lock is poisoned".into())
+	}
+
+	/// Queue ordered boundaries on the native owner without blocking the UI thread.
+	pub fn request_action(
+		&self,
+		action: ViewportActionDto,
+	) -> Result<mpsc::Receiver<Result<ViewportEditorStateDto, String>>, String> {
+		action.validate()?;
+		#[cfg(windows)]
+		{
+			// Capture the actual workspace before entering lifecycle/queue locks.
+			// The worker rechecks this identity under its mutation lock.
+			let workspace_generation = self
+				.shared
+				.lock()
+				.map_err(|_| "Editor document lock is poisoned")?
+				.as_ref()
+				.ok_or("Open a project before using viewport tools")?
+				.generation;
+			let running = self
+				.running
+				.lock()
+				.map_err(|_| "Viewport lifecycle lock is poisoned")?;
+			let running = running
+				.as_ref()
+				.ok_or("Open a project and attach its viewport first")?;
+			let (reply, receiver) = mpsc::sync_channel(1);
+			running
+				.control
+				.request_action(action, workspace_generation, reply)?;
+			Ok(receiver)
+		}
+		#[cfg(not(windows))]
+		{
+			let _ = action;
+			Err("The embedded Vulkan editor currently supports Windows only".into())
 		}
 	}
 
@@ -251,17 +299,22 @@ impl Drop for ViewportHost {
 #[cfg(windows)]
 mod windows {
 	use super::*;
+	use crate::viewport_interaction::ViewportInteraction;
 	use bridge::editor::{ViewportInputDto, ViewportModifiersDto};
-	use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
+	use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle};
 	use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
 	use runtime::{assets::AssetManager, scene::Scene, scene_io, Camera};
 	use std::{
+		collections::VecDeque,
 		num::NonZeroIsize,
 		path::PathBuf,
 		thread::JoinHandle,
 		time::{Duration, Instant},
 	};
 	use tauri::Emitter;
+	use windows_sys::Win32::UI::WindowsAndMessaging::{
+		SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+	};
 	use winit::{
 		application::ApplicationHandler,
 		dpi::{PhysicalPosition, PhysicalSize},
@@ -269,10 +322,118 @@ mod windows {
 		event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
 		keyboard::{ModifiersState, PhysicalKey},
 		platform::windows::EventLoopBuilderExtWindows,
-		window::{Window, WindowId},
+		window::{CursorGrabMode, Window, WindowId},
 	};
 
 	const FRAME: Duration = Duration::from_nanos(16_666_667);
+	const EDITOR_STATE_INTERVAL: Duration = Duration::from_millis(50);
+
+	fn show_viewport_window(window: &Window) -> Result<(), String> {
+		let handle = window.window_handle().map_err(|error| error.to_string())?;
+		let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+			return Err("Native viewport window has no Win32 handle".into());
+		};
+		window.set_visible(true);
+		// Win32 creates child windows below existing siblings. Wry's windowed
+		// WebView2 fills the same parent, so showing the viewport is insufficient.
+		// SAFETY: The worker owns the live child HWND on this thread.
+		let positioned = unsafe {
+			SetWindowPos(
+				handle.hwnd.get(),
+				HWND_TOP,
+				0,
+				0,
+				0,
+				0,
+				SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+			)
+		};
+		if positioned == 0 {
+			return Err(format!(
+				"Could not show the Vulkan viewport above the editor WebView: {}",
+				std::io::Error::last_os_error()
+			));
+		}
+		Ok(())
+	}
+
+	fn pending_editor_publication(
+		current_revision: u64,
+		published_revision: u64,
+		last_emit: Instant,
+	) -> Option<Instant> {
+		(current_revision != published_revision).then_some(last_emit + EDITOR_STATE_INTERVAL)
+	}
+	struct ActionRequest {
+		action: ViewportActionDto,
+		workspace_generation: u64,
+		reply: mpsc::SyncSender<Result<ViewportEditorStateDto, String>>,
+		deadline: Instant,
+	}
+	impl ActionRequest {
+		fn validate_context(&self, workspace_generation: u64, now: Instant) -> Result<(), String> {
+			if now > self.deadline {
+				return Err("Viewport action expired before it could be applied".into());
+			}
+			if self.workspace_generation != workspace_generation {
+				return Err("Viewport action belongs to a different open project; retry in the current workspace".into());
+			}
+			Ok(())
+		}
+	}
+	#[cfg(test)]
+	mod action_context_tests {
+		use super::*;
+
+		fn request(generation: u64, deadline: Instant) -> ActionRequest {
+			let (reply, _) = mpsc::sync_channel(1);
+			ActionRequest {
+				action: ViewportActionDto::SetGrid { visible: true },
+				workspace_generation: generation,
+				reply,
+				deadline,
+			}
+		}
+
+		#[test]
+		fn queued_action_rejects_a_replaced_workspace() {
+			let now = Instant::now();
+			let queued = request(41, now + Duration::from_secs(8));
+			assert!(queued.validate_context(41, now).is_ok());
+			assert!(queued
+				.validate_context(42, now)
+				.unwrap_err()
+				.contains("different open project"));
+		}
+
+		#[test]
+		fn action_expiry_is_rechecked_after_waiting_for_the_workspace() {
+			let now = Instant::now();
+			let queued = request(41, now + Duration::from_secs(8));
+			assert!(queued
+				.validate_context(41, now + Duration::from_secs(7))
+				.is_ok());
+			assert!(queued
+				.validate_context(41, now + Duration::from_secs(9))
+				.unwrap_err()
+				.contains("expired"));
+		}
+
+		#[test]
+		fn final_editor_publication_wakes_once_then_returns_to_idle() {
+			let emitted = Instant::now();
+			// A completion immediately after CommitPlacement still needs an
+			// event-loop wake even when there is no further pointer/frame work.
+			assert_eq!(
+				pending_editor_publication(8, 7, emitted),
+				Some(emitted + Duration::from_millis(50))
+			);
+			assert_eq!(
+				pending_editor_publication(8, 8, emitted + Duration::from_millis(50)),
+				None
+			);
+		}
+	}
 
 	#[derive(Clone, Copy)]
 	struct Wake;
@@ -291,6 +452,7 @@ mod windows {
 	pub(super) struct Control {
 		latest: Mutex<Latest>,
 		proxy: Mutex<Option<EventLoopProxy<Wake>>>,
+		actions: Mutex<VecDeque<ActionRequest>>,
 	}
 	impl Control {
 		pub(super) fn requested_status(&self, mut status: ViewportStatusDto) -> ViewportStatusDto {
@@ -326,7 +488,34 @@ mod windows {
 					wake_queued: false,
 				}),
 				proxy: Mutex::new(None),
+				actions: Mutex::new(VecDeque::new()),
 			})
+		}
+		pub(super) fn request_action(
+			&self,
+			action: ViewportActionDto,
+			workspace_generation: u64,
+			reply: mpsc::SyncSender<Result<ViewportEditorStateDto, String>>,
+		) -> Result<(), String> {
+			if self.stopping() {
+				return Err("Viewport is shutting down".into());
+			}
+			let mut actions = self
+				.actions
+				.lock()
+				.map_err(|_| "Viewport action lock is poisoned")?;
+			if actions.len() >= 64 {
+				return Err("Viewport action queue is full; coalesce continuous input".into());
+			}
+			actions.push_back(ActionRequest {
+				action,
+				workspace_generation,
+				reply,
+				deadline: Instant::now() + Duration::from_secs(8),
+			});
+			drop(actions);
+			self.wake();
+			Ok(())
 		}
 		fn validate_bounds(bounds: ViewportBoundsDto, dpi: f64) -> Result<(), String> {
 			bounds.validate()?;
@@ -439,6 +628,7 @@ mod windows {
 		shared: Workspace,
 		control: Arc<Control>,
 		status: Arc<Mutex<ViewportStatusDto>>,
+		editor_state: Arc<Mutex<ViewportEditorStateDto>>,
 	) -> Result<JoinHandle<()>, String> {
 		std::thread::Builder::new()
 			.name("editor-vulkan-viewport".into())
@@ -458,6 +648,7 @@ mod windows {
 						shared,
 						Arc::clone(&control),
 						Arc::clone(&status),
+						editor_state,
 					);
 					event_loop
 						.run_app(&mut app)
@@ -528,6 +719,10 @@ mod windows {
 		shared: Workspace,
 		control: Arc<Control>,
 		status: Arc<Mutex<ViewportStatusDto>>,
+		editor_state: Arc<Mutex<ViewportEditorStateDto>>,
+		interaction: ViewportInteraction,
+		last_editor_emit: Instant,
+		last_editor_revision: u64,
 		bounds: ViewportBoundsDto,
 		attached: bool,
 		parent_visible: bool,
@@ -536,6 +731,7 @@ mod windows {
 		occluded: bool,
 		failed: bool,
 		last_tick: Option<Instant>,
+		last_camera_tick: Option<Instant>,
 		next_frame: Instant,
 		redraw_retry: Option<Instant>,
 		prepared_extent: Option<[u32; 2]>,
@@ -553,6 +749,7 @@ mod windows {
 			shared: Workspace,
 			control: Arc<Control>,
 			status: Arc<Mutex<ViewportStatusDto>>,
+			editor_state: Arc<Mutex<ViewportEditorStateDto>>,
 		) -> Self {
 			let now = Instant::now();
 			Self {
@@ -563,6 +760,10 @@ mod windows {
 				shared,
 				control,
 				status,
+				editor_state,
+				interaction: ViewportInteraction::default(),
+				last_editor_emit: now - Duration::from_secs(1),
+				last_editor_revision: u64::MAX,
 				bounds: ViewportBoundsDto::default(),
 				attached: false,
 				parent_visible: true,
@@ -571,6 +772,7 @@ mod windows {
 				occluded: false,
 				failed: false,
 				last_tick: None,
+				last_camera_tick: None,
 				next_frame: now,
 				redraw_retry: None,
 				prepared_extent: None,
@@ -586,13 +788,33 @@ mod windows {
 				engine_logger::error!(target: "editor_viewport", "Viewport entered failed state: operation={operation}");
 			}
 			self.failed = true;
+			self.cancel_editor();
+			if let Some(window) = self.window.as_ref() {
+				let _ = window.set_cursor_grab(CursorGrabMode::None);
+			}
+			if let Some(window) = self.window.as_ref() {
+				window.set_visible(false);
+			}
 			self.dirty = false;
 			self.last_tick = None;
 			self.prepared_extent = None;
+			self.last_status = Instant::now() - Duration::from_secs(1);
 			if let Ok(mut status) = self.status.lock() {
 				status.error = Some(error.into());
+				status.visible = false;
 				status.width = 0;
 				status.height = 0;
+			}
+		}
+		fn update_window_visibility(&mut self) {
+			if let Some(window) = self.window.as_ref() {
+				if self.active() && !self.failed {
+					if let Err(error) = show_viewport_window(window) {
+						self.fail("window_z_order", error);
+					}
+				} else {
+					window.set_visible(false);
+				}
 			}
 		}
 		fn active(&self) -> bool {
@@ -610,6 +832,138 @@ mod windows {
 				}
 			}
 			self.last_tick = None;
+		}
+		fn publish_editor(&mut self, force: bool) {
+			let current = self.interaction.state();
+			if let Ok(mut state) = self.editor_state.lock() {
+				*state = current.clone();
+			}
+			let now = Instant::now();
+			if current.revision != self.last_editor_revision
+				&& (force || now.duration_since(self.last_editor_emit) >= EDITOR_STATE_INTERVAL)
+			{
+				let _ = self.parent.emit("editor://viewport-editor-state", &current);
+				self.last_editor_revision = current.revision;
+				self.last_editor_emit = now;
+			}
+			if self.interaction.take_document_changed() {
+				let payload = self.shared.lock().ok().and_then(|workspace| workspace.as_ref().map(|workspace| serde_json::json!({
+					"workspace_generation": workspace.generation, "revision": workspace.backend.session().revision()
+				})));
+				if let Some(payload) = payload {
+					let _ = self
+						.parent
+						.emit("editor://viewport-document-changed", payload);
+				}
+			}
+		}
+		fn update_capture(&self) {
+			if let Some(window) = self.window.as_ref() {
+				let captured = self.interaction.captured();
+				let _ = window.set_cursor_grab(if captured {
+					CursorGrabMode::Confined
+				} else {
+					CursorGrabMode::None
+				});
+			}
+		}
+		fn cancel_editor(&mut self) {
+			if let Ok(mut workspace) = self.shared.lock() {
+				if let Some(workspace) = workspace.as_mut() {
+					if let Err(error) = self.interaction.cancel(workspace) {
+						self.interaction.report(error);
+					}
+				}
+			}
+			self.update_capture();
+			self.publish_editor(true);
+		}
+		fn process_actions(&mut self) {
+			let requests: Vec<_> = self
+				.control
+				.actions
+				.lock()
+				.map(|mut actions| actions.drain(..).collect())
+				.unwrap_or_default();
+			for request in requests {
+				if Instant::now() > request.deadline {
+					let _ = request.reply.send(Err(
+						"Viewport action expired before it could be applied".into(),
+					));
+					continue;
+				}
+				let reply = request.reply.clone();
+				let extent = self.prepared_extent.unwrap_or_else(|| self.extent());
+				let result = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned".to_string())
+					.and_then(|mut workspace| {
+						let workspace = workspace
+							.as_mut()
+							.ok_or("Open a project before using viewport tools")?;
+						// Waiting for the workspace lock can cross both project and
+						// timeout boundaries; reject before any action can mutate it.
+						request.validate_context(workspace.generation, Instant::now())?;
+						self.interaction.action(request.action, workspace, extent)
+					});
+				if let Err(error) = result.as_ref() {
+					self.interaction.report(error.clone());
+				}
+				self.dirty = true;
+				self.update_capture();
+				self.publish_editor(true);
+				let _ = reply.send(result.map(|()| self.interaction.state()));
+			}
+		}
+		fn process_input(
+			&mut self,
+			kind: &str,
+			button: Option<String>,
+			code: Option<String>,
+			repeat: bool,
+			delta: Option<[f64; 2]>,
+		) {
+			let extent = self.prepared_extent.unwrap_or_else(|| self.extent());
+			if extent.contains(&0) {
+				return;
+			}
+			let position = self.window.as_ref().map(|window| {
+				let size = window.inner_size();
+				[
+					self.cursor[0] * extent[0] as f64 / size.width.max(1) as f64,
+					self.cursor[1] * extent[1] as f64 / size.height.max(1) as f64,
+				]
+			});
+			let input = ViewportInputDto {
+				kind: kind.into(),
+				position,
+				extent,
+				button,
+				code,
+				repeat,
+				delta,
+				modifiers: ViewportModifiersDto {
+					shift: self.modifiers.shift_key(),
+					control: self.modifiers.control_key(),
+					alt: self.modifiers.alt_key(),
+					super_key: self.modifiers.super_key(),
+				},
+			};
+			let before = self.interaction.state().revision;
+			if let Ok(mut workspace) = self.shared.lock() {
+				if let Some(workspace) = workspace.as_mut() {
+					if let Err(error) = self.interaction.input(&input, workspace, extent, self.dpi)
+					{
+						let _ = self.interaction.cancel(workspace);
+						self.interaction.report(error);
+					}
+				}
+			}
+			self.dirty |= before != self.interaction.state().revision
+				|| kind == "pointer_move" && self.interaction.captured();
+			self.update_capture();
+			self.publish_editor(kind != "pointer_move");
 		}
 		fn extent(&self) -> [u32; 2] {
 			[
@@ -658,7 +1012,8 @@ mod windows {
 				|| self.bounds.height != bounds.height
 				|| self.bounds.visible != bounds.visible
 				|| self.dpi != dpi;
-			if self.attached != attached || (self.failed && invalidated) {
+			let retrying = self.failed && (invalidated || changed);
+			if self.attached != attached || retrying {
 				self.failed = false;
 				if let Ok(mut status) = self.status.lock() {
 					status.error = None;
@@ -670,6 +1025,19 @@ mod windows {
 			self.dpi = dpi;
 			if clear_input || !self.active() {
 				self.clear_play_input();
+				self.cancel_editor();
+			}
+			if changed {
+				let extent = self.extent();
+				if let Ok(mut workspace) = self.shared.lock() {
+					if let Some(workspace) = workspace.as_mut() {
+						if let Err(error) =
+							self.interaction.geometry_changed(workspace, extent, dpi)
+						{
+							self.interaction.report(error);
+						}
+					}
+				}
 			}
 			if changed {
 				if let Some(window) = &self.window {
@@ -680,11 +1048,15 @@ mod windows {
 					));
 					let _ =
 						window.request_inner_size(PhysicalSize::new(width.max(1), height.max(1)));
-					window.set_visible(self.active());
 					if let Some(gpu) = self.gpu.as_mut() {
 						gpu.renderer.resize(width, height);
 					}
 				}
+			}
+			// A failed child was explicitly hidden. Retrying with identical
+			// bounds must show it again even when no resize is required.
+			if changed || retrying {
+				self.update_window_visibility();
 			}
 			if invalidated || changed {
 				self.dirty = true;
@@ -704,13 +1076,14 @@ mod windows {
 			let extent = self.prepared_extent.unwrap_or([0; 2]);
 			if let Ok(mut status) = self.status.lock() {
 				status.attached = self.attached;
-				status.visible = self.active();
+				status.visible = self.active() && !self.failed;
 				status.width = extent[0];
 				status.height = extent[1];
 			}
 			if changed {
 				self.last_status = Instant::now() - Duration::from_secs(1);
 			}
+			self.process_actions();
 		}
 
 		fn draw(&mut self) -> Result<(), String> {
@@ -719,13 +1092,14 @@ mod windows {
 			}
 			let packet = loop {
 				let captured = {
-					let workspace = self
+					let mut workspace = self
 						.shared
 						.lock()
 						.map_err(|_| "Editor document lock is poisoned")?;
 					let workspace = workspace
-						.as_ref()
+						.as_mut()
 						.ok_or("Open a scene before attaching a viewport")?;
+					self.interaction.sync(workspace)?;
 					if self
 						.gpu
 						.as_ref()
@@ -924,15 +1298,44 @@ mod windows {
 				self.last_status = Instant::now() - Duration::from_secs(1);
 			}
 			self.prepared_extent = Some([width, height]);
-			let uniform = CameraUniform::perspective(
-				gpu.camera.position,
-				gpu.camera.target(),
-				[0.0, 1.0, 0.0],
-				gpu.camera.vertical_fov,
-				width as f32 / height as f32,
-				gpu.camera.near,
-				gpu.camera.far,
-			);
+			if self.interaction.settings.view == bridge::viewport::ViewportView::Scene {
+				self.interaction.synchronize_targets(
+					&gpu.scene,
+					generation,
+					revision,
+					[width, height],
+				)?;
+			}
+			let uniform = if self.interaction.settings.view == bridge::viewport::ViewportView::Scene
+			{
+				CameraUniform::from_view_projection(
+					self.interaction
+						.camera
+						.view_projection([width, height], self.interaction.settings.projection)?,
+				)
+			} else {
+				CameraUniform::perspective(
+					gpu.camera.position,
+					gpu.camera.target(),
+					[0.0, 1.0, 0.0],
+					gpu.camera.vertical_fov,
+					width as f32 / height as f32,
+					gpu.camera.near,
+					gpu.camera.far,
+				)
+			};
+			let visuals = {
+				let workspace = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				self.interaction.visuals(
+					workspace.as_ref().ok_or("No scene is open")?,
+					[width, height],
+					self.dpi,
+				)?
+			};
+			gpu.renderer.set_editor_visuals(&visuals)?;
 			let frustum = runtime::visibility::Frustum::from_view_projection(
 				glam::Mat4::from_cols_array(&uniform.view_projection),
 			)?;
@@ -958,6 +1361,7 @@ mod windows {
 					status.gpu_timestamps_supported = metrics.gpu_timestamps_supported;
 				}
 			}
+			self.publish_editor(false);
 			Ok(())
 		}
 
@@ -1022,6 +1426,7 @@ mod windows {
 			}
 			.with_title("Game Engine viewport")
 			.with_decorations(false)
+			.with_active(false)
 			.with_visible(false)
 			.with_inner_size(PhysicalSize::new(width.max(1), height.max(1)))
 			.with_position(PhysicalPosition::new(
@@ -1030,10 +1435,9 @@ mod windows {
 			));
 			match event_loop.create_window(attributes) {
 				Ok(window) => {
-					let window = Arc::new(window);
-					window.set_visible(self.active());
-					self.window = Some(window);
+					self.window = Some(Arc::new(window));
 					self.dirty = true;
+					self.update_window_visibility();
 				}
 				Err(error) => {
 					self.fail("window_create", error.to_string());
@@ -1059,6 +1463,7 @@ mod windows {
 			}
 			match event {
 				WindowEvent::CloseRequested | WindowEvent::Destroyed => {
+					self.cancel_editor();
 					event_loop.exit();
 				}
 				WindowEvent::Resized(size) => {
@@ -1087,6 +1492,7 @@ mod windows {
 					self.dirty = !occluded;
 					if occluded {
 						self.clear_play_input();
+						self.cancel_editor();
 					}
 				}
 				WindowEvent::RedrawRequested => {
@@ -1107,6 +1513,7 @@ mod windows {
 				}
 				WindowEvent::CursorLeft { .. } => {
 					self.pending_motion = None;
+					self.process_input("pointer_leave", None, None, false, None);
 					self.emit_input("pointer_leave", None, None, false, None);
 				}
 				WindowEvent::MouseInput { state, button, .. } => {
@@ -1118,6 +1525,26 @@ mod windows {
 						MouseButton::Forward => "forward".into(),
 						MouseButton::Other(value) => format!("other:{value}"),
 					};
+					// Release is an ordered boundary; flush the newest pointer value first.
+					if self.pending_motion.take().is_some() {
+						self.process_input("pointer_move", None, None, false, None);
+					}
+					if state == ElementState::Pressed {
+						if let Some(window) = self.window.as_ref() {
+							window.focus_window();
+						}
+					}
+					self.process_input(
+						if state == ElementState::Pressed {
+							"pointer_down"
+						} else {
+							"pointer_up"
+						},
+						Some(button.clone()),
+						None,
+						false,
+						None,
+					);
 					self.emit_input(
 						if state == ElementState::Pressed {
 							"pointer_down"
@@ -1137,6 +1564,7 @@ mod windows {
 							("wheel_pixels", [position.x, position.y])
 						}
 					};
+					self.process_input(kind, None, None, false, Some(delta));
 					self.emit_input(kind, None, None, false, Some(delta));
 				}
 				WindowEvent::ModifiersChanged(modifiers) => {
@@ -1147,6 +1575,17 @@ mod windows {
 						PhysicalKey::Code(code) => format!("{code:?}"),
 						PhysicalKey::Unidentified(code) => format!("{code:?}"),
 					};
+					self.process_input(
+						if event.state == ElementState::Pressed {
+							"key_down"
+						} else {
+							"key_up"
+						},
+						None,
+						Some(code.clone()),
+						event.repeat,
+						None,
+					);
 					self.emit_input(
 						if event.state == ElementState::Pressed {
 							"key_down"
@@ -1165,6 +1604,13 @@ mod windows {
 						self.pending_motion = None;
 						self.clear_play_input();
 					}
+					self.process_input(
+						if focused { "focused" } else { "blurred" },
+						None,
+						None,
+						false,
+						None,
+					);
 					self.emit_input(
 						if focused { "focused" } else { "blurred" },
 						None,
@@ -1182,9 +1628,20 @@ mod windows {
 				return;
 			}
 			let now = Instant::now();
+			if let Ok(mut workspace) = self.shared.lock() {
+				if let Some(workspace) = workspace.as_mut() {
+					let before = workspace.backend.session().revision();
+					if let Err(error) = self.interaction.sync(workspace) {
+						self.interaction.report(error);
+					}
+					self.interaction.drain_imports(workspace);
+					self.dirty |= before != workspace.backend.session().revision();
+				}
+			}
 			if self.pending_motion.is_some() && now.duration_since(self.last_motion) >= FRAME {
 				self.pending_motion = None;
 				self.last_motion = now;
+				self.process_input("pointer_move", None, None, false, None);
 				self.emit_input("pointer_move", None, None, false, None);
 			}
 			let ticking = self
@@ -1198,6 +1655,22 @@ mod windows {
 				})
 				.unwrap_or(false);
 			let ticking = ticking && self.active() && !self.failed;
+			let camera_ticking =
+				self.interaction.needs_camera_tick() && self.active() && !self.failed;
+			let camera_advanced = camera_ticking && now >= self.next_frame;
+			if camera_advanced {
+				let elapsed = self
+					.last_camera_tick
+					.replace(now)
+					.map_or(FRAME.as_secs_f32(), |last| {
+						now.duration_since(last).as_secs_f32()
+					});
+				self.interaction.camera_tick(elapsed);
+				self.dirty = true;
+			}
+			if !camera_ticking {
+				self.last_camera_tick = None;
+			}
 			if ticking && now >= self.next_frame {
 				let elapsed = self
 					.last_tick
@@ -1222,8 +1695,13 @@ mod windows {
 				self.next_frame = now + FRAME;
 			} else if !ticking {
 				self.last_tick = None;
-				self.next_frame = now;
+				if camera_advanced {
+					self.next_frame = now + FRAME;
+				} else if !camera_ticking {
+					self.next_frame = now;
+				}
 			}
+			self.publish_editor(false);
 			if self.dirty
 				&& self.active()
 				&& !self.failed
@@ -1244,10 +1722,21 @@ mod windows {
 				}
 				self.last_status = now;
 			}
-			let mut deadline = if ticking { Some(self.next_frame) } else { None };
+			let mut deadline = if ticking || camera_ticking {
+				Some(self.next_frame)
+			} else {
+				None
+			};
 			if self.pending_motion.is_some() {
 				let motion = self.last_motion + FRAME;
 				deadline = Some(deadline.map_or(motion, |deadline| deadline.min(motion)));
+			}
+			if let Some(publication) = pending_editor_publication(
+				self.interaction.state().revision,
+				self.last_editor_revision,
+				self.last_editor_emit,
+			) {
+				deadline = Some(deadline.map_or(publication, |deadline| deadline.min(publication)));
 			}
 			if self.dirty && self.active() && !self.failed {
 				if let Some(retry) = self.redraw_retry {
@@ -1257,6 +1746,14 @@ mod windows {
 			event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 		}
 		fn exiting(&mut self, _: &ActiveEventLoop) {
+			self.cancel_editor();
+			if let Ok(mut actions) = self.control.actions.lock() {
+				for request in actions.drain(..) {
+					let _ = request
+						.reply
+						.send(Err("Viewport stopped before the action was applied".into()));
+				}
+			}
 			self.gpu = None;
 			self.window = None;
 			engine_logger::debug!(target: "editor_viewport", "Viewport worker teardown completed");

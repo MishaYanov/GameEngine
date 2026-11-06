@@ -1,0 +1,56 @@
+:host {
+  flex: none;
+}
+
+.file-trigger,
+.file-menu a,
+.file-menu button {
+  min-height: var(--space-7);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--palette-text-text0);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: start;
+}
+
+.file-trigger {
+  anchor-name: --editor-file-trigger;
+}
+
+.file-trigger:is(:hover, :focus-visible),
+.file-trigger:has(+ .file-menu:popover-open),
+.file-menu :is(a, button:enabled):is(:hover, :focus-visible) {
+  background: var(--palette-neutral-n800);
+}
+
+.file-menu {
+  position: fixed;
+  position-anchor: --editor-file-trigger;
+  inset: auto;
+  top: anchor(bottom);
+  left: anchor(left);
+  min-width: 10rem;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1);
+  border: var(--border-width) solid var(--palette-neutral-n800);
+  border-radius: var(--radius-md);
+  background: var(--palette-neutral-n700);
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 35%);
+}
+
+.file-menu:popover-open {
+  display: grid;
+}
+
+.file-menu a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.file-menu button:disabled {
+  opacity: var(--opacity-disabled);
+}

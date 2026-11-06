@@ -599,6 +599,40 @@ describe('EditorService native command and viewport queues', () => {
         expect(invoke).not.toHaveBeenCalled();
     });
 
+    it('restores the retained native workspace and its unsaved state after a frontend reload', async () => {
+        const retained = {...snapshot(8), dirty: true, can_undo: true};
+        vi.mocked(invoke).mockResolvedValueOnce(retained);
+        const service = TestBed.inject(EditorService);
+        expect(await service.restoreWorkspace()).toEqual(retained);
+        expect(service.snapshot()).toEqual(retained);
+        expect(service.workspaceGeneration()).toBe(1);
+        expect(service.dirty()).toBe(true);
+        expect(await service.restoreWorkspace()).toEqual(retained);
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_snapshot', undefined);
+    });
+
+    it('treats a cold native launch as an empty workspace', async () => {
+        vi.mocked(invoke).mockRejectedValueOnce('Open a scene before using the editor');
+        const service = TestBed.inject(EditorService);
+        expect(await service.restoreWorkspace()).toBeNull();
+        expect(service.snapshot()).toBeNull();
+        expect(service.workspaceGeneration()).toBe(0);
+        expect(service.error()).toBeNull();
+    });
+
+    it('uses the project already opened by setup instead of fetching over it', async () => {
+        const opened = snapshot(9);
+        vi.mocked(invoke).mockResolvedValueOnce(opened);
+        const service = TestBed.inject(EditorService);
+        const open = service.openProject('new/project.json');
+        const restore = service.restoreWorkspace();
+        expect(await restore).toEqual(await open);
+        expect(service.workspaceGeneration()).toBe(1);
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_open_project', {
+            manifestPath: 'new/project.json', expectedRevision: null, discardUnsaved: false,
+        });
+    });
+
     it('opens the selected project manifest and invalidates cached assets only after success', async () => {
         const opened: EditorSnapshot = {
             ...snapshot(8),
@@ -620,7 +654,9 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.modelAssets()).toEqual([]);
         const manifest = 'D:/Projects/My Game/project.json';
         expect(await service.openProject(manifest)).toEqual(opened);
-        expect(invoke).toHaveBeenLastCalledWith('editor_open_project', {manifestPath: manifest});
+        expect(invoke).toHaveBeenLastCalledWith('editor_open_project', {
+            manifestPath: manifest, expectedRevision: 3, discardUnsaved: false,
+        });
         expect(service.snapshot()).toEqual(opened);
         expect(service.modelAssets()).toBeNull();
         expect(service.pending()).toBe(0);
@@ -810,6 +846,46 @@ describe('EditorService native command and viewport queues', () => {
         await Promise.all(queued);
         expect(invoke).toHaveBeenCalledTimes(256);
         expect(service.pending()).toBe(0);
+    });
+
+    it('keeps background compilation out of the document queue', async () => {
+        const compiled = deferred<{path: string; asset_count: number; asset_bytes: number}>();
+        vi.mocked(invoke).mockImplementation(async operation => {
+            if (operation === 'editor_open_project') return snapshot(1);
+            if (operation === 'editor_prepare_project_build') return {build_id: 4, path: 'D:/Exports/Game', asset_count: 4, asset_bytes: 1024};
+            if (operation === 'editor_finish_project_build') return compiled.promise;
+            if (operation === 'editor_capabilities') return capabilities;
+            if (operation === 'editor_execute_incremental') return commandUpdate(snapshot(2));
+            throw new Error(`Unexpected operation: ${operation}`);
+        });
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        const prepared = await service.prepareBuild('D:/Exports');
+        const build = service.finishBuild(prepared.build_id);
+        expect(service.busy()).toBe(false);
+        await service.execute({type: 'select', keys: []});
+        expect(service.snapshot()?.revision).toBe(2);
+        expect(invoke).toHaveBeenCalledWith('editor_prepare_project_build', {destination: 'D:/Exports', expectedRevision: 1});
+        expect(invoke).toHaveBeenCalledWith('editor_finish_project_build', {buildId: 4});
+        const result = {path: 'D:/Exports/Game', asset_count: 4, asset_bytes: 1024};
+        compiled.resolve(result);
+        expect(await build).toEqual(result);
+        expect(service.snapshot()?.revision).toBe(2);
+    });
+
+    it('saves all documents through the revision queue and explicitly runs a recorded export', async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({...snapshot(7), dirty: true, project_dirty: true})
+            .mockResolvedValueOnce(snapshot(8))
+            .mockResolvedValueOnce({path: 'D:/Exports/Game', process_id: 123});
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.saveAll();
+        expect(invoke).toHaveBeenLastCalledWith('editor_save_all', {expectedRevision: 7});
+        expect(service.snapshot()?.revision).toBe(8);
+        expect(service.dirty()).toBe(false);
+        expect(await service.runBuild('D:/Exports/Game')).toEqual({path: 'D:/Exports/Game', process_id: 123});
+        expect(invoke).toHaveBeenLastCalledWith('editor_run_build', {expectedPath: 'D:/Exports/Game'});
     });
 
     it('cleans up a native listener that resolves after its Angular owner was destroyed', async () => {

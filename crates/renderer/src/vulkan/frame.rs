@@ -125,6 +125,11 @@ pub struct FrameTargets<'a> {
 	pub depth_buffer: &'a VulkanDepthBuffer,
 }
 
+pub(crate) struct FrameEditor<'a> {
+	pub pass: &'a mut super::editor::EditorPass,
+	pub visuals: &'a crate::EditorVisuals,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameStatus {
 	Rendered,
@@ -137,6 +142,7 @@ pub enum VulkanFrameError {
 	Camera(VulkanCameraError),
 	Buffer(VulkanBufferError),
 	TooManyInstances,
+	Editor(String),
 }
 
 impl Display for VulkanFrameError {
@@ -154,6 +160,7 @@ impl Display for VulkanFrameError {
 				formatter,
 				"frame exceeds {MAX_FRAME_INSTANCES} render instances"
 			),
+			Self::Editor(error) => write!(formatter, "Editor visualization failed: {error}"),
 		}
 	}
 }
@@ -164,7 +171,7 @@ impl Error for VulkanFrameError {
 			Self::Vulkan(error) => Some(error),
 			Self::Camera(error) => Some(error),
 			Self::Buffer(error) => Some(error),
-			Self::TooManyInstances => None,
+			Self::TooManyInstances | Self::Editor(_) => None,
 		}
 	}
 }
@@ -377,10 +384,39 @@ impl VulkanFrame {
 		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<FrameStatus, VulkanFrameError> {
+		self.draw_with_editor(
+			device,
+			targets,
+			pipelines,
+			camera,
+			camera_uniform,
+			objects,
+			None,
+		)
+	}
+
+	pub(crate) fn draw_with_editor(
+		&mut self,
+		device: &VulkanDevice,
+		targets: FrameTargets<'_>,
+		pipelines: &VulkanMaterialPipelines,
+		camera: &VulkanCamera,
+		camera_uniform: &CameraUniform,
+		objects: &[RenderObject<'_>],
+		editor: Option<FrameEditor<'_>>,
+	) -> Result<FrameStatus, VulkanFrameError> {
 		if self.invalidated {
 			return Ok(FrameStatus::SwapchainNeedsRebuild);
 		}
-		let result = self.draw_once(device, targets, pipelines, camera, camera_uniform, objects);
+		let result = self.draw_once(
+			device,
+			targets,
+			pipelines,
+			camera,
+			camera_uniform,
+			objects,
+			editor,
+		);
 		// Acquisition can leave its semaphore signaled even when recording or
 		// submission fails. Only a fresh frame may acquire another image.
 		if !matches!(result, Ok(FrameStatus::Rendered)) {
@@ -397,12 +433,25 @@ impl VulkanFrame {
 		camera: &VulkanCamera,
 		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
+		mut editor: Option<FrameEditor<'_>>,
 	) -> Result<FrameStatus, VulkanFrameError> {
 		let swapchain = targets.swapchain;
 
 		self.wait_complete()?;
 		self.acquisition_pending = false;
 		self.submission_pending = false;
+		if let Some(editor) = &mut editor {
+			let extent = targets.swapchain.extent();
+			editor
+				.pass
+				.prepare(
+					device,
+					editor.visuals,
+					camera_uniform,
+					[extent.width, extent.height],
+				)
+				.map_err(VulkanFrameError::Editor)?;
+		}
 
 		if let Some(timer) = &mut self.timer {
 			timer.collect()?;
@@ -445,6 +494,7 @@ impl VulkanFrame {
 			pipelines,
 			camera.descriptor_set(),
 			objects,
+			editor.as_ref().map(|editor| &*editor.pass),
 		)?;
 
 		let wait_semaphores = [self.image_available];
@@ -471,8 +521,11 @@ impl VulkanFrame {
 		if let Some(timer) = &mut self.timer {
 			timer.pending = true;
 		}
+		let (editor_draws, editor_triangles) = editor
+			.as_ref()
+			.map_or((0, 0), |editor| editor.pass.draw_counts());
 		self.metrics = DrawMetrics {
-			draw_calls: self.batches.len() as u64,
+			draw_calls: self.batches.len() as u64 + editor_draws,
 			instances: objects.len() as u64,
 			triangles: self
 				.batches
@@ -480,7 +533,8 @@ impl VulkanFrame {
 				.map(|batch| {
 					objects[batch.object].mesh().index_count() as u64 / 3 * batch.count as u64
 				})
-				.sum(),
+				.sum::<u64>()
+				+ editor_triangles,
 			instanced_draw_calls: self.batches.iter().filter(|batch| batch.count > 1).count()
 				as u64,
 			gpu_time_ms: self.timer.as_ref().and_then(|timer| timer.last_ms),
@@ -570,6 +624,7 @@ impl VulkanFrame {
 		pipelines: &VulkanMaterialPipelines,
 		camera_descriptor_set: vk::DescriptorSet,
 		objects: &[RenderObject<'_>],
+		editor: Option<&super::editor::EditorPass>,
 	) -> Result<(), VulkanFrameError> {
 		let image = targets.swapchain.images()[image_index as usize];
 		let image_view = targets.swapchain.image_views()[image_index as usize];
@@ -656,7 +711,11 @@ impl VulkanFrame {
 
 		let clear_value = vk::ClearValue {
 			color: vk::ClearColorValue {
-				float32: [0.04, 0.08, 0.16, 1.0],
+				float32: if editor.is_some() {
+					[0.08, 0.095, 0.12, 1.0]
+				} else {
+					[0.04, 0.08, 0.16, 1.0]
+				},
 			},
 		};
 
@@ -833,6 +892,9 @@ impl VulkanFrame {
 				);
 			}
 
+			if let Some(editor) = editor {
+				editor.record(&self.device, self.command_buffer);
+			}
 			self.device.cmd_end_rendering(self.command_buffer);
 		}
 

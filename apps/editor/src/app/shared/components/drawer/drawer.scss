@@ -4,7 +4,7 @@
 	position: relative;
 	width: var(--drawer-width);
 	height: 100%;
-	min-width: min(var(--drawer-min-width), var(--drawer-available-width));
+  min-width: min(var(--drawer-min-width), var(--drawer-max-width), var(--drawer-available-width));
 	max-width: min(var(--drawer-max-width), var(--drawer-available-width));
 	--drawer-available-width: max(0px, calc(100% - min(var(--layout-pane-min-width), 60%)));
 	--drawer-available-height: max(0px, calc(100% - min(var(--layout-pane-min-height), 60%)));
@@ -82,11 +82,32 @@
 	min-width: 0;
 	max-width: none;
 	height: var(--drawer-height);
-	min-height: min(var(--drawer-min-height), var(--drawer-available-height));
+  min-height: min(var(--drawer-min-height), var(--drawer-max-height), var(--drawer-available-height));
 	max-height: min(var(--drawer-max-height), var(--drawer-available-height));
 }
 
 :host([data-side='bottom']) app-splitter {
 	bottom: auto;
 	top: calc(var(--layout-resize-hit-area) / -2);
+}
+
+:host(.collapsed:is([data-side='top'], [data-side='bottom'])) {
+  height: var(--layout-drawer-collapsed-width);
+  min-height: var(--layout-drawer-collapsed-width);
+  max-height: var(--layout-drawer-collapsed-width);
+
+  .subject-rail {
+    flex-direction: row;
+    overflow: auto hidden;
+  }
+
+  .rail-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: auto;
+    margin: 0;
+    padding-inline: var(--space-3);
+    font-size: var(--font-size-sm);
+  }
 }

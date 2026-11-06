@@ -67,24 +67,28 @@ const label = (id) =>
     id.replace(/[-_]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 
 export async function generateRegistry(componentRoot, outputFile) {
-    const folders = (await readdir(componentRoot, {withFileTypes: true}))
+    const folders = new Set((await readdir(componentRoot, {withFileTypes: true}))
         .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .map((entry) => entry.name));
     const entries = [];
     const previewRoot = join(dirname(outputFile), 'previews');
     const previewFiles = await readdir(previewRoot).catch((error) => {
         if (error.code === 'ENOENT') return [];
         throw error;
     });
+    const previewNames = previewFiles
+        .filter((name) => name.endsWith('.design.ts'))
+        .map((name) => name.slice(0, -'.design.ts'.length));
+    const sectionIds = [...new Set([...folders, ...previewNames])].sort((a, b) => a.localeCompare(b));
     const importPath = (file) => {
         const path = relative(dirname(outputFile), file).replaceAll('\\', '/').replace(/\.ts$/, '');
         return JSON.stringify(path.startsWith('.') ? path : `./${path}`);
     };
-    for (const folder of folders) {
-        const directory = join(componentRoot, folder.name);
-        const files = await readdir(directory);
-        const preview = previewFiles.includes(`${folder.name}.design.ts`)
-            ? join(previewRoot, `${folder.name}.design.ts`)
+    for (const id of sectionIds) {
+        const directory = join(componentRoot, id);
+        const files = folders.has(id) ? await readdir(directory) : [];
+        const preview = previewFiles.includes(`${id}.design.ts`)
+            ? join(previewRoot, `${id}.design.ts`)
             : undefined;
         const components = [];
         for (const file of files.filter(
@@ -104,7 +108,7 @@ export async function generateRegistry(componentRoot, outputFile) {
             load = `() => import(${importPath(preview)}).then(preview => preview.default)`;
         }
         entries.push(
-            `    {id: ${JSON.stringify(folder.name)}, title: ${JSON.stringify(label(folder.name))}, requiredInputs: ${JSON.stringify(component?.requiredInputs ?? [])}${load ? `, load: ${load}` : ''}},`,
+            `    {id: ${JSON.stringify(id)}, title: ${JSON.stringify(label(id))}, requiredInputs: ${JSON.stringify(component?.requiredInputs ?? [])}${load ? `, load: ${load}` : ''}},`,
         );
     }
     const source =

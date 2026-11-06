@@ -14,10 +14,12 @@ pub struct WindowRenderer {
 	size: [u32; 2],
 	dirty: bool,
 	lighting: LightingUniform,
+	editor_visuals: crate::EditorVisuals,
 }
 
 struct RendererResources {
 	targets: Option<RenderTargets>,
+	editor: Option<crate::vulkan::editor::EditorPass>,
 	pipelines: Option<VulkanMaterialPipelines>,
 	camera: VulkanCamera,
 	material_layout: Arc<VulkanMaterialLayout>,
@@ -104,6 +106,7 @@ impl WindowRenderer {
 		let mut renderer = Self {
 			resources: ManuallyDrop::new(RendererResources {
 				targets: None,
+				editor: None,
 				pipelines: None,
 				camera,
 				material_layout,
@@ -115,6 +118,7 @@ impl WindowRenderer {
 			size: [width, height],
 			dirty: true,
 			lighting: LightingUniform::default(),
+			editor_visuals: crate::EditorVisuals::default(),
 		};
 		renderer.prepare()?;
 		Ok(renderer)
@@ -130,6 +134,14 @@ impl WindowRenderer {
 	/// Validated CPU state; upload occurs after the previous frame completes.
 	pub fn set_lights(&mut self, lights: &[Light]) -> Result<(), String> {
 		self.lighting = LightingUniform::from_lights(lights)?;
+		Ok(())
+	}
+
+	/// Editor-only presentation; no scene entities/materials are created.
+	pub fn set_editor_visuals(&mut self, visuals: &crate::EditorVisuals) -> Result<(), String> {
+		visuals.validate()?;
+		self.editor_visuals.grid = visuals.grid;
+		self.editor_visuals.lines.clone_from(&visuals.lines);
 		Ok(())
 	}
 
@@ -217,8 +229,26 @@ impl WindowRenderer {
 		}
 		let resources = &mut *self.resources;
 		let targets = resources.targets.as_mut().expect("prepared render targets");
+		let editor = if self.editor_visuals.is_empty() {
+			None
+		} else {
+			if resources.editor.as_ref().is_none_or(|pass| {
+				!pass.supports_formats(targets.swapchain.format(), targets.depth.format())
+			}) {
+				resources.editor = Some(crate::vulkan::editor::EditorPass::new(
+					&resources.device,
+					targets.swapchain.format(),
+					targets.depth.format(),
+				)?);
+			}
+			let pass = resources.editor.as_mut().expect("editor pass initialized");
+			Some(crate::vulkan::frame::FrameEditor {
+				pass,
+				visuals: &self.editor_visuals,
+			})
+		};
 		targets.frame.set_lighting(self.lighting);
-		let result = targets.frame.draw(
+		let result = targets.frame.draw_with_editor(
 			&resources.device,
 			FrameTargets {
 				swapchain: &targets.swapchain,
@@ -228,6 +258,7 @@ impl WindowRenderer {
 			&resources.camera,
 			camera,
 			objects,
+			editor,
 		);
 		finish_draw(&mut self.dirty, result)
 	}

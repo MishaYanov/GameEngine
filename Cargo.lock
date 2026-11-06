@@ -137,6 +137,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
+ "windows-sys 0.52.0",
  "winit",
 ]
 

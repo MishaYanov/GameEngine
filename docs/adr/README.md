@@ -1,7 +1,7 @@
 # Architecture decisions: reading guide and dependencies
 
 This guide explains which part of the engine each ADR covers, which decisions to read first, and what still needs
-evidence. ADR-0001 records accepted architectural direction with implementation planned. On 2026-10-29, core
+evidence. ADR-0001 records accepted direction with partial workspace implementation; substantial UI/protocol/build work remains. On 2026-10-29, core
 state/lifecycle decisions in ADR-0004 and ADR-0005, and the native module/typed-state direction in ADR-0008, were
 accepted. Their extended proposals and the other ADRs remain open. Acceptance and implementation/verification are
 tracked separately; a document's existence does not establish a feature.
@@ -40,7 +40,7 @@ describe integration between decisions that can be developed together.
 
 | ADR                                                                                 | Question it answers                                                                                          | Read first                                            | Status                                         |
 |-------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|-------------------------------------------------------|------------------------------------------------|
-| [0001 — Editor command pipeline](0001-editor-command-pipeline.md)                   | How does an edit become a validated, undoable backend change, and how are explicit builds coordinated?       | Entry point                                           | Accepted direction; implementation planned     |
+| [0001 — Editor command pipeline](0001-editor-command-pipeline.md)                   | How does an edit become a validated, undoable backend change, and how are explicit builds coordinated?       | Entry point                                           | Accepted direction; partial implementation     |
 | [0002 — Objects and components](0002-object-composition-and-components.md)          | What is an Object, what can be attached, and what is a Subject, Controller, Asset, or Preset?                | 0001                                                  | Proposed                                       |
 | [0003 — Rust–TypeScript bridge](0003-rust-typescript-bridge.md)                     | Which types and values cross the boundary, in which representation, with what validation and delivery rules? | 0001, 0002                                            | Proposed                                       |
 | [0004 — Authored, Play, and editor state](0004-authoring-play-and-editor-state.md)  | What is saved, what exists only during Play, and what belongs to the user's workspace?                       | 0001, 0002                                            | Core resolved; extensions proposed             |

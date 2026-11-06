@@ -1,0 +1,82 @@
+<app-drawer
+        [config]="drawerConfig"
+        icon="object"
+        label="Inspector"
+        preferenceKey="editor.object-inspector"
+        resizeLabel="Resize Inspector"
+        type="right"
+>
+    <editor-pane icon="object" title="Inspector">
+        @for (selection of selectedEntities(); track selection.identity) {
+            @let selected = selection.entity;
+            <div class="inspector-content">
+                @if (!editable()) {
+                    <p class="read-only">Properties are read-only while editing is unavailable.</p>
+                }
+                <label class="name-field">
+                    <span>Name</span>
+                    <input
+                            #nameInput
+                            type="text"
+                            maxlength="1024"
+                            autocomplete="off"
+                            [value]="nameValue()"
+                            [disabled]="!editable()"
+                            [attr.aria-invalid]="invalidName() ? 'true' : null"
+                            [attr.aria-describedby]="invalidName() ? nameErrorId : null"
+                            (focus)="startName(nameInput)"
+                            (input)="changeName(nameInput)"
+                            (blur)="finishName(nameInput)"
+                            (keydown)="nameKeydown($event, nameInput)"
+                    />
+                </label>
+                @if (invalidName()) {
+                    <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
+                }
+                <dl class="entity-reference">
+                    <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
+                    <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
+                </dl>
+                <section class="transform" aria-label="Local transform">
+                    <h3>Transform <span>Local space</span></h3>
+                    <editor-vector3-field
+                            label="Position"
+                            [value]="selected.transform.position"
+                            [disabled]="!editable()"
+                            (editStarted)="editStarted.emit('position')"
+                            (valueChanged)="changeTransform('position', $event)"
+                            (editCommitted)="editCommitted.emit()"
+                            (editCancelled)="editCancelled.emit()"
+                    />
+                    <editor-vector3-field
+                            label="Rotation"
+                            unit="degrees"
+                            [value]="rotationDegrees()"
+                            [disabled]="!editable()"
+                            (editStarted)="editStarted.emit('rotation')"
+                            (valueChanged)="changeTransform('rotation', $event)"
+                            (editCommitted)="editCommitted.emit()"
+                            (editCancelled)="editCancelled.emit()"
+                    />
+                    <editor-vector3-field
+                            label="Scale"
+                            [value]="selected.transform.scale"
+                            [disabled]="!editable()"
+                            (editStarted)="editStarted.emit('scale')"
+                            (valueChanged)="changeTransform('scale', $event)"
+                            (editCommitted)="editCommitted.emit()"
+                            (editCancelled)="editCancelled.emit()"
+                    />
+                </section>
+            </div>
+        } @empty {
+            <p class="placeholder">Select an entity to inspect its properties.</p>
+        }
+        @if (editError(); as error) {
+            <div class="edit-error" role="alert">
+                <p class="error">{{ error }}</p>
+                <button class="discard-edit" type="button" (click)="editCancelled.emit()">Discard edit</button>
+            </div>
+        }
+    </editor-pane>
+</app-drawer>

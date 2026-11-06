@@ -1,10 +1,7 @@
 # Workspace architecture
 
 The intended product is one Angular editor with controls and a game pane. engine-core owns CPU editing/game logic,
-runtime supplies GPU adapters, bridge re-exports transport contracts, and Tauri supplies project/native ownership. This
-batch implements integration APIs and engine
-foundations, not a finished editor layout. Start with [usage](usage.md) and
-the [steps 21–35 learning report](editor-steps-21-35.md).
+runtime supplies GPU adapters, bridge re-exports transport contracts, and Tauri supplies project/native ownership. The current workspace connects a subset of editor actions; read [usage](usage.md) and [editor workspace](editor-workspace.md) for present wiring and limits. Earlier step reports retain their milestone context.
 
 Current project schema 3 and editor protocol 2 support retained multi-scene authoring and reusable behavior settings.
 GameSession adds explicit prepared replacement of a running simulation and game-owned in-memory progress across scene
@@ -13,7 +10,9 @@ See [project lifecycle](project-lifecycle.md) for the current contract; earlier 
 milestones.
 
 For a method-level walkthrough with diagrams, read [Editor flow: startup to project builds](editor-flow.md).
-It distinguishes the current setup UI, the main editor shell, available native APIs, and admin Cargo rebuild jobs.
+It distinguishes the current setup UI, the partially connected editor workspace, available native APIs, and admin Cargo rebuild jobs.
+
+Current Angular workspace wiring mounts the native SceneViewport and connects guarded File Open plus Save Scene/Undo/Redo/Play/Stop. Entity/assets lists do not yet provide full selection/inspection/import workflows, and build UI remains open. See [workspace guide](editor-workspace.md); the latest committed backend and this uncommitted UI are separate snapshots.
 
 ## Projects and boundaries
 

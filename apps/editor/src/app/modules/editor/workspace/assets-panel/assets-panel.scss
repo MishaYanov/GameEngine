@@ -1,0 +1,89 @@
+:host {
+  display: contents;
+}
+
+app-drawer {
+  margin-top: var(--space-2);
+}
+
+.asset-browser {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.folder-location,
+.asset-details,
+li button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.folder-location span,
+.asset-file span {
+  overflow-wrap: anywhere;
+}
+
+ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+button {
+  min-height: var(--space-7);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: var(--cursor-action);
+}
+
+button:hover:enabled {
+  background: var(--color-control-hover);
+}
+
+button:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+button.selected {
+  border-color: var(--color-focus);
+  background: var(--color-control-hover);
+}
+
+.asset-details {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--color-pane-edge);
+}
+
+.asset-details div {
+  min-width: 0;
+}
+
+.asset-path {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+
+.active-scene {
+  color: var(--color-success);
+  font-size: var(--font-size-xs);
+}
+
+.asset-kind,
+p {
+  color: var(--color-text-secondary);
+}

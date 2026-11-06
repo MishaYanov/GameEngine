@@ -1,0 +1,43 @@
+:host {
+  display: block;
+  flex: none;
+  min-width: 0;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  overflow-x: auto;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: var(--cursor-action);
+}
+
+button:hover:not(:disabled),
+button.active {
+  background: var(--color-pane);
+  border-color: var(--color-pane-edge);
+  color: var(--color-text);
+}
+
+button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+button:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}

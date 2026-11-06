@@ -1,8 +1,28 @@
-<editor-nav-manager></editor-nav-manager>
 <main class="editor-main">
-    <editor-header></editor-header>
-    <editor-grid-wrapper></editor-grid-wrapper>
-    <editor-footer></editor-footer>
+    <editor-header
+            (openProjectRequested)="openProject()"
+            [canOpen]="canOpenProject()"
+            [opening]="opening()"
+    />
+
+    <div [class.has-message]="opening()" class="open-status" role="status">{{ openMessage() }}</div>
+
+    @if (openError(); as message) {
+        <div class="open-error" role="alert">
+            <span>{{ message }}</span>
+
+            <button (click)="openError.set(null)" type="button">
+                Dismiss
+            </button>
+        </div>
+    }
+
+    <editor-workspace
+            (openProjectRequested)="openProject()"
+            [canOpenProject]="canOpenProject()"
+            [opening]="opening()"
+    />
+    <editor-footer [projectName]="editorService.snapshot()?.project.name ?? null"/>
 </main>
 
 <editor-portal>

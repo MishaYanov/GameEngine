@@ -1,0 +1,7 @@
+<% if (panel) { %><editor-pane [title]="title()">
+    <div class="panel-content">
+        <ng-content/>
+    </div>
+</editor-pane>
+<% } else { %><ng-content><%= title %></ng-content>
+<% } %>

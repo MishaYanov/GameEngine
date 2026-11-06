@@ -1,0 +1,12 @@
+import {Component<% if (panel) { %>, input<% } %>} from '@angular/core';
+<% if (panel) { %>import {EditorPane} from '../../../../shared/components/pane/pane';
+<% } %>
+@Component({
+    selector: '<%= selector %>',
+<% if (panel) { %>    imports: [EditorPane],
+<% } %>    templateUrl: './<%= name %>.html',
+    styleUrl: './<%= name %>.scss',
+})
+export class <%= className %> {<% if (panel) { %>
+    readonly title = input('<%= title %>');
+<% } %>}

@@ -302,6 +302,173 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 }
 
 #[test]
+fn save_all_persists_dirty_scene_drafts_and_project_without_switching() {
+	let (fixture, _, second) = two_scene_project();
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: "a".into(),
+			name: "First saved together".into(),
+		},
+	);
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: second.clone(),
+		},
+	);
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: "a".into(),
+			name: "Second saved together".into(),
+		},
+	);
+	let mut project = workspace.backend.session().project().clone();
+	project.name = "Saved all settings".into();
+	run(&mut workspace, Command::SetProject { project });
+	let active_path = workspace.scene_path.clone();
+	let scene_revision = workspace.backend.session().scene_revision();
+	let saved = workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	assert_eq!(saved.active_scene_id, second);
+	assert_eq!(workspace.scene_path, active_path);
+	assert_eq!(saved.scene_revision, scene_revision);
+	assert!(!saved.dirty);
+	assert!(!saved.project_dirty);
+	assert!(saved.scenes.iter().all(|scene| !scene.dirty));
+	for (path, name) in [
+		("scenes/main.json", "First saved together"),
+		("scenes/second.json", "Second saved together"),
+	] {
+		assert_eq!(
+			runtime::scene_io::load_data(&fixture.0.join(path))
+				.unwrap()
+				.data
+				.entities[0]
+				.name,
+			name
+		);
+	}
+	assert_eq!(
+		runtime::project::ProjectData::load(&workspace.project_path)
+			.unwrap()
+			.name,
+		"Saved all settings"
+	);
+	let reopened = fixture.open();
+	assert!(!reopened.backend.session().is_dirty());
+	assert_eq!(
+		reopened.backend.session().project().name,
+		"Saved all settings"
+	);
+}
+
+#[test]
+fn save_all_keeps_successful_scene_baselines_when_manifest_write_fails_then_retries() {
+	let fixture = Fixture::new();
+	fixture.write_project("scenes/main.json");
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: "a".into(),
+			name: "Scene already written".into(),
+		},
+	);
+	let mut project = workspace.backend.session().project().clone();
+	project.name = "Project pending retry".into();
+	run(&mut workspace, Command::SetProject { project });
+	// Exhaust the manifest writer's temporary slots to fail after scene writes.
+	let blocked: Vec<_> = (0..128)
+		.map(|id| {
+			workspace
+				.project_path
+				.with_file_name(format!("project.json.tmp-{}-{id}", std::process::id()))
+		})
+		.collect();
+	for path in &blocked {
+		fs::write(path, b"held").unwrap();
+	}
+	let error = workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap_err();
+	assert!(error.contains("Cannot allocate temporary file"), "{error}");
+	let partial = workspace.backend.snapshot().unwrap();
+	assert!(partial.project_dirty);
+	assert!(partial.dirty);
+	assert!(partial.scenes.iter().all(|scene| !scene.dirty));
+	assert_eq!(
+		runtime::scene_io::load_data(&workspace.scene_path)
+			.unwrap()
+			.data
+			.entities[0]
+			.name,
+		"Scene already written"
+	);
+	assert_eq!(
+		runtime::project::ProjectData::load(&workspace.project_path)
+			.unwrap()
+			.name,
+		"Selected project"
+	);
+	for path in blocked {
+		fs::remove_file(path).unwrap();
+	}
+	assert!(
+		!workspace
+			.save_all(workspace.backend.session().revision())
+			.unwrap()
+			.dirty
+	);
+	assert_eq!(
+		runtime::project::ProjectData::load(&workspace.project_path)
+			.unwrap()
+			.name,
+		"Project pending retry"
+	);
+}
+
+#[test]
+fn save_all_rejects_grouped_edits_play_and_invalid_paths_before_any_writes() {
+	let (fixture, _, _) = two_scene_project();
+	let mut workspace = fixture.open();
+	let original = fs::read(&workspace.scene_path).unwrap();
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: "a".into(),
+			name: "Keep dirty".into(),
+		},
+	);
+	run(
+		&mut workspace,
+		Command::BeginTransaction {
+			label: "In progress".into(),
+		},
+	);
+	assert!(workspace
+		.save_all(workspace.backend.session().revision())
+		.is_err());
+	run(&mut workspace, Command::CancelTransaction);
+	run(&mut workspace, Command::StartPlay);
+	assert!(workspace
+		.save_all(workspace.backend.session().revision())
+		.is_err());
+	run(&mut workspace, Command::StopPlay);
+	let other = fixture.0.join("scenes/second.json");
+	fs::rename(&other, other.with_extension("held")).unwrap();
+	fs::create_dir(&other).unwrap();
+	assert!(workspace
+		.save_all(workspace.backend.session().revision())
+		.is_err());
+	assert_eq!(fs::read(&workspace.scene_path).unwrap(), original);
+	assert!(workspace.backend.session().is_dirty());
+}
+
+#[test]
 fn workspace_switch_preserves_drafts_and_saves_only_active_scene_then_reopens_startup() {
 	let (fixture, project, second) = two_scene_project();
 	let mut workspace = fixture.open();

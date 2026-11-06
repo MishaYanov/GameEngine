@@ -12,6 +12,9 @@
                 type="button"
         >
             <editor-icon [name]="icon()"/>
+            @if (!horizontal()) {
+                <span>{{ label() }}</span>
+            }
         </button>
         @for (subject of subjects(); track subject.element) {
             <button

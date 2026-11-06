@@ -16,10 +16,9 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
-  margin-left: var(--space-2);
 }
 
-editor-grid-wrapper {
+editor-workspace {
   flex: 1;
   min-height: 0;
 }
@@ -32,7 +31,41 @@ editor-portal {
   :host {
     padding: var(--space-1);
   }
-  .editor-main {
-    margin-left: var(--space-1);
-  }
+}
+
+.open-status.has-message,
+.open-error {
+  flex: none;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+.open-status {
+  color: var(--color-text-secondary);
+}
+
+.open-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: var(--border-width) solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+}
+
+.open-error span {
+  overflow-wrap: anywhere;
+}
+
+.open-error button {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-control-hover);
+  color: var(--color-text);
+  font: inherit;
+  cursor: var(--cursor-action);
 }

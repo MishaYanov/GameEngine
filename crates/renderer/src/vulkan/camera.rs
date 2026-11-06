@@ -75,6 +75,39 @@ impl From<VulkanBufferError> for VulkanCameraError {
 }
 
 impl CameraUniform {
+	pub fn from_view_projection(matrix: glam::Mat4) -> Self {
+		Self {
+			view_projection: matrix.to_cols_array(),
+		}
+	}
+
+	pub fn orthographic(
+		position: [f32; 3],
+		target: [f32; 3],
+		up: [f32; 3],
+		vertical_height: f32,
+		aspect_ratio: f32,
+		near: f32,
+		far: f32,
+	) -> Self {
+		let half_height = vertical_height * 0.5;
+		let half_width = half_height * aspect_ratio;
+		let projection = glam::camera::rh::proj::vulkan::orthographic(
+			-half_width,
+			half_width,
+			-half_height,
+			half_height,
+			near,
+			far,
+		);
+		let view = look_at_mat4(
+			Vec3::from_array(position),
+			Vec3::from_array(target),
+			Vec3::from_array(up).normalize(),
+		);
+		Self::from_view_projection(projection * view)
+	}
+
 	pub fn perspective(
 		position: [f32; 3],
 		target: [f32; 3],
@@ -297,5 +330,35 @@ impl Drop for VulkanCamera {
 			self.device
 				.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
 		}
+	}
+}
+
+#[cfg(test)]
+mod projection_tests {
+	use super::*;
+	#[test]
+	fn orthographic_camera_keeps_parallel_size_and_vulkan_depth_range() {
+		let camera = CameraUniform::orthographic(
+			[0.0, 0.0, 10.0],
+			[0.0; 3],
+			[0.0, 1.0, 0.0],
+			8.0,
+			2.0,
+			0.1,
+			100.0,
+		);
+		let matrix = glam::Mat4::from_cols_array(&camera.view_projection);
+		let near = matrix * glam::Vec4::new(0.0, 0.0, 9.9, 1.0);
+		let far = matrix * glam::Vec4::new(0.0, 0.0, -90.0, 1.0);
+		assert!((near.z / near.w).abs() < 1e-5);
+		assert!((far.z / far.w - 1.0).abs() < 1e-5);
+		let front = matrix * glam::Vec4::new(1.0, 1.0, 0.0, 1.0);
+		let back = matrix * glam::Vec4::new(1.0, 1.0, -10.0, 1.0);
+		assert!((front.x / front.w - back.x / back.w).abs() < 1e-6);
+		assert!((front.y / front.w - back.y / back.w).abs() < 1e-6);
+		assert!(
+			front.y < 0.0,
+			"Vulkan projection flips Y for a positive-height viewport"
+		);
 	}
 }

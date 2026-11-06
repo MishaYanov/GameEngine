@@ -1,0 +1,31 @@
+:host { display: block; flex: none; }
+.scene-actions, .scene-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+.scene-files { border-block: 1px solid var(--color-pane-edge); }
+label { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+select, input, button {
+  min-height: 1.75rem;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+select { max-width: min(45vw, 24rem); }
+input { width: min(45vw, 20rem); }
+button:enabled:hover { background: var(--color-control-hover); }
+button:disabled, select:disabled { opacity: var(--opacity-disabled); }
+.startup { color: var(--color-text-secondary); font-size: var(--font-size-xs); }
+p { margin: 0; font-size: var(--font-size-xs); }
+.scene-files p { flex-basis: 100%; }
+.status, .error { padding: var(--space-1) var(--space-2); color: var(--color-text-secondary); }
+.error { color: var(--color-danger); }

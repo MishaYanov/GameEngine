@@ -1,0 +1,76 @@
+<app-drawer
+        [config]="drawerConfig"
+        icon="folder"
+        label="Assets"
+        preferenceKey="editor.assets"
+        resizeLabel="Resize Assets"
+        type="bottom"
+>
+    <editor-pane icon="folder" title="Assets">
+        <button (click)="loadModels()" [disabled]="!canLoadModels()" pane-actions type="button">
+            {{ loading() ? 'Loading models…' : models() === null ? 'Load Models' : 'Refresh Models' }}
+        </button>
+        <div class="asset-browser">
+            @if (!projectOpen()) {
+                <p>Open a project to browse its assets.</p>
+            } @else {
+                <nav aria-label="Asset folders" class="folder-location">
+                    <button (click)="upOneFolder(location)" [disabled]="!folder()" type="button">Up</button>
+                    <span #location tabindex="-1">{{ folder() ? 'Assets / ' + folder() : 'Assets' }}</span>
+                </nav>
+                @if (error(); as message) {
+                    <p role="alert">{{ message }}</p>
+                }
+                @if (status(); as message) {
+                    <p role="status">{{ message }}</p>
+                }
+                <ul aria-label="Folder contents">
+                    @for (folder of folderContents().folders; track folder[1]) {
+                        <li>
+                            <button (click)="openFolder(folder[1], location)" type="button">
+                                <editor-icon name="folder"/>
+                                {{ folder[0] }}
+                            </button>
+                        </li>
+                    }
+                    @for (file of folderContents().files; track file.kind === 'scene' ? file.sceneId : file.path) {
+                        <li [title]="file.path" class="asset-file">
+                            <button
+                                    (click)="selectFile(file)"
+                                    (pointerdown)="beginModelDrag(file, $event)"
+                                    [attr.aria-pressed]="isSelected(file)"
+                                    [class.selected]="isSelected(file)"
+                                    type="button"
+                            >
+                                <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
+                                <span>{{ file.name }}</span>
+                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : 'Model' }}</span>
+                                @if (isActiveScene(file)) {
+                                    <span class="active-scene">Active</span>
+                                }
+                            </button>
+                        </li>
+                    }
+                </ul>
+                @if (folderContents().folders.length === 0 && folderContents().files.length === 0) {
+                    <p>No catalogued assets in this folder.</p>
+                }
+                @if (selected(); as file) {
+                    <section aria-label="Selected asset" class="asset-details">
+                        <div>
+                            <strong>{{ file.name }}</strong>
+                            <span class="asset-path">{{ file.path }}</span>
+                        </div>
+                        @if (file.kind === 'scene') {
+                            <button (click)="openScene()" [disabled]="!canRunAction() || isActiveScene(file)" type="button">
+                                Open Scene
+                            </button>
+                        } @else {
+                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">Add to Scene</button>
+                        }
+                    </section>
+                }
+            }
+        </div>
+    </editor-pane>
+</app-drawer>

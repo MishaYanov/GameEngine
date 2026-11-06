@@ -1,11 +1,9 @@
 # Angular editor integration
 
-Source: `apps/editor`. The Angular 22 app owns editor UI, input bindings and the chosen game pane. Runtime supplies
-editor behavior through a typed Tauri bridge. **This batch adds integration APIs, not a new UI layout, mock screen, or
-composed editor template.** The current setup/status screen has not been replaced with a finished scene editor.
+Source: `apps/editor`. The Angular 22 app supplies project creation/opening, Scene/Game views, live Inspector editing, scene/model actions, native viewport controls, Save All and staged standalone export. Native spatial gestures and rendering stay in Rust/Vulkan; the Settings portal remains a placeholder. Automated checks and desktop/GPU acceptance are distinct.
 
-See [Editor flow: startup to project builds](../../editor-flow.md) for the current startup routes, setup action,
-document queue, and viewport graphs, including which APIs are not yet connected to the main editor UI.
+Read [Angular editor workspace](../../editor-workspace.md) for the desktop workflow, exact connected controls, project replacement guards, component generators and remaining UI gaps. [Editor flow](../../editor-flow.md) traces the underlying methods.
+The [native scene editor implementation](../../viewport-implementation.md) documents the new viewport gestures, grid/handle rendering, pointer-captured placement and current limits.
 
 ## Run
 
@@ -28,6 +26,8 @@ demand in the host, not unconditionally before the window opens.
 | `editor.service.ts`            | Read-only signals, native command queues, revision-aware edits, imports/prefabs/collisions, viewport lifecycle |
 | `editor-updates.ts`            | Validate incremental command replies and merge authoritative deltas before publishing signals                  |
 | `engine-viewport.directive.ts` | Attach a native child to one existing Angular DOM pane; observe bounds/visibility and emit input/status/errors |
+| `viewport-editor.models.ts` | Editor-only camera/tool actions and native presentation-state DTOs |
+| `viewport-editor.service.ts` | Bounded view-action queue, native state subscriptions and coalesced document notifications |
 
 EditorService exposes document, selection, dirty, playing, pending/busy, capabilities, assets, collisions and viewport
 signals. Open a project, load capabilities, execute typed intent, and accept the returned authoritative snapshot.
@@ -54,8 +54,7 @@ returns the serialized comparison baseline; unchanged configs avoid another writ
 baseline when connecting a component. Changed configs are cloned through JSON, debounced for 300 ms and flushed in
 order. Layout settings remain separate from authored project/scene state.
 
-The core service does not assign shortcuts. Future UI controls and key bindings use the same execute path. Do not mutate
-signal snapshots or duplicate runtime scene semantics in components.
+EditorService does not assign shortcuts. Native ViewportInteraction owns focused spatial shortcuts; Angular controls send editor-only viewport actions. Authored commands keep their existing typed execute path. Do not mutate signal snapshots or duplicate runtime scene semantics in components.
 
 ## Project and scene operations
 
@@ -65,20 +64,21 @@ project files are upgraded by the native JSON loader before reaching the fronten
 `openProject(manifestPath)`, `registerScene(path)`, `switchScene(id)`, `saveSceneAs(path)` and `saveProject()` wrap the
 host APIs. Snapshots expose active scene identity, project state and per-scene dirty flags. `save()` persists only the
 active scene; `saveProject()` persists only the manifest. `reload()` explicitly sends `discard_unsaved`, while
-`refresh()` reads in-memory state. The UI must make destructive reload intent clear.
-See [project lifecycle](../../project-lifecycle.md) for a complete example and limits. No new scene-browser template is
-implied by these service changes.
+`refresh()` reads in-memory state. `saveAll()` persists all dirty retained scenes and project settings without changing the active scene. The UI must make destructive reload intent clear.
+See [project lifecycle](../../project-lifecycle.md) for the data model. The workspace now exposes scene switching, startup selection, registration and Save As, plus selectable model/scene catalogue entries and origin/native-drag model placement.
+
+`core/project/project.service.ts` creates authoring projects and chooses a destination. Setup opens the created manifest through EditorService, retaining a retry path after open cancellation/failure. `prepareBuild()` stages saved inputs inside the edit reservation; `finishBuild()` compiles outside the document queue. `runBuild(expectedPath)` explicitly launches the remembered successful output.
 
 ## Pane boundary and platform limits
 
-EngineViewportDirective is available as `[engineViewport]` with input/status/error outputs. It has not been applied to a
-newly composed app pane here. The eventual UI owner chooses layout, imports the directive, binds controls, handles
-errors, and maps raw input into commands. The directive handles one viewport reservation, resize/intersection
-visibility, bounds updates and teardown.
+`SceneViewport` in modules/editor/workspace imports `[engineViewport]` and is mounted by the main workspace when a project is open. It displays status/errors, registers the CSS aperture for asset dragging and suppresses the surface for WebView modal dialogs. Native ViewportInteraction handles viewport input; the wrapper still exposes raw input/status/error outputs for observation. The directive owns one viewport reservation, bounds/visibility and teardown; Scene/Game tabs share this surface rather than creating two renderers.
+
+The adjacent ViewportToolbar stays outside the child bounds. Native grid, selection bounds, handles, marquee and placement markers are rendered in Vulkan. `ViewportAssetDragService` captures a model-entry pointer, forwards normalized CSS-aperture coordinates and flushes the final position before CommitPlacement. Native asset adoption is asynchronous and remains cancellable through its loading state.
+
+Hierarchy uses virtual parent/child rows, keyboard navigation and keep-world reparent actions with an Inspector commit barrier. ViewportEditorService binds native generations to the frontend's separate local contexts, clears stale gesture/preview state and rejects queued actions after replacement. WebView blur cancels an unfinished model drag; focus transfer after submission retains the load, with Escape cancellation available.
 
 Embedding currently uses a Windows native child window. It has native airspace: ordinary HTML is not an arbitrary
-overlay above the Vulkan child. Non-Windows capability limits must be surfaced. No interactive acceptance of pane
-bounds, clipping, DPI, focus, or shutdown has been performed for this batch.
+overlay above the Vulkan child. Non-Windows capability limits must be surfaced. Real cross-window capture, DPI, focus, shutdown and GPU behavior require their separately recorded desktop acceptance.
 
 ## Contracts and learning report
 

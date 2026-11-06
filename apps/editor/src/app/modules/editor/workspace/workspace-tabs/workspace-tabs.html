@@ -1,0 +1,21 @@
+<nav aria-label="Workspace views" class="workspace-tabs">
+    <div aria-label="Workspace views" class="tabs" role="tablist">
+        @for (tab of tabs(); track tab.kind) {
+            <button
+                #tabButton
+                (click)="selectView(tab.kind)"
+                (keydown)="onTabKeydown($event, tab.kind)"
+                [attr.aria-controls]="panelId"
+                [attr.aria-selected]="tab.active"
+                [attr.tabindex]="tab.kind === focusableTab() ? 0 : -1"
+                [class.active]="tab.active"
+                [id]="buttonId(tab.kind)"
+                role="tab"
+                type="button"
+            >
+                <editor-icon [name]="tab.icon"/>
+                <span>{{ tab.label }}</span>
+            </button>
+        }
+    </div>
+</nav>

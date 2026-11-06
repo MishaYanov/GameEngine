@@ -4,6 +4,12 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 ## Workspace and development
 
+- [Vulkan scene editor design](../designs/editor-viewport/README.md): Researched navigation, grid, selection, transform tools, native asset placement, rendering architecture, and a game-creation support profile. Proposed viewport work is distinguished from current implementation.
+
+- [Vulkan scene editor implementation](viewport-implementation.md): Native camera, analytic grid, selection, transform gestures, asynchronous asset placement, Hierarchy, rendering contracts, verification and current limits.
+
+- [Angular editor workspace](editor-workspace.md): Guarded File Open, Scene/Game viewport, Hierarchy, live Inspector, assets, component generators and remaining UI limits.
+
 - [Editor flow: startup to project builds](editor-flow.md): Ten method-level graphs trace startup, setup creation,
   project opening, command queues, save/reload, native rendering, Play, packaging, and admin rebuilds. Marks current
   UI wiring separately from available backend APIs.
@@ -22,7 +28,7 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 
 - [ADR-0001: Typed editor commands, change messages, and project builds](adr/0001-editor-command-pipeline.md):
   Accepted architecture for the editor client, recorded UI intent, runtime synchronization, and explicit build jobs;
-  implementation is planned.
+  implementation is partial; substantial editing/build UI and protocol work remains.
 
 - [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 3, protocol 2, shared settings,
   scene IDs, retained

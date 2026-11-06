@@ -157,4 +157,22 @@ describe('Drawer configuration', () => {
         splitter.resize.emit(20);
         expect(component.config().width).toBe('220px');
     });
+
+    it('uses the panel width limit in place of an older saved maximum', async () => {
+        load.mockResolvedValue({
+            schema_version: 1,
+            components: {'editor.navigation': {width: '240px', maxWidth: '288px'}},
+        });
+        fixture.componentRef.setInput('maxWidth', '45%');
+        await initialize();
+
+        const element: HTMLElement = fixture.nativeElement;
+        vi.spyOn(element.parentElement!, 'getBoundingClientRect').mockReturnValue(
+            new DOMRect(0, 0, 1000, 600),
+        );
+        const splitter: Splitter = fixture.debugElement.query(By.directive(Splitter)).componentInstance;
+        splitter.edge.emit('max');
+
+        expect(component.config().width).toBe('450px');
+    });
 });

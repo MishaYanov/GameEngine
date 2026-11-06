@@ -4,13 +4,17 @@ mod layout_preferences;
 mod project_location;
 mod state;
 mod viewport;
+mod viewport_tools;
+mod viewport_interaction;
 
 use crate::commands::editor::*;
 use crate::commands::engine::engine_status;
 use crate::commands::preferences::{
 	editor_layout_preferences_load, editor_layout_preferences_save,
 };
-use crate::commands::project::{choose_project_destination, create_project};
+use crate::commands::project::{
+	choose_project_destination, choose_project_manifest, confirm_project_discard, create_project,
+};
 use state::EditorState;
 use tauri::Manager;
 
@@ -55,6 +59,8 @@ pub fn run() {
 			engine_status,
 			create_project,
 			choose_project_destination,
+			choose_project_manifest,
+			confirm_project_discard,
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
 			editor_capabilities,
@@ -68,7 +74,11 @@ pub fn run() {
 			editor_execute_receipt,
 			editor_changes,
 			editor_save_project,
+			editor_save_all,
 			editor_build_project,
+			editor_prepare_project_build,
+			editor_finish_project_build,
+			editor_run_build,
 			editor_submit_import,
 			editor_cancel_import,
 			editor_drain_imports,
@@ -85,6 +95,8 @@ pub fn run() {
 			editor_viewport_bounds,
 			editor_viewport_detach,
 			editor_viewport_status,
+			editor_viewport_editor_state,
+			editor_viewport_action,
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running Game Engine editor");

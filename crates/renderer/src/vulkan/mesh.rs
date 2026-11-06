@@ -3,7 +3,7 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
-use ash::{vk, Instance};
+use ash::{Instance, vk};
 
 use super::{Vertex, VulkanBuffer, VulkanBufferError, VulkanDevice};
 
@@ -113,7 +113,7 @@ impl VulkanMesh {
 				super::upload::copy_buffer(raw, command, &staging[0], mesh.vertex_buffer());
 				super::upload::copy_buffer(raw, command, &staging[1], mesh.index_buffer());
 			})
-				.map_err(VulkanBufferError::from)?;
+			.map_err(VulkanBufferError::from)?;
 		Ok(mesh)
 	}
 

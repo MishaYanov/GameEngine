@@ -99,6 +99,13 @@ test('supports default-exported components and explicit previews for multi-compo
     assert.doesNotMatch(source, /module\["A"\]/);
 });
 
+test('registers an explicit preview for a feature component outside the shared folders', async (t) => {
+    const f = await fixture(t);
+    await f.preview('scene-viewport', 'export default {component: SceneViewport};');
+    await generateRegistry(f.root, f.output);
+    assert.match(await f.source(), /id: "scene-viewport".*previews\/scene-viewport\.design/);
+});
+
 test('watch mode adds and removes sections while serving', async (t) => {
     const f = await fixture(t);
     await generateRegistry(f.root, f.output);

@@ -3,6 +3,7 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {applyEditorUpdate} from './editor-updates';
 import type {
+    BuildLaunchResult,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -10,6 +11,8 @@ import type {
     EditorSnapshot,
     ModelAsset,
     Prefab,
+    ProjectBuildPreparation,
+    ProjectBuildResult,
     SceneId,
     Vec3,
     ViewportBounds,
@@ -18,6 +21,11 @@ import type {
 } from './editor.models';
 
 export type EditorErrorKind = 'unavailable' | 'not_open' | 'conflict' | 'busy' | 'backend';
+
+export interface ProjectOpenOptions {
+    readonly expectedRevision?: number | null;
+    readonly discardUnsaved?: boolean;
+}
 
 export class EditorClientError extends Error {
     constructor(
@@ -43,6 +51,8 @@ export class EditorService {
     private readonly destroyRef = inject(DestroyRef);
     private readonly snapshotState = signal<EditorSnapshot | null>(null);
     readonly snapshot = this.snapshotState.asReadonly();
+    private readonly workspaceGenerationState = signal(0);
+    readonly workspaceGeneration = this.workspaceGenerationState.asReadonly();
     readonly document = computed(() => this.snapshotState()?.document ?? null);
     readonly selection = computed(() => this.snapshotState()?.selection ?? []);
     readonly dirty = computed(() => this.snapshotState()?.dirty ?? false);
@@ -78,8 +88,6 @@ export class EditorService {
             this.destroyed = true;
             for (const unlisten of this.listeners) unlisten();
             this.listeners.clear();
-            // Finish any already submitted attach before the final detach. Do not
-            // leave a native child behind when its Angular owner is destroyed.
             if (this.nativeAvailable && this.viewportRequested) {
                 void this.viewportQueue.then(() => invoke('editor_viewport_detach')).catch(() => undefined);
             }
@@ -115,14 +123,40 @@ export class EditorService {
         return this.enqueue('editor_open', async () => {
             const result = await this.native<EditorSnapshot>('editor_open', {assetRoot, scenePath});
             this.assetsState.set(null);
+            this.workspaceGenerationState.update(generation => generation + 1);
             return this.accept(result);
         });
     }
 
-    openProject(manifestPath: string): Promise<EditorSnapshot> {
+    async chooseProjectManifest(): Promise<string | null> {
+        try {
+            return await this.native<string | null>('choose_project_manifest');
+        } catch (cause: unknown) {
+            throw this.recordError('choose_project_manifest', cause);
+        }
+    }
+
+    async confirmProjectDiscard(): Promise<boolean> {
+        try {
+            return await this.native<boolean>('confirm_project_discard');
+        } catch (cause: unknown) {
+            throw this.recordError('confirm_project_discard', cause);
+        }
+    }
+
+    openProject(manifestPath: string, options: ProjectOpenOptions = {}): Promise<EditorSnapshot> {
+        // Capture the reviewed revision now, rather than after queued edits finish.
+        const expectedRevision = options.expectedRevision === undefined
+            ? this.snapshotState()?.revision ?? null
+            : options.expectedRevision;
         return this.enqueue('editor_open_project', async () => {
-            const result = await this.native<EditorSnapshot>('editor_open_project', {manifestPath});
+            const result = await this.native<EditorSnapshot>('editor_open_project', {
+                manifestPath,
+                expectedRevision,
+                discardUnsaved: options.discardUnsaved ?? false,
+            });
             this.assetsState.set(null);
+            this.workspaceGenerationState.update(generation => generation + 1);
             return this.accept(result);
         });
     }
@@ -141,6 +175,54 @@ export class EditorService {
 
     saveProject(): Promise<EditorSnapshot> {
         return this.snapshotOperation('editor_save_project');
+    }
+
+    saveAll(): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_save_all');
+    }
+
+    prepareBuild(destination: string): Promise<ProjectBuildPreparation> {
+        return this.enqueue('editor_prepare_project_build', () =>
+            this.native<ProjectBuildPreparation>('editor_prepare_project_build', {
+                destination, expectedRevision: this.revision(),
+            }), true);
+    }
+
+    /** Inputs are staged before compilation, which does not occupy the edit queue. */
+    async finishBuild(buildId: number): Promise<ProjectBuildResult> {
+        try {
+            return await this.native<ProjectBuildResult>('editor_finish_project_build', {buildId});
+        } catch (cause: unknown) {
+            throw this.recordError('editor_finish_project_build', cause);
+        }
+    }
+
+    async runBuild(expectedPath: string): Promise<BuildLaunchResult> {
+        try {
+            return await this.native<BuildLaunchResult>('editor_run_build', {expectedPath});
+        } catch (cause: unknown) {
+            throw this.recordError('editor_run_build', cause);
+        }
+    }
+
+    restoreWorkspace(): Promise<EditorSnapshot | null> {
+        const current = this.snapshotState();
+        if (current || !this.nativeAvailable) return Promise.resolve(current);
+        return this.enqueue('editor_snapshot', async () => {
+            // Project Setup may have populated the session while this read was queued.
+            const known = this.snapshotState();
+            if (known) return known;
+            let retained: EditorSnapshot;
+            try {
+                retained = await this.native<EditorSnapshot>('editor_snapshot');
+            } catch (cause: unknown) {
+                // The existing native command reports a missing workspace as this error.
+                if ((cause instanceof Error ? cause.message : cause) === 'Open a scene before using the editor') return null;
+                throw cause;
+            }
+            this.workspaceGenerationState.update(generation => generation + 1);
+            return this.accept(retained);
+        });
     }
 
     refresh(): Promise<EditorSnapshot> {
@@ -175,7 +257,7 @@ export class EditorService {
     }
 
     reload(): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_reload', {policy: 'discard_unsaved'});
+        return this.snapshotOperation('editor_reload', {policy: 'discard_unsaved'}, true);
     }
 
     assets(refresh = false): Promise<readonly ModelAsset[]> {
@@ -343,16 +425,18 @@ export class EditorService {
     private snapshotOperation(
         operation: string,
         args: Record<string, unknown> = {},
+        replacesWorkspace = false,
     ): Promise<EditorSnapshot> {
         return this.enqueue(
             operation,
-            async () =>
-                this.accept(
-                    await this.native<EditorSnapshot>(operation, {
-                        ...args,
-                        expectedRevision: this.revision(),
-                    }),
-                ),
+            async () => {
+                const snapshot = await this.native<EditorSnapshot>(operation, {
+                    ...args,
+                    expectedRevision: this.revision(),
+                });
+                if (replacesWorkspace) this.workspaceGenerationState.update(generation => generation + 1);
+                return this.accept(snapshot);
+            },
             true,
         );
     }

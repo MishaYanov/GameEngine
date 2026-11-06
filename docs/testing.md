@@ -3,6 +3,10 @@
 Run from the repository root after [setup](usage.md). Cache locked Rust dependencies and install frontend/docs
 dependencies first.
 
+## Current editor workspace documentation scope
+
+The 2026-11-06 update inspects commit c3a3e95 plus staged/unstaged/untracked Angular workspace, local generator and host replacement/dialog changes. It runs documentation-site checks only. New component and schematic specs are source coverage, not current passed results here. Prior Rust/frontend/GPU totals below remain attributed historical snapshots; native File Open/discard races, viewport interaction, accessibility and current production build need fresh application evidence. See [workspace guide](editor-workspace.md).
+
 ## Current project lifecycle changes
 
 The [project lifecycle guide](project-lifecycle.md) covers project schema 3 / editor protocol 2: root validation,

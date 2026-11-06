@@ -55,6 +55,40 @@ fn resolves_new_project_and_rejects_existing_folder() {
 }
 
 struct AssetFixture(PathBuf);
+
+#[test]
+fn new_authoring_project_contains_editable_starter_data_without_a_player() {
+	let fixture = AssetFixture::new();
+	let project_path =
+		create_authoring_project("Authoring Demo", fixture.0.to_str().unwrap()).unwrap();
+	let project = ProjectData::load(project_path.join("project.json")).unwrap();
+	assert_eq!(project.name, "Authoring Demo");
+	let prepared = prepare_project(&project, &project_path.join("assets")).unwrap();
+	assert!(prepared.asset_count() > 0);
+	assert!(project.scenes.iter().count() >= 2);
+	assert!(
+		!project_path
+			.join(format!("game{}", std::env::consts::EXE_SUFFIX))
+			.exists()
+	);
+	assert!(!project_path.join("README.txt").exists());
+}
+
+#[test]
+fn authoring_creation_never_overwrites_an_existing_project() {
+	let fixture = AssetFixture::new();
+	let existing = fixture.0.join("Existing");
+	fs::create_dir(&existing).unwrap();
+	fs::write(existing.join("project.json"), b"my authored data").unwrap();
+	let error = create_authoring_project("Existing", fixture.0.to_str().unwrap()).unwrap_err();
+	assert!(error.contains("already exists"));
+	assert_eq!(
+		fs::read(existing.join("project.json")).unwrap(),
+		b"my authored data"
+	);
+	assert!(!existing.join("assets").exists());
+}
+
 impl AssetFixture {
 	fn new() -> Self {
 		static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -159,6 +193,66 @@ fn preparing_an_authored_project_captures_its_actual_scene_assets_and_behavior_c
 		fs::read(source.join("scenes/main.json")).unwrap(),
 		fs::read(destination.join("scenes/main.json")).unwrap()
 	);
+}
+
+#[test]
+fn staged_export_keeps_its_frozen_assets_and_manifest_when_authoring_changes_before_finish() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (mut project, _) = authored_scene_fixture(&source);
+	fs::write(source.join("payload.bin"), b"snapshot bytes").unwrap();
+	let prepared = prepare_project(&project, &source).unwrap();
+	let expected_scene = fs::read(source.join("scenes/main.json")).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	let staged_path = staged.path().to_path_buf();
+	assert_eq!(staged.asset_count(), prepared.asset_count());
+	assert_eq!(staged.asset_bytes(), prepared.total_bytes());
+	assert!(staged_path.join("project.json").is_file());
+	assert!(
+		!staged_path
+			.join(format!("game{}", std::env::consts::EXE_SUFFIX))
+			.exists()
+	);
+	fs::write(
+		source.join("scenes/main.json"),
+		b"new incomplete authoring draft",
+	)
+	.unwrap();
+	fs::write(source.join("payload.bin"), b"changed data").unwrap();
+	project.name = "New authoring project name".into();
+	fs::write(fixture.0.join("project.json"), project.to_json().unwrap()).unwrap();
+	let player = fixture.0.join("compiled-player.bin");
+	fs::write(&player, b"compiled fixture; never execute").unwrap();
+	// Complete the installation boundary without invoking Cargo or reopening source assets.
+	let finished = install_staged_player(staged, &player).unwrap();
+	assert_eq!(finished, staged_path);
+	assert_eq!(
+		fs::read(finished.join("assets/scenes/main.json")).unwrap(),
+		expected_scene
+	);
+	assert_eq!(
+		fs::read(finished.join("assets/payload.bin")).unwrap(),
+		b"snapshot bytes"
+	);
+	assert_eq!(
+		ProjectData::load(finished.join("project.json")).unwrap(),
+		*prepared.project()
+	);
+	assert_eq!(
+		fs::read(finished.join(format!("game{}", std::env::consts::EXE_SUFFIX))).unwrap(),
+		b"compiled fixture; never execute"
+	);
+}
+
+#[test]
+fn staging_rejects_changed_source_before_creating_an_export_folder() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, _) = authored_scene_fixture(&source);
+	let prepared = prepare_project(&project, &source).unwrap();
+	fs::write(source.join("scenes/main.json"), b"changed").unwrap();
+	assert!(stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).is_err());
+	assert!(!fixture.0.join(&project.name).exists());
 }
 
 #[test]

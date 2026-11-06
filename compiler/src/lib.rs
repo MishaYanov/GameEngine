@@ -55,6 +55,26 @@ impl PreparedProject {
 	}
 }
 
+/// Exported authoring data frozen before compilation. Finishing uses only this
+/// output directory and never rereads the editable project's source assets.
+#[derive(Clone)]
+pub struct StagedProject {
+	path: PathBuf,
+	asset_count: usize,
+	asset_bytes: u64,
+}
+impl StagedProject {
+	pub fn path(&self) -> &Path {
+		&self.path
+	}
+	pub fn asset_count(&self) -> usize {
+		self.asset_count
+	}
+	pub fn asset_bytes(&self) -> u64 {
+		self.asset_bytes
+	}
+}
+
 const MAX_SCENE_REPORT_BYTES: usize = 16 * 1024;
 const OMISSION_NOTICE: &str = "\nFurther scene diagnostics omitted.";
 
@@ -114,10 +134,33 @@ pub fn project_path(name: &str, destination: &str) -> Result<PathBuf, String> {
 	Ok(path)
 }
 
-/// Compatibility entry point for the bundled starter. New projects should use
-/// `install_authored_project` with their authored manifest and asset root.
+/// Create editable starter data without compiling or installing a game player.
+pub fn create_authoring_project(name: &str, destination: &str) -> Result<PathBuf, String> {
+	project_path(name, destination)?;
+	let (project, root) = bundled_starter(name)?;
+	let prepared = prepare_project(&project, &root)?;
+	let path = project_path(&project.name, destination)?;
+	prepared.validate_inputs()?;
+	// Never merge starter data into an existing project, including a folder
+	// created after the initial destination check.
+	fs::create_dir(&path).map_err(|e| format!("Could not create project folder: {e}"))?;
+	copy_prepared_project(&prepared, &path).map_err(|error| {
+		format!(
+			"Could not create project: {error}; incomplete output retained at {}",
+			path.display()
+		)
+	})?;
+	Ok(path)
+}
+
+/// Compatibility entry point that builds and packages the bundled starter.
 pub fn install_project(name: &str, destination: &str) -> Result<PathBuf, String> {
 	project_path(name, destination)?;
+	let (project, root) = bundled_starter(name)?;
+	install_authored_project(&project, &root, destination)
+}
+
+fn bundled_starter(name: &str) -> Result<(ProjectData, PathBuf), String> {
 	let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.ok_or("Missing engine workspace")?;
@@ -132,7 +175,7 @@ pub fn install_project(name: &str, destination: &str) -> Result<PathBuf, String>
 		legacy_starter_project(name.trim(), &scene)?
 	};
 	project.name = name.trim().to_owned();
-	install_authored_project(&project, &root, destination)
+	Ok((project, root))
 }
 
 pub fn install_project_from_manifest(
@@ -161,8 +204,52 @@ pub fn install_prepared_project(
 	prepared: &PreparedProject,
 	destination: &str,
 ) -> Result<PathBuf, String> {
+	finish_staged_project(stage_prepared_project(prepared, destination)?)
+}
+
+pub fn stage_prepared_project(
+	prepared: &PreparedProject,
+	destination: &str,
+) -> Result<StagedProject, String> {
 	let path = project_path(&prepared.project.name, destination)?;
 	prepared.validate_inputs()?;
+	// create_dir is atomic: never merge into an existing project.
+	fs::create_dir(&path).map_err(|e| format!("Could not create project folder: {e}"))?;
+	let result = (|| -> Result<(), std::io::Error> {
+		copy_prepared_project(prepared, &path)?;
+		fs::write(path.join("project-name.txt"), &prepared.project.name)?;
+		fs::write(
+			path.join("README.txt"),
+			"Game Engine project\nRun game.exe to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
+		)?;
+		Ok(())
+	})();
+	if let Err(error) = result {
+		// Retain the new folder for inspection; never recursively remove a path
+		// that may have been modified by another process during a long build.
+		return Err(format!(
+			"Could not stage project: {error}; incomplete output retained at {}",
+			path.display()
+		));
+	}
+	Ok(StagedProject {
+		path,
+		asset_count: prepared.asset_count(),
+		asset_bytes: prepared.total_bytes(),
+	})
+}
+
+pub fn finish_staged_project(staged: StagedProject) -> Result<PathBuf, String> {
+	let executable = compile_player().map_err(|error| {
+		format!(
+			"{error}; incomplete output retained at {}",
+			staged.path.display()
+		)
+	})?;
+	install_staged_player(staged, &executable)
+}
+
+fn compile_player() -> Result<PathBuf, String> {
 	let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.ok_or("Missing engine workspace")?;
@@ -186,41 +273,34 @@ pub fn install_prepared_project(
 			String::from_utf8_lossy(&output.stderr)
 		));
 	}
-	// create_dir is atomic: never merge into an existing project.
-	fs::create_dir(&path).map_err(|e| format!("Could not create project folder: {e}"))?;
-	let result = (|| -> Result<(), std::io::Error> {
-		fs::copy(
-			target
-				.join("release")
-				.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
-			path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
-		)?;
-		copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
+	Ok(target
+		.join("release")
+		.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
+}
 
-		let copied_root = path.join("assets").canonicalize()?;
-
-		validate_catalog_scenes(&prepared.project, &copied_root, &prepared.files)
-			.map_err(io::Error::other)?;
-
-		let mut project_json = prepared.project.to_json().map_err(io::Error::other)?;
-		project_json.push('\n');
-		fs::write(path.join("project.json"), project_json)?;
-		fs::write(path.join("project-name.txt"), &prepared.project.name)?;
-		fs::write(
-			path.join("README.txt"),
-			"Game Engine project\nRun game.exe to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
-		)?;
-		Ok(())
-	})();
-	if let Err(error) = result {
-		// Retain the new folder for inspection; never recursively remove a path
-		// that may have been modified by another process during a long build.
-		return Err(format!(
-			"Could not install project: {error}; incomplete output retained at {}",
+fn install_staged_player(staged: StagedProject, executable: &Path) -> Result<PathBuf, String> {
+	let path = staged.path;
+	fs::copy(
+		executable,
+		path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+	)
+	.map_err(|error| {
+		format!(
+			"Could not install game executable: {error}; incomplete output retained at {}",
 			path.display()
-		));
-	}
+		)
+	})?;
 	Ok(path)
+}
+
+fn copy_prepared_project(prepared: &PreparedProject, path: &Path) -> io::Result<()> {
+	copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
+	let copied_root = path.join("assets").canonicalize()?;
+	validate_catalog_scenes(&prepared.project, &copied_root, &prepared.files)
+		.map_err(io::Error::other)?;
+	let mut project_json = prepared.project.to_json().map_err(io::Error::other)?;
+	project_json.push('\n');
+	fs::write(path.join("project.json"), project_json)
 }
 
 fn legacy_starter_project(name: &str, scene: &SceneData) -> Result<ProjectData, String> {

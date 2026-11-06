@@ -1,7 +1,7 @@
 use crate::project_location::ProjectLocation;
 use crate::{
 	editor::{EditorWorkspace, ReloadPolicy},
-	state::EditorState,
+	state::{EditorState, PendingProjectBuild, ProjectBuildState},
 };
 use bridge::editor::{
 	EditorCapabilitiesDto, EditorCommandRequest, EditorSnapshotDto, ViewportBoundsDto,
@@ -12,7 +12,15 @@ use runtime::{
 	editor::{CommandFactory, PrefabData},
 };
 use serde::Serialize;
-use std::{sync::Arc, time::Instant};
+use std::{
+	path::{Path, PathBuf},
+	process::Command,
+	sync::{
+		atomic::{AtomicU64, Ordering},
+		Arc, Mutex,
+	},
+	time::Instant,
+};
 use tauri::{Emitter, State, WebviewWindow};
 
 pub(super) fn trusted_window(window: &WebviewWindow) -> Result<(), String> {
@@ -86,11 +94,39 @@ pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDt
 	})
 }
 
+struct ProjectReplacement {
+	expected_revision: Option<u64>,
+	discard_unsaved: bool,
+}
+
+impl ProjectReplacement {
+	fn validate(&self, current: Option<&EditorWorkspace>) -> Result<(), String> {
+		if current.map(|workspace| workspace.backend.session().revision()) != self.expected_revision
+		{
+			return Err("Revision conflict: the open project changed. Review its current state and try again.".into());
+		}
+		if let Some(workspace) = current {
+			let session = workspace.backend.session();
+			if session.is_playing() {
+				return Err("Stop Play before opening another project.".into());
+			}
+			if session.has_transaction() {
+				return Err("Finish the current edit before opening another project.".into());
+			}
+			if session.is_dirty() && !self.discard_unsaved {
+				return Err("The current project has unsaved changes. Confirm discarding them before opening another project.".into());
+			}
+		}
+		Ok(())
+	}
+}
+
 /// Prepare a candidate off the WebView thread, then install it through the
 /// same revision, completion and viewport path for scene and project opening.
 async fn open_workspace(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
+	replacement: Option<ProjectReplacement>,
 	prepare: impl FnOnce(Box<dyn Fn() + Send>) -> Result<EditorWorkspace, String> + Send + 'static,
 ) -> Result<EditorSnapshotDto, String> {
 	trusted_window(&window)?;
@@ -114,6 +150,11 @@ async fn open_workspace(
 		}))?;
 		let snapshot = {
 			let mut current = shared.lock().map_err(|_| "Editor state lock failed")?;
+			// Recheck under the installation lock: candidate preparation and native
+			// dialogs must never authorize discarding edits made in the meantime.
+			if let Some(replacement) = replacement {
+				replacement.validate(current.as_ref())?;
+			}
 			if let Some(old) = current.as_ref() {
 				candidate
 					.backend
@@ -149,7 +190,7 @@ pub async fn editor_open(
 	asset_root: String,
 	scene_path: String,
 ) -> Result<EditorSnapshotDto, String> {
-	open_workspace(window, state, move |on_ready| {
+	open_workspace(window, state, None, move |on_ready| {
 		EditorWorkspace::open_with_notifier(&asset_root, &scene_path, on_ready)
 	})
 	.await
@@ -160,8 +201,14 @@ pub async fn editor_open_project(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	manifest_path: String,
+	expected_revision: Option<u64>,
+	discard_unsaved: Option<bool>,
 ) -> Result<EditorSnapshotDto, String> {
-	open_workspace(window, state, move |on_ready| {
+	let replacement = ProjectReplacement {
+		expected_revision,
+		discard_unsaved: discard_unsaved.unwrap_or(false),
+	};
+	open_workspace(window, state, Some(replacement), move |on_ready| {
 		let location = ProjectLocation::from_manifest(std::path::Path::new(&manifest_path))
 			.map_err(|error| error.to_string())?;
 		EditorWorkspace::open_project_with_notifier(location, on_ready)
@@ -258,12 +305,142 @@ pub async fn editor_save_project(
 	})
 	.await
 }
+#[tauri::command]
+pub async fn editor_save_all(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: u64,
+) -> Result<EditorSnapshotDto, String> {
+	trusted_window(&window)?;
+	workspace(state, false, Some("save_all"), move |w| {
+		w.save_all(expected_revision)
+	})
+	.await
+}
 #[derive(Serialize)]
 pub struct ProjectBuildDto {
 	path: String,
 	asset_count: usize,
 	asset_bytes: u64,
 }
+
+#[derive(Serialize)]
+pub struct PreparedBuildDto {
+	build_id: u64,
+	path: String,
+	asset_count: usize,
+	asset_bytes: u64,
+}
+
+static NEXT_BUILD_ID: AtomicU64 = AtomicU64::new(1);
+
+#[tauri::command]
+pub async fn editor_prepare_project_build(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: u64,
+	destination: String,
+) -> Result<PreparedBuildDto, String> {
+	trusted_window(&window)?;
+	let pending_build = Arc::clone(&state.pending_build);
+	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
+		w.prepare_build(expected_revision)
+	})
+	.await?;
+	tauri::async_runtime::spawn_blocking(move || {
+		let mut pending = pending_build
+			.lock()
+			.map_err(|_| "Build state lock failed")?;
+		let staged = compiler::stage_prepared_project(&prepared, &destination)?;
+		let build_id = NEXT_BUILD_ID
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+			.map_err(|_| "Build token space is exhausted")?;
+		let result = PreparedBuildDto {
+			build_id,
+			path: staged.path().to_string_lossy().into_owned(),
+			asset_count: staged.asset_count(),
+			asset_bytes: staged.asset_bytes(),
+		};
+		// Only one unclaimed token is retained. New preparation supersedes an
+		// abandoned token; its already-created output remains available to inspect.
+		pending.latest_id = build_id;
+		pending.pending = Some(PendingProjectBuild {
+			id: build_id,
+			staged,
+		});
+		Ok(result)
+	})
+	.await
+	.map_err(|error| format!("Project staging worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn editor_finish_project_build(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	build_id: u64,
+) -> Result<ProjectBuildDto, String> {
+	trusted_window(&window)?;
+	let pending_build = Arc::clone(&state.pending_build);
+	let last_build = Arc::clone(&state.last_build);
+	tauri::async_runtime::spawn_blocking(move || {
+		finish_prepared_build(&pending_build, build_id, |staged| {
+			finish_project_build(staged, &last_build)
+		})
+	})
+	.await
+	.map_err(|error| format!("Project build worker failed: {error}"))?
+}
+
+fn finish_prepared_build(
+	pending_build: &Mutex<ProjectBuildState>,
+	build_id: u64,
+	finish: impl FnOnce(compiler::StagedProject) -> Result<ProjectBuildDto, String>,
+) -> Result<ProjectBuildDto, String> {
+	let staged = {
+		let mut state = pending_build
+			.lock()
+			.map_err(|_| "Build state lock failed")?;
+		if state.pending.as_ref().map(|build| build.id) != Some(build_id) {
+			return Err("Prepared build is missing, superseded, or already compiling".into());
+		}
+		state.pending.take().expect("matched pending build").staged
+	};
+	let retry = staged.clone();
+	let result = finish(staged);
+	if result.is_err() {
+		let mut state = pending_build
+			.lock()
+			.map_err(|_| "Build state lock failed")?;
+		if state.latest_id == build_id && state.pending.is_none() {
+			state.pending = Some(PendingProjectBuild {
+				id: build_id,
+				staged: retry,
+			});
+		}
+	}
+	result
+}
+
+fn finish_project_build(
+	staged: compiler::StagedProject,
+	last_build: &Mutex<Option<PathBuf>>,
+) -> Result<ProjectBuildDto, String> {
+	let asset_count = staged.asset_count();
+	let asset_bytes = staged.asset_bytes();
+	engine_logger::info!(target:"project_build","Build started: assets={asset_count}, bytes={asset_bytes}");
+	let path = compiler::finish_staged_project(staged).inspect_err(|_| {
+		engine_logger::error!(target:"project_build","Build failed: operation=finish_staged_project");
+	})?;
+	*last_build.lock().map_err(|_| "Build state lock failed")? = Some(path.clone());
+	engine_logger::info!(target:"project_build","Build completed: assets={asset_count}, bytes={asset_bytes}");
+	Ok(ProjectBuildDto {
+		path: path.to_string_lossy().into_owned(),
+		asset_count,
+		asset_bytes,
+	})
+}
+
 #[tauri::command]
 pub async fn editor_build_project(
 	window: WebviewWindow,
@@ -272,24 +449,74 @@ pub async fn editor_build_project(
 	destination: String,
 ) -> Result<ProjectBuildDto, String> {
 	trusted_window(&window)?;
+	let last_build = Arc::clone(&state.last_build);
 	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
 		w.prepare_build(expected_revision)
 	})
 	.await?;
 	tauri::async_runtime::spawn_blocking(move || {
-		let asset_count = prepared.asset_count();
-		let asset_bytes = prepared.total_bytes();
-		engine_logger::info!(target:"project_build","Build started: assets={asset_count}, bytes={asset_bytes}");
-		let path = compiler::install_prepared_project(&prepared, &destination).inspect_err(|_| { engine_logger::error!(target:"project_build","Build failed: operation=install_authored_project"); })?;
-		engine_logger::info!(target:"project_build","Build completed: assets={asset_count}, bytes={asset_bytes}");
-		Ok(ProjectBuildDto {
-			path: path.to_string_lossy().into_owned(),
-			asset_count,
-			asset_bytes,
+		let staged = compiler::stage_prepared_project(&prepared, &destination)?;
+		finish_project_build(staged, &last_build)
+	})
+	.await
+	.map_err(|e| format!("Project build worker failed: {e}"))?
+}
+
+#[derive(Serialize)]
+pub struct ProjectRunDto {
+	path: String,
+	process_id: u32,
+}
+
+fn build_launch_command(path: Option<&Path>, expected_path: &Path) -> Result<Command, String> {
+	let path = path.ok_or("Build a project before running its exported game")?;
+	if path != expected_path {
+		return Err("The latest completed build changed; run the current build instead".into());
+	}
+	let path = path
+		.canonicalize()
+		.map_err(|error| format!("Build folder is unavailable: {error}"))?;
+	if !path.is_dir() {
+		return Err("Build output must be a folder".into());
+	}
+	let executable = path.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+	let metadata = std::fs::symlink_metadata(&executable)
+		.map_err(|error| format!("Built game is unavailable: {error}"))?;
+	if !metadata.is_file() || metadata.file_type().is_symlink() {
+		return Err("Built game must be a regular executable file".into());
+	}
+	let mut command = Command::new(executable);
+	command.current_dir(path).arg("--player");
+	Ok(command)
+}
+
+#[tauri::command]
+pub async fn editor_run_build(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_path: String,
+) -> Result<ProjectRunDto, String> {
+	trusted_window(&window)?;
+	let path = state
+		.last_build
+		.lock()
+		.map_err(|_| "Build state lock failed")?
+		.clone();
+	tauri::async_runtime::spawn_blocking(move || {
+		let mut command = build_launch_command(path.as_deref(), Path::new(&expected_path))?;
+		let child = command
+			.spawn()
+			.map_err(|error| format!("Could not run built game: {error}"))?;
+		Ok(ProjectRunDto {
+			path: path
+				.expect("validated build path")
+				.to_string_lossy()
+				.into_owned(),
+			process_id: child.id(),
 		})
 	})
-		.await
-		.map_err(|e| format!("Project build worker failed: {e}"))?
+	.await
+	.map_err(|error| format!("Game launch worker failed: {error}"))?
 }
 #[tauri::command]
 pub async fn editor_submit_import(
@@ -551,3 +778,22 @@ pub fn editor_viewport_status(
 		.map_err(|_| "Viewport state lock failed")?
 		.status())
 }
+
+#[tauri::command]
+pub fn editor_viewport_editor_state(window: WebviewWindow, state: State<'_, EditorState>) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
+	trusted_window(&window)?;
+	state.viewport.lock().map_err(|_| "Viewport state lock failed")?.editor_state()
+}
+
+#[tauri::command]
+pub async fn editor_viewport_action(window: WebviewWindow, state: State<'_, EditorState>, action: bridge::viewport::ViewportActionDto) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
+	trusted_window(&window)?;
+	let receiver = state.viewport.lock().map_err(|_| "Viewport state lock failed")?.request_action(action)?;
+	tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(std::time::Duration::from_secs(9))
+		.map_err(|_| "Viewport action did not complete; inspect its current state before retrying".to_string())?)
+		.await.map_err(|error| format!("Viewport action worker failed: {error}"))?
+}
+
+#[cfg(test)]
+#[path = "tests_build_launch.rs"]
+mod tests_build_launch;

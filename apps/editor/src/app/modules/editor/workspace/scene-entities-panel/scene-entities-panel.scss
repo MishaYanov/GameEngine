@@ -1,0 +1,36 @@
+:host { display: contents; }
+.hierarchy-content { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.scene-root {
+  display: flex; align-items: center; gap: var(--space-2); flex: none; min-height: 32px; width: 100%;
+  padding: var(--space-1) var(--space-2); border: 1px solid transparent; background: var(--color-surface);
+  color: var(--color-text); font: inherit; font-size: var(--font-size-xs); text-align: left;
+}
+.scene-root span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-root small { font-size: inherit; color: var(--color-text-secondary); }
+.entity-list { position: relative; flex: 1; min-height: 112px; overflow: auto; overscroll-behavior: contain; }
+.virtual-space { position: relative; min-width: 100%; }
+.entity-button {
+  position: absolute; inset-inline: 0; display: flex; align-items: center; gap: 4px; width: 100%; height: 28px;
+  min-height: 28px; box-sizing: border-box; min-width: 0; padding-block: 0; padding-inline-end: var(--space-2);
+  border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text);
+  font: inherit; font-size: var(--font-size-sm); text-align: left; cursor: var(--cursor-action);
+}
+.entity-button:hover:not(:disabled), .scene-root:hover:not(:disabled) { background: var(--color-surface-hover); }
+.entity-button.selected { background: var(--color-control-hover); border-inline-start-color: var(--color-focus); }
+.entity-list:focus-visible .entity-button.focused { outline: 1px solid var(--color-focus); outline-offset: -1px; }
+.entity-button:disabled, .scene-root:disabled, .hierarchy-actions button:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.disclosure { width: 14px; height: 24px; display: inline-grid; place-items: center; flex: none; color: transparent; }
+.disclosure.has-children { color: var(--color-text-secondary); }
+.disclosure.expanded { transform: rotate(90deg); }
+editor-icon { flex: none; color: var(--color-text-secondary); --layout-icon-size: 14px; }
+.entity-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hierarchy-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--color-pane-edge); }
+.hierarchy-actions button { min-height: 28px; padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-xs); }
+.hierarchy-actions button:hover:enabled { background: var(--color-control-hover); }
+.entity-details, .placeholder, .hierarchy-status, .hierarchy-error { flex: none; margin: 0; padding: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-xs); }
+.entity-details { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hierarchy-status, .hierarchy-error { overflow-wrap: anywhere; }
+.hierarchy-error { color: var(--color-danger); }
+.drop-target { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.drop-rejected { outline: 1px dashed var(--color-danger); outline-offset: -1px; }
+@container (max-width: 45rem) { app-drawer { height: 14rem; } }

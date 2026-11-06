@@ -1,0 +1,14 @@
+{
+  "schematics": {
+    "ui-component": {
+      "description": "Create a reusable component discoverable by the editor design guide.",
+      "factory": "./component.cjs#uiComponent",
+      "schema": "./component.schema.json"
+    },
+    "editor-panel": {
+      "description": "Create an editor workspace panel using the shared EditorPane.",
+      "factory": "./component.cjs#editorPanel",
+      "schema": "./component.schema.json"
+    }
+  }
+}

@@ -4,26 +4,21 @@ Trace the current method calls from desktop startup through project creation, ed
 simulation, packaging, and repeated builds in the admin UI. The diagrams distinguish working UI actions from APIs
 that exist without a caller in the main editor screen.
 
-Source inspection: **2026-10-27**, commit `fcb748b04853209b5e17e680c38c847c19f7f365` plus the working tree, including
-the uncommitted explicit-scene simulation changes. This is an implementation trace, not a proposed architecture or
-native runtime acceptance result. See [project lifecycle](project-lifecycle.md) for document contracts and
-[the ADR reading guide](adr/README.md) for proposed changes.
+Source inspection: **2026-11-06**, commit `c3a3e95` plus staged, unstaged and untracked workspace changes. This is a source trace, not native runtime acceptance. [Editor workspace](editor-workspace.md) describes current UI behavior; [project lifecycle](project-lifecycle.md) defines document contracts and [the ADR guide](adr/README.md) retains proposals.
 
 ## What is connected today
 
 | Surface or operation           | Current entry point                           | Result and boundary                                                                                                                        |
 |--------------------------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | Setup: Create & launch project | `ProjectSetup.createProject()`                | Packages the bundled starter into a new folder, then attempts to launch its player.                                                        |
-| Main `/editor` route           | `Editor` and its layout components            | Displays the editor shell and empty-project/scene state. No Open, Save, Play, Build, or Rebuild control currently calls the document APIs. |
-| Open/edit/save/reload APIs     | `EditorService` and registered Tauri commands | Implemented integration surface; requires a UI owner to invoke it and consume the signals.                                                 |
+| Main `/editor` route           | `Editor` and its layout components            | File Open, Save Scene, Undo/Redo and Play/Stop call document APIs; inspector editing and builds remain unconnected. |
+| Open/edit/save/reload APIs     | `EditorService` and registered Tauri commands | Open/save/history/Play are connected; reload/catalog/project-save remain service APIs without this toolbar UI.                                                 |
 | Authored project package       | Native `editor_build_project()`               | Requires clean saved authoring state; compiles and installs into a new folder. No current `EditorService` wrapper or main editor control.  |
-| Native game pane               | `EnginePortal` / `EngineViewportDirective`    | Present in the design preview; not mounted by the main `/editor` route.                                                                    |
+| Native game pane               | `SceneViewport` / `EngineViewportDirective`    | Mounted by the main workspace after opening; one surface follows selected view and backend mode.                                                                    |
 | Admin Builds                   | `App.queueJob()`                              | Queues repeatable Cargo builds of packages in a source workspace.                                                                          |
 | Admin Builder                  | `Builder.preview()` / `generate()`            | Creates and validates a new standalone source workspace.                                                                                   |
 
-The main layout's `EditorPortal` is a content wrapper, not the native `EnginePortal`. The shared
-`shared/builder/builder.service.ts` is empty at this inspection. A native command being registered does not mean a
-button calls it. Browser-only setup disables project creation instead of simulating native results.
+The main layout's EditorPortal remains a content wrapper. The actual native surface is SceneViewport under EditorWorkspace. File opening uses native manifest selection/discard confirmation and a revision check under the host installation mutex. Browser mode disables native actions. See [workspace limits](editor-workspace.md#connected-controls-and-current-limits) before treating the composed panels as completed authoring tools.
 
 ## 1. Desktop startup and Angular initialization
 
@@ -52,7 +47,7 @@ flowchart TD
     P --> Q["invoke_handler(...)<br/>Register native commands"]
     Q --> R["Tauri event loop"]
 
-    J --> S["EditorHeader / EditorNavManager<br/>EditorGridWrapper / EditorFooter"]
+    J --> S["EditorHeader / File menu<br/>EditorWorkspace / EditorFooter"]
     S --> T["No project open / No scene open"]
     S --> U["Drawer → connectConfig()"]
     U --> V["LayoutPreferencesService.initialize()"]
@@ -206,12 +201,11 @@ Source: `apps/editor-host/src-tauri/src/commands/editor.rs` (`editor_build_proje
 
 ## 4. Open a project and construct the editor backend
 
-This path exists through `EditorService.openProject()` and the native host. A UI owner must invoke it; the main editor
-route does not currently do so during startup.
+File Open on the main editor invokes this path after native file selection and any dirty-state confirmation. Startup itself still does not automatically open a document. The service captures the reviewed revision before queueing; the host checks it under the installation lock after candidate preparation.
 
 ```mermaid
 flowchart TD
-    A["EditorService.openProject(manifestPath)"]
+    A["Editor.openProject(): chooser + discard intent<br/>EditorService.openProject(manifestPath, options)"]
     A --> B["enqueue('editor_open_project', action)"]
     B --> C["native() → invoke('editor_open_project')"]
     C --> D["editor_open_project()<br/>open_workspace()"]
@@ -407,12 +401,11 @@ Source: `apps/editor/src/app/core/editor/editor.service.ts` and
 
 ## 7. Native viewport attachment and scene reconstruction
 
-This path runs when a native `EnginePortal` is mounted and a workspace is open. The main `/editor` screen currently
-mounts a different, content-only `EditorPortal`; the design preview mounts `EnginePortal`.
+The main workspace mounts SceneViewport when a project snapshot exists. The Scene/Game tabs and current mode decide whether its single native surface is enabled; WebView modal dialogs hide it. The design preview uses the same wrapper separately.
 
 ```mermaid
 flowchart TD
-    A["EnginePortal mounts"]
+    A["SceneViewport mounts"]
     A --> B["EngineViewportDirective<br/>afterNextRender() → start()"]
     B --> C["reserveViewport()<br/>Observe resize / intersection / visibility"]
     C --> D["schedule() → requestAnimationFrame()<br/>measure() → flush()"]
@@ -461,7 +454,7 @@ through `WindowRenderer::resize()` and `prepare()` to recreate presentation targ
 Bounds use CSS logical coordinates, with clipping and visibility checks; the directive does not multiply them by
 device pixel ratio. Viewport operations use a separate queue capped at 32 pending calls, with latest pending bounds
 coalesced and teardown allowed to complete. Status events update `viewportState`, then the directive forwards status
-to `EnginePortal.statusChanged()`. Raw input is forwarded for its owner to interpret.
+to `SceneViewport.statusChanged()`. Raw input is forwarded for its owner to interpret.
 
 The portal hides its native child when a modal dialog is open. `stop()` disconnects observers/listeners and calls
 `detachViewport()` on destruction. The Windows child-window capability and browser fallback are explicit; see
@@ -469,7 +462,7 @@ The portal hides its native child when a modal dialog is open. `stop()` disconne
 invalidation instead of continuously rendering. A draw failure records an error and suspends work until a subsequent
 attachment or invalidation resets the failed state.
 
-Source: `apps/editor/src/app/shared/components/portal/portal.{ts,html}`,
+Source: `apps/editor/src/app/modules/editor/workspace/scene-viewport/scene-viewport.{ts,html}`,
 `apps/editor/src/app/core/editor/engine-viewport.directive.ts`,
 `apps/editor-host/src-tauri/src/viewport.rs`, `crates/runtime/src/{scene,scene_io}.rs`,
 and `crates/renderer/src/window_renderer.rs`.

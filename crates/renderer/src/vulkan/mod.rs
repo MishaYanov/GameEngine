@@ -2,6 +2,7 @@ pub mod buffer;
 pub mod camera;
 pub mod depth_buffer;
 mod device;
+pub(crate) mod editor;
 pub mod frame;
 mod instance;
 mod instancing;

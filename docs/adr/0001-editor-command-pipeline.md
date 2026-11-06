@@ -1,10 +1,12 @@
 # ADR-0001: Typed editor commands, change messages, and project builds
 
-Status: Accepted architectural direction; implementation is planned.
+Status: Accepted architectural direction; implementation is partial, with substantial UI/protocol/build workflow remaining.
 
 Date: 2026-10-26
 
 Scope: Angular editor, Tauri host, bridge contracts, engine-core, runtime synchronization, and project compiler.
+
+Implementation note, 2026-11-06: the working tree connects guarded File Open, a native viewport and Save Scene/Undo/Redo/Play/Stop controls. Read [current workspace](../editor-workspace.md) for scope. This does not complete the recorded-intent/client/build architecture below or resolve the whole ADR. The original inspection tables retain their dated historical context; current incremental transport is described in the frontend guide.
 
 ## Context
 

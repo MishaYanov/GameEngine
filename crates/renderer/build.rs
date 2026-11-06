@@ -11,6 +11,15 @@ fn main() {
 	compile_shader("shaders/triangle.vert", "triangle.vert.spv");
 
 	compile_shader("shaders/triangle.frag", "triangle.frag.spv");
+	for shader in [
+		"editor-grid.vert",
+		"editor-grid.frag",
+		"editor-lines.vert",
+		"editor-lines.frag",
+	] {
+		println!("cargo:rerun-if-changed=shaders/{shader}");
+		compile_shader(&format!("shaders/{shader}"), &format!("{shader}.spv"));
+	}
 }
 
 fn compile_shader(source: &str, output_name: &str) {

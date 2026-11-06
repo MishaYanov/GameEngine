@@ -1,0 +1,22 @@
+<button class="file-trigger" popovertarget="editor-file-menu" type="button">File</button>
+
+<div #fileMenu class="file-menu" id="editor-file-menu" popover>
+    <button
+            (click)="canOpen() && fileMenu.hidePopover()"
+            [disabled]="!canOpen()"
+            [queryParams]="{from: 'editor'}"
+            [routerLink]="canOpen() ? '/setup' : null"
+            [title]="nativeAvailable ? 'Create a new authoring project' : 'Create projects in the desktop editor'"
+            autofocus
+            type="button"
+    >New Project…</button>
+    <button
+            (click)="fileMenu.hidePopover(); openProjectRequested.emit()"
+            [attr.aria-busy]="opening()"
+            [disabled]="!canOpen()"
+            [title]="nativeAvailable ? 'Open a project.json manifest' : 'Open projects in the desktop editor'"
+            type="button"
+    >
+        {{ opening() ? 'Opening…' : 'Open Project…' }}
+    </button>
+</div>

@@ -1,7 +1,26 @@
 <header>
+    <editor-file-menu
+            (openProjectRequested)="openProjectRequested.emit()"
+            [canOpen]="canOpen()"
+            [opening]="opening()"
+    />
+
     <div class="breadcrumb">
-        <span>Workspace</span><span aria-hidden="true">/</span>
-        <h1>Editor</h1>
+        <span class="workspace-label">Workspace</span>
+        <span aria-hidden="true" class="workspace-label">/</span>
+
+        <h1 [title]="editorService.snapshot()?.project?.name ?? 'Editor'">
+            {{ editorService.snapshot()?.project?.name ?? 'Editor' }}
+        </h1>
+
+        @if (editorService.snapshot(); as snapshot) {
+            <span [title]="snapshot.active_scene_id" class="scene-name">
+                / {{ snapshot.active_scene_id }}
+            </span>
+
+            @if (snapshot.dirty) {
+                <span class="dirty-label">Unsaved changes</span>
+            }
+        }
     </div>
-    <a routerLink="/setup">Project setup</a>
 </header>

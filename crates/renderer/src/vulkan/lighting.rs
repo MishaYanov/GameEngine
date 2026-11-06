@@ -109,6 +109,6 @@ impl Default for LightingUniform {
 			color: [1.0; 3],
 			intensity: 0.75,
 		}])
-			.expect("constant default lighting is valid")
+		.expect("constant default lighting is valid")
 	}
 }

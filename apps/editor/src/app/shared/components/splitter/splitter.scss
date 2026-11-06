@@ -21,12 +21,27 @@
   transition: background var(--duration-fast);
 }
 
+:host::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--space-1);
+  height: var(--space-6);
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+  pointer-events: none;
+}
+
 :host(:hover)::before {
   background: var(--color-border-strong);
 }
 
 :host(:focus-visible)::before,
-:host(.dragging)::before {
+:host(.dragging)::before,
+:host(:focus-visible)::after,
+:host(.dragging)::after {
   background: var(--color-focus);
 }
 
@@ -42,4 +57,9 @@
 
 :host(.horizontal)::before {
   inset: calc((var(--layout-resize-hit-area) - var(--border-width)) / 2) var(--space-3);
+}
+
+:host(.horizontal)::after {
+  width: var(--space-6);
+  height: var(--space-1);
 }

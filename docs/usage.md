@@ -57,6 +57,7 @@ The installed folder contains:
 ```text
 My Game/
   game.exe
+  project.json
   project-name.txt
   README.txt
   assets/
@@ -65,6 +66,7 @@ My Game/
       bricks.jpg
     scenes/
       robots.json
+      courtyard.json
     props/
       robot.glb
 ```
@@ -75,7 +77,7 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. The installer copies the complete nested asset tree, including `assets/scenes/robots.json` and `assets/props/robot.glb`; the earlier missing-model omission is fixed. Installed mode draws stationary robot model instances. Preserve executable, name file, and the asset tree together. See [the game guide](apps/game/README.md).
+The window title uses the project name. The installer copies the validated nested asset tree and manifest, including catalogued scenes and model dependencies. The player reads the authored project and its configured behavior. Preserve the executable, project manifest and asset tree together. See [the game guide](apps/game/README.md).
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 
@@ -83,23 +85,17 @@ Names accept letters, numbers, spaces, hyphens and underscores, with a limit of 
 
 Exit codes are `0` for success, `1` for build/install failure, and `2` for an incorrect number of arguments.
 
-This CLI is a development tool tied to the engine source checkout. Its installed output is a runtime stub; it does not include an independent source workspace or editable scene.
+This CLI is a development tool tied to the engine source checkout. Its output packages the player and authored project/assets, not an independent source workspace.
 
-### Current editor integration direction
+### Open and preview an authored project
 
-The Angular app owns editor controls and the game pane. This sequence adds typed core/editor models, EditorService and
-EngineViewportDirective plus runtime/host logic. It does not compose a new editor layout or apply the directive in a
-newly built app template. Do not expect a finished hierarchy/material/prefab screen merely by launching the existing
-setup app.
+In the desktop `/editor` route, choose **File → Open Project…** and select project.json. Dirty workspace replacement requires native discard confirmation; the host checks the reviewed revision before installing its validated candidate. The toolbar connects Save Scene, Save All, Undo/Redo, entity actions and Play/Stop. The Scene selector changes retained catalog scenes; Scene/Game tabs choose the view of one native renderer.
 
-Source `cargo run -p game` defaults to Development with existing panels/gizmos and learning controls. Installed projects
-default to Player. Explicit `--development`/`--player` flags select mode; the native harness delegates to the shared
-core session. The future Angular UI owns product shortcuts/tool gestures.
+Select an entity from Hierarchy or the viewport, then edit its name/local transform in Inspector or use native Move/Rotate/Scale handles. Hierarchy expands parent/child rows and supports keep-world reparenting by internal drag or Set Parent/Move to Root. Alt-left drag orbits, middle drag pans, the wheel zooms, and F frames selection. Navigation changes only the editor camera. Grid, snapping, projection and orientation have adjacent controls. Scene remains inspectable during Play with authoring locked.
 
-A future UI integration can open an asset root/scene, inspect capabilities, send typed expected-revision commands and
-apply the viewport directive to its chosen pane. The current native child is Windows-only with airspace/visibility/DPI
-lifecycle constraints. See [Angular guide](apps/editor/README.md), [host](apps/editor-host/README.md),
-and [steps21–35](editor-steps-21-35.md) for examples and limits.
+Assets opens registered scenes and loads/refreshes models explicitly. Add to Scene places a selected model at the origin; dragging it into Scene uses a native preview and asynchronous adoption. Escape/cancellation ends a pending gesture. Native selection and placement currently approximate model bounds. Read [native scene editor implementation](viewport-implementation.md) for the complete workflow and limits, including Windows airspace and the desktop acceptance checklist.
+
+Source game execution separately defaults to Development with its learning controls; installed projects default to Player. Explicit --development/--player select mode. The sample campaign module and the editor's configured-behavior module still require a shared activation policy before complete key/exit progress parity can be claimed.
 
 ## 3. Use the editor project setup screen
 
@@ -107,13 +103,13 @@ Start the Angular editor inside its Tauri desktop host:
 
 ```powershell
 Set-Location 'D:\Coding\Game Engine'
-python launcher.py --run client
+.\dev.ps1 editor
 ```
 
-The PowerShell wrapper uses the same launcher commands:
+The direct launcher equivalent is:
 
 ```powershell
-.\dev.ps1 editor
+python launcher.py --run client
 ```
 
 In the setup screen:
@@ -121,13 +117,24 @@ In the setup screen:
 1. Enter a **Project name**, such as `My Game`.
 2. Enter an existing **Destination folder**, such as `D:\Projects`, or use **Browse…** to choose one in the native
    folder dialog. Cancelling keeps the current path. Browsing and creation cannot run at the same time.
-3. Click **Create & launch project**.
-4. Wait for the build and installation. The form disables submission while working.
-5. Read the installed path and launch status. The host attempts to open the graphics window after installation. Process-spawn success does not certify that the child subsequently initialized Vulkan or rendered successfully.
+3. Click **Create project**.
+4. Wait for validated starter manifest/assets creation. The form disables submission while working.
+5. The created manifest opens in the editor. If opening is cancelled or fails, retain the created path and use **Open in Editor** to retry.
 
-This uses the same installer as the CLI, including its destination and overwrite rules. If launch fails after installation, the screen reports that separately; run `game.exe` from the installed folder to retry.
+This authoring-only operation retains the compiler's destination and no-overwrite validation but does not compile or launch a player. It is distinct from the CLI's packaged game installation.
 
-A browser-only editor preview cannot build or launch projects. Use the Tauri desktop application for these actions.
+A browser-only preview cannot perform native project creation/opening, Vulkan editing or player export. Use the Tauri desktop application for these actions.
+
+### Export the saved project
+
+1. Stop Play and choose Save All.
+2. Choose Export Game and select an existing output parent such as `D:\Exports`.
+3. Preparation creates a new child named after the project and stages verified assets/manifest. Existing output folders are not overwritten.
+4. Continue editing while the release player compiles from the staged inputs.
+5. If compilation fails, Retry Export reuses its staged token/output instead of creating the same folder again.
+6. After success, review the output path and choose Run Exported Game explicitly.
+
+The player starts with the exported folder as its working directory and player mode selected. Process-spawn success is separate from actual Vulkan startup, gameplay acceptance and another-machine verification. The editor's compiler still relies on this engine source checkout and Rust/Cargo when producing a player.
 
 ## 4. Launch the admin dashboard
 

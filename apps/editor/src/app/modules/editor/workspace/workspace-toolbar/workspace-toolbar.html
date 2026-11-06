@@ -1,0 +1,35 @@
+<div aria-label="Workspace actions" class="workspace-actions" role="group">
+    <div aria-label="Scene edits" class="action-group" role="group">
+        <button (click)="runAction('save')" [disabled]="!canEditScene() || !(editorService.dirty() || sceneEditing?.hasChanges())" type="button">
+            Save Scene
+        </button>
+        <button (click)="runAction('saveAll')" [disabled]="!canEditScene() || !(editorService.dirty() || sceneEditing?.hasChanges())" type="button">
+            Save All
+        </button>
+        <button (click)="runAction('undo')" [disabled]="!canEditScene() || !(editorService.snapshot()?.can_undo || sceneEditing?.hasChanges())"
+                type="button">
+            Undo
+        </button>
+        <button (click)="runAction('redo')" [disabled]="!canEditScene() || !editorService.snapshot()?.can_redo"
+                type="button">
+            Redo
+        </button>
+    </div>
+    <div aria-label="Selected entities" class="action-group" role="group">
+        <button (click)="runAction('duplicate')" [disabled]="!canEditScene() || !editorService.selection().length" type="button">Duplicate</button>
+        <button (click)="runAction('deleteSelection')" [disabled]="!canEditScene() || !editorService.selection().length" type="button">Delete</button>
+        <button (click)="runAction('frameSelection')" [disabled]="!canEditScene() || !editorService.selection().length" type="button">Frame Selection</button>
+    </div>
+    <div aria-label="Game preview controls" class="action-group" role="group">
+        <button (click)="runAction('play')" [disabled]="!canEditScene()" class="play-action" type="button">
+            <editor-icon name="play"/>
+            Play
+        </button>
+        <button (click)="runAction('stop')" [disabled]="!canRunAction() || !editorService.playing()" type="button">
+            Stop
+        </button>
+    </div>
+</div>
+@if (actionError(); as message) {
+    <div class="action-error" role="alert">{{ message }}</div>
+}

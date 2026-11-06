@@ -1,0 +1,31 @@
+<div class="viewport-tools" role="group" aria-label="Scene viewport tools">
+    <div class="tool-group" role="group" aria-label="Transform tools">
+        @for (tool of tools; track tool.tool) {
+            <button type="button" [attr.aria-pressed]="settings().tool === tool.tool" [disabled]="tool.tool === 'hand' ? !available() : !authoringAvailable()" (click)="send({type: 'set_tool', tool: tool.tool})" [title]="tool.label + ' (' + tool.shortcut + ')'">{{ tool.label }} <kbd>{{ tool.shortcut }}</kbd></button>
+        }
+    </div>
+    <label>Space <select #spaceInput [value]="settings().space" [disabled]="!authoringAvailable()" (change)="space(spaceInput.value)"><option value="world">World</option><option value="local">Local</option></select></label>
+    <label>Handle <select #pivotInput [value]="settings().pivot" [disabled]="!authoringAvailable()" (change)="pivot(pivotInput.value)"><option value="pivot">Pivot</option><option value="center">Center</option></select></label>
+    <button type="button" [disabled]="!available()" [attr.aria-pressed]="settings().grid" (click)="send({type: 'set_grid', visible: !settings().grid})">Grid</button>
+    <label>Plane <select #planeInput [value]="settings().plane" [disabled]="!available()" (change)="plane(planeInput.value)"><option value="xz">XZ</option><option value="xy">XY</option><option value="yz">YZ</option></select></label>
+    <label>Grid step <input #spacing type="number" min="0.0001" step="any" [value]="settings().grid_spacing" [disabled]="!available()" (change)="gridSpacing(spacing)"/></label>
+    <button type="button" [disabled]="!authoringAvailable()" [attr.aria-pressed]="settings().snap" (click)="send({type: 'set_snap', enabled: !settings().snap})">Snap</button>
+    <button type="button" [disabled]="!available()" (click)="send({type: 'frame_selection'})">Frame Selection <kbd>F</kbd></button>
+    <button type="button" [disabled]="!available()" (click)="send({type: 'zoom', factor: 0.8})" aria-label="Zoom in">+</button>
+    <button type="button" [disabled]="!available()" (click)="send({type: 'zoom', factor: 1.25})" aria-label="Zoom out">−</button>
+    <label>Projection <select #projectionInput [value]="settings().projection" [disabled]="!available()" (change)="projection(projectionInput.value)"><option value="perspective">Perspective</option><option value="orthographic">Orthographic</option></select></label>
+    <label>View <select #orientation [disabled]="!available()" (change)="orient(orientation.value)">@for (view of views; track view.value) { <option [value]="view.value">{{ view.label }}</option> }</select></label>
+    <button type="button" [attr.aria-expanded]="help()" (click)="help.set(!help())">Navigation &amp; Snap</button>
+    @if (viewport.authoringGesture()) { <button type="button" (click)="send({type: 'cancel'})">Cancel Gesture <kbd>Esc</kbd></button> }
+</div>
+@if (help()) {
+    <div class="viewport-help">
+        <p>Alt + left drag: orbit · Middle drag or Hand: pan · Wheel: zoom · Right drag: look · Right mouse + WASD/QE: fly · F: frame selection · Escape: cancel. Scene navigation leaves the game camera and scene history unchanged.</p>
+        <div class="snap-settings" role="group" aria-label="Snap increments">
+            <label>Move <input #moveSnap type="number" min="0.0001" step="any" [value]="settings().move_snap" [disabled]="!authoringAvailable()" (change)="snapIncrements(moveSnap, rotateSnap, scaleSnap)"/></label>
+            <label>Rotate (degrees) <input #rotateSnap type="number" min="0.0001" step="any" [value]="settings().rotation_snap_degrees" [disabled]="!authoringAvailable()" (change)="snapIncrements(moveSnap, rotateSnap, scaleSnap)"/></label>
+            <label>Scale <input #scaleSnap type="number" min="0.0001" step="any" [value]="settings().scale_snap" [disabled]="!authoringAvailable()" (change)="snapIncrements(moveSnap, rotateSnap, scaleSnap)"/></label>
+        </div>
+    </div>
+}
+@if (viewport.error(); as message) { <p class="viewport-error" role="alert">{{ message }}</p> }
