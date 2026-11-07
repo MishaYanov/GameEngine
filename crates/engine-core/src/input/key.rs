@@ -214,6 +214,21 @@ pub enum Key {
 }
 
 impl Key {
+	/// Matches the physical key names forwarded by the desktop viewport.
+	pub(super) fn physical_code(self) -> String {
+		let name = match self {
+			Self::Unidentified(code) => return format!("{code:?}"),
+			key => format!("{key:?}"),
+		};
+		if name.len() == 1 {
+			format!("Key{name}")
+		} else {
+			name
+		}
+	}
+}
+
+impl Key {
 	/// Every named physical key; native scan-code values are not enumerable.
 	pub const ALL: &'static [Self] = &[
 		Self::Backquote,

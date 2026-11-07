@@ -1,7 +1,7 @@
 import {Component, computed, inject, signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
-import type {EditorCommand, EditorSnapshot, SceneDocument, SceneEntity} from '../../../core/editor/editor.models';
+import type {EditorCommand, EditorSnapshot, SceneDocument, SceneEntity, Vec3} from '../../../core/editor/editor.models';
 import {EditorService} from '../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
 import {DEFAULT_VIEWPORT_SETTINGS, type ViewportEditorState} from '../../../core/editor/viewport-editor.models';
@@ -120,6 +120,18 @@ class EditorBridge {
     types(): EditorCommand['type'][] {
         return this.commands.map(command => command.type);
     }
+
+    setVector(field: keyof SceneEntity['transform'], value: Vec3): void {
+        this.snapshot.update(snapshot => ({
+            ...snapshot,
+            document: {
+                ...snapshot.document, entities: snapshot.document.entities.map(entity =>
+                    entity.key === snapshot.selection[0]
+                        ? {...entity, transform: {...entity.transform, [field]: value}}
+                        : entity)
+            },
+        }));
+    }
 }
 
 @Component({template: '', providers: [SceneEditingService]})
@@ -180,6 +192,48 @@ describe('SceneEditingService', () => {
         expect(bridge.snapshot().document.entities[0].transform.position[0]).toBe(4);
         expect(bridge.history).toHaveLength(1);
         expect(bridge.snapshot().transaction).toBeNull();
+    });
+
+    it.each(['position', 'rotation'] as const)('applies the linked %s offset across the original vector', async field => {
+        bridge.setVector(field, [1, 2, 3]);
+        editing.transform({field, axis: 1, value: 5, linked: true});
+        expect(editing.entity()?.transform[field]).toEqual([4, 5, 6]);
+        expect(await editing.commit()).toBe(true);
+        expect(bridge.snapshot().document.entities[0].transform[field]).toEqual([4, 5, 6]);
+        expect(bridge.history).toHaveLength(1);
+    });
+
+    it('retains signed scale ratios through coalesced edits and an intermediate zero', async () => {
+        bridge.setVector('scale', [1, 2, -3]);
+        const held = bridge.holdNext('set_transforms');
+        editing.transform({field: 'scale', axis: 0, value: 4, linked: true});
+        await held.started;
+        expect(editing.entity()?.transform.scale).toEqual([4, 8, -12]);
+        editing.transform({field: 'scale', axis: 0, value: 0, linked: true});
+        editing.transform({field: 'scale', axis: 0, value: 2, linked: true});
+        expect(editing.entity()?.transform.scale).toEqual([2, 4, -6]);
+
+        const completion = editing.commit();
+        held.release();
+        expect(await completion).toBe(true);
+        expect(bridge.types()).toEqual(['begin_transaction', 'set_transforms', 'set_transforms', 'commit_transaction']);
+        expect(bridge.snapshot().document.entities[0].transform.scale).toEqual([2, 4, -6]);
+        expect(bridge.history).toHaveLength(1);
+    });
+
+    it('lets a linked scale recover from all-zero while guarding zero axes and overflow', async () => {
+        bridge.setVector('scale', [0, 2, 3]);
+        editing.transform({field: 'scale', axis: 0, value: 2, linked: true});
+        expect(editing.error()).toContain('Unlink Scale');
+        editing.transform({field: 'scale', axis: 1, value: 3e38, linked: true});
+        expect(editing.error()).toContain('finite 32-bit');
+        expect(await editing.cancel()).toBe(true);
+        expect(bridge.types()).toEqual([]);
+
+        bridge.setVector('scale', [0, 0, 0]);
+        editing.transform({field: 'scale', axis: 0, value: 2, linked: true});
+        expect(await editing.commit()).toBe(true);
+        expect(bridge.snapshot().document.entities[0].transform.scale).toEqual([2, 2, 2]);
     });
 
     it('cancels an edit even when the transaction begin request is still pending', async () => {

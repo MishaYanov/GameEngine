@@ -67,8 +67,8 @@ input {
   min-height: var(--layout-control-height);
   padding: var(--space-3) var(--space-4);
   color: var(--color-text);
-  background: var(--color-surface);
-  border: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-input);
+  border: var(--border-width) solid var(--color-input-edge);
   border-radius: var(--radius-md);
 }
 
@@ -105,8 +105,8 @@ button {
   margin-top: var(--space-6);
   display: flex;
   justify-content: space-between;
-  background: var(--color-action);
-  color: var(--color-on-action);
+  background: var(--setup-button-color, var(--color-action));
+  color: var(--setup-button-text, var(--color-on-action));
   padding: var(--space-4);
   border: 0;
   border-radius: var(--radius-md);
@@ -115,14 +115,27 @@ button {
   transition: background-color var(--duration-fast) var(--easing-standard);
 }
 
-button:hover:not(:disabled) {
-  background: var(--color-action-hover);
+.browse {
+  --setup-button-color: var(--color-control);
+  --setup-button-text: var(--color-text);
+  --setup-button-hover: var(--color-control-hover);
+  --setup-button-pressed: var(--color-control-pressed);
+  box-shadow: inset 0 0 0 var(--border-width) var(--color-border);
+}
+
+button:enabled:hover {
+  background: var(--setup-button-hover, var(--color-action-hover));
+}
+
+button:enabled:active {
+  background: var(--setup-button-pressed, var(--color-action-pressed));
 }
 
 button:disabled,
 input:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
 }
 
 ol {

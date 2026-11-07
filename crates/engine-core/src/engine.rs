@@ -1,6 +1,6 @@
 //! Typed coordinator shared by editor hosts, players and headless tools.
 //! It owns CPU state and events; filesystem and graphics adapters stay outside.
-use std::{fmt, sync::Arc};
+use std::{collections::HashSet, fmt, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -225,6 +225,13 @@ impl Engine {
 	}
 	pub fn clear_play_input(&mut self) {
 		self.session.clear_play_input();
+	}
+	/// Update transient gameplay input without adding a document revision or history entry.
+	pub fn set_game_keyboard_input_from_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+	) -> Result<(), String> {
+		self.session.set_game_keyboard_input_from_codes(held_codes)
 	}
 	pub fn set_model_bounds(
 		&mut self,

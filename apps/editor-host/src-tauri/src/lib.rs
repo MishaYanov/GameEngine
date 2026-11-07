@@ -4,8 +4,8 @@ mod layout_preferences;
 mod project_location;
 mod state;
 mod viewport;
-mod viewport_tools;
 mod viewport_interaction;
+mod viewport_tools;
 
 use crate::commands::editor::*;
 use crate::commands::engine::engine_status;
@@ -14,6 +14,7 @@ use crate::commands::preferences::{
 };
 use crate::commands::project::{
 	choose_project_destination, choose_project_manifest, confirm_project_discard, create_project,
+	editor_exit,
 };
 use state::EditorState;
 use tauri::Manager;
@@ -61,6 +62,7 @@ pub fn run() {
 			choose_project_destination,
 			choose_project_manifest,
 			confirm_project_discard,
+			editor_exit,
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
 			editor_capabilities,

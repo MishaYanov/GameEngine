@@ -1,7 +1,11 @@
 <main class="editor-main">
     <editor-header
+            (exitRequested)="exitEditor()"
             (openProjectRequested)="openProject()"
+            (settingsRequested)="settings.setOpen(true)"
+            [canExit]="canExit()"
             [canOpen]="canOpenProject()"
+            [canOpenSettings]="!opening()"
             [opening]="opening()"
     />
 
@@ -28,3 +32,5 @@
 <editor-portal>
     <router-outlet></router-outlet>
 </editor-portal>
+
+<editor-settings-dialog/>

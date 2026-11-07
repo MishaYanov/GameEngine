@@ -1,24 +1,28 @@
 import {Component, computed, inject, input, signal} from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
+import {SceneSwitchService} from './scene-switch.service';
 
 @Component({
     selector: 'editor-scene-actions',
-    imports: [FormField],
+    imports: [EditorDialog, FormField],
     templateUrl: './scene-actions.html',
     styleUrl: './scene-actions.scss',
 })
 export class SceneActions {
     readonly opening = input(false);
     protected readonly editor = inject(EditorService);
+    protected readonly sceneSwitch = inject(SceneSwitchService);
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly pending = signal(false);
     protected readonly expanded = signal(false);
     protected readonly message = signal<string | null>(null);
     protected readonly error = signal<string | null>(null);
+    protected readonly confirmationConfig = {draggable: false, resizable: false, expandable: false};
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
-        !this.opening() && !this.pending() && (this.editing?.ready() ??
+        !this.opening() && !this.pending() && !this.sceneSwitch.pending() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
     private readonly pathDraft = signal({path: ''});
     protected readonly fields = form(this.pathDraft, path => {
@@ -34,10 +38,10 @@ export class SceneActions {
     protected switchScene(select: HTMLSelectElement): void {
         const id = select.value;
         select.value = this.editor.snapshot()?.active_scene_id ?? '';
-        void this.run(async () => {
-            await this.editor.switchScene(id);
-            this.message.set('Scene opened. Unsaved edits in other scenes are retained.');
-        });
+        if (!this.available()) return;
+        this.error.set(null);
+        this.message.set(null);
+        void this.sceneSwitch.request(id);
     }
 
     protected async setStartup(): Promise<void> {
@@ -64,6 +68,7 @@ export class SceneActions {
     private async run(action: () => Promise<void>): Promise<void> {
         if (!this.available()) return;
         this.pending.set(true);
+        this.sceneSwitch.clearFeedback();
         this.error.set(null);
         this.message.set(null);
         try {

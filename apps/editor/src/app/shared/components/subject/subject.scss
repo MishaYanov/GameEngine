@@ -102,9 +102,21 @@ h3 {
   cursor: var(--cursor-action);
 }
 
+.header-toggle:hover,
 .traits-toggle:hover {
   color: var(--color-text);
-  background: var(--color-surface-hover);
+  background: var(--color-control-hover);
+}
+
+.header-toggle:active,
+.traits-toggle:active {
+  color: var(--color-text);
+  background: var(--color-control-pressed);
+}
+
+.header-toggle:is(:hover, :active) editor-icon,
+.traits-toggle:is(:hover, :active) editor-icon {
+  color: inherit;
 }
 
 .traits-toggle editor-icon {

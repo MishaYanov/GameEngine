@@ -10,9 +10,13 @@
 }
 
 :host(.selected) {
-  border-color: var(--color-action);
-  box-shadow: 0 0 0 var(--border-width) var(--color-action),
-  var(--shadow-graph-node);
+  background: var(--color-selected);
+  border-color: var(--color-selection-edge);
+  box-shadow: 0 0 0 var(--border-width) var(--color-selection-edge), var(--shadow-graph-node);
+}
+
+:host(.selected:hover) {
+  background: var(--color-selected-hover);
 }
 
 :host([data-kind='animation.state']) {
@@ -72,12 +76,17 @@ header button span {
   white-space: nowrap;
 }
 
+header button:hover {
+  background: var(--color-control-hover);
+}
+
 header button:active {
+  background: var(--color-control-pressed);
   cursor: var(--cursor-dragging);
 }
 
 header editor-icon {
-  color: var(--color-action);
+  color: var(--color-graph-accent);
 }
 
 :host([data-domain='animation']) header editor-icon {
@@ -125,6 +134,11 @@ header editor-icon {
   color: var(--color-text);
 }
 
+.port:active {
+  background: var(--color-control-pressed);
+  color: var(--color-text);
+}
+
 .output-ports .port {
   justify-content: flex-end;
   text-align: right;
@@ -138,7 +152,7 @@ header editor-icon {
   height: var(--layout-graph-port-size);
   border: var(--focus-width) solid var(--port-color);
   border-radius: var(--radius-pill);
-  background: var(--color-graph-node);
+  background: transparent;
 }
 
 .port.connected::before,
@@ -185,6 +199,16 @@ editor-graph-values {
   padding: var(--space-2);
   cursor: var(--cursor-action);
   font: inherit;
+}
+
+.composite-summary button:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+.composite-summary button:active {
+  background: var(--color-control-pressed);
+  color: var(--color-text);
 }
 
 [data-type='transition'],

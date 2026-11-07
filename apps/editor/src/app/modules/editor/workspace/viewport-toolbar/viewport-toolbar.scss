@@ -5,11 +5,56 @@
 button, select, input { min-height: 1.75rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--color-text); background: var(--color-surface); font: inherit; font-size: var(--font-size-xs); }
 button { white-space: nowrap; }
 button:enabled:hover { background: var(--color-control-hover); }
-button[aria-pressed='true'] { background: var(--color-action); color: var(--color-on-action); }
-button:disabled, select:disabled, input:disabled { opacity: var(--opacity-disabled); }
+
+button[aria-pressed='true']:enabled {
+  background: var(--color-selected);
+  border-color: var(--color-selection-edge);
+}
+
+button[aria-pressed='true']:enabled:hover {
+  background: var(--color-selected-hover);
+}
+
+button:enabled:active,
+button[aria-pressed='true']:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+button:disabled, select:disabled, input:disabled {
+  background: var(--color-control-disabled);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+}
 label { display: flex; align-items: center; gap: var(--space-1); color: var(--color-text-secondary); font-size: var(--font-size-xs); }
 input { width: 4.5rem; min-width: 0; }
-kbd { color: inherit; font-family: var(--font-family-mono); font-size: var(--font-size-xs); opacity: .8; }
+
+kbd {
+  color: inherit;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
 .viewport-help, .viewport-error { margin: 0; padding: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
 .viewport-help p { margin: 0 0 var(--space-2); }
-.viewport-error { color: var(--color-danger); overflow-wrap: anywhere; }
+
+.shortcut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-2);
+}
+
+.shortcut-legend div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.shortcut-legend dd {
+  margin: 0;
+}
+
+.viewport-error {
+  border: var(--border-width) solid var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}

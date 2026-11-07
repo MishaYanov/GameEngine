@@ -2,7 +2,9 @@
     <button type="button" [disabled]="!available()" (click)="exportProject()">
         {{ pending() === 'choose' ? 'Choosing output…' : pending() === 'build' ? 'Exporting…' : 'Export Game…' }}
     </button>
-    @if (unsaved()) { <span class="hint">Save All before exporting.</span> }
+    @if (unsaved()) {
+        <span class="hint warning">Save All before exporting.</span>
+    }
     @if (retryPreparation(); as staged) {
         @if (error()) {
             <button type="button" [disabled]="pending() !== null || opening()" (click)="retryExport()">Retry Export</button>
@@ -14,6 +16,9 @@
         <span class="hint">{{ build.asset_count }} assets · {{ (build.asset_bytes / 1048576).toFixed(1) }} MiB</span>
         <button type="button" [disabled]="pending() !== null" (click)="runBuild()">{{ pending() === 'run' ? 'Starting…' : 'Run Exported Game' }}</button>
     }
-    @if (status(); as message) { <p role="status">{{ message }}</p> }
+    @if (status(); as message) {
+        <p [class.progress]="pending() === 'build'" [class.success]="result() && pending() !== 'build'"
+           role="status">{{ message }}</p>
+    }
     @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
 </section>

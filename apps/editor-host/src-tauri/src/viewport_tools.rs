@@ -188,10 +188,20 @@ impl EditorCamera {
 		if !delta.is_finite() {
 			return;
 		}
-		self.yaw =
-			(self.yaw - delta.x.clamp(-2000.0, 2000.0) * 0.006).rem_euclid(std::f32::consts::TAU);
-		self.pitch = (self.pitch + delta.y.clamp(-2000.0, 2000.0) * 0.006)
-			.clamp(-pole_limit(), pole_limit());
+		let angle = delta.clamp(Vec2::splat(-2000.0), Vec2::splat(2000.0)) * 0.006;
+		self.orbit_angles(Vec2::new(-angle.x, angle.y));
+	}
+
+	pub fn orbit_angles(&mut self, delta: Vec2) {
+		self.yaw = (self.yaw + delta.x).rem_euclid(std::f32::consts::TAU);
+		self.pitch = (self.pitch + delta.y).clamp(-pole_limit(), pole_limit());
+	}
+
+	/// Fly mode turns around the eye instead of swinging around the scene pivot.
+	pub fn look(&mut self, delta: Vec2) {
+		let position = self.position();
+		self.orbit(-delta);
+		self.pivot = position + self.forward() * self.distance;
 	}
 
 	/// Pan uses physical pixels and the matching physical extent.

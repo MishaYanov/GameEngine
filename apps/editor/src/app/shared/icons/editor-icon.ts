@@ -17,6 +17,8 @@ export const EDITOR_ICONS = {
     graph: 'M3 3h6v6H3V3Zm12 12h6v6h-6v-6ZM6 9v9h9M9 6h9v9',
     plus: 'M12 5v14M5 12h14',
     minus: 'M5 12h14',
+    lock: 'M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Zm2 0V7a3 3 0 0 1 6 0v4m-3 4v2',
+    unlock: 'M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Zm2 0V7a3 3 0 0 1 5.8-1m-2.8 9v2',
 } as const;
 
 export type EditorIconName = keyof typeof EDITOR_ICONS;

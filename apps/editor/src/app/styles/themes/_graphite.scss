@@ -1,0 +1,51 @@
+@use 'sass:map';
+
+$graphite: () !default;
+
+@function graphite() {
+  @return map.merge(
+          (
+                  color-scheme: dark,
+            // Neutral surfaces are ordered from the canvas to floating chrome.
+                  color-canvas: #14191f,
+                  color-bg: #171b20,
+                  color-workspace: #1c2127,
+                  color-pane: #20262d,
+                  color-surface-raised: #282f38,
+                  color-control: #2a323c,
+                  color-border: #414c59,
+                  color-border-strong: #78889d,
+                  color-shadow: #090c10,
+                  color-text: #e9edf3,
+                  color-text-secondary: #bac4d0,
+                  color-text-muted: #afbbca,
+            // Hover and press are transient. Selection and focus are independent.
+                  color-control-hover: #323c48,
+                  color-control-pressed: #3b4755,
+                  color-control-disabled: #222830,
+                  color-text-disabled: #8b98a8,
+                  color-selected: #263b5d,
+                  color-selected-hover: #2e466c,
+                  color-selection-edge: #8bb0ff,
+                  color-focus: #a8c5ff,
+                  color-drop-target: #243e49,
+                  color-drop-edge: #77cde8,
+            // Solid fills are reserved for primary actions.
+                  color-action: #335cc7,
+                  color-action-hover: #3d64cb,
+                  color-action-pressed: #294ba7,
+                  color-on-action: #f7faff,
+            // These foregrounds pair with the state surfaces in the registry.
+                  color-info: #8cc6f5,
+                  color-success: #83d9a6,
+                  color-warning: #f3c878,
+                  color-danger: #ff9d9b,
+            // Port and wire types describe data, independently of message severity.
+                  color-graph-accent: #9fb8f2,
+                  color-graph-float: #80cedd,
+                  color-graph-vector: #8dd9ae,
+                  color-graph-pose: #baa6ed,
+          ),
+          $graphite
+  );
+}

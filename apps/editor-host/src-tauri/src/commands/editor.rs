@@ -622,8 +622,17 @@ pub async fn editor_assets(
 	state: State<'_, EditorState>,
 ) -> Result<Vec<ModelAssetDto>, String> {
 	trusted_window(&window)?;
-	workspace(state, false, None, |w| {
-		runtime::assets::catalog::scan_models(&w.asset_root).map(|assets| {
+	let shared = Arc::clone(&state.editor);
+	tauri::async_runtime::spawn_blocking(move || {
+		let asset_root = shared
+			.lock()
+			.map_err(|_| "Editor state lock failed")?
+			.as_ref()
+			.ok_or("Open a scene before using the editor")?
+			.asset_root
+			.clone();
+		// Directory traversal should not block document edits or viewport frames.
+		runtime::assets::catalog::scan_models(asset_root).map(|assets| {
 			assets
 				.into_iter()
 				.map(|a| ModelAssetDto {
@@ -634,6 +643,7 @@ pub async fn editor_assets(
 		})
 	})
 	.await
+		.map_err(|error| format!("Asset catalog worker failed: {error}"))?
 }
 #[tauri::command]
 pub async fn editor_import_model(
@@ -780,18 +790,40 @@ pub fn editor_viewport_status(
 }
 
 #[tauri::command]
-pub fn editor_viewport_editor_state(window: WebviewWindow, state: State<'_, EditorState>) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
+pub fn editor_viewport_editor_state(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
 	trusted_window(&window)?;
-	state.viewport.lock().map_err(|_| "Viewport state lock failed")?.editor_state()
+	state
+		.viewport
+		.lock()
+		.map_err(|_| "Viewport state lock failed")?
+		.editor_state()
 }
 
 #[tauri::command]
-pub async fn editor_viewport_action(window: WebviewWindow, state: State<'_, EditorState>, action: bridge::viewport::ViewportActionDto) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
+pub async fn editor_viewport_action(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	action: bridge::viewport::ViewportActionDto,
+) -> Result<bridge::viewport::ViewportEditorStateDto, String> {
 	trusted_window(&window)?;
-	let receiver = state.viewport.lock().map_err(|_| "Viewport state lock failed")?.request_action(action)?;
-	tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(std::time::Duration::from_secs(9))
-		.map_err(|_| "Viewport action did not complete; inspect its current state before retrying".to_string())?)
-		.await.map_err(|error| format!("Viewport action worker failed: {error}"))?
+	let receiver = state
+		.viewport
+		.lock()
+		.map_err(|_| "Viewport state lock failed")?
+		.request_action(action)?;
+	tauri::async_runtime::spawn_blocking(move || {
+		receiver
+			.recv_timeout(std::time::Duration::from_secs(9))
+			.map_err(|_| {
+				"Viewport action did not complete; inspect its current state before retrying"
+					.to_string()
+			})?
+	})
+		.await
+		.map_err(|error| format!("Viewport action worker failed: {error}"))?
 }
 
 #[cfg(test)]

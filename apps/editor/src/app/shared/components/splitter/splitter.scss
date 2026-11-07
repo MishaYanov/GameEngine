@@ -38,10 +38,20 @@
   background: var(--color-border-strong);
 }
 
-:host(:focus-visible)::before,
-:host(.dragging)::before,
-:host(:focus-visible)::after,
+:host(:hover)::after {
+  background: var(--color-text-secondary);
+}
+
+:host(.dragging)::before {
+  background: var(--color-control-pressed);
+}
+
 :host(.dragging)::after {
+  background: var(--color-text);
+}
+
+:host(:focus-visible)::before,
+:host(:focus-visible)::after {
   background: var(--color-focus);
 }
 

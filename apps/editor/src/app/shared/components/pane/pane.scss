@@ -37,7 +37,7 @@
   min-width: 0;
 }
 
-.pane-title editor-icon {
+.pane-title > editor-icon {
   color: var(--color-text-muted);
 }
 
@@ -57,6 +57,11 @@
 
 .drawer-toggle:hover {
   background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+.drawer-toggle:active {
+  background: var(--color-control-pressed);
   color: var(--color-text);
 }
 

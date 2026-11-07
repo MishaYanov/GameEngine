@@ -45,9 +45,11 @@ describe('Scene viewport', () => {
         const status = vi.fn();
         const errors = vi.fn();
         const inputs = vi.fn();
+        const actions = vi.fn();
         fixture.componentInstance.viewportStatus.subscribe(status);
         fixture.componentInstance.viewportError.subscribe(errors);
         fixture.componentInstance.viewportInput.subscribe(inputs);
+        fixture.componentInstance.editorActionRequested.subscribe(actions);
         const snapshot: ViewportStatus = {
             attached: true,
             visible: true,
@@ -74,6 +76,11 @@ describe('Scene viewport', () => {
         };
         directive.engineViewportInput.emit(input);
         expect(inputs).toHaveBeenCalledWith(input);
+        expect(actions).not.toHaveBeenCalled();
+        directive.engineViewportInput.emit({
+            ...input, kind: 'key_down', button: null, code: 'KeyS', modifiers: {...input.modifiers, control: true},
+        });
+        expect(actions).toHaveBeenCalledExactlyOnceWith('document.save');
         const error = new EditorClientError('backend', 'editor_viewport_attach', 'GPU unavailable');
         directive.engineViewportError.emit(error);
         fixture.detectChanges();

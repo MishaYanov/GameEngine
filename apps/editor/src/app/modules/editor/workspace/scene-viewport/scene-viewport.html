@@ -4,7 +4,7 @@
             #surface
             #viewport="engineViewport"
             (engineViewportError)="failed($event)"
-            (engineViewportInput)="viewportInput.emit($event)"
+            (engineViewportInput)="inputReceived($event)"
             (engineViewportStatus)="statusChanged($event)"
             [engineViewport]="active()"
             class="surface"

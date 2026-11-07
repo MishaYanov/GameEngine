@@ -10,8 +10,29 @@ button {
   font-size: var(--font-size-sm);
 }
 button:enabled:hover { background: var(--color-control-hover); }
-button:disabled { opacity: var(--opacity-disabled); }
+
+button:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+button:disabled {
+  background: var(--color-control-disabled);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+}
 .hint, p { color: var(--color-text-secondary); font-size: var(--font-size-xs); }
 .output { max-width: min(40vw, 30rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-size: var(--font-size-xs); }
 p { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .error { color: var(--color-danger); }
+
+.warning {
+  color: var(--color-warning);
+}
+
+.progress {
+  color: var(--color-info);
+}
+
+.success {
+  color: var(--color-success);
+}

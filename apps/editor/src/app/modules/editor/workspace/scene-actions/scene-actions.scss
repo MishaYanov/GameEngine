@@ -23,9 +23,37 @@ select, input, button {
 select { max-width: min(45vw, 24rem); }
 input { width: min(45vw, 20rem); }
 button:enabled:hover { background: var(--color-control-hover); }
-button:disabled, select:disabled { opacity: var(--opacity-disabled); }
+
+button:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+button:disabled, select:disabled {
+  background: var(--color-control-disabled);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+}
 .startup { color: var(--color-text-secondary); font-size: var(--font-size-xs); }
 p { margin: 0; font-size: var(--font-size-xs); }
 .scene-files p { flex-basis: 100%; }
 .status, .error { padding: var(--space-1) var(--space-2); color: var(--color-text-secondary); }
 .error { color: var(--color-danger); }
+
+.switch-prompt {
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.save-and-open {
+  background: var(--color-action);
+  border-color: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.save-and-open:enabled:hover {
+  background: var(--color-action-hover);
+}
+
+.save-and-open:enabled:active {
+  background: var(--color-action-pressed);
+}

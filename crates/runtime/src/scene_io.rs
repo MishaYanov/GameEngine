@@ -69,7 +69,20 @@ pub fn instantiate(
 	assets: &mut AssetManager,
 	renderer: &WindowRenderer,
 ) -> Result<(Scene, Camera), String> {
+	instantiate_with_progress(data, assets, renderer, |_, _| {})
+}
+
+/// Reports actual scene objects as they finish construction. An object's GPU
+/// resources are either prepared here or reused from the asset cache.
+pub fn instantiate_with_progress(
+	data: &SceneData,
+	assets: &mut AssetManager,
+	renderer: &WindowRenderer,
+	mut prepared: impl FnMut(usize, usize),
+) -> Result<(Scene, Camera), String> {
 	data.validate()?;
+	let total = data.entities.len();
+	prepared(0, total);
 	let mut scene = Scene::default();
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
@@ -116,6 +129,7 @@ pub fn instantiate(
 			)
 			.map_err(|error| format!("Scene entity {index}: {error}"))?;
 		scene.set_entity_metadata(id, entity)?;
+		prepared(index + 1, total);
 	}
 
 	for (name, key) in &data.bindings {

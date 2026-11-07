@@ -17,6 +17,51 @@ legend {
   font-size: var(--font-size-sm);
 }
 
+.legend-content {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.axis-lock {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: 0;
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text-secondary);
+}
+
+.axis-lock:enabled:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+.axis-lock[aria-pressed='true'] {
+  border-color: var(--color-selection-edge);
+  background: var(--color-selected);
+  color: var(--color-text);
+}
+
+.axis-lock[aria-pressed='true']:enabled:hover {
+  background: var(--color-selected-hover);
+}
+
+.axis-lock:enabled:active,
+.axis-lock[aria-pressed='true']:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+.axis-lock:disabled {
+  border-color: var(--color-border);
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
 .unit {
   font-size: var(--font-size-xs);
 }
@@ -40,9 +85,9 @@ input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 2rem;
-  padding: var(--space-1);
-  border: var(--border-width) solid var(--color-input-edge);
+  min-height: var(--space-7);
+  padding: 0.125rem 0.1875rem;
+  border: 0.5px solid var(--color-input-edge-subtle);
   border-radius: var(--radius-sm);
   background: var(--color-input);
   color: var(--color-text);
@@ -50,17 +95,17 @@ input {
   font-size: var(--font-size-sm);
 }
 
-input:focus-visible {
-  outline: 2px solid var(--color-action);
-  outline-offset: 1px;
+input:enabled:hover {
+  border-color: var(--color-input-edge);
 }
 
-input[aria-invalid='true'] {
+input:enabled[aria-invalid='true'] {
   border-color: var(--color-danger);
 }
 
-fieldset:disabled {
-  opacity: var(--opacity-disabled);
+input:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
 }
 
 .error {

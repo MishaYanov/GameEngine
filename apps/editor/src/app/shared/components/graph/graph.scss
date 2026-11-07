@@ -42,7 +42,7 @@
 }
 
 .graph-title editor-icon {
-  color: var(--color-action);
+  color: var(--color-graph-accent);
 }
 
 .domain {
@@ -70,9 +70,19 @@ button {
   gap: var(--space-1);
 }
 
-button:hover {
-  background: var(--color-surface-hover);
+:is(button, select):enabled:hover {
+  background: var(--color-control-hover);
   color: var(--color-text);
+}
+
+:is(button, select):enabled:active {
+  background: var(--color-control-pressed);
+  color: var(--color-text);
+}
+
+:is(button, select):disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
 }
 
 .icon-button {
@@ -87,8 +97,20 @@ button:hover {
   color: var(--color-on-action);
 }
 
-.add:hover {
+.add:enabled:hover {
   background: var(--color-action-hover);
+  border-color: var(--color-action-hover);
+  color: var(--color-on-action);
+}
+
+.add:enabled:active {
+  background: var(--color-action-pressed);
+  border-color: var(--color-action-pressed);
+  color: var(--color-on-action);
+}
+
+.add:disabled {
+  border-color: var(--color-input-edge);
 }
 
 .zoom {
@@ -136,10 +158,6 @@ button:hover {
   stroke-dasharray: 6 3;
 }
 
-.wire.selected-wire {
-  stroke: var(--color-action);
-}
-
 .wire[data-type='bool'],
 .wire[data-type='trigger'],
 .wire[data-type='events'] {
@@ -184,7 +202,7 @@ button:hover {
 }
 
 .wire {
-  stroke: var(--color-action);
+  stroke: var(--color-graph-accent);
   stroke-width: var(--layout-graph-wire-width);
   pointer-events: none;
 }
@@ -201,6 +219,10 @@ button:hover {
   stroke: var(--color-graph-pose);
 }
 
+.wire.selected-wire {
+  stroke: var(--color-selection-edge);
+}
+
 .wire-hit {
   stroke: transparent;
   stroke-width: var(--layout-graph-wire-hit-area);
@@ -211,6 +233,11 @@ button:hover {
 .wire-hit:hover {
   stroke: var(--color-graph-wire-hover);
   outline: none;
+}
+
+.wire-hit:active:not(:focus-visible) {
+  stroke: var(--color-graph-accent);
+  stroke-opacity: 0.65;
 }
 
 .wire-hit:focus-visible {

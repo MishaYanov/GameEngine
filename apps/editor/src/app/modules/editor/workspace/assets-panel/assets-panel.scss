@@ -45,18 +45,32 @@ button {
   cursor: var(--cursor-action);
 }
 
-button:hover:enabled {
+button:enabled:hover {
   background: var(--color-control-hover);
+}
+
+button.selected:enabled {
+  border-color: var(--color-selection-edge);
+  background: var(--color-selected);
+}
+
+button.selected:enabled:hover {
+  background: var(--color-selected-hover);
+}
+
+button:enabled:active,
+button.selected:enabled:active {
+  background: var(--color-control-pressed);
 }
 
 button:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
 }
 
-button.selected {
-  border-color: var(--color-focus);
-  background: var(--color-control-hover);
+.drag-source {
+  cursor: var(--cursor-drag);
+  touch-action: none;
 }
 
 .asset-details {
@@ -79,11 +93,23 @@ button.selected {
 }
 
 .active-scene {
-  color: var(--color-success);
+  padding-inline: var(--space-1);
+  border: var(--border-width) solid var(--color-info-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-info-bg);
+  color: var(--color-info);
   font-size: var(--font-size-xs);
 }
 
 .asset-kind,
 p {
   color: var(--color-text-secondary);
+}
+
+p[role='alert'] {
+  color: var(--color-danger);
+}
+
+p[role='status'] {
+  color: var(--color-success);
 }

@@ -95,6 +95,33 @@ fn prime_clock(app: &mut GameApp) -> Instant {
 }
 
 #[test]
+fn player_uses_authored_keys_without_running_conflicting_camera_or_pause_shortcuts() {
+	let (mut app, [actor, _]) = fixture();
+	let mut project = app.project.clone().unwrap();
+	project.input_profile = Some(InputProfile {
+		movement: MovementBindings::ARROWS,
+		actions: vec![runtime::input::GameInputBinding {
+			id: "interact".into(),
+			key: Key::Space,
+			animation_parameter: Some("IsInteracting".into()),
+		}],
+		..InputProfile::default()
+	});
+	app.editor.set_initial_project(project).unwrap();
+	app.editor.start_play(&mut app.scene).unwrap();
+	app.standalone_runtime = true;
+	app.input.reset();
+	app.input.press(Key::ArrowRight);
+	app.input.press(Key::Space);
+	let before_camera = app.camera.position;
+	let before_actor = app.scene.get(actor).unwrap().transform().position;
+	app.update_player(1.0 / 30.0);
+	assert!(app.scene.get(actor).unwrap().transform().position[0] > before_actor[0]);
+	assert_eq!(app.camera.position, before_camera);
+	assert!(!app.editor.simulation_paused());
+}
+
+#[test]
 fn helpers_report_missing_configuration_without_mutating_live_state() {
 	let directory = TestDirectory::new();
 	let (mut app, _) = fixture();

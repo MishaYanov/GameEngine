@@ -1,4 +1,4 @@
-<app-drawer [config]="drawerConfig" icon="object" label="Hierarchy" maxWidth="45%"
+<app-drawer [config]="drawerConfig" icon="object" label="Hierarchy" maxWidth="60%"
             preferenceKey="editor.scene-objects" resizeLabel="Resize Hierarchy" type="left">
     <editor-pane icon="object" title="Hierarchy">
         @if (scene().projectOpen) {
@@ -6,46 +6,70 @@
                 <button type="button" class="scene-root" [class.drop-target]="isDropTarget(null) && dropTarget()?.valid"
                         [class.drop-rejected]="isDropTarget(null) && !dropTarget()?.valid"
                         [disabled]="disabled()" aria-label="Move selected entity to Scene root"
-                        (click)="moveToRoot()" (dragover)="dragOver($event, null)" (dragleave)="dragLeft($event)" (drop)="dropped($event, null)">
-                    <editor-icon name="cube"/><span [title]="sceneLabel()">{{ sceneLabel() }}</span><small>Scene root</small>
+                        (click)="moveToRoot()" (dragleave)="dragLeft($event)" (dragover)="dragOver($event, null)"
+                        (drop)="dropped($event, null)">
+                    <editor-icon name="cube"/>
+                    <span [title]="sceneLabel()">{{ sceneLabel() }}</span><small>Scene root</small>
                 </button>
                 @if (rows().length) {
-                    <div #tree class="entity-list" role="tree" aria-label="Entities in the active scene" aria-multiselectable="true" tabindex="0"
+                    <div #tree aria-label="Entities in the active scene" aria-multiselectable="true" class="entity-list"
+                         role="tree" tabindex="0"
                          [attr.aria-disabled]="disabled()" [attr.aria-activedescendant]="activeId()"
                          (scroll)="scrolled($event)" (keydown)="keydown($event)">
                         <div class="virtual-space" role="presentation" [style.height.px]="totalHeight()">
                             @for (row of renderedRows(); track row.key) {
                                 <button type="button" role="treeitem" tabindex="-1" class="entity-button"
                                         [id]="rowId(row.key)" [attr.data-key]="row.key"
-                                        [attr.aria-label]="row.entity.name" [attr.aria-selected]="selection().has(row.key)"
-                                        [attr.aria-level]="row.level" [attr.aria-posinset]="row.position" [attr.aria-setsize]="row.siblings"
+                                        (click)="choose(row)"
+                                        (dragend)="dragEnded()"
+                                        (dragleave)="dragLeft($event)" (dragover)="dragOver($event, row.key)"
+                                        (dragstart)="dragStarted($event, row.key)"
                                         [attr.aria-expanded]="row.children ? row.expanded : null"
-                                        [class.selected]="selection().has(row.key)" [class.focused]="activeKey() === row.key"
+                                        (drop)="dropped($event, row.key)"
+                                        [attr.aria-label]="row.entity.name"
                                         [class.drop-target]="isDropTarget(row.key) && dropTarget()?.valid"
                                         [class.drop-rejected]="isDropTarget(row.key) && !dropTarget()?.valid"
                                         [disabled]="disabled()" [draggable]="!disabled()"
-                                        [style.top.px]="row.index * rowHeight" [style.padding-inline-start.px]="row.indent"
+                                        [attr.aria-level]="row.level"
+                                        [attr.aria-posinset]="row.position"
                                         [title]="row.entity.name + ' · ' + row.entity.model_path"
-                                        (click)="choose(row)" (dragstart)="dragStarted($event, row.key)" (dragend)="dragEnded()"
-                                        (dragover)="dragOver($event, row.key)" (dragleave)="dragLeft($event)" (drop)="dropped($event, row.key)">
-                                    <span class="disclosure" [class.has-children]="row.children" [class.expanded]="row.expanded"
+                                        [attr.aria-selected]="selection().has(row.key)"
+                                        [attr.aria-setsize]="row.siblings"
+                                        [class.focused]="activeKey() === row.key"
+                                        [class.selected]="selection().has(row.key)"
+                                        [style.padding-inline-start.px]="row.indent"
+                                        [style.top.px]="row.index * rowHeight">
+                                    <span [class.expanded]="row.expanded" [class.has-children]="row.children"
+                                          class="disclosure"
                                           aria-hidden="true" (click)="toggle($event, row)">▸</span>
-                                    <editor-icon name="object"/><span class="entity-name">{{ row.entity.name }}</span>
+                                    <editor-icon name="object"/>
+                                    <span class="entity-name">{{ row.entity.name }}</span>
                                 </button>
                             }
                         </div>
                     </div>
-                } @else { <p class="placeholder">This scene contains no entities.</p> }
+                } @else {
+                    <p class="placeholder">This scene contains no entities.</p>
+                }
                 <div class="hierarchy-actions" role="group" aria-label="Hierarchy parenting">
-                    <button type="button" [disabled]="disabled() || !primary()" (click)="beginParenting()">Set Parent…</button>
-                    <button type="button" [disabled]="disabled() || (!primary()?.parent && !parentingChild())" (click)="moveToRoot()">Move to Root</button>
+                    <button (click)="beginParenting()" [disabled]="disabled() || !primary()" type="button">Set Parent…
+                    </button>
+                    <button (click)="moveToRoot()" [disabled]="disabled() || (!primary()?.parent && !parentingChild())"
+                            type="button">Move to Root
+                    </button>
                 </div>
                 @if (primary(); as selected) {
                     <p class="entity-details" [title]="selected.model_path">{{ selected.model_path }}</p>
                 }
-                @if (status(); as message) { <p class="hierarchy-status" role="status">{{ message }}</p> }
-                @if (error(); as message) { <p class="hierarchy-error" role="alert">{{ message }}</p> }
+                @if (status(); as message) {
+                    <p class="hierarchy-status" role="status">{{ message }}</p>
+                }
+                @if (error(); as message) {
+                    <p class="hierarchy-error" role="alert">{{ message }}</p>
+                }
             </div>
-        } @else { <p class="placeholder">Open a project to view its scene entities.</p> }
+        } @else {
+            <p class="placeholder">Open a project to view its scene entities.</p>
+        }
     </editor-pane>
 </app-drawer>

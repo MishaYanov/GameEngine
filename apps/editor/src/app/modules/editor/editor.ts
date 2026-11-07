@@ -5,12 +5,15 @@ import {EditorWorkspace} from './workspace/editor-workspace';
 import {EditorFooter} from "./components/editor-footer/editor-footer";
 import {EditorPortal} from "./components/editor-portal/editor-portal";
 import {EditorClientError, EditorService} from "../../core/editor/editor.service";
+import {EditorSettingsService} from '../../core/editor/settings/editor-settings.service';
+import {EditorSettingsDialog} from '../editor-settings/editor-settings-dialog';
 
 enum OpenMessages {
     RESTORING = 'Checking for the open project…',
     CREATING = 'Choosing a project…',
     DISCARD = 'Waiting for your discard decision…',
-    OPENING = 'Opening project…'
+    OPENING = 'Opening project…',
+    EXITING = 'Closing the editor…',
 }
 
 @Component({
@@ -21,24 +24,26 @@ enum OpenMessages {
         EditorWorkspace,
         EditorFooter,
         EditorPortal,
+        EditorSettingsDialog,
     ],
     templateUrl: './editor.html',
     styleUrl: './editor.scss',
 })
 export class Editor {
     protected readonly editorService = inject(EditorService);
+    protected readonly settings = inject(EditorSettingsService);
     protected readonly destroyRef = inject(DestroyRef);
     unregisterFn = this.destroyRef.onDestroy(() => this.destroyCallBack());
     protected openMessage = signal<string | null>(null);
     protected openError = signal<string | null>(null);
     protected readonly opening = computed(() => this.openMessage() !== null);
-    protected readonly canOpenProject = computed(() =>
+    protected readonly canExit = computed(() =>
         this.editorService.nativeAvailable &&
         !this.opening() &&
         !this.editorService.busy() &&
-        !this.editorService.playing() &&
         !this.editorService.snapshot()?.transaction
     );
+    protected readonly canOpenProject = computed(() => this.canExit() && !this.editorService.playing());
     private destroyed = false;
 
     async ngOnInit(): Promise<void> {
@@ -120,7 +125,22 @@ export class Editor {
         }
     }
 
+    protected async exitEditor(): Promise<void> {
+        if (!this.canExit()) return;
+        this.openError.set(null);
+        this.openMessage.set(OpenMessages.EXITING);
+        let closing = false;
+        try {
+            closing = await this.editorService.requestExit();
+        } catch (error: unknown) {
+            if (!this.destroyed) this.openError.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            if (!closing) this.openMessage.set(null);
+        }
+    }
+
     private destroyCallBack() {
         this.destroyed = true;
+        this.settings.setOpen(false);
     }
 }

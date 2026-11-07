@@ -1,6 +1,6 @@
 //! Compatibility adapter for the native development harness. Authoring and
 //! undo/redo are delegated to the same CPU EditorSession used by Tauri.
-use crate::input::MovementBindings;
+use crate::input::{InputProfile, MovementBindings};
 use crate::{
 	Camera, EntityKey, InputState, Key, SceneData, Transform,
 	editor::{
@@ -30,7 +30,7 @@ pub struct SceneEditor {
 	selected: Option<EntityId>,
 	movement_entity: Option<EntityId>,
 	play_input_target: MovementTarget,
-	play_movement_bindings: MovementBindings,
+	play_input_override: Option<InputProfile>,
 }
 
 impl SceneEditor {
@@ -196,20 +196,17 @@ impl SceneEditor {
 		elapsed: f32,
 	) -> Result<(), String> {
 		self.initialize(scene)?;
-		if input.just_pressed(Key::Space) {
+		if input.just_pressed(Key::Space) && !self.play_input_binds_key(Key::Space) {
 			self.execute_core(Command::SetPaused {
 				paused: !self.simulation_paused(),
 			})?;
 		}
-		if self
-			.play_controlled_targets()
-			.is_some_and(|targets| !targets.is_empty())
-		{
-			let direction = self.play_movement_bindings.direction(input);
-			self.route_play_input([direction[0], direction[1], 0.0])?;
-		}
+		let defaults = InputProfile::default();
+		let profile = self.play_input_profile().unwrap_or(&defaults);
+		let keyboard = profile.resolve_keyboard(input);
 
 		let session = self.session.as_mut().expect("initialized session");
+		session.set_game_keyboard_input(&self.play_input_target, keyboard)?;
 		let outcome = session.tick(elapsed as f64)?;
 		if !outcome.changes.is_empty()
 			&& let Some(world) = session.render_world()
@@ -243,7 +240,20 @@ impl SceneEditor {
 		bindings: MovementBindings,
 		input: &mut InputState,
 	) -> bool {
-		if self.play_movement_bindings == bindings {
+		let mut profile = self.play_input_profile().cloned().unwrap_or_default();
+		profile.movement = bindings;
+		self.set_play_input_profile(profile, input)
+	}
+
+	pub fn set_play_input_profile(
+		&mut self,
+		profile: InputProfile,
+		input: &mut InputState,
+	) -> bool {
+		let defaults = InputProfile::default();
+		let changed = self.play_input_profile().unwrap_or(&defaults) != &profile;
+		self.play_input_override = Some(profile);
+		if !changed {
 			return false;
 		}
 
@@ -252,7 +262,6 @@ impl SceneEditor {
 		}
 
 		input.suppress_held();
-		self.play_movement_bindings = bindings;
 
 		true
 	}
@@ -270,7 +279,22 @@ impl SceneEditor {
 	}
 
 	pub fn play_movement_bindings(&self) -> &MovementBindings {
-		&self.play_movement_bindings
+		self.play_input_profile()
+			.map(|profile| &profile.movement)
+			.unwrap_or(&MovementBindings::WASD)
+	}
+
+	pub fn play_input_binds_key(&self, key: Key) -> bool {
+		self.play_input_profile().map_or_else(
+			|| MovementBindings::WASD.contains_key(key),
+			|profile| profile.contains_key(key),
+		)
+	}
+
+	fn play_input_profile(&self) -> Option<&InputProfile> {
+		self.play_input_override
+			.as_ref()
+			.or_else(|| self.project()?.input_profile.as_ref())
 	}
 
 	fn initialize(&mut self, scene: &Scene) -> Result<(), String> {
@@ -696,14 +720,7 @@ impl SceneEditor {
 			&& self
 				.play_controlled_targets()
 				.is_some_and(|targets| !targets.is_empty())
-			&& self.play_movement_bindings.any_held(input)
-	}
-
-	fn route_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
-		match self.play_input_target.clone() {
-			MovementTarget::AllControlled => self.set_play_input(movement),
-			MovementTarget::Entity(entity) => self.set_entity_play_input(&entity, movement),
-		}
+			&& self.play_movement_bindings().any_held(input)
 	}
 }
 

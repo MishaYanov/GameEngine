@@ -53,6 +53,7 @@ p {
   position: absolute;
   inset: auto 0 0;
   padding: var(--space-3);
-  background: var(--color-dialog);
+  border-block-start: var(--border-width) solid var(--color-danger-border);
+  background: var(--color-danger-bg);
   color: var(--color-danger);
 }

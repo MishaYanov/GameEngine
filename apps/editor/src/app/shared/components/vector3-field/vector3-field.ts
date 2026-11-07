@@ -1,4 +1,5 @@
-import {Component, input, output, signal} from '@angular/core';
+import {Component, input, model, output, signal} from '@angular/core';
+import {EditorIcon} from '../../icons/editor-icon';
 
 export type Vector3Value = readonly [number, number, number];
 export type Vector3Axis = 0 | 1 | 2;
@@ -13,6 +14,7 @@ let nextVectorId = 0;
 /** Numeric presentation and field gestures; the owner decides how values are applied. */
 @Component({
     selector: 'editor-vector3-field',
+    imports: [EditorIcon],
     templateUrl: './vector3-field.html',
     styleUrl: './vector3-field.scss',
 })
@@ -21,6 +23,9 @@ export class Vector3Field {
     readonly value = input.required<Vector3Value>();
     readonly unit = input('');
     readonly disabled = input(false);
+    readonly lockable = input(false);
+    readonly lockHint = input('');
+    readonly locked = model(false);
     readonly valueChanged = output<Vector3Change>();
     readonly editStarted = output<void>();
     readonly editCommitted = output<void>();
@@ -31,11 +36,18 @@ export class Vector3Field {
         {index: 1, name: 'Y'},
         {index: 2, name: 'Z'},
     ];
-    protected readonly errorId = `vector3-error-${nextVectorId++}`;
+    private readonly fieldId = `vector3-${nextVectorId++}`;
+    protected readonly labelId = `${this.fieldId}-label`;
+    protected readonly errorId = `${this.fieldId}-error`;
+    protected readonly lockHintId = `${this.fieldId}-lock-hint`;
     protected readonly activeAxis = signal<Vector3Axis | null>(null);
     protected readonly invalidAxis = signal<Vector3Axis | null>(null);
     protected readonly draft = signal('');
     private initialValue = '';
+
+    protected toggleLock(): void {
+        if (this.lockable() && !this.disabled()) this.locked.update(locked => !locked);
+    }
 
     protected displayValue(axis: Vector3Axis): string {
         return this.activeAxis() === axis ? this.draft() : String(this.value()[axis]);

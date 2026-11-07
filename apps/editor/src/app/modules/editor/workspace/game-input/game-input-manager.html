@@ -1,0 +1,85 @@
+<button (click)="show()" [disabled]="!available()" type="button">Game Input…</button>
+
+<editor-dialog (closed)="clearPreview()" [(open)]="open" [config]="dialogConfig"
+               [renderFields]="false" preferenceKey="game-input-manager" title="Game Input Manager">
+    <p>Map physical keys to movement and game actions. An action can drive a boolean animation parameter while its key
+        is held.</p>
+
+    <fieldset [disabled]="pending()">
+        <legend>Movement</legend>
+        <div class="movement-keys">
+            @for (axis of axes; track axis.field) {
+                <label>{{ axis.label }}
+                    <select [formField]="fields.movement[axis.field]">
+                        @if (unlistedKey(draft().movement[axis.field])) {
+                            <option [value]="draft().movement[axis.field]">{{ draft().movement[axis.field] }}</option>
+                        }
+                        @for (choice of keys; track choice.key) {
+                            <option [value]="choice.key">{{ choice.label }}</option>
+                        }
+                    </select>
+                </label>
+            }
+        </div>
+    </fieldset>
+
+    <fieldset [disabled]="pending()">
+        <legend>Game actions</legend>
+        @for (action of draft().actions; track action.row; let index = $index) {
+            <div [attr.aria-label]="'Action ' + (index + 1)" class="action-row" role="group">
+                <label>Action name
+                    <input [formField]="fields.actions[index].id" autocomplete="off" placeholder="jump"/>
+                </label>
+                <label>Key
+                    <select [formField]="fields.actions[index].key">
+                        @if (unlistedKey(action.key)) {
+                            <option [value]="action.key">{{ action.key }}</option>
+                        }
+                        @for (choice of keys; track choice.key) {
+                            <option [value]="choice.key">{{ choice.label }}</option>
+                        }
+                    </select>
+                </label>
+                <label>Animation parameter
+                    <input [formField]="fields.actions[index].parameter" autocomplete="off" placeholder="Optional"/>
+                </label>
+                <button (click)="removeAction(action.row)" [attr.aria-label]="'Remove action ' + (index + 1)"
+                        type="button">Remove
+                </button>
+            </div>
+        } @empty {
+            <p>Add a named action such as <code>jump</code> or <code>interact</code>.</p>
+        }
+        <button (click)="addAction()" [disabled]="draft().actions.length >= actionLimit" type="button">Add Action
+        </button>
+    </fieldset>
+
+    <section (blur)="clearPreview()" (keydown)="previewKey($event, true)" (keyup)="previewKey($event, false)"
+             aria-label="Test game bindings" class="preview" tabindex="0">
+        <h3>Test bindings</h3>
+        <p>Focus this area and press your keys. The animation output is a parameter preview.</p>
+        <dl>
+            <dt>Movement</dt>
+            <dd>{{ preview().movement[0].toFixed(2) }}, {{ preview().movement[1].toFixed(2) }}</dd>
+            <dt>Active actions</dt>
+            <dd>{{ preview().actions.join(', ') || 'None' }}</dd>
+            @for (parameter of parameters(); track parameter[0]) {
+                <dt>{{ parameter[0] }}</dt>
+                <dd>{{ parameter[1] ? 'True' : 'False' }}</dd>
+            }
+        </dl>
+    </section>
+
+    @if (validation(); as failure) {
+        <p class="error">{{ failure }}</p>
+    }
+    @if (error(); as failure) {
+        <p class="error" role="alert">{{ failure }}</p>
+    }
+    @if (message(); as status) {
+        <p role="status">{{ status }}</p>
+    }
+    <button (click)="apply()" [disabled]="!available() || !!validation() || !changed()" dialog-actions type="button">
+        {{ pending() ? 'Applying…' : 'Apply Bindings' }}
+    </button>
+</editor-dialog>

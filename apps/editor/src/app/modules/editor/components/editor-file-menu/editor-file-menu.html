@@ -1,4 +1,4 @@
-<button class="file-trigger" popovertarget="editor-file-menu" type="button">File</button>
+<button #fileTrigger class="file-trigger" popovertarget="editor-file-menu" type="button">File</button>
 
 <div #fileMenu class="file-menu" id="editor-file-menu" popover>
     <button
@@ -18,5 +18,19 @@
             type="button"
     >
         {{ opening() ? 'Opening…' : 'Open Project…' }}
+    </button>
+    <button
+            (click)="fileMenu.hidePopover(); fileTrigger.focus(); settingsRequested.emit()"
+            [disabled]="!canOpenSettings()"
+            type="button"
+    >Settings…
+    </button>
+    <hr/>
+    <button
+            (click)="fileMenu.hidePopover(); exitRequested.emit()"
+            [disabled]="!canExit()"
+            [title]="nativeAvailable ? 'Close the editor' : 'Exit is available in the desktop editor'"
+            type="button"
+    >Exit
     </button>
 </div>

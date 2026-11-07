@@ -1,14 +1,26 @@
-import {Component, computed, inject, signal} from '@angular/core';
+import {Component, inject, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import {EditorService} from '../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
-import {DEFAULT_VIEWPORT_SETTINGS, type ViewportAction, type ViewportEditorState} from '../../../core/editor/viewport-editor.models';
+import {
+    DEFAULT_VIEWPORT_SETTINGS,
+    type ViewportAction,
+    type ViewportEditorState
+} from '../../../core/editor/viewport-editor.models';
 import {SceneEditingService} from './scene-editing.service';
 import {ViewportAssetDragService} from './viewport-asset-drag.service';
 
-@Component({template: '<button type="button" (pointerdown)="drag.candidate(\'props/robot.glb\', $event)">Robot</button>'})
-class DragHost {readonly drag = inject(ViewportAssetDragService);}
+@Component({
+    template: `
+        <button type="button" (pointerdown)="drag.candidate('props/robot.glb', $event)">Robot</button>
+        <button type="button" (pointerdown)="drag.candidateScene('courtyard', $event, openScene)">Courtyard</button>
+    `
+})
+class DragHost {
+    readonly drag = inject(ViewportAssetDragService);
+    readonly openScene = vi.fn(async (_id: string) => true);
+}
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -24,15 +36,20 @@ describe('Viewport asset drag', () => {
     let playing: ReturnType<typeof signal<boolean>>;
     let withCommittedEdit: ReturnType<typeof vi.fn>;
     let nativeState: ReturnType<typeof signal<ViewportEditorState | null>>;
+    let workspaceGeneration: ReturnType<typeof signal<number>>;
 
     beforeEach(() => {
         action = vi.fn(async (_action: ViewportAction) => ({}));
         updatePlacement = vi.fn(async () => ({}));
         ready = signal(true); playing = signal(false);
         nativeState = signal<ViewportEditorState | null>(null);
+        workspaceGeneration = signal(1);
         withCommittedEdit = vi.fn(async (callback: () => Promise<void>) => {await callback(); return true;});
         TestBed.configureTestingModule({providers: [ViewportAssetDragService,
-            {provide: EditorService, useValue: {playing}},
+                {
+                    provide: EditorService,
+                    useValue: {playing, workspaceGeneration, snapshot: () => ({active_scene_id: 'main'})}
+                },
             {provide: SceneEditingService, useValue: {ready, error: signal(null), withCommittedEdit}},
             {provide: ViewportEditorService, useValue: {
                 nativeAvailable: true, settings: signal(DEFAULT_VIEWPORT_SETTINGS), state: nativeState, action, updatePlacement,
@@ -41,13 +58,20 @@ describe('Viewport asset drag', () => {
         ]});
     });
 
-    async function host() {
+    async function host(scene = false) {
         const fixture = TestBed.createComponent(DragHost);
         await fixture.whenStable();
-        const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+        const button = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')[scene ? 1 : 0];
         const capture = vi.fn(); const release = vi.fn();
         button.setPointerCapture = capture; button.hasPointerCapture = () => true; button.releasePointerCapture = release;
-        return {fixture, button, capture, release, drag: fixture.componentInstance.drag};
+        return {
+            fixture,
+            button,
+            capture,
+            release,
+            drag: fixture.componentInstance.drag,
+            openScene: fixture.componentInstance.openScene
+        };
     }
 
     function pointer(target: EventTarget, type: string, x: number, y: number) {
@@ -82,6 +106,42 @@ describe('Viewport asset drag', () => {
         expect(updatePlacement).toHaveBeenLastCalledWith([0.5, 0.5]);
         expect(order.at(-2)).toBe('point'); expect(order.at(-1)).toBe('commit_placement');
         expect(drag.dragging()).toBe(false); expect(release).toHaveBeenCalledWith(pointerId);
+    });
+
+    it('opens scene drops inside the aperture only after releasing the pointer', async () => {
+        const {fixture, button, release, openScene} = await host(true);
+        openScene.mockImplementation(async () => {
+            expect(release).toHaveBeenCalledWith(pointerId);
+            return true;
+        });
+        pointer(button, 'pointerdown', 10, 300);
+        pointer(document, 'pointermove', 200, 150);
+        expect(openScene).not.toHaveBeenCalled();
+        pointer(document, 'pointerup', 300, 150);
+        await fixture.whenStable();
+        expect(openScene).toHaveBeenCalledExactlyOnceWith('courtyard');
+        expect(action).not.toHaveBeenCalled();
+        expect(updatePlacement).not.toHaveBeenCalled();
+    });
+
+    it('ignores scene clicks, outside drops, Escape cancellation, and stale workspace drops', async () => {
+        const {fixture, button, openScene} = await host(true);
+        pointer(button, 'pointerdown', 10, 300);
+        pointer(document, 'pointerup', 10, 300);
+        pointer(button, 'pointerdown', 10, 300);
+        pointer(document, 'pointermove', 200, 150);
+        pointer(document, 'pointerup', 800, 150);
+        pointer(button, 'pointerdown', 10, 300);
+        pointer(document, 'pointermove', 200, 150);
+        document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        pointer(document, 'pointerup', 300, 150);
+        pointer(button, 'pointerdown', 10, 300);
+        pointer(document, 'pointermove', 200, 150);
+        workspaceGeneration.set(2);
+        pointer(document, 'pointerup', 300, 150);
+        await fixture.whenStable();
+        expect(openScene).not.toHaveBeenCalled();
+        expect(action).not.toHaveBeenCalled();
     });
 
     it('cancels with Escape even while native placement is beginning', async () => {

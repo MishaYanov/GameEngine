@@ -4,14 +4,12 @@ import {EditorPane} from "../../../../shared/components/pane/pane";
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
 import type {SceneEntity, Vec3} from '../../../../core/editor/editor.models';
-import {Vector3Field, type Vector3Change} from '../../../../shared/components/vector3-field/vector3-field';
+import {type Vector3Change, Vector3Field} from '../../../../shared/components/vector3-field/vector3-field';
+import type {InspectorField, TransformFieldEdit} from '../scene-editing.service';
 
-export type InspectorField = 'name' | 'position' | 'rotation' | 'scale';
-export type TransformProperty = Exclude<InspectorField, 'name'>;
-
-export interface InspectorTransformChange extends Vector3Change {
-    readonly field: TransformProperty;
-}
+export type {InspectorField} from '../scene-editing.service';
+export type TransformProperty = TransformFieldEdit['field'];
+export type InspectorTransformChange = TransformFieldEdit;
 
 let nextInspectorId = 0;
 
@@ -36,6 +34,15 @@ export class InspectorPanel {
     readonly editCommitted = output<void>();
     readonly editCancelled = output<void>();
 
+    protected readonly positionLinked = signal(false);
+    protected readonly rotationLinked = signal(false);
+    protected readonly scaleLinked = signal(false);
+    protected readonly drawerConfig: Config<DrawerSettings> = {
+        width: '20rem',
+        minWidth: '12rem',
+        maxWidth: '45%',
+    };
+
     // A new context also replaces drafts when two scenes reuse the same entity key.
     protected readonly selectedEntities = computed(() => {
         const entity = this.entity();
@@ -59,11 +66,10 @@ export class InspectorPanel {
         : this.entity()?.name ?? '');
     private initialName = '';
     private selectedKey: string | null = null;
-
-    protected readonly drawerConfig: Config<DrawerSettings> = {
-        width: '20rem',
-        minWidth: '12rem',
-        maxWidth: '24rem',
+    private readonly linked = {
+        position: this.positionLinked,
+        rotation: this.rotationLinked,
+        scale: this.scaleLinked,
     };
 
     constructor() {
@@ -122,6 +128,7 @@ export class InspectorPanel {
             field,
             axis: change.axis,
             value: field === 'rotation' ? change.value * Math.PI / 180 : change.value,
+            linked: this.linked[field](),
         });
     }
 }

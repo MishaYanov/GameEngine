@@ -1,0 +1,111 @@
+:host {
+  display: block;
+  padding: var(--space-1);
+}
+
+button, select, input {
+  min-height: var(--layout-control-height);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+button:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+button[dialog-actions]:enabled {
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+button[dialog-actions]:enabled:hover {
+  background: var(--color-action-hover);
+}
+
+button[dialog-actions]:enabled:active {
+  background: var(--color-action-pressed);
+}
+
+button:disabled, select:disabled, input:disabled {
+  background: var(--color-control-disabled);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+}
+
+p {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+fieldset, .preview {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-strong);
+}
+
+label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+}
+
+input, select {
+  width: 100%;
+  min-width: 0;
+}
+
+.movement-keys, .action-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.movement-keys {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+
+.action-row {
+  grid-template-columns: 1fr minmax(5rem, 0.6fr) 1fr auto;
+  align-items: end;
+  margin-bottom: var(--space-2);
+}
+
+.preview h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.preview dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+p[role='status'] {
+  color: var(--color-success);
+}
+
+@media (max-width: 38rem) {
+  .action-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

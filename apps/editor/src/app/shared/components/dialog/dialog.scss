@@ -91,12 +91,18 @@ button {
   cursor: var(--cursor-action);
 }
 
-button:hover {
-  background: var(--color-surface-hover);
+button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+button:enabled:active {
+  background: var(--color-control-pressed);
 }
 
 button:disabled {
-  opacity: var(--opacity-disabled);
+  background: var(--color-control-disabled);
+  border-color: var(--color-input-edge);
+  color: var(--color-text-disabled);
   cursor: not-allowed;
 }
 
@@ -115,8 +121,14 @@ button:disabled {
   border-color: var(--color-action);
 }
 
-.primary:hover {
+.primary:enabled:hover {
   background: var(--color-action-hover);
+  border-color: var(--color-action-hover);
+}
+
+.primary:enabled:active {
+  background: var(--color-action-pressed);
+  border-color: var(--color-action-pressed);
 }
 
 form {

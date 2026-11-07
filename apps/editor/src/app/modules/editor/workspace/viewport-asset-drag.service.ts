@@ -1,14 +1,22 @@
 import {computed, DestroyRef, DOCUMENT, effect, inject, Injectable, signal} from '@angular/core';
+import type {SceneId} from '../../../core/editor/editor.models';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
 import {EditorService} from '../../../core/editor/editor.service';
 import {SceneEditingService} from './scene-editing.service';
 
+type DragAsset =
+    | { readonly kind: 'model'; readonly path: string }
+    | { readonly kind: 'scene'; readonly id: SceneId; readonly open: (id: SceneId) => Promise<boolean> };
+
 interface AssetDrag {
-    readonly path: string;
+    readonly asset: DragAsset;
+    readonly workspace: number;
+    readonly scene: SceneId | null;
     readonly pointerId: number;
     readonly element: HTMLElement;
     readonly start: readonly [number, number];
     point: readonly [number, number];
+    started: boolean;
     beginning: Promise<boolean> | null;
     ready: boolean;
     ending: boolean;
@@ -27,25 +35,27 @@ export class ViewportAssetDragService {
     private readonly draggingState = signal(false);
     readonly dragging = this.draggingState.asReadonly();
     private readonly messageState = signal<string | null>(null);
-    private readonly awaitingPlacement = signal<{generation: number | null} | null>(null);
+    private readonly awaitingPlacement = signal<(Pick<AssetDrag, 'workspace' | 'scene'> & {
+        generation: number | null
+    }) | null>(null);
     readonly message = this.messageState.asReadonly();
     readonly canBegin = computed(() => this.viewport.nativeAvailable && this.editing.ready() &&
-        !this.editor.playing() && this.viewport.settings().view === 'scene' && !this.dragging());
+        !this.editor.playing() && this.viewport.settings().view === 'scene' && !this.dragging() && !this.awaitingPlacement());
 
     constructor() {
         effect(() => {
             const pending = this.awaitingPlacement();
             const state = this.viewport.state();
-            if (!pending || !state) return;
-            if (pending.generation !== state.workspace_generation) {
+            if (!pending) return;
+            if (!this.isCurrent(pending) || (state && pending.generation !== state.workspace_generation)) {
                 this.awaitingPlacement.set(null);
                 this.messageState.set('Placement ended because the open project changed.');
-            } else if (state.gesture === 'asset_loading') {
+            } else if (state?.gesture === 'asset_loading') {
                 this.messageState.set('Loading and placing model…');
-            } else if (state.error) {
+            } else if (state?.error) {
                 this.awaitingPlacement.set(null);
                 this.messageState.set(state.error);
-            } else if (!state.placement) {
+            } else if (state && !state.placement) {
                 this.awaitingPlacement.set(null);
                 this.messageState.set('Model placement finished.');
             }
@@ -68,29 +78,22 @@ export class ViewportAssetDragService {
     }
 
     candidate(path: string, event: PointerEvent): void {
-        if (event.button !== 0 || !this.canBegin() || !/\.(?:gltf|glb)$/i.test(path) ||
+        if (!/\.(?:gltf|glb)$/i.test(path) ||
             path.startsWith('/') || /[:\\\p{Cc}]/u.test(path) || path.split('/').some(part => !part || part === '.' || part === '..')) return;
-        const element = event.currentTarget;
-        if (!(element instanceof HTMLElement)) return;
-        void this.cancel();
-        const drag: AssetDrag = {
-            path, pointerId: event.pointerId, element,
-            start: [event.clientX, event.clientY], point: [event.clientX, event.clientY],
-            beginning: null, ready: false, ending: false, cancelled: false,
-        };
-        this.active = drag;
-        this.messageState.set(null);
-        try {element.setPointerCapture(event.pointerId);} catch {
-            this.active = null;
-            this.messageState.set('Pointer capture is unavailable. Use Add to Scene instead.');
-        }
+        this.capture({kind: 'model', path}, event);
+    }
+
+    candidateScene(id: SceneId, event: PointerEvent, open: (id: SceneId) => Promise<boolean>): void {
+        this.capture({kind: 'scene', id, open}, event);
     }
 
     async cancel(): Promise<void> {
         const drag = this.active;
         if (!drag) {
-            if (this.awaitingPlacement()) {
+            const pending = this.awaitingPlacement();
+            if (pending) {
                 this.awaitingPlacement.set(null);
+                if (!this.isCurrent(pending)) return;
                 try {
                     await this.viewport.action({type: 'cancel_placement'});
                     this.messageState.set('Placement cancellation requested.');
@@ -102,19 +105,51 @@ export class ViewportAssetDragService {
         await this.finish(drag, true);
     }
 
+    private capture(asset: DragAsset, event: PointerEvent): void {
+        if (event.button !== 0 || event.isPrimary === false || !this.canBegin()) return;
+        const element = event.currentTarget;
+        if (!(element instanceof HTMLElement)) return;
+        void this.cancel();
+        const drag: AssetDrag = {
+            asset, workspace: this.editor.workspaceGeneration(), scene: this.editor.snapshot()?.active_scene_id ?? null,
+            pointerId: event.pointerId, element,
+            start: [event.clientX, event.clientY], point: [event.clientX, event.clientY],
+            started: false, beginning: null, ready: false, ending: false, cancelled: false,
+        };
+        this.active = drag;
+        this.messageState.set(null);
+        try {
+            element.setPointerCapture(event.pointerId);
+        } catch {
+            this.active = null;
+            const alternative = asset.kind === 'scene' ? 'Open Scene' : 'Add to Scene';
+            this.messageState.set(`Pointer capture is unavailable. Use ${alternative} instead.`);
+        }
+    }
+
     private readonly moved = (event: PointerEvent): void => {
         const drag = this.active;
         if (!drag || drag.pointerId !== event.pointerId || drag.ending) return;
+        if (!this.isCurrent(drag)) {
+            void this.cancel();
+            return;
+        }
         drag.point = [event.clientX, event.clientY];
-        if (!drag.beginning && Math.hypot(event.clientX - drag.start[0], event.clientY - drag.start[1]) < 5) return;
+        if (!drag.started && Math.hypot(event.clientX - drag.start[0], event.clientY - drag.start[1]) < 5) return;
         event.preventDefault();
-        if (!drag.beginning) {
+        if (!drag.started) {
+            drag.started = true;
             this.draggingState.set(true);
+            const asset = drag.asset;
+            if (asset.kind === 'scene') {
+                this.messageState.set('Drop the scene file in Scene to open it. Escape cancels.');
+                return;
+            }
             drag.beginning = this.editing.withCommittedEdit(async () => {
-                await this.viewport.action({type: 'begin_placement', path: drag.path});
+                if (this.isCurrent(drag)) await this.viewport.action({type: 'begin_placement', path: asset.path});
             });
             void drag.beginning.then(async accepted => {
-                if (!accepted || drag.cancelled || drag.ending || this.active !== drag) return;
+                if (!accepted || drag.cancelled || drag.ending || this.active !== drag || !this.isCurrent(drag)) return;
                 drag.ready = true;
                 await this.viewport.updatePlacement(this.viewport.normalizedPoint(...drag.point));
                 this.messageState.set('Drop the model in Scene. Escape cancels placement.');
@@ -128,11 +163,13 @@ export class ViewportAssetDragService {
         const drag = this.active;
         if (!drag || drag.pointerId !== event.pointerId) return;
         drag.point = [event.clientX, event.clientY];
-        if (drag.beginning) event.preventDefault();
+        if (drag.started) event.preventDefault();
         void this.finish(drag, false);
     };
 
-    private readonly cancelled = (): void => {void this.cancel();};
+    private readonly cancelled = (event: PointerEvent): void => {
+        if (this.active?.pointerId === event.pointerId) void this.cancel();
+    };
     // The native child taking focus also blurs the WebView. A submitted import
     // remains valid while navigating there; only an unfinished pointer drag ends.
     private readonly blurred = (): void => {if (this.active && !this.active.ending) void this.cancel();};
@@ -153,9 +190,26 @@ export class ViewportAssetDragService {
         }
         drag.ending = true;
         drag.cancelled ||= cancel;
+        if (drag.asset.kind === 'scene') {
+            const {id, open} = drag.asset;
+            const dropped = drag.started && !drag.cancelled && this.isCurrent(drag) &&
+                this.viewport.normalizedPoint(...drag.point) !== null;
+            this.release(drag);
+            this.messageState.set(null);
+            // A valid drop can open a modal. Release the captured pointer before showing it.
+            if (dropped) {
+                try {
+                    await open(id);
+                } catch (error) {
+                    this.failed(error);
+                }
+            }
+            return;
+        }
         try {
-            if (!drag.beginning) return;
+            if (!drag.beginning || !this.isCurrent(drag)) return;
             const accepted = await drag.beginning;
+            if (!this.isCurrent(drag)) return;
             if (!accepted) {
                 this.messageState.set(this.editing.error() ?? 'Finish the current edit before dragging an asset.');
                 return;
@@ -167,22 +221,44 @@ export class ViewportAssetDragService {
             } else {
                 // Flush the final coordinate before the non-replaceable drop boundary.
                 await this.viewport.updatePlacement(normalized);
+                if (!this.isCurrent(drag)) return;
                 const result = await this.viewport.action({type: drag.cancelled ? 'cancel_placement' : 'commit_placement'});
                 if (drag.cancelled) this.messageState.set('Model placement cancelled.');
                 else {
-                    this.awaitingPlacement.set({generation: result.workspace_generation ?? null});
+                    this.awaitingPlacement.set({
+                        workspace: drag.workspace,
+                        scene: drag.scene,
+                        generation: result.workspace_generation ?? null
+                    });
                     this.messageState.set('Loading and placing model…');
                 }
             }
         } catch (error) {
             this.failed(error);
-            try {await this.viewport.action({type: 'cancel_placement'});} catch {/* Retain the original error. */}
-        } finally {
-            if (this.active === drag) {
-                this.active = null;
-                this.draggingState.set(false);
+            if (this.isCurrent(drag)) {
+                try {
+                    await this.viewport.action({type: 'cancel_placement'});
+                } catch {/* Retain the original error. */
+                }
             }
-            try {if (drag.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId);} catch {/* Capture already ended. */}
+        } finally {
+            this.release(drag);
+        }
+    }
+
+    private isCurrent(context: Pick<AssetDrag, 'workspace' | 'scene'>): boolean {
+        return this.editor.workspaceGeneration() === context.workspace &&
+            (this.editor.snapshot()?.active_scene_id ?? null) === context.scene;
+    }
+
+    private release(drag: AssetDrag): void {
+        if (this.active === drag) {
+            this.active = null;
+            this.draggingState.set(false);
+        }
+        try {
+            if (drag.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId);
+        } catch {/* Capture already ended. */
         }
     }
 

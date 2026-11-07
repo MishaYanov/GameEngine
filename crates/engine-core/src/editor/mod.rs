@@ -15,6 +15,7 @@ use crate::game_session::{GameSession, PreparedScene};
 use crate::simulation_session::MovementTarget;
 use crate::{
 	Bounds3, EntityKey,
+	input::{GameKeyboardInput, InputProfile},
 	project::ProjectData,
 	scene_catalog::SceneId,
 	scene_data::SceneData,
@@ -319,6 +320,28 @@ impl EditorSession {
 		if let Some(play) = self.play.as_mut() {
 			play.active_mut().clear_input();
 		}
+	}
+
+	pub fn set_game_keyboard_input(
+		&mut self,
+		target: &MovementTarget,
+		input: GameKeyboardInput,
+	) -> Result<(), String> {
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut()
+			.set_game_keyboard_input(target, input)
+	}
+
+	pub fn set_game_keyboard_input_from_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+	) -> Result<(), String> {
+		let defaults = InputProfile::default();
+		let profile = self.project.input_profile.as_ref().unwrap_or(&defaults);
+		let input = profile.resolve_keyboard_codes(held_codes);
+		self.set_game_keyboard_input(&MovementTarget::AllControlled, input)
 	}
 
 	pub fn needs_tick(&self) -> bool {

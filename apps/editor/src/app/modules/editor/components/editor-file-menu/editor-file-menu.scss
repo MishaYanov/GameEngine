@@ -8,9 +8,9 @@
   min-height: var(--space-7);
   padding: var(--space-1) var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  //border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--palette-text-text0);
+  color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-sm);
   text-align: start;
@@ -20,10 +20,19 @@
   anchor-name: --editor-file-trigger;
 }
 
-.file-trigger:is(:hover, :focus-visible),
-.file-trigger:has(+ .file-menu:popover-open),
-.file-menu :is(a, button:enabled):is(:hover, :focus-visible) {
-  background: var(--palette-neutral-n800);
+.file-trigger:hover,
+.file-menu :is(a, button:enabled):hover {
+  background: var(--color-control-hover);
+}
+
+.file-trigger:has(+ .file-menu:popover-open) {
+  background: var(--color-selected);
+  box-shadow: inset 0 -2px var(--color-selection-edge);
+}
+
+.file-trigger:active,
+.file-menu :is(a, button:enabled):active {
+  background: var(--color-control-pressed);
 }
 
 .file-menu {
@@ -35,10 +44,10 @@
   min-width: 10rem;
   margin: var(--space-1) 0 0;
   padding: var(--space-1);
-  border: var(--border-width) solid var(--palette-neutral-n800);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--palette-neutral-n700);
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 35%);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-popover);
 }
 
 .file-menu:popover-open {
@@ -52,5 +61,11 @@
 }
 
 .file-menu button:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
+}
+
+.file-menu hr {
+  margin: var(--space-1) 0;
+  border: 0;
+  border-top: var(--border-width) solid var(--color-border);
 }

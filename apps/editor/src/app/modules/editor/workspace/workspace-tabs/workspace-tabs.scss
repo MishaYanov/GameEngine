@@ -26,11 +26,25 @@ button {
   cursor: var(--cursor-action);
 }
 
-button:hover:not(:disabled),
-button.active {
-  background: var(--color-pane);
+button:enabled:hover {
+  background: var(--color-control-hover);
   border-color: var(--color-pane-edge);
   color: var(--color-text);
+}
+
+button[aria-selected='true']:enabled {
+  background: var(--color-selected);
+  border-block-end-color: var(--color-selection-edge);
+  color: var(--color-text);
+}
+
+button[aria-selected='true']:enabled:hover {
+  background: var(--color-selected-hover);
+}
+
+button:enabled:active,
+button[aria-selected='true']:enabled:active {
+  background: var(--color-control-pressed);
 }
 
 button:focus-visible {
@@ -38,6 +52,6 @@ button:focus-visible {
 }
 
 button:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
 }

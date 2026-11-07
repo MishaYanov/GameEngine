@@ -1,5 +1,11 @@
 import {computed, DestroyRef, effect, inject, Injectable, signal} from '@angular/core';
-import {CommandBuilder, type EditorCommand, type EntityKey, type SceneEntity, type Vec3} from '../../../core/editor/editor.models';
+import {
+    CommandBuilder,
+    type EditorCommand,
+    type EntityKey,
+    type SceneEntity,
+    type Vec3
+} from '../../../core/editor/editor.models';
 import {EditorService} from '../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
 
@@ -8,6 +14,22 @@ export interface TransformFieldEdit {
     readonly field: Exclude<InspectorField, 'name'>;
     readonly axis: 0 | 1 | 2;
     readonly value: number;
+    readonly linked?: boolean;
+}
+
+function linkedVector(original: Vec3, {field, axis, value}: TransformFieldEdit): Vec3 | null {
+    const start = original[axis];
+    if (field !== 'scale') {
+        const offset = value - start;
+        return [original[0] + offset, original[1] + offset, original[2] + offset];
+    }
+    if (start !== 0) {
+        const factor = value / start;
+        return [original[0] * factor, original[1] * factor, original[2] * factor];
+    }
+    if (value === 0) return original;
+    // A collapsed vector can be restored uniformly. A single zero axis has no proportional edit.
+    return original.every(component => component === 0) ? [value, value, value] : null;
 }
 
 interface FieldEdit {
@@ -116,9 +138,21 @@ export class SceneEditingService {
         this.begin(change.field);
         const edit = this.active;
         if (!edit || edit.field !== change.field || !this.editable()) return;
-        const values: [number, number, number] = [...edit.entity.transform[change.field]];
+        // Derive each linked preview from the same starting vector, including when a draft crosses zero.
+        const vector = change.linked
+            ? linkedVector(edit.original.transform[change.field], change)
+            : edit.entity.transform[change.field];
+        if (vector === null) {
+            this.errorState.set('Unlink Scale to change a zero axis independently.');
+            return;
+        }
+        const values: [number, number, number] = [...vector];
         values[change.axis] = change.value;
-        edit.entity = {...edit.entity, transform: {...edit.entity.transform, [change.field]: values as Vec3}};
+        if (!values.every(value => Number.isFinite(Math.fround(value)))) {
+            this.errorState.set('Linked transform values must fit a finite 32-bit number.');
+            return;
+        }
+        edit.entity = {...edit.entity, transform: {...edit.entity.transform, [change.field]: values}};
         this.errorState.set(null);
         this.update(edit, CommandBuilder.transforms([{key: edit.entity.key, transform: edit.entity.transform}], 'local'));
     }

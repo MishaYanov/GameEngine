@@ -1,7 +1,7 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import type {SceneEntity} from '../../../../core/editor/editor.models';
-import {InspectorPanel, type InspectorField, type InspectorTransformChange} from './inspector-panel';
+import {type InspectorField, InspectorPanel, type InspectorTransformChange} from './inspector-panel';
 
 const entity: SceneEntity = {
     key: 'robot',
@@ -54,7 +54,33 @@ describe('InspectorPanel', () => {
         rotation.value = '180';
         rotation.dispatchEvent(new Event('input'));
         expect(started).toEqual(['rotation']);
-        expect(changed).toEqual([{field: 'rotation', axis: 1, value: Math.PI}]);
+        expect(changed).toEqual([{field: 'rotation', axis: 1, value: Math.PI, linked: false}]);
+    });
+
+    it('links only the chosen transform vector and keeps that choice across selections', async () => {
+        await select();
+        const changed: InspectorTransformChange[] = [];
+        fixture.componentInstance.transformChanged.subscribe(value => changed.push(value));
+        const root: HTMLElement = fixture.nativeElement;
+        const scaleLock = () => root.querySelector<HTMLButtonElement>(
+            '[aria-label="Link Scale axes"]',
+        )!;
+        scaleLock().click();
+        await fixture.whenStable();
+        expect(scaleLock().getAttribute('aria-pressed')).toBe('true');
+
+        await select({...entity, key: 'other'});
+        expect(scaleLock().getAttribute('aria-pressed')).toBe('true');
+        const scale = input('Scale X');
+        scale.value = '3';
+        scale.dispatchEvent(new Event('input'));
+        const position = input('Position X');
+        position.value = '2';
+        position.dispatchEvent(new Event('input'));
+        expect(changed).toEqual([
+            {field: 'scale', axis: 0, value: 3, linked: true},
+            {field: 'position', axis: 0, value: 2, linked: false},
+        ]);
     });
 
     it('emits a name edit and cancels Escape without committing on the following blur', async () => {

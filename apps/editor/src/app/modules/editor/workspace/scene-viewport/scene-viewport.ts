@@ -12,6 +12,8 @@ import {
     viewChild,
 } from '@angular/core';
 import {EngineViewportDirective} from '../../../../core/editor/engine-viewport.directive';
+import {resolveNativeEditorShortcut} from '../../../../core/editor/editor-keymap';
+import type {EditorActionId} from '../../../../core/editor/editor-actions';
 import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import type {ViewportInput, ViewportStatus} from '../../../../core/editor/editor.models';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
@@ -28,6 +30,7 @@ export class SceneViewport {
     readonly label = input('Scene viewport');
     readonly enabled = input(true);
     readonly viewportInput = output<ViewportInput>();
+    readonly editorActionRequested = output<EditorActionId>();
     readonly viewportStatus = output<ViewportStatus>();
     readonly viewportError = output<EditorClientError>();
     protected readonly nativeAvailable = inject(EditorService).nativeAvailable;
@@ -79,6 +82,12 @@ export class SceneViewport {
     /** Notify after a dock/drag operation that moves the viewport without resizing it. */
     refreshBounds(): void {
         this.viewport()?.refreshBounds();
+    }
+
+    protected inputReceived(input: ViewportInput): void {
+        this.viewportInput.emit(input);
+        const action = resolveNativeEditorShortcut(input);
+        if (action) this.editorActionRequested.emit(action);
     }
 
     protected statusChanged(status: ViewportStatus): void {

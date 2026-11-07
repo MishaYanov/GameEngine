@@ -28,6 +28,19 @@ select {
   font-size: var(--font-size-sm);
 }
 
+select:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+select:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+select:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
 p {
   margin: var(--space-1) 0 0;
   color: var(--color-text-muted);

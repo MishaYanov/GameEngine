@@ -1,7 +1,6 @@
 @use 'sass:map';
 
-// Complete radius and shadow primitives from linear-app-design-tokens.json.
-// Named aliases plus editor border, focus and disabled defaults are configurable.
+// Shape and elevation are shared across themes. The shadow color follows the theme.
 $effects: () !default;
 
 @function effects() {
@@ -16,53 +15,6 @@ $effects: () !default;
                   radius-r6: 50px,
                   radius-r7: 400px,
                   radius-r8: 9999px,
-                  shadow-sh0: (
-                          rgba(94, 106, 210, 0.1) 0px 0px 0px 0.125074px,
-                  ),
-                  shadow-sh1: (
-                          rgba(0, 0, 0, 0.1) 0px 0px 0px 2px,
-                  ),
-                  shadow-sh2: (
-                          rgba(0, 0, 0, 0.2) 0px 0px 0px 1px,
-                  ),
-                  shadow-sh3: (
-                          rgb(35, 37, 42) 0px 0px 0px 1px inset,
-                  ),
-                  shadow-sh4: (
-                          rgba(8, 9, 10, 0.1) 0px 0px 0px 1px,
-                          rgba(8, 9, 10, 0.4) 0px 0px 64px 0px,
-                  ),
-                  shadow-sh5: (
-                          rgba(255, 255, 255, 0.03) 0px 0px 0px 1px inset,
-                          rgba(255, 255, 255, 0.04) 0px 1px 0px 0px inset,
-                          rgba(0, 0, 0, 0.6) 0px 0px 0px 1px,
-                          rgba(0, 0, 0, 0.1) 0px 4px 4px 0px,
-                  ),
-                  shadow-sh6: (
-                          rgba(0, 0, 0, 0.4) 0px 1px 0px 0px,
-                  ),
-                  shadow-sh7: (
-                          rgb(35, 37, 42) 1px 0px 0px 0px inset,
-                  ),
-                  shadow-sh8: (
-                          rgba(0, 0, 0, 0.03) 0px 1.2px 0px 0px,
-                  ),
-                  shadow-sh9: (
-                          rgba(0, 0, 0, 0.4) 0px 2px 4px 0px,
-                  ),
-                  shadow-sh10: (
-                          rgba(0, 0, 0, 0) 0px 8px 2px 0px,
-                          rgba(0, 0, 0, 0.01) 0px 5px 2px 0px,
-                          rgba(0, 0, 0, 0.04) 0px 3px 2px 0px,
-                          rgba(0, 0, 0, 0.07) 0px 1px 1px 0px,
-                          rgba(0, 0, 0, 0.08) 0px 0px 1px 0px,
-                  ),
-                  shadow-sh11: (
-                          rgba(0, 0, 0, 0.2) 0px 0px 12px 0px inset,
-                  ),
-                  shadow-sh12: (
-                          rgba(8, 9, 10, 0.6) 0px 4px 32px 0px,
-                  ),
                   radius-xs: var(--radius-r0),
                   radius-sm: var(--radius-r1),
                   radius-md: var(--radius-r2),
@@ -70,18 +22,17 @@ $effects: () !default;
                   radius-xl: var(--radius-r4),
                   radius-2xl: var(--radius-r5),
                   radius-pill: var(--radius-r8),
-                  shadow-popover: var(--shadow-sh12),
+                  shadow-popover: 0 6px 20px color-mix(in srgb, var(--color-shadow) 55%, transparent),
                   radius-dialog: var(--radius-lg),
-                  shadow-dialog: var(--shadow-sh12),
-                  shadow-graph-node: var(--shadow-sh12),
+                  shadow-dialog: 0 12px 36px color-mix(in srgb, var(--color-shadow) 64%, transparent),
+                  shadow-graph-node: 0 3px 10px color-mix(in srgb, var(--color-shadow) 42%, transparent),
                   radius-pane: var(--radius-r2),
-                  shadow-pane: var(--shadow-sh5),
+                  shadow-pane: 0 1px 3px color-mix(in srgb, var(--color-shadow) 28%, transparent),
                   radius-subject: var(--radius-md),
-                  shadow-subject: var(--shadow-sh9),
+                  shadow-subject: 0 2px 4px color-mix(in srgb, var(--color-shadow) 32%, transparent),
                   border-width: 1px,
                   focus-width: 2px,
                   focus-offset: 3px,
-                  opacity-disabled: 0.6,
           ),
           $effects
   );

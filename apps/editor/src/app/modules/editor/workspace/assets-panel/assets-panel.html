@@ -37,9 +37,11 @@
                         <li [title]="file.path" class="asset-file">
                             <button
                                     (click)="selectFile(file)"
-                                    (pointerdown)="beginModelDrag(file, $event)"
+                                    (pointerdown)="beginAssetDrag(file, $event)"
                                     [attr.aria-pressed]="isSelected(file)"
+                                    [class.drag-source]="canDrag(file)"
                                     [class.selected]="isSelected(file)"
+                                    [title]="canDrag(file) ? 'Drag into the Scene viewport' : file.path"
                                     type="button"
                             >
                                 <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
@@ -62,7 +64,8 @@
                             <span class="asset-path">{{ file.path }}</span>
                         </div>
                         @if (file.kind === 'scene') {
-                            <button (click)="openScene()" [disabled]="!canRunAction() || isActiveScene(file)" type="button">
+                            <button (click)="openScene()" [disabled]="!canOpenScene() || isActiveScene(file)"
+                                    type="button">
                                 Open Scene
                             </button>
                         } @else {

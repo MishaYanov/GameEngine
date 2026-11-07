@@ -1,5 +1,8 @@
+use crate::{editor::EditorWorkspace, state::EditorState};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::State;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 #[tauri::command]
@@ -31,20 +34,85 @@ pub async fn choose_project_manifest(
 pub async fn confirm_project_discard(window: tauri::WebviewWindow) -> Result<bool, String> {
 	super::editor::trusted_window(&window)?;
 	tauri::async_runtime::spawn_blocking(move || {
-		window
-			.dialog()
-			.message("Opening another project will discard all unsaved scene and project changes.")
-			.title("Discard unsaved changes?")
-			.parent(&window)
-			.kind(MessageDialogKind::Warning)
-			.buttons(MessageDialogButtons::OkCancelCustom(
-				"Discard and open".into(),
-				"Keep current project".into(),
-			))
-			.blocking_show()
+		confirm_discard(
+			&window,
+			"Opening another project will discard all unsaved scene and project changes.",
+			"Discard and open",
+			"Keep current project",
+		)
 	})
-	.await
-	.map_err(|error| error.to_string())
+		.await
+		.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn editor_exit(
+	window: tauri::WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: Option<u64>,
+) -> Result<bool, String> {
+	super::editor::trusted_window(&window)?;
+	let editor = Arc::clone(&state.editor);
+	tauri::async_runtime::spawn_blocking(move || {
+		let review = |workspace: Option<&EditorWorkspace>| -> Result<bool, String> {
+			let session = workspace.map(|workspace| workspace.backend.session());
+			if session.map(|session| session.revision()) != expected_revision {
+				return Err("Revision conflict: the open project changed. Try Exit again.".into());
+			}
+			if session.is_some_and(|session| session.has_transaction()) {
+				return Err("Finish the current edit before exiting.".into());
+			}
+			Ok(session.is_some_and(|session| session.is_dirty()))
+		};
+		let dirty = {
+			let workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
+			review(workspace.as_ref())?
+		};
+		if dirty
+			&& !confirm_discard(
+			&window,
+			"Exiting the editor will discard all unsaved scene and project changes.",
+			"Discard and exit",
+			"Keep editing",
+		) {
+			return Ok(false);
+		}
+
+		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
+		if review(workspace.as_ref())? && !dirty {
+			return Err(
+				"Revision conflict: the project has new unsaved changes. Try Exit again.".into(),
+			);
+		}
+		// CloseRequested already waits for the native viewport before destroying its parent.
+		window.close().map_err(|error| error.to_string())?;
+		// Retire the reviewed workspace before background completions can adopt more edits.
+		let retired = workspace.take();
+		drop(workspace);
+		drop(retired);
+		Ok(true)
+	})
+		.await
+		.map_err(|error| error.to_string())?
+}
+
+fn confirm_discard(
+	window: &tauri::WebviewWindow,
+	message: &str,
+	accept: &str,
+	cancel: &str,
+) -> bool {
+	window
+		.dialog()
+		.message(message)
+		.title("Discard unsaved changes?")
+		.parent(window)
+		.kind(MessageDialogKind::Warning)
+		.buttons(MessageDialogButtons::OkCancelCustom(
+			accept.into(),
+			cancel.into(),
+		))
+		.blocking_show()
 }
 
 #[tauri::command]

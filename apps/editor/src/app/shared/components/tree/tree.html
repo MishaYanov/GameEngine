@@ -1,0 +1,41 @@
+@if (rows().length) {
+    <div
+        #tree
+        (keydown)="navigate($event)"
+        [attr.aria-activedescendant]="activeDescendant()"
+        [attr.aria-label]="label()"
+        aria-orientation="vertical"
+        class="tree"
+        role="tree"
+        tabindex="0"
+    >
+        @for (row of rows(); track row.node.id) {
+            <div
+                    (click)="choose(row.node.id)"
+                    [attr.aria-expanded]="row.expanded"
+                    [attr.aria-label]="row.node.label"
+                    [attr.aria-level]="row.level"
+                    [attr.aria-posinset]="row.position"
+                    [attr.aria-selected]="row.node.id === selectedId()"
+                    [attr.aria-setsize]="row.siblingCount"
+                    [class.active]="row.node.id === activeId()"
+                    [id]="rowId(row.node.id)"
+                    [style.--tree-depth]="row.level - 1"
+                    class="tree-row"
+                    role="treeitem"
+            >
+                @if (row.expanded !== null) {
+                    <span (click)="toggle($event, row)" aria-hidden="true" class="disclosure">
+                        <editor-icon [class.expanded]="row.expanded" name="expand"/>
+                    </span>
+                } @else {
+                    <span aria-hidden="true" class="disclosure"></span>
+                }
+                @if (row.node.icon; as icon) {
+                    <editor-icon [name]="icon"/>
+                }
+                <span [title]="row.node.label" class="label">{{ row.node.label }}</span>
+            </div>
+        }
+    </div>
+}

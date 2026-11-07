@@ -1,14 +1,23 @@
-import {Component, input} from '@angular/core';
+import {Component, input, output} from '@angular/core';
 import {type ComponentFixture, TestBed} from '@angular/core/testing';
 import {By} from '@angular/platform-browser';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import {vi} from 'vitest';
+import type {EditorActionId} from '../../../core/editor/editor-actions';
 import {EditorService} from '../../../core/editor/editor.service';
-import type {EditorCommand, EditorCommandRequest, EditorSnapshot, SceneDocument} from '../../../core/editor/editor.models';
+import type {
+    EditorCommand,
+    EditorCommandRequest,
+    EditorSnapshot,
+    SceneDocument,
+    ViewportSceneLoad,
+    ViewportStatus
+} from '../../../core/editor/editor.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
 import {SceneEditingService} from './scene-editing.service';
 import {SceneEntitiesPanel} from './scene-entities-panel/scene-entities-panel';
+import {SceneSwitchService} from './scene-actions/scene-switch.service';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 
@@ -18,6 +27,7 @@ vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => tr
 class ViewportStub {
     readonly enabled = input(false);
     readonly label = input('');
+    readonly editorActionRequested = output<EditorActionId>();
 }
 
 function initialSnapshot(): EditorSnapshot {
@@ -53,6 +63,7 @@ describe('Workspace live editing flow', () => {
     let undo: SceneDocument[];
     let redo: SceneDocument[];
     let commands: EditorCommand[];
+    let viewportStatus: ViewportStatus;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -62,6 +73,11 @@ describe('Workspace live editing flow', () => {
         undo = [];
         redo = [];
         commands = [];
+        viewportStatus = {
+            attached: true, visible: true, width: 800, height: 500,
+            draw_calls: 0, instances: 0, triangles: 0, gpu_time_ms: null,
+            gpu_timestamps_supported: false, error: null,
+        };
         vi.mocked(isTauri).mockReturnValue(true);
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
@@ -80,6 +96,8 @@ describe('Workspace live editing flow', () => {
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
+            if (operation === 'editor_assets') return [];
+            if (operation === 'editor_viewport_bounds') return viewportStatus;
             if (operation !== 'editor_execute_incremental') throw new Error(`Unexpected operation: ${operation}`);
             const {request} = args as {request: EditorCommandRequest};
             expect(request.expected_revision).toBe(nativeState.revision);
@@ -132,6 +150,9 @@ describe('Workspace live editing flow', () => {
                     nativeState = {...nativeState, mode: 'play'};
                     break;
                 case 'stop_play': nativeState = {...nativeState, mode: 'edit'}; break;
+                case 'switch_scene':
+                    nativeState = {...nativeState, active_scene_id: command.scene_id, selection: []};
+                    break;
                 default: throw new Error(`Unexpected command: ${command.type}`);
             }
             nativeState = {...nativeState, revision: nativeState.revision + 1, scene_revision: nativeState.scene_revision + 1};
@@ -139,7 +160,8 @@ describe('Workspace live editing flow', () => {
                 kind: 'snapshot', snapshot: structuredClone(nativeState),
                 receipt: {
                     revision: nativeState.revision, scene_revision: nativeState.scene_revision,
-                    change_cursor: nativeState.revision, active_scene_id: 'main', affected_scenes: ['main'],
+                    change_cursor: nativeState.revision, active_scene_id: nativeState.active_scene_id,
+                    affected_scenes: [nativeState.active_scene_id],
                     state_changed: true, project_changed: false,
                     changes: {changed_entities: [], removed_entities: [], camera_changed: false,
                         lights_changed: false, topology_changed: false, full_resync: false},
@@ -257,6 +279,35 @@ describe('Workspace live editing flow', () => {
         expect(fixture.nativeElement.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Scene');
     });
 
+    it('dispatches hierarchy shortcuts while leaving text and Game keys to their owners', async () => {
+        await selectRobot();
+        const position = input('Position X');
+        await change(position, '6');
+        position.blur();
+        await editing.commit();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const press = (target: Element, code: string, key: string) => {
+            const event = new KeyboardEvent('keydown', {code, key, ctrlKey: true, bubbles: true, cancelable: true});
+            target.dispatchEvent(event);
+            return event.defaultPrevented;
+        };
+        expect(press(position, 'KeyZ', 'z')).toBe(false);
+        expect(editor.document()!.entities[0].transform.position[0]).toBe(6);
+        const tree = root.querySelector('[role="tree"]')!;
+        expect(press(tree, 'KeyZ', 'z')).toBe(true);
+        await vi.waitFor(() => expect(editor.document()!.entities[0].transform.position[0]).toBe(0));
+        await fixture.whenStable();
+        expect(press(tree, 'KeyA', 'a')).toBe(true);
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['robot', 'crate']));
+        const gameTab = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+            .find(tab => tab.textContent?.trim() === 'Game')!;
+        gameTab.click();
+        await fixture.whenStable();
+        expect(press(root.querySelector('[role="tabpanel"]')!, 'KeyY', 'y')).toBe(false);
+        expect(commands.some(command => command.type === 'redo')).toBe(false);
+    });
+
     it('commits the current inspector draft before reparenting and preserves world-space intent', async () => {
         await selectRobot();
         await change(input('Position X'), '5');
@@ -286,5 +337,42 @@ describe('Workspace live editing flow', () => {
         await editor.openProject('another/project.json');
         await fixture.whenStable();
         expect(fixture.nativeElement.querySelector('scene-entities-panel [role="alert"]')).toBeNull();
+    });
+
+    it('shows measured scene progress until a frame for the accepted scene revision is presented', async () => {
+        const target = {id: 'courtyard', asset_path: 'scenes/courtyard.json'};
+        nativeState = {
+            ...nativeState,
+            scenes: [...nativeState.scenes, {...target, dirty: false, loaded: true}],
+            project: {...nativeState.project, scenes: [...nativeState.project.scenes, target]},
+        };
+        await editor.refresh();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const progress = () => root.querySelector('progress');
+        const status = () => root.querySelector('.scene-load [role="status"]')?.textContent;
+        const update = async (load: ViewportSceneLoad) => {
+            viewportStatus = {...viewportStatus, scene_load: load};
+            await editor.updateViewportBounds({x: 0, y: 0, width: 800, height: 500, visible: true});
+            await fixture.whenStable();
+        };
+        const previousFrame: ViewportSceneLoad = {
+            workspace_generation: 1, scene_id: target.id, scene_revision: 1, stage: 'presented',
+        };
+        await update(previousFrame);
+        const switcher = fixture.debugElement.injector.get(SceneSwitchService);
+        expect(await switcher.request(target.id)).toBe(true);
+        await fixture.whenStable();
+        expect(progress()?.hasAttribute('value')).toBe(false);
+
+        const current = {...previousFrame, scene_revision: editor.snapshot()!.scene_revision};
+        await update({...current, stage: 'preparing', completed: 2, total: 4});
+        expect(progress()?.value).toBe(2);
+        expect(progress()?.max).toBe(4);
+        await update({...current, stage: 'rendering'});
+        expect(progress()?.hasAttribute('value')).toBe(false);
+        expect(status()).toContain('Presenting');
+        await update(current);
+        expect(progress()).toBeNull();
     });
 });

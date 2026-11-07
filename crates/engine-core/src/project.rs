@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	EntityKey,
+	input::{InputProfile, Key},
 	scene_catalog::{SceneCatalog, SceneDescriptor, SceneId},
 	scene_data::SceneData,
 };
@@ -113,6 +114,8 @@ pub struct ProjectData {
 	pub behaviors: Vec<SceneBehavior>,
 	#[serde(default)]
 	pub behavior_definitions: Vec<BehaviorDefinition>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub input_profile: Option<InputProfile>,
 }
 
 fn default_hz() -> u32 {
@@ -154,6 +157,7 @@ impl ProjectData {
 			max_catchup_steps: default_catchup(),
 			behaviors: Vec::new(),
 			behavior_definitions: Vec::new(),
+			input_profile: None,
 		};
 		project.validate_scene(scene)?;
 		Ok(project)
@@ -198,6 +202,12 @@ impl ProjectData {
 			return Err(format!(
 				"Project exceeds {MAX_BEHAVIOR_DEFINITIONS} behavior definitions"
 			));
+		}
+		if let Some(profile) = &self.input_profile {
+			profile.validate()?;
+			if profile.movement.contains_key(Key::Escape) {
+				return Err("Escape is reserved for leaving game input".into());
+			}
 		}
 		let mut definitions = HashMap::with_capacity(self.behavior_definitions.len());
 		for (index, definition) in self.behavior_definitions.iter().enumerate() {
@@ -365,6 +375,9 @@ impl ProjectData {
 		if header.schema_version == 2 {
 			let fields: serde_json::Value = serde_json::from_str(source)
 				.map_err(|error| format!("Invalid project JSON: {error}"))?;
+			if fields.get("input_profile").is_some() {
+				return Err("An authored input profile requires project schema version 3".into());
+			}
 			if fields.get("behavior_definitions").is_some()
 				|| value
 					.behaviors

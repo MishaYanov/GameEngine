@@ -40,9 +40,25 @@ input[type='checkbox'] {
   accent-color: var(--color-action);
 }
 
-:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: not-allowed;
+input:not([type='checkbox']):enabled:hover {
+  border-color: var(--color-border-strong);
+}
+
+:is(button:not(.blend-surface), select):enabled:hover {
+  background: var(--color-control-hover);
+}
+
+:is(button:not(.blend-surface), select):enabled:active {
+  background: var(--color-control-pressed);
+}
+
+:is(input:not([type='checkbox']), select, button):disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
+input[type='checkbox']:disabled {
+  accent-color: var(--color-text-disabled);
 }
 
 .check {
@@ -126,7 +142,7 @@ input[type='checkbox'] {
   width: var(--space-3);
   height: var(--space-3);
   border-radius: var(--radius-pill);
-  background: var(--color-action);
+  background: var(--color-graph-accent);
   transform: translate(-50%, -50%);
 }
 

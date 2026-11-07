@@ -1,7 +1,11 @@
 <header>
     <editor-file-menu
+            (exitRequested)="exitRequested.emit()"
             (openProjectRequested)="openProjectRequested.emit()"
+            (settingsRequested)="settingsRequested.emit()"
+            [canExit]="canExit()"
             [canOpen]="canOpen()"
+            [canOpenSettings]="canOpenSettings()"
             [opening]="opening()"
     />
 

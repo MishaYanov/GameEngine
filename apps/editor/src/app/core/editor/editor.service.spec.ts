@@ -10,6 +10,7 @@ import type {
     EditorCommandUpdate,
     EditorSnapshot,
     Light,
+    ModelAsset,
     SceneEntity,
     ViewportBounds,
     ViewportStatus,
@@ -682,6 +683,31 @@ describe('EditorService native command and viewport queues', () => {
         await service.saveProject();
         expect(invoke).toHaveBeenLastCalledWith('editor_save_project', {expectedRevision: 3});
         expect(service.error()).toBeNull();
+    });
+
+    it('coalesces catalogue scans off the edit queue and ignores results from a replaced project', async () => {
+        const oldScan = deferred<readonly ModelAsset[]>();
+        const newScan = deferred<readonly ModelAsset[]>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(3))
+            .mockReturnValueOnce(oldScan.promise)
+            .mockResolvedValueOnce(snapshot(4))
+            .mockReturnValueOnce(newScan.promise);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('old/project.json');
+        const old = service.assets();
+        expect(service.assets(true)).toBe(old);
+        expect(service.busy()).toBe(false);
+        await service.openProject('new/project.json');
+        const current = service.assets();
+        oldScan.resolve([{name: 'Old model', path: 'props/old.glb'}]);
+        await old;
+        expect(service.modelAssets()).toBeNull();
+        expect(service.assets()).toBe(current);
+        const models = [{name: 'New model', path: 'props/new.glb'}];
+        newScan.resolve(models);
+        expect(await current).toEqual(models);
+        expect(service.modelAssets()).toEqual(models);
     });
 
     it('queues scene registration, save-as, project save and reload with each returned revision', async () => {

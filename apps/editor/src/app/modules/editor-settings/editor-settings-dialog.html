@@ -1,0 +1,43 @@
+<editor-dialog
+        (openChange)="settings.setOpen($event)"
+        [config]="dialogConfig"
+        [open]="settings.state().open"
+        preferenceKey="editor:settings-dialog"
+        title="Settings"
+>
+    <div class="settings-layout">
+        <div class="settings-navigation">
+            <editor-tree
+                    (selectedIdChange)="settings.select($event)"
+                    [nodes]="tree"
+                    [selectedId]="settings.state().page"
+                    label="Settings categories"
+            />
+        </div>
+
+        <div class="settings-detail">
+            @if (settings.state().page === 'editor.keymap') {
+                <editor-form-section description="Default editor shortcuts, grouped by where they work." title="Keymap">
+                    @for (section of sections; track section.title) {
+                        <div class="keymap-section">
+                            <h4>{{ section.title }}</h4>
+                            <p>{{ section.context }}</p>
+                            <dl>
+                                @for (shortcut of section.shortcuts; track shortcut.id) {
+                                    <div class="keymap-row">
+                                        <dt>{{ shortcut.label }}</dt>
+                                        <dd><kbd>{{ shortcut.keys }}</kbd></dd>
+                                    </div>
+                                }
+                            </dl>
+                        </div>
+                    }
+                </editor-form-section>
+            } @else {
+                <editor-form-section description="Settings for the editor application." title="Editor">
+                    <button (click)="settings.select('editor.keymap')" type="button">View Keymap</button>
+                </editor-form-section>
+            }
+        </div>
+    </div>
+</editor-dialog>

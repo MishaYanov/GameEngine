@@ -74,6 +74,7 @@ export class EditorService {
     private queue: Promise<void> = Promise.resolve();
     private viewportQueue: Promise<void> = Promise.resolve();
     private capabilitiesRequest: Promise<EditorCapabilities> | null = null;
+    private assetRequest: { generation: number; promise: Promise<readonly ModelAsset[]> } | null = null;
     private viewportStatusListener: UnlistenFn | null = null;
     private pendingBounds: PendingBounds | null = null;
     private pendingDetach: Promise<ViewportStatus> | null = null;
@@ -142,6 +143,13 @@ export class EditorService {
         } catch (cause: unknown) {
             throw this.recordError('confirm_project_discard', cause);
         }
+    }
+
+    requestExit(): Promise<boolean> {
+        return this.enqueue('editor_exit', () =>
+                this.native<boolean>('editor_exit', {expectedRevision: this.snapshotState()?.revision ?? null}),
+            true,
+        );
     }
 
     openProject(manifestPath: string, options: ProjectOpenOptions = {}): Promise<EditorSnapshot> {
@@ -261,13 +269,25 @@ export class EditorService {
     }
 
     assets(refresh = false): Promise<readonly ModelAsset[]> {
-        return this.enqueue('editor_assets', async () => {
-            const cached = this.assetsState();
-            if (cached && !refresh) return cached;
-            const result = await this.native<readonly ModelAsset[]>('editor_assets');
-            this.assetsState.set(result);
-            return result;
-        });
+        const cached = this.assetsState();
+        if (cached && !refresh) return Promise.resolve(cached);
+        const generation = this.workspaceGeneration();
+        if (this.assetRequest?.generation === generation) return this.assetRequest.promise;
+        const current = () => !this.destroyed && this.workspaceGeneration() === generation;
+        // Discovery reads the asset root. Keep it independent of the document command queue.
+        const promise: Promise<readonly ModelAsset[]> = this.native<readonly ModelAsset[]>('editor_assets')
+            .then(models => {
+                if (current()) this.assetsState.set(models);
+                return models;
+            })
+            .catch((cause: unknown) => {
+                throw current() ? this.recordError('editor_assets', cause) : cause;
+            })
+            .finally(() => {
+                if (this.assetRequest?.promise === promise) this.assetRequest = null;
+            });
+        this.assetRequest = {generation, promise};
+        return promise;
     }
 
     importModel(path: string, position: Vec3): Promise<EditorSnapshot> {

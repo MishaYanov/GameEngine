@@ -1,3 +1,5 @@
+import type {GameInputProfile} from '../game-input/game-input.models';
+
 export type SceneId = string;
 
 export interface SceneDescriptor {
@@ -28,6 +30,7 @@ export interface ProjectData {
     readonly max_catchup_steps: number;
     readonly behaviors: readonly { readonly scene_id: SceneId; readonly behavior: BehaviorSpec }[];
     readonly behavior_definitions: readonly { readonly id: string; readonly settings: BehaviorSettings }[];
+    readonly input_profile?: GameInputProfile | null;
 }
 
 export interface SceneState extends SceneDescriptor {
@@ -322,6 +325,15 @@ export interface ViewportBounds {
     readonly visible: boolean;
 }
 
+export interface ViewportSceneLoad {
+    readonly workspace_generation: number;
+    readonly scene_id: SceneId;
+    readonly scene_revision: number;
+    readonly stage: 'preparing' | 'rendering' | 'presented';
+    readonly completed?: number | null;
+    readonly total?: number | null;
+}
+
 export interface ViewportStatus {
     readonly attached: boolean;
     readonly visible: boolean;
@@ -333,6 +345,7 @@ export interface ViewportStatus {
     readonly gpu_time_ms: number | null;
     readonly gpu_timestamps_supported: boolean;
     readonly error: string | null;
+    readonly scene_load?: ViewportSceneLoad | null;
 }
 
 export interface ViewportModifiers {

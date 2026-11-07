@@ -146,8 +146,9 @@ export function exampleGraph(domain: GraphDomain): GraphDocument {
       }
 
       button[aria-pressed='true'] {
+        background: var(--color-selected);
         color: var(--color-text);
-        border-color: var(--color-action);
+        border-color: var(--color-selection-edge);
       }
     `,
 })

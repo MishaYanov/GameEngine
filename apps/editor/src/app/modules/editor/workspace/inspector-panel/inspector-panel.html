@@ -5,6 +5,7 @@
         preferenceKey="editor.object-inspector"
         resizeLabel="Resize Inspector"
         type="right"
+        maxWidth="45%"
 >
     <editor-pane icon="object" title="Inspector">
         @for (selection of selectedEntities(); track selection.identity) {
@@ -41,6 +42,9 @@
                     <h3>Transform <span>Local space</span></h3>
                     <editor-vector3-field
                             label="Position"
+                            [(locked)]="positionLinked"
+                            [lockable]="true"
+                            lockHint="Move all three axes by the same offset"
                             [value]="selected.transform.position"
                             [disabled]="!editable()"
                             (editStarted)="editStarted.emit('position')"
@@ -51,6 +55,9 @@
                     <editor-vector3-field
                             label="Rotation"
                             unit="degrees"
+                            [(locked)]="rotationLinked"
+                            [lockable]="true"
+                            lockHint="Rotate all three axes by the same angle"
                             [value]="rotationDegrees()"
                             [disabled]="!editable()"
                             (editStarted)="editStarted.emit('rotation')"
@@ -60,6 +67,9 @@
                     />
                     <editor-vector3-field
                             label="Scale"
+                            [(locked)]="scaleLinked"
+                            [lockable]="true"
+                            lockHint="Scale all three axes by the same factor"
                             [value]="selected.transform.scale"
                             [disabled]="!editable()"
                             (editStarted)="editStarted.emit('scale')"

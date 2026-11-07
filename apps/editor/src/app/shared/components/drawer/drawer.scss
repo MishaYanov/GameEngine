@@ -63,6 +63,11 @@
 	background: var(--color-control-hover);
 }
 
+.subject-rail button:active {
+	color: var(--color-text);
+	background: var(--color-control-pressed);
+}
+
 .subject-rail button:focus-visible {
 	outline-offset: calc(-1 * var(--focus-width));
 }

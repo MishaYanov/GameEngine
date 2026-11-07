@@ -1,4 +1,4 @@
-import {Component, computed, inject, input, linkedSignal, signal} from '@angular/core';
+import {Component, computed, effect, inject, input, linkedSignal, signal} from '@angular/core';
 import type {SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
@@ -6,6 +6,7 @@ import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-s
 import {EditorPane} from '../../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import type {Config} from '../../../../shared/models/config.model';
+import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 
@@ -14,8 +15,9 @@ interface AssetFile {
     readonly name: string;
 }
 
-type AssetEntry = AssetFile & ({readonly kind: 'scene'; readonly sceneId: SceneId} | {readonly kind: 'model'});
-type AssetAction = 'models' | 'open' | 'add';
+type SceneAsset = AssetFile & { readonly kind: 'scene'; readonly sceneId: SceneId };
+type AssetEntry = SceneAsset | (AssetFile & { readonly kind: 'model' });
+type AssetAction = 'models' | 'add';
 
 @Component({
     selector: 'editor-assets-panel',
@@ -24,7 +26,7 @@ type AssetAction = 'models' | 'open' | 'add';
     styleUrl: './assets-panel.scss',
 })
 export class AssetsPanel {
-    protected readonly modelDrag = inject(ViewportAssetDragService, {optional: true});
+    private readonly assetDrag = inject(ViewportAssetDragService, {optional: true});
     readonly opening = input(false);
 
     private readonly pendingAction = signal<AssetAction | null>(null);
@@ -38,6 +40,8 @@ export class AssetsPanel {
     };
     private readonly editor = inject(EditorService);
     private readonly sceneEditing = inject(SceneEditingService, {optional: true});
+    private readonly sceneSwitch = inject(SceneSwitchService);
+    protected readonly canOpenScene = computed(() => this.canRunAction() && this.sceneSwitch.canSwitch());
     protected readonly projectOpen = computed(() => this.editor.snapshot() !== null);
     protected readonly models = this.editor.modelAssets;
     protected readonly canRunAction = computed(() => {
@@ -48,6 +52,7 @@ export class AssetsPanel {
                 : !this.editor.busy() && snapshot.transaction === null);
     });
     protected readonly canLoadModels = this.canRunAction;
+    private catalogWorkspace: number | null = null;
     private readonly scenes = computed(() => this.editor.snapshot()?.scenes);
     private readonly entries = computed<readonly AssetEntry[]>(() => [
         ...(this.scenes() ?? []).map(scene => ({
@@ -95,6 +100,15 @@ export class AssetsPanel {
         };
     });
 
+    constructor() {
+        effect(() => {
+            const workspace = this.editor.workspaceGeneration();
+            if (workspace === this.catalogWorkspace || !this.canRunAction()) return;
+            this.catalogWorkspace = workspace;
+            if (this.models() === null) void this.loadCatalog(false);
+        });
+    }
+
     protected upOneFolder(location: HTMLElement): void {
         const path = this.folder();
         this.openFolder(path.slice(0, Math.max(0, path.lastIndexOf('/'))), location);
@@ -112,8 +126,19 @@ export class AssetsPanel {
         this.status.set(null);
     }
 
-    protected beginModelDrag(file: AssetEntry, event: PointerEvent): void {
-        if (file.kind === 'model' && this.canRunAction()) this.modelDrag?.candidate(file.path, event);
+    protected canDrag(file: AssetEntry): boolean {
+        return this.assetDrag?.canBegin() === true && (file.kind === 'scene'
+            ? this.canOpenScene() && !this.isActiveScene(file)
+            : this.canRunAction());
+    }
+
+    protected beginAssetDrag(file: AssetEntry, event: PointerEvent): void {
+        if (!this.canDrag(file)) return;
+        if (file.kind === 'scene') {
+            this.assetDrag?.candidateScene(file.sceneId, event, () => this.openSceneFile(file));
+        } else {
+            this.assetDrag?.candidate(file.path, event);
+        }
     }
 
     protected isSelected(file: AssetEntry): boolean {
@@ -126,33 +151,48 @@ export class AssetsPanel {
     }
 
     protected async loadModels(): Promise<void> {
-        await this.runAction('models', async () => {
-            await this.editor.assets(true);
-            this.status.set('Model catalogue refreshed.');
-        });
+        if (this.canLoadModels()) await this.loadCatalog(true);
     }
 
     protected async openScene(): Promise<void> {
         const selected = this.selected();
-        if (selected?.kind !== 'scene' || this.isActiveScene(selected)) return;
-        await this.runAction('open', async () => {
-            await this.editor.switchScene(selected.sceneId);
-            this.status.set(`Opened ${selected.name}.`);
-        });
+        if (selected?.kind === 'scene') await this.openSceneFile(selected);
     }
 
     protected async addModel(): Promise<void> {
         const selected = this.selected();
         if (selected?.kind !== 'model') return;
-        await this.runAction('add', async () => {
+        await this.addAsset(async () => {
             await this.editor.importModel(selected.path, [0, 0, 0]);
             this.status.set(`Added ${selected.name} to the scene.`);
         });
     }
 
-    private async runAction(kind: AssetAction, action: () => Promise<void>): Promise<void> {
+    private async loadCatalog(refresh: boolean): Promise<void> {
+        const workspace = this.editor.workspaceGeneration();
+        this.pendingAction.set('models');
+        this.error.set(null);
+        this.status.set(null);
+        try {
+            await this.editor.assets(refresh);
+            if (refresh && workspace === this.editor.workspaceGeneration()) this.status.set('Model catalogue refreshed.');
+        } catch (error) {
+            if (workspace === this.editor.workspaceGeneration()) this.error.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            this.pendingAction.set(null);
+        }
+    }
+
+    private async openSceneFile(file: SceneAsset): Promise<boolean> {
+        if (!this.canOpenScene() || this.isActiveScene(file)) return false;
+        this.error.set(null);
+        this.status.set(null);
+        return this.sceneSwitch.request(file.sceneId);
+    }
+
+    private async addAsset(action: () => Promise<void>): Promise<void> {
         if (!this.canRunAction()) return;
-        this.pendingAction.set(kind);
+        this.pendingAction.set('add');
         this.error.set(null);
         this.status.set(null);
         try {

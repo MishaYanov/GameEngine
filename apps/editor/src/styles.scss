@@ -1,4 +1,4 @@
 // Optional build-time overrides go first:
-// @use './app/styles' with ($palette: (brand-secondary: #515bc0));
+// @use './app/styles' with ($graphite: (color-action: #335cc7));
 @use './app/styles/root';
 @use './app/styles/core/core';

@@ -1,0 +1,86 @@
+.settings-layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: clamp(7.5rem, 24%, 12rem) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.settings-navigation,
+.settings-detail {
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+}
+
+.settings-navigation {
+  border-inline-end: var(--border-width) solid var(--color-dialog-edge);
+  padding-inline-start: 0;
+}
+
+.settings-detail {
+  padding-inline-end: 0;
+}
+
+.keymap-section {
+  margin-block-end: var(--space-4);
+}
+
+.keymap-section h4,
+.keymap-section p,
+.keymap-section dl,
+.keymap-row dd {
+  margin: 0;
+}
+
+.keymap-section h4 {
+  font-size: var(--font-size-sm);
+}
+
+.keymap-section p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  margin-block: var(--space-1) var(--space-2);
+}
+
+.keymap-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-block: var(--space-1);
+  border-block-end: var(--border-width) solid var(--color-dialog-edge);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.keymap-row dd {
+  text-align: end;
+}
+
+.keymap-row kbd {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-dialog-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-subject-toggle);
+  font-size: var(--font-size-xs);
+}
+
+.settings-detail button {
+  min-height: var(--layout-subject-control-height);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-dialog-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-subject-toggle);
+  color: var(--color-text);
+  font: inherit;
+  cursor: var(--cursor-action);
+}
+
+.settings-detail button:hover {
+  background: var(--color-control-hover);
+}
+
+.settings-detail button:active {
+  background: var(--color-control-pressed);
+}

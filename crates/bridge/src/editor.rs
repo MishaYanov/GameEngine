@@ -65,6 +65,28 @@ pub struct ViewportStatusDto {
 	pub gpu_time_ms: Option<f64>,
 	pub gpu_timestamps_supported: bool,
 	pub error: Option<String>,
+	pub scene_load: Option<ViewportSceneLoadDto>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewportSceneLoadStage {
+	Preparing,
+	Rendering,
+	Presented,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewportSceneLoadDto {
+	pub workspace_generation: u64,
+	pub scene_id: engine_core::scene_catalog::SceneId,
+	pub scene_revision: u64,
+	pub stage: ViewportSceneLoadStage,
+	/// Counts scene entities prepared by the GPU factory, including reused models.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub completed: Option<usize>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub total: Option<usize>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ViewportModifiersDto {

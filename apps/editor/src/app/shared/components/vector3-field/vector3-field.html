@@ -1,5 +1,28 @@
-<fieldset [disabled]="disabled()">
-    <legend>{{ label() }} @if (unit()) { <span class="unit">({{ unit() }})</span> }</legend>
+<fieldset [attr.aria-labelledby]="labelId" [disabled]="disabled()">
+    <legend>
+        <span class="legend-content">
+            <span [id]="labelId">{{ label() }} @if (unit()) {
+                <span class="unit">({{ unit() }})</span>
+            }</span>
+            @if (lockable()) {
+                <button
+                        (click)="toggleLock()"
+                        [attr.aria-describedby]="lockHint() ? lockHintId : null"
+                        [attr.aria-label]="'Link ' + label() + ' axes'"
+                        [attr.aria-pressed]="locked()"
+                        [disabled]="disabled()"
+                        [title]="lockHint() || 'Link X, Y, and Z axes'"
+                        class="axis-lock"
+                        type="button"
+                >
+                    <editor-icon [name]="locked() ? 'lock' : 'unlock'"/>
+                </button>
+                @if (lockHint(); as hint) {
+                    <span [id]="lockHintId" hidden>{{ hint }}</span>
+                }
+            }
+        </span>
+    </legend>
     <div class="axis-fields">
         @for (axis of axes; track axis.index) {
             <label class="axis-field">

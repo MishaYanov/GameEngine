@@ -4,6 +4,12 @@ import type {ComponentPreview, ComponentSection} from './component-registry';
 export const componentRegistry: readonly ComponentSection[] = [
     {id: "dialog", title: "Dialog", requiredInputs: ["title"], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/dialog/dialog"), import("./previews/dialog.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : ["title"], ...options, component: options.component ?? module["EditorDialog"]}; }},
     {id: "drawer", title: "Drawer", requiredInputs: [], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/drawer/drawer"), import("./previews/drawer.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : [], ...options, component: options.component ?? module["Drawer"]}; }},
+    {
+        id: "form-section",
+        title: "Form Section",
+        requiredInputs: ["title"],
+        load: () => import("../../../src/app/shared/components/form-section/form-section").then(module => ({component: module["EditorFormSection"]}))
+    },
     {id: "graph", title: "Graph", requiredInputs: [], load: () => import("./previews/graph.design").then(preview => preview.default)},
     {id: "pane", title: "Pane", requiredInputs: ["title"], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/pane/pane"), import("./previews/pane.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : ["title"], ...options, component: options.component ?? module["EditorPane"]}; }},
     {id: "portal", title: "Portal", requiredInputs: []},
@@ -11,5 +17,11 @@ export const componentRegistry: readonly ComponentSection[] = [
     {id: "scene-viewport", title: "Scene Viewport", requiredInputs: [], load: () => import("./previews/scene-viewport.design").then(preview => preview.default)},
     {id: "splitter", title: "Splitter", requiredInputs: [], load: () => import("../../../src/app/shared/components/splitter/splitter").then(module => ({component: module["Splitter"]}))},
     {id: "subject", title: "Subject", requiredInputs: [], load: () => import("./previews/subject.design").then(preview => preview.default)},
+    {
+        id: "tree",
+        title: "Tree",
+        requiredInputs: ["label", "nodes"],
+        load: () => import("../../../src/app/shared/components/tree/tree").then(module => ({component: module["EditorTree"]}))
+    },
     {id: "vector3-field", title: "Vector3 Field", requiredInputs: ["label","value"], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/vector3-field/vector3-field"), import("./previews/vector3-field.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : ["label","value"], ...options, component: options.component ?? module["Vector3Field"]}; }},
 ];

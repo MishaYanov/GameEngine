@@ -71,13 +71,25 @@ select {
   font-size: var(--font-size-sm);
 }
 
-input:disabled,
-select:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: not-allowed;
+input:not([type='checkbox'], [aria-invalid='true']):enabled:hover {
+  border-color: var(--color-border-strong);
 }
 
-input[aria-invalid='true'] {
+select:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+select:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+input:not([type='checkbox']):disabled,
+select:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
+input:enabled[aria-invalid='true'] {
   border-color: var(--color-danger);
 }
 
@@ -93,6 +105,10 @@ input[type='checkbox'] {
   height: var(--layout-icon-size);
   margin: 0;
   accent-color: var(--color-action);
+}
+
+input[type='checkbox']:disabled {
+  accent-color: var(--color-text-disabled);
 }
 
 .error {

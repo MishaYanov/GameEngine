@@ -1,13 +1,15 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
-        <workspace-toolbar (viewSelected)="selectView($event)" [opening]="opening()"/>
+        <workspace-toolbar (viewSelected)="selectView($event)" [opening]="workspaceActionBlocked()"/>
         <editor-scene-actions [opening]="opening()"/>
-        <editor-project-build [opening]="opening()"/>
+        <editor-game-input [opening]="workspaceActionBlocked()"/>
+        <editor-project-build [opening]="workspaceActionBlocked()"/>
     </div>
     <workspace-tabs #tabs (viewSelected)="selectView($event)" [activeViewKind]="activeViewKind()"/>
 
     <div class="workspace-main">
         <scene-entities-panel
+                data-editor-shortcut-scope="hierarchy"
                 [scene]="sceneEntities()"
                 [selectedKeys]="editorService.selection()"
                 [disabled]="!sceneEditing.ready()"
@@ -17,8 +19,10 @@
                 (selectionRequested)="sceneEditing.select($event)"
                 (reparentRequested)="reparentEntity($event)"
         />
-        <section aria-label="Workspace" class="workspace-center">
-            @if (!gameView()) { <editor-viewport-toolbar [opening]="opening()"/> }
+        <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
+            @if (!gameView()) {
+                <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
+            }
             <div
                     [attr.aria-labelledby]="tabs.panelId + '-tab-' + activeViewKind()"
                     [id]="tabs.panelId"
@@ -27,8 +31,33 @@
                     tabindex="0"
             >
                 <editor-pane [icon]="gameView() ? 'play' : 'cube'" [title]="gameView() ? 'Game Preview' : 'Scene'">
+                    @if (sceneProgress(); as progress) {
+                        <div class="scene-load" pane-actions>
+                            <span [title]="progress.name" role="status">{{ progress.label }}</span>
+                            <progress
+                                    [attr.aria-label]="'Loading ' + progress.name"
+                                    [attr.max]="progress.total"
+                                    [attr.value]="progress.completed"
+                            ></progress>
+                            @if (progress.completed !== null) {
+                                <span aria-hidden="true" class="scene-load-count">{{ progress.completed }}
+                                    / {{ progress.total }}</span>
+                            }
+                        </div>
+                    } @else if (gameView() && editorService.playing()) {
+                        <span [class.captured]="gameKeyboardCaptured()" class="viewport-keyboard-hint" pane-actions
+                              role="status">{{
+                                gameKeyboardCaptured() ? 'Game keyboard active · Esc releases' : 'Click Game to capture the keyboard'
+                            }}</span>
+                    } @else if (!gameView() && viewportEditor.state()?.gesture === 'fly') {
+                        <span class="viewport-keyboard-hint" pane-actions role="status">WASD to move · Mouse to look · Esc exits</span>
+                    } @else if (!gameView() && assetDrag.message(); as message) {
+                        <span [title]="message" class="viewport-keyboard-hint" pane-actions
+                              role="status">{{ message }}</span>
+                    }
                     @if (editorService.snapshot(); as snapshot) {
                         <scene-viewport
+                                (editorActionRequested)="handleNativeShortcut($event)"
                                 [enabled]="showingViewport() && !opening()"
                                 [hidden]="!showingViewport()"
                                 [label]="gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
@@ -65,6 +94,7 @@
             </div>
         </section>
         <inspector-panel
+                data-editor-shortcut-scope="inspector"
                 [entity]="sceneEditing.entity()"
                 [contextKey]="sceneContext()"
                 [editable]="sceneEditing.editable()"
@@ -76,6 +106,5 @@
                 (editCancelled)="sceneEditing.cancel()"
         />
     </div>
-    <editor-assets-panel [opening]="opening()"/>
-    @if (assetDrag.message(); as message) { <p class="drag-status" role="status">{{ message }}</p> }
+    <editor-assets-panel [opening]="workspaceActionBlocked()" data-editor-shortcut-scope="assets"/>
 </section>

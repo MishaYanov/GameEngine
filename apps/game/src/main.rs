@@ -82,6 +82,7 @@ struct GameApp {
 	window_occluded: bool,
 	next_frame_deadline: Option<Instant>,
 	project: Option<ProjectData>,
+	input_profile_override: Option<InputProfile>,
 	project_path: Option<PathBuf>,
 	installed_project: bool,
 	play_update_error_reported: bool,
@@ -101,8 +102,7 @@ impl GameApp {
 			return;
 		}
 
-		self.camera_controller
-			.update(&mut self.camera, &self.input, delta_seconds);
+		self.update_keyboard_camera(delta_seconds);
 
 		if self.authored.is_some() {
 			let previous_paused = self.editor.simulation_paused();
@@ -145,7 +145,7 @@ impl GameApp {
 	}
 
 	fn update_player(&mut self, delta_seconds: f32) {
-		if self.input.just_pressed(Key::F10) {
+		if self.player_shortcut_pressed(Key::F10) {
 			let result = self.restart_player_game();
 			report_update_result(
 				"player_new_game",
@@ -155,7 +155,7 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.input.just_pressed(Key::F8) {
+		if self.player_shortcut_pressed(Key::F8) {
 			let result = self.cycle_player_scene();
 			report_update_result(
 				"player_scene_switch",
@@ -165,7 +165,7 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.input.just_pressed(Key::F7) {
+		if self.player_shortcut_pressed(Key::F7) {
 			let result = runtime::game_progress::ProgressAction::new::<progress::CampaignProgress>(
 				progress::ProgressAction::AwardScore { amount: 1 },
 			)
@@ -178,8 +178,7 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		self.camera_controller
-			.update(&mut self.camera, &self.input, delta_seconds);
+		self.update_keyboard_camera(delta_seconds);
 		let result = self
 			.editor
 			.update_play(&mut self.scene, &self.input, delta_seconds);
@@ -188,6 +187,26 @@ impl GameApp {
 			result,
 			&mut self.play_update_error_reported,
 		);
+	}
+
+	fn player_shortcut_pressed(&self, key: Key) -> bool {
+		self.input.just_pressed(key) && !self.editor.play_input_binds_key(key)
+	}
+
+	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
+		let game_owns_arrow = self.editor.is_playing()
+			&& [
+			Key::ArrowLeft,
+			Key::ArrowRight,
+			Key::ArrowDown,
+			Key::ArrowUp,
+		]
+			.into_iter()
+			.any(|key| self.input.is_held(key) && self.editor.play_input_binds_key(key));
+		if !game_owns_arrow {
+			self.camera_controller
+				.update(&mut self.camera, &self.input, delta_seconds);
+		}
 	}
 
 	fn needs_continuous_redraw(&self) -> bool {
@@ -402,8 +421,9 @@ impl GameApp {
 		self.scene = loaded.scene;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
-		let bindings = *self.editor.play_movement_bindings();
-		editor.set_play_movement_bindings(bindings, &mut self.input);
+		if let Some(profile) = &self.input_profile_override {
+			editor.set_play_input_profile(profile.clone(), &mut self.input);
+		}
 		self.editor = editor;
 		self.tools = tools;
 		self.selection_overlay = overlay;
@@ -737,8 +757,9 @@ impl GameApp {
 		self.tools.templates.clear();
 		self.tools.drag = None;
 		self.tools.saved = Some(saved);
-		let bindings = *self.editor.play_movement_bindings();
-		editor.set_play_movement_bindings(bindings, &mut self.input);
+		if let Some(profile) = &self.input_profile_override {
+			editor.set_play_input_profile(profile.clone(), &mut self.input);
+		}
 		self.editor = editor;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
@@ -907,19 +928,6 @@ impl GameApp {
 			}
 			window.set_cursor_visible(true);
 		}
-	}
-
-	fn set_play_movement_bindings(&mut self, bindings: MovementBindings) -> bool {
-		let changed = self
-			.editor
-			.set_play_movement_bindings(bindings, &mut self.input);
-
-		if changed {
-			self.clock.reset();
-			self.request_input_frame();
-		}
-
-		changed
 	}
 }
 
@@ -1259,13 +1267,13 @@ fn run() -> Result<(), String> {
 		std::env::var("GAME_ENGINE_NATIVE_EDITOR_DEMO").as_deref() == Ok("1"),
 	)?;
 
-	let input_profile = match options.input_profile.as_deref() {
-		Some(path) => load_input_profile(path)?,
-		None => InputProfile::default(),
-	};
+	app.input_profile_override = options
+		.input_profile
+		.as_deref()
+		.map(load_input_profile)
+		.transpose()?;
 
 	app.standalone_runtime = options.mode == LaunchMode::Player;
-	app.set_play_movement_bindings(input_profile.movement);
 	engine_logger::debug!(target: "game", "Launch configuration selected: mode={:?}, installed={}", options.mode, app.installed_project);
 
 	// Validate launch configuration before creating platform/GPU resources.

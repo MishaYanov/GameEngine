@@ -201,6 +201,7 @@ impl ViewportHost {
 			status.instances = 0;
 			status.triangles = 0;
 			status.gpu_time_ms = None;
+			status.scene_load = None;
 			status.width = 0;
 			status.height = 0;
 		}
@@ -300,7 +301,9 @@ impl Drop for ViewportHost {
 mod windows {
 	use super::*;
 	use crate::viewport_interaction::ViewportInteraction;
-	use bridge::editor::{ViewportInputDto, ViewportModifiersDto};
+	use bridge::editor::{
+		ViewportInputDto, ViewportModifiersDto, ViewportSceneLoadDto, ViewportSceneLoadStage,
+	};
 	use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle};
 	use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
 	use runtime::{assets::AssetManager, scene::Scene, scene_io, Camera};
@@ -308,38 +311,54 @@ mod windows {
 		collections::VecDeque,
 		num::NonZeroIsize,
 		path::PathBuf,
+		sync::atomic::{AtomicBool, Ordering},
 		thread::JoinHandle,
 		time::{Duration, Instant},
 	};
 	use tauri::Emitter;
-	use windows_sys::Win32::UI::WindowsAndMessaging::{
-		SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+	use windows_sys::Win32::{
+		Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+		UI::{
+			Input::KeyboardAndMouse::{GetFocus, SetFocus},
+			Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+			WindowsAndMessaging::{
+				GetForegroundWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE,
+				SWP_NOOWNERZORDER, SWP_NOSIZE, WM_KILLFOCUS, WM_NCDESTROY,
+			},
+		},
 	};
 	use winit::{
 		application::ApplicationHandler,
 		dpi::{PhysicalPosition, PhysicalSize},
-		event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+		event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
 		event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
-		keyboard::{ModifiersState, PhysicalKey},
+		keyboard::{KeyCode, ModifiersState, PhysicalKey},
 		platform::windows::EventLoopBuilderExtWindows,
 		window::{CursorGrabMode, Window, WindowId},
 	};
 
 	const FRAME: Duration = Duration::from_nanos(16_666_667);
 	const EDITOR_STATE_INTERVAL: Duration = Duration::from_millis(50);
+	const SCENE_LOAD_INTERVAL: Duration = Duration::from_millis(75);
+	const STATUS_INTERVAL: Duration = Duration::from_millis(500);
 
-	fn show_viewport_window(window: &Window) -> Result<(), String> {
+	fn window_handle(window: &Window) -> Result<HWND, String> {
 		let handle = window.window_handle().map_err(|error| error.to_string())?;
 		let RawWindowHandle::Win32(handle) = handle.as_raw() else {
 			return Err("Native viewport window has no Win32 handle".into());
 		};
+		Ok(handle.hwnd.get())
+	}
+
+	fn show_viewport_window(window: &Window) -> Result<(), String> {
+		let hwnd = window_handle(window)?;
 		window.set_visible(true);
 		// Win32 creates child windows below existing siblings. Wry's windowed
 		// WebView2 fills the same parent, so showing the viewport is insufficient.
 		// SAFETY: The worker owns the live child HWND on this thread.
 		let positioned = unsafe {
 			SetWindowPos(
-				handle.hwnd.get(),
+				hwnd,
 				HWND_TOP,
 				0,
 				0,
@@ -355,6 +374,60 @@ mod windows {
 			));
 		}
 		Ok(())
+	}
+
+	struct KeyboardFocusHook {
+		hwnd: HWND,
+		_control: Arc<Control>,
+	}
+	impl KeyboardFocusHook {
+		fn new(window: &Window, control: Arc<Control>) -> Result<Self, String> {
+			let hwnd = window_handle(window)?;
+			// SAFETY: Installed on the child owner thread. The hook retains the
+			// control pointer until removal, and is dropped before the window.
+			if unsafe {
+				SetWindowSubclass(
+					hwnd,
+					Some(keyboard_focus_proc),
+					0,
+					Arc::as_ptr(&control) as usize,
+				)
+			} == 0
+			{
+				return Err("Could not monitor keyboard focus for the native viewport".into());
+			}
+			Ok(Self {
+				hwnd,
+				_control: control,
+			})
+		}
+	}
+	impl Drop for KeyboardFocusHook {
+		fn drop(&mut self) {
+			// SAFETY: The worker drops its own hook on the child owner thread.
+			unsafe { RemoveWindowSubclass(self.hwnd, Some(keyboard_focus_proc), 0) };
+		}
+	}
+
+	unsafe extern "system" fn keyboard_focus_proc(
+		hwnd: HWND,
+		message: u32,
+		wparam: WPARAM,
+		lparam: LPARAM,
+		id: usize,
+		context: usize,
+	) -> LRESULT {
+		if message == WM_KILLFOCUS {
+			// SAFETY: The installed hook owns the Arc backing this reference.
+			let control = unsafe { &*(context as *const Control) };
+			control.keyboard_blurred.store(true, Ordering::Release);
+			control.wake();
+		} else if message == WM_NCDESTROY {
+			// SAFETY: A destroying HWND can detach its own subclass procedure.
+			unsafe { RemoveWindowSubclass(hwnd, Some(keyboard_focus_proc), id) };
+		}
+		// SAFETY: Forward every message through the existing subclass chain.
+		unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 	}
 
 	fn pending_editor_publication(
@@ -433,6 +506,58 @@ mod windows {
 				None
 			);
 		}
+
+		#[test]
+		fn a_new_frame_for_the_same_scene_advances_readiness() {
+			let scene_id = runtime::scene_catalog::SceneId::new("level-one").unwrap();
+			let other = runtime::scene_catalog::SceneId::new("level-two").unwrap();
+			let mut status = ViewportStatusDto {
+				scene_load: Some(ViewportSceneLoadDto {
+					workspace_generation: 41,
+					scene_id: scene_id.clone(),
+					scene_revision: 7,
+					stage: ViewportSceneLoadStage::Presented,
+					completed: None,
+					total: None,
+				}),
+				..ViewportStatusDto::default()
+			};
+			assert!(!advance_presented_revision(
+				&mut status,
+				42,
+				Some(&scene_id),
+				9
+			));
+			assert!(!advance_presented_revision(
+				&mut status,
+				41,
+				Some(&other),
+				9
+			));
+			assert!(!advance_presented_revision(
+				&mut status,
+				41,
+				Some(&scene_id),
+				7
+			));
+			// A hidden viewport can skip an intervening scene and render this
+			// scene again at a new revision. The old presented event is stale.
+			assert!(advance_presented_revision(
+				&mut status,
+				41,
+				Some(&scene_id),
+				9
+			));
+			assert_eq!(
+				serde_json::to_value(status.scene_load).unwrap(),
+				serde_json::json!({
+					"workspace_generation": 41,
+					"scene_id": "level-one",
+					"scene_revision": 9,
+					"stage": "presented",
+				})
+			);
+		}
 	}
 
 	#[derive(Clone, Copy)]
@@ -453,6 +578,7 @@ mod windows {
 		latest: Mutex<Latest>,
 		proxy: Mutex<Option<EventLoopProxy<Wake>>>,
 		actions: Mutex<VecDeque<ActionRequest>>,
+		keyboard_blurred: AtomicBool,
 	}
 	impl Control {
 		pub(super) fn requested_status(&self, mut status: ViewportStatusDto) -> ViewportStatusDto {
@@ -470,6 +596,7 @@ mod windows {
 					status.instances = 0;
 					status.triangles = 0;
 					status.gpu_time_ms = None;
+					status.scene_load = None;
 				}
 			}
 			status
@@ -489,6 +616,7 @@ mod windows {
 				}),
 				proxy: Mutex::new(None),
 				actions: Mutex::new(VecDeque::new()),
+				keyboard_blurred: AtomicBool::new(false),
 			})
 		}
 		pub(super) fn request_action(
@@ -698,9 +826,49 @@ mod windows {
 		camera: Camera,
 		revision: u64,
 		generation: u64,
+		scene_id: Option<runtime::scene_catalog::SceneId>,
 		change_cursor: u64,
 		asset_root: PathBuf,
 		lights_changed: bool,
+	}
+
+	fn publish_scene_load(
+		parent: &tauri::WebviewWindow,
+		control: &Control,
+		shared: &Mutex<ViewportStatusDto>,
+		progress: ViewportSceneLoadDto,
+	) {
+		let event = shared.lock().ok().and_then(|mut status| {
+			if !status.attached || status.scene_load.as_ref() == Some(&progress) {
+				return None;
+			}
+			status.scene_load = Some(progress);
+			Some(status.clone())
+		});
+		if let Some(event) = event {
+			let _ = parent.emit("editor://viewport-status", control.requested_status(event));
+		}
+	}
+
+	/// Refresh readiness without announcing another load on ordinary authored edits.
+	fn advance_presented_revision(
+		status: &mut ViewportStatusDto,
+		generation: u64,
+		scene_id: Option<&runtime::scene_catalog::SceneId>,
+		revision: u64,
+	) -> bool {
+		let Some(progress) = status.scene_load.as_mut() else {
+			return false;
+		};
+		if progress.stage != ViewportSceneLoadStage::Presented
+			|| progress.workspace_generation != generation
+			|| scene_id != Some(&progress.scene_id)
+			|| revision <= progress.scene_revision
+		{
+			return false;
+		}
+		progress.scene_revision = revision;
+		true
 	}
 	impl Drop for GpuState {
 		fn drop(&mut self) {
@@ -713,6 +881,7 @@ mod windows {
 
 	struct Worker {
 		gpu: Option<GpuState>,
+		focus_hook: Option<KeyboardFocusHook>,
 		window: Option<Arc<Window>>,
 		hwnd: isize,
 		parent: tauri::WebviewWindow,
@@ -723,6 +892,8 @@ mod windows {
 		interaction: ViewportInteraction,
 		last_editor_emit: Instant,
 		last_editor_revision: u64,
+		game_keyboard_active: bool,
+		game_focus_pending: bool,
 		bounds: ViewportBoundsDto,
 		attached: bool,
 		parent_visible: bool,
@@ -738,8 +909,10 @@ mod windows {
 		cursor: [f64; 2],
 		modifiers: ModifiersState,
 		pending_motion: Option<[f64; 2]>,
+		pending_fly_motion: [f64; 2],
 		last_motion: Instant,
 		last_status: Instant,
+		status_pending: bool,
 	}
 
 	impl Worker {
@@ -754,6 +927,7 @@ mod windows {
 			let now = Instant::now();
 			Self {
 				gpu: None,
+				focus_hook: None,
 				window: None,
 				hwnd,
 				parent,
@@ -764,6 +938,8 @@ mod windows {
 				interaction: ViewportInteraction::default(),
 				last_editor_emit: now - Duration::from_secs(1),
 				last_editor_revision: u64::MAX,
+				game_keyboard_active: false,
+				game_focus_pending: false,
 				bounds: ViewportBoundsDto::default(),
 				attached: false,
 				parent_visible: true,
@@ -779,8 +955,10 @@ mod windows {
 				cursor: [0.0; 2],
 				modifiers: ModifiersState::empty(),
 				pending_motion: None,
+				pending_fly_motion: [0.0; 2],
 				last_motion: now - FRAME,
 				last_status: now - Duration::from_secs(1),
+				status_pending: false,
 			}
 		}
 		fn fail(&mut self, operation: &'static str, error: impl Into<String>) {
@@ -788,6 +966,7 @@ mod windows {
 				engine_logger::error!(target: "editor_viewport", "Viewport entered failed state: operation={operation}");
 			}
 			self.failed = true;
+			self.release_keyboard_focus();
 			self.cancel_editor();
 			if let Some(window) = self.window.as_ref() {
 				let _ = window.set_cursor_grab(CursorGrabMode::None);
@@ -809,6 +988,15 @@ mod windows {
 		fn update_window_visibility(&mut self) {
 			if let Some(window) = self.window.as_ref() {
 				if self.active() && !self.failed {
+					if self.focus_hook.is_none() {
+						match KeyboardFocusHook::new(window, Arc::clone(&self.control)) {
+							Ok(hook) => self.focus_hook = Some(hook),
+							Err(error) => {
+								self.fail("window_keyboard_focus", error);
+								return;
+							}
+						}
+					}
 					if let Err(error) = show_viewport_window(window) {
 						self.fail("window_z_order", error);
 					}
@@ -824,6 +1012,90 @@ mod windows {
 				&& self.bounds.width > 0.0
 				&& self.bounds.height > 0.0
 				&& !self.occluded
+		}
+		fn native_keyboard_focused(&self) -> bool {
+			// SAFETY: Read-only queries for the worker's own input queue.
+			self.focus_hook.as_ref().is_some_and(|hook| unsafe {
+				GetForegroundWindow() == self.hwnd && GetFocus() == hook.hwnd
+			})
+		}
+		fn note_keyboard_focus(&mut self, focused: bool) {
+			if !focused {
+				self.modifiers = ModifiersState::empty();
+				self.pending_motion = None;
+				self.pending_fly_motion = [0.0; 2];
+			}
+			if self.interaction.keyboard_focused() != focused {
+				let event = if focused { "focused" } else { "blurred" };
+				self.process_input(event, None, None, false, None);
+				self.emit_input(event, None, None, false, None);
+			}
+		}
+		fn drain_native_blur(&mut self) {
+			if self.control.keyboard_blurred.swap(false, Ordering::AcqRel) {
+				self.note_keyboard_focus(false);
+			}
+		}
+		fn focus_keyboard(&mut self) {
+			let Some(hook) = self.focus_hook.as_ref() else {
+				return;
+			};
+			// SAFETY: SetFocus targets our child on its owning thread, and only
+			// while the editor is the foreground window.
+			if self.active() && !self.failed && unsafe { GetForegroundWindow() == self.hwnd } {
+				unsafe { SetFocus(hook.hwnd) };
+				self.note_keyboard_focus(self.native_keyboard_focused());
+			}
+		}
+		fn release_keyboard_focus(&mut self) {
+			let was_focused = self.interaction.keyboard_focused();
+			self.note_keyboard_focus(false);
+			let Some(hook) = self.focus_hook.as_ref() else {
+				return;
+			};
+			// SAFETY: Clear focus only when our own child still owns it.
+			if unsafe { GetFocus() } != hook.hwnd {
+				return;
+			}
+			unsafe { SetFocus(0) };
+			if !was_focused {
+				// Escape already updated interaction state before releasing the HWND.
+				self.emit_input("blurred", None, None, false, None);
+			}
+			let parent = self.parent.clone();
+			let hwnd = self.hwnd;
+			let _ = self.parent.run_on_main_thread(move || {
+				// An intervening click or dialog owns its own focus. Wry's
+				// programmatic WebView focus restores the prior HTML element.
+				let (foreground, focused) = unsafe { (GetForegroundWindow(), GetFocus()) };
+				if foreground == hwnd && (focused == 0 || focused == hwnd) {
+					let _ = parent.as_ref().set_focus();
+				}
+			});
+		}
+		fn refresh_game_keyboard_focus(&mut self) {
+			let game_active = self.interaction.game_keyboard_active();
+			if game_active != self.game_keyboard_active {
+				self.game_keyboard_active = game_active;
+				self.game_focus_pending = game_active;
+				if !game_active {
+					self.release_keyboard_focus();
+				}
+			}
+			if self.game_focus_pending && self.active() && !self.failed && self.focus_hook.is_some()
+			{
+				// This is a one-shot request on entering Play/Game. Escape, blur,
+				// and restoring a hidden surface must not reacquire it.
+				self.game_focus_pending = false;
+				self.focus_keyboard();
+			}
+		}
+		fn flush_fly_motion(&mut self) {
+			let delta = std::mem::take(&mut self.pending_fly_motion);
+			if delta != [0.0; 2] && self.interaction.is_flying() && self.native_keyboard_focused() {
+				self.interaction.look_from_fly_motion(delta);
+				self.dirty = true;
+			}
 		}
 		fn clear_play_input(&mut self) {
 			if let Ok(mut workspace) = self.shared.lock() {
@@ -911,6 +1183,7 @@ mod windows {
 					self.interaction.report(error.clone());
 				}
 				self.dirty = true;
+				self.refresh_game_keyboard_focus();
 				self.update_capture();
 				self.publish_editor(true);
 				let _ = reply.send(result.map(|()| self.interaction.state()));
@@ -925,7 +1198,7 @@ mod windows {
 			delta: Option<[f64; 2]>,
 		) {
 			let extent = self.prepared_extent.unwrap_or_else(|| self.extent());
-			if extent.contains(&0) {
+			if extent.contains(&0) && !matches!(kind, "focused" | "blurred") {
 				return;
 			}
 			let position = self.window.as_ref().map(|window| {
@@ -961,7 +1234,8 @@ mod windows {
 				}
 			}
 			self.dirty |= before != self.interaction.state().revision
-				|| kind == "pointer_move" && self.interaction.captured();
+				|| kind == "pointer_move" && self.interaction.captured()
+				|| matches!(kind, "key_down" | "key_up") && self.interaction.game_keyboard_active();
 			self.update_capture();
 			self.publish_editor(kind != "pointer_move");
 		}
@@ -972,7 +1246,7 @@ mod windows {
 			]
 		}
 		fn apply_control(&mut self, event_loop: &ActiveEventLoop) {
-			let was_active = self.active();
+			self.drain_native_blur();
 			let values = self
 				.control
 				.latest
@@ -1024,6 +1298,7 @@ mod windows {
 			self.bounds = bounds;
 			self.dpi = dpi;
 			if clear_input || !self.active() {
+				self.release_keyboard_focus();
 				self.clear_play_input();
 				self.cancel_editor();
 			}
@@ -1038,6 +1313,7 @@ mod windows {
 						}
 					}
 				}
+				self.update_capture();
 			}
 			if changed {
 				if let Some(window) = &self.window {
@@ -1064,10 +1340,6 @@ mod windows {
 			if !self.active() {
 				self.last_tick = None;
 				self.pending_motion = None;
-				if was_active {
-					self.modifiers = ModifiersState::empty();
-					self.emit_input("blurred", None, None, false, None);
-				}
 			}
 			if !self.attached {
 				self.gpu = None;
@@ -1084,6 +1356,7 @@ mod windows {
 				self.last_status = Instant::now() - Duration::from_secs(1);
 			}
 			self.process_actions();
+			self.refresh_game_keyboard_focus();
 		}
 
 		fn draw(&mut self) -> Result<(), String> {
@@ -1187,6 +1460,10 @@ mod windows {
 							},
 							revision,
 							generation,
+							scene_id: (!session.is_playing()
+								&& self.interaction.settings.view
+								== bridge::viewport::ViewportView::Scene)
+								.then(|| session.active_scene_id().clone()),
 							change_cursor: cursor,
 							asset_root: workspace.asset_root.clone(),
 							lights_changed,
@@ -1206,10 +1483,56 @@ mod windows {
 				camera,
 				revision,
 				generation,
+				scene_id,
 				change_cursor,
 				asset_root,
 				lights_changed,
 			} = packet;
+			let previous = scene_id.as_ref().and_then(|scene_id| {
+				self.status.lock().ok().and_then(|status| {
+					status.scene_load.as_ref().and_then(|progress| {
+						(progress.workspace_generation == generation
+							&& &progress.scene_id == scene_id)
+							.then_some(progress.stage)
+					})
+				})
+			});
+			let loading = scene_id.is_some() && previous != Some(ViewportSceneLoadStage::Presented);
+			let (parent, control, status) = (&self.parent, &self.control, &self.status);
+			let report = |stage, count: Option<(usize, usize)>| {
+				if let Some(scene_id) = scene_id.as_ref() {
+					let (completed, total) = count.unzip();
+					publish_scene_load(
+						parent,
+						control,
+						status,
+						ViewportSceneLoadDto {
+							workspace_generation: generation,
+							scene_id: scene_id.clone(),
+							scene_revision: revision,
+							stage,
+							completed,
+							total,
+						},
+					);
+				}
+			};
+			if loading && previous.is_none() {
+				report(ViewportSceneLoadStage::Preparing, None);
+			}
+			let mut last_count = None;
+			let mut count_prepared = |completed, total| {
+				if !loading {
+					return;
+				}
+				let now = Instant::now();
+				if completed == total
+					|| last_count.is_none_or(|last| now.duration_since(last) >= SCENE_LOAD_INTERVAL)
+				{
+					report(ViewportSceneLoadStage::Preparing, Some((completed, total)));
+					last_count = Some(now);
+				}
+			};
 			if self.gpu.is_none() {
 				let window = Arc::clone(
 					self.window
@@ -1223,7 +1546,12 @@ mod windows {
 				let data = document
 					.take()
 					.ok_or("Initial viewport packet is missing scene data")?;
-				let (scene, initial_camera) = scene_io::instantiate(&data, &mut assets, &renderer)?;
+				let (scene, initial_camera) = scene_io::instantiate_with_progress(
+					&data,
+					&mut assets,
+					&renderer,
+					&mut count_prepared,
+				)?;
 				renderer.set_lights(&scene.renderer_lights())?;
 				engine_logger::debug!(target: "editor_viewport", "Viewport GPU state created: generation={generation}, width={width}, height={height}, entities={}, lights={}", data.entities.len(), data.lights.len());
 				drop(data);
@@ -1248,20 +1576,24 @@ mod windows {
 					.take()
 					.ok_or("Full viewport synchronization packet is missing scene data")?;
 				let replacement = if !gpu.scene.synchronize(&data)? {
-					let (scene, _) =
-						match scene_io::instantiate(&data, &mut gpu.assets, &gpu.renderer) {
-							Ok(candidate) => candidate,
-							Err(error) => {
-								drop(data);
-								gpu.renderer.wait_idle().map_err(|wait_error| {
-									format!(
+					let (scene, _) = match scene_io::instantiate_with_progress(
+						&data,
+						&mut gpu.assets,
+						&gpu.renderer,
+						&mut count_prepared,
+					) {
+						Ok(candidate) => candidate,
+						Err(error) => {
+							drop(data);
+							gpu.renderer.wait_idle().map_err(|wait_error| {
+								format!(
 										"{error}; failed to retire rejected candidate GPU resources: {wait_error}"
 									)
-								})?;
-								gpu.assets.prune_unused();
-								return Err(error);
-							}
-						};
+							})?;
+							gpu.assets.prune_unused();
+							return Err(error);
+						}
+					};
 					Some(scene)
 				} else {
 					None
@@ -1286,6 +1618,9 @@ mod windows {
 			// Do not hold a strong document snapshot across frame fences or
 			// presentation. Play can mutate its uniquely owned Arc in place.
 			drop(document);
+			if loading {
+				report(ViewportSceneLoadStage::Rendering, None);
+			}
 			let Some([width, height]) = gpu.renderer.prepare()? else {
 				self.prepared_extent = None;
 				if let Ok(mut status) = self.status.lock() {
@@ -1340,7 +1675,8 @@ mod windows {
 				glam::Mat4::from_cols_array(&uniform.view_projection),
 			)?;
 			let (objects, _) = gpu.scene.try_render_visible(Some(&frustum))?;
-			match gpu.renderer.draw(&uniform, &objects)? {
+			let frame_status = gpu.renderer.draw(&uniform, &objects)?;
+			match frame_status {
 				DrawStatus::NeedsRedraw => {
 					self.dirty = true;
 					self.redraw_retry = Some(Instant::now() + FRAME);
@@ -1359,7 +1695,18 @@ mod windows {
 					status.triangles = metrics.triangles as usize;
 					status.gpu_time_ms = metrics.gpu_time_ms;
 					status.gpu_timestamps_supported = metrics.gpu_timestamps_supported;
+					if !loading && frame_status == DrawStatus::Rendered {
+						self.status_pending |= advance_presented_revision(
+							&mut status,
+							generation,
+							scene_id.as_ref(),
+							revision,
+						);
+					}
 				}
+			}
+			if loading && frame_status == DrawStatus::Rendered {
+				report(ViewportSceneLoadStage::Presented, None);
 			}
 			self.publish_editor(false);
 			Ok(())
@@ -1438,6 +1785,7 @@ mod windows {
 					self.window = Some(Arc::new(window));
 					self.dirty = true;
 					self.update_window_visibility();
+					self.refresh_game_keyboard_focus();
 				}
 				Err(error) => {
 					self.fail("window_create", error.to_string());
@@ -1447,6 +1795,17 @@ mod windows {
 		}
 		fn user_event(&mut self, event_loop: &ActiveEventLoop, _: Wake) {
 			self.apply_control(event_loop);
+		}
+		fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+			if let DeviceEvent::MouseMotion { delta } = event {
+				if self.interaction.is_flying()
+					&& self.interaction.keyboard_focused()
+					&& self.native_keyboard_focused()
+				{
+					self.pending_fly_motion[0] += delta.0;
+					self.pending_fly_motion[1] += delta.1;
+				}
+			}
 		}
 		fn window_event(
 			&mut self,
@@ -1461,6 +1820,7 @@ mod windows {
 			{
 				return;
 			}
+			self.drain_native_blur();
 			match event {
 				WindowEvent::CloseRequested | WindowEvent::Destroyed => {
 					self.cancel_editor();
@@ -1491,6 +1851,7 @@ mod windows {
 					self.last_tick = None;
 					self.dirty = !occluded;
 					if occluded {
+						self.release_keyboard_focus();
 						self.clear_play_input();
 						self.cancel_editor();
 					}
@@ -1509,7 +1870,9 @@ mod windows {
 				}
 				WindowEvent::CursorMoved { position, .. } => {
 					self.cursor = [position.x, position.y];
-					self.pending_motion = Some(self.cursor);
+					if !self.interaction.is_flying() {
+						self.pending_motion = Some(self.cursor);
+					}
 				}
 				WindowEvent::CursorLeft { .. } => {
 					self.pending_motion = None;
@@ -1529,10 +1892,11 @@ mod windows {
 					if self.pending_motion.take().is_some() {
 						self.process_input("pointer_move", None, None, false, None);
 					}
-					if state == ElementState::Pressed {
-						if let Some(window) = self.window.as_ref() {
-							window.focus_window();
-						}
+					self.flush_fly_motion();
+					if state == ElementState::Pressed
+						&& matches!(button.as_str(), "left" | "middle" | "right")
+					{
+						self.focus_keyboard();
 					}
 					self.process_input(
 						if state == ElementState::Pressed {
@@ -1570,54 +1934,37 @@ mod windows {
 				WindowEvent::ModifiersChanged(modifiers) => {
 					self.modifiers = modifiers.state();
 				}
-				WindowEvent::KeyboardInput { event, .. } => {
+				WindowEvent::KeyboardInput {
+					event,
+					is_synthetic: false,
+					..
+				} if self.interaction.keyboard_focused() && self.native_keyboard_focused() => {
+					self.flush_fly_motion();
+					let release = event.state == ElementState::Pressed
+						&& !event.repeat && event.physical_key
+						== PhysicalKey::Code(KeyCode::Escape);
 					let code = match event.physical_key {
 						PhysicalKey::Code(code) => format!("{code:?}"),
 						PhysicalKey::Unidentified(code) => format!("{code:?}"),
 					};
-					self.process_input(
-						if event.state == ElementState::Pressed {
-							"key_down"
-						} else {
-							"key_up"
-						},
-						None,
-						Some(code.clone()),
-						event.repeat,
-						None,
-					);
-					self.emit_input(
-						if event.state == ElementState::Pressed {
-							"key_down"
-						} else {
-							"key_up"
-						},
-						None,
-						Some(code),
-						event.repeat,
-						None,
-					);
-				}
-				WindowEvent::Focused(focused) => {
-					if !focused {
-						self.modifiers = ModifiersState::empty();
-						self.pending_motion = None;
-						self.clear_play_input();
+					let kind = if event.state == ElementState::Pressed {
+						"key_down"
+					} else {
+						"key_up"
+					};
+					let editor_key = (self.interaction.settings.view
+						== bridge::viewport::ViewportView::Scene)
+						.then(|| code.clone());
+					self.process_input(kind, None, Some(code), event.repeat, None);
+					if let Some(code) = editor_key {
+						self.emit_input(kind, None, Some(code), event.repeat, None);
 					}
-					self.process_input(
-						if focused { "focused" } else { "blurred" },
-						None,
-						None,
-						false,
-						None,
-					);
-					self.emit_input(
-						if focused { "focused" } else { "blurred" },
-						None,
-						None,
-						false,
-						None,
-					);
+					if release {
+						self.release_keyboard_focus();
+					}
+				}
+				WindowEvent::Focused(false) if !self.native_keyboard_focused() => {
+					self.note_keyboard_focus(false);
 				}
 				_ => {}
 			}
@@ -1626,6 +1973,10 @@ mod windows {
 			if self.control.stopping() {
 				event_loop.exit();
 				return;
+			}
+			self.drain_native_blur();
+			if self.interaction.keyboard_focused() && !self.native_keyboard_focused() {
+				self.note_keyboard_focus(false);
 			}
 			let now = Instant::now();
 			if let Ok(mut workspace) = self.shared.lock() {
@@ -1638,11 +1989,16 @@ mod windows {
 					self.dirty |= before != workspace.backend.session().revision();
 				}
 			}
-			if self.pending_motion.is_some() && now.duration_since(self.last_motion) >= FRAME {
-				self.pending_motion = None;
+			self.refresh_game_keyboard_focus();
+			if (self.pending_motion.is_some() || self.pending_fly_motion != [0.0; 2])
+				&& now.duration_since(self.last_motion) >= FRAME
+			{
 				self.last_motion = now;
-				self.process_input("pointer_move", None, None, false, None);
-				self.emit_input("pointer_move", None, None, false, None);
+				if self.pending_motion.take().is_some() {
+					self.process_input("pointer_move", None, None, false, None);
+					self.emit_input("pointer_move", None, None, false, None);
+				}
+				self.flush_fly_motion();
 			}
 			let ticking = self
 				.shared
@@ -1712,7 +2068,7 @@ mod windows {
 					window.request_redraw();
 				}
 			}
-			if now.duration_since(self.last_status) >= Duration::from_millis(500) {
+			if now.duration_since(self.last_status) >= STATUS_INTERVAL {
 				let status = self.status.lock().ok().map(|status| status.clone());
 				if let Some(status) = status {
 					let _ = self.parent.emit(
@@ -1721,15 +2077,20 @@ mod windows {
 					);
 				}
 				self.last_status = now;
+				self.status_pending = false;
 			}
 			let mut deadline = if ticking || camera_ticking {
 				Some(self.next_frame)
 			} else {
 				None
 			};
-			if self.pending_motion.is_some() {
+			if self.pending_motion.is_some() || self.pending_fly_motion != [0.0; 2] {
 				let motion = self.last_motion + FRAME;
 				deadline = Some(deadline.map_or(motion, |deadline| deadline.min(motion)));
+			}
+			if self.status_pending {
+				let status = self.last_status + STATUS_INTERVAL;
+				deadline = Some(deadline.map_or(status, |deadline| deadline.min(status)));
 			}
 			if let Some(publication) = pending_editor_publication(
 				self.interaction.state().revision,
@@ -1746,6 +2107,7 @@ mod windows {
 			event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 		}
 		fn exiting(&mut self, _: &ActiveEventLoop) {
+			self.note_keyboard_focus(false);
 			self.cancel_editor();
 			if let Ok(mut actions) = self.control.actions.lock() {
 				for request in actions.drain(..) {
@@ -1755,6 +2117,7 @@ mod windows {
 				}
 			}
 			self.gpu = None;
+			self.focus_hook = None;
 			self.window = None;
 			engine_logger::debug!(target: "editor_viewport", "Viewport worker teardown completed");
 		}

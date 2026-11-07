@@ -24,6 +24,23 @@
             <p id="scene-path-help">Use a relative .json path. Save As writes a new file and changes this scene’s path; existing files are preserved.</p>
         </div>
     }
-    @if (message(); as status) { <p class="status" role="status">{{ status }}</p> }
-    @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
+    @if (sceneSwitch.error() ?? error(); as failure) {
+        <p class="error" role="alert">{{ failure }}</p>
+    } @else if (sceneSwitch.message() ?? message(); as status) {
+        <p class="status" role="status">{{ status }}</p>
+    }
 }
+
+<editor-dialog (openChange)="!$event && sceneSwitch.choose('cancel')" [config]="confirmationConfig"
+               [open]="sceneSwitch.confirmation() !== null" [renderFields]="false"
+               closeLabel="Cancel"
+               title="Save changes before opening scene?">
+    @if (sceneSwitch.confirmation(); as confirmation) {
+        <p class="switch-prompt">Save changes to <strong>{{ confirmation.fromPath }}</strong> before opening
+            <strong>{{ confirmation.toPath }}</strong>?</p>
+        <p class="switch-prompt">Keep Edits and Open keeps the unsaved changes in this editor session.</p>
+    }
+    <button (click)="sceneSwitch.choose('keep')" dialog-actions type="button">Keep Edits and Open</button>
+    <button (click)="sceneSwitch.choose('save')" class="save-and-open" dialog-actions type="button">Save and Open
+    </button>
+</editor-dialog>

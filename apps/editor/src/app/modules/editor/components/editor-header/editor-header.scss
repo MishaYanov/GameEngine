@@ -11,9 +11,9 @@ header {
   min-height: var(--layout-control-height);
   padding: var(--space-1) var(--space-2);
   gap: var(--space-3);
-  border: var(--border-width) solid var(--palette-neutral-n800);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--palette-neutral-n700);
+  background: var(--color-surface-raised);
 }
 
 .breadcrumb {
@@ -21,13 +21,13 @@ header {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-  color: var(--palette-text-text4);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
 h1 {
   margin: 0;
-  color: var(--palette-text-text0);
+  color: var(--color-text);
   font-size: inherit;
   font-weight: var(--font-weight-medium);
 }
@@ -51,5 +51,5 @@ h1,
 
 .dirty-label {
   flex: none;
-  color: var(--palette-status-warning);
+  color: var(--color-warning);
 }

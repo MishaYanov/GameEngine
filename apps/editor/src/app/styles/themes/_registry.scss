@@ -1,0 +1,59 @@
+@use 'sass:map';
+@use 'graphite';
+
+$default-theme: 'graphite';
+$themes: (
+        'graphite': graphite.graphite(),
+);
+
+@mixin properties($tokens, $prefix: '') {
+  @each $name, $value in $tokens {
+    --#{$prefix}#{$name}: #{$value};
+  }
+}
+
+@mixin registered-themes {
+  :root {
+    @include properties(map.get($themes, $default-theme));
+  }
+
+  @each $name, $theme in $themes {
+    @if $name != $default-theme {
+      :root[data-theme='#{$name}'] {
+        @include properties($theme);
+      }
+    }
+  }
+}
+
+// Component roles use the same color contract in every theme.
+@mixin color-roles {
+  --color-surface: var(--color-pane);
+  --color-drawer: var(--color-pane);
+  --color-pane-edge: var(--color-border);
+  --color-subject: var(--color-pane);
+  --color-subject-edge: var(--color-border);
+  --color-subject-toggle: var(--color-control);
+  --color-dialog: var(--color-surface-raised);
+  --color-dialog-edge: var(--color-border);
+  --color-dialog-backdrop: color-mix(in srgb, var(--color-shadow) 72%, transparent);
+  --color-input: var(--color-canvas);
+  --color-input-edge: var(--color-border-strong);
+  --color-input-edge-subtle: color-mix(in srgb, var(--color-input-edge) 85%, var(--color-input));
+  --color-text-selection: var(--color-selected-hover);
+
+  --color-graph-bg: var(--color-canvas);
+  --color-graph-toolbar: var(--color-pane);
+  --color-graph-node: var(--color-surface-raised);
+  --color-graph-node-edge: var(--color-border);
+  --color-graph-grid: color-mix(in srgb, var(--color-border) 58%, var(--color-canvas));
+  --color-graph-wire-hover: color-mix(in srgb, var(--color-text) 25%, transparent);
+
+  @each $tone in info, success, warning, danger {
+    --color-#{$tone}-bg: color-mix(in srgb, var(--color-#{$tone}) 10%, var(--color-surface-raised));
+    --color-#{$tone}-border: color-mix(in srgb, var(--color-#{$tone}) 60%, var(--color-surface-raised));
+  }
+
+  --color-preview-start: color-mix(in srgb, var(--color-action) 12%, var(--color-pane));
+  --color-preview-end: var(--color-pane);
+}

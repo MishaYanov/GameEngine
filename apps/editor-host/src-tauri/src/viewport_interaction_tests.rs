@@ -239,6 +239,16 @@ fn key(code: &str) -> ViewportInputDto {
 		..event("key_down", [0.0; 2], None)
 	}
 }
+fn focus_keyboard(controller: &mut ViewportInteraction, workspace: &mut EditorWorkspace) {
+	send(controller, workspace, event("focused", [0.0; 2], None));
+}
+
+fn start_walk(controller: &mut ViewportInteraction, workspace: &mut EditorWorkspace) {
+	let mut walk = key("Backquote");
+	walk.modifiers.shift = true;
+	send(controller, workspace, walk);
+	assert_eq!(controller.state().gesture.as_deref(), Some("fly"));
+}
 fn select(workspace: &mut EditorWorkspace, keys: &[&str]) {
 	command(
 		workspace,
@@ -523,6 +533,7 @@ fn escape_and_focus_loss_restore_the_captured_transform_without_history() {
 		let fixture = Fixture::new(1);
 		let mut workspace = fixture.open();
 		let mut controller = controller(&mut workspace);
+		focus_keyboard(&mut controller, &mut workspace);
 		let original = workspace.backend.session().authored_document().entities[0]
 			.transform
 			.clone();
@@ -615,6 +626,7 @@ fn changing_tool_with_a_shortcut_cancels_its_active_transform() {
 	let fixture = Fixture::new(1);
 	let mut workspace = fixture.open();
 	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
 	let original = workspace.backend.session().authored_document().entities[0]
 		.transform
 		.clone();
@@ -737,6 +749,50 @@ fn invalid_or_cancelled_model_placement_never_creates_authored_entities() {
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
 		before
 	);
+}
+
+#[test]
+fn resizing_reprojects_an_active_placement_and_preserves_the_submitted_position() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	begin_valid_placement(&mut controller, &mut workspace);
+	let normalized = [0.8, 0.5];
+	controller
+		.action(
+			ViewportActionDto::UpdatePlacement {
+				normalized: Some(normalized),
+			},
+			&mut workspace,
+			EXTENT,
+		)
+		.unwrap();
+	let original = controller.placement.as_ref().unwrap().position.unwrap();
+	let resized = [1200, 600];
+	controller
+		.geometry_changed(&mut workspace, resized, 1.0)
+		.unwrap();
+	let placement = controller.placement.as_ref().unwrap();
+	assert_eq!(placement.normalized, Some(normalized));
+	let position = placement.position.unwrap();
+	assert!(position.abs_diff_eq(Vec3::new(original.x * 1.5, original.y, original.z), 1e-4));
+
+	controller
+		.action(ViewportActionDto::CommitPlacement, &mut workspace, resized)
+		.unwrap();
+	let ticket = controller.import.as_ref().unwrap().job_id;
+	controller
+		.geometry_changed(&mut workspace, [900, 600], 1.0)
+		.unwrap();
+	assert_eq!(
+		controller.placement.as_ref().unwrap().position,
+		Some(position)
+	);
+	drain_until_complete(&mut controller, &mut workspace, ticket);
+	assert!(controller.state().error.is_none());
+	let document = workspace.backend.session().authored_document();
+	assert_eq!(document.entities.len(), 2);
+	assert_eq!(document.entities[1].transform.position, position.to_array());
 }
 
 #[test]
@@ -1079,6 +1135,7 @@ fn play_mode_locks_authored_transforms_placement_and_delete() {
 	let fixture = Fixture::new(1);
 	let mut workspace = fixture.open();
 	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
 	select(&mut workspace, &["entity-0"]);
 	command(&mut workspace, Command::StartPlay);
 	controller.sync(&mut workspace).unwrap();
@@ -1097,4 +1154,250 @@ fn play_mode_locks_authored_transforms_placement_and_delete() {
 	assert_eq!(*workspace.backend.session().authored_document(), *authored);
 	assert!(!workspace.backend.session().has_transaction());
 	assert!(!workspace.backend.session().is_dirty());
+}
+
+#[test]
+fn scene_keyboard_requires_focus_and_preserves_transform_shortcuts() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	let initial = controller.settings.tool;
+	send(&mut controller, &mut workspace, key("KeyR"));
+	assert_eq!(controller.settings.tool, initial);
+	focus_keyboard(&mut controller, &mut workspace);
+	for (code, tool) in [
+		("KeyQ", ViewportTool::Hand),
+		("KeyW", ViewportTool::Move),
+		("KeyE", ViewportTool::Rotate),
+		("KeyR", ViewportTool::Scale),
+	] {
+		send(&mut controller, &mut workspace, key(code));
+		assert_eq!(controller.settings.tool, tool);
+	}
+	send(&mut controller, &mut workspace, key("Escape"));
+	send(&mut controller, &mut workspace, key("KeyQ"));
+	assert!(!controller.state().focused);
+	assert_eq!(controller.settings.tool, ViewportTool::Scale);
+}
+
+#[test]
+fn middle_mouse_modifiers_choose_orbit_pan_and_dolly() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	let initial = controller.camera.clone();
+	let start = [300.0, 300.0];
+	let end = [340.0, 330.0];
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", start, Some("middle")),
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", start, Some("right")),
+	);
+	assert!(controller.captured());
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_move", end, None),
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", end, Some("middle")),
+	);
+	assert!(!controller.captured());
+	assert_ne!(controller.camera.yaw, initial.yaw);
+	assert_eq!(controller.camera.pivot, initial.pivot);
+	assert_eq!(controller.camera.distance, initial.distance);
+	let orbit = controller.camera.clone();
+	let mut pan = event("pointer_down", start, Some("middle"));
+	pan.modifiers.shift = true;
+	send(&mut controller, &mut workspace, pan);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_move", end, None),
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", end, Some("middle")),
+	);
+	assert_eq!(controller.camera.yaw, orbit.yaw);
+	assert_eq!(controller.camera.distance, orbit.distance);
+	assert_ne!(controller.camera.pivot, orbit.pivot);
+	let panned = controller.camera.clone();
+	let mut dolly = event("pointer_down", start, Some("middle"));
+	dolly.modifiers.control = true;
+	send(&mut controller, &mut workspace, dolly);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_move", end, None),
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", end, Some("middle")),
+	);
+	assert_eq!(controller.camera.pivot, panned.pivot);
+	assert!(controller.camera.distance > panned.distance);
+	assert!(controller.camera.ortho_height > panned.ortho_height);
+}
+
+#[test]
+fn walk_uses_wasd_and_mouse_look_and_only_explicit_cancel_restores_the_camera() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
+	send(&mut controller, &mut workspace, key("KeyE"));
+	let initial = controller.camera.clone();
+	for boundary in ["Escape", "right", "Enter"] {
+		start_walk(&mut controller, &mut workspace);
+		controller.look_from_fly_motion([50.0, 30.0]);
+		assert_ne!(controller.camera.yaw, initial.yaw);
+		assert!(controller
+			.camera
+			.position()
+			.abs_diff_eq(initial.position(), 1.0e-5));
+		send(&mut controller, &mut workspace, key("KeyW"));
+		assert!(controller.needs_camera_tick());
+		controller.camera_tick(0.05);
+		assert!(!controller
+			.camera
+			.position()
+			.abs_diff_eq(initial.position(), 1.0e-5));
+		assert_eq!(controller.settings.tool, ViewportTool::Rotate);
+		if boundary == "right" {
+			send(
+				&mut controller,
+				&mut workspace,
+				event("pointer_down", [300.0, 300.0], Some("right")),
+			);
+		} else {
+			send(&mut controller, &mut workspace, key(boundary));
+		}
+		assert!(!controller.captured());
+		assert!(!controller.needs_camera_tick());
+		assert_eq!(controller.camera.yaw == initial.yaw, boundary != "Enter");
+		if boundary == "Escape" {
+			assert!(!controller.state().focused);
+			focus_keyboard(&mut controller, &mut workspace);
+		}
+	}
+	assert!(!workspace.backend.session().is_dirty());
+}
+
+#[test]
+fn numpad_changes_orientation_and_projection() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
+	send(&mut controller, &mut workspace, key("Numpad1"));
+	assert!(controller.camera.forward().abs_diff_eq(-Vec3::Z, 1.0e-5));
+	let mut back = key("Numpad1");
+	back.modifiers.control = true;
+	send(&mut controller, &mut workspace, back);
+	assert!(controller.camera.forward().abs_diff_eq(Vec3::Z, 1.0e-5));
+	send(&mut controller, &mut workspace, key("Numpad9"));
+	assert!(controller.camera.forward().abs_diff_eq(-Vec3::Z, 1.0e-5));
+	send(&mut controller, &mut workspace, key("Numpad5"));
+	assert_eq!(
+		controller.settings.projection,
+		ViewportProjection::Perspective
+	);
+}
+
+#[test]
+fn focused_game_routes_held_mapped_movement_until_key_release_or_blur() {
+	use runtime::{
+		input::{InputProfile, MovementBindings},
+		project::BehaviorSpec,
+	};
+
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut project = workspace.backend.session().project().clone();
+	let player = EntityKey::new("entity-0").unwrap();
+	project.add_behavior(BehaviorSpec::ControlledMove {
+		entity: player.clone(),
+		speed: 2.0,
+		space: Default::default(),
+	});
+	project.input_profile = Some(InputProfile {
+		movement: MovementBindings::ARROWS,
+		..Default::default()
+	});
+	command(&mut workspace, Command::SetProject { project });
+	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
+	controller
+		.action(
+			ViewportActionDto::SetView {
+				view: ViewportView::Game,
+			},
+			&mut workspace,
+			EXTENT,
+		)
+		.unwrap();
+	assert!(!controller.game_keyboard_active());
+	command(&mut workspace, Command::StartPlay);
+	controller.sync(&mut workspace).unwrap();
+	assert!(controller.game_keyboard_active());
+	assert_eq!(
+		workspace.backend.session().play_controlled_targets(),
+		Some(&[player][..])
+	);
+	let position = |workspace: &EditorWorkspace| {
+		workspace.backend.session().render_document().entities[0]
+			.transform
+			.position
+	};
+	let tick = |workspace: &mut EditorWorkspace| {
+		workspace.backend.tick(0.1).unwrap();
+		position(workspace)
+	};
+	send(&mut controller, &mut workspace, key("KeyD"));
+	assert_eq!(tick(&mut workspace), [0.0; 3]);
+	send(&mut controller, &mut workspace, key("ArrowRight"));
+	assert!(Vec3::from_array(tick(&mut workspace)).abs_diff_eq(Vec3::X * 0.2, 1.0e-5));
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", [300.0, 300.0], Some("left")),
+	);
+	let before_release = tick(&mut workspace);
+	assert!(Vec3::from_array(before_release).abs_diff_eq(Vec3::X * 0.4, 1.0e-5));
+	let key_up = ViewportInputDto {
+		kind: "key_up".into(),
+		..key("ArrowRight")
+	};
+	send(&mut controller, &mut workspace, key_up);
+	assert_eq!(tick(&mut workspace), before_release);
+	send(&mut controller, &mut workspace, key("ArrowRight"));
+	let before_blur = tick(&mut workspace);
+	assert!(Vec3::from_array(before_blur).abs_diff_eq(Vec3::X * 0.6, 1.0e-5));
+	controller
+		.input(
+			&event("blurred", [0.0; 2], None),
+			&mut workspace,
+			[0; 2],
+			1.0,
+		)
+		.unwrap();
+	assert!(controller.keys.is_empty());
+	assert!(!controller.state().focused);
+	assert_eq!(tick(&mut workspace), before_blur);
+	send(&mut controller, &mut workspace, key("ArrowRight"));
+	assert_eq!(tick(&mut workspace), before_blur);
+	command(&mut workspace, Command::StopPlay);
+	controller.sync(&mut workspace).unwrap();
+	assert!(!controller.game_keyboard_active());
+	assert_eq!(position(&workspace), [0.0; 3]);
 }

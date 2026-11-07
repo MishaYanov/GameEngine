@@ -21,10 +21,18 @@ use crate::viewport_tools::{
 const TRANSFORM_LABEL: &str = "Viewport transform";
 const MAX_VIEW_BOOKMARKS: usize = 128;
 
-enum Navigation {
-	Orbit(Vec2),
-	Pan(Vec2),
-	Fly(Vec2),
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NavigationMode {
+	Orbit,
+	Pan,
+	Dolly,
+	Fly,
+}
+struct Navigation {
+	mode: NavigationMode,
+	previous: Vec2,
+	button: Option<&'static str>,
+	walk_origin: Option<EditorCamera>,
 }
 struct Click {
 	start: [f64; 2],
@@ -142,6 +150,8 @@ impl ViewportInteraction {
 				Some("asset_loading".into())
 			} else if self.placement.is_some() {
 				Some("placement".into())
+			} else if self.is_flying() {
+				Some("fly".into())
 			} else if self.navigation.is_some() {
 				Some("navigation".into())
 			} else {
@@ -277,8 +287,16 @@ impl ViewportInteraction {
 			self.navigation = None;
 			self.click = None;
 			self.keys.clear();
+			if self.game_keyboard_active() {
+				workspace.backend.clear_play_input();
+			}
 			if self.import.is_none() {
-				self.placement = None;
+				if extent.contains(&0) {
+					self.placement = None;
+				} else if let Some(placement) = self.placement.as_ref() {
+					// A WebView asset drag can resize the aperture without losing capture.
+					self.update_placement(placement.normalized, extent);
+				}
 			}
 			self.last_extent = extent;
 			self.last_dpi = dpi;
@@ -363,16 +381,19 @@ impl ViewportInteraction {
 				self.settings.scale_snap = scale;
 			}
 			ViewportActionDto::SetProjection { projection } => {
-				self.navigation = None;
+				self.end_navigation();
 				self.settings.projection = projection;
 			}
 			ViewportActionDto::SetPlane { plane } => self.settings.plane = plane,
 			ViewportActionDto::SetView { view } => {
-				self.cancel(workspace)?;
-				self.settings.view = view;
+				if self.settings.view != view {
+					self.cancel(workspace)?;
+					workspace.backend.clear_play_input();
+					self.settings.view = view;
+				}
 			}
 			ViewportActionDto::Orient { orientation } => {
-				self.navigation = None;
+				self.end_navigation();
 				self.camera.orient(orientation);
 				self.settings.projection = if orientation == ViewportOrientation::Free {
 					ViewportProjection::Perspective
@@ -422,28 +443,7 @@ impl ViewportInteraction {
 				});
 			}
 			ViewportActionDto::UpdatePlacement { normalized } => {
-				let point = normalized
-					.and_then(|point| {
-						self.camera
-							.ray(
-								[point[0] * extent[0] as f64, point[1] * extent[1] as f64],
-								extent,
-								self.settings.projection,
-							)
-							.ok()
-					})
-					.and_then(|ray| {
-						tools::placement_point(
-							ray,
-							&self.targets,
-							self.settings.plane,
-							self.settings.snap.then_some(self.settings.move_snap),
-						)
-					});
-				if let Some(placement) = self.placement.as_mut() {
-					placement.normalized = normalized;
-					placement.position = point;
-				}
+				self.update_placement(normalized, extent);
 			}
 			ViewportActionDto::CommitPlacement => {
 				if !self.can_author(workspace) {
@@ -471,6 +471,31 @@ impl ViewportInteraction {
 		}
 		self.changed();
 		Ok(())
+	}
+
+	fn update_placement(&mut self, normalized: Option<[f64; 2]>, extent: [u32; 2]) {
+		let Some(placement) = self.placement.as_mut() else {
+			return;
+		};
+		placement.normalized = normalized;
+		placement.position = normalized
+			.and_then(|point| {
+				self.camera
+					.ray(
+						[point[0] * extent[0] as f64, point[1] * extent[1] as f64],
+						extent,
+						self.settings.projection,
+					)
+					.ok()
+			})
+			.and_then(|ray| {
+				tools::placement_point(
+					ray,
+					&self.targets,
+					self.settings.plane,
+					self.settings.snap.then_some(self.settings.move_snap),
+				)
+			});
 	}
 
 	pub fn drain_imports(&mut self, workspace: &mut EditorWorkspace) {
@@ -742,6 +767,9 @@ impl ViewportInteraction {
 		dpi: f64,
 	) -> Result<(), String> {
 		self.sync(workspace)?;
+		if matches!(input.kind.as_str(), "focused" | "blurred") {
+			return self.set_keyboard_focus(input.kind == "focused", workspace);
+		}
 		if extent.contains(&0) {
 			return Ok(());
 		}
@@ -749,26 +777,15 @@ impl ViewportInteraction {
 		let cursor = Vec2::new(point[0] as f32, point[1] as f32);
 		let ctrl = input.modifiers.control || input.modifiers.super_key;
 		match input.kind.as_str() {
-			"focused" => {
-				self.focused = true;
-				self.changed();
-			}
-			"blurred" => {
-				// Internal asset drags are captured by the WebView, which owns
-				// their app-blur cancellation. Losing child focus alone is normal.
-				self.focused = false;
-				self.cancel_transform(workspace)?;
-				self.navigation = None;
-				self.click = None;
-				self.keys.clear();
-				workspace.backend.clear_play_input();
-				self.changed();
-			}
-			"pointer_down" if self.settings.view == ViewportView::Game => {
-				self.focused = true;
-				self.changed();
-			}
 			"pointer_down" if self.settings.view == ViewportView::Scene => {
+				let button = input.button.as_deref().unwrap_or("");
+				if self.persistent_fly() && matches!(button, "left" | "right") {
+					if button == "right" {
+						self.restore_walk_camera();
+					}
+					self.end_navigation();
+					return Ok(());
+				}
 				if self.drag.is_some() || self.navigation.is_some() || self.click.is_some() {
 					return Ok(());
 				}
@@ -776,17 +793,31 @@ impl ViewportInteraction {
 					return Ok(());
 				}
 				self.error = None;
-				let button = input.button.as_deref().unwrap_or("");
-				if button == "left" && input.modifiers.alt {
-					self.navigation = Some(Navigation::Orbit(cursor));
-					self.changed();
-				} else if button == "middle"
-					|| (button == "left" && self.settings.tool == ViewportTool::Hand)
-				{
-					self.navigation = Some(Navigation::Pan(cursor));
-					self.changed();
-				} else if button == "right" {
-					self.navigation = Some(Navigation::Fly(cursor));
+				let navigation = match button {
+					"middle" => Some((
+						if input.modifiers.control {
+							NavigationMode::Dolly
+						} else if input.modifiers.shift {
+							NavigationMode::Pan
+						} else {
+							NavigationMode::Orbit
+						},
+						"middle",
+					)),
+					"left" if input.modifiers.alt => Some((NavigationMode::Orbit, "left")),
+					"left" if self.settings.tool == ViewportTool::Hand => {
+						Some((NavigationMode::Pan, "left"))
+					}
+					"right" => Some((NavigationMode::Fly, "right")),
+					_ => None,
+				};
+				if let Some((mode, button)) = navigation {
+					self.navigation = Some(Navigation {
+						mode,
+						previous: cursor,
+						button: Some(button),
+						walk_origin: None,
+					});
 					self.changed();
 				} else if button == "left" {
 					if self.import.is_some() {
@@ -860,20 +891,20 @@ impl ViewportInteraction {
 				}
 			}
 			"pointer_move" if self.settings.view == ViewportView::Scene => {
-				match self.navigation.as_mut() {
-					Some(Navigation::Orbit(previous)) | Some(Navigation::Fly(previous)) => {
-						let delta = (cursor - *previous) / (dpi as f32);
-						*previous = cursor;
-						self.camera.orbit(delta);
-						self.changed();
+				if let Some(navigation) = self.navigation.as_mut() {
+					let delta = cursor - std::mem::replace(&mut navigation.previous, cursor);
+					let logical = delta / dpi as f32;
+					match navigation.mode {
+						NavigationMode::Orbit => self.camera.orbit(logical),
+						NavigationMode::Pan => {
+							self.camera.pan(delta, extent, self.settings.projection)
+						}
+						NavigationMode::Dolly => {
+							self.camera.zoom((logical.y * 0.009).clamp(-2.0, 2.0).exp())
+						}
+						NavigationMode::Fly => return Ok(()),
 					}
-					Some(Navigation::Pan(previous)) => {
-						let delta = cursor - *previous;
-						*previous = cursor;
-						self.camera.pan(delta, extent, self.settings.projection);
-						self.changed();
-					}
-					None => {}
+					self.changed();
 				}
 				if let Some(drag) = self.drag.as_mut() {
 					let (edits, space) = if drag.tool() == ViewportTool::Move {
@@ -944,7 +975,13 @@ impl ViewportInteraction {
 					self.changed();
 				}
 			}
-			"pointer_up" => {
+			"pointer_up" if self.settings.view == ViewportView::Scene => {
+				if let Some(navigation) = self.navigation.as_ref() {
+					if navigation.button.is_some() && navigation.button == input.button.as_deref() {
+						self.end_navigation();
+					}
+					return Ok(());
+				}
 				if self.drag.is_some() {
 					if input.button.as_deref() != Some("left") {
 						return Ok(());
@@ -962,9 +999,6 @@ impl ViewportInteraction {
 						self.select_click(workspace, click, extent, dpi)?;
 					}
 				}
-				self.navigation = None;
-				self.keys.clear();
-				self.changed();
 			}
 			"wheel_lines" | "wheel_pixels" if self.settings.view == ViewportView::Scene => {
 				if self.drag.is_some() {
@@ -979,28 +1013,59 @@ impl ViewportInteraction {
 				self.camera.zoom((-step).clamp(-2.0, 2.0).exp() as f32);
 				self.changed();
 			}
-			"key_down" => {
+			"key_down" if self.focused && !input.repeat => {
 				let code = input.code.as_deref().unwrap_or("");
 				if code == "Escape" {
+					self.restore_walk_camera();
 					self.cancel(workspace)?;
-					workspace.backend.clear_play_input();
-					self.focused = false;
-					self.changed();
-					return Ok(());
+					return self.set_keyboard_focus(false, workspace);
 				}
 				if self.settings.view == ViewportView::Game {
-					if self.focused && workspace.backend.session().is_playing() {
-						self.keys.insert(code.into());
+					if self.game_keyboard_active()
+						&& !code.is_empty()
+						&& self.keys.insert(code.into())
+					{
 						self.route_game_input(workspace)?;
 					}
 					return Ok(());
 				}
-				if matches!(self.navigation, Some(Navigation::Fly(_))) {
-					self.keys.insert(code.into());
+				if code == "Backquote" && input.modifiers.shift && !ctrl && !input.modifiers.alt {
+					if self.persistent_fly() {
+						self.end_navigation();
+					} else if !self.captured() && self.placement.is_none() {
+						self.navigation = Some(Navigation {
+							mode: NavigationMode::Fly,
+							previous: cursor,
+							button: None,
+							walk_origin: Some(self.camera.clone()),
+						});
+						self.changed();
+					}
 					return Ok(());
 				}
-				if input.repeat {
+				if self.is_flying() {
+					if matches!(code, "Enter" | "NumpadEnter") && self.persistent_fly() {
+						self.end_navigation();
+					} else if matches!(
+						code,
+						"KeyW"
+							| "KeyA" | "KeyS" | "KeyD"
+							| "KeyQ" | "KeyE" | "ShiftLeft"
+							| "ShiftRight"
+					) {
+						self.keys.insert(code.into());
+					}
 					return Ok(());
+				}
+				if !input.modifiers.alt && !input.modifiers.super_key {
+					if let Some(action) = self.scene_shortcut(code, input.modifiers.control) {
+						self.end_navigation();
+						self.click = None;
+						return self.action(action, workspace, extent);
+					}
+					if !ctrl && self.orbit_key(code, workspace)? {
+						return Ok(());
+					}
 				}
 				if ctrl
 					&& !workspace.backend.session().has_transaction()
@@ -1033,39 +1098,107 @@ impl ViewportInteraction {
 						_ => {}
 					}
 				} else if !ctrl {
-					if matches!(code, "KeyQ" | "KeyW" | "KeyE" | "KeyR" | "KeyF") {
-						self.cancel_transform(workspace)?;
-						self.navigation = None;
-						self.click = None;
-					}
 					match code {
-						"KeyQ" => self.settings.tool = ViewportTool::Hand,
-						"KeyW" => self.settings.tool = ViewportTool::Move,
-						"KeyE" => self.settings.tool = ViewportTool::Rotate,
-						"KeyR" => self.settings.tool = ViewportTool::Scale,
-						"KeyF" => self.frame_selection(workspace, extent)?,
 						"Delete"
 							if self.can_author(workspace)
 								&& !workspace.backend.session().has_transaction() =>
 						{
 							self.execute(workspace, Command::DeleteSelection)?
 						}
-						_ => {}
+						_ => return Ok(()),
 					}
 					self.changed();
 				}
 			}
 			"key_up" => {
-				if let Some(code) = input.code.as_ref() {
-					self.keys.remove(code);
-				}
-				if self.settings.view == ViewportView::Game
-					&& workspace.backend.session().is_playing()
+				if input
+					.code
+					.as_ref()
+					.is_some_and(|code| self.keys.remove(code))
+					&& self.focused && self.game_keyboard_active()
 				{
 					self.route_game_input(workspace)?;
 				}
 			}
 			_ => {}
+		}
+		Ok(())
+	}
+
+	fn scene_shortcut(&self, code: &str, control: bool) -> Option<ViewportActionDto> {
+		use ViewportActionDto::{FrameSelection, Orient, SetProjection, SetTool, Zoom};
+		use ViewportOrientation::{Back, Bottom, Front, Left, Right, Top};
+		use ViewportProjection::{Orthographic, Perspective};
+		use ViewportTool::{Hand, Move, Rotate, Scale};
+		Some(match (code, control) {
+			("KeyQ", false) => SetTool { tool: Hand },
+			("KeyW", false) => SetTool { tool: Move },
+			("KeyE", false) => SetTool { tool: Rotate },
+			("KeyR", false) => SetTool { tool: Scale },
+			("KeyF" | "NumpadDecimal", false) => FrameSelection,
+			("NumpadAdd", false) => Zoom { factor: 0.87 },
+			("NumpadSubtract", false) => Zoom { factor: 1.0 / 0.87 },
+			("Numpad1", false) => Orient { orientation: Front },
+			("Numpad1", true) => Orient { orientation: Back },
+			("Numpad3", false) => Orient { orientation: Right },
+			("Numpad3", true) => Orient { orientation: Left },
+			("Numpad7", false) => Orient { orientation: Top },
+			("Numpad7", true) => Orient {
+				orientation: Bottom,
+			},
+			("Numpad5", false) => SetProjection {
+				projection: match self.settings.projection {
+					Perspective => Orthographic,
+					Orthographic => Perspective,
+				},
+			},
+			_ => return None,
+		})
+	}
+
+	fn orbit_key(&mut self, code: &str, workspace: &mut EditorWorkspace) -> Result<bool, String> {
+		let step = std::f32::consts::PI / 12.0;
+		let (yaw, pitch) = match code {
+			"Numpad2" => (0.0, step),
+			"Numpad4" => (step, 0.0),
+			"Numpad6" => (-step, 0.0),
+			"Numpad8" => (0.0, -step),
+			"Numpad9" => (std::f32::consts::PI, -2.0 * self.camera.pitch),
+			_ => return Ok(false),
+		};
+		self.cancel_transform(workspace)?;
+		self.end_navigation();
+		self.click = None;
+		self.camera.orbit_angles(Vec2::new(yaw, pitch));
+		self.changed();
+		Ok(true)
+	}
+
+	pub fn keyboard_focused(&self) -> bool {
+		self.focused
+	}
+
+	pub fn game_keyboard_active(&self) -> bool {
+		self.playing && self.settings.view == ViewportView::Game
+	}
+
+	fn set_keyboard_focus(
+		&mut self,
+		focused: bool,
+		workspace: &mut EditorWorkspace,
+	) -> Result<(), String> {
+		if self.focused == focused && (focused || !self.captured()) {
+			return Ok(());
+		}
+		self.focused = focused;
+		self.changed();
+		if !focused {
+			// Internal asset drags belong to the WebView and handle app blur there.
+			self.navigation = None;
+			self.click = None;
+			self.keys.clear();
+			workspace.backend.clear_play_input();
+			self.cancel_transform(workspace)?;
 		}
 		Ok(())
 	}
@@ -1141,6 +1274,44 @@ impl ViewportInteraction {
 		Ok(())
 	}
 
+	fn end_navigation(&mut self) {
+		if self.navigation.take().is_some() {
+			self.keys.clear();
+			self.changed();
+		}
+	}
+
+	pub fn is_flying(&self) -> bool {
+		self.navigation
+			.as_ref()
+			.is_some_and(|nav| nav.mode == NavigationMode::Fly)
+	}
+
+	fn persistent_fly(&self) -> bool {
+		self.navigation
+			.as_ref()
+			.is_some_and(|nav| nav.walk_origin.is_some())
+	}
+
+	fn restore_walk_camera(&mut self) {
+		if let Some(original) = self
+			.navigation
+			.as_mut()
+			.and_then(|nav| nav.walk_origin.take())
+		{
+			self.camera = original;
+		}
+	}
+
+	pub fn look_from_fly_motion(&mut self, delta: [f64; 2]) {
+		if self.is_flying() && delta != [0.0; 2] {
+			// Device motion is relative, independent of the cursor reaching an edge.
+			self.camera
+				.look(Vec2::new(delta[0] as f32, delta[1] as f32) * 0.35);
+			self.changed();
+		}
+	}
+
 	fn fly_movement(&self) -> Vec3 {
 		let down = |key: &str| if self.keys.contains(key) { 1.0 } else { 0.0 };
 		Vec3::new(
@@ -1150,7 +1321,7 @@ impl ViewportInteraction {
 		)
 	}
 	pub fn needs_camera_tick(&self) -> bool {
-		matches!(self.navigation, Some(Navigation::Fly(_))) && self.fly_movement() != Vec3::ZERO
+		self.is_flying() && self.fly_movement() != Vec3::ZERO
 	}
 	pub fn camera_tick(&mut self, seconds: f32) {
 		if !self.needs_camera_tick() {
@@ -1171,30 +1342,9 @@ impl ViewportInteraction {
 	}
 
 	fn route_game_input(&mut self, workspace: &mut EditorWorkspace) -> Result<(), String> {
-		// Match the player's shared default XY movement vector contract. The
-		// game module decides how this input affects the controlled world.
-		let mut input = runtime::input::InputState::default();
-		for (code, key) in [
-			("KeyW", runtime::input::Key::W),
-			("KeyA", runtime::input::Key::A),
-			("KeyS", runtime::input::Key::S),
-			("KeyD", runtime::input::Key::D),
-		] {
-			if self.keys.contains(code) {
-				input.press(key);
-			}
-		}
-		let direction = runtime::input::MovementBindings::default().direction(&input);
-		let revision = workspace.backend.session().revision();
 		workspace
-			.execute_receipt(EditorCommandRequest {
-				expected_revision: revision,
-				command: Command::SetPlayInput {
-					movement: [direction[0], direction[1], 0.0],
-				},
-			})
-			.map_err(|error| error.to_string())?;
-		Ok(())
+			.backend
+			.set_game_keyboard_input_from_codes(&self.keys)
 	}
 
 	pub fn visuals(

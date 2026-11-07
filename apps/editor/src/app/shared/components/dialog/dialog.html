@@ -83,7 +83,7 @@
             </div>
             <footer [class.resizable]="settings().resizable && !expanded()" role="presentation">
                 <ng-content select="[dialog-actions]"/>
-                <button (click)="close()" type="button">Close</button>
+                <button (click)="close()" type="button">{{ closeLabel() }}</button>
                 @if (form() || subjects().length) {
                     <button [disabled]="pending()" class="primary" type="submit">{{ submitLabel() }}</button>
                 }

@@ -40,17 +40,35 @@
   color: var(--color-text);
 }
 
+.action-group button:active:enabled {
+  background: var(--color-control-pressed);
+}
+
 .action-group .play-action:enabled {
-  border-color: var(--color-border-strong);
-  color: var(--color-text);
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.action-group .play-action:enabled:hover {
+  background: var(--color-action-hover);
+}
+
+.action-group .play-action:enabled:active {
+  background: var(--color-action-pressed);
 }
 
 .action-group button:disabled {
-  opacity: var(--opacity-disabled);
+  color: var(--color-text-disabled);
+}
+
+.action-group .play-action:disabled {
+  background: var(--color-control-disabled);
 }
 
 .action-error {
   padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-danger-border);
+  background: var(--color-danger-bg);
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }

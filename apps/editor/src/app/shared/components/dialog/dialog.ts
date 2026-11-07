@@ -39,6 +39,7 @@ export class EditorDialog {
     /** Set false when projecting custom rows instead of rendering the form automatically. */
     readonly renderFields = input(true);
     readonly submitLabel = input('Apply');
+    readonly closeLabel = input('Close');
     readonly submitted = output<void>();
     readonly closed = output<void>();
     protected readonly titleId = `editor-dialog-${nextDialogId++}`;

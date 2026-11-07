@@ -48,7 +48,7 @@ import type {DialogSubject} from '../../../../src/app/shared/components/dialog/d
       }
 
       button:hover {
-        background: var(--color-surface-hover);
+        background: var(--color-control-hover);
       }
 
       p {

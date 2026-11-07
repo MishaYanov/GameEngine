@@ -4,6 +4,7 @@ use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
 	collision::{CollisionStats, CollisionWorld},
+	input::{GameKeyboardInput, HeldGameActions},
 	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
 	scene_data::{SceneData, TransformData},
 	simulation::FixedStepper,
@@ -24,13 +25,21 @@ pub enum MovementTarget {
 #[derive(Default)]
 pub struct InputFrame {
 	movement: HashMap<EntityKey, [f32; 3]>,
+	game_actions: HeldGameActions,
 }
 impl InputFrame {
 	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
 		self.movement.get(entity).copied().unwrap_or([0.0; 3])
 	}
 	pub fn is_idle(&self) -> bool {
-		self.movement.is_empty()
+		self.movement.is_empty() && self.game_actions.ids.is_empty()
+	}
+	pub fn action_held(&self, id: &str) -> bool {
+		self.game_actions.ids.contains(id)
+	}
+	/// Multiple held actions may feed the same parameter. Any held source sets it.
+	pub fn animation_bool(&self, parameter: &str) -> bool {
+		self.game_actions.animation_parameters.contains(parameter)
 	}
 }
 pub enum SimulationAction {
@@ -382,6 +391,7 @@ impl SimulationSession {
 	}
 	pub fn clear_input(&mut self) {
 		self.inputs.movement.clear();
+		self.inputs.game_actions = HeldGameActions::default();
 		self.clock.reset();
 	}
 	pub fn set_paused(&mut self, paused: bool) {
@@ -413,6 +423,23 @@ impl SimulationSession {
 			MovementTarget::AllControlled => self.set_controlled_input(movement),
 			MovementTarget::Entity(entity) => self.set_input(entity, movement),
 		}
+	}
+
+	pub(crate) fn set_game_keyboard_input(
+		&mut self,
+		target: &MovementTarget,
+		input: GameKeyboardInput,
+	) -> Result<(), String> {
+		if self.paused {
+			return Ok(());
+		}
+		// Projects can use digital actions without declaring a movement behavior.
+		if !matches!(target, MovementTarget::AllControlled) || !self.controlled_targets.is_empty() {
+			let [x, y] = input.movement;
+			self.set_targeted_input(target, [x, y, 0.0])?;
+		}
+		self.inputs.game_actions = input.actions;
+		Ok(())
 	}
 
 	fn apply_input(

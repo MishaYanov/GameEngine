@@ -3,7 +3,9 @@ import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
+import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetsPanel} from './assets-panel';
 
 const robot: ModelAsset = {name: 'Robot', path: 'props/robot.glb'};
@@ -35,15 +37,17 @@ type EditingStub = Pick<SceneEditingService, 'ready' | 'error' | 'withCommittedE
 async function createPanel(options: {models?: readonly ModelAsset[]; editing?: EditingStub; nativeAvailable?: boolean} = {}) {
     const current = signal(snapshot());
     const modelAssets = signal<readonly ModelAsset[] | null>(options.models ?? null);
+    const workspaceGeneration = signal(1);
     const busy = signal(false);
     const assets = vi.fn(async () => {
         modelAssets.set([robot]);
         return modelAssets()!;
     });
-    const switchScene = vi.fn(async (sceneId: string) => {
+    const request = vi.fn(async (sceneId: string) => {
         current.update(value => ({...value, active_scene_id: sceneId}));
-        return current();
+        return true;
     });
+    const drag = {canBegin: () => true, candidate: vi.fn(), candidateScene: vi.fn()};
     const importModel = vi.fn(async (_path: string, _position: readonly [number, number, number]) => {
         current.update(value => ({...value, dirty: true}));
         return current();
@@ -52,8 +56,10 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         {provide: EditorService, useValue: {
             nativeAvailable: options.nativeAvailable ?? true,
             snapshot: current, busy, playing: computed(() => current().mode === 'play'),
-            modelAssets, assets, switchScene, importModel,
+                modelAssets, assets, importModel, workspaceGeneration,
         }},
+            {provide: SceneSwitchService, useValue: {request, canSwitch: () => true}},
+            {provide: ViewportAssetDragService, useValue: drag},
         ...(options.editing ? [{provide: SceneEditingService, useValue: options.editing}] : []),
     ]});
     const fixture = TestBed.createComponent(AssetsPanel);
@@ -69,18 +75,15 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         return candidate;
     };
     await fixture.whenStable();
-    return {fixture, root, button, file, current, modelAssets, busy, assets, switchScene, importModel};
+    return {fixture, root, button, file, current, modelAssets, busy, assets, request, importModel, drag};
 }
 
 describe('AssetsPanel', () => {
-    it('loads models explicitly and keeps the current folder and selected file when refreshed', async () => {
+    it('discovers props automatically and keeps the current folder and selected file when refreshed', async () => {
         const panel = await createPanel();
-        expect(panel.assets).not.toHaveBeenCalled();
+        expect(panel.assets).toHaveBeenCalledExactlyOnceWith(false);
         panel.button('scenes').click();
         await panel.fixture.whenStable();
-        panel.button('Load Models').click();
-        await panel.fixture.whenStable();
-        expect(panel.assets).toHaveBeenCalledExactlyOnceWith(true);
         expect(panel.root.textContent).toContain('Assets / scenes');
 
         panel.button('Up').click();
@@ -91,12 +94,14 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         panel.button('Refresh Models').click();
         await panel.fixture.whenStable();
+        expect(panel.assets).toHaveBeenCalledTimes(2);
+        expect(panel.assets).toHaveBeenLastCalledWith(true);
         expect(panel.root.textContent).toContain('Assets / props');
         expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
         expect(panel.root.querySelector('.asset-details')?.textContent).toContain(robot.path);
     });
 
-    it('opens the selected scene through the backend without saving or discarding dirty work', async () => {
+    it('opens the selected scene through the shared review flow', async () => {
         const panel = await createPanel();
         panel.current.update(value => ({...value, dirty: true}));
         panel.button('scenes').click();
@@ -107,12 +112,36 @@ describe('AssetsPanel', () => {
         panel.button('Open Scene').click();
         await panel.fixture.whenStable();
 
-        expect(panel.switchScene).toHaveBeenCalledExactlyOnceWith('courtyard');
+        expect(panel.request).toHaveBeenCalledExactlyOnceWith('courtyard');
         expect(panel.current().dirty).toBe(true);
         expect(panel.importModel).not.toHaveBeenCalled();
         expect(panel.file('scenes/courtyard.json').textContent).toContain('Active');
         expect(panel.button('Open Scene').disabled).toBe(true);
-        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('Opened courtyard.json');
+        expect(panel.root.querySelector('[role="status"]')).toBeNull();
+    });
+
+    it('hands models and scene files to their drag entry points while excluding the active scene', async () => {
+        const panel = await createPanel();
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        const propPointer = new MouseEvent('pointerdown', {button: 0});
+        panel.file(robot.path).dispatchEvent(propPointer);
+        expect(panel.drag.candidate).toHaveBeenCalledExactlyOnceWith(robot.path, propPointer);
+
+        panel.button('Up').click();
+        await panel.fixture.whenStable();
+        panel.button('scenes').click();
+        await panel.fixture.whenStable();
+        const scenePointer = new MouseEvent('pointerdown', {button: 0});
+        panel.file('scenes/main.json').dispatchEvent(scenePointer);
+        expect(panel.drag.candidateScene).not.toHaveBeenCalled();
+        panel.file('scenes/courtyard.json').dispatchEvent(scenePointer);
+        expect(panel.drag.candidateScene).toHaveBeenCalledExactlyOnceWith('courtyard', scenePointer, expect.any(Function));
+        expect(panel.request).not.toHaveBeenCalled();
+
+        const open = panel.drag.candidateScene.mock.calls[0][2] as () => Promise<boolean>;
+        expect(await open()).toBe(true);
+        expect(panel.request).toHaveBeenCalledExactlyOnceWith('courtyard');
     });
 
     it('adds a catalogued model to the active scene at the origin', async () => {
