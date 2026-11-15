@@ -263,13 +263,14 @@ describe('EditorService native command and viewport queues', () => {
         ]);
     });
 
-    it('accepts schema 3 shared behaviors in a fallback snapshot for topology and project changes', async () => {
+    it('accepts shared behaviors and the gameplay module in a fallback snapshot', async () => {
         const current = snapshot(3);
         const next: EditorSnapshot = {
             ...snapshot(4),
             project: {
                 ...current.project,
                 name: 'Changed project',
+                gameplay_module: 'campaign',
                 behavior_definitions: [{id: 'walk', settings: {kind: 'controlled_move', speed: 2, space: 'world'}}],
                 behaviors: [{scene_id: 'main', behavior: {kind: 'shared', entity: 'new', definition: 'walk'}}],
             },
@@ -293,12 +294,32 @@ describe('EditorService native command and viewport queues', () => {
         expect(await service.execute({type: 'undo'})).toBe(next);
         expect(service.snapshot()?.document.entities[0].key).toBe('new');
         expect(service.snapshot()?.project.name).toBe('Changed project');
+        expect(service.snapshot()?.project.gameplay_module).toBe('campaign');
         expect(service.snapshot()?.project.behavior_definitions[0].id).toBe('walk');
         expect(vi.mocked(invoke).mock.calls.map(([operation]) => operation)).toEqual([
             'editor_open',
             'editor_capabilities',
             'editor_execute_incremental',
         ]);
+    });
+
+    it('recovers from a fallback snapshot with a malformed gameplay module', async () => {
+        const current = snapshot(3);
+        const recovered = snapshot(4);
+        const malformed = {
+            ...recovered,
+            project: {...recovered.project, gameplay_module: 1},
+        };
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(current)
+            .mockResolvedValueOnce(capabilities)
+            .mockResolvedValueOnce({kind: 'snapshot', snapshot: malformed, receipt: receipt(recovered)})
+            .mockResolvedValueOnce(recovered);
+
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scene.json');
+        await expect(service.execute({type: 'undo'})).rejects.toMatchObject({kind: 'backend'});
+        expect(service.snapshot()).toBe(recovered);
     });
 
     it('keeps the document for selection-only and no-op receipts while advancing queued revisions', async () => {

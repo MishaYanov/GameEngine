@@ -112,7 +112,10 @@
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
-            "isolate": true
+            "isolate": true,
+            "setupFiles": [
+              "src/test-setup.ts"
+            ]
           }
         }
       }

@@ -13,7 +13,7 @@ use runtime::{
 };
 use serde::Serialize;
 use std::{
-	path::{Path, PathBuf},
+	path::Path,
 	process::Command,
 	sync::{
 		atomic::{AtomicU64, Ordering},
@@ -424,18 +424,19 @@ fn finish_prepared_build(
 
 fn finish_project_build(
 	staged: compiler::StagedProject,
-	last_build: &Mutex<Option<PathBuf>>,
+	last_build: &Mutex<Option<compiler::InstalledProject>>,
 ) -> Result<ProjectBuildDto, String> {
 	let asset_count = staged.asset_count();
 	let asset_bytes = staged.asset_bytes();
 	engine_logger::info!(target:"project_build","Build started: assets={asset_count}, bytes={asset_bytes}");
-	let path = compiler::finish_staged_project(staged).inspect_err(|_| {
+	let installed = compiler::complete_staged_project(staged).inspect_err(|_| {
 		engine_logger::error!(target:"project_build","Build failed: operation=finish_staged_project");
 	})?;
-	*last_build.lock().map_err(|_| "Build state lock failed")? = Some(path.clone());
+	let path = installed.path().to_string_lossy().into_owned();
+	*last_build.lock().map_err(|_| "Build state lock failed")? = Some(installed);
 	engine_logger::info!(target:"project_build","Build completed: assets={asset_count}, bytes={asset_bytes}");
 	Ok(ProjectBuildDto {
-		path: path.to_string_lossy().into_owned(),
+		path,
 		asset_count,
 		asset_bytes,
 	})
@@ -468,25 +469,16 @@ pub struct ProjectRunDto {
 	process_id: u32,
 }
 
-fn build_launch_command(path: Option<&Path>, expected_path: &Path) -> Result<Command, String> {
-	let path = path.ok_or("Build a project before running its exported game")?;
-	if path != expected_path {
+fn build_launch_command(
+	build: Option<&compiler::InstalledProject>,
+	expected_path: &Path,
+) -> Result<Command, String> {
+	let build = build.ok_or("Build a project before running its exported game")?;
+	if build.path() != expected_path {
 		return Err("The latest completed build changed; run the current build instead".into());
 	}
-	let path = path
-		.canonicalize()
-		.map_err(|error| format!("Build folder is unavailable: {error}"))?;
-	if !path.is_dir() {
-		return Err("Build output must be a folder".into());
-	}
-	let executable = path.join(format!("game{}", std::env::consts::EXE_SUFFIX));
-	let metadata = std::fs::symlink_metadata(&executable)
-		.map_err(|error| format!("Built game is unavailable: {error}"))?;
-	if !metadata.is_file() || metadata.file_type().is_symlink() {
-		return Err("Built game must be a regular executable file".into());
-	}
-	let mut command = Command::new(executable);
-	command.current_dir(path).arg("--player");
+	let mut command = Command::new(build.verified_executable()?);
+	command.current_dir(build.path()).arg("--player");
 	Ok(command)
 }
 
@@ -497,21 +489,15 @@ pub async fn editor_run_build(
 	expected_path: String,
 ) -> Result<ProjectRunDto, String> {
 	trusted_window(&window)?;
-	let path = state
-		.last_build
-		.lock()
-		.map_err(|_| "Build state lock failed")?
-		.clone();
+	let last_build = Arc::clone(&state.last_build);
 	tauri::async_runtime::spawn_blocking(move || {
-		let mut command = build_launch_command(path.as_deref(), Path::new(&expected_path))?;
+		let latest = last_build.lock().map_err(|_| "Build state lock failed")?;
+		let mut command = build_launch_command(latest.as_ref(), Path::new(&expected_path))?;
 		let child = command
 			.spawn()
 			.map_err(|error| format!("Could not run built game: {error}"))?;
 		Ok(ProjectRunDto {
-			path: path
-				.expect("validated build path")
-				.to_string_lossy()
-				.into_owned(),
+			path: expected_path,
 			process_id: child.id(),
 		})
 	})
@@ -643,7 +629,7 @@ pub async fn editor_assets(
 		})
 	})
 	.await
-		.map_err(|error| format!("Asset catalog worker failed: {error}"))?
+	.map_err(|error| format!("Asset catalog worker failed: {error}"))?
 }
 #[tauri::command]
 pub async fn editor_import_model(
@@ -822,8 +808,8 @@ pub async fn editor_viewport_action(
 					.to_string()
 			})?
 	})
-		.await
-		.map_err(|error| format!("Viewport action worker failed: {error}"))?
+	.await
+	.map_err(|error| format!("Viewport action worker failed: {error}"))?
 }
 
 #[cfg(test)]

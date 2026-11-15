@@ -46,15 +46,20 @@ engine cannot undo arbitrary module interior state or external I/O.
 
 ## Implemented game example
 
-`apps/game/src/progress.rs` defines `CampaignProgress { score: i32, has_courtyard_key: bool }`, `AwardScore { amount }`
-and `UnlockCourtyard`. Nonnegative score/award checks and checked addition enforce its domain rules. `CampaignFactory`
+`crates/courtyard-gameplay/src/lib.rs` defines `CampaignProgress { score: i32, has_courtyard_key: bool }`,
+`AwardScore { amount }` and `UnlockCourtyard`. Nonnegative score/award checks and checked addition enforce its domain
+rules. `CampaignFactory`
 supplies defaults and wraps configured movement/spin through the prepared factory path. `CampaignModule` requests the
 key when a controlled entity's **world X is at least 1.0** and the key is not already owned; planning reads the
 current/candidate progress view.
 
-The Player path in `apps/game/src/main.rs` uses F7 to award one score through the same typed operation, F8 to cycle
-scenes and F10 to prepare New Game at the configured startup scene. These are native demo bindings, not Angular progress
-controls, a portable input-map decision or interactive verification.
+The bundled manifest selects `courtyard_run`. Editor Play, the Player and the headless runner use the shared
+resolver. It reads the current authored project at the start of a run. The selected factory supplies the scene
+module and initial typed progress. Projects with no selected module use configured behaviors and empty progress.
+See [the manifest contract](../../project-lifecycle.md#gameplay-module-selection).
+
+The Player path in `apps/game/src/main.rs` uses F7 to award one point when campaign progress exists, F8 to cycle
+scenes, and F10 to prepare New Game at the configured startup scene. These shortcut bindings live in the native Player.
 
 ## Rationale and remaining proposals
 
@@ -72,9 +77,6 @@ in [original ADR-0008](../0008-game-modules-and-scripting.md). Subject UI does n
 
 The prior documentation checkpoint attributes 555 passing workspace tests/zero failures/two ignored to TEST/root,
 including three progress regressions for type/atomic/budget rejection, aggregate world/progress rollback and scene
-retention/New Game/token invalidation. Core progress/session/simulation/editor/world/project files, the game progress
-module, native adapter and focused tests match its stored hashes at inspection; Player main differs. The report supports
-that inspected snapshot, not every native callback, changed Player flow or staged-only commit. Project5 and this
-documentation task did not rerun behavioral tests. No sandbox, infinite-loop containment, disk-save, hot-reload or
-visible F7/F8/F10 acceptance is established. Hash matching compares documentation inventories; it is not an
-independently pinned test execution.
+retention/New Game/token invalidation. Current module-selection checks and packaged Player evidence are recorded in
+`docs-site/docs-state.json`. The packaged-player smoke check covers startup and initial progress. Key acquisition,
+scene cycling and restart still need native interaction acceptance.

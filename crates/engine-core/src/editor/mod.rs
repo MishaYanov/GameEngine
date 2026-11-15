@@ -19,7 +19,9 @@ use crate::{
 	project::ProjectData,
 	scene_catalog::SceneId,
 	scene_data::SceneData,
-	simulation_session::{ConfiguredBehaviorFactory, GameModuleFactory, TickOutcome},
+	simulation_session::{
+		GameModuleFactory, GameModuleResolver, TickOutcome, resolve_default_gameplay,
+	},
 };
 use history::{History, Patch};
 pub use prefab::PrefabData;
@@ -38,7 +40,7 @@ pub struct EditorSession {
 	data: Arc<SceneData>,
 	project: Arc<ProjectData>,
 	saved_project: Arc<ProjectData>,
-	module_factory: Arc<dyn GameModuleFactory>,
+	module_resolver: GameModuleResolver,
 	saved: Arc<SceneData>,
 	selection: Vec<EntityKey>,
 	history: History,
@@ -203,7 +205,7 @@ impl EditorSession {
 			document_costs: DocumentCostCache::default(),
 			saved_project: Arc::clone(&project),
 			project,
-			module_factory: Arc::new(ConfiguredBehaviorFactory),
+			module_resolver: Arc::new(resolve_default_gameplay),
 			saved: Arc::clone(&data),
 			data,
 			selection: Vec::new(),
@@ -235,8 +237,12 @@ impl EditorSession {
 		&mut self,
 		factory: Arc<dyn GameModuleFactory>,
 	) -> Result<(), String> {
+		self.set_module_resolver(Arc::new(move |_| Ok(Arc::clone(&factory))))
+	}
+
+	pub fn set_module_resolver(&mut self, resolver: GameModuleResolver) -> Result<(), String> {
 		self.require_edit()?;
-		self.module_factory = factory;
+		self.module_resolver = resolver;
 		Ok(())
 	}
 
@@ -638,12 +644,14 @@ impl EditorSession {
 			Command::StartPlay => {
 				self.require_edit()?;
 				self.require_no_transaction()?;
-				self.play = Some(GameSession::with_factory_for_scene(
+				let factory = (self.module_resolver)(&self.project)?;
+				let run = GameSession::with_factory_for_scene(
 					Arc::clone(&self.project),
 					self.active_scene_id.clone(),
 					Arc::clone(&self.data),
-					Arc::clone(&self.module_factory),
-				)?);
+					factory,
+				)?;
+				self.play = Some(run);
 				self.scene_revision += 1;
 				self.bump();
 			}

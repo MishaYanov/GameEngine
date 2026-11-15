@@ -70,8 +70,9 @@ See [packaging step22](../../editor-steps-21-35.md#step-22-json-aware-packaging)
 
 Project Builder v1 creates an independent **native game workspace on Windows**. It does not generate the Angular editor/client host. Enter a name, source and new absolute destination outside the source workspace; the destination parent must already exist. Preview the allowlisted sources/assets, then generate. Offline validation uses cached Cargo dependencies by default; disable the checkbox to permit downloads. Rust and Vulkan SDK/glslc are required.
 
-The builder copies game sources/assets and engine-core, logger, renderer, runtime and bridge into sibling staging,
-writes a fresh root workspace, and queues validation. Only success publishes the destination with a Windows move that
+The builder copies game sources/assets and engine-core, logger, renderer, runtime, bridge, and courtyard-gameplay
+into sibling staging. It preserves the project manifest's gameplay module selection, writes a fresh root workspace,
+and queues validation. Only success publishes the destination with a Windows move that
 cannot replace an existing path. Preview fingerprints detect changed files; template symlinks are rejected. Failure,
 cancellation and interruption retain staging for inspection. No automatic recursive cleanup is performed. Project
 history retains at most 50 runs / 32 MiB. Keep the generated workspace layout when running its game so

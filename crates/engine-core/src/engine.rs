@@ -12,7 +12,9 @@ use crate::{
 	events::{BackendEventKind, ChangeJournal, ChangePage},
 	project::ProjectData,
 	scene_data::{EntityData, SceneData, validate_model_path},
-	simulation_session::{ConfiguredBehaviorFactory, GameModuleFactory, TickOutcome},
+	simulation_session::{
+		GameModuleFactory, GameModuleResolver, TickOutcome, resolve_default_gameplay,
+	},
 	world::WorldChange,
 };
 
@@ -57,7 +59,7 @@ pub struct EngineBuilder {
 	documents: Vec<(crate::scene_catalog::SceneId, SceneData)>,
 	scene: SceneData,
 	project: ProjectData,
-	module_factory: Arc<dyn GameModuleFactory>,
+	module_resolver: GameModuleResolver,
 	asset_limits: AssetRegistryLimits,
 }
 impl EngineBuilder {
@@ -66,7 +68,7 @@ impl EngineBuilder {
 			documents: Vec::new(),
 			scene,
 			project,
-			module_factory: Arc::new(ConfiguredBehaviorFactory),
+			module_resolver: Arc::new(resolve_default_gameplay),
 			asset_limits: AssetRegistryLimits::default(),
 		}
 	}
@@ -77,8 +79,11 @@ impl EngineBuilder {
 		self.documents = documents;
 		self
 	}
-	pub fn module_factory(mut self, factory: Arc<dyn GameModuleFactory>) -> Self {
-		self.module_factory = factory;
+	pub fn module_factory(self, factory: Arc<dyn GameModuleFactory>) -> Self {
+		self.module_resolver(Arc::new(move |_| Ok(Arc::clone(&factory))))
+	}
+	pub fn module_resolver(mut self, resolver: GameModuleResolver) -> Self {
+		self.module_resolver = resolver;
 		self
 	}
 	pub fn asset_limits(mut self, limits: AssetRegistryLimits) -> Self {
@@ -96,7 +101,7 @@ impl EngineBuilder {
 		let mut session = EditorSession::for_project(self.scene, self.project).map_err(invalid)?;
 		session.load_saved_scenes(self.documents).map_err(invalid)?;
 		session
-			.set_module_factory(self.module_factory)
+			.set_module_resolver(self.module_resolver)
 			.map_err(invalid)?;
 		Ok(Engine {
 			session,

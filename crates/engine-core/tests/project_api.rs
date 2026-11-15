@@ -29,6 +29,63 @@ fn a_new_authored_project_has_no_implicit_demo_behavior_and_roundtrips_without_s
 }
 
 #[test]
+fn gameplay_module_roundtrips_and_validates_the_version_and_id() {
+	let data = scene(vec![entity("actor", [0.0; 3])]);
+	let project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();
+	let mut manifest: serde_json::Value =
+		serde_json::from_str(&project.to_json().unwrap()).unwrap();
+	assert!(manifest.get("gameplay_module").is_none());
+	assert_eq!(
+		ProjectData::from_json(&manifest.to_string())
+			.unwrap()
+			.gameplay_module,
+		None
+	);
+
+	manifest["gameplay_module"] = json!(null);
+	assert_eq!(
+		ProjectData::from_json(&manifest.to_string())
+			.unwrap()
+			.gameplay_module,
+		None
+	);
+
+	manifest["gameplay_module"] = json!("courtyard_run");
+	let selected = ProjectData::from_json(&manifest.to_string()).unwrap();
+	assert_eq!(selected.gameplay_module.as_deref(), Some("courtyard_run"));
+	assert_eq!(
+		ProjectData::from_json(&selected.to_json().unwrap()).unwrap(),
+		selected
+	);
+
+	for invalid in [
+		"",
+		"9module",
+		"Courtyard",
+		"two words",
+		"é",
+		&"a".repeat(33),
+	] {
+		manifest["gameplay_module"] = json!(invalid);
+		assert!(
+			ProjectData::from_json(&manifest.to_string())
+				.unwrap_err()
+				.contains("Gameplay module ID")
+		);
+	}
+
+	manifest["schema_version"] = json!(2);
+	for value in [json!("courtyard_run"), json!(null)] {
+		manifest["gameplay_module"] = value;
+		assert!(
+			ProjectData::from_json(&manifest.to_string())
+				.unwrap_err()
+				.contains("requires project schema version 3")
+		);
+	}
+}
+
+#[test]
 fn indexed_shared_resolution_preserves_scene_order_and_revalidates_public_mutations() {
 	let data = scene(vec![entity("actor", [0.0; 3])]);
 	let mut project = ProjectData::for_scene("Project", "scenes/main.json", &data).unwrap();

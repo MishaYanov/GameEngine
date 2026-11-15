@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bridge::EngineStatusDto;
@@ -18,7 +17,7 @@ pub struct EditorState {
 	pub engine_status: Arc<Mutex<Option<EngineStatusDto>>>,
 	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
 	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
-	pub last_build: Arc<Mutex<Option<PathBuf>>>,
+	pub last_build: Arc<Mutex<Option<compiler::InstalledProject>>>,
 	pub pending_build: Arc<Mutex<ProjectBuildState>>,
 }
 

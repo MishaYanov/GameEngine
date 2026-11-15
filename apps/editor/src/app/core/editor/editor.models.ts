@@ -31,6 +31,7 @@ export interface ProjectData {
     readonly behaviors: readonly { readonly scene_id: SceneId; readonly behavior: BehaviorSpec }[];
     readonly behavior_definitions: readonly { readonly id: string; readonly settings: BehaviorSettings }[];
     readonly input_profile?: GameInputProfile | null;
+    readonly gameplay_module?: string | null;
 }
 
 export interface SceneState extends SceneDescriptor {

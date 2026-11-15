@@ -85,7 +85,7 @@ The following is a source inspection map, not a native acceptance certification.
 Recheck the current tree before turning it into implementation instructions.
 The main wire definitions are in `apps/editor/src/app/core/editor/editor.models.ts`.
 The configured starter is in `apps/game/project.json`.
-Native application-specific progress is demonstrated in `apps/game/src/progress.rs`.
+Native application-specific progress is demonstrated in `crates/courtyard-gameplay/src/lib.rs`.
 
 | Capability | Inspected state | Consequence for the next work |
 | --- | --- | --- |
@@ -121,18 +121,14 @@ It should not spread game-specific role names through reusable engine crates.
 
 ### 3.2 Editor and player must select the same gameplay module
 
-The sample application installs `CampaignFactory` in `apps/game/src/main.rs`.
-The Tauri editor workspace currently uses the engine's configured-behavior default.
-The default can execute shared movement/spin behavior without the sample campaign's rules.
-Consequently, identical scene JSON alone does not establish editor/player gameplay parity.
+The bundled demo selects `courtyard_run` through the manifest. The Tauri editor,
+packaged player, and headless runner resolve that selection through the same native
+module. Generic projects use configured movement and spin. Read the
+[manifest contract](../../docs/project-lifecycle.md#gameplay-module-selection).
 
-Before accepting the reference game's objective flow, expose or install its module
-through a shared, explicit project/runtime activation path.
-Use the same module configuration, progress type, restart policy, and scene-transition
-rules in editor Play and in the packaged player.
-Keep sample campaign rules in the application module rather than copying them into
-the generic Tauri viewport implementation.
-The acceptance run must acquire the key and finish the game in both paths.
+Use the existing shared module for named gameplay roles and the reference game's
+objective, exit, and finish rules. The acceptance run must acquire the key,
+transition, finish, and restart in both editor Play and the packaged player.
 
 ## 4. Authoring data and runtime state
 

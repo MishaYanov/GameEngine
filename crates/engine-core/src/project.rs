@@ -116,6 +116,8 @@ pub struct ProjectData {
 	pub behavior_definitions: Vec<BehaviorDefinition>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub input_profile: Option<InputProfile>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub gameplay_module: Option<String>,
 }
 
 fn default_hz() -> u32 {
@@ -158,6 +160,7 @@ impl ProjectData {
 			behaviors: Vec::new(),
 			behavior_definitions: Vec::new(),
 			input_profile: None,
+			gameplay_module: None,
 		};
 		project.validate_scene(scene)?;
 		Ok(project)
@@ -207,6 +210,17 @@ impl ProjectData {
 			profile.validate()?;
 			if profile.movement.contains_key(Key::Escape) {
 				return Err("Escape is reserved for leaving game input".into());
+			}
+		}
+		if let Some(id) = &self.gameplay_module {
+			let mut bytes = id.bytes();
+			let valid = id.len() <= 32
+				&& bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+				&& bytes
+					.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+
+			if !valid {
+				return Err("Gameplay module ID must start with a lowercase ASCII letter and contain at most 32 lowercase ASCII letters, digits, or underscores".into());
 			}
 		}
 		let mut definitions = HashMap::with_capacity(self.behavior_definitions.len());
@@ -377,6 +391,9 @@ impl ProjectData {
 				.map_err(|error| format!("Invalid project JSON: {error}"))?;
 			if fields.get("input_profile").is_some() {
 				return Err("An authored input profile requires project schema version 3".into());
+			}
+			if fields.get("gameplay_module").is_some() {
+				return Err("gameplay_module requires project schema version 3".into());
 			}
 			if fields.get("behavior_definitions").is_some()
 				|| value

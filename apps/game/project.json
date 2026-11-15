@@ -1,6 +1,7 @@
 {
   "schema_version": 3,
   "name": "Game Engine Robot Demo",
+  "gameplay_module": "courtyard_run",
   "fixed_hz": 60,
   "max_catchup_steps": 8,
   "behavior_definitions": [

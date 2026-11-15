@@ -9,6 +9,7 @@ import {GameInputManager} from './game-input-manager';
 const project: ProjectData = {
     schema_version: 3, name: 'Input fixture', scenes: [{id: 'main', asset_path: 'scenes/main.json'}],
     startup_scene_id: 'main', fixed_hz: 60, max_catchup_steps: 8, behaviors: [], behavior_definitions: [],
+    gameplay_module: 'campaign',
 };
 
 describe('Game Input Manager', () => {

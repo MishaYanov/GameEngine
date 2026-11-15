@@ -1,33 +1,44 @@
 use super::*;
 
 #[test]
-fn launch_requires_a_successful_build_and_an_existing_player() {
+fn launch_requires_a_successful_build() {
 	let path = Path::new(env!("CARGO_MANIFEST_DIR"));
 	assert!(build_launch_command(None, path)
 		.unwrap_err()
 		.contains("Build a project"));
-	assert!(build_launch_command(Some(path), path).is_err());
-	assert!(build_launch_command(Some(path), Path::new("outdated"))
-		.unwrap_err()
-		.contains("latest completed build changed"));
 }
 
 #[test]
+#[ignore = "builds a real release player"]
 fn launch_uses_the_exported_executable_and_its_asset_working_directory() {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.join("../../../target")
 		.join(format!("qa-build-launch-{}", std::process::id()));
 	std::fs::create_dir(&root).unwrap();
-	let executable = root.join(format!("game{}", std::env::consts::EXE_SUFFIX));
-	std::fs::write(&executable, b"fixture; do not execute").unwrap();
-	let result = build_launch_command(Some(&root), &root);
-	let expected = root.canonicalize().unwrap();
-	std::fs::remove_dir_all(&root).unwrap();
-	let command = result.unwrap();
-	let expected_executable = expected.join(executable.file_name().unwrap());
-	assert_eq!(command.get_program(), expected_executable.as_os_str());
-	assert_eq!(command.get_current_dir(), Some(expected.as_path()));
+	let source = compiler::create_authoring_project("Launch Demo", root.to_str().unwrap()).unwrap();
+	let project = runtime::project::ProjectData::load(source.join("project.json")).unwrap();
+	let prepared = compiler::prepare_project(&project, &source.join("assets")).unwrap();
+	let exports = root.join("exports");
+	std::fs::create_dir(&exports).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, exports.to_str().unwrap()).unwrap();
+	let installed = compiler::complete_staged_project(staged).unwrap();
+	let path = installed.path();
+	assert!(
+		build_launch_command(Some(&installed), Path::new("outdated"))
+			.unwrap_err()
+			.contains("latest completed build changed")
+	);
+
+	let command = build_launch_command(Some(&installed), path).unwrap();
+	let executable = path.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+	assert_eq!(command.get_program(), executable.as_os_str());
+	assert_eq!(command.get_current_dir(), Some(path));
 	assert_eq!(command.get_args().collect::<Vec<_>>(), ["--player"]);
+	let mut player = std::fs::read(&executable).unwrap();
+	player[0] ^= 1;
+	std::fs::write(&executable, player).unwrap();
+	assert!(build_launch_command(Some(&installed), path).is_err());
+	std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]

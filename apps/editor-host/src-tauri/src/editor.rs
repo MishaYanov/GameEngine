@@ -17,7 +17,10 @@ use std::{
 	fs::{self, File, OpenOptions},
 	io::{Read, Write},
 	path::{Path, PathBuf},
-	sync::atomic::{AtomicU64, Ordering},
+	sync::{
+		atomic::{AtomicU64, Ordering},
+		Arc,
+	},
 };
 
 #[derive(Clone, Copy, Default, serde::Deserialize)]
@@ -135,6 +138,7 @@ impl EditorWorkspace {
 		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
+			.module_resolver(Arc::new(courtyard_gameplay::resolve))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -174,6 +178,7 @@ impl EditorWorkspace {
 		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
+			.module_resolver(Arc::new(courtyard_gameplay::resolve))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -574,6 +579,7 @@ impl EditorWorkspace {
 		let documents = load_project_documents(&self.asset_root, &project, &data)?;
 		let mut candidate = runtime::EngineBuilder::new(data, project)
 			.with_scenes(documents)
+			.module_resolver(Arc::new(courtyard_gameplay::resolve))
 			.build()
 			.map_err(|e| e.to_string())?;
 		candidate

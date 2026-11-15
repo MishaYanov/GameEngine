@@ -18,7 +18,7 @@ use engine_core::game_progress::{GameProgress, ProgressAction};
 pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
 use engine_core::scene_catalog::SceneId;
-use engine_core::simulation_session::GameModuleFactory;
+use engine_core::simulation_session::{GameModuleFactory, GameModuleResolver};
 pub use engine_core::simulation_session::{MovementTarget, SimulationSession};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,6 +97,12 @@ impl SceneEditor {
 			.as_mut()
 			.ok_or("Native authoring session is not initialized")?
 			.set_module_factory(factory)
+	}
+	pub fn set_module_resolver(&mut self, resolver: GameModuleResolver) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.set_module_resolver(resolver)
 	}
 	pub fn play_progress<P: GameProgress>(&self) -> Option<&P> {
 		self.session.as_ref()?.play_progress::<P>()

@@ -64,13 +64,15 @@ function validDocument(value: unknown): boolean {
 }
 
 function project(value: unknown): boolean {
+    if (!record(value)) return false;
+    const gameplayModule = value['gameplay_module'];
     return (
-        record(value) &&
         value['schema_version'] === 3 &&
         typeof value['name'] === 'string' &&
         typeof value['startup_scene_id'] === 'string' &&
         Number.isFinite(value['fixed_hz']) &&
         integer(value['max_catchup_steps']) &&
+        (gameplayModule === undefined || gameplayModule === null || typeof gameplayModule === 'string') &&
         Array.isArray(value['behaviors']) &&
         Array.isArray(value['behavior_definitions']) &&
         Array.isArray(value['scenes']) &&

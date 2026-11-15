@@ -63,6 +63,7 @@ fn new_authoring_project_contains_editable_starter_data_without_a_player() {
 		create_authoring_project("Authoring Demo", fixture.0.to_str().unwrap()).unwrap();
 	let project = ProjectData::load(project_path.join("project.json")).unwrap();
 	assert_eq!(project.name, "Authoring Demo");
+	assert_eq!(project.gameplay_module, None);
 	let prepared = prepare_project(&project, &project_path.join("assets")).unwrap();
 	assert!(prepared.asset_count() > 0);
 	assert!(project.scenes.iter().count() >= 2);
@@ -196,10 +197,23 @@ fn preparing_an_authored_project_captures_its_actual_scene_assets_and_behavior_c
 }
 
 #[test]
+fn export_preflight_rejects_an_unavailable_gameplay_module() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (mut project, _) = authored_scene_fixture(&source);
+	project.gameplay_module = Some("missing_module".into());
+
+	assert!(
+		matches!(prepare_project(&project, &source), Err(error) if error.contains("missing_module"))
+	);
+}
+
+#[test]
 fn staged_export_keeps_its_frozen_assets_and_manifest_when_authoring_changes_before_finish() {
 	let fixture = AssetFixture::new();
 	let source = fixture.0.join("source");
 	let (mut project, _) = authored_scene_fixture(&source);
+	project.gameplay_module = Some("courtyard_run".into());
 	fs::write(source.join("payload.bin"), b"snapshot bytes").unwrap();
 	let prepared = prepare_project(&project, &source).unwrap();
 	let expected_scene = fs::read(source.join("scenes/main.json")).unwrap();
@@ -220,27 +234,76 @@ fn staged_export_keeps_its_frozen_assets_and_manifest_when_authoring_changes_bef
 	.unwrap();
 	fs::write(source.join("payload.bin"), b"changed data").unwrap();
 	project.name = "New authoring project name".into();
+	project.gameplay_module = None;
 	fs::write(fixture.0.join("project.json"), project.to_json().unwrap()).unwrap();
 	let player = fixture.0.join("compiled-player.bin");
 	fs::write(&player, b"compiled fixture; never execute").unwrap();
 	// Complete the installation boundary without invoking Cargo or reopening source assets.
 	let finished = install_staged_player(staged, &player).unwrap();
-	assert_eq!(finished, staged_path);
+	assert_eq!(finished.path(), staged_path);
 	assert_eq!(
-		fs::read(finished.join("assets/scenes/main.json")).unwrap(),
+		fs::read(finished.path().join("assets/scenes/main.json")).unwrap(),
 		expected_scene
 	);
 	assert_eq!(
-		fs::read(finished.join("assets/payload.bin")).unwrap(),
+		fs::read(finished.path().join("assets/payload.bin")).unwrap(),
 		b"snapshot bytes"
 	);
 	assert_eq!(
-		ProjectData::load(finished.join("project.json")).unwrap(),
+		ProjectData::load(finished.path().join("project.json")).unwrap(),
 		*prepared.project()
 	);
+	let executable = finished.verified_executable().unwrap();
 	assert_eq!(
-		fs::read(finished.join(format!("game{}", std::env::consts::EXE_SUFFIX))).unwrap(),
+		fs::read(&executable).unwrap(),
 		b"compiled fixture; never execute"
+	);
+	fs::write(executable, b"changed! fixture; never execute").unwrap();
+	assert!(finished.verified_executable().is_err());
+}
+
+#[test]
+fn changed_stage_and_occupied_player_are_rejected_without_losing_the_original_files() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, _) = authored_scene_fixture(&source);
+	let prepared = prepare_project(&project, &source).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	let executable = fixture.0.join("player.bin");
+	let installed = staged
+		.path()
+		.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+
+	let manifest = staged.path().join("project.json");
+	let original = fs::read(&manifest).unwrap();
+	let mut changed = original.clone();
+	*changed.last_mut().unwrap() = b' ';
+	fs::write(&manifest, changed).unwrap();
+	assert!(
+		matches!(complete_staged_project(staged.clone()), Err(error) if error.contains("project.json changed"))
+	);
+	fs::write(&manifest, original).unwrap();
+
+	let extra = staged.path().join("assets/extra.bin");
+	fs::write(&extra, b"extra").unwrap();
+	assert!(
+		matches!(complete_staged_project(staged.clone()), Err(error) if error.contains("Staged assets changed"))
+	);
+	fs::remove_file(extra).unwrap();
+
+	assert!(install_staged_player(staged.clone(), &executable).is_err());
+	assert!(!installed.exists());
+	fs::write(&executable, b"compiler output").unwrap();
+	fs::write(&installed, b"existing user file").unwrap();
+	assert!(install_staged_player(staged.clone(), &executable).is_err());
+	assert_eq!(fs::read(&installed).unwrap(), b"existing user file");
+	assert!(publish_player(&executable, &installed).is_err());
+	assert_eq!(fs::read(&installed).unwrap(), b"existing user file");
+	fs::remove_file(&installed).unwrap();
+	let installed = install_staged_player(staged, &executable).unwrap();
+	assert_eq!(
+		fs::read(installed.verified_executable().unwrap()).unwrap(),
+		b"compiler output"
 	);
 }
 

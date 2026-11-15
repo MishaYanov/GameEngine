@@ -1,22 +1,28 @@
 use std::{
-	collections::{HashMap, HashSet, hash_map::DefaultHasher},
+	collections::{HashMap, HashSet},
 	fs,
-	hash::Hasher,
 	io::{self, Read, Write},
 	path::{Path, PathBuf},
 	process::Command,
+	sync::{
+		Arc,
+		atomic::{AtomicU64, Ordering},
+	},
 };
 
+use sha2::{Digest, Sha256};
+
 use engine_core::{
-	project::{BehaviorSpace, BehaviorSpec, ProjectData},
+	project::{BehaviorSpace, BehaviorSpec, MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::SceneData,
 };
 
+#[derive(Clone, PartialEq, Eq)]
 struct PackageAsset {
 	relative: PathBuf,
 	bytes: u64,
-	fingerprint: u64,
+	fingerprint: [u8; 32],
 }
 
 /// Validated authoring inputs. The manifest is captured before a build and
@@ -60,7 +66,9 @@ impl PreparedProject {
 #[derive(Clone)]
 pub struct StagedProject {
 	path: PathBuf,
-	asset_count: usize,
+	manifest_bytes: u64,
+	manifest_fingerprint: [u8; 32],
+	files: Arc<[PackageAsset]>,
 	asset_bytes: u64,
 }
 impl StagedProject {
@@ -68,10 +76,33 @@ impl StagedProject {
 		&self.path
 	}
 	pub fn asset_count(&self) -> usize {
-		self.asset_count
+		self.files.len()
 	}
 	pub fn asset_bytes(&self) -> u64 {
 		self.asset_bytes
+	}
+}
+
+/// A completed export and the fingerprint of its installed executable.
+#[derive(Clone)]
+pub struct InstalledProject {
+	staged: StagedProject,
+	player: PackageAsset,
+}
+
+impl InstalledProject {
+	pub fn path(&self) -> &Path {
+		self.staged.path()
+	}
+
+	pub fn verified_executable(&self) -> Result<PathBuf, String> {
+		validate_export_snapshot(&self.staged, Some(&self.player.relative))?;
+		let result = || -> io::Result<PathBuf> {
+			let executable = checked_asset_path(self.path(), &self.player.relative)?;
+			copy_verified_asset(&executable, &self.player, &mut io::sink())?;
+			Ok(executable)
+		};
+		result().map_err(|error| format!("Built game changed or is unavailable: {error}"))
 	}
 }
 
@@ -83,6 +114,7 @@ pub fn prepare_project(
 	asset_root: &Path,
 ) -> Result<PreparedProject, String> {
 	project.validate()?;
+	courtyard_gameplay::resolve(project)?;
 	let metadata = fs::symlink_metadata(asset_root).map_err(|e| e.to_string())?;
 	if metadata.file_type().is_symlink() || !metadata.is_dir() {
 		return Err("Asset root must be a directory without symbolic links".into());
@@ -137,19 +169,22 @@ pub fn project_path(name: &str, destination: &str) -> Result<PathBuf, String> {
 /// Create editable starter data without compiling or installing a game player.
 pub fn create_authoring_project(name: &str, destination: &str) -> Result<PathBuf, String> {
 	project_path(name, destination)?;
-	let (project, root) = bundled_starter(name)?;
+	let (mut project, root) = bundled_starter(name)?;
+	project.gameplay_module = None;
 	let prepared = prepare_project(&project, &root)?;
 	let path = project_path(&project.name, destination)?;
 	prepared.validate_inputs()?;
 	// Never merge starter data into an existing project, including a folder
 	// created after the initial destination check.
 	fs::create_dir(&path).map_err(|e| format!("Could not create project folder: {e}"))?;
-	copy_prepared_project(&prepared, &path).map_err(|error| {
-		format!(
-			"Could not create project: {error}; incomplete output retained at {}",
-			path.display()
-		)
-	})?;
+	copy_prepared_project(&prepared, &path, &project_json(&prepared.project)?).map_err(
+		|error| {
+			format!(
+				"Could not create project: {error}; incomplete output retained at {}",
+				path.display()
+			)
+		},
+	)?;
 	Ok(path)
 }
 
@@ -213,14 +248,21 @@ pub fn stage_prepared_project(
 ) -> Result<StagedProject, String> {
 	let path = project_path(&prepared.project.name, destination)?;
 	prepared.validate_inputs()?;
+	let project_json = project_json(&prepared.project)?;
+	let parent = path.parent().ok_or("Missing export parent folder")?;
+	let name = path.file_name().ok_or("Missing export folder name")?;
+	let path = parent.canonicalize().map_err(|e| e.to_string())?.join(name);
 	// create_dir is atomic: never merge into an existing project.
 	fs::create_dir(&path).map_err(|e| format!("Could not create project folder: {e}"))?;
 	let result = (|| -> Result<(), std::io::Error> {
-		copy_prepared_project(prepared, &path)?;
-		fs::write(path.join("project-name.txt"), &prepared.project.name)?;
-		fs::write(
-			path.join("README.txt"),
-			"Game Engine project\nRun game.exe to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
+		copy_prepared_project(prepared, &path, &project_json)?;
+		write_new(
+			&path.join("project-name.txt"),
+			prepared.project.name.as_bytes(),
+		)?;
+		write_new(
+			&path.join("README.txt"),
+			b"Game Engine project\nRun game.exe to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
 		)?;
 		Ok(())
 	})();
@@ -234,12 +276,19 @@ pub fn stage_prepared_project(
 	}
 	Ok(StagedProject {
 		path,
-		asset_count: prepared.asset_count(),
+		manifest_bytes: project_json.len() as u64,
+		manifest_fingerprint: Sha256::digest(project_json.as_bytes()).into(),
+		files: prepared.files.clone().into(),
 		asset_bytes: prepared.total_bytes(),
 	})
 }
 
 pub fn finish_staged_project(staged: StagedProject) -> Result<PathBuf, String> {
+	complete_staged_project(staged).map(|installed| installed.staged.path)
+}
+
+pub fn complete_staged_project(staged: StagedProject) -> Result<InstalledProject, String> {
+	validate_export_snapshot(&staged, None)?;
 	let executable = compile_player().map_err(|error| {
 		format!(
 			"{error}; incomplete output retained at {}",
@@ -278,29 +327,141 @@ fn compile_player() -> Result<PathBuf, String> {
 		.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
 }
 
-fn install_staged_player(staged: StagedProject, executable: &Path) -> Result<PathBuf, String> {
-	let path = staged.path;
-	fs::copy(
-		executable,
-		path.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
-	)
-	.map_err(|error| {
+fn check_export_folder(path: &Path) -> io::Result<()> {
+	let metadata = fs::symlink_metadata(path)?;
+	if !metadata.is_dir() || path.canonicalize()? != path {
+		return Err(io::Error::other("Export folder changed"));
+	}
+	Ok(())
+}
+
+fn validate_export_snapshot(staged: &StagedProject, player: Option<&Path>) -> Result<(), String> {
+	let check = || -> io::Result<()> {
+		check_export_folder(&staged.path)?;
+		for entry in fs::read_dir(&staged.path)? {
+			let entry = entry?;
+			let name = entry.file_name();
+			let name = Path::new(&name);
+			let expected = ["project.json", "project-name.txt", "README.txt", "assets"]
+				.iter()
+				.any(|expected| name == Path::new(expected));
+			if !expected && player != Some(name) {
+				return Err(io::Error::other("Unexpected file in export folder"));
+			}
+		}
+		let manifest = checked_asset_path(&staged.path, Path::new("project.json"))?;
+		let fingerprint = copy_and_hash(&manifest, staged.manifest_bytes, &mut io::sink())?;
+		if fingerprint != staged.manifest_fingerprint {
+			return Err(io::Error::other("Staged project.json changed"));
+		}
+		let root = staged.path.join("assets");
+		check_export_folder(&root)?;
+		if prepare_assets(&root)?.as_slice() != staged.files.as_ref() {
+			return Err(io::Error::other("Staged assets changed"));
+		}
+		Ok(())
+	};
+	check().map_err(|error| format!("Export snapshot changed or is unavailable: {error}"))
+}
+
+fn install_staged_player(
+	staged: StagedProject,
+	executable: &Path,
+) -> Result<InstalledProject, String> {
+	validate_export_snapshot(&staged, None)?;
+	let path = staged.path();
+	let relative = PathBuf::from(format!("game{}", std::env::consts::EXE_SUFFIX));
+	let destination = path.join(&relative);
+	let install = || -> io::Result<PackageAsset> {
+		static NEXT_PLAYER: AtomicU64 = AtomicU64::new(0);
+		let temporary = path.join(format!(
+			".game-{}-{}.tmp",
+			std::process::id(),
+			NEXT_PLAYER.fetch_add(1, Ordering::Relaxed)
+		));
+		let metadata = fs::metadata(executable)?;
+		if !metadata.is_file() {
+			return Err(io::Error::other("Compiled player must be a regular file"));
+		}
+		let mut writer = fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.open(&temporary)?;
+		let result = (|| -> io::Result<PackageAsset> {
+			let bytes = metadata.len();
+			let fingerprint = copy_and_hash(executable, bytes, &mut writer)?;
+			writer.set_permissions(metadata.permissions())?;
+			writer.sync_all()?;
+			drop(writer);
+			publish_player(&temporary, &destination)?;
+			Ok(PackageAsset {
+				relative,
+				bytes,
+				fingerprint,
+			})
+		})();
+		// Windows moves the temporary file. Unix publishes a second directory entry.
+		let _ = fs::remove_file(&temporary);
+		result
+	};
+	let player = install().map_err(|error| {
 		format!(
 			"Could not install game executable: {error}; incomplete output retained at {}",
 			path.display()
 		)
 	})?;
-	Ok(path)
+	Ok(InstalledProject { staged, player })
 }
 
-fn copy_prepared_project(prepared: &PreparedProject, path: &Path) -> io::Result<()> {
+#[cfg(windows)]
+fn publish_player(source: &Path, destination: &Path) -> io::Result<()> {
+	use std::os::windows::ffi::OsStrExt;
+	use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+	let source: Vec<_> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+	let target: Vec<_> = destination
+		.as_os_str()
+		.encode_wide()
+		.chain(Some(0))
+		.collect();
+	// Leaving the replace flag unset preserves an occupied destination.
+	if unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), 0) } == 0 {
+		return Err(io::Error::last_os_error());
+	}
+	Ok(())
+}
+
+#[cfg(not(windows))]
+fn publish_player(source: &Path, destination: &Path) -> io::Result<()> {
+	fs::hard_link(source, destination)
+}
+
+fn project_json(project: &ProjectData) -> Result<String, String> {
+	let mut json = project.to_json()?;
+	if json.len() < MAX_PROJECT_BYTES {
+		json.push('\n');
+	}
+	Ok(json)
+}
+
+fn copy_prepared_project(
+	prepared: &PreparedProject,
+	path: &Path,
+	project_json: &str,
+) -> io::Result<()> {
 	copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
 	let copied_root = path.join("assets").canonicalize()?;
 	validate_catalog_scenes(&prepared.project, &copied_root, &prepared.files)
 		.map_err(io::Error::other)?;
-	let mut project_json = prepared.project.to_json().map_err(io::Error::other)?;
-	project_json.push('\n');
-	fs::write(path.join("project.json"), project_json)
+	write_new(&path.join("project.json"), project_json.as_bytes())
+}
+
+fn write_new(path: &Path, contents: &[u8]) -> io::Result<()> {
+	fs::OpenOptions::new()
+		.write(true)
+		.create_new(true)
+		.open(path)?
+		.write_all(contents)
 }
 
 fn legacy_starter_project(name: &str, scene: &SceneData) -> Result<ProjectData, String> {
@@ -384,7 +545,7 @@ fn copy_prepared_assets(root: &Path, destination: &Path, files: &[PackageAsset])
 	Ok(())
 }
 
-fn verify_asset_fingerprint(asset: &PackageAsset, actual: u64) -> io::Result<()> {
+fn verify_asset_fingerprint(asset: &PackageAsset, actual: [u8; 32]) -> io::Result<()> {
 	if actual != asset.fingerprint {
 		return Err(io::Error::other(
 			"Asset changed after preflight; build again from the current authored files",
@@ -422,16 +583,27 @@ fn checked_asset_path(root: &Path, relative: &Path) -> io::Result<PathBuf> {
 	Ok(path)
 }
 
-fn copy_and_hash(path: &Path, expected_bytes: u64, writer: &mut impl Write) -> io::Result<u64> {
+fn copy_and_hash(
+	path: &Path,
+	expected_bytes: u64,
+	writer: &mut impl Write,
+) -> io::Result<[u8; 32]> {
+	let metadata = fs::symlink_metadata(path)?;
+	if !metadata.is_file() {
+		return Err(io::Error::other("Export input must be a regular file"));
+	}
+	if metadata.len() != expected_bytes {
+		return Err(io::Error::other("Asset changed size after preflight"));
+	}
 	let file = fs::File::open(path)?;
 	let metadata = file.metadata()?;
 	if !metadata.is_file() || metadata.len() != expected_bytes {
-		return Err(io::Error::other("Asset changed size after preflight"));
+		return Err(io::Error::other("Export input changed before reading"));
 	}
-	let mut reader = file.take(expected_bytes + 1);
+	let mut reader = file.take(expected_bytes.saturating_add(1));
 	let mut buffer = [0u8; 64 * 1024];
 	let mut copied = 0u64;
-	let mut fingerprint = DefaultHasher::new();
+	let mut fingerprint = Sha256::new();
 	loop {
 		let read = reader.read(&mut buffer)?;
 		if read == 0 {
@@ -441,13 +613,13 @@ fn copy_and_hash(path: &Path, expected_bytes: u64, writer: &mut impl Write) -> i
 		if copied > expected_bytes {
 			return Err(io::Error::other("Asset grew during installation"));
 		}
-		fingerprint.write(&buffer[..read]);
+		fingerprint.update(&buffer[..read]);
 		writer.write_all(&buffer[..read])?;
 	}
 	if copied != expected_bytes {
 		return Err(io::Error::other("Asset shrank during installation"));
 	}
-	Ok(fingerprint.finish())
+	Ok(fingerprint.finalize().into())
 }
 
 fn collect_assets(
@@ -471,10 +643,8 @@ fn collect_assets(
 		));
 	}
 	if metadata.is_dir() {
-		let mut entries = fs::read_dir(path)?.collect::<io::Result<Vec<_>>>()?;
-		entries.sort_by_key(|entry| entry.file_name());
-		for entry in entries {
-			collect_assets(root, &entry.path(), depth + 1, files, total, visited)?;
+		for entry in fs::read_dir(path)? {
+			collect_assets(root, &entry?.path(), depth + 1, files, total, visited)?;
 		}
 		return Ok(());
 	}

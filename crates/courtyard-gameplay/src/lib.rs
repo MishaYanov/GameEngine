@@ -1,15 +1,26 @@
-use runtime::{
+//! Gameplay for projects that opt in to the Courtyard Run module.
+
+use engine_core::{
 	EntityKey,
 	game_progress::{GameProgress, ProgressState, ProgressView},
 	project::{BehaviorSettings, ProjectData, ResolvedBehavior},
 	scene_catalog::SceneId,
 	simulation_session::{
 		ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameplayContext,
-		InputFrame, PreparedModuleConfig,
+		InputFrame, PreparedModuleConfig, resolve_default_gameplay,
 	},
 	world::RuntimeWorld,
 };
-use std::{collections::HashSet, mem::size_of};
+use std::{collections::HashSet, mem::size_of, sync::Arc};
+
+pub const COURTYARD_RUN_ID: &str = "courtyard_run";
+
+pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
+	if project.gameplay_module.as_deref() == Some(COURTYARD_RUN_ID) {
+		return Ok(Arc::new(CampaignFactory));
+	}
+	resolve_default_gameplay(project)
+}
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct CampaignProgress {
@@ -144,5 +155,60 @@ impl GameModule for CampaignModule {
 			output.push_progress::<CampaignProgress>(ProgressAction::UnlockCourtyard)?;
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use engine_core::{SceneData, game_session::GameSession};
+
+	#[test]
+	fn bundled_project_opts_in_to_campaign_progress() {
+		let mut project =
+			ProjectData::from_json(include_str!("../../../apps/game/project.json")).unwrap();
+		let document = Arc::new(
+			SceneData::from_json(include_str!(
+				"../../../apps/game/assets/scenes/courtyard.json"
+			))
+			.unwrap(),
+		);
+		let courtyard = SceneId::new("courtyard").unwrap();
+		let factory = resolve(&project).unwrap();
+		let mut campaign = GameSession::with_factory_for_scene(
+			Arc::new(project.clone()),
+			courtyard.clone(),
+			Arc::clone(&document),
+			factory,
+		)
+		.unwrap();
+		assert!(
+			!campaign
+				.progress::<CampaignProgress>()
+				.unwrap()
+				.has_courtyard_key
+		);
+
+		campaign
+			.active_mut()
+			.set_controlled_input([1.0, 0.0, 0.0])
+			.unwrap();
+		for _ in 0..70 {
+			campaign.tick(1.0 / f64::from(project.fixed_hz)).unwrap();
+		}
+		assert!(
+			campaign
+				.progress::<CampaignProgress>()
+				.unwrap()
+				.has_courtyard_key
+		);
+		assert_eq!(campaign.progress_revision(), 1);
+
+		project.gameplay_module = None;
+		let factory = resolve(&project).unwrap();
+		let generic =
+			GameSession::with_factory_for_scene(Arc::new(project), courtyard, document, factory)
+				.unwrap();
+		assert!(generic.progress::<CampaignProgress>().is_none());
 	}
 }

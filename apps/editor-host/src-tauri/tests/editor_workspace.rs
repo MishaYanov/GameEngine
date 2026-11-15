@@ -209,6 +209,89 @@ fn project_open_uses_canonical_selected_manifest_startup_scene_and_notifier() {
 }
 
 #[test]
+fn play_selects_the_current_gameplay_module_after_history_and_workspace_reopen() {
+	use courtyard_gameplay::{CampaignProgress, COURTYARD_RUN_ID};
+	use runtime::project::ProjectData;
+
+	let fixture = Fixture::new();
+	let manifest = fixture.write_project("scenes/main.json");
+	let mut workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	let mut project = workspace.backend.session().project().clone();
+	project.gameplay_module = Some(COURTYARD_RUN_ID.into());
+	run(&mut workspace, Command::SetProject { project });
+
+	for (edit, campaign) in [
+		(None, true),
+		(Some(Command::Undo), false),
+		(Some(Command::Redo), true),
+	] {
+		if let Some(command) = edit {
+			run(&mut workspace, command);
+		}
+		run(&mut workspace, Command::StartPlay);
+		assert_eq!(
+			workspace
+				.backend
+				.session()
+				.play_progress::<CampaignProgress>()
+				.is_some(),
+			campaign
+		);
+		run(&mut workspace, Command::StopPlay);
+	}
+
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	assert_eq!(
+		ProjectData::load(&manifest)
+			.unwrap()
+			.gameplay_module
+			.as_deref(),
+		Some(COURTYARD_RUN_ID)
+	);
+	workspace
+		.reload_with_policy(
+			workspace.backend.session().revision(),
+			ReloadPolicy::RequireClean,
+		)
+		.unwrap();
+	run(&mut workspace, Command::StartPlay);
+	assert!(workspace
+		.backend
+		.session()
+		.play_progress::<CampaignProgress>()
+		.is_some());
+	run(&mut workspace, Command::StopPlay);
+
+	let mut project = workspace.backend.session().project().clone();
+	project.gameplay_module = Some("missing_module".into());
+	run(&mut workspace, Command::SetProject { project });
+	let session = workspace.backend.session();
+	let (revision, scene_revision, cursor) = (
+		session.revision(),
+		session.scene_revision(),
+		workspace.backend.change_cursor(),
+	);
+	let error = workspace
+		.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: Command::StartPlay,
+		})
+		.unwrap_err();
+	assert!(error.contains("missing_module"));
+	let session = workspace.backend.session();
+	assert!(!session.is_playing());
+	assert_eq!(session.revision(), revision);
+	assert_eq!(session.scene_revision(), scene_revision);
+	assert_eq!(workspace.backend.change_cursor(), cursor);
+}
+
+#[test]
 fn project_open_requires_a_manifest_and_rejects_invalid_manifest_data() {
 	let fixture = Fixture::new();
 	let manifest = fixture.0.parent().unwrap().join("project.json");

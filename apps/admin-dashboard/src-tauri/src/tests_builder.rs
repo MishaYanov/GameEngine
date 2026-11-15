@@ -11,6 +11,7 @@ fn fixture(label: &str) -> (PathBuf, PathBuf) {
 		("crates/runtime", "runtime"),
 		("crates/bridge", "bridge"),
 		("crates/engine-core", "engine-core"),
+		("crates/courtyard-gameplay", "courtyard-gameplay"),
 	] {
 		fs::create_dir_all(source.join(folder).join("src")).unwrap();
 		fs::write(
@@ -515,6 +516,15 @@ fn real_native_template_validation() {
 	assert!(!main.contains("PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"assets\")"));
 	let cargo = fs::read_to_string(root.join("client/Cargo.toml")).unwrap();
 	assert!(!cargo.contains("admin-dashboard"));
+	assert!(cargo.contains("crates/courtyard-gameplay"));
+	assert!(
+		root.join("client/crates/courtyard-gameplay/src/lib.rs")
+			.is_file()
+	);
+	let project =
+		engine_core::project::ProjectData::load(root.join("client/apps/game/project.json"))
+			.unwrap();
+	assert_eq!(project.gameplay_module.as_deref(), Some("courtyard_run"));
 	eprintln!(
 		"Validated native client at {}",
 		root.join("client").display()

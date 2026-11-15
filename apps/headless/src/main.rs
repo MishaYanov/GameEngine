@@ -17,6 +17,7 @@ use std::{
 	io::{self, Read, Write},
 	path::{Path, PathBuf},
 	process::ExitCode,
+	sync::Arc,
 	time::{Duration, Instant},
 };
 
@@ -259,6 +260,7 @@ fn run(options: Options) -> Result<Summary, String> {
 	let source_schema = parsed.source_schema_version;
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
+		.module_resolver(Arc::new(courtyard_gameplay::resolve))
 		.build()
 		.map_err(|e| e.to_string())?;
 	let mut measures = Measurements::default();

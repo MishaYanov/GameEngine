@@ -12,9 +12,10 @@ The compatibility CLI still takes exactly a project name and an existing absolut
 cargo run -p compiler -- 'My Game' 'D:\Projects'
 ```
 
-It uses the bundled starter configuration, installs without launching, and exits 0 on success, 1 on build/install
-failure or 2 on wrong argument count. `install_project(name, destination)` remains the starter adapter. Application
-hosts can use:
+It uses the bundled starter configuration with the `courtyard_run` module, installs without launching, and exits
+0 on success, 1 on build/install failure or 2 on wrong argument count. `install_project(name, destination)` remains
+the starter adapter. The editor's New Project uses `create_authoring_project`, which copies the starter scenes and
+behaviors with the generic gameplay default. Application hosts can use:
 
 - `prepare_project(&project, asset_root)` to validate/capture authored inputs into PreparedProject.
 - `install_authored_project(&project, asset_root, destination)` or
@@ -30,7 +31,9 @@ absolute.
 
 Project schema 3 identifies catalog entries by stable SceneId, startup_scene_id and scene-scoped behaviors, including
 shared configuration references. Inline-only schema-2 files upgrade through ProjectData::from_json. Preparation
-captures the asset file list, then validates every catalog scene and its referenced models. A shared resolver requires
+validates the optional gameplay module with the same resolver used by the Player, captures the asset file list, and
+then validates every catalog scene and its referenced models. Staging writes the captured manifest with its selector. A
+shared resolver requires
 each scene/model path to resolve to a regular file within the canonical asset root and to belong to that captured list.
 One path index serves the whole catalog pass; scene membership is checked before reading/parsing the file.
 
@@ -45,13 +48,11 @@ The nested build invokes `cargo build --locked --package game --release --target
 source workspace. Cargo and shader compiler glslc must be available. The nested build does not use --offline; an offline
 outer invocation does not make it offline automatically.
 
-Installation reserves a new folder with atomic create_dir, copies the executable and prepared assets, canonicalizes the
-copied asset root, and runs the same catalog validation pass there before writing project.json plus project-name.txt and
-README.txt. This pass includes scene loading, scoped behavior targets and model references. Source projects retain
-authored
-configuration/assets; output packages contain those data files, not the source workspace. Installed project detection
-defaults the game to Player mode. Copy/write failure retains the incomplete output for inspection and returns its path;
-existing directories are never merged.
+Staging creates a new folder, copies the prepared assets, and runs catalog validation against the copied asset
+root before writing `project.json`, `project-name.txt`, and `README.txt`. Finish checks the staged manifest and
+complete asset inventory before compiling and again before publishing the executable. Publication preserves an
+occupied executable path and retains an incomplete export for inspection on failure. A successful export opens
+in Player mode by default.
 
 The host's build_project additionally requires clean Edit state, no open transaction, matching saved manifest and every
 catalog scene matching memory. It releases the workspace lock before compiling. Registering a scene or saving its
@@ -68,11 +69,10 @@ asset path and underlying cause through the existing string-error interface. For
 Prepared asset "actor.glb" is no longer valid: Asset changed after preflight; build again from the current authored files
 ```
 
-This adds one streamed pass over captured inputs without retaining their complete contents in memory. The shared
-`copy_verified_asset` and `verify_asset_fingerprint` helpers also keep the same checks during copying after compilation,
-so the early recheck does not replace detection of changes made while Cargo runs. Neither pass creates an immutable or
-atomic filesystem snapshot, and fingerprints are not cryptographic proof of unchanged data. The scene-report limit
-below does not apply to these separate input errors.
+Preflight and copying stream files through SHA-256 checks. The editor keeps the installed executable's
+fingerprint and verifies it and the staged project data on **Run Exported Game**. Choose a destination
+that only trusted users can modify. The checks observe the filesystem at specific points, and another writer
+can still change files between verification and process start.
 
 ## Scene validation diagnostics
 

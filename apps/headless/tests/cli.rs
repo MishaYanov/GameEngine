@@ -150,6 +150,41 @@ fn help_and_invalid_options_exit_without_graphics_or_project_io() {
 }
 
 #[test]
+fn headless_runs_the_selected_campaign_without_input() {
+	let fixture = Fixture::new();
+	let mut scene = SceneData::from_json(&fs::read_to_string(&fixture.scene).unwrap()).unwrap();
+	scene.entities[0].transform.position[0] = 2.0;
+	fs::write(&fixture.scene, scene.to_json().unwrap()).unwrap();
+
+	let mut project = ProjectData::load(&fixture.project).unwrap();
+	project.behaviors.truncate(1);
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+	let run = || success(fixture.command().arg("--steps").arg("2").output().unwrap());
+	assert_eq!(run()["fixed_steps"], 0);
+
+	// At the key threshold, campaign progress is the only reason to step.
+	project.gameplay_module = Some(courtyard_gameplay::COURTYARD_RUN_ID.into());
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+	assert_eq!(run()["fixed_steps"], 1);
+}
+
+#[test]
+fn headless_rejects_an_unavailable_gameplay_module() {
+	let fixture = Fixture::new();
+	let mut project = ProjectData::load(&fixture.project).unwrap();
+	project.gameplay_module = Some("missing_module".into());
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+
+	let error = failure(fixture.command().arg("--steps").arg("1").output().unwrap());
+	assert!(
+		error["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("missing_module")
+	);
+}
+
+#[test]
 fn replay_uses_authored_behavior_targets_and_shared_simulation_with_deterministic_state_hash() {
 	let fixture = Fixture::new();
 	let source = fs::read(&fixture.scene).unwrap();

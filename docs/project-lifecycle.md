@@ -13,8 +13,8 @@ new project installations and native viewport reconstruction.
 
 Project manifests now use **schema 3**, while individual scene documents also use **schema 3**. These versions are
 independent of **editor protocol 2**. `ProjectData::from_json` upgrades a schema-2 manifest containing only inline
-behaviors to schema 3 in memory; subsequent serialization writes schema 3. Schema 2 cannot contain
-`behavior_definitions` or shared behavior attachments, even if the definitions list is empty. Unsupported versions,
+behaviors to schema 3 in memory. Subsequent serialization writes schema 3. Schema 2 rejects
+`behavior_definitions`, shared behavior attachments, `input_profile`, and `gameplay_module`. Unsupported versions,
 including schema 1, are rejected. Older scene schemas still use the scene parser's existing migration behavior.
 
 ```json
@@ -62,6 +62,21 @@ and a 64-document count ceiling, including documents retained for history. That 
 vectors, history storage and allocator overhead; it does not measure total process or GPU memory. Each scene retains
 its existing individual validation and size limits, and each selection is separately limited to 4,096 distinct existing
 entity keys.
+
+## Gameplay module selection
+
+Project schema 3 accepts an optional `gameplay_module`. The bundled demo opts in with
+`"gameplay_module": "courtyard_run"`. Omission or `null` uses the built-in configured movement and spin
+behaviors. New Project keeps the starter scenes and behaviors and uses that generic default.
+
+A module ID starts with a lowercase ASCII letter and uses up to 32 lowercase ASCII letters, digits, or underscores.
+The manifest parser checks that format. The shared native resolver recognizes `courtyard_run`, and an unsupported
+ID fails when starting Play or preparing an export. The editor resolves the current in-memory project each time
+Play starts, so project edits and Undo/Redo affect the next run. The Player and headless runner use the same resolver.
+
+The selected factory supplies both the scene module and its initial progress. Ordinary runtime scene replacement
+retains that progress, while New Game initializes fresh progress. The module ID is authored project data. Play state
+lives in memory. See [the game demo](apps/game/README.md#demo-progress-and-new-game) for its current rule.
 
 ## Open a project or standalone scene
 
@@ -193,8 +208,9 @@ primary cause per invalid scene and a 16 KiB UTF-8 report limit. See [compiler d
 checks](compiler/README.md#scene-validation-diagnostics) for the report scope and captured-input limits. Admin
 native-template validation also traverses the catalog. Detailed geometry import remains a runtime concern.
 
-Player launch resolves the configured startup ID to a scene path; configured simulation uses that scene's behaviors.
-Headless project loading prepares all catalog documents through `with_scenes`, rejects file aliases/budget overflow and
+Player launch resolves the configured startup ID to a scene path and uses that scene's behaviors with the selected
+gameplay module. Staged output preserves the saved module ID. Headless project loading prepares all catalog documents
+through `with_scenes`, rejects file aliases/budget overflow and
 supports typed scene commands in replay. A standalone headless scene gets a stable transient ID for comparable
 diagnostic hashes. The native Player's explicit F8 cycle is separate from headless authoring scene commands and does
 not provide automatic gameplay transitions.

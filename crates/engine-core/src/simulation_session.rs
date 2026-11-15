@@ -140,6 +140,20 @@ pub trait GameModuleFactory: Send + Sync {
 	}
 }
 
+/// Resolves the project configuration once, before a new game run is created.
+pub type GameModuleResolver =
+	Arc<dyn Fn(&ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> + Send + Sync>;
+
+/// The engine's built-in fallback. Applications can resolve additional native modules.
+pub fn resolve_default_gameplay(
+	project: &ProjectData,
+) -> Result<Arc<dyn GameModuleFactory>, String> {
+	match project.gameplay_module.as_deref() {
+		None => Ok(Arc::new(ConfiguredBehaviorFactory)),
+		Some(id) => Err(format!("Unsupported gameplay module {id:?}")),
+	}
+}
+
 /// Engine-prepared module input. Only the engine can construct this validated
 /// context; custom factories can inspect it or keep implementing `create` only.
 pub struct PreparedModuleConfig<'a> {
@@ -288,7 +302,8 @@ impl SimulationSession {
 	pub const MAX_COLLISION_CANDIDATES_PER_TICK: usize = 1_000_000;
 
 	pub fn new(project: ProjectData, document: Arc<SceneData>) -> Result<Self, String> {
-		Self::with_factory(project, document, &ConfiguredBehaviorFactory)
+		let factory = resolve_default_gameplay(&project)?;
+		Self::with_factory(project, document, factory.as_ref())
 	}
 
 	pub fn with_factory(

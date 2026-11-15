@@ -24,18 +24,18 @@ for opening the shell.
 
 ## Editor IPC
 
-| Commands                                                                                          | Scope                                                              |
-|---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
-| editor_capabilities / editor_open / editor_snapshot                                               | Protocol/schema descriptors and authoritative document             |
-| editor_execute / editor_save / editor_reload                                                      | Revision-aware command dispatch, authored persistence, replacement |
-| editor_save_all                                                                                  | Persist dirty retained scene documents and project settings without switching scenes |
-| editor_execute_incremental                                                                        | Atomic receipt plus changed UI data or full snapshot fallback      |
-| editor_assets / editor_import_model                                                               | Catalog and static glTF scene import                               |
-| editor_export_prefab / editor_instantiate_prefab / editor_save_prefab / editor_load_prefab        | Prefab data and scoped files                                       |
-| editor_collisions                                                                                 | Validated collision snapshot                                       |
-| editor_viewport_attach / editor_viewport_bounds / editor_viewport_detach / editor_viewport_status | Single native-pane lifecycle                                       |
-| editor_viewport_action / editor_viewport_editor_state                                             | Editor-only view/tool actions and applied native state |
-| editor_prepare_project_build / editor_finish_project_build / editor_run_build                     | Immutable staged export, background compilation, retry and explicit player launch |
+| Commands                                                                                          | Scope                                                                                |
+|---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| editor_capabilities / editor_open / editor_snapshot                                               | Protocol/schema descriptors and authoritative document                               |
+| editor_execute / editor_save / editor_reload                                                      | Revision-aware command dispatch, authored persistence, replacement                   |
+| editor_save_all                                                                                   | Persist dirty retained scene documents and project settings without switching scenes |
+| editor_execute_incremental                                                                        | Atomic receipt plus changed UI data or full snapshot fallback                        |
+| editor_assets / editor_import_model                                                               | Catalog and static glTF scene import                                                 |
+| editor_export_prefab / editor_instantiate_prefab / editor_save_prefab / editor_load_prefab        | Prefab data and scoped files                                                         |
+| editor_collisions                                                                                 | Validated collision snapshot                                                         |
+| editor_viewport_attach / editor_viewport_bounds / editor_viewport_detach / editor_viewport_status | Single native-pane lifecycle                                                         |
+| editor_viewport_action / editor_viewport_editor_state                                             | Editor-only view/tool actions and applied native state                               |
+| editor_prepare_project_build / editor_finish_project_build / editor_run_build                     | Staged export, background compilation, retry and explicit player launch              |
 
 Document DTOs live in bridge::editor; view/tool DTOs live in bridge::viewport. EditorSession owns mutations and validation. Compatibility Open accepts an asset root and a scene path
 resolved within it. Workspace/project switches advance revision identity so stale commands cannot accidentally apply to
@@ -57,8 +57,11 @@ command/history processing may still clone full scene data.
 ## Project lifecycle and multi-scene persistence
 
 `editor_open_project` uses ProjectLocation and prepares every catalog scene before installing a candidate. Project
-schema 3 uses stable scene IDs, scene-scoped behaviors and shared settings; inline-only schema-2 JSON upgrades on load.
-Capabilities advertise protocol 2 / scene schema 3.
+schema 3 uses stable scene IDs, scene-scoped behaviors, shared settings, and an optional `gameplay_module`.
+Inline-only schema-2 JSON upgrades on load. Capabilities advertise protocol 2 / scene schema 3.
+The host installs the shared project resolver when opening or reloading a workspace. `StartPlay` resolves the
+current in-memory manifest before creating a runtime session. An unsupported ID rejects Play and preserves the
+authored state. The existing project snapshot and `set_project` command carry the field over protocol 2.
 `editor_register_scene` registers an existing file, while `editor_save_scene_as` writes a new destination and changes
 the active scene path. `editor_save` saves only the active scene; `editor_save_project` saves the manifest. `editor_save_all` preflights all catalogued outputs and advances each successful saved baseline before later writes, so a partial failure can be retried accurately.
 
@@ -66,7 +69,11 @@ the active scene path. `editor_save` saves only the active scene; `editor_save_p
 through typed commands. `editor_reload` accepts `require_clean` (default when omitted) or explicit `discard_unsaved`; it
 validates all replacement documents and refreshes generation/jobs/caches only after success. Manifest-backed state never
 silently falls back when project.json disappears. Build preparation compares every scene with disk before releasing the
-workspace lock for compilation. The split export API stages verified source assets and manifest before preparation acknowledges success. Finish consumes the staged token, compiles outside the workspace lock and retains failed tokens for retry unless superseded. `editor_run_build` validates the expected remembered output path and launches that player's executable explicitly. See [project lifecycle](../../project-lifecycle.md) for failure behavior and frontend
+workspace lock for compilation. The split export API stages verified source assets and manifest before preparation
+acknowledges success. Finish verifies the staged manifest and assets, compiles outside the workspace lock, and retains
+failed tokens for retry unless superseded. `editor_run_build` checks the latest completed build, verifies its data and
+executable fingerprints, and launches that player. Use an output folder writable only by trusted users.
+See [project lifecycle](../../project-lifecycle.md) for failure behavior and frontend
 helpers.
 
 ## Guarded project replacement and native dialogs

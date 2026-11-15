@@ -384,10 +384,11 @@ Click Game to focus its input, then use W/A/S/D with the shared movement binding
 Releasing a key updates movement; Escape or focus loss clears held play input.
 Scene view preferences and camera bookmarks remain separate from runtime movement.
 
-The sample player installs CampaignFactory while the generic editor uses the
-configured-behavior default. Shared movement/spin configuration does not establish
-parity for sample campaign key/exit rules. A shared module activation path remains
-necessary before accepting the entire reference game's progress loop in both.
+The bundled sample selects `courtyard_run` in its manifest. Editor Play and the
+packaged Player use the shared resolver and the same campaign module. That module
+implements the demo's controlled-actor position check for the key. An automatic
+exit, a finish state, and a complete native playthrough still need their own
+implementation and acceptance. See [gameplay module selection](project-lifecycle.md#gameplay-module-selection).
 
 ## 16. Save scenes and project settings
 
@@ -704,7 +705,7 @@ for the complete native authoring workflow.
 - Rotate/Scale can reject affine results the scene's TRS format cannot represent.
 - Snap settings do not provide vertex/socket snapping or arbitrary surface alignment.
 - Animation/shader graph workspace types are not finished authoring editors.
-- The sample campaign requires shared module activation before complete editor/player parity.
+- The reference campaign playthrough still needs an authored exit, finish state, and acceptance in both Play modes.
 - End-to-end native, supported-machine, and measured performance acceptance remains explicit.
 
 These boundaries keep the next work concrete: resolve observed authoring friction

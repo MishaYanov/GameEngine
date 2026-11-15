@@ -125,6 +125,7 @@ dependencies = [
  "bridge",
  "commands",
  "compiler",
+ "courtyard-gameplay",
  "engine-logger",
  "glam",
  "log",
@@ -629,8 +630,11 @@ checksum = "688226b9769bbf11a9d82a94fb4adda15793a6023d33a8ca7695dbafec6f4123"
 name = "compiler"
 version = "0.1.0"
 dependencies = [
+ "courtyard-gameplay",
  "engine-core",
  "engine-logger",
+ "sha2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -724,6 +728,13 @@ dependencies = [
  "bitflags 2.13.1",
  "core-foundation 0.10.1",
  "libc",
+]
+
+[[package]]
+name = "courtyard-gameplay"
+version = "0.1.0"
+dependencies = [
+ "engine-core",
 ]
 
 [[package]]
@@ -1137,6 +1148,7 @@ dependencies = [
 name = "engine-headless"
 version = "0.1.0"
 dependencies = [
+ "courtyard-gameplay",
  "engine-core",
  "serde",
  "serde_json",
@@ -1415,6 +1427,7 @@ dependencies = [
 name = "game"
 version = "0.1.0"
 dependencies = [
+ "courtyard-gameplay",
  "engine-logger",
  "glam",
  "renderer",

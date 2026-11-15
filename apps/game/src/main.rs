@@ -3,9 +3,9 @@ mod editor_tools;
 mod game;
 mod gizmo_overlay;
 mod native_input;
-mod progress;
 mod selection_overlay;
 
+use courtyard_gameplay as progress;
 use editor_panel::PanelView;
 use editor_tools::EditorTools;
 use runtime::FrameClock;
@@ -165,7 +165,12 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.player_shortcut_pressed(Key::F7) {
+		if self.player_shortcut_pressed(Key::F7)
+			&& self
+				.editor
+				.play_progress::<progress::CampaignProgress>()
+				.is_some()
+		{
 			let result = runtime::game_progress::ProgressAction::new::<progress::CampaignProgress>(
 				progress::ProgressAction::AwardScore { amount: 1 },
 			)
@@ -196,11 +201,11 @@ impl GameApp {
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
 		let game_owns_arrow = self.editor.is_playing()
 			&& [
-			Key::ArrowLeft,
-			Key::ArrowRight,
-			Key::ArrowDown,
-			Key::ArrowUp,
-		]
+				Key::ArrowLeft,
+				Key::ArrowRight,
+				Key::ArrowDown,
+				Key::ArrowUp,
+			]
 			.into_iter()
 			.any(|key| self.input.is_held(key) && self.editor.play_input_binds_key(key));
 		if !game_owns_arrow {
@@ -296,22 +301,25 @@ impl GameApp {
 
 	fn update_selection_title(&mut self) {
 		if self.standalone_runtime {
-			let progress = self.editor.play_progress::<progress::CampaignProgress>();
-			let title = format!(
-				"{} | Score: {} | Courtyard key: {}{}",
-				self.project_name.as_deref().unwrap_or("Game Engine Player"),
-				progress.map_or(0, |value| value.score),
-				if progress.is_some_and(|value| value.has_courtyard_key) {
+			let mut title = self
+				.project_name
+				.as_deref()
+				.unwrap_or("Game Engine Player")
+				.to_owned();
+			if let Some(progress) = self.editor.play_progress::<progress::CampaignProgress>() {
+				let key = if progress.has_courtyard_key {
 					"yes"
 				} else {
 					"no"
-				},
-				if self.editor.simulation_paused() {
-					" | Paused"
-				} else {
-					""
-				}
-			);
+				};
+				title.push_str(&format!(
+					" | Score: {} | Courtyard key: {key}",
+					progress.score
+				));
+			}
+			if self.editor.simulation_paused() {
+				title.push_str(" | Paused");
+			}
 			if title != self.last_window_title {
 				if let Some(window) = self.window.as_ref() {
 					window.set_title(&title);
@@ -379,11 +387,15 @@ impl GameApp {
 		let mut editor = Self::prepare_editor(&mut loaded)?;
 		let project = match self.project.clone() {
 			Some(project) => project,
-			None if self.installed_project => game::legacy_project(
-				&loaded.scene,
-				self.project_name.as_deref().unwrap_or("Legacy Project"),
-				startup_scene,
-			)?,
+			None if self.installed_project => {
+				let mut project = game::legacy_project(
+					&loaded.scene,
+					self.project_name.as_deref().unwrap_or("Legacy Project"),
+					startup_scene,
+				)?;
+				project.gameplay_module = Some(progress::COURTYARD_RUN_ID.to_owned());
+				project
+			}
 			None => ProjectData::for_scene(
 				self.project_name.as_deref().unwrap_or("Game Engine"),
 				startup_scene,
@@ -391,7 +403,7 @@ impl GameApp {
 			)?,
 		};
 		editor.set_initial_project(project.clone())?;
-		editor.set_module_factory(Arc::new(progress::CampaignFactory))?;
+		editor.set_module_resolver(Arc::new(progress::resolve))?;
 		let overlay = if !self.standalone_runtime {
 			Some(SelectionOverlay::new(&renderer, &mut loaded.assets)?)
 		} else {
@@ -742,7 +754,7 @@ impl GameApp {
 		if let Some(project) = project.as_ref() {
 			editor.set_initial_project(project.clone())?;
 		}
-		editor.set_module_factory(Arc::new(progress::CampaignFactory))?;
+		editor.set_module_resolver(Arc::new(progress::resolve))?;
 		if self.standalone_runtime {
 			editor.start_play(&mut loaded.scene)?;
 		}
@@ -1235,10 +1247,14 @@ fn run() -> Result<(), String> {
 		.ok_or("Executable has no parent directory")?;
 	let installed_config = executable_root.join("project.json");
 	let marker = executable_root.join("project-name.txt");
-	app.installed_project = installed_config.is_file() || marker.is_file();
-	app.project_name = std::fs::read_to_string(marker).ok();
+	let has_manifest = installed_config.is_file();
+	let legacy_install = !has_manifest && marker.is_file();
+	app.installed_project = has_manifest || legacy_install;
+	if legacy_install {
+		app.project_name = read_legacy_project_name(&marker);
+	}
 	let source_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.json");
-	app.project_path = if installed_config.is_file() {
+	app.project_path = if has_manifest {
 		Some(installed_config)
 	} else if !app.installed_project && source_config.is_file() {
 		Some(source_config)
@@ -1274,6 +1290,11 @@ fn run() -> Result<(), String> {
 		.transpose()?;
 
 	app.standalone_runtime = options.mode == LaunchMode::Player;
+	if app.standalone_runtime
+		&& let Some(project) = &app.project
+	{
+		progress::resolve(project)?;
+	}
 	engine_logger::debug!(target: "game", "Launch configuration selected: mode={:?}, installed={}", options.mode, app.installed_project);
 
 	// Validate launch configuration before creating platform/GPU resources.
@@ -1302,6 +1323,20 @@ fn report_update_result(operation: &'static str, result: Result<(), String>, rep
 		*reported = false;
 		engine_logger::debug!(target: "game", "Game update recovered: operation={operation}");
 	}
+}
+
+fn read_legacy_project_name(path: &Path) -> Option<String> {
+	const MAX_LEGACY_NAME_BYTES: u64 = 80;
+	if !std::fs::symlink_metadata(path).ok()?.is_file() {
+		return None;
+	}
+	let mut name = String::new();
+	File::open(path)
+		.ok()?
+		.take(MAX_LEGACY_NAME_BYTES + 1)
+		.read_to_string(&mut name)
+		.ok()?;
+	(name.len() as u64 <= MAX_LEGACY_NAME_BYTES).then_some(name)
 }
 
 fn load_input_profile(path: &Path) -> Result<InputProfile, String> {

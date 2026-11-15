@@ -56,6 +56,10 @@ session; [project lifecycle](../../project-lifecycle.md#editor-play-and-simulati
 authoring
 and startup distinction.
 
+`SimulationSession::new` uses configured behaviors and rejects manifests with an explicit gameplay module. Hosts
+that support native modules resolve a factory and construct a `GameSession` so the factory supplies the scene module
+and initial typed progress. See [gameplay module selection](../../project-lifecycle.md#gameplay-module-selection).
+
 Editor Play now owns a `GameSession` containing the active SimulationSession. `prepare_play_scene` and
 `commit_play_scene` allow explicit replacement with a validated candidate identified by session owner and generation.
 Preparation leaves the active simulation installed. Commit preserves current pause state, clears movement and advances

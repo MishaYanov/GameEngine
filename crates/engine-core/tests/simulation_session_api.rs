@@ -20,6 +20,19 @@ fn project(data: &engine_core::SceneData, behaviors: Vec<BehaviorSpec>) -> Proje
 	}
 	p
 }
+#[test]
+fn default_simulation_requires_explicit_factory_for_a_named_module() {
+	let data = Arc::new(scene(vec![entity("actor", [0.0; 3])]));
+	let mut project = project(&data, vec![]);
+	project.gameplay_module = Some("custom_module".into());
+
+	assert!(matches!(
+		SimulationSession::new(project.clone(), Arc::clone(&data)),
+		Err(message) if message.contains("custom_module")
+	));
+	assert!(SimulationSession::with_factory(project, data, &ConfiguredBehaviorFactory).is_ok());
+}
+
 fn controlled(target: &str, speed: f32, space: BehaviorSpace) -> BehaviorSpec {
 	BehaviorSpec::ControlledMove {
 		entity: key(target),

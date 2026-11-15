@@ -410,6 +410,8 @@ impl Builder {
 			"crates/bridge/src",
 			"crates/engine-core/Cargo.toml",
 			"crates/engine-core/src",
+			"crates/courtyard-gameplay/Cargo.toml",
+			"crates/courtyard-gameplay/src",
 		] {
 			let path = source.join(path);
 			walk(&source, &path, &mut files, &mut total)?;
@@ -525,7 +527,7 @@ impl Builder {
 			}
 			fs::write(
 				staging.join("Cargo.toml"),
-				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\"]\n",
+				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\",\"crates/courtyard-gameplay\"]\n",
 			)?;
 			let main = staging.join("apps/game/src/main.rs");
 			let text = fs::read_to_string(&main)?.replace("PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"assets\")", "std::env::current_exe().expect(\"game executable path\").parent().expect(\"game executable folder\").join(\"../../apps/game/assets\")");

@@ -28,9 +28,11 @@ Use `cargo run -p game -- --development` or `cargo run -p game -- --player` to c
 detection selects Player by default; the older environment switch remains a compatibility input. Development retains
 existing controls, but native SceneEditor delegates edits/history to core EditorSession.
 
-Project schema 3 identifies startup_scene_id in its scene catalog. The player loads that document and applies its
+Project schema 3 identifies `startup_scene_id` in its scene catalog. The player loads that document and applies its
 scene-scoped ControlledMove/Spin behaviors, including shared settings, through the same SimulationSession used by
-editor Play. GameSession owns the current simulation and explicit replacement boundary. RobotGame and older
+editor Play. Both paths resolve the manifest's optional `gameplay_module` through `courtyard-gameplay` when Play
+starts. An omitted selector uses configured behaviors. GameSession owns the current simulation and explicit
+replacement boundary. RobotGame and older
 CommandHistory APIs remain compatibility helpers, not the normal GameApp behavior pipeline.
 See [project lifecycle](../../project-lifecycle.md), [backend handoff](../../project3-handoff.md)
 and [runtime](../../crates/runtime/README.md).
@@ -58,12 +60,14 @@ Native GPU/interactive acceptance remains separate from source inspection and CP
 
 ## Demo progress and New Game
 
-The native game's CampaignFactory owns an in-memory `CampaignProgress` with score and a courtyard-key flag. In Player
-mode, **F7** awards one score point, **F8** changes scenes while keeping progress, and **F10** prepares a New Game at
-the
-startup scene. The title displays score/key state. The configured controlled actor reaching world X >= 1 unlocks the
-courtyard key through a simulation progress action. The flag demonstrates shared progress; scene cycling is not gated
-by it.
+The bundled demo sets `gameplay_module` to `courtyard_run`. Its factory in `crates/courtyard-gameplay` supplies
+in-memory `CampaignProgress` with score and a courtyard-key flag. In Player mode, the title displays this state and
+**F7** awards one point when campaign progress is active. **F8** changes scenes while keeping progress, and **F10**
+prepares a New Game at the startup scene.
+
+When a configured controlled actor reaches world X >= 1, the module requests the courtyard key through a typed
+progress action. That rule now runs in editor Play, headless Play, and the Player. F8 remains a manual scene cycle.
+Acquiring the key, entering an exit trigger, and finishing a run are still a planned authoring scenario.
 
 New Game prepares both fresh progress and a new scene before adopting CPU/GPU state, then resets the run identity and
 scene generation. Stopping Play or exiting loses this progress; restarting does not read a save file. The game supplies

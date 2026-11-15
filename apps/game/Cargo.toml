@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+courtyard-gameplay = { path = "../../crates/courtyard-gameplay" }
 engine-logger = { path = "../../crates/logger" }
 runtime = { path = "../../crates/runtime" }
 renderer = { version = "0.1.0", path = "../../crates/renderer" }
