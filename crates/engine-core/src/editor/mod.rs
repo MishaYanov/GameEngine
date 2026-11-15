@@ -8,7 +8,7 @@ mod operations;
 mod prefab;
 use crate::command::{
 	CommandDescriptorDto, EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto,
-	SnapSettingsDto,
+	PlayStatusDto, SnapSettingsDto,
 };
 use crate::game_progress::{GameProgress, ProgressAction};
 use crate::game_session::{GameSession, PreparedScene};
@@ -131,6 +131,13 @@ impl CommandFactory {
 				false,
 			),
 			("set_collider", "Set collider", "collision", true, false),
+			(
+				"set_scene_binding",
+				"Set scene binding",
+				"scene",
+				true,
+				false,
+			),
 			("upsert_light", "Set light", "lighting", true, false),
 			("remove_light", "Remove light", "lighting", true, false),
 			("set_camera", "Set camera", "camera", true, false),
@@ -456,6 +463,7 @@ impl EditorSession {
 		let state = self.state();
 		Ok(EditorSnapshotDto {
 			active_scene_id: state.active_scene_id,
+			play_session_id: state.play_session_id,
 			project_dirty: state.project_dirty,
 			scenes: state.scenes,
 			revision: state.revision,
@@ -480,6 +488,10 @@ impl EditorSession {
 		let dirty = project_dirty || scenes.iter().any(|scene| scene.dirty);
 		crate::command::EditorStateDto {
 			active_scene_id: self.active_scene_id.clone(),
+			play_session_id: self
+				.play
+				.as_ref()
+				.map(|play| play.play_session_id().to_owned()),
 			project_dirty,
 			scenes,
 			revision: self.revision,
@@ -755,8 +767,16 @@ impl EditorSession {
 			}
 			mutation => {
 				self.require_edit()?;
+
+				if let Command::SetSceneBinding { scene_id, .. } = &mutation {
+					if scene_id != &self.active_scene_id {
+						return Err("Scene binding command must target the active scene".into());
+					}
+				}
+
 				let mut next = (*self.data).clone();
 				let mut selection = self.selection.clone();
+
 				operations::apply(
 					&mut next,
 					&mut selection,
@@ -764,6 +784,7 @@ impl EditorSession {
 					&self.bounds,
 					mutation,
 				)?;
+
 				self.commit(next, selection, "Edit scene")?;
 			}
 		}
@@ -898,6 +919,14 @@ impl EditorSession {
 }
 
 impl EditorSession {
+	pub fn play_status(&self) -> Option<PlayStatusDto> {
+		self.play.as_ref().map(GameSession::status)
+	}
+
+	pub(crate) fn play_run_id(&self) -> Option<&str> {
+		self.play.as_ref().map(GameSession::run_id)
+	}
+
 	pub fn play_progress<P: GameProgress>(&self) -> Option<&P> {
 		self.play.as_ref()?.progress::<P>()
 	}
@@ -930,6 +959,22 @@ impl EditorSession {
 		self.play.as_ref().map(|play| play.active().scene_id())
 	}
 
+	pub fn pending_play_scene(&self) -> Option<&SceneId> {
+		self.play.as_ref()?.pending_scene()
+	}
+
+	pub fn prepare_pending_play_scene(&self) -> Result<(PreparedScene, Arc<SceneData>), String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		let play = self.play.as_ref().ok_or("Play mode is not active")?;
+		let scene_id = play
+			.pending_scene()
+			.ok_or("No runtime scene request is pending")?;
+		let document = self.scene_document(scene_id)?;
+		let prepared = play.prepare_pending_scene(Arc::clone(&document))?;
+		Ok((prepared, document))
+	}
+
 	pub fn prepare_play_scene(
 		&self,
 		scene_id: SceneId,
@@ -954,8 +999,6 @@ impl EditorSession {
 			.commit_scene(prepared)?;
 
 		self.scene_revision += 1;
-		self.bump();
-
 		Ok(())
 	}
 }

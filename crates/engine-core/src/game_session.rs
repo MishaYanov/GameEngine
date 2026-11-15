@@ -1,27 +1,48 @@
-use crate::SceneData;
 use crate::game_progress::{GameProgress, ProgressAction, ProgressState};
 use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
-use crate::simulation_session::{GameModuleFactory, SimulationSession};
+use crate::simulation_session::{GameModuleFactory, SimulationSession, TickOutcome};
+use crate::{SceneData, command::PlayStatusDto};
 use std::sync::Arc;
 
 pub struct GameSession {
 	project: Arc<ProjectData>,
 	factory: Arc<dyn GameModuleFactory>,
 	active: SimulationSession,
-	identity: Arc<()>,
+	play_session_id: String,
+	identity: Arc<String>,
 	progress: ProgressState,
 	scene_generation: u64,
+	pending_scene: Option<SceneId>,
 }
 
 pub struct PreparedScene {
-	new_progress: Option<ProgressState>,
-	owner: Arc<()>,
+	new_run: Option<(ProgressState, Arc<String>)>,
+	owner: Arc<String>,
 	expected_generation: u64,
 	simulation: SimulationSession,
 }
 
 impl GameSession {
+	pub fn play_session_id(&self) -> &str {
+		&self.play_session_id
+	}
+
+	pub fn run_id(&self) -> &str {
+		&self.identity
+	}
+
+	pub fn status(&self) -> PlayStatusDto {
+		PlayStatusDto {
+			play_session_id: self.play_session_id.clone(),
+			run_id: self.run_id().to_owned(),
+			scene_id: self.active.scene_id().clone(),
+			paused: self.active.paused(),
+			pending_scene_id: self.pending_scene.clone(),
+			gameplay: self.active.gameplay_status(self.progress.view()),
+		}
+	}
+
 	pub fn progress<P: GameProgress>(&self) -> Option<&P> {
 		self.progress.view().get::<P>()
 	}
@@ -31,8 +52,16 @@ impl GameSession {
 	pub fn apply_progress_actions(&mut self, actions: &[ProgressAction]) -> Result<bool, String> {
 		self.progress.apply_batch(actions)
 	}
-	pub fn tick(&mut self, elapsed: f64) -> Result<crate::simulation_session::TickOutcome, String> {
-		self.active.tick_with_progress(elapsed, &mut self.progress)
+	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
+		let outcome = self.active.tick_with_progress(
+			elapsed,
+			&mut self.progress,
+			self.pending_scene.is_some(),
+		)?;
+		if let Some(scene_id) = &outcome.requested_scene {
+			self.pending_scene = Some(scene_id.clone());
+		}
+		Ok(outcome)
 	}
 	pub fn needs_tick(&self) -> bool {
 		self.active.needs_tick_with_progress(self.progress.view())
@@ -45,6 +74,18 @@ impl GameSession {
 	}
 	pub fn scene_generation(&self) -> u64 {
 		self.scene_generation
+	}
+
+	/// The outstanding request stays available if a host cannot prepare its destination.
+	pub fn pending_scene(&self) -> Option<&SceneId> {
+		self.pending_scene.as_ref()
+	}
+
+	pub fn prepare_pending_scene(&self, document: Arc<SceneData>) -> Result<PreparedScene, String> {
+		let scene_id = self
+			.pending_scene()
+			.ok_or("No runtime scene request is pending")?;
+		self.prepare_scene(scene_id.clone(), document)
 	}
 
 	pub fn prepare_scene(
@@ -70,7 +111,7 @@ impl GameSession {
 		simulation.set_paused(self.active.paused());
 
 		Ok(PreparedScene {
-			new_progress: None,
+			new_run: None,
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
 			simulation,
@@ -95,9 +136,11 @@ impl GameSession {
 			project,
 			factory,
 			active,
-			identity: Arc::new(()),
+			play_session_id: uuid::Uuid::new_v4().to_string(),
+			identity: Arc::new(uuid::Uuid::new_v4().to_string()),
 			progress,
 			scene_generation: 0,
+			pending_scene: None,
 		})
 	}
 
@@ -116,7 +159,7 @@ impl GameSession {
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
 			simulation: next.active,
-			new_progress: Some(next.progress),
+			new_run: Some((next.progress, next.identity)),
 		})
 	}
 
@@ -128,7 +171,7 @@ impl GameSession {
 			return Err("Scene generation counter is out of sync".into());
 		}
 
-		let next_generation = if prepared.new_progress.is_some() {
+		let next_generation = if prepared.new_run.is_some() {
 			0
 		} else {
 			self.scene_generation
@@ -136,17 +179,18 @@ impl GameSession {
 				.ok_or_else(|| "Scene generation counter is exhausted".to_string())?
 		};
 
-		if prepared.new_progress.is_none() {
+		if prepared.new_run.is_none() {
 			prepared.simulation.set_paused(self.active.paused());
 		}
 		prepared.simulation.clear_input();
-		if let Some(progress) = prepared.new_progress {
+		if let Some((progress, identity)) = prepared.new_run {
 			self.progress = progress;
-			self.identity = Arc::new(());
+			self.identity = identity;
 		}
 
 		self.active = prepared.simulation;
 		self.scene_generation = next_generation;
+		self.pending_scene = None;
 
 		Ok(())
 	}

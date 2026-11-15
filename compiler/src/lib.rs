@@ -13,6 +13,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use engine_core::{
+	game_session::GameSession,
 	project::{BehaviorSpace, BehaviorSpec, MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::SceneData,
@@ -693,6 +694,14 @@ fn validate_catalog_scenes(
 ) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
+	let gameplay = if project.gameplay_module.is_some() {
+		Some((
+			Arc::new(project.clone()),
+			courtyard_gameplay::resolve(project)?,
+		))
+	} else {
+		None
+	};
 	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
 	for behavior in &project.behaviors {
 		targets
@@ -707,7 +716,20 @@ fn validate_catalog_scenes(
 
 	for entry in ordered_scenes(project) {
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
-		if let Err(error) = validate_catalog_scene(scene_targets, root, entry, &packaged) {
+		let result =
+			validate_catalog_scene(scene_targets, root, entry, &packaged).and_then(|scene| {
+				if let Some((project, factory)) = &gameplay {
+					GameSession::with_factory_for_scene(
+						Arc::clone(project),
+						entry.id().clone(),
+						Arc::new(scene),
+						Arc::clone(factory),
+					)
+					.map_err(|cause| scene_error(entry, cause))?;
+				}
+				Ok(())
+			});
+		if let Err(error) = result {
 			append_scene_error(&mut report, &error, &mut truncated);
 		}
 	}
@@ -758,7 +780,7 @@ fn validate_catalog_scene(
 	root: &Path,
 	entry: &SceneDescriptor,
 	packaged: &HashSet<&Path>,
-) -> Result<(), String> {
+) -> Result<SceneData, String> {
 	let path = prepared_asset_path(root, Path::new(entry.asset_path()), packaged)
 		.map_err(|cause| scene_error(entry, cause))?;
 	let scene = read_scene_file(&path).map_err(|cause| scene_error(entry, cause))?;
@@ -782,7 +804,7 @@ fn validate_catalog_scene(
 
 	validate_model_references(&scene, root, packaged).map_err(|cause| scene_error(entry, cause))?;
 
-	Ok(())
+	Ok(scene)
 }
 
 fn ordered_scenes(project: &ProjectData) -> Vec<&SceneDescriptor> {

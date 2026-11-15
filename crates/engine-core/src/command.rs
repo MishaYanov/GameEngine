@@ -45,6 +45,13 @@ pub enum TransformSpace {
 	World,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SceneBindingTarget {
+	Assign { key: String },
+	Clear {},
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapSettingsDto {
 	pub enabled: bool,
@@ -179,6 +186,11 @@ pub enum EditorCommandDto {
 		entity: String,
 		movement: [f32; 3],
 	},
+	SetSceneBinding {
+		scene_id: SceneId,
+		name: String,
+		target: SceneBindingTarget,
+	},
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -193,9 +205,27 @@ pub struct SceneStateDto {
 	pub loaded: bool,
 	pub dirty: bool,
 }
+pub use crate::simulation_session::GameplayStatus;
+
+/// Runtime-only state. These IDs are deliberately independent of authored scenes
+/// and revisions, and a new run retains the enclosing Play session ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayStatusDto {
+	pub play_session_id: String,
+	pub run_id: String,
+	pub scene_id: SceneId,
+	pub paused: bool,
+	#[serde(default)]
+	pub pending_scene_id: Option<SceneId>,
+	#[serde(default)]
+	pub gameplay: Option<GameplayStatus>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorStateDto {
 	pub active_scene_id: SceneId,
+	#[serde(default)]
+	pub play_session_id: Option<String>,
 	pub project_dirty: bool,
 	pub scenes: Vec<SceneStateDto>,
 	pub revision: u64,
@@ -212,6 +242,8 @@ pub struct EditorStateDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSnapshotDto {
 	pub active_scene_id: SceneId,
+	#[serde(default)]
+	pub play_session_id: Option<String>,
 	pub project_dirty: bool,
 	pub scenes: Vec<SceneStateDto>,
 	pub revision: u64,

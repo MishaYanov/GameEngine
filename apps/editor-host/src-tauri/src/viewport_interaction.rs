@@ -11,7 +11,7 @@ use bridge::editor::{
 use bridge::viewport::*;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use renderer::{EditorGrid, EditorLine, EditorVisuals};
-use runtime::{scene::Scene, Bounds3};
+use runtime::{scene::Scene, simulation_session::TickOutcome, BackendError, Bounds3};
 
 use crate::editor::{AssetTicket, EditorWorkspace};
 use crate::viewport_tools::{
@@ -87,6 +87,8 @@ pub(crate) struct ViewportInteraction {
 	error: Option<String>,
 	document_changed: bool,
 	playing: bool,
+	game_status_revision: Option<(u64, u64)>,
+	game_status: Option<bridge::editor::PlayStatusDto>,
 	last_extent: [u32; 2],
 	last_dpi: f64,
 	hovered: Option<String>,
@@ -122,6 +124,8 @@ impl Default for ViewportInteraction {
 			error: None,
 			document_changed: false,
 			playing: false,
+			game_status_revision: None,
+			game_status: None,
 			last_extent: [0; 2],
 			last_dpi: 1.0,
 			hovered: None,
@@ -133,7 +137,11 @@ impl Default for ViewportInteraction {
 
 impl ViewportInteraction {
 	fn changed(&mut self) {
-		self.revision = self.revision.wrapping_add(1);
+		self.revision = self.revision.saturating_add(1);
+	}
+
+	pub fn revision(&self) -> u64 {
+		self.revision
 	}
 
 	pub fn state(&self) -> ViewportEditorStateDto {
@@ -167,12 +175,46 @@ impl ViewportInteraction {
 			focused: self.focused,
 			error: self.error.clone(),
 			transform_preview: self.preview.clone(),
+			game_status: self.game_status.clone(),
 		}
 	}
 
 	pub fn report(&mut self, error: impl Into<String>) {
 		self.error = Some(error.into());
 		self.changed();
+	}
+
+	pub fn clear_error(&mut self) {
+		if self.error.take().is_some() {
+			self.changed();
+		}
+	}
+
+	/// Runtime status has its own publication path; it never invalidates an authored snapshot.
+	pub fn sync_game_status(&mut self, workspace: &EditorWorkspace) {
+		self.game_status_revision =
+			Some((workspace.generation, workspace.backend.session().revision()));
+		let status = workspace.backend.play_status();
+		if self.game_status != status {
+			self.game_status = status;
+			self.changed();
+		}
+	}
+
+	pub fn sync_game_status_after_tick(
+		&mut self,
+		workspace: &EditorWorkspace,
+		outcome: &Result<TickOutcome, BackendError>,
+	) {
+		// Progress, pending scene requests and a pause after rejection can all
+		// change the HUD without touching the authored revision.
+		let changed = match outcome {
+			Ok(outcome) => outcome.progress_changed || outcome.requested_scene.is_some(),
+			Err(_) => true,
+		};
+		if changed {
+			self.sync_game_status(workspace);
+		}
 	}
 
 	pub fn take_document_changed(&mut self) -> bool {
@@ -225,7 +267,11 @@ impl ViewportInteraction {
 		if self.playing != playing {
 			self.cancel(workspace)?;
 			self.playing = playing;
+			self.error = None;
 			self.changed();
+		}
+		if self.game_status_revision != Some((generation, workspace.backend.session().revision())) {
+			self.sync_game_status(workspace);
 		}
 		Ok(())
 	}
@@ -365,6 +411,9 @@ impl ViewportInteraction {
 			}
 		}
 		match action {
+			ViewportActionDto::RestartRun { .. } => {
+				return Err("Restart Run must be prepared by the native viewport worker".into());
+			}
 			ViewportActionDto::SetTool { tool } => self.settings.tool = tool,
 			ViewportActionDto::SetSpace { space } => self.settings.space = space,
 			ViewportActionDto::SetPivot { pivot } => self.settings.pivot = pivot,
@@ -1339,6 +1388,11 @@ impl ViewportInteraction {
 
 	pub fn captured(&self) -> bool {
 		self.navigation.is_some() || self.drag.is_some() || self.click.is_some()
+	}
+
+	pub fn clear_play_input(&mut self, workspace: &mut EditorWorkspace) {
+		self.keys.clear();
+		workspace.backend.clear_play_input();
 	}
 
 	fn route_game_input(&mut self, workspace: &mut EditorWorkspace) -> Result<(), String> {

@@ -122,6 +122,19 @@ Selection retention lasts only for the current session. Newly created or freshly
 selection, and reopening a workspace starts empty again. Selection is not serialized into scene/project files and does
 not contribute to scene/project dirty flags or change saved baselines.
 
+## Gameplay role bindings
+
+A scene's schema-3 `bindings` map stores role names and entity keys in that authored document. In Edit, use
+**Gameplay Roles** to assign **Player**, **Key**, **Exit**, or **Finish** from the active scene. Choose **Unassigned**
+to clear a role. The editor applies each change as an undoable scene command. Save Scene or Save All writes the
+binding changes. Entity deletion can clear its bindings, so check the roles before Play or export.
+
+For `courtyard_run`, a scene with Key or Exit needs Player, Key and Exit bound to distinct entities. Player needs
+a controlled movement behavior with positive speed. The catalog needs the scene ID `finish`; that scene needs
+distinct Player and Finish bindings and a movable Player. A scene without Key or Exit roles and with an ID other
+than `finish` can keep configured movement and spin. Role requirements come from the selected module.
+[Play the bundled route](apps/game/README.md#demo-progress-and-new-game).
+
 ## Editor Play and simulation scene identity
 
 `SimulationSession::scene_id()` identifies the scene being simulated separately from the project's authored
@@ -141,19 +154,23 @@ scene is rejected. `commit_scene(prepared)` accepts only a candidate created by 
 generation; another successful commit makes older candidates stale. Commit preserves the current pause state, clears
 input, resets simulation state with the new candidate and advances the scene generation.
 
-EditorSession exposes this through `play_scene_id`, `prepare_play_scene` and `commit_play_scene`. Preparation and commit
-require Play, no open transaction and revision capacity. Commit advances command and scene revisions; it does not edit
-authored documents or switch the authoring catalog selection. Stopping Play returns to the retained authored state.
-These Rust APIs do not add a typed scene-transition command or Angular control. GameSession now retains a game-owned
-progress value across ordinary scene changes; the outgoing simulation world is still discarded. Progress is in memory,
-not a save file or automatic scene-trigger system. The native Player adds an explicit
-[F8 catalog cycle](apps/game/README.md#player-scene-switching) using this boundary.
+Modules can emit a typed `RequestScene` action. An accepted tick returns the requested scene to the host, which
+prepares the destination before committing. Editor Play prepares from the corresponding retained draft. Its native
+worker stages models, camera and GPU resources before committing the CPU scene and clearing held movement.
+A failed preparation surfaces an error and leaves the current runtime scene installed. The source stays playable.
+Ordinary commits retain progress and discard the outgoing runtime
+world. [Player switching](apps/game/README.md#player-scene-switching).
 
-`prepare_new_game` prepares a fresh simulation and factory-created progress, including when restarting the active scene.
-Committing that candidate resets progress, scene generation and session identity, invalidating all earlier prepared
-tokens; it starts with the new simulation's pause state. Ordinary scene commits preserve the latest progress and pause
-state rather than copying progress captured during preparation. Stopping Play drops progress; starting Play creates
-another run. See [game progress](crates/runtime/README.md#game-progress) for typed actions and transaction limits.
+EditorSession exposes `play_scene_id`, `prepare_pending_play_scene` and `commit_play_scene`. A runtime scene commit
+publishes `RuntimeSceneChanged` and advances the render scene revision. The authored command revision, active authoring
+scene, selection and documents retain their values. Stop returns to the retained authored state.
+
+**Restart Run** in Game prepares a fresh simulation and factory-created progress at the configured startup scene from
+its retained draft. A successful commit resets progress, run identity and the pending destination. It starts unpaused
+and invalidates prepared candidates from the preceding run. Ordinary scene changes preserve the latest progress
+and pause state. Starting Play creates a Play session ID used to correlate status, while Restart Run within that
+session assigns a new run ID. Stopping Play drops the
+run. [Typed progress and limits](crates/runtime/README.md#game-progress).
 
 ## Save, Save As, register and reload
 
@@ -202,18 +219,20 @@ migration.
 
 Host build preparation requires clean Edit state, no grouped edit, a manifest matching memory and **every catalog scene
 ** matching its retained document on disk. Compilation runs after releasing the workspace lock. Compiler preparation
-requires catalog scenes and referenced models to belong to the captured asset list; copied output uses the same
-validation pass against its canonical asset root. Scene failures include ID/path context in stable ID order, with one
+requires catalog scenes and referenced models to belong to the captured asset list. With a selected gameplay module,
+it also prepares each scene with that module to validate game-specific bindings and destination requirements. Copied
+output uses the same validation pass against its canonical asset root. Scene failures include ID/path context in stable
+ID order, with one
 primary cause per invalid scene and a 16 KiB UTF-8 report limit. See [compiler diagnostics and packaging
 checks](compiler/README.md#scene-validation-diagnostics) for the report scope and captured-input limits. Admin
 native-template validation also traverses the catalog. Detailed geometry import remains a runtime concern.
 
 Player launch resolves the configured startup ID to a scene path and uses that scene's behaviors with the selected
 gameplay module. Staged output preserves the saved module ID. Headless project loading prepares all catalog documents
-through `with_scenes`, rejects file aliases/budget overflow and
-supports typed scene commands in replay. A standalone headless scene gets a stable transient ID for comparable
-diagnostic hashes. The native Player's explicit F8 cycle is separate from headless authoring scene commands and does
-not provide automatic gameplay transitions.
+through `with_scenes`, rejects file aliases and budget overflow, and supports typed scene commands in replay.
+Gameplay scene requests use the same retained-document preparation and commit in headless Play. Its diagnostic
+summary shows `active_scene_id` and, while playing, `play_scene_id`. A standalone headless scene gets a stable
+transient ID for comparable diagnostic hashes. The hash covers the project and rendered scene.
 
 ## Source map and verification
 

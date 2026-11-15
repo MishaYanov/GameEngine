@@ -106,9 +106,7 @@ impl GameApp {
 
 		if self.authored.is_some() {
 			let previous_paused = self.editor.simulation_paused();
-			let result = self
-				.editor
-				.update_play(&mut self.scene, &self.input, delta_seconds);
+			let result = self.tick_play(delta_seconds);
 			report_update_result(
 				"development_play",
 				result,
@@ -145,7 +143,11 @@ impl GameApp {
 	}
 
 	fn update_player(&mut self, delta_seconds: f32) {
-		if self.player_shortcut_pressed(Key::F10) {
+		let completed = self.campaign_completed();
+		// The completion message promises F10 even when gameplay normally owns it.
+		if (completed && self.input.just_pressed(Key::F10))
+			|| self.player_shortcut_pressed(Key::F10)
+		{
 			let result = self.restart_player_game();
 			report_update_result(
 				"player_new_game",
@@ -155,7 +157,10 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.player_shortcut_pressed(Key::F8) {
+		if completed {
+			return;
+		}
+		if self.player_shortcut_pressed(Key::F8) && self.editor.pending_play_scene().is_none() {
 			let result = self.cycle_player_scene();
 			report_update_result(
 				"player_scene_switch",
@@ -184,9 +189,7 @@ impl GameApp {
 			return;
 		}
 		self.update_keyboard_camera(delta_seconds);
-		let result = self
-			.editor
-			.update_play(&mut self.scene, &self.input, delta_seconds);
+		let result = self.tick_play(delta_seconds);
 		report_update_result(
 			"player_simulation",
 			result,
@@ -194,8 +197,34 @@ impl GameApp {
 		);
 	}
 
+	fn tick_play(&mut self, delta_seconds: f32) -> Result<(), String> {
+		let destination = if self.input.just_pressed(Key::F8)
+			&& let Some(scene_id) = self.editor.pending_play_scene()
+		{
+			Some(scene_id.clone())
+		} else {
+			self.editor
+				.update_play(&mut self.scene, &self.input, delta_seconds)?
+				.requested_scene
+		};
+		if let Some(scene_id) = destination {
+			let result = self.install_play_scene(scene_id, false);
+			if result.is_err() {
+				self.update_selection_title();
+			}
+			return result;
+		}
+		Ok(())
+	}
+
 	fn player_shortcut_pressed(&self, key: Key) -> bool {
 		self.input.just_pressed(key) && !self.editor.play_input_binds_key(key)
+	}
+
+	fn campaign_completed(&self) -> bool {
+		self.editor
+			.play_progress::<progress::CampaignProgress>()
+			.is_some_and(|progress| progress.completed)
 	}
 
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
@@ -215,7 +244,7 @@ impl GameApp {
 	}
 
 	fn needs_continuous_redraw(&self) -> bool {
-		if self.window_occluded {
+		if self.window_occluded || (self.standalone_runtime && self.campaign_completed()) {
 			return false;
 		}
 
@@ -300,6 +329,16 @@ impl GameApp {
 	}
 
 	fn update_selection_title(&mut self) {
+		let scene_status = self
+			.editor
+			.play_scene_id()
+			.map(|id| format!(" | Scene: {}", id.as_str()))
+			.unwrap_or_default();
+		let pending = self
+			.editor
+			.pending_play_scene()
+			.map(|id| format!(" | {} pending (F8 to retry)", id.as_str()))
+			.unwrap_or_default();
 		if self.standalone_runtime {
 			let mut title = self
 				.project_name
@@ -316,10 +355,26 @@ impl GameApp {
 					" | Score: {} | Courtyard key: {key}",
 					progress.score
 				));
+				if progress.completed {
+					title.push_str(" | Complete! F10 to restart");
+				}
+				if self.scene.binding("exit").is_some() {
+					let exit = if progress.courtyard_exit_reached {
+						"reached"
+					} else if progress.has_courtyard_key {
+						"unlocked"
+					} else {
+						"locked"
+					};
+					title.push_str(" | Exit: ");
+					title.push_str(exit);
+				}
 			}
 			if self.editor.simulation_paused() {
 				title.push_str(" | Paused");
 			}
+			title.push_str(&scene_status);
+			title.push_str(&pending);
 			if title != self.last_window_title {
 				if let Some(window) = self.window.as_ref() {
 					window.set_title(&title);
@@ -346,7 +401,7 @@ impl GameApp {
 		};
 
 		let title = format!(
-			"Game Engine{} | {mode} | Selected: {selected_name} | F6 Edit/Play",
+			"Game Engine{} | {mode} | Selected: {selected_name} | F6 Edit/Play{scene_status}{pending}",
 			if self.is_dirty() { " *" } else { "" }
 		);
 		if title != self.last_window_title {
@@ -599,13 +654,11 @@ impl GameApp {
 
 	fn stop_play(&mut self) -> Result<(), String> {
 		self.wait_for_gpu()?;
-		if self.authored.is_none() {
-			return Ok(());
-		}
-		self.editor.stop_play(&mut self.scene)?;
-		let Some(authored) = self.authored.take() else {
+		let Some(authored) = self.authored.as_mut() else {
 			return Ok(());
 		};
+		self.editor.stop_play(&mut authored.scene)?;
+		let authored = self.authored.take().expect("authored scene was present");
 		self.scene = authored.scene;
 		self.camera = authored.camera;
 		self.finish_mode_change();
@@ -649,7 +702,7 @@ impl GameApp {
 	}
 
 	fn switch_player_scene(&mut self, scene_id: SceneId) -> Result<(), String> {
-		self.install_player_scene(scene_id, false)
+		self.install_play_scene(scene_id, false)
 	}
 
 	fn restart_player_game(&mut self) -> Result<(), String> {
@@ -659,13 +712,10 @@ impl GameApp {
 			.ok_or("Project configuration is not initialized")?
 			.startup_scene_id
 			.clone();
-		self.install_player_scene(startup, true)
+		self.install_play_scene(startup, true)
 	}
 
-	fn install_player_scene(&mut self, scene_id: SceneId, new_game: bool) -> Result<(), String> {
-		if !self.standalone_runtime {
-			return Err("Runtime scene switching requires Player mode".into());
-		}
+	fn install_play_scene(&mut self, scene_id: SceneId, new_game: bool) -> Result<(), String> {
 		let current = self
 			.editor
 			.play_scene_id()
@@ -709,12 +759,15 @@ impl GameApp {
 
 		// The old scene remains installed until CPU/GPU preparation succeeds.
 		renderer.wait_idle()?;
-		self.editor.commit_play_scene(prepared, &mut self.input)?;
+		self.editor
+			.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
 		// No fallible operations between committing the CPU world and its view.
 		self.scene = scene;
-		self.asset_manager = Some(assets);
 		self.camera = camera;
-		self.scene_path = Some(scene_path);
+		if self.standalone_runtime {
+			self.asset_manager = Some(assets);
+			self.scene_path = Some(scene_path);
+		}
 		self.clock.reset();
 		self.next_frame_deadline = None;
 		self.play_update_error_reported = false;

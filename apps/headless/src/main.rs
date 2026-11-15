@@ -99,6 +99,9 @@ struct Summary {
 	schema_version: u32,
 	project: String,
 	mode: &'static str,
+	active_scene_id: SceneId,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	play_scene_id: Option<SceneId>,
 	revision: u64,
 	scene_revision: u64,
 	change_cursor: u64,
@@ -380,6 +383,8 @@ fn run(options: Options) -> Result<Summary, String> {
 		} else {
 			"edit"
 		},
+		active_scene_id: engine.session().active_scene_id().clone(),
+		play_scene_id: engine.session().play_scene_id().cloned(),
 		revision: engine.session().revision(),
 		scene_revision: engine.session().scene_revision(),
 		change_cursor: engine.change_cursor(),
@@ -548,6 +553,15 @@ fn advance(
 		check_budget(started, budget)?;
 		let tick_start = Instant::now();
 		let outcome = engine.tick(elapsed).map_err(|e| e.to_string())?;
+		if let Some(destination) = &outcome.requested_scene {
+			check_budget(started, budget)?;
+			let (prepared, _) = engine.prepare_pending_play_scene().map_err(|error| {
+				format!("Cannot prepare requested scene {destination:?}: {error}")
+			})?;
+			engine.commit_play_scene(prepared).map_err(|error| {
+				format!("Cannot install requested scene {destination:?}: {error}")
+			})?;
+		}
 		let time = tick_start.elapsed();
 		measures.tick_total += time;
 		measures.tick_max = measures.tick_max.max(time);

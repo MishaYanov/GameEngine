@@ -34,6 +34,21 @@ export interface ViewportEditorState {
     readonly focused: boolean;
     readonly error: string | null;
     readonly transform_preview?: ViewportTransformPreview | null;
+    readonly game_status?: PlayStatus | null;
+}
+
+export interface PlayStatus {
+    readonly play_session_id: string;
+    readonly run_id: string;
+    readonly scene_id: string;
+    readonly paused: boolean;
+    readonly pending_scene_id: string | null;
+    readonly gameplay: {
+        readonly objective: string;
+        readonly detail: string | null;
+        readonly score: number | null;
+        readonly completed: boolean;
+    } | null;
 }
 
 export type ViewportAction =
@@ -47,6 +62,7 @@ export type ViewportAction =
     | {readonly type: 'set_projection'; readonly projection: ViewportProjection}
     | {readonly type: 'set_plane'; readonly plane: ViewportPlane}
     | {readonly type: 'set_view'; readonly view: ViewportView}
+    | { readonly type: 'restart_run'; readonly run_id: string; readonly expected_revision: number }
     | {readonly type: 'orient'; readonly orientation: ViewportOrientation}
     | {readonly type: 'zoom'; readonly factor: number}
     | {readonly type: 'frame_selection'}

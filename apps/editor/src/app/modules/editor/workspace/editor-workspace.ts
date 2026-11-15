@@ -51,6 +51,20 @@ export class EditorWorkspace {
     protected readonly activeViewKind = signal<WorkspaceViewKind>('scene-viewport');
     protected readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
     protected readonly showingViewport = computed(() => !this.gameView() || this.editorService.playing());
+    protected readonly gameStatus = this.viewportEditor.gameStatus;
+    protected readonly canRestartRun = computed(() =>
+        this.gameView() && this.gameStatus() !== null && !this.workspaceActionBlocked() &&
+        this.editorService.viewport()?.attached === true && !this.editorService.busy() &&
+        this.viewportEditor.pending() === 0
+    );
+    private readonly restartFailure = signal<{ runId: string; generation: number; message: string } | null>(null);
+    protected readonly gameError = computed(() => {
+        const status = this.gameStatus();
+        if (!status) return null;
+        const failure = this.restartFailure();
+        return failure?.runId === status.run_id && failure.generation === this.editorService.workspaceGeneration()
+            ? failure.message : this.viewportEditor.state()?.error ?? null;
+    });
     protected readonly gameKeyboardCaptured = computed(() => {
         const state = this.viewportEditor.state();
         return state?.settings.view === 'game' && state.focused;
@@ -110,6 +124,28 @@ export class EditorWorkspace {
 
     protected selectView(kind: WorkspaceViewKind): void {
         this.activeViewKind.set(kind);
+    }
+
+    protected async restartRun(): Promise<void> {
+        const snapshot = this.editorService.snapshot();
+        const status = this.gameStatus();
+        if (!snapshot || !status || !this.canRestartRun()) return;
+        const generation = this.editorService.workspaceGeneration();
+        this.restartFailure.set(null);
+        try {
+            await this.viewportEditor.action({
+                type: 'restart_run', run_id: status.run_id, expected_revision: snapshot.revision,
+            });
+        } catch (error) {
+            if (this.editorService.workspaceGeneration() === generation &&
+                this.gameStatus()?.run_id === status.run_id) {
+                this.restartFailure.set({
+                    runId: status.run_id,
+                    generation,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
     }
 
     protected handleEditorShortcut(event: KeyboardEvent): void {

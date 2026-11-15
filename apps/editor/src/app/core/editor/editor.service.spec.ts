@@ -191,6 +191,53 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.busy()).toBe(false);
     });
 
+    it.each(['reload', 'openProject'] as const)(
+        'rejects queued role edits from the previous workspace after %s even when scene IDs match',
+        async operation => {
+            const base = snapshot(1);
+            const initial = {...base, document: {...base.document, entities: [entity('a')]}};
+            const reopened = {...initial, revision: 10, scene_revision: 10};
+            const replacement = deferred<EditorSnapshot>();
+            const assigned = {
+                ...reopened,
+                revision: 11,
+                document: {...reopened.document, bindings: {player: 'a'}},
+            };
+            vi.mocked(invoke)
+                .mockResolvedValueOnce(initial)
+                .mockReturnValueOnce(replacement.promise)
+                .mockResolvedValueOnce(reopened)
+                .mockResolvedValueOnce(capabilities)
+                .mockResolvedValueOnce(commandUpdate(assigned));
+            const service = TestBed.inject(EditorService);
+            await service.openProject('first/project.json');
+            const generation = service.workspaceGeneration();
+            const replace = operation === 'reload'
+                ? service.reload()
+                : service.openProject('second/project.json');
+            const command = {
+                type: 'set_scene_binding', scene_id: 'main', name: 'player',
+                target: {kind: 'assign', key: 'a'},
+            } as const;
+            const stale = service.execute(command, generation);
+            const rejected = expect(stale).rejects.toThrow('The workspace changed');
+            replacement.resolve(reopened);
+            await replace;
+            await rejected;
+            expect(service.workspaceGeneration()).toBe(generation + 1);
+            expect(service.snapshot()).toEqual(reopened);
+            expect(vi.mocked(invoke).mock.calls.some(([name]) =>
+                name === 'editor_execute' || name === 'editor_execute_incremental')).toBe(false);
+
+            await service.execute(command, service.workspaceGeneration());
+            expect(invoke).toHaveBeenLastCalledWith('editor_execute_incremental', {
+                request: {expected_revision: 10, command},
+            });
+            expect(service.snapshot()?.document.bindings['player']).toBe('a');
+            expect(service.error()).toBeNull();
+        },
+    );
+
     it('refreshes authoritative memory after a conflict without retrying the rejected edit', async () => {
         vi.mocked(invoke)
             .mockResolvedValueOnce(snapshot(1))
@@ -343,6 +390,20 @@ describe('EditorService native command and viewport queues', () => {
         });
     });
 
+    it('keeps the Play session identity when applying a runtime state delta', async () => {
+        const playing: EditorSnapshot = {...snapshot(3), mode: 'play', play_session_id: 'play-1'};
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(playing)
+            .mockResolvedValueOnce(capabilities)
+            .mockResolvedValueOnce(delta({...playing, revision: 4, paused: true}));
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scene.json');
+        const result = await service.execute({type: 'set_paused', paused: true});
+        expect(result.play_session_id).toBe('play-1');
+        expect(result.paused).toBe(true);
+        expect(result.document).toBe(playing.document);
+    });
+
     it('applies camera and light deltas without copying the entity array', async () => {
         const current = snapshot(3);
         const camera: Camera = {...current.document.camera, position: [1, 2, 3]};
@@ -378,6 +439,7 @@ describe('EditorService native command and viewport queues', () => {
         'topology change',
         'missing camera',
         'bad state',
+        'bad Play session identity',
     ])(
         'resynchronizes an invalid delta (%s) without replaying the accepted command',
         async (failure) => {
@@ -410,7 +472,9 @@ describe('EditorService native command and viewport queues', () => {
                                                 changes: {...update.receipt.changes, camera_changed: true},
                                             },
                                         }
-                                        : {...update, state: {...update.state, mode: 'broken'}};
+                                        : failure === 'bad state'
+                                            ? {...update, state: {...update.state, mode: 'broken'}}
+                                            : {...update, state: {...update.state, mode: 'play', play_session_id: 42}};
             const recovered = {...current, revision: 4, scene_revision: 4};
             vi.mocked(invoke)
                 .mockResolvedValueOnce(current)

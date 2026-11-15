@@ -306,7 +306,10 @@ mod windows {
 	};
 	use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle};
 	use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
-	use runtime::{assets::AssetManager, scene::Scene, scene_io, Camera};
+	use runtime::{
+		assets::AssetManager, scene::Scene, scene_catalog::SceneId, scene_editor::PreparedScene,
+		scene_io, Camera,
+	};
 	use std::{
 		collections::VecDeque,
 		num::NonZeroIsize,
@@ -454,6 +457,39 @@ mod windows {
 			Ok(())
 		}
 	}
+
+	/// Both checks run under the workspace lock, including after GPU preparation.
+	/// Obsolete automatic transitions are discarded; an explicit restart must fail visibly.
+	enum PlayInstall<'a> {
+		Transition {
+			generation: u64,
+			target: &'a SceneId,
+		},
+		Restart(&'a ActionRequest),
+	}
+	impl PlayInstall<'_> {
+		fn validate(&self, workspace: &EditorWorkspace, now: Instant) -> Result<bool, String> {
+			match self {
+				Self::Transition { generation, target } => Ok(workspace.generation == *generation
+					&& workspace.backend.pending_play_scene() == Some(*target)),
+				Self::Restart(request) => {
+					request.validate_context(workspace.generation, now)?;
+					let ViewportActionDto::RestartRun {
+						run_id,
+						expected_revision,
+					} = &request.action
+					else {
+						return Err("Expected a Restart Run request".into());
+					};
+					workspace
+						.backend
+						.validate_restart_play(run_id, *expected_revision)
+						.map_err(|error| error.to_string())?;
+					Ok(true)
+				}
+			}
+		}
+	}
 	#[cfg(test)]
 	mod action_context_tests {
 		use super::*;
@@ -490,6 +526,71 @@ mod windows {
 				.validate_context(41, now + Duration::from_secs(9))
 				.unwrap_err()
 				.contains("expired"));
+		}
+
+		#[test]
+		fn restart_rechecks_deadline_revision_run_and_stop_after_preparation() {
+			use bridge::editor::{EditorCommandDto, EditorCommandRequest};
+			let assets =
+				std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
+			let mut workspace =
+				EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+			let execute = |workspace: &mut EditorWorkspace, command| {
+				workspace
+					.execute_receipt(EditorCommandRequest {
+						expected_revision: workspace.backend.session().revision(),
+						command,
+					})
+					.unwrap()
+			};
+			execute(&mut workspace, EditorCommandDto::StartPlay);
+			let status = workspace.backend.play_status().unwrap();
+			let revision = workspace.backend.session().revision();
+			let now = Instant::now();
+			let mut queued = request(workspace.generation, now + Duration::from_secs(8));
+			queued.action = ViewportActionDto::RestartRun {
+				run_id: status.run_id.clone(),
+				expected_revision: revision,
+			};
+			let guard = PlayInstall::Restart(&queued);
+			assert!(guard.validate(&workspace, now).unwrap());
+			let (prepared, _) = workspace
+				.backend
+				.prepare_restart_play(&status.run_id, revision)
+				.unwrap();
+			assert!(guard
+				.validate(&workspace, now + Duration::from_secs(9))
+				.unwrap_err()
+				.contains("expired"));
+			assert_eq!(
+				workspace.backend.play_status().unwrap(),
+				status,
+				"expired staging leaves old run intact"
+			);
+			workspace.backend.commit_play_scene(prepared).unwrap();
+			assert!(
+				guard.validate(&workspace, now).is_err(),
+				"queued duplicate cannot restart the new run"
+			);
+			let fresh = workspace.backend.play_status().unwrap();
+			queued.action = ViewportActionDto::RestartRun {
+				run_id: fresh.run_id.clone(),
+				expected_revision: revision,
+			};
+			let (prepared, _) = workspace
+				.backend
+				.prepare_restart_play(&fresh.run_id, revision)
+				.unwrap();
+			execute(&mut workspace, EditorCommandDto::SetPaused { paused: true });
+			assert!(PlayInstall::Restart(&queued)
+				.validate(&workspace, now)
+				.is_err());
+			execute(&mut workspace, EditorCommandDto::StopPlay);
+			assert!(PlayInstall::Restart(&queued)
+				.validate(&workspace, now)
+				.is_err());
+			assert!(workspace.backend.commit_play_scene(prepared).is_err());
+			assert!(workspace.backend.play_status().is_none());
 		}
 
 		#[test]
@@ -1100,11 +1201,158 @@ mod windows {
 		fn clear_play_input(&mut self) {
 			if let Ok(mut workspace) = self.shared.lock() {
 				if let Some(workspace) = workspace.as_mut() {
-					workspace.backend.clear_play_input();
+					self.interaction.clear_play_input(workspace);
 				}
 			}
 			self.last_tick = None;
 		}
+
+		fn tick_play(&mut self, elapsed: f64) -> Result<(), String> {
+			let transition = {
+				let mut workspace = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let workspace = workspace.as_mut().ok_or("No editor document is open")?;
+				if !self.gpu_matches(workspace) {
+					self.last_tick = None;
+					self.dirty = true;
+					return Ok(());
+				}
+				let outcome = workspace.backend.tick(elapsed);
+				self.interaction
+					.sync_game_status_after_tick(workspace, &outcome);
+				let outcome = outcome.map_err(|error| error.to_string())?;
+				self.dirty |= !outcome.changes.is_empty();
+				outcome.requested_scene.map(|target| {
+					(
+						workspace.generation,
+						target,
+						workspace.backend.prepare_pending_play_scene(),
+					)
+				})
+			};
+
+			if let Some((generation, target, prepared)) = transition {
+				self.last_tick = None;
+				let result = prepared
+					.map_err(|error| error.to_string())
+					.and_then(|prepared| {
+						self.install_play_scene(
+							PlayInstall::Transition {
+								generation,
+								target: &target,
+							},
+							prepared,
+						)
+					});
+				if let Err(error) = result {
+					let current = self.shared.lock().ok().is_some_and(|workspace| {
+						workspace.as_ref().is_some_and(|workspace| {
+							workspace.generation == generation
+								&& workspace.backend.pending_play_scene() == Some(&target)
+						})
+					});
+					if current {
+						engine_logger::error!(target: "editor_viewport", "Play scene transition failed: operation=install_play_scene");
+						self.interaction.report(format!(
+							"Could not switch to game scene {:?}: {error}",
+							target.as_str()
+						));
+					}
+				}
+			}
+			Ok(())
+		}
+
+		fn gpu_matches(&self, workspace: &EditorWorkspace) -> bool {
+			self.gpu.as_ref().is_some_and(|gpu| {
+				gpu.generation == workspace.generation && gpu.asset_root == workspace.asset_root
+			})
+		}
+
+		fn install_play_scene(
+			&mut self,
+			guard: PlayInstall<'_>,
+			(prepared, document): (PreparedScene, Arc<runtime::SceneData>),
+		) -> Result<(), String> {
+			let gpu = self
+				.gpu
+				.as_mut()
+				.ok_or("Native viewport renderer is not initialized")?;
+			let mut assets =
+				AssetManager::new(&gpu.asset_root).map_err(|error| error.to_string())?;
+			let (scene, camera) = scene_io::instantiate(&document, &mut assets, &gpu.renderer)?;
+			drop(document);
+			gpu.renderer.wait_idle()?;
+
+			let mut shared = self
+				.shared
+				.lock()
+				.map_err(|_| "Editor document lock is poisoned")?;
+			let Some(workspace) = shared.as_mut() else {
+				return match guard {
+					PlayInstall::Transition { .. } => Ok(()),
+					PlayInstall::Restart(_) => Err("The project was closed during restart".into()),
+				};
+			};
+			if !guard.validate(workspace, Instant::now())? {
+				return Ok(());
+			}
+
+			// Lights are validated CPU data. Keep renderer uploads and waits
+			// outside the workspace lock and restore the old lights on rejection.
+			gpu.renderer.set_lights(&scene.renderer_lights())?;
+			if let Err(error) = workspace.backend.commit_play_scene(prepared) {
+				gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
+				return Err(error.to_string());
+			}
+			let retired_scene = std::mem::replace(&mut gpu.scene, scene);
+			let retired_assets = std::mem::replace(&mut gpu.assets, assets);
+			gpu.camera = camera;
+			gpu.revision = workspace.backend.session().scene_revision();
+			gpu.change_cursor = workspace.backend.change_cursor();
+			self.interaction.clear_play_input(workspace);
+			self.interaction.clear_error();
+			self.interaction.sync_game_status(workspace);
+			self.last_tick = None;
+			self.dirty = true;
+			drop(shared);
+			drop(retired_scene);
+			drop(retired_assets);
+			Ok(())
+		}
+
+		fn restart_run(&mut self, request: &ActionRequest) -> Result<(), String> {
+			let prepared = {
+				let shared = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let workspace = shared
+					.as_ref()
+					.ok_or("Open a project before restarting a run")?;
+				PlayInstall::Restart(request).validate(workspace, Instant::now())?;
+				if !self.gpu_matches(workspace) {
+					return Err(
+						"Wait for the current project to finish loading before restarting".into(),
+					);
+				}
+				let ViewportActionDto::RestartRun {
+					run_id,
+					expected_revision,
+				} = &request.action
+				else {
+					return Err("Expected a Restart Run request".into());
+				};
+				workspace
+					.backend
+					.prepare_restart_play(run_id, *expected_revision)
+					.map_err(|error| error.to_string())?
+			};
+			self.install_play_scene(PlayInstall::Restart(request), prepared)
+		}
+
 		fn publish_editor(&mut self, force: bool) {
 			let current = self.interaction.state();
 			if let Ok(mut state) = self.editor_state.lock() {
@@ -1166,21 +1414,40 @@ mod windows {
 				}
 				let reply = request.reply.clone();
 				let extent = self.prepared_extent.unwrap_or_else(|| self.extent());
-				let result = self
-					.shared
-					.lock()
-					.map_err(|_| "Editor document lock is poisoned".to_string())
-					.and_then(|mut workspace| {
-						let workspace = workspace
-							.as_mut()
-							.ok_or("Open a project before using viewport tools")?;
-						// Waiting for the workspace lock can cross both project and
-						// timeout boundaries; reject before any action can mutate it.
-						request.validate_context(workspace.generation, Instant::now())?;
-						self.interaction.action(request.action, workspace, extent)
-					});
+				let result = if matches!(&request.action, ViewportActionDto::RestartRun { .. }) {
+					self.restart_run(&request)
+				} else {
+					self.shared
+						.lock()
+						.map_err(|_| "Editor document lock is poisoned".to_string())
+						.and_then(|mut workspace| {
+							let workspace = workspace
+								.as_mut()
+								.ok_or("Open a project before using viewport tools")?;
+							// Waiting for the workspace lock can cross both project and
+							// timeout boundaries; reject before any action can mutate it.
+							request.validate_context(workspace.generation, Instant::now())?;
+							self.interaction
+								.action(request.action.clone(), workspace, extent)
+						})
+				};
 				if let Err(error) = result.as_ref() {
-					self.interaction.report(error.clone());
+					// A late failure must not paint an error onto another project or a newer run.
+					let current = self.shared.lock().ok().is_some_and(|shared| {
+						shared.as_ref().is_some_and(|workspace| {
+							workspace.generation == request.workspace_generation
+								&& match &request.action {
+									ViewportActionDto::RestartRun { run_id, .. } => workspace
+										.backend
+										.play_status()
+										.is_some_and(|status| status.run_id == *run_id),
+									_ => true,
+								}
+						})
+					});
+					if current {
+						self.interaction.report(error.clone());
+					}
 				}
 				self.dirty = true;
 				self.refresh_game_keyboard_focus();
@@ -1223,7 +1490,7 @@ mod windows {
 					super_key: self.modifiers.super_key(),
 				},
 			};
-			let before = self.interaction.state().revision;
+			let before = self.interaction.revision();
 			if let Ok(mut workspace) = self.shared.lock() {
 				if let Some(workspace) = workspace.as_mut() {
 					if let Err(error) = self.interaction.input(&input, workspace, extent, self.dpi)
@@ -1233,7 +1500,7 @@ mod windows {
 					}
 				}
 			}
-			self.dirty |= before != self.interaction.state().revision
+			self.dirty |= before != self.interaction.revision()
 				|| kind == "pointer_move" && self.interaction.captured()
 				|| matches!(kind, "key_down" | "key_up") && self.interaction.game_keyboard_active();
 			self.update_capture();
@@ -1413,6 +1680,9 @@ mod windows {
 												changes: delta,
 												..
 											} => changes.merge(delta),
+											runtime::events::BackendEventKind::RuntimeSceneChanged { .. } => {
+												changes.full_resync = true;
+											}
 											runtime::events::BackendEventKind::StateChanged
 											| runtime::events::BackendEventKind::ProjectChanged => {}
 										}
@@ -1462,7 +1732,7 @@ mod windows {
 							generation,
 							scene_id: (!session.is_playing()
 								&& self.interaction.settings.view
-								== bridge::viewport::ViewportView::Scene)
+									== bridge::viewport::ViewportView::Scene)
 								.then(|| session.active_scene_id().clone()),
 							change_cursor: cursor,
 							asset_root: workspace.asset_root.clone(),
@@ -2005,9 +2275,9 @@ mod windows {
 				.lock()
 				.ok()
 				.and_then(|workspace| {
-					workspace
-						.as_ref()
-						.map(|workspace| workspace.backend.session().needs_tick())
+					workspace.as_ref().map(|workspace| {
+						self.gpu_matches(workspace) && workspace.backend.session().needs_tick()
+					})
 				})
 				.unwrap_or(false);
 			let ticking = ticking && self.active() && !self.failed;
@@ -2032,21 +2302,8 @@ mod windows {
 					.last_tick
 					.replace(now)
 					.map_or(0.0, |last| now.duration_since(last).as_secs_f64());
-				let result = self
-					.shared
-					.lock()
-					.map_err(|_| "Editor document lock is poisoned".to_string())
-					.and_then(|mut workspace| {
-						let backend = &mut workspace
-							.as_mut()
-							.ok_or("No editor document is open".to_string())?
-							.backend;
-						let outcome = backend.tick(elapsed).map_err(|error| error.to_string())?;
-						Ok(!outcome.changes.is_empty())
-					});
-				match result {
-					Ok(changed) => self.dirty |= changed,
-					Err(error) => self.fail("simulation_tick", error),
+				if let Err(error) = self.tick_play(elapsed) {
+					self.fail("simulation_tick", error);
 				}
 				self.next_frame = now + FRAME;
 			} else if !ticking {
@@ -2093,7 +2350,7 @@ mod windows {
 				deadline = Some(deadline.map_or(status, |deadline| deadline.min(status)));
 			}
 			if let Some(publication) = pending_editor_publication(
-				self.interaction.state().revision,
+				self.interaction.revision(),
 				self.last_editor_revision,
 				self.last_editor_emit,
 			) {

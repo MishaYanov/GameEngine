@@ -384,11 +384,18 @@ Click Game to focus its input, then use W/A/S/D with the shared movement binding
 Releasing a key updates movement; Escape or focus loss clears held play input.
 Scene view preferences and camera bookmarks remain separate from runtime movement.
 
-The bundled sample selects `courtyard_run` in its manifest. Editor Play and the
-packaged Player use the shared resolver and the same campaign module. That module
-implements the demo's controlled-actor position check for the key. An automatic
-exit, a finish state, and a complete native playthrough still need their own
-implementation and acceptance. See [gameplay module selection](project-lifecycle.md#gameplay-module-selection).
+To play the bundled course, open `apps/game/project.json` and select
+`scenes/courtyard.json` before clicking Play. In Game, focus the viewport and
+move with **A** toward the green locked exit, **D** to the yellow key, then **A**
+back to the exit. Game status shows the objective and score. The unlocked exit
+loads `finish` and the panel displays the runtime scene while the Scene selector
+retains Courtyard. Release the movement key, then move with **D** to the blue
+marker. The panel displays **Completed** and movement stops.
+
+Click **Restart Run** to return to the configured startup scene with fresh progress.
+Click **Stop** to return to the authored scene, selection and drafts.
+The editor and Player resolve the bundled `courtyard_run` selection through the
+same module. [Gameplay module selection](project-lifecycle.md#gameplay-module-selection).
 
 ## 16. Save scenes and project settings
 
@@ -405,6 +412,9 @@ Save Scene As writes a new file and changes the active scene's registered path;
 it preserves existing files and requires a new destination.
 
 Scene file actions use paths relative to Assets, such as `scenes/level.json`.
+The **Gameplay Roles** dropdowns assign or clear bindings on the active scene.
+Undo and Redo restore role changes through the scene history. Scene saves persist
+the bindings. [Role requirements](project-lifecycle.md#gameplay-role-bindings).
 Save All persists catalogue/settings changes after these operations.
 Undo history and dirty-state behavior remain the core editor's responsibility.
 
@@ -416,8 +426,9 @@ The output child uses the project name and is not merged into an existing folder
 
 The export has two explicit stages:
 
-1. Prepare: validate every saved document and copy verified assets/manifest into
-   the new output folder before returning a build token.
+1. Prepare every saved document and its models, validate selected gameplay for
+   each scene, and stage verified assets and manifest into the new output folder
+   before returning a build token.
 2. Finish: compile the release player and install it into that staged output.
 
 The editor commit reservation lasts through preparation acknowledgement.
@@ -639,6 +650,15 @@ npm.cmd run check:production
 npm.cmd test -- --watch=false
 ```
 
+The Courtyard Run update passed 317 editor tests, including Game status, Restart Run,
+and the startup scene chooser regression. The production bundle and custom-protocol
+host builds passed. On Windows, a generic-project smoke displayed the base props and
+exercised Game status, Restart Run and Stop. Campaign objectives and completion in
+Editor Game were verified in host and Angular tests. The full desktop walkthrough
+below lists the broader spatial and campaign checks to record.
+
+The following results describe the earlier viewport implementation.
+
 The new math/interaction checks exercise projection conventions, rays, selection,
 constraints, transaction cancellation, parent transforms and stale/lifecycle cases.
 Renderer checks exercise editor data validation, clipping, capacity growth and
@@ -687,9 +707,9 @@ export remain separately recorded acceptance tasks.
 10. Drag a model from Assets, cancel it, and confirm no new entity exists.
 11. Drop a model at a valid point and wait for adoption.
 12. Confirm one undoable creation and a clean end to asset-loading state.
-13. Play, focus Game movement, then inspect Scene without authoring changes.
-14. Stop and confirm authored transforms and Scene viewpoint remain consistent.
-15. Save All, close/reopen, export, and run the player outside the repository.
+13. Play the Courtyard route in Game and observe the objective, scene change and completion.
+14. Restart Run, then Stop and confirm authored transforms, roles and Scene viewpoint.
+15. Save All, close/reopen, export, and repeat the route with the player outside the repository.
 
 Record hardware, DPI, project fixture, observed result and any failure for those
 steps. A successful process spawn or an empty viewport is not sufficient evidence
@@ -705,7 +725,6 @@ for the complete native authoring workflow.
 - Rotate/Scale can reject affine results the scene's TRS format cannot represent.
 - Snap settings do not provide vertex/socket snapping or arbitrary surface alignment.
 - Animation/shader graph workspace types are not finished authoring editors.
-- The reference campaign playthrough still needs an authored exit, finish state, and acceptance in both Play modes.
 - End-to-end native, supported-machine, and measured performance acceptance remains explicit.
 
 These boundaries keep the next work concrete: resolve observed authoring friction

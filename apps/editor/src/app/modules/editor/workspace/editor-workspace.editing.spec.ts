@@ -2,6 +2,8 @@ import {Component, input, output} from '@angular/core';
 import {type ComponentFixture, TestBed} from '@angular/core/testing';
 import {By} from '@angular/platform-browser';
 import {invoke, isTauri} from '@tauri-apps/api/core';
+import {type Event as TauriEvent, listen} from '@tauri-apps/api/event';
+import axe from 'axe-core';
 import {vi} from 'vitest';
 import type {EditorActionId} from '../../../core/editor/editor-actions';
 import {EditorService} from '../../../core/editor/editor.service';
@@ -18,8 +20,16 @@ import {SceneViewport} from './scene-viewport/scene-viewport';
 import {SceneEditingService} from './scene-editing.service';
 import {SceneEntitiesPanel} from './scene-entities-panel/scene-entities-panel';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
+import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
+import {
+    DEFAULT_VIEWPORT_SETTINGS,
+    type PlayStatus,
+    type ViewportAction,
+    type ViewportEditorState
+} from '../../../core/editor/viewport-editor.models';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
+vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 
 // Exercise the real UI, draft controller, revision queue and command bridge.
 // GPU attachment is outside this DOM test.
@@ -64,6 +74,9 @@ describe('Workspace live editing flow', () => {
     let redo: SceneDocument[];
     let commands: EditorCommand[];
     let viewportStatus: ViewportStatus;
+    let viewportEditorState: ViewportEditorState;
+    let viewportStateListener: ((event: TauriEvent<ViewportEditorState>) => void) | undefined;
+    let restartReply: (() => Promise<ViewportEditorState>) | undefined;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -78,6 +91,19 @@ describe('Workspace live editing flow', () => {
             draw_calls: 0, instances: 0, triangles: 0, gpu_time_ms: null,
             gpu_timestamps_supported: false, error: null,
         };
+        viewportEditorState = {
+            settings: DEFAULT_VIEWPORT_SETTINGS, camera_position: [0, 0, 3], camera_target: [0, 0, 0],
+            camera_distance: 3, revision: 1, workspace_generation: 1, gesture: null, placement: null,
+            focused: false, error: null, game_status: null,
+        };
+        restartReply = undefined;
+        viewportStateListener = undefined;
+        vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
+            if (name === 'editor://viewport-editor-state') {
+                viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
+            }
+            return () => undefined;
+        });
         vi.mocked(isTauri).mockReturnValue(true);
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
@@ -98,6 +124,18 @@ describe('Workspace live editing flow', () => {
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_assets') return [];
             if (operation === 'editor_viewport_bounds') return viewportStatus;
+            if (operation === 'editor_viewport_editor_state') return viewportEditorState;
+            if (operation === 'editor_viewport_action') {
+                const {action} = args as { action: ViewportAction };
+                if (action.type === 'set_view') {
+                    viewportEditorState = {
+                        ...viewportEditorState, revision: viewportEditorState.revision + 1,
+                        settings: {...viewportEditorState.settings, view: action.view},
+                    };
+                    return viewportEditorState;
+                }
+                if (action.type === 'restart_run' && restartReply) return restartReply();
+            }
             if (operation !== 'editor_execute_incremental') throw new Error(`Unexpected operation: ${operation}`);
             const {request} = args as {request: EditorCommandRequest};
             expect(request.expected_revision).toBe(nativeState.revision);
@@ -147,9 +185,11 @@ describe('Workspace live editing flow', () => {
                     break;
                 case 'start_play':
                     expect(nativeState.transaction).toBeNull();
-                    nativeState = {...nativeState, mode: 'play'};
+                    nativeState = {...nativeState, mode: 'play', play_session_id: `play-${nativeState.revision + 1}`};
                     break;
-                case 'stop_play': nativeState = {...nativeState, mode: 'edit'}; break;
+                case 'stop_play':
+                    nativeState = {...nativeState, mode: 'edit', play_session_id: null};
+                    break;
                 case 'switch_scene':
                     nativeState = {...nativeState, active_scene_id: command.scene_id, selection: []};
                     break;
@@ -277,6 +317,100 @@ describe('Workspace live editing flow', () => {
         expect(input('Position X').matches(':disabled')).toBe(false);
         expect(input('Position X').valueAsNumber).toBe(3);
         expect(fixture.nativeElement.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Scene');
+    });
+
+    it('displays status for the current Play session and restarts only after native confirmation', async () => {
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await editor.updateViewportBounds({x: 0, y: 0, width: 800, height: 500, visible: true});
+        action('Play').click();
+        await fixture.whenStable();
+        const snapshot = editor.snapshot()!;
+        const root: HTMLElement = fixture.nativeElement;
+        const panel = root.querySelector<HTMLElement>('.game-status')!;
+        const restart = panel.querySelector<HTMLButtonElement>('button')!;
+        expect(restart.textContent).toContain('Restart Run');
+        expect(restart.disabled).toBe(true);
+
+        const sendStatus = async (status: PlayStatus) => {
+            viewportEditorState = {
+                ...viewportEditorState,
+                revision: viewportEditorState.revision + 1,
+                game_status: status
+            };
+            viewportStateListener!({
+                event: 'editor://viewport-editor-state', id: 1, payload: viewportEditorState,
+            });
+            await fixture.whenStable();
+        };
+        const completed: PlayStatus = {
+            play_session_id: snapshot.play_session_id!,
+            run_id: 'run-1',
+            scene_id: 'finish',
+            paused: false,
+            pending_scene_id: null,
+            gameplay: {objective: 'Run complete', detail: 'Finish reached', score: 1, completed: true},
+        };
+        await sendStatus({...completed, play_session_id: 'old-session'});
+        expect(panel.textContent).not.toContain('Run complete');
+        expect(restart.disabled).toBe(true);
+        await sendStatus(completed);
+        expect(panel.textContent).toContain('Runtime scene: finish');
+        expect(panel.textContent).toContain('Completed');
+        expect(panel.querySelector('[role="status"]')?.textContent).toContain('Run complete');
+        expect(panel.textContent).toContain('Finish reached');
+        expect(panel.textContent).toContain('Score: 1');
+        expect(restart.disabled).toBe(false);
+        const accessibility = await axe.run(panel, {rules: {'color-contrast': {enabled: false}}});
+        expect(accessibility.violations).toEqual([]);
+
+        restartReply = async () => {
+            throw new Error('Startup scene could not be loaded.');
+        };
+        restart.click();
+        await fixture.whenStable();
+        expect(root.querySelector('.game-error')?.textContent).toContain('Startup scene could not be loaded');
+        expect(panel.textContent).toContain('Completed');
+        expect(restart.disabled).toBe(false);
+
+        let acceptRestart!: () => void;
+        const restarted: PlayStatus = {
+            ...completed, run_id: 'run-2', scene_id: 'courtyard',
+            gameplay: {objective: 'Find the key', detail: null, score: 0, completed: false},
+        };
+        restartReply = () => new Promise(resolve => {
+            acceptRestart = () => {
+                viewportEditorState = {
+                    ...viewportEditorState,
+                    revision: viewportEditorState.revision + 1,
+                    game_status: restarted
+                };
+                resolve(viewportEditorState);
+            };
+        });
+        restart.click();
+        await vi.waitFor(() => expect(acceptRestart).toBeDefined());
+        expect(invoke).toHaveBeenLastCalledWith('editor_viewport_action', {
+            action: {type: 'restart_run', run_id: 'run-1', expected_revision: snapshot.revision},
+        });
+        await fixture.whenStable();
+        expect(restart.disabled).toBe(true);
+        expect(panel.textContent).toContain('Completed');
+        acceptRestart();
+        await vi.waitFor(() => expect(viewport.gameStatus()?.run_id).toBe('run-2'));
+        await fixture.whenStable();
+        expect(panel.textContent).toContain('Runtime scene: courtyard');
+        expect(panel.textContent).toContain('Running');
+        expect(panel.textContent).toContain('Score: 0');
+        expect(root.querySelector('.game-error')).toBeNull();
+        expect(editor.snapshot()).toBe(snapshot);
+        expect(invoke).not.toHaveBeenCalledWith('editor_snapshot');
+
+        await sendStatus({...restarted, paused: true});
+        expect(panel.textContent).toContain('Paused');
+        action('Stop').click();
+        await fixture.whenStable();
+        expect(root.querySelector('.game-status')).toBeNull();
     });
 
     it('dispatches hierarchy shortcuts while leaving text and Game keys to their owners', async () => {

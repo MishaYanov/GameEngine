@@ -67,7 +67,23 @@ active scene; `saveProject()` persists only the manifest. `reload()` explicitly 
 `refresh()` reads in-memory state. `saveAll()` persists all dirty retained scenes and project settings without changing the active scene. The UI must make destructive reload intent clear.
 See [project lifecycle](../../project-lifecycle.md) for the data model. The workspace now exposes scene switching, startup selection, registration and Save As, plus selectable model/scene catalogue entries and origin/native-drag model placement.
 
+**Gameplay Roles** in the scene controls lets you assign Player, Key, Exit and Finish to entities in the current
+scene. **Unassigned** clears a role. Assignment and clearing support Undo and Redo and persist with the scene.
+[Scene role requirements](../../project-lifecycle.md#gameplay-role-bindings).
+
 `core/project/project.service.ts` creates authoring projects and chooses a destination. Setup opens the created manifest through EditorService, retaining a retry path after open cancellation/failure. `prepareBuild()` stages saved inputs inside the edit reservation; `finishBuild()` compiles outside the document queue. `runBuild(expectedPath)` explicitly launches the remembered successful output.
+
+## Game status and Restart Run
+
+Play starts from the active authoring scene. With Game selected, the status panel beside the native viewport shows
+the runtime scene, Running/Paused/Completed, and any objective, detail and score supplied by the gameplay module.
+During a run, transitions can change the runtime scene while the Scene selector and Inspector retain their authored
+context.
+
+**Restart Run** prepares the configured startup scene and fresh progress. The button is disabled until the viewport
+is attached and has current Play status, and stays disabled while work is pending. The current run remains visible
+until the restart succeeds. Stop returns to the retained authoring
+state. [Courtyard Run steps](../../viewport-implementation.md#15-scene-and-game-share-one-surface).
 
 ## Pane boundary and platform limits
 

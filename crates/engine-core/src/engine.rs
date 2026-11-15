@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	Bounds3, EntityKey,
 	asset_registry::{AssetHandle, AssetMetadata, AssetRef, AssetRegistry, AssetRegistryLimits},
-	command::{EditorCommandRequest, EditorSnapshotDto},
+	command::{EditorCommandRequest, EditorSnapshotDto, PlayStatusDto},
 	editor::{CommandFactory, EditorSession, PrefabData},
 	events::{BackendEventKind, ChangeJournal, ChangePage},
+	game_session::PreparedScene,
 	project::ProjectData,
+	scene_catalog::SceneId,
 	scene_data::{EntityData, SceneData, validate_model_path},
 	simulation_session::{
 		GameModuleFactory, GameModuleResolver, TickOutcome, resolve_default_gameplay,
@@ -178,20 +180,95 @@ impl Engine {
 			Err(message) => {
 				// Simulation rejects and rolls back an action batch, then pauses.
 				// Consumers still need the state transition even on this error.
-				self.publish(BackendEventKind::StateChanged)?;
+				self.publish_runtime(BackendEventKind::StateChanged)?;
 				return Err(self.error(BackendErrorCode::SimulationRejected, message));
 			}
 		};
 		if outcome.progress_changed {
-			self.publish(BackendEventKind::StateChanged)?;
+			self.publish_runtime(BackendEventKind::StateChanged)?;
 		}
 		if outcome.steps > 0 {
-			self.publish(BackendEventKind::SimulationAdvanced {
+			self.publish_runtime(BackendEventKind::SimulationAdvanced {
 				tick: outcome.tick,
 				changes: outcome.changes.clone(),
 			})?;
 		}
 		Ok(outcome)
+	}
+
+	pub fn play_status(&self) -> Option<PlayStatusDto> {
+		self.session.play_status()
+	}
+
+	/// Validates the UI's source run and authoring revision before preparing
+	/// or installing a restart that was prepared while rendering was unlocked.
+	pub fn validate_restart_play(
+		&self,
+		run_id: &str,
+		expected_revision: u64,
+	) -> Result<(), BackendError> {
+		if expected_revision != self.session.revision() {
+			return Err(self.error(
+				BackendErrorCode::Conflict,
+				"The editor changed before restart. Try again.",
+			));
+		}
+		let current = self.session.play_run_id().ok_or_else(|| {
+			self.error(BackendErrorCode::CommandRejected, "Play mode is not active")
+		})?;
+		if current != run_id {
+			return Err(self.error(
+				BackendErrorCode::Conflict,
+				"The game run changed before restart. Try again.",
+			));
+		}
+		Ok(())
+	}
+
+	pub fn prepare_restart_play(
+		&self,
+		run_id: &str,
+		expected_revision: u64,
+	) -> Result<(PreparedScene, Arc<SceneData>), BackendError> {
+		self.validate_restart_play(run_id, expected_revision)?;
+		let startup = self.session.project().startup_scene_id.clone();
+		let document = self
+			.session
+			.scene_document(&startup)
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		let prepared = self
+			.session
+			.prepare_new_game(startup, Arc::clone(&document))
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		Ok((prepared, document))
+	}
+
+	pub fn pending_play_scene(&self) -> Option<&SceneId> {
+		self.session.pending_play_scene()
+	}
+
+	pub fn prepare_pending_play_scene(
+		&self,
+	) -> Result<(PreparedScene, Arc<SceneData>), BackendError> {
+		self.session
+			.prepare_pending_play_scene()
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))
+	}
+
+	pub fn commit_play_scene(&mut self, prepared: PreparedScene) -> Result<(), BackendError> {
+		self.ensure_event_capacity()?;
+		let from = self.session.play_scene_id().cloned().ok_or_else(|| {
+			self.error(BackendErrorCode::CommandRejected, "Play mode is not active")
+		})?;
+		self.session
+			.commit_play_scene(prepared)
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		let to = self
+			.session
+			.play_scene_id()
+			.expect("committed Play scene")
+			.clone();
+		self.publish_runtime(BackendEventKind::RuntimeSceneChanged { from, to })
 	}
 
 	pub fn replace_document(&mut self, data: SceneData) -> Result<CommandReceipt, BackendError> {
@@ -433,12 +510,26 @@ impl Engine {
 		Ok(())
 	}
 	fn publish(&mut self, event: BackendEventKind) -> Result<(), BackendError> {
+		self.publish_for_scene(self.session.active_scene_id().clone(), event)
+	}
+	fn publish_runtime(&mut self, event: BackendEventKind) -> Result<(), BackendError> {
+		let scene_id = self
+			.session
+			.play_scene_id()
+			.unwrap_or_else(|| self.session.active_scene_id());
+		self.publish_for_scene(scene_id.clone(), event)
+	}
+	fn publish_for_scene(
+		&mut self,
+		scene_id: SceneId,
+		event: BackendEventKind,
+	) -> Result<(), BackendError> {
 		self.journal
 			.publish_for_scene(
 				self.session.revision(),
 				self.session.scene_revision(),
 				event,
-				Some(self.session.active_scene_id().clone()),
+				Some(scene_id),
 			)
 			.map_err(|message| self.error(BackendErrorCode::Internal, message))
 	}

@@ -36,6 +36,39 @@
   max-width: 100%;
 }
 
+.game-status, .game-error {
+  flex-basis: 100%;
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+}
+
+.game-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.game-status button {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-control);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.game-status button:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
+.game-error {
+  color: var(--color-danger);
+}
+
 .workspace-center {
   display: flex;
   flex-direction: column;

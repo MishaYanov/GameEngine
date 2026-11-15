@@ -46,20 +46,24 @@ engine cannot undo arbitrary module interior state or external I/O.
 
 ## Implemented game example
 
-`crates/courtyard-gameplay/src/lib.rs` defines `CampaignProgress { score: i32, has_courtyard_key: bool }`,
-`AwardScore { amount }` and `UnlockCourtyard`. Nonnegative score/award checks and checked addition enforce its domain
-rules. `CampaignFactory`
-supplies defaults and wraps configured movement/spin through the prepared factory path. `CampaignModule` requests the
-key when a controlled entity's **world X is at least 1.0** and the key is not already owned; planning reads the
-current/candidate progress view.
+`crates/courtyard-gameplay/src/lib.rs` defines `CampaignProgress` with score, key ownership, exit reached and
+completion. Its typed actions award score, collect the key, reach the exit and complete the run. Nonnegative score,
+checked addition, the key requirement and the exit requirement enforce the domain rules. `CampaignFactory` supplies
+defaults and wraps configured movement and spin through the prepared factory path.
+
+The authored role bindings identify entities for the proximity checks. Key pickup awards one point once. After
+pickup, reaching the exit commits progress with a typed request for `finish`. The Finish marker completes the
+run after that exit and the module stops planning
+movement. [Play the route](../../apps/game/README.md#demo-progress-and-new-game).
 
 The bundled manifest selects `courtyard_run`. Editor Play, the Player and the headless runner use the shared
 resolver. It reads the current authored project at the start of a run. The selected factory supplies the scene
 module and initial typed progress. Projects with no selected module use configured behaviors and empty progress.
 See [the manifest contract](../../project-lifecycle.md#gameplay-module-selection).
 
-The Player path in `apps/game/src/main.rs` uses F7 to award one point when campaign progress exists, F8 to cycle
-scenes, and F10 to prepare New Game at the configured startup scene. These shortcut bindings live in the native Player.
+The native player title exposes key, exit, score and completion. F7 awards a point and F8 cycles scenes before
+completion. F10 prepares New Game at the configured startup scene. Editor Game shows the module's read-only status
+and exposes Restart Run through the viewport action channel.
 
 ## Rationale and remaining proposals
 

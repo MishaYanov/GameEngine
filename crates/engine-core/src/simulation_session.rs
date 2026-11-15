@@ -44,6 +44,9 @@ impl InputFrame {
 }
 pub enum SimulationAction {
 	Progress(ProgressAction),
+	RequestScene {
+		scene_id: SceneId,
+	},
 	Move {
 		entity: EntityKey,
 		world_delta: [f32; 3],
@@ -84,6 +87,31 @@ impl ActionWriter<'_> {
 		Ok(())
 	}
 }
+
+/// Bounded, game-owned text for the active runtime objective.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameplayStatus {
+	pub objective: String,
+	#[serde(default)]
+	pub detail: Option<String>,
+	#[serde(default)]
+	pub score: Option<i32>,
+	pub completed: bool,
+}
+
+impl GameplayStatus {
+	pub const MAX_TEXT_BYTES: usize = 128;
+
+	pub(crate) fn is_valid(&self) -> bool {
+		let valid_text = |text: &str| {
+			text.len() <= Self::MAX_TEXT_BYTES
+				&& !text.trim().is_empty()
+				&& !text.chars().any(char::is_control)
+		};
+		valid_text(&self.objective) && self.detail.as_deref().is_none_or(valid_text)
+	}
+}
+
 /// Modules plan bounded actions from a read-only world. Mutation and collision
 /// policy remain in the engine, so a game module cannot bypass world validation.
 pub struct GameplayContext<'a> {
@@ -117,6 +145,11 @@ pub trait GameModule: Send {
 		step: f32,
 		output: &mut ActionWriter<'_>,
 	) -> Result<(), String>;
+
+	/// Projects optional status from committed run progress for a host to display.
+	fn status(&self, _progress: ProgressView<'_>) -> Option<GameplayStatus> {
+		None
+	}
 }
 
 pub trait GameModuleFactory: Send + Sync {
@@ -159,6 +192,7 @@ pub fn resolve_default_gameplay(
 pub struct PreparedModuleConfig<'a> {
 	project: &'a ProjectData,
 	scene_id: &'a SceneId,
+	document: &'a SceneData,
 	behaviors: Vec<ResolvedBehavior>,
 }
 impl PreparedModuleConfig<'_> {
@@ -170,6 +204,9 @@ impl PreparedModuleConfig<'_> {
 	}
 	pub fn behaviors(&self) -> &[ResolvedBehavior] {
 		&self.behaviors
+	}
+	pub fn document(&self) -> &SceneData {
+		self.document
 	}
 }
 
@@ -281,6 +318,8 @@ pub struct TickOutcome {
 	pub progress_changed: bool,
 	#[serde(default)]
 	pub progress_revision: u64,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub requested_scene: Option<SceneId>,
 }
 pub struct SimulationSession {
 	project: Arc<ProjectData>,
@@ -351,6 +390,7 @@ impl SimulationSession {
 		let module = factory.create_prepared(PreparedModuleConfig {
 			project: &project,
 			scene_id: &scene_id,
+			document: world.data(),
 			behaviors,
 		})?;
 		let collisions = CollisionWorld::new(&world)?;
@@ -395,6 +435,12 @@ impl SimulationSession {
 	pub fn needs_tick(&self) -> bool {
 		!self.paused && self.module.needs_tick(&self.inputs)
 	}
+	pub(crate) fn gameplay_status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
+		self.module
+			.status(progress)
+			.filter(GameplayStatus::is_valid)
+	}
+
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
 			&& self
@@ -499,13 +545,14 @@ impl SimulationSession {
 	}
 
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
-		self.tick_with_progress(elapsed, &mut ProgressState::empty())
+		self.tick_with_progress(elapsed, &mut ProgressState::empty(), false)
 	}
 
 	pub(crate) fn tick_with_progress(
 		&mut self,
 		elapsed: f64,
 		progress: &mut ProgressState,
+		scene_request_pending: bool,
 	) -> Result<TickOutcome, String> {
 		if !elapsed.is_finite() || elapsed < 0.0 {
 			return Err("Elapsed time must be finite and nonnegative".into());
@@ -527,6 +574,8 @@ impl SimulationSession {
 		let mut before = HashMap::<EntityKey, TransformData>::new();
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
+		let mut steps = 0;
+		let mut requested_scene = None;
 		let initial_matrix_updates = self.world.matrix_updates();
 		let mut collision_candidates_remaining = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let mut progress_transaction = progress.transaction();
@@ -559,13 +608,37 @@ impl SimulationSession {
 					// Count attempted actions too: blocked moves still perform
 					// collision work and must not reset their allowance per step.
 					actions_applied += 1;
-					if let SimulationAction::Progress(action) = &action {
-						progress_transaction.apply(action)?;
-						continue;
-					}
+					let action = match action {
+						SimulationAction::Progress(action) => {
+							progress_transaction.apply(&action)?;
+							continue;
+						}
+						SimulationAction::RequestScene { scene_id } => {
+							if scene_id == self.scene_id {
+								return Err("Cannot request the current runtime scene".into());
+							}
+							self.project.scenes.get(&scene_id).map_err(|error| {
+								format!("Cannot request scene {:?}: {error}", scene_id.as_str())
+							})?;
+							if scene_request_pending {
+								continue;
+							}
+							if let Some(previous) = &requested_scene {
+								if previous != &scene_id {
+									return Err(
+										"Conflicting runtime scene requests in one step".into()
+									);
+								}
+							} else {
+								requested_scene = Some(scene_id);
+							}
+							continue;
+						}
+						action => action,
+					};
 					let entity = match &action {
-						SimulationAction::Progress(_) => {
-							return Err("Progress action reached world mutation".into());
+						SimulationAction::Progress(_) | SimulationAction::RequestScene { .. } => {
+							unreachable!("Non-world actions were handled above");
 						}
 						SimulationAction::Move { entity, .. }
 						| SimulationAction::Rotate { entity, .. }
@@ -579,8 +652,8 @@ impl SimulationSession {
 						.entry(entity.clone())
 						.or_insert_with(|| self.world.data().entities[index].transform.clone());
 					let change = match action {
-						SimulationAction::Progress(_) => {
-							return Err("Progress action reached world mutation".into());
+						SimulationAction::Progress(_) | SimulationAction::RequestScene { .. } => {
+							unreachable!("Non-world actions were handled above");
 						}
 						SimulationAction::Move {
 							entity,
@@ -623,6 +696,11 @@ impl SimulationSession {
 					}
 					changes.merge(change);
 				}
+				steps += 1;
+				if requested_scene.is_some() {
+					// A new scene starts at the next step, after the host commits it.
+					break;
+				}
 			}
 			Ok(())
 		})();
@@ -645,11 +723,13 @@ impl SimulationSession {
 		outcome.progress_changed = progress_transaction.commit();
 		outcome.progress_revision = progress.view().revision();
 		self.clock = clock;
-		self.tick += report.steps as u64;
+		self.tick += u64::from(steps);
 		outcome.tick = self.tick;
-		outcome.steps = report.steps;
-		outcome.dropped_seconds = report.dropped_seconds;
+		outcome.steps = steps;
+		outcome.dropped_seconds = report.dropped_seconds
+			+ f64::from(report.steps - steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();
+		outcome.requested_scene = requested_scene;
 		Ok(outcome)
 	}
 }

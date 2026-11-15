@@ -292,6 +292,236 @@ fn play_selects_the_current_gameplay_module_after_history_and_workspace_reopen()
 }
 
 #[test]
+fn editor_play_completes_in_the_retained_draft_and_restores_the_authoring_scene_on_stop() {
+	use bridge::editor::SceneBindingTarget;
+	use courtyard_gameplay::{CampaignProgress, COURTYARD_RUN_ID};
+	use runtime::{
+		events::BackendEventKind,
+		project::{BehaviorSpace, BehaviorSpec, ProjectData, SceneBehavior},
+		scene_data::TransformData,
+	};
+	use std::collections::HashSet;
+
+	let fixture = Fixture::new();
+	let scene_path = fixture.0.join("scenes/main.json");
+	let mut data = runtime::scene_io::load_data(&scene_path).unwrap().data;
+	let mut finish = data.clone();
+	let finish_player = EntityKey::new("finish-player").unwrap();
+	let finish_marker = EntityKey::new("finish-marker").unwrap();
+	finish.entities[0].key = finish_player.clone();
+	finish.entities[0].name = "Saved destination".into();
+	finish.entities.push(
+		EntityData::new(finish_marker.clone(), "Finish", "models/triangle.glb").with_transform(
+			TransformData {
+				position: [1.0, 0.0, 0.0],
+				..Default::default()
+			},
+		),
+	);
+	finish
+		.bindings
+		.insert("player".into(), finish_player.clone());
+	finish.bindings.insert("finish".into(), finish_marker);
+	finish.camera.position = [1.0, 2.0, 5.0];
+	let finish_id = SceneId::new("finish").unwrap();
+	let finish_path = fixture.0.join("scenes/finish.json");
+	let finish_bytes = finish.to_json().unwrap();
+	fs::write(&finish_path, &finish_bytes).unwrap();
+	for (key, x) in [("key-marker", -1.0), ("exit-marker", 1.0)] {
+		data.entities.push(
+			EntityData::new(EntityKey::new(key).unwrap(), key, "models/triangle.glb")
+				.with_transform(TransformData {
+					position: [x, 0.0, 0.0],
+					..Default::default()
+				}),
+		);
+	}
+	let mut project =
+		ProjectData::for_scene("Courtyard workspace", "scenes/main.json", &data).unwrap();
+	project.gameplay_module = Some(COURTYARD_RUN_ID.into());
+	project.add_behavior(BehaviorSpec::ControlledMove {
+		entity: EntityKey::new("a").unwrap(),
+		speed: 1.0,
+		space: BehaviorSpace::World,
+	});
+	project
+		.scenes
+		.insert(SceneDescriptor::new(finish_id.clone(), "scenes/finish.json").unwrap())
+		.unwrap();
+	project.behaviors.push(SceneBehavior {
+		scene_id: finish_id.clone(),
+		behavior: BehaviorSpec::ControlledMove {
+			entity: finish_player.clone(),
+			speed: 1.0,
+			space: BehaviorSpace::World,
+		},
+	});
+	let scene_id = project.startup_scene_id.clone();
+	let elapsed = 1.0 / f64::from(project.fixed_hz);
+	let manifest = fixture.0.parent().unwrap().join("project.json");
+	fs::write(&scene_path, data.to_json().unwrap()).unwrap();
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	let mut workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	for (name, key) in [
+		("player", "a"),
+		("key", "key-marker"),
+		("exit", "exit-marker"),
+	] {
+		run(
+			&mut workspace,
+			Command::SetSceneBinding {
+				scene_id: scene_id.clone(),
+				name: name.into(),
+				target: SceneBindingTarget::Assign { key: key.into() },
+			},
+		);
+	}
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	let saved_bytes = fs::read(&scene_path).unwrap();
+	let authored = workspace.backend.session().authored_document();
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: finish_id.clone(),
+		},
+	);
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: finish_player.as_str().into(),
+			name: "Unsaved destination".into(),
+		},
+	);
+	let finish_draft = workspace.backend.session().authored_document();
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: scene_id.clone(),
+		},
+	);
+
+	run(&mut workspace, Command::StartPlay);
+	let walk = |workspace: &mut EditorWorkspace, x: f32, ticks| {
+		run(
+			workspace,
+			Command::SetPlayInput {
+				movement: [x, 0.0, 0.0],
+			},
+		);
+		let mut requested = None;
+		for _ in 0..ticks {
+			if let Some(target) = workspace.backend.tick(elapsed).unwrap().requested_scene {
+				assert!(requested.replace(target).is_none());
+			}
+		}
+		requested
+	};
+	let progress = |workspace: &EditorWorkspace| {
+		workspace
+			.backend
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.clone()
+	};
+
+	assert!(walk(&mut workspace, 1.0, 60).is_none());
+	let runtime = workspace.backend.session().render_document();
+	assert!(runtime.entities[0].transform.position[0] > 0.9);
+	assert!(!progress(&workspace).has_courtyard_key);
+	assert!(!progress(&workspace).courtyard_exit_reached);
+	assert!(walk(&mut workspace, -1.0, 120).is_none());
+	assert!(progress(&workspace).has_courtyard_key);
+	assert!(!progress(&workspace).courtyard_exit_reached);
+	assert_eq!(walk(&mut workspace, 1.0, 120), Some(finish_id.clone()));
+	assert!(progress(&workspace).courtyard_exit_reached);
+	assert_eq!(progress(&workspace).score, 1);
+	assert_eq!(workspace.backend.session().play_scene_id(), Some(&scene_id));
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+
+	// Closing an unsuccessful GPU preparation leaves the original play scene active.
+	let (candidate, document) = workspace.backend.prepare_pending_play_scene().unwrap();
+	assert_eq!(document, finish_draft);
+	drop(candidate);
+	assert_eq!(workspace.backend.session().play_scene_id(), Some(&scene_id));
+	let next_tick = workspace.backend.tick(elapsed).unwrap();
+	assert!(next_tick.requested_scene.is_none());
+
+	let (candidate, _) = workspace.backend.prepare_pending_play_scene().unwrap();
+	let revision = workspace.backend.session().revision();
+	let scene_revision = workspace.backend.session().scene_revision();
+	let cursor = workspace.backend.change_cursor();
+	workspace.backend.commit_play_scene(candidate).unwrap();
+	let session = workspace.backend.session();
+	assert_eq!(session.revision(), revision);
+	assert_eq!(session.scene_revision(), scene_revision + 1);
+	assert_eq!(session.active_scene_id(), &scene_id);
+	assert_eq!(session.play_scene_id(), Some(&finish_id));
+	assert_eq!(session.render_document(), finish_draft);
+	assert_eq!(progress(&workspace).score, 1);
+	assert!(progress(&workspace).courtyard_exit_reached);
+	let changes = workspace.backend.changes_since(cursor).unwrap();
+	assert!(changes.events.iter().any(|event| {
+		matches!(&event.event, BackendEventKind::RuntimeSceneChanged { from, to }
+			if from == &scene_id && to == &finish_id)
+	}));
+	assert_eq!(workspace.backend.tick(elapsed).unwrap().steps, 0);
+	assert!(!progress(&workspace).completed);
+
+	workspace
+		.backend
+		.set_game_keyboard_input_from_codes(&HashSet::from(["KeyD".into()]))
+		.unwrap();
+	let mut completion_changes = 0;
+	for _ in 0..90 {
+		let tick = workspace.backend.tick(elapsed).unwrap();
+		completion_changes += usize::from(tick.progress_changed);
+	}
+	let completed = progress(&workspace);
+	assert!(completed.completed);
+	assert!(completed.courtyard_exit_reached);
+	assert!(completed.has_courtyard_key);
+	assert_eq!(completed.score, 1);
+	assert_eq!(completion_changes, 1);
+	let frozen = workspace.backend.session().render_document();
+	assert_ne!(
+		frozen.entities[0].transform,
+		finish_draft.entities[0].transform
+	);
+
+	workspace
+		.backend
+		.set_game_keyboard_input_from_codes(&HashSet::from(["KeyA".into()]))
+		.unwrap();
+	assert!(!workspace.backend.session().needs_tick());
+	let after_completion = workspace.backend.tick(elapsed).unwrap();
+	assert_eq!(after_completion.steps, 0);
+	assert!(!after_completion.progress_changed);
+	assert_eq!(workspace.backend.session().render_document(), frozen);
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+
+	workspace
+		.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: Command::StopPlay,
+		})
+		.unwrap();
+	let session = workspace.backend.session();
+	assert_eq!(session.render_document(), authored);
+	assert_eq!(session.scene_document(&finish_id).unwrap(), finish_draft);
+	assert!(session.is_dirty());
+	assert!(session.play_progress::<CampaignProgress>().is_none());
+	assert_eq!(fs::read(&scene_path).unwrap(), saved_bytes);
+	assert_eq!(fs::read_to_string(&finish_path).unwrap(), finish_bytes);
+}
+
+#[test]
 fn project_open_requires_a_manifest_and_rejects_invalid_manifest_data() {
 	let fixture = Fixture::new();
 	let manifest = fixture.0.parent().unwrap().join("project.json");
@@ -2189,4 +2419,80 @@ fn incremental_structural_and_project_changes_resync_and_conflicts_preserve_stat
 		before,
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
 	);
+}
+
+#[test]
+fn scene_binding_edits_return_authoritative_snapshots_and_persist_after_reopen() {
+	use bridge::editor::SceneBindingTarget;
+
+	let fixture = Fixture::new();
+	let path = fixture.0.join("scenes/main.json");
+	let mut document = runtime::scene_io::load_data(&path).unwrap().data;
+	let mut second = document.entities[0].clone();
+	second.key = EntityKey::new("b").unwrap();
+	second.name = "Second".into();
+	document.entities.push(second);
+	fs::write(&path, document.to_json().unwrap()).unwrap();
+	let manifest = fixture.write_project("scenes/main.json");
+
+	let open = || {
+		let location = ProjectLocation::from_manifest(&manifest).unwrap();
+		EditorWorkspace::open_project_with_notifier(location, || {}).unwrap()
+	};
+	let mut workspace = open();
+	let scene_id = workspace.backend.session().active_scene_id().clone();
+	let bind = |target| Command::SetSceneBinding {
+		scene_id: scene_id.clone(),
+		name: "player".into(),
+		target,
+	};
+	let assign = |key: &str| bind(SceneBindingTarget::Assign { key: key.into() });
+
+	for (command, expected) in [
+		(assign("a"), Some("a")),
+		(assign("b"), Some("b")),
+		(bind(SceneBindingTarget::Clear {}), None),
+		(Command::Undo, Some("b")),
+		(Command::Undo, Some("a")),
+		(Command::Redo, Some("b")),
+		(Command::Redo, None),
+		(Command::Undo, Some("b")),
+	] {
+		let update = incremental(&mut workspace, command);
+		let EditorCommandUpdateDto::Snapshot { receipt, snapshot } = update else {
+			panic!("A binding map change must use the authoritative snapshot");
+		};
+		assert!(receipt.state_changed);
+		assert!(!receipt.project_changed);
+		assert_eq!(
+			snapshot
+				.document
+				.bindings
+				.get("player")
+				.map(EntityKey::as_str),
+			expected,
+		);
+		assert_eq!(
+			serde_json::to_value(snapshot).unwrap(),
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+		);
+	}
+
+	let draft = workspace.backend.snapshot().unwrap();
+	assert!(draft.dirty);
+	assert!(!draft.project_dirty);
+	assert!(runtime::scene_io::load_data(&path)
+		.unwrap()
+		.data
+		.bindings
+		.is_empty());
+
+	let saved = workspace.save(draft.revision).unwrap();
+	assert!(!saved.dirty);
+	assert_eq!(saved.document.bindings["player"].as_str(), "b");
+
+	let reopened = open().backend.snapshot().unwrap();
+	assert_eq!(reopened.document.bindings["player"].as_str(), "b");
+	assert!(!reopened.dirty);
+	assert!(!reopened.can_undo);
 }

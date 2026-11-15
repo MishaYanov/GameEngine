@@ -2,7 +2,12 @@ import {computed, DestroyRef, effect, inject, Injectable, signal} from '@angular
 import {invoke} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {EditorService} from './editor.service';
-import {DEFAULT_VIEWPORT_SETTINGS, type ViewportAction, type ViewportDocumentChange, type ViewportEditorState} from './viewport-editor.models';
+import {
+    DEFAULT_VIEWPORT_SETTINGS,
+    type ViewportAction,
+    type ViewportDocumentChange,
+    type ViewportEditorState
+} from './viewport-editor.models';
 
 /** One editor workspace owns native view actions and its notification subscriptions. */
 @Injectable()
@@ -12,6 +17,12 @@ export class ViewportEditorService {
     private readonly current = signal<ViewportEditorState | null>(null);
     private readonly localContext = signal(this.editor.workspaceGeneration());
     readonly state = computed(() => this.localContext() === this.editor.workspaceGeneration() ? this.current() : null);
+    readonly gameStatus = computed(() => {
+        const status = this.state()?.game_status;
+        const snapshot = this.editor.snapshot();
+        return status && snapshot?.mode === 'play' && snapshot.play_session_id === status.play_session_id
+            ? status : null;
+    });
     readonly settings = computed(() => this.state()?.settings ?? DEFAULT_VIEWPORT_SETTINGS);
     readonly authoringGesture = computed(() => {
         const state = this.state();
@@ -102,21 +113,29 @@ export class ViewportEditorService {
                 throw new Error('The open project changed before the viewport action completed. Try again in the current workspace.');
             }
         };
+        let action: ViewportAction | undefined;
         this.pendingState.update(count => count + 1);
         const result = this.queue.then(async () => {
             if (this.destroyed) throw new Error('The viewport workspace has closed.');
             assertCurrentWorkspace();
             await this.start();
             assertCurrentWorkspace();
-            const action = readAction();
+            action = readAction();
+            if (action.type === 'restart_run' && this.gameStatus()?.run_id !== action.run_id) {
+                throw new Error('The game run changed before it could be restarted.');
+            }
             const state = await invoke<ViewportEditorState>('editor_viewport_action', {action});
             assertCurrentWorkspace();
-            this.accept(state);
-            this.errorState.set(state.error);
-            if (state.error) throw new Error(state.error);
+            if (this.accept(state)) {
+                this.errorState.set(state.error);
+                if (state.error) throw new Error(state.error);
+            }
             return state;
         }).catch(error => {
-            this.errorState.set(this.message(error));
+            if (!this.destroyed && workspaceGeneration === this.editor.workspaceGeneration() &&
+                (action?.type !== 'restart_run' || this.gameStatus()?.run_id === action.run_id)) {
+                this.errorState.set(this.message(error));
+            }
             throw error;
         });
         this.queue = result.then(() => undefined, () => undefined);
@@ -141,25 +160,26 @@ export class ViewportEditorService {
         }
     }
 
-    private accept(state: ViewportEditorState): void {
-        if (this.destroyed || !state?.settings) return;
+    private accept(state: ViewportEditorState): boolean {
+        if (this.destroyed || !state?.settings) return false;
         this.synchronizeContext();
         const generation = state.workspace_generation ?? -1;
-        if (generation <= this.retiredNativeContext) return;
+        if (generation <= this.retiredNativeContext) return false;
         if (this.nativeContext !== null && generation !== this.nativeContext) {
             // Native project installation can publish before Angular receives
             // its open reply. Hold one future state until the local context moves.
             const future = this.futureState;
             if (generation > this.nativeContext && (!future || generation > (future.workspace_generation ?? -1) ||
                 (generation === future.workspace_generation && state.revision >= future.revision))) this.futureState = state;
-            return;
+            return false;
         }
         if (generation >= 0) this.nativeContext = generation;
         const previous = this.current();
         const oldGeneration = previous?.workspace_generation ?? -1;
-        if (generation < oldGeneration || (generation === oldGeneration && previous && state.revision < previous.revision)) return;
+        if (generation < oldGeneration || (generation === oldGeneration && previous && state.revision < previous.revision)) return false;
         this.current.set(state);
         if (state.error) this.errorState.set(state.error);
+        return true;
     }
 
     private synchronizeContext(): void {

@@ -19,7 +19,7 @@ pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
 use engine_core::scene_catalog::SceneId;
 use engine_core::simulation_session::{GameModuleFactory, GameModuleResolver};
-pub use engine_core::simulation_session::{MovementTarget, SimulationSession};
+pub use engine_core::simulation_session::{MovementTarget, SimulationSession, TickOutcome};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -134,6 +134,12 @@ impl SceneEditor {
 		self.session.as_ref().and_then(EditorSession::play_scene_id)
 	}
 
+	pub fn pending_play_scene(&self) -> Option<&SceneId> {
+		self.session
+			.as_ref()
+			.and_then(EditorSession::pending_play_scene)
+	}
+
 	pub fn prepare_play_scene(
 		&self,
 		scene_id: SceneId,
@@ -145,12 +151,13 @@ impl SceneEditor {
 			.prepare_play_scene(scene_id, document)
 	}
 
-	/// Player-only installation boundary. The caller must finish GPU work before
-	/// releasing retained snapshots and replace the rendered scene after success.
+	/// Installation boundary. The caller must finish GPU work before releasing
+	/// retained snapshots and replace the rendered scene after success.
 	pub fn commit_play_scene(
 		&mut self,
 		prepared: PreparedScene,
 		input: &mut InputState,
+		retain_authored_resources: bool,
 	) -> Result<(), String> {
 		self.session
 			.as_mut()
@@ -159,7 +166,9 @@ impl SceneEditor {
 		self.play_input_target = MovementTarget::AllControlled;
 		self.selected = None;
 		self.movement_entity = None;
-		self.resources.clear();
+		if !retain_authored_resources {
+			self.resources.clear();
+		}
 		input.suppress_held();
 		Ok(())
 	}
@@ -200,7 +209,7 @@ impl SceneEditor {
 		scene: &mut Scene,
 		input: &InputState,
 		elapsed: f32,
-	) -> Result<(), String> {
+	) -> Result<TickOutcome, String> {
 		self.initialize(scene)?;
 		if input.just_pressed(Key::Space) && !self.play_input_binds_key(Key::Space) {
 			self.execute_core(Command::SetPaused {
@@ -223,7 +232,7 @@ impl SceneEditor {
 					.into(),
 			);
 		}
-		Ok(())
+		Ok(outcome)
 	}
 
 	pub fn from_scene(scene: &Scene) -> Self {

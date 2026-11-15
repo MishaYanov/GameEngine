@@ -2,7 +2,9 @@
 //! commands; neither participates in their scene mutation semantics.
 use std::collections::{HashMap, HashSet};
 
-use crate::command::{EditorCommandDto, SnapSettingsDto, TransformDto, TransformSpace};
+use crate::command::{
+	EditorCommandDto, SceneBindingTarget, SnapSettingsDto, TransformDto, TransformSpace,
+};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 
 use crate::{
@@ -253,6 +255,16 @@ pub(super) fn apply(
 			data.camera.position = finite_result(position, "Camera pan")?.to_array();
 		}
 		EditorCommandDto::DollyCamera { distance } => dolly(data, selection, bounds, distance)?,
+		EditorCommandDto::SetSceneBinding { name, target, .. } => match target {
+			SceneBindingTarget::Assign { key } => {
+				let index = entity_index(data, &key)?;
+				let entity_key = data.entities[index].key.clone();
+				data.bindings.insert(name, entity_key);
+			}
+			SceneBindingTarget::Clear {} => {
+				data.bindings.remove(&name);
+			}
+		},
 		_ => return Err("This command is a session operation rather than a scene mutation".into()),
 	}
 	Ok(())

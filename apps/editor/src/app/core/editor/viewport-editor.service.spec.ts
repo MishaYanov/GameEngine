@@ -1,11 +1,16 @@
 import {signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {invoke} from '@tauri-apps/api/core';
-import {listen, type Event} from '@tauri-apps/api/event';
+import {type Event, listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import {EditorService} from './editor.service';
 import {ViewportEditorService} from './viewport-editor.service';
-import {DEFAULT_VIEWPORT_SETTINGS, type ViewportAction, type ViewportEditorState} from './viewport-editor.models';
+import {
+    DEFAULT_VIEWPORT_SETTINGS,
+    type PlayStatus,
+    type ViewportAction,
+    type ViewportEditorState
+} from './viewport-editor.models';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -13,6 +18,14 @@ vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 function state(revision = 1, generation = 1): ViewportEditorState {
     return {settings: {...DEFAULT_VIEWPORT_SETTINGS}, camera_position: [0, 5, 10], camera_target: [0, 0, 0],
         camera_distance: 10, revision, workspace_generation: generation, gesture: null, placement: null, focused: true, error: null};
+}
+
+function gameStatus(playSessionId: string, runId: string, completed = false): PlayStatus {
+    return {
+        play_session_id: playSessionId, run_id: runId, scene_id: 'courtyard',
+        paused: false, pending_scene_id: null,
+        gameplay: {objective: completed ? 'Run complete' : 'Find the key', detail: null, score: 0, completed},
+    };
 }
 
 function deferred<T>() {
@@ -26,7 +39,7 @@ describe('ViewportEditorService', () => {
     let handlers: Map<string, (event: Event<unknown>) => void>;
     let stops: ReturnType<typeof vi.fn>[];
     let current: ViewportEditorState;
-    let snapshot: ReturnType<typeof signal<{revision: number}>>;
+    let snapshot: ReturnType<typeof signal<{ revision: number; mode?: 'edit' | 'play'; play_session_id?: string }>>;
     let workspaceGeneration: ReturnType<typeof signal<number>>;
     let refresh: ReturnType<typeof vi.fn>;
 
@@ -62,6 +75,51 @@ describe('ViewportEditorService', () => {
         expect(service.state()?.camera_distance).toBe(39);
         expect(refresh).not.toHaveBeenCalled();
         expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_viewport_editor_state');
+    });
+
+    it('accepts progress-only game status and hides status from another Play session', async () => {
+        await service.start();
+        snapshot.set({revision: 2, mode: 'play', play_session_id: 'play-1'});
+        const first = gameStatus('play-1', 'run-1');
+        emit('editor://viewport-editor-state', {...state(2), game_status: first});
+        expect(service.gameStatus()).toEqual(first);
+        const completed = gameStatus('play-1', 'run-1', true);
+        emit('editor://viewport-editor-state', {...state(3), game_status: completed});
+        expect(service.gameStatus()).toEqual(completed);
+
+        snapshot.set({revision: 3, mode: 'edit'});
+        expect(service.gameStatus()).toBeNull();
+        snapshot.set({revision: 4, mode: 'play', play_session_id: 'play-2'});
+        emit('editor://viewport-editor-state', {...state(4), game_status: completed});
+        expect(service.gameStatus()).toBeNull();
+        const second = gameStatus('play-2', 'run-2');
+        emit('editor://viewport-editor-state', {...state(5), game_status: second});
+        emit('editor://viewport-editor-state', {...state(4), game_status: completed});
+        expect(service.gameStatus()).toEqual(second);
+        expect(refresh).not.toHaveBeenCalled();
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_viewport_editor_state');
+    });
+
+    it('ignores stale restart reply errors after newer state has arrived', async () => {
+        await service.start();
+        snapshot.set({revision: 2, mode: 'play', play_session_id: 'play-1'});
+        const first = gameStatus('play-1', 'run-1', true);
+        emit('editor://viewport-editor-state', {...state(2), game_status: first});
+        const held = deferred<ViewportEditorState>();
+        vi.mocked(invoke).mockImplementationOnce(() => held.promise);
+        const restart = service.action({type: 'restart_run', run_id: first.run_id, expected_revision: 2});
+        await vi.waitFor(() => expect(actions()).toHaveLength(1));
+        const restarted = gameStatus('play-1', 'run-2');
+        emit('editor://viewport-editor-state', {...state(4), game_status: restarted});
+        held.resolve({...state(3), game_status: first, error: 'Old restart failure'});
+        await restart;
+
+        expect(service.gameStatus()).toEqual(restarted);
+        expect(service.error()).toBeNull();
+        await expect(service.action({type: 'restart_run', run_id: first.run_id, expected_revision: 2}))
+            .rejects.toThrow('game run changed');
+        expect(actions()).toHaveLength(1);
+        expect(service.error()).toBeNull();
     });
 
     it('coalesces a document-event burst into one authoritative refresh', async () => {

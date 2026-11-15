@@ -4,6 +4,27 @@
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
+        @if (gameView() && editorService.playing()) {
+            <section aria-label="Game status" class="game-status">
+                @if (gameStatus(); as status) {
+                    <span>Runtime scene: <strong>{{ status.scene_id }}</strong></span>
+                    <strong>{{ status.gameplay?.completed ? 'Completed' : status.paused ? 'Paused' : 'Running' }}</strong>
+                    @if (status.gameplay; as gameplay) {
+                        <span role="status">{{ gameplay.objective }}</span>
+                        @if (gameplay.detail; as detail) {
+                            <span>{{ detail }}</span>
+                        }
+                        @if (gameplay.score !== null) {
+                            <span>Score: {{ gameplay.score }}</span>
+                        }
+                    }
+                }
+                <button (click)="restartRun()" [disabled]="!canRestartRun()" type="button">Restart Run</button>
+            </section>
+            @if (gameError(); as error) {
+                <p class="game-error" role="alert">{{ error }}</p>
+            }
+        }
     </div>
     <workspace-tabs #tabs (viewSelected)="selectView($event)" [activeViewKind]="activeViewKind()"/>
 

@@ -1,20 +1,22 @@
 # Standalone game runtime
 
-Source: `apps/game`. The source executable defaults to Development mode with the existing learning panels, gizmos and
-controls. Installed projects default to Player mode. The future product editor remains Angular/Tauri; native tools are a
-transitional harness over shared core semantics.
+Source: `apps/game`. The source executable defaults to Development mode with the native learning tools.
+Installed projects default to Player mode. The Development tools and the Angular/Tauri editor use shared core
+behavior and scene semantics.
 
 ## Run
 
-From the root after [setup](../../usage.md):
+From the repository root, build and launch the bundled Courtyard Run in Player mode. [Setup](../../usage.md).
 
 ```powershell
-cargo run -p game --locked --offline
+cargo run --locked --offline -p game -- --player
 ```
 
-The native runtime needs Vulkan 1.3, a supported driver, shader compiler, and debug validation layers. Scene assets
-resolve below the development game asset root or beside an installed/name-file executable. Preserve scenes, models,
-images and external dependencies together.
+The native runtime needs Vulkan 1.3, a supported driver, shader compiler, and debug validation layers. The source
+launch loads `apps/game/project.json` and `apps/game/assets`. A `project.json` beside the executable takes precedence,
+and a legacy adjacent `project-name.txt` also selects installed assets if the manifest is absent. Run from a clean Cargo
+target directory if a previously installed project occupies the executable directory. Keep the manifest, scenes,
+models and their dependencies together in a distribution.
 
 ## Runtime foundations
 
@@ -41,9 +43,11 @@ Keep the manifest, scenes, models and asset dependencies together in an installe
 
 ## Player scene switching
 
-In Player mode, **F8** cycles to the next catalog scene in lexicographic scene-ID order, wrapping at the end; fewer than
-two scenes is a no-op. The bundled demo adds `courtyard`, whose player attachment shares the `player_move` settings
-with `robot-left` in the robots scene. Each scene's entity key and runtime world remain independent.
+The authored exit in the bundled course requests the `finish` scene. During an incomplete run, **F8** also cycles
+to the next catalog scene in lexicographic scene-ID order and wraps at the end. It has an effect when there are at
+least two scenes and gameplay input leaves that shortcut available. With a failed transition pending, F8 retries
+the requested destination. The Courtyard, Finish and Robot Demo actors share `player_move` settings and have their
+own entity keys and runtime worlds.
 
 The switch resolves the catalog path canonically inside the asset root, parses the document and prepares a CPU
 simulation candidate. A separate AssetManager and GPU scene/camera are then built. The old scene stays installed
@@ -51,29 +55,30 @@ until those steps and `renderer.wait_idle()` succeed. Commit rejects foreign/sta
 resets the native movement target/selection, and suppresses held input until release. After commit, the caller replaces
 the rendered scene/assets/camera without intervening fallible operations and resets frame scheduling.
 
-A failed preparation preserves the installed scene and reports an update error. Switching starts a fresh simulation;
-it does not resume prior world state when cycling back, save the outgoing runtime world, change authored startup
-settings
-or add automatic scene triggers. Game-owned progress remains alive across the cycle. The development harness and
-Angular editor do not gain an F8 transition control.
-Native GPU/interactive acceptance remains separate from source inspection and CPU checks.
+A failed preparation preserves the installed scene and reports an update error. Switching builds a fresh runtime
+world for the destination and retains the run's game-owned progress. The manifest's startup scene and the authored
+documents keep their existing values.
 
 ## Demo progress and New Game
 
-The bundled demo sets `gameplay_module` to `courtyard_run`. Its factory in `crates/courtyard-gameplay` supplies
-in-memory `CampaignProgress` with score and a courtyard-key flag. In Player mode, the title displays this state and
-**F7** awards one point when campaign progress is active. **F8** changes scenes while keeping progress, and **F10**
-prepares a New Game at the startup scene.
+The bundled manifest selects `courtyard_run` and starts in Courtyard. The same role-based rules run in Editor Play,
+headless Play, and the standalone Player. The default movement keys are W, A, S and D.
 
-When a configured controlled actor reaches world X >= 1, the module requests the courtyard key through a typed
-progress action. That rule now runs in editor Play, headless Play, and the Player. F8 remains a manual scene cycle.
-Acquiring the key, entering an exit trigger, and finishing a run are still a planned authoring scenario.
+1. Move the capsule with **A** toward the green exit at X = −1.5. The title reports **Exit: locked** while the key is
+   missing.
+2. Move with **D** toward the yellow key sphere at X = 1.5. Entering its 0.35-unit proximity awards one point, records
+   the key and unlocks the exit.
+3. Return with **A** to the green exit. The game loads Finish automatically. Release the movement key before moving
+   again so input starts fresh in the new scene.
+4. Move with **D** toward the blue Finish cube at X = 1.5. Approaching it after taking the courtyard exit completes
+   the run and freezes gameplay movement. The title displays **Complete! F10 to restart**.
+5. Press **F10** to start a fresh run in Courtyard with score zero and the exit locked.
 
-New Game prepares both fresh progress and a new scene before adopting CPU/GPU state, then resets the run identity and
-scene generation. Stopping Play or exiting loses this progress; restarting does not read a save file. The game supplies
-native progress validation/action code
-through [the shared progress contract](../../crates/runtime/README.md#game-progress).
-This demo does not add user-defined scripts, persistent saves or a universal game-state schema.
+The title reports runtime scene, score, key ownership and exit state when the scene has an exit role. **F7** adds one
+debug point during an incomplete campaign run. New Game prepares fresh progress and a startup simulation before
+adopting CPU/GPU state. Ordinary scene travel retains the run's in-memory progress. The demo's capsule, cube and
+sphere are packaged as reusable glTF models under
+`apps/game/assets/props`. [Typed progress contract](../../crates/runtime/README.md#game-progress).
 
 ## Movement input profiles
 
@@ -128,6 +133,7 @@ cargo check --workspace --all-targets --locked --offline
 cargo test -p runtime -p game -p renderer --all-targets --locked --offline
 ```
 
-Refer to [testing](../../testing.md) and the current report for final counts/evidence. Historical Windows output-access
-problems and steps 11–20 counts describe that batch; they should not be treated as current failures or new visual
-acceptance.
+A Windows smoke placed the route markers at their respective player spawns in a copied export. The Player
+displayed the Finish marker and completion in the title. After restoring the exported Courtyard document in
+the copy, F10 returned to Courtyard with score zero and the exit locked. Automated checks cover the full route
+and restart from authored and staged data. [Repository testing](../../testing.md).

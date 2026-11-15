@@ -37,9 +37,14 @@ shared resolver requires
 each scene/model path to resolve to a regular file within the canonical asset root and to belong to that captured list.
 One path index serves the whole catalog pass; scene membership is checked before reading/parsing the file.
 
-Project validation and per-scene behavior target indexing are prepared once for the immutable catalog pass. Parsed
-documents already carry scene validation; the remaining cross-document checks verify target membership and packaged
-model references. This avoids repeated whole-project work without relaxing containment, file or diagnostic limits.
+Project validation and behavior target indexing are prepared once for the immutable catalog pass. After checking
+target membership and packaged models, a project with a gameplay module prepares a CPU GameSession for each scene.
+This checks the full catalog, including nonstartup scenes, using the same factory as the Player. For Courtyard Run
+that includes required role bindings, positive-speed player movement and the `finish` destination. Both source
+preflight and copied-asset validation perform these checks before compiling the executable.
+
+New authoring projects start with the generic configured-behavior selection. Export preserves the authored module
+selection and packages referenced glTF/GLB models and asset dependencies, including the Courtyard demo's base props.
 
 Captured membership identifies paths. Prepared inputs also retain their byte lengths and fingerprints for the
 pre-build recheck and verified copying below. Detailed glTF geometry validation remains with the runtime importer.
@@ -76,11 +81,12 @@ can still change files between verification and process start.
 
 ## Scene validation diagnostics
 
-Catalog validation visits scenes in ascending SceneId string order and reports one primary failure per invalid scene:
-path/read/parse errors first, then behavior-target validation, then model-reference validation. Every scene failure
-includes its stable ID and catalog path while retaining the underlying explanation. For example:
+Catalog validation visits scenes in ascending SceneId string order and reports one primary failure per invalid scene.
+It checks paths and documents first, then behavior targets, model references and gameplay preparation. Each scene
+failure includes its stable ID, catalog path and underlying explanation.
 
 ```text
+Scene "finish" ("scenes/finish.json"): Scene "finish" requires a "finish" binding
 Scene "level-a" ("scenes/a.json"): Behavior 0 targets missing entity "missing"
 Scene "level-b" ("scenes/b.json"): Model 'models/missing.glb' preflight failed: <filesystem cause>
 ```

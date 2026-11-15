@@ -18,28 +18,33 @@ The expected revision is null when no workspace is open. A direct caller replaci
 
 ## Connected controls and current limits
 
-| Surface | Current behavior |
-| --- | --- |
-| File menu | Guarded New Project/setup/open-created flow and guarded native Open Project flow |
-| Save Scene | Calls `EditorService.save()` for the active authored scene; requires Edit, no transaction and overall dirty state. It does not save the manifest or other drafts |
-| Save All | Saves dirty retained scenes and project settings without switching scenes; partial failures preserve accurate remaining dirty baselines |
-| Undo / Redo | Sends typed commands; enabled from snapshot history availability and Edit/queue state |
-| Play / Stop | Sends typed commands through the existing queue. Successful Play chooses the Game tab; Stop returns to Scene |
-| Scene / Game tabs | Select the native view through editor-only actions, with arrow/Home/End keyboard navigation. They do not themselves start/stop Play or switch catalog scenes |
-| Hierarchy | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives |
-| Inspector | Edits selected name and local position/rotation/scale with live previews, grouped history, Enter/blur commit and Escape cancellation |
-| Viewport tools | Editor-only camera, grid/planes, projection/orientation, native picking and Move/Rotate/Scale handles |
-| Assets | Catalogued scenes can be opened; catalogued models can be added at origin or pointer-captured into a native placement preview |
-| Scene controls | Switch retained scenes, choose startup, register existing scene files and save the active scene at a new path |
-| Export Game | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output |
-| Settings portal | Placeholder component; not a completed settings editor |
-| Reload | Service API exists; the workspace does not expose a destructive Reload action |
+| Surface                   | Current behavior                                                                                                                                                 |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| File menu                 | Guarded New Project/setup/open-created flow and guarded native Open Project flow                                                                                 |
+| Save Scene                | Calls `EditorService.save()` for the active authored scene; requires Edit, no transaction and overall dirty state. It does not save the manifest or other drafts |
+| Save All                  | Saves dirty retained scenes and project settings without switching scenes; partial failures preserve accurate remaining dirty baselines                          |
+| Undo / Redo               | Sends typed commands; enabled from snapshot history availability and Edit/queue state                                                                            |
+| Play / Stop               | Sends typed commands through the existing queue. Successful Play chooses the Game tab; Stop returns to Scene                                                     |
+| Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
+| Scene / Game tabs         | Select the native view through editor-only actions, with arrow/Home/End keyboard navigation. They do not themselves start/stop Play or switch catalog scenes     |
+| Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
+| Inspector                 | Edits selected name and local position/rotation/scale with live previews, grouped history, Enter/blur commit and Escape cancellation                             |
+| Viewport tools            | Editor-only camera, grid/planes, projection/orientation, native picking and Move/Rotate/Scale handles                                                            |
+| Assets                    | Catalogued scenes can be opened; catalogued models can be added at origin or pointer-captured into a native placement preview                                    |
+| Scene controls            | Switch retained scenes, choose startup, assign Gameplay Roles, register scene files and save the active scene at a new path                                      |
+| Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                          |
+| Settings portal           | Placeholder component; not a completed settings editor                                                                                                           |
+| Reload                    | Service API exists; the workspace does not expose a destructive Reload action                                                                                    |
 
 The overall dirty flag can include project settings or inactive drafts. Therefore an enabled Save Scene button does not promise that the whole workspace will become clean. Use Save All before Export Game. [Project lifecycle](project-lifecycle.md) defines the separate saved baselines.
 
 ## One native surface, two views
 
 `EditorWorkspace` owns `WorkspaceViewKind` (`scene-viewport` or `game-preview`) and mounts one persistent `SceneViewport` after a snapshot exists. Scene remains visible during Play, using the editor camera with read-only authoring tools. Game uses the runtime camera and hides editor decoration. Game while stopped shows explanatory empty content. Switching these tabs creates neither a second renderer nor a second simulation.
+
+Game status sits beside the native child window. The runtime scene can change while the authored scene selector
+still shows the scene you were editing. Restart Run restores startup and default progress, and Stop returns to
+the retained authoring data. [Try the bundled course](viewport-implementation.md#15-scene-and-game-share-one-surface).
 
 `SceneViewport` imports `EngineViewportDirective`, displays status/error feedback and exposes input/status/error outputs. It hides the native child for WebView modal dialogs using a mutation observer, and disconnects that observer on destruction. `refreshBounds()` is available after dock/drag movement that changes position without resizing. Directive/host queues retain bounds, visibility and teardown ownership; the wrapper does not own GPU uploads.
 

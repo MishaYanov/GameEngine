@@ -1,9 +1,11 @@
 @if (editor.snapshot(); as snapshot) {
     <div class="scene-actions">
         <label>Scene
-            <select #scene [value]="snapshot.active_scene_id" [disabled]="!available()" (change)="switchScene(scene)">
+            <select #scene (change)="switchScene(scene)" [disabled]="!available()">
                 @for (entry of snapshot.scenes; track entry.id) {
-                    <option [value]="entry.id">{{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}</option>
+                    <option [selected]="entry.id === snapshot.active_scene_id" [value]="entry.id">
+                        {{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}
+                    </option>
                 }
             </select>
         </label>
@@ -12,18 +14,47 @@
         } @else {
             <button type="button" [disabled]="!available()" (click)="setStartup()">Use as Startup</button>
         }
-        <button type="button" [attr.aria-expanded]="expanded()" (click)="expanded.set(!expanded())">Scene Files…</button>
+        <button (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()" type="button">Scene Files…
+        </button>
     </div>
     @if (expanded()) {
         <div class="scene-files" role="group" aria-label="Scene files">
             <label>Scene path within Assets
                 <input [formField]="fields.path" placeholder="scenes/level.json" aria-describedby="scene-path-help"/>
             </label>
-            <button type="button" [disabled]="!available() || !validPath()" (click)="sceneFile('register')">Register Existing Scene</button>
-            <button type="button" [disabled]="!available() || !validPath()" (click)="sceneFile('saveAs')">Save Scene As</button>
-            <p id="scene-path-help">Use a relative .json path. Save As writes a new file and changes this scene’s path; existing files are preserved.</p>
+            <button (click)="sceneFile('register')" [disabled]="!available() || !validPath()" type="button">Register
+                Existing Scene
+            </button>
+            <button (click)="sceneFile('saveAs')" [disabled]="!available() || !validPath()" type="button">Save Scene
+                As
+            </button>
+            <p id="scene-path-help">Use a relative .json path. Save As writes a new file and changes this scene’s path;
+                existing files are preserved.</p>
         </div>
     }
+    <fieldset [disabled]="!available()">
+        <legend>Gameplay Roles</legend>
+
+        @for (role of gameplayRoles; track role.name) {
+            @let boundEntity = snapshot.document.bindings[role.name];
+            <label>
+                {{ role.label }}
+
+                <select
+                    #roleSelect
+                    (change)="setRole(role.name, roleSelect)"
+                >
+                    <option [selected]="!boundEntity" value="">Unassigned</option>
+
+                    @for (entity of snapshot.document.entities; track entity.key) {
+                        <option [selected]="entity.key === boundEntity" [value]="entity.key">
+                            {{ entity.name }} ({{ entity.key }})
+                        </option>
+                    }
+                </select>
+            </label>
+        }
+    </fieldset>
     @if (sceneSwitch.error() ?? error(); as failure) {
         <p class="error" role="alert">{{ failure }}</p>
     } @else if (sceneSwitch.message() ?? message(); as status) {

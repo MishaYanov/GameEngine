@@ -14,6 +14,228 @@ use std::{
 
 const EXTENT: [u32; 2] = [800, 600];
 
+#[test]
+fn game_status_publishes_progress_only_completion_restart_and_new_play_identity() {
+	use std::sync::Arc;
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game");
+	let project = runtime::project::ProjectData::load(&sample.join("project.json")).unwrap();
+	let mut documents = Vec::new();
+	for entry in project.scenes.iter() {
+		let mut document =
+			runtime::scene_io::load_data(&sample.join("assets").join(entry.asset_path()))
+				.unwrap()
+				.data;
+		// Coincident markers exercise the entire objective route without GPU/input timing.
+		if matches!(entry.id().as_str(), "courtyard" | "finish") {
+			for entity in &mut document.entities {
+				entity.transform.position = [0.0; 3];
+			}
+		}
+		documents.push((entry.id().clone(), document));
+	}
+	let startup = documents
+		.iter()
+		.find(|(id, _)| id == &project.startup_scene_id)
+		.unwrap()
+		.1
+		.clone();
+	documents.retain(|(id, _)| id != &project.startup_scene_id);
+	workspace.backend = runtime::EngineBuilder::new(startup, project)
+		.with_scenes(documents)
+		.module_resolver(Arc::new(courtyard_gameplay::resolve))
+		.build()
+		.unwrap();
+	let mut controller = controller(&mut workspace);
+	assert!(controller.state().game_status.is_none());
+	command(&mut workspace, Command::StartPlay);
+	controller.sync(&mut workspace).unwrap();
+	let first = controller.state().game_status.unwrap();
+	assert_eq!(first.gameplay.as_ref().unwrap().score, Some(0));
+	let author_revision = workspace.backend.session().revision();
+	let before = controller.revision();
+	let outcome = workspace.backend.tick(1.0 / 60.0);
+	controller.sync_game_status_after_tick(&workspace, &outcome);
+	let outcome = outcome.unwrap();
+	assert!(outcome.progress_changed && outcome.changes.is_empty());
+	assert!(controller.state().revision > before);
+	assert_eq!(
+		controller
+			.state()
+			.game_status
+			.unwrap()
+			.gameplay
+			.unwrap()
+			.score,
+		Some(1)
+	);
+	assert!(!controller.take_document_changed());
+	let outcome = workspace.backend.tick(1.0 / 60.0);
+	controller.sync_game_status_after_tick(&workspace, &outcome);
+	assert_eq!(outcome.unwrap().requested_scene.unwrap().as_str(), "finish");
+	assert_eq!(
+		controller
+			.state()
+			.game_status
+			.unwrap()
+			.pending_scene_id
+			.unwrap()
+			.as_str(),
+		"finish"
+	);
+	let (prepared, _) = workspace.backend.prepare_pending_play_scene().unwrap();
+	workspace.backend.commit_play_scene(prepared).unwrap();
+	controller.sync_game_status(&workspace);
+	let transitioned = controller.state().game_status.unwrap();
+	assert_eq!(transitioned.scene_id.as_str(), "finish");
+	assert!(transitioned.pending_scene_id.is_none());
+	let outcome = workspace.backend.tick(1.0 / 60.0);
+	controller.sync_game_status_after_tick(&workspace, &outcome);
+	let outcome = outcome.unwrap();
+	assert!(outcome.progress_changed && outcome.changes.is_empty());
+	let completed = controller.state();
+	assert!(completed.game_status.unwrap().gameplay.unwrap().completed);
+	assert!(!workspace.backend.session().needs_tick());
+	assert_eq!(workspace.backend.session().revision(), author_revision);
+	assert!(!controller.take_document_changed());
+	controller.sync(&mut workspace).unwrap();
+	assert_eq!(
+		controller.revision(),
+		completed.revision,
+		"idle status is deduplicated"
+	);
+	let (prepared, _) = workspace
+		.backend
+		.prepare_restart_play(&first.run_id, author_revision)
+		.unwrap();
+	workspace.backend.commit_play_scene(prepared).unwrap();
+	controller.sync_game_status(&workspace);
+	let restarted = controller.state().game_status.unwrap();
+	assert_eq!(restarted.play_session_id, first.play_session_id);
+	assert_ne!(restarted.run_id, first.run_id);
+	assert_eq!(restarted.scene_id.as_str(), "courtyard");
+	assert_eq!(restarted.gameplay.unwrap().score, Some(0));
+	assert!(controller.state().revision > completed.revision);
+	command(&mut workspace, Command::SetPaused { paused: true });
+	controller.sync(&mut workspace).unwrap();
+	assert!(controller.state().game_status.unwrap().paused);
+	command(&mut workspace, Command::StopPlay);
+	command(&mut workspace, Command::StartPlay);
+	// Simulates Stop/Start both arriving between worker wakes.
+	controller.sync(&mut workspace).unwrap();
+	assert_ne!(
+		controller.state().game_status.unwrap().play_session_id,
+		first.play_session_id
+	);
+	command(&mut workspace, Command::StopPlay);
+	controller.sync(&mut workspace).unwrap();
+	assert!(controller.state().game_status.is_none());
+}
+
+#[test]
+fn game_status_projects_only_on_changes_during_steady_ticks() {
+	use courtyard_gameplay::{CampaignProgress, ProgressAction as CampaignAction};
+	use runtime::{
+		game_progress::{ProgressAction, ProgressState, ProgressView},
+		project::ProjectData,
+		scene_catalog::SceneId,
+		simulation_session::{
+			ActionWriter, GameModule, GameModuleFactory, GameplayContext, GameplayStatus,
+			InputFrame,
+		},
+		world::RuntimeWorld,
+	};
+	use std::sync::Arc;
+
+	#[derive(Clone)]
+	struct CountedStatus(Arc<AtomicU64>);
+	impl GameModuleFactory for CountedStatus {
+		fn create_progress(&self) -> Result<ProgressState, String> {
+			ProgressState::new(CampaignProgress::default())
+		}
+		fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+			Ok(Box::new(self.clone()))
+		}
+	}
+	impl GameModule for CountedStatus {
+		fn needs_tick(&self, _: &InputFrame) -> bool {
+			true
+		}
+		fn plan(
+			&self,
+			_: &RuntimeWorld,
+			_: &InputFrame,
+			_: f32,
+			_: &mut ActionWriter<'_>,
+		) -> Result<(), String> {
+			Ok(())
+		}
+		fn plan_with_progress(
+			&self,
+			context: GameplayContext<'_>,
+			_: &mut ActionWriter<'_>,
+		) -> Result<(), String> {
+			if context.progress.revision() > 0 {
+				return Err("Test simulation rejection".into());
+			}
+			Ok(())
+		}
+		fn status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
+			self.0.fetch_add(1, Ordering::Relaxed);
+			Some(GameplayStatus {
+				objective: "Test objective".into(),
+				detail: None,
+				score: progress
+					.get::<CampaignProgress>()
+					.map(|progress| progress.score),
+				completed: false,
+			})
+		}
+	}
+
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let session = workspace.backend.session();
+	let calls = Arc::new(AtomicU64::new(0));
+	let elapsed = 1.0 / f64::from(session.project().fixed_hz);
+	workspace.backend = runtime::EngineBuilder::new(
+		(*session.authored_document()).clone(),
+		session.project().clone(),
+	)
+	.module_factory(Arc::new(CountedStatus(Arc::clone(&calls))))
+	.build()
+	.unwrap();
+	let mut controller = controller(&mut workspace);
+	command(&mut workspace, Command::StartPlay);
+	for _ in 0..120 {
+		controller.sync(&mut workspace).unwrap();
+		let outcome = workspace.backend.tick(elapsed);
+		controller.sync_game_status_after_tick(&workspace, &outcome);
+		assert_eq!(outcome.unwrap().steps, 1);
+		controller.sync(&mut workspace).unwrap();
+	}
+	assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+	let award =
+		ProgressAction::new::<CampaignProgress>(CampaignAction::AwardScore { amount: 2 }).unwrap();
+	workspace.backend.apply_play_progress(&[award]).unwrap();
+	controller.sync(&mut workspace).unwrap();
+	let status = controller.state().game_status.unwrap();
+	assert_eq!(status.gameplay.unwrap().score, Some(2));
+	assert!(!status.paused);
+	assert_eq!(calls.load(Ordering::Relaxed), 2);
+
+	let author_revision = workspace.backend.session().revision();
+	let rejected = workspace.backend.tick(elapsed);
+	assert!(rejected.is_err());
+	controller.sync_game_status_after_tick(&workspace, &rejected);
+	assert!(controller.state().game_status.unwrap().paused);
+	assert_eq!(workspace.backend.session().revision(), author_revision);
+	controller.sync(&mut workspace).unwrap();
+	assert_eq!(calls.load(Ordering::Relaxed), 3);
+}
+
 struct Fixture {
 	directory: PathBuf,
 	assets: PathBuf,
@@ -1315,7 +1537,7 @@ fn numpad_changes_orientation_and_projection() {
 }
 
 #[test]
-fn focused_game_routes_held_mapped_movement_until_key_release_or_blur() {
+fn focused_game_routes_held_mapped_movement_until_input_reset_or_blur() {
 	use runtime::{
 		input::{InputProfile, MovementBindings},
 		project::BehaviorSpec,
@@ -1379,6 +1601,19 @@ fn focused_game_routes_held_mapped_movement_until_key_release_or_blur() {
 		..key("ArrowRight")
 	};
 	send(&mut controller, &mut workspace, key_up);
+	assert_eq!(tick(&mut workspace), before_release);
+	send(&mut controller, &mut workspace, key("ArrowRight"));
+	controller.clear_play_input(&mut workspace);
+	assert!(controller.keys.is_empty());
+	assert!(controller.game_keyboard_active());
+	send(
+		&mut controller,
+		&mut workspace,
+		ViewportInputDto {
+			repeat: true,
+			..key("ArrowRight")
+		},
+	);
 	assert_eq!(tick(&mut workspace), before_release);
 	send(&mut controller, &mut workspace, key("ArrowRight"));
 	let before_blur = tick(&mut workspace);

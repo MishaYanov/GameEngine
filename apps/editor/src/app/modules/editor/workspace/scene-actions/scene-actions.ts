@@ -4,6 +4,16 @@ import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
+import {EditorCommand} from "../../../../core/editor/editor.models";
+
+const GAMEPLAY_ROLES = [
+    {name: 'player', label: 'Player'},
+    {name: 'key', label: 'Key'},
+    {name: 'exit', label: 'Exit'},
+    {name: 'finish', label: 'Finish'},
+] as const;
+
+type GameplayRole = typeof GAMEPLAY_ROLES[number]['name'];
 
 @Component({
     selector: 'editor-scene-actions',
@@ -35,6 +45,8 @@ export class SceneActions {
             path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
     });
 
+    protected readonly gameplayRoles = GAMEPLAY_ROLES;
+
     protected switchScene(select: HTMLSelectElement): void {
         const id = select.value;
         select.value = this.editor.snapshot()?.active_scene_id ?? '';
@@ -62,6 +74,35 @@ export class SceneActions {
                 ? 'Scene registered. Save All to persist the project settings.'
                 : 'Scene saved at the new path. Save All to persist the project settings.');
             this.pathDraft.set({path: ''});
+        });
+    }
+
+    protected async setRole(
+        role: GameplayRole,
+        select: HTMLSelectElement,
+    ): Promise<void> {
+        const snapshot = this.editor.snapshot();
+        if (!snapshot) return;
+
+        // Capture the user's choice before resetting the control.
+        const key = select.value;
+        const generation = this.editor.workspaceGeneration();
+        const sceneId = snapshot.active_scene_id;
+
+        // Keep displaying the confirmed value until Rust accepts the edit.
+        select.value = snapshot.document.bindings[role] ?? '';
+
+        const command: EditorCommand = {
+            type: 'set_scene_binding',
+            scene_id: sceneId,
+            name: role,
+            target: key === ''
+                ? {kind: 'clear'}
+                : {kind: 'assign', key},
+        };
+
+        await this.run(async () => {
+            await this.editor.execute(command, generation);
         });
     }
 

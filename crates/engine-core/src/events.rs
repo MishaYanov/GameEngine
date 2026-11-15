@@ -1,5 +1,5 @@
 //! Bounded pull-based change journal. Slow consumers receive a resync marker.
-use crate::world::WorldChange;
+use crate::{scene_catalog::SceneId, world::WorldChange};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -8,12 +8,13 @@ use std::collections::VecDeque;
 pub enum BackendEventKind {
 	DocumentChanged { changes: WorldChange },
 	SimulationAdvanced { tick: u64, changes: WorldChange },
+	RuntimeSceneChanged { from: SceneId, to: SceneId },
 	StateChanged,
 	ProjectChanged,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendEvent {
-	pub scene_id: Option<crate::scene_catalog::SceneId>,
+	pub scene_id: Option<SceneId>,
 	pub sequence: u64,
 	pub revision: u64,
 	pub scene_revision: u64,
@@ -55,7 +56,7 @@ impl ChangeJournal {
 		revision: u64,
 		scene_revision: u64,
 		event: BackendEventKind,
-		scene_id: Option<crate::scene_catalog::SceneId>,
+		scene_id: Option<SceneId>,
 	) -> Result<(), String> {
 		let sequence = self
 			.cursor

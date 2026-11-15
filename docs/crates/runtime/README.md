@@ -62,19 +62,21 @@ and initial typed progress. See [gameplay module selection](../../project-lifecy
 
 Editor Play now owns a `GameSession` containing the active SimulationSession. `prepare_play_scene` and
 `commit_play_scene` allow explicit replacement with a validated candidate identified by session owner and generation.
-Preparation leaves the active simulation installed. Commit preserves current pause state, clears movement and advances
-editor revisions. The native SceneEditor adapter also resets its movement target, selection and retained resource
+Preparation leaves the active simulation installed. Commit preserves current pause state and clears movement.
+Editor commits advance the render scene revision while preserving the authored command revision.
+The native SceneEditor adapter also resets its movement target, selection and retained resource
 snapshots, and suppresses held input until release. Its caller must finish GPU work and prepare a matching rendered
 scene before committing. The [Player transition path](../../apps/game/README.md#player-scene-switching) follows this
-ordering; Angular has no transition command/control added by these APIs. Authored data remains separate from the
-temporary runtime, and an outgoing simulation is not retained for later resumption.
+ordering. The Tauri viewport also stages GPU resources before commit. Headless Play prepares and commits the CPU
+destination. A runtime transition preserves authored data and discards the outgoing simulation world.
 
 ## Game progress
 
 `game_progress` is re-exported from engine-core. `GameSession` owns one game-defined progress value for a run, separate
 from authored documents and the active simulation world. Ordinary scene replacement preserves its latest value;
-New Game resets it and invalidates old prepared scenes. Starting/stopping editor Play creates/drops a run. No disk
-save format, inventory schema, cross-process transfer or Angular progress editor is provided.
+New Game resets it and invalidates old prepared scenes. Starting or stopping editor Play creates or drops a run.
+Modules may return a read-only objective, detail, score and completion status. The viewport carries that status
+with Play session and run identity, and Angular shows it beside Game. Progress is retained in memory for the run.
 
 Implement `GameProgress` with an independent `Clone`, equality, validation, owned-byte accounting and an action type.
 `ProgressState` exposes typed read-only `ProgressView::get` and a revision; changes pass through `ProgressAction` and
@@ -90,8 +92,9 @@ The context exposes world, input, fixed-step duration and a read-only progress v
 `ActionWriter::push_progress`. `GameSession::tick` runs world and progress actions together; later catch-up steps see
 the candidate progress. A failed tick discards progress, restores touched world transforms through the failure path,
 pauses simulation and clears movement. `TickOutcome` reports progress_changed/progress_revision separately from scene
-changes. Use GameSession's tick/needs_tick APIs when progress matters; standalone SimulationSession methods supply an
-empty progress value.
+changes. Modules can emit `SimulationAction::RequestScene` in the same action batch. That outcome hands a fresh
+accepted destination to the host for staged preparation. Use GameSession's tick/needs_tick APIs when progress matters;
+standalone SimulationSession methods supply an empty progress value.
 
 Factories can override `create_prepared(PreparedModuleConfig)` to reuse engine-validated scene identity and resolved
 behaviors; its default delegates to `create`. `ValidatedScene` similarly borrows an immutable validated document so

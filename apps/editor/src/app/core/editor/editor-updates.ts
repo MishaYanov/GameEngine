@@ -86,12 +86,15 @@ function project(value: unknown): boolean {
 function state(value: unknown): boolean {
     if (!record(value) || !record(value['snap'])) return false;
     const snap = value['snap'];
+    const playSessionId = value['play_session_id'];
     return (
         integer(value['revision']) &&
         integer(value['scene_revision']) &&
         typeof value['active_scene_id'] === 'string' &&
         strings(value['selection']) &&
         (value['mode'] === 'edit' || value['mode'] === 'play') &&
+        (playSessionId === undefined || playSessionId === null ||
+            (value['mode'] === 'play' && typeof playSessionId === 'string' && playSessionId.length > 0)) &&
         ['project_dirty', 'paused', 'dirty', 'can_undo', 'can_redo'].every(
             (key) => typeof value[key] === 'boolean',
         ) &&
@@ -203,6 +206,7 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
         scene_revision: update.state.scene_revision,
         selection: update.state.selection,
         mode: update.state.mode,
+        play_session_id: update.state.play_session_id ?? null,
         paused: update.state.paused,
         dirty: update.state.dirty,
         can_undo: update.state.can_undo,

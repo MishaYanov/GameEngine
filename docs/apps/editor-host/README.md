@@ -34,7 +34,7 @@ for opening the shell.
 | editor_export_prefab / editor_instantiate_prefab / editor_save_prefab / editor_load_prefab        | Prefab data and scoped files                                                         |
 | editor_collisions                                                                                 | Validated collision snapshot                                                         |
 | editor_viewport_attach / editor_viewport_bounds / editor_viewport_detach / editor_viewport_status | Single native-pane lifecycle                                                         |
-| editor_viewport_action / editor_viewport_editor_state                                             | Editor-only view/tool actions and applied native state                               |
+| editor_viewport_action / editor_viewport_editor_state                                             | View/tool actions, Restart Run, applied native state and Game status                 |
 | editor_prepare_project_build / editor_finish_project_build / editor_run_build                     | Staged export, background compilation, retry and explicit player launch              |
 
 Document DTOs live in bridge::editor; view/tool DTOs live in bridge::viewport. EditorSession owns mutations and validation. Compatibility Open accepts an asset root and a scene path
@@ -53,6 +53,18 @@ Full resync, topology, project, binding or entity-order changes return `Snapshot
 advertises `incremental_commands: true`; the legacy full-snapshot command remains available. The handler emits
 `editor://changes-ready` with the receipt cursor after execution. This reduces returned data for compatible edits;
 command/history processing may still clone full scene data.
+
+The native worker publishes `game_status` in applied viewport state as its fields change. The status includes
+Play session and run IDs, current runtime scene, pause and pending destination, and optional objective/detail/score
+and completion from the module. Angular matches the Play session ID to its authored snapshot. Progress-only
+updates use this viewport channel without refreshing the authored document.
+
+Runtime requests prepare the retained destination and stage renderer resources before committing. Workspace
+generation and candidate checks guard adoption. `restart_run` also validates the current run ID and expected
+authored revision, and restarts at the retained startup scene. A successful restart clears input and changes the
+run ID within the same Play session. Preparation failure leaves the previous scene and progress installed and
+reports an error in
+Game. [Runtime and authoring identity](../../project-lifecycle.md#editor-play-and-simulation-scene-identity).
 
 ## Project lifecycle and multi-scene persistence
 

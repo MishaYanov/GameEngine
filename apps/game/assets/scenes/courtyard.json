@@ -1,11 +1,15 @@
 {
   "schema_version": 3,
-  "bindings": {},
+  "bindings": {
+    "player": "courtyard-player",
+    "key": "courtyard-key",
+    "exit": "courtyard-exit"
+  },
   "entities": [
     {
       "key": "courtyard-player",
       "name": "Courtyard Player",
-      "model_path": "props/robot.glb",
+      "model_path": "props/capsule.glb",
       "transform": {
         "position": [
           0.0,
@@ -18,9 +22,69 @@
           0.0
         ],
         "scale": [
-          0.7,
-          0.7,
-          0.7
+          0.4,
+          0.4,
+          0.4
+        ]
+      }
+    },
+    {
+      "key": "courtyard-key",
+      "name": "Courtyard Key",
+      "model_path": "props/sphere.glb",
+      "transform": {
+        "position": [
+          1.5,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "material": {
+        "base_color_factor": [
+          1.0,
+          0.8,
+          0.1,
+          1.0
+        ]
+      }
+    },
+    {
+      "key": "courtyard-exit",
+      "name": "Courtyard Exit",
+      "model_path": "props/cube.glb",
+      "transform": {
+        "position": [
+          -1.5,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.3,
+          0.0
+        ],
+        "scale": [
+          0.35,
+          1.2,
+          0.35
+        ]
+      },
+      "material": {
+        "base_color_factor": [
+          0.2,
+          1.0,
+          0.3,
+          1.0
         ]
       }
     }

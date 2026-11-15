@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "name": "Game Engine Robot Demo",
+  "name": "Courtyard Run Demo",
   "gameplay_module": "courtyard_run",
   "fixed_hz": 60,
   "max_catchup_steps": 8,
@@ -15,6 +15,14 @@
     }
   ],
   "behaviors": [
+    {
+      "scene_id": "finish",
+      "behavior": {
+        "kind": "shared",
+        "entity": "finish-player",
+        "definition": "player_move"
+      }
+    },
     {
       "scene_id": "courtyard",
       "behavior": {
@@ -58,6 +66,10 @@
   ],
   "scenes": [
     {
+      "id": "finish",
+      "asset_path": "scenes/finish.json"
+    },
+    {
       "id": "courtyard",
       "asset_path": "scenes/courtyard.json"
     },
@@ -66,5 +78,5 @@
       "asset_path": "scenes/robots.json"
     }
   ],
-  "startup_scene_id": "7c33e4b1-5820-4d24-952b-91eb41d35c86"
+  "startup_scene_id": "courtyard"
 }

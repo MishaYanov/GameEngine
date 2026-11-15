@@ -118,6 +118,8 @@ pub struct ViewportEditorStateDto {
 	pub focused: bool,
 	pub error: Option<String>,
 	pub transform_preview: Option<ViewportTransformPreviewDto>,
+	#[serde(default)]
+	pub game_status: Option<crate::editor::PlayStatusDto>,
 }
 impl Default for ViewportEditorStateDto {
 	fn default() -> Self {
@@ -133,6 +135,7 @@ impl Default for ViewportEditorStateDto {
 			focused: false,
 			error: None,
 			transform_preview: None,
+			game_status: None,
 		}
 	}
 }
@@ -140,6 +143,10 @@ impl Default for ViewportEditorStateDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ViewportActionDto {
+	RestartRun {
+		run_id: String,
+		expected_revision: u64,
+	},
 	SetTool {
 		tool: ViewportTool,
 	},
@@ -194,6 +201,11 @@ impl ViewportActionDto {
 	pub fn validate(&self) -> Result<(), String> {
 		let positive = |value: f32| value.is_finite() && (0.0001..=1_000_000.0).contains(&value);
 		match self {
+			Self::RestartRun { run_id, .. }
+				if run_id.is_empty() || run_id.len() > 64 || !run_id.is_ascii() =>
+			{
+				Err("Restart requires a valid run identity".into())
+			}
 			Self::SetGridSpacing { spacing } if !positive(*spacing) => {
 				Err("Grid spacing must be finite and positive".into())
 			}

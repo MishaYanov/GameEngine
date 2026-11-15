@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
 	EntityKey,
-	command::{EditorCommandDto, EditorCommandRequest, TransformDto},
+	command::{EditorCommandDto, EditorCommandRequest, SceneBindingTarget, TransformDto},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, SceneData, validate_model_path},
 };
 
@@ -197,6 +197,21 @@ impl CommandFactory {
 			EditorCommandDto::SetEntityInput { entity, movement } => {
 				validate_key(entity)?;
 				finite(movement, "Movement")?;
+			}
+			EditorCommandDto::SetSceneBinding {
+				name,
+				scene_id,
+				target,
+			} => {
+				crate::scene_catalog::SceneId::new(scene_id.as_str())?;
+				validate_name(name, 1024)?;
+
+				match target {
+					SceneBindingTarget::Assign { key } => {
+						validate_key(key)?;
+					}
+					SceneBindingTarget::Clear {} => {}
+				}
 			}
 			EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection

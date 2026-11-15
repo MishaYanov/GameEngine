@@ -608,6 +608,7 @@ fn configured_scheduler_distinguishes_idle_input_disabled_controls_and_nonzero_s
 struct PreparedFactory {
 	project: ProjectData,
 	scene_id: SceneId,
+	document: Arc<engine_core::SceneData>,
 	calls: Mutex<usize>,
 }
 impl GameModuleFactory for PreparedFactory {
@@ -620,6 +621,7 @@ impl GameModuleFactory for PreparedFactory {
 	) -> Result<Box<dyn GameModule>, String> {
 		assert_eq!(config.project(), &self.project);
 		assert_eq!(config.scene_id(), &self.scene_id);
+		assert_eq!(config.document(), self.document.as_ref());
 		assert_eq!(
 			config.behaviors(),
 			self.project.resolved_behaviors_for(&self.scene_id).unwrap()
@@ -631,15 +633,27 @@ impl GameModuleFactory for PreparedFactory {
 
 #[test]
 fn prepared_factory_hook_runs_only_after_project_scene_and_target_validation() {
-	let (project, scene_id, wrong_scene, chosen_scene) = scene_context_fixture();
+	let (project, scene_id, wrong_scene, mut chosen_scene) = scene_context_fixture();
+	Arc::make_mut(&mut chosen_scene)
+		.bindings
+		.insert("player".into(), key("secondary-only"));
 	let factory = PreparedFactory {
 		project: project.clone(),
 		scene_id: scene_id.clone(),
+		document: Arc::clone(&chosen_scene),
 		calls: Mutex::new(0),
 	};
-	let mut invalid_scene = chosen_scene.as_ref().clone();
-	invalid_scene.camera.near_plane = -1.0;
-	for document in [wrong_scene, Arc::new(invalid_scene)] {
+	let mut invalid_camera = chosen_scene.as_ref().clone();
+	invalid_camera.camera.near_plane = -1.0;
+	let mut invalid_binding = chosen_scene.as_ref().clone();
+	invalid_binding
+		.bindings
+		.insert("player".into(), key("startup-only"));
+	for document in [
+		wrong_scene,
+		Arc::new(invalid_camera),
+		Arc::new(invalid_binding),
+	] {
 		assert!(
 			SimulationSession::with_factory_for_scene(
 				project.clone(),

@@ -239,11 +239,26 @@ export class EditorService {
         );
     }
 
-    execute(command: EditorCommand): Promise<EditorSnapshot> {
+    execute(
+        command: EditorCommand,
+        expectedGeneration?: number,
+    ): Promise<EditorSnapshot> {
         return this.enqueue(
             'editor_execute_incremental',
             async () => {
-                const request: EditorCommandRequest = {expected_revision: this.revision(), command};
+                if (
+                    expectedGeneration !== undefined &&
+                    expectedGeneration !== this.workspaceGeneration()
+                ) {
+                    throw new Error(
+                        'The workspace changed. Select the gameplay role again.'
+                    );
+                }
+
+                const request: EditorCommandRequest = {
+                    expected_revision: this.revision(),
+                    command,
+                };
                 const capabilities = await this.loadCapabilities();
                 if (!capabilities.incremental_commands) {
                     try {

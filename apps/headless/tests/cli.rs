@@ -1,6 +1,7 @@
 use engine_core::{
 	EntityKey,
-	project::{BehaviorSpec, ProjectData},
+	project::{BehaviorSpec, ProjectData, SceneBehavior},
+	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData, SceneData, TransformData},
 };
 use serde_json::{Value, json};
@@ -97,6 +98,48 @@ impl Fixture {
 		.unwrap();
 		path
 	}
+	fn add_finish(&self, project: &mut ProjectData, source: &SceneData) -> SceneData {
+		let id = SceneId::new("finish").unwrap();
+		project
+			.scenes
+			.insert(SceneDescriptor::new(id.clone(), "scenes/finish.json").unwrap())
+			.unwrap();
+		let player = EntityKey::new("finish-player").unwrap();
+		let marker = EntityKey::new("finish-marker").unwrap();
+		let mut finish = source.clone();
+		finish.bindings = [
+			("player".into(), player.clone()),
+			("finish".into(), marker.clone()),
+		]
+		.into();
+		finish.entities = vec![
+			EntityData::new(
+				player.clone(),
+				"Destination player",
+				"models/not-loaded.glb",
+			),
+			EntityData::new(marker, "Finish marker", "models/not-loaded.glb").with_transform(
+				TransformData {
+					position: [1.0, 0.0, 0.0],
+					..Default::default()
+				},
+			),
+		];
+		project.behaviors.push(SceneBehavior {
+			scene_id: id,
+			behavior: BehaviorSpec::ControlledMove {
+				entity: player,
+				speed: 2.0,
+				space: Default::default(),
+			},
+		});
+		fs::write(
+			self.root.join("assets/scenes/finish.json"),
+			finish.to_json().unwrap(),
+		)
+		.unwrap();
+		finish
+	}
 }
 impl Drop for Fixture {
 	fn drop(&mut self) {
@@ -150,11 +193,20 @@ fn help_and_invalid_options_exit_without_graphics_or_project_io() {
 }
 
 #[test]
-fn headless_runs_the_selected_campaign_without_input() {
+fn headless_collects_the_bound_key_without_input_only_when_the_campaign_is_selected() {
 	let fixture = Fixture::new();
 	let mut scene = SceneData::from_json(&fs::read_to_string(&fixture.scene).unwrap()).unwrap();
-	scene.entities[0].transform.position[0] = 2.0;
-	fs::write(&fixture.scene, scene.to_json().unwrap()).unwrap();
+	let key = EntityKey::new("key-marker").unwrap();
+	scene
+		.entities
+		.push(EntityData::new(key.clone(), "Key", "models/not-loaded.glb"));
+	scene.bindings.extend([
+		("player".into(), EntityKey::new("actor").unwrap()),
+		("key".into(), key),
+		("exit".into(), EntityKey::new("other").unwrap()),
+	]);
+	let document = scene.to_json().unwrap();
+	fs::write(&fixture.scene, &document).unwrap();
 
 	let mut project = ProjectData::load(&fixture.project).unwrap();
 	project.behaviors.truncate(1);
@@ -162,10 +214,151 @@ fn headless_runs_the_selected_campaign_without_input() {
 	let run = || success(fixture.command().arg("--steps").arg("2").output().unwrap());
 	assert_eq!(run()["fixed_steps"], 0);
 
-	// At the key threshold, campaign progress is the only reason to step.
+	// The player spawns next to the key. With movement idle and the exit far
+	// away, the pickup is the only reason to step.
+	project.gameplay_module = Some(courtyard_gameplay::COURTYARD_RUN_ID.into());
+	fixture.add_finish(&mut project, &scene);
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+	let selected = run();
+	let repeated = run();
+	assert_eq!(selected["fixed_steps"], 1);
+	assert_eq!(selected["simulation_tick"], 1);
+	assert_eq!(selected["state_hash"], repeated["state_hash"]);
+	assert_eq!(selected["change_cursor"], repeated["change_cursor"]);
+	assert_eq!(fs::read_to_string(&fixture.scene).unwrap(), document);
+}
+
+#[test]
+fn headless_run_reaches_finish_and_stop_restores_authored_scene() {
+	let fixture = Fixture::new();
+	let mut scene = SceneData::from_json(&fs::read_to_string(&fixture.scene).unwrap()).unwrap();
+	scene.entities[1].transform.position = [0.0; 3];
+	let key = EntityKey::new("key-marker").unwrap();
+	scene
+		.entities
+		.push(EntityData::new(key.clone(), "Key", "models/not-loaded.glb"));
+	scene.bindings.extend([
+		("player".into(), EntityKey::new("actor").unwrap()),
+		("key".into(), key),
+		("exit".into(), EntityKey::new("other").unwrap()),
+	]);
+	let mut project = ProjectData::load(&fixture.project).unwrap();
+	project.behaviors.truncate(1);
+	project.gameplay_module = Some(courtyard_gameplay::COURTYARD_RUN_ID.into());
+	let finish = fixture.add_finish(&mut project, &scene);
+	let authored = scene.to_json().unwrap();
+	fs::write(&fixture.scene, &authored).unwrap();
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+	let mut actions = vec![
+		json!({"type":"command","command":{"type":"start_play"}}),
+		json!({"type":"command","command":{"type":"set_play_input","movement":[1,0,0]}}),
+		json!({"type":"tick","count":10}),
+	];
+	let replay = fixture.replay(actions.clone());
+	let state = fixture.root.join("destination.json");
+	let result = success(
+		fixture
+			.command()
+			.arg("--replay")
+			.arg(&replay)
+			.arg("--state-output")
+			.arg(&state)
+			.output()
+			.unwrap(),
+	);
+	assert_eq!(result["active_scene_id"], project.startup_scene_id.as_str());
+	assert_eq!(result["play_scene_id"], "finish");
+	assert_eq!(result["fixed_steps"], 2);
+	assert_eq!(result["simulation_tick"], 0);
+	let rendered = SceneData::from_json(&fs::read_to_string(&state).unwrap()).unwrap();
+	assert_eq!(
+		rendered, finish,
+		"old held input must not move the destination player"
+	);
+	assert_eq!(fs::read_to_string(&fixture.scene).unwrap(), authored);
+
+	actions.extend([
+		json!({"type":"command","command":{"type":"set_play_input","movement":[1,0,0]}}),
+		json!({"type":"tick","count":90}),
+	]);
+	let replay = fixture.replay(actions.clone());
+	let completed_state = fixture.root.join("completed.json");
+	let completed = success(
+		fixture
+			.command()
+			.arg("--replay")
+			.arg(&replay)
+			.arg("--state-output")
+			.arg(&completed_state)
+			.output()
+			.unwrap(),
+	);
+	assert_eq!(
+		completed["active_scene_id"],
+		project.startup_scene_id.as_str()
+	);
+	assert_eq!(completed["play_scene_id"], "finish");
+	// Twenty movement steps enter marker range, then one completion step
+	// commits without moving. The remaining held-input ticks all stay idle.
+	assert_eq!(completed["simulation_tick"], 21);
+	assert_eq!(completed["fixed_steps"], 23);
+	let rendered = SceneData::from_json(&fs::read_to_string(completed_state).unwrap()).unwrap();
+	let player_x = rendered.entities[0].transform.position[0];
+	assert!((player_x - 2.0 / 3.0).abs() < 1e-5, "{player_x}");
+	assert_eq!(rendered.bindings, finish.bindings);
+
+	// Background gameplay must not make the editor's Stop revision stale.
+	actions.push(json!({"type":"command","expected_revision":3,"command":{"type":"stop_play"}}));
+	let replay = fixture.replay(actions);
+	let stopped_state = fixture.root.join("stopped.json");
+	let stopped = success(
+		fixture
+			.command()
+			.arg("--replay")
+			.arg(&replay)
+			.arg("--state-output")
+			.arg(&stopped_state)
+			.output()
+			.unwrap(),
+	);
+	assert_eq!(stopped["mode"], "edit");
+	assert!(stopped.get("play_scene_id").is_none());
+	assert_eq!(fs::read_to_string(&fixture.scene).unwrap(), authored);
+	assert_eq!(
+		SceneData::from_json(
+			&fs::read_to_string(fixture.root.join("assets/scenes/finish.json")).unwrap()
+		)
+		.unwrap(),
+		finish,
+	);
+	assert_eq!(
+		SceneData::from_json(&fs::read_to_string(stopped_state).unwrap()).unwrap(),
+		scene
+	);
+}
+
+#[test]
+fn headless_can_open_a_course_draft_but_rejects_play_without_its_exit_role() {
+	let fixture = Fixture::new();
+	let mut scene = SceneData::from_json(&fs::read_to_string(&fixture.scene).unwrap()).unwrap();
+	scene.bindings.extend([
+		("player".into(), EntityKey::new("actor").unwrap()),
+		("key".into(), EntityKey::new("other").unwrap()),
+	]);
+	fs::write(&fixture.scene, scene.to_json().unwrap()).unwrap();
+	let mut project = ProjectData::load(&fixture.project).unwrap();
 	project.gameplay_module = Some(courtyard_gameplay::COURTYARD_RUN_ID.into());
 	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
-	assert_eq!(run()["fixed_steps"], 1);
+
+	let opened = success(fixture.command().arg("--steps").arg("0").output().unwrap());
+	assert_eq!(opened["mode"], "edit");
+	let error = failure(fixture.command().arg("--steps").arg("1").output().unwrap());
+	assert!(
+		error["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains(r#"requires a "exit" binding"#)
+	);
 }
 
 #[test]

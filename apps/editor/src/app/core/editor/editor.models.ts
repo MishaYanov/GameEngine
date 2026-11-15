@@ -21,6 +21,10 @@ export type BehaviorSettings =
     | { readonly kind: 'controlled_move'; readonly speed: number; readonly space: 'local' | 'world' }
     | { readonly kind: 'spin'; readonly angular_velocity: Vec3 };
 
+export type SceneBindingTarget =
+    | { readonly kind: 'assign'; readonly key: EntityKey }
+    | { readonly kind: 'clear' };
+
 export interface ProjectData {
     readonly schema_version: 3;
     readonly name: string;
@@ -192,7 +196,13 @@ export type EditorCommand =
     | { readonly type: 'start_play' }
     | { readonly type: 'stop_play' }
     | { readonly type: 'set_paused'; readonly paused: boolean }
-    | { readonly type: 'set_play_input'; readonly movement: Vec3 };
+    | { readonly type: 'set_play_input'; readonly movement: Vec3 }
+    | {
+    readonly type: 'set_scene_binding';
+    readonly scene_id: SceneId;
+    readonly name: string;
+    readonly target: SceneBindingTarget;
+};
 
 export interface EditorCommandRequest {
     readonly expected_revision: number;
@@ -200,6 +210,7 @@ export interface EditorCommandRequest {
 }
 
 export interface EditorSnapshot {
+    readonly play_session_id?: string | null;
     readonly active_scene_id: SceneId;
     readonly project: ProjectData;
     readonly project_dirty: boolean;

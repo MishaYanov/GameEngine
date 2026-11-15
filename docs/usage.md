@@ -65,10 +65,14 @@ My Game/
       crate.png
       bricks.jpg
     scenes/
-      robots.json
       courtyard.json
+      finish.json
+      robots.json
     props/
+      capsule.glb
+      cube.glb
       robot.glb
+      sphere.glb
 ```
 
 Launch the installed demo:
@@ -77,7 +81,9 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. The installer copies the validated nested asset tree and manifest, including catalogued scenes and model dependencies. The player reads the authored project and its configured behavior. Preserve the executable, project manifest and asset tree together. See [the game guide](apps/game/README.md).
+The window title uses the project name. The installer packages the bundled Courtyard Run manifest, catalogued
+scenes and model dependencies. Keep the executable, manifest and asset tree
+together. [Play the bundled route](apps/game/README.md#demo-progress-and-new-game).
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 
@@ -95,7 +101,11 @@ Select an entity from Hierarchy or the viewport, then edit its name/local transf
 
 Assets opens registered scenes and loads/refreshes models explicitly. Add to Scene places a selected model at the origin; dragging it into Scene uses a native preview and asynchronous adoption. Escape/cancellation ends a pending gesture. Native selection and placement currently approximate model bounds. Read [native scene editor implementation](viewport-implementation.md) for the complete workflow and limits, including Windows airspace and the desktop acceptance checklist.
 
-Source game execution separately defaults to Development with its learning controls; installed projects default to Player. Explicit --development/--player select mode. The sample campaign module and the editor's configured-behavior module still require a shared activation policy before complete key/exit progress parity can be claimed.
+Open the bundled `apps/game/project.json` to try Courtyard Run. Gameplay Roles binds Player, Key, Exit and Finish
+to entities in the active authored scene. Select Courtyard and click Play, then focus Game and use WASD. Game shows
+the objective, runtime scene and score. Restart Run uses the startup scene and clears progress. Source game
+execution defaults to Development, while installed games default to Player. Use `--player` to launch the source
+demo as a player. [Editor and player walkthrough](viewport-implementation.md#15-scene-and-game-share-one-surface).
 
 ## 3. Use the editor project setup screen
 
@@ -129,7 +139,8 @@ A browser-only preview cannot perform native project creation/opening, Vulkan ed
 
 1. Stop Play and choose Save All.
 2. Choose Export Game and select an existing output parent such as `D:\Exports`.
-3. Preparation creates a new child named after the project and stages verified assets/manifest. Existing output folders are not overwritten.
+3. Preparation checks the saved catalog and selected module, then stages the verified assets and manifest in a new child
+   named after the project.
 4. Continue editing while the release player compiles from the staged inputs.
 5. If compilation fails, Retry Export reuses its staged token/output instead of creating the same folder again.
 6. After success, review the output path and choose Run Exported Game explicitly.

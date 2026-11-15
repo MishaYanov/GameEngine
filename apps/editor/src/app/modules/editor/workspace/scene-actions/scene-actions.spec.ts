@@ -2,12 +2,24 @@ import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import axe from 'axe-core';
-import type {EditorSnapshot} from '../../../../core/editor/editor.models';
+import type {EditorSnapshot, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneActions} from './scene-actions';
 import {SceneSwitchService} from './scene-switch.service';
+
+function entity(key: string): SceneEntity {
+    return {
+        key, name: key, model_path: 'models/robot.glb', renderable: true,
+        transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+    };
+}
+
+function choose(select: HTMLSelectElement, value: string): void {
+    select.value = value;
+    select.dispatchEvent(new Event('change'));
+}
 
 function snapshot(): EditorSnapshot {
     return {
@@ -31,8 +43,8 @@ function snapshot(): EditorSnapshot {
     };
 }
 
-async function createActions() {
-    const current = signal(snapshot());
+async function createActions(initial = snapshot()) {
+    const current = signal(initial);
     const busy = signal(false);
     const generation = signal(1);
     const switchScene = vi.fn(async (sceneId: string) => {
@@ -49,7 +61,7 @@ async function createActions() {
     });
     const registerScene = vi.fn(async (_path: string) => current());
     const saveSceneAs = vi.fn(async (_path: string) => current());
-    const execute = vi.fn(async () => current());
+    const execute = vi.fn<EditorService['execute']>(async () => current());
     const withCommittedEdit = vi.fn(async (action: () => Promise<void>) => {
         await action();
         return true;
@@ -142,10 +154,20 @@ describe('SceneActions', () => {
     });
 
     it('updates the chooser only after a successful scene switch', async () => {
-        const {fixture, root, current, sceneSwitch, switchScene, withCommittedEdit} = await createActions();
-        const select = root.querySelector('select')!;
-        select.value = 'second';
-        select.dispatchEvent(new Event('change'));
+        const initial = snapshot();
+        const first = {id: 'first', asset_path: 'scenes/first.json', dirty: false, loaded: false};
+        const {fixture, root, current, sceneSwitch, switchScene, withCommittedEdit} = await createActions({
+            ...initial,
+            scenes: [first, ...initial.scenes],
+            project: {
+                ...initial.project,
+                scenes: [{id: first.id, asset_path: first.asset_path}, ...initial.project.scenes],
+            },
+        });
+        const select = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
+        expect([...select.options].map(option => option.value)).toEqual(['first', 'main', 'second']);
+        expect(select.value).toBe('main');
+        choose(select, 'second');
         await fixture.whenStable();
         expect(withCommittedEdit).toHaveBeenCalledOnce();
         expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
@@ -289,6 +311,112 @@ describe('SceneActions', () => {
         expect(execute).toHaveBeenCalledExactlyOnceWith({type: 'set_startup_scene', scene_id: 'second'});
     });
 
+    it('shows the saved role on open and switches to the new scene binding', async () => {
+        const initial = snapshot();
+        const {fixture, root, current, switchScene} = await createActions({
+            ...initial,
+            document: {...initial.document, entities: [entity('robot')], bindings: {player: 'robot'}},
+        });
+        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        expect(player.value).toBe('robot');
+
+        switchScene.mockImplementationOnce(async () => {
+            current.update(value => ({
+                ...value,
+                active_scene_id: 'second',
+                document: {...value.document, entities: [entity('scout')], bindings: {player: 'scout'}},
+            }));
+            return current();
+        });
+        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        await fixture.whenStable();
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
+        expect([...player.options].map(option => option.value)).toEqual(['', 'scout']);
+        expect(player.value).toBe('scout');
+    });
+
+    it('assigns, reassigns and clears a role only after the command is accepted', async () => {
+        const initial = snapshot();
+        const {fixture, root, current, execute} = await createActions({
+            ...initial,
+            document: {...initial.document, entities: [entity('robot'), entity('scout')]},
+        });
+        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        for (const [before, after] of [['', 'robot'], ['robot', 'scout'], ['scout', '']] as const) {
+            const bindings: EditorSnapshot['document']['bindings'] = after ? {player: after} : {};
+            let accept!: () => void;
+            execute.mockImplementationOnce(() => new Promise<EditorSnapshot>(resolve => {
+                accept = () => {
+                    current.update(value => ({
+                        ...value,
+                        document: {...value.document, bindings},
+                    }));
+                    resolve(current());
+                };
+            }));
+
+            choose(player, after);
+            await vi.waitFor(() => expect(accept).toBeDefined());
+            expect(execute).toHaveBeenLastCalledWith({
+                type: 'set_scene_binding', scene_id: 'main', name: 'player',
+                target: after ? {kind: 'assign', key: after} : {kind: 'clear'},
+            }, 1);
+            expect(player.value).toBe(before);
+            accept();
+            await fixture.whenStable();
+            expect(player.value).toBe(after);
+        }
+        expect(execute).toHaveBeenCalledTimes(3);
+    });
+
+    it('shows a cleared role after the entity is deleted and restores it after Undo', async () => {
+        const initial = snapshot();
+        const authored = {
+            ...initial,
+            document: {...initial.document, entities: [entity('robot')], bindings: {player: 'robot'}},
+        };
+        const {fixture, root, current, execute} = await createActions(authored);
+        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+
+        current.set({...initial, revision: 2, can_undo: true});
+        await fixture.whenStable();
+        expect([...player.options].map(option => option.value)).toEqual(['']);
+        expect(player.value).toBe('');
+
+        current.set({...authored, revision: 3, can_redo: true});
+        await fixture.whenStable();
+        expect(player.value).toBe('robot');
+        expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('waits for the Inspector and keeps the confirmed role when the update fails', async () => {
+        const initial = snapshot();
+        const {fixture, root, execute, withCommittedEdit} = await createActions({
+            ...initial,
+            document: {...initial.document, entities: [entity('robot'), entity('scout')], bindings: {player: 'robot'}},
+        });
+        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        let finishEdit!: () => void;
+        withCommittedEdit.mockImplementationOnce(async action => {
+            await new Promise<void>(resolve => finishEdit = resolve);
+            await action();
+            return true;
+        });
+        execute.mockRejectedValueOnce(new Error('Binding target disappeared.'));
+
+        choose(player, 'scout');
+        expect(player.value).toBe('robot');
+        expect(execute).not.toHaveBeenCalled();
+        finishEdit();
+        await fixture.whenStable();
+        expect(execute).toHaveBeenCalledExactlyOnceWith({
+            type: 'set_scene_binding', scene_id: 'main', name: 'player',
+            target: {kind: 'assign', key: 'scout'},
+        }, 1);
+        expect(player.value).toBe('robot');
+        expect(root.querySelector('[role="alert"]')?.textContent).toContain('Binding target disappeared.');
+    });
+
     it('disables scene changes, startup, and scene files during Play', async () => {
         const {fixture, root, current, execute, registerScene, saveSceneAs, switchScene, button, expand} = await createActions();
         const path = await expand();
@@ -297,6 +425,7 @@ describe('SceneActions', () => {
         current.update(value => ({...value, active_scene_id: 'second', mode: 'play'}));
         await fixture.whenStable();
         expect(root.querySelector('select')!.disabled).toBe(true);
+        expect(root.querySelector('fieldset')!.disabled).toBe(true);
         expect(path.disabled).toBe(true);
         for (const action of ['Use as Startup', 'Register Existing Scene', 'Save Scene As']) {
             expect(button(action).disabled).toBe(true);

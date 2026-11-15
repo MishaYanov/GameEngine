@@ -2,6 +2,57 @@ use bridge::editor::{EditorCommandDto, EditorCommandRequest, ViewportBoundsDto};
 use serde_json::json;
 
 #[test]
+fn runtime_status_and_restart_use_separate_play_and_run_identities() {
+	use bridge::editor::{GameplayStatus, PlayStatusDto};
+	use bridge::viewport::{ViewportActionDto, ViewportEditorStateDto};
+	let mut state = ViewportEditorStateDto::default();
+	state.game_status = Some(PlayStatusDto {
+		play_session_id: "play-1".into(),
+		run_id: "run-2".into(),
+		scene_id: engine_core::scene_catalog::SceneId::new("finish").unwrap(),
+		paused: false,
+		pending_scene_id: None,
+		gameplay: Some(GameplayStatus {
+			objective: "Run complete!".into(),
+			detail: None,
+			score: Some(1),
+			completed: true,
+		}),
+	});
+	let wire = serde_json::to_value(&state).unwrap();
+	assert_eq!(wire["game_status"]["play_session_id"], "play-1");
+	assert_eq!(wire["game_status"]["run_id"], "run-2");
+	let decoded: ViewportEditorStateDto = serde_json::from_value(wire.clone()).unwrap();
+	assert_eq!(decoded.game_status, state.game_status);
+	let mut legacy = wire;
+	legacy.as_object_mut().unwrap().remove("game_status");
+	assert!(
+		serde_json::from_value::<ViewportEditorStateDto>(legacy)
+			.unwrap()
+			.game_status
+			.is_none()
+	);
+	let action = json!({"type":"restart_run","run_id":"run-2","expected_revision":17});
+	let decoded: ViewportActionDto = serde_json::from_value(action.clone()).unwrap();
+	decoded.validate().unwrap();
+	assert_eq!(serde_json::to_value(decoded).unwrap(), action);
+	for invalid in [
+		json!({"type":"restart_run","run_id":"run-2"}),
+		json!({"type":"restart_run","run_id":"run-2","expected_revision":17,"scene_id":"finish"}),
+	] {
+		assert!(serde_json::from_value::<ViewportActionDto>(invalid).is_err());
+	}
+	assert!(
+		ViewportActionDto::RestartRun {
+			run_id: "x".repeat(65),
+			expected_revision: 17
+		}
+		.validate()
+		.is_err()
+	);
+}
+
+#[test]
 fn typed_editor_command_roundtrip_uses_explicit_revision_tag_and_strict_nested_fields() {
 	let value = json!({"expected_revision":42,"command":{"type":"set_transforms","edits":[{"key":"robot","transform":{"position":[1,2,3],"rotation":[0,0,0],"scale":[1,1,1]}}],"space":"world","snap":true}});
 	let request: EditorCommandRequest = serde_json::from_value(value.clone()).unwrap();
@@ -184,7 +235,52 @@ fn scene_lifecycle_commands_roundtrip_stable_ids_and_reject_extra_transport_fiel
 			serde_json::from_value::<EditorCommandRequest>(
 				json!({"expected_revision":42,"command":command})
 			)
-				.is_err()
+			.is_err()
 		);
 	}
+}
+
+#[test]
+fn scene_binding_commands_roundtrip_assign_and_clear_and_reject_invalid_targets() {
+	let request = |target| {
+		json!({
+			"expected_revision": 1,
+			"command": {
+				"type": "set_scene_binding",
+				"scene_id": "main",
+				"name": "player",
+				"target": target,
+			},
+		})
+	};
+	for target in [
+		json!({"kind": "assign", "key": "a"}),
+		json!({"kind": "clear"}),
+	] {
+		let value = request(target);
+		let decoded: EditorCommandRequest = serde_json::from_value(value.clone()).unwrap();
+		assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+	}
+
+	for target in [
+		json!(null),
+		json!({"key": "a"}),
+		json!({"kind": "assign"}),
+		json!({"kind": "assign", "key": null}),
+		json!({"kind": "assign", "key": "a", "extra": true}),
+		json!({"kind": "clear", "key": "a"}),
+		json!({"kind": "replace", "key": "a"}),
+	] {
+		let value = request(target);
+		assert!(
+			serde_json::from_value::<EditorCommandRequest>(value.clone()).is_err(),
+			"accepted malformed scene binding request {value}"
+		);
+	}
+	let mut missing_target = request(json!(null));
+	missing_target["command"]
+		.as_object_mut()
+		.unwrap()
+		.remove("target");
+	assert!(serde_json::from_value::<EditorCommandRequest>(missing_target).is_err());
 }

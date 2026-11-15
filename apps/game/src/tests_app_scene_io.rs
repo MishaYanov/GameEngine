@@ -122,6 +122,77 @@ fn player_uses_authored_keys_without_running_conflicting_camera_or_pause_shortcu
 }
 
 #[test]
+fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available() {
+	let (mut app, _) = fixture();
+	let mut project = app.editor.project().unwrap().clone();
+	project.gameplay_module = Some(progress::COURTYARD_RUN_ID.into());
+	project.input_profile = Some(InputProfile {
+		actions: vec![runtime::input::GameInputBinding {
+			id: "interact".into(),
+			key: Key::F10,
+			animation_parameter: None,
+		}],
+		..InputProfile::default()
+	});
+	app.editor.set_initial_project(project).unwrap();
+	app.editor
+		.set_module_resolver(Arc::new(progress::resolve))
+		.unwrap();
+	app.editor.start_play(&mut app.scene).unwrap();
+	app.standalone_runtime = true;
+	app.input.reset();
+	app.input.press(Key::F10);
+	app.update_player(1.0 / 60.0);
+	assert!(
+		!app.play_update_error_reported,
+		"F10 belongs to gameplay before completion"
+	);
+	assert!(!app.campaign_completed());
+	app.input.reset();
+	for action in [
+		progress::ProgressAction::CollectCourtyardKey,
+		progress::ProgressAction::ReachCourtyardExit,
+		progress::ProgressAction::CompleteRun,
+	] {
+		app.editor
+			.apply_play_progress(&[runtime::game_progress::ProgressAction::new::<
+				progress::CampaignProgress,
+			>(action)
+			.unwrap()])
+			.unwrap();
+	}
+	app.update_selection_title();
+	assert!(app.last_window_title.contains("Complete! F10 to restart"));
+	assert!(app.last_window_title.contains("Score: 1"));
+	let completed_scene = snapshot(&app);
+	let camera = app.camera.position;
+	for key in [Key::D, Key::ArrowRight, Key::F7, Key::F8] {
+		app.input.press(key);
+	}
+	app.update_player(0.1);
+	assert_eq!(snapshot(&app), completed_scene);
+	assert_eq!(app.camera.position, camera);
+	assert_eq!(
+		app.editor
+			.play_progress::<progress::CampaignProgress>()
+			.unwrap()
+			.score,
+		1
+	);
+	assert!(!app.needs_continuous_redraw());
+	assert!(!app.play_update_error_reported);
+
+	// No GPU/asset root in this fixture: a failed restart must keep the ending.
+	// The attempted load proves the advertised key overrides its game binding.
+	app.input.reset();
+	app.input.press(Key::F10);
+	app.update_player(0.1);
+	assert!(app.play_update_error_reported);
+	assert!(app.campaign_completed());
+	assert_eq!(snapshot(&app), completed_scene);
+}
+
+#[test]
 fn helpers_report_missing_configuration_without_mutating_live_state() {
 	let directory = TestDirectory::new();
 	let (mut app, _) = fixture();
@@ -1219,4 +1290,45 @@ fn saving_current_scene_preserves_catalog_ids_and_inactive_scene_behaviors() {
 	assert_eq!(saved, project);
 	assert_eq!(app.editor.project(), Some(&project));
 	assert!(!app.is_dirty());
+}
+
+#[test]
+fn development_stop_after_a_scene_transition_restores_authored_topology_and_undo() {
+	let (mut app, [left, _]) = fixture();
+	let before_delete = snapshot(&app);
+	let mut project = app.editor.project().unwrap().clone();
+	let finish = SceneId::new("finish").unwrap();
+	project
+		.scenes
+		.insert(
+			runtime::scene_catalog::SceneDescriptor::new(finish.clone(), "scenes/finish.json")
+				.unwrap(),
+		)
+		.unwrap();
+	app.editor.set_initial_project(project).unwrap();
+	app.editor.select(&app.scene, left).unwrap();
+	app.editor.delete_selected(&mut app.scene).unwrap();
+	let authored = snapshot(&app);
+	app.start_play().unwrap();
+
+	let destination = Scene::default();
+	let document = Arc::new(destination.to_data(&Camera::default()).unwrap());
+	let prepared = app
+		.editor
+		.prepare_play_scene(finish.clone(), document)
+		.unwrap();
+	app.input.press(Key::D);
+	app.editor
+		.commit_play_scene(prepared, &mut app.input, true)
+		.unwrap();
+	app.scene = destination;
+	assert!(!app.input.is_held(Key::D));
+	assert_eq!(app.editor.play_scene_id(), Some(&finish));
+	assert_ne!(snapshot(&app), authored);
+
+	app.stop_play().unwrap();
+	assert_eq!(snapshot(&app), authored);
+	assert!(app.editor.play_scene_id().is_none());
+	press(&mut app, &[Key::ControlLeft, Key::Z], 0.0);
+	assert_eq!(snapshot(&app), before_delete);
 }

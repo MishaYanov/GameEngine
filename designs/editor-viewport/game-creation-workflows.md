@@ -1,6 +1,6 @@
 # Game creation workflows and support agent
 
-Status: proposed product design, informed by the inspected working tree on 2026-11-06.
+Status: proposed product design. The capability map reflects the working tree inspected on 2026-11-15.
 Audience: Engine Developer.
 This chapter defines the game a usable viewport should help someone finish.
 It complements the interaction and rendering chapters rather than specifying a second editor architecture.
@@ -28,44 +28,34 @@ It does not require this engine to reproduce ProBuilder's mesh editor before mak
 
 ## 2. The reference game: Courtyard Run
 
-The proposed reference game is a short third-person or elevated-camera courtyard challenge.
-The player crosses an introductory area, acquires a key, reaches an exit, and finishes.
-A second scene demonstrates a real scene transition rather than merely opening another document.
-Restart returns the game to its defined starting state.
-The complete run should take a few minutes, not hours.
-The player uses a single movement scheme and one optional interaction action.
-The game can use the existing robot model while interaction tools mature.
-Use simple architectural modules and colored markers for the first layout.
-Do not make final character art a dependency of viewport navigation.
+The bundled Courtyard Run is a short two-scene challenge. The player moves a capsule to a yellow key sphere,
+returns to a green exit and enters Finish. A blue finish marker completes the run. Key pickup, the exit and
+completion use proximity. Restart returns the player to the Courtyard spawn with fresh progress. The layouts
+use reusable capsule, cube and sphere glTF props. The separate Robot Demo scene remains in the catalog.
+[Run the reference game](../../docs/apps/game/README.md#demo-progress-and-new-game).
 
 ### 2.1 Game brief
 
-| Item | Proposed value |
-| --- | --- |
-| Working title | Courtyard Run |
-| Player goal | Acquire a key and reach the courtyard exit |
-| Primary action | Move through a readable space |
-| Secondary action | Interact with an exit if the game needs explicit confirmation |
-| Failure state | A clearly marked hazard or a manual restart |
-| Completion state | A visible finish state with a restart action |
-| Scene count | Two small scenes |
-| Art requirement | Existing robot plus simple modular geometry |
-| Required authoring | Place, align, duplicate, inspect, save, and play entities |
-| Required runtime proof | Objective, transition, finish, and restart in the player |
-| Deliberately deferred | Combat, inventory UI, networking, terrain painting, and cinematics |
+| Item                   | Reference fixture                                                      |
+|------------------------|------------------------------------------------------------------------|
+| Working title          | Courtyard Run                                                          |
+| Player goal            | Acquire a key, reach the courtyard exit and approach the finish marker |
+| Primary action         | Move through a readable space                                          |
+| Restart                | Restart Run in the editor or F10 in the native Player                  |
+| Completion state       | A visible finish state with a restart action                           |
+| Scene count            | Two small scenes                                                       |
+| Art requirement        | Capsule, cube and sphere props with role-specific colors               |
+| Required authoring     | Place, align, duplicate, inspect, save, and play entities              |
+| Required runtime proof | Objective, transition, finish, and restart in the player               |
+| Deliberately deferred  | Combat, inventory UI, networking, terrain painting, and cinematics     |
 
 ### 2.2 Playable route
 
-1. Spawn facing a clear forward route.
-2. Walk through an opening that teaches the movement scale.
-3. Reach a landmark visible from the starting area.
-4. Acquire a key or satisfy the first objective.
-5. Return to an exit that now communicates availability.
-6. Transition to the courtyard scene.
-7. Cross a second short layout using the same movement behavior.
-8. Reach the finish marker.
-9. Show completion feedback.
-10. Restart the complete run without restarting the executable.
+1. Spawn in Courtyard and check the locked exit to the left.
+2. Move to the key on the right to collect it and unlock the exit.
+3. Return to the exit to load Finish, then release movement before heading to the marker.
+4. Approach the finish marker on the right and observe completion and frozen movement.
+5. Restart to restore the Courtyard spawn and starting progress.
 
 ### 2.3 Why this fixture exercises the editor
 
@@ -81,43 +71,40 @@ The export tests that the authored game does not depend on editor-only geometry.
 
 ## 3. Current capability map
 
-The following is a source inspection map, not a native acceptance certification.
-Recheck the current tree before turning it into implementation instructions.
+The following records current source capabilities. Record native acceptance separately.
 The main wire definitions are in `apps/editor/src/app/core/editor/editor.models.ts`.
 The configured starter is in `apps/game/project.json`.
 Native application-specific progress is demonstrated in `crates/courtyard-gameplay/src/lib.rs`.
 
-| Capability | Inspected state | Consequence for the next work |
-| --- | --- | --- |
-| Authoring project creation | Angular and host flow present | Start from a real project folder |
-| Scene catalog | Project data and editor UI present | Use stable scene IDs |
-| Retained scene edits | Rust workspace support present | Switching scenes should preserve drafts |
-| Entity name and transform | Inspector and commands present | Numeric editing is the fallback for every gizmo |
-| Entity parent key | Scene data and reparent command present | A visual hierarchy is still a separate UI task |
-| Model catalog | Explicit discovery and selection present | Existing project models can be placed |
-| Models from external folders | No complete authoring flow established here | Do not claim arbitrary file import is solved |
-| Duplicate and delete | Toolbar and Rust commands present | Use undoable structural operations |
-| Grid visualization | Proposed viewport work | It is editor-only visual guidance |
-| Pointer transform gizmos | Proposed viewport work | Must share Inspector command semantics |
-| Local and world transforms | Command support present | Presentation and mixed selection rules need design |
-| Materials and colliders | DTOs and commands present | Full component authoring is not implied |
-| Prefab data operations | APIs exist | Linked overrides and a complete prefab UI are future work |
-| Controlled movement and spin | Configured behavior types present | Reuse these before creating a scripting framework |
-| Typed game progress | Core foundations and campaign example present | Authoring arbitrary objectives remains a separate feature |
-| Scene transitions | Game-session foundations present | A finished game flow still needs application logic |
-| Animation and shader workspace kinds | Type definitions exist | Do not display them as finished editors |
-| Standalone export | Staging, compilation, retry, and launch flow present | Desktop execution remains an acceptance activity |
+| Capability                           | Inspected state                                                              | Consequence for the next work                                |
+|--------------------------------------|------------------------------------------------------------------------------|--------------------------------------------------------------|
+| Authoring project creation           | Angular and host flow present                                                | Start from a real project folder                             |
+| Scene catalog                        | Project data and editor UI present                                           | Use stable scene IDs                                         |
+| Retained scene edits                 | Rust workspace support present                                               | Switching scenes should preserve drafts                      |
+| Entity name and transform            | Inspector and commands present                                               | Numeric editing is the fallback for every gizmo              |
+| Entity parent key                    | Scene data and reparent command present                                      | A visual hierarchy is still a separate UI task               |
+| Model catalog                        | Explicit discovery and selection present                                     | Existing project models can be placed                        |
+| Models from external folders         | No complete authoring flow established here                                  | Do not claim arbitrary file import is solved                 |
+| Duplicate and delete                 | Toolbar and Rust commands present                                            | Use undoable structural operations                           |
+| Grid visualization                   | Proposed viewport work                                                       | It is editor-only visual guidance                            |
+| Pointer transform gizmos             | Proposed viewport work                                                       | Must share Inspector command semantics                       |
+| Local and world transforms           | Command support present                                                      | Presentation and mixed selection rules need design           |
+| Materials and colliders              | DTOs and commands present                                                    | Full component authoring is not implied                      |
+| Prefab data operations               | APIs exist                                                                   | Linked overrides and a complete prefab UI are future work    |
+| Controlled movement and spin         | Configured behavior types present                                            | Reuse these before creating a scripting framework            |
+| Gameplay roles                       | Assign and clear four named scene bindings in Gameplay Roles                 | Save or undo role changes using the scene workflow           |
+| Typed game progress                  | Key pickup, exit and completion with status and run reset                    | Observe objective and score during Play                      |
+| Scene transitions                    | Authored exit requests `finish` in editor, Player and headless Play          | Observe the runtime scene separately from authored selection |
+| Animation and shader workspace kinds | Type definitions exist                                                       | Do not display them as finished editors                      |
+| Standalone export                    | Staging, shared module preflight, compilation, retry and launch flow present | Correct failed role/scene diagnostics before compiling       |
 
-### 3.1 Existing progress is an example, not a generic objective editor
+### 3.1 Authored roles and module objectives
 
-`CampaignProgress` currently contains score and a courtyard-key flag.
+`CampaignProgress` contains score, key ownership, exit reached and completion.
 `CampaignFactory` composes configured behavior with application-specific progress logic.
-The example unlock condition inspects controlled targets crossing an X threshold.
-That does not provide a designer-authored trigger volume, quest graph, or inventory system.
-The viewport design should not mislabel that code as a complete gameplay authoring tool.
-It can nevertheless inform a first explicit objective module.
-The next module should use named roles and configured data where the user needs authoring control.
-It should not spread game-specific role names through reusable engine crates.
+Gameplay Roles writes scene bindings for Player, Key, Exit and Finish. The module uses them for
+the key, exit and finish proximity checks. The editor shows status and Restart Run in Game.
+[Role configuration](../../docs/project-lifecycle.md#gameplay-role-bindings).
 
 ### 3.2 Editor and player must select the same gameplay module
 
@@ -126,9 +113,8 @@ packaged player, and headless runner resolve that selection through the same nat
 module. Generic projects use configured movement and spin. Read the
 [manifest contract](../../docs/project-lifecycle.md#gameplay-module-selection).
 
-Use the existing shared module for named gameplay roles and the reference game's
-objective, exit, and finish rules. The acceptance run must acquire the key,
-transition, finish, and restart in both editor Play and the packaged player.
+The module runs the reference game's objective, exit and finish rules. Desktop acceptance
+exercises acquire, transition, finish and restart in editor Play and the packaged player.
 
 ## 4. Authoring data and runtime state
 
@@ -756,6 +742,8 @@ Acceptance: reparenting a landmark preserves its visible world pose.
 
 ### Step 17: make gameplay roles inspectable
 
+The Gameplay Roles controls implement assignment and clearing for Player, Key, Exit and Finish.
+
 Prerequisite: the reference game's stable role configuration.
 Outcome: the user can see which entity is the player, key, and exit.
 Reuse existing shared behavior definitions where possible.
@@ -764,6 +752,8 @@ Show missing references as actionable validation.
 Acceptance: changing the player instance does not require searching unrelated source files.
 
 ### Step 18: finish the reference game's progress loop
+
+The shared module implements the route, Game status and Restart Run. The Player uses its title and F10.
 
 Prerequisite: roles, movement, and a defined interaction rule.
 Outcome: acquire, transition, finish, and restart work consistently.
