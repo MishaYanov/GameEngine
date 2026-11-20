@@ -377,6 +377,7 @@ describe('typed prefab authoring', () => {
 		await fixture.whenStable();
 		expect(backend.instantiateLinkedPrefab).toHaveBeenCalledWith(
 			'door.json',
+			'draft-1',
 			[0, 0, 0],
 			{ Actor: 'player' },
 			1,
@@ -448,6 +449,7 @@ describe('typed prefab authoring', () => {
 		await fixture.whenStable();
 		expect(backend.updateLinkedPrefab).toHaveBeenCalledWith(
 			'anchor',
+			'draft-1',
 			'reject',
 			{ Actor: 'player' },
 			1,
@@ -461,6 +463,7 @@ describe('typed prefab authoring', () => {
 		await fixture.whenStable();
 		expect(backend.updateLinkedPrefab).toHaveBeenLastCalledWith(
 			'anchor',
+			'draft-1',
 			'keep_local',
 			{ Actor: 'player' },
 			1,

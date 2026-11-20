@@ -38,12 +38,19 @@ test('copy sends original code text to clipboard',async()=>{
   const button=d.querySelector('.copy-code');button.click();await new Promise(resolve=>setTimeout(resolve,10));
   assert.equal(copied,button.closest('.code-block').querySelector('code').textContent);assert.equal(button.textContent,'Copied');dom.window.close();
 });
-test('every section anchor on every generated page resolves',async()=>{
-  for(const doc of search){
-    const markup=await readFile(new URL('./dist/'+doc.route,import.meta.url),'utf8');const dom=new JSDOM(markup);
-    for(const anchor of dom.window.document.querySelectorAll('a[href^="#"]'))assert.ok(dom.window.document.getElementById(anchor.getAttribute('href').slice(1)),doc.route+': '+anchor.href);
-    dom.window.close();
-  }
+test('every local section anchor resolves within and across generated pages',async()=>{
+  const routes=[...search.map(doc=>doc.route),'index.html','game-app-developer/index.html'];
+  const pages=new Map();
+  try {
+    for(const route of routes)pages.set('/'+route,new JSDOM(await readFile(new URL('./dist/'+route,import.meta.url),'utf8')));
+    for(const [route,dom] of pages){
+      for(const anchor of dom.window.document.querySelectorAll('a[href]')){
+        const target=new URL(anchor.getAttribute('href'),'https://docs.test'+route);
+        if(target.origin!=='https://docs.test'||!target.hash)continue;
+        assert.ok(pages.get(target.pathname)?.window.document.getElementById(decodeURIComponent(target.hash.slice(1))),route+': '+anchor.getAttribute('href'));
+      }
+    }
+  } finally {for(const dom of pages.values())dom.window.close();}
 });
 
 test('spaces separate existing developer documentation from the empty game app space',async()=>{

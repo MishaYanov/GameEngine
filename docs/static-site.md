@@ -18,6 +18,10 @@ Open `http://127.0.0.1:4173/`. Stop the preview with Ctrl+C. Set `$env:PORT` to 
 
 Edit the Markdown sources, then rebuild. The builder discovers all `.md` files under `docs` and `designs` and groups navigation by source directory. Add introductions to `docs/main.md` for new guides. Relative Markdown links are rewritten to generated HTML paths. Unmapped local links and missing generated targets fail the build rather than silently producing broken navigation.
 
+Relative links to JSON evidence directly under `docs/verification` publish that artifact at the matching site path.
+The copier accepts regular files with simple `.json` names, parses them as JSON and preserves their bytes. Other
+non-Markdown local links remain unsupported. The site tests verify that the milestone evidence matches its source.
+
 The build writes only `docs-site/dist`. It clears that generated directory before rebuilding; do not put hand-edited content there. Dependencies and build output are ignored by Git. The Markdown files, builder, styles, scripts, and package lockfile are the maintained sources.
 
 ## Flow diagrams
@@ -38,7 +42,7 @@ or **Fit width** to return to the page width. Diagrams have accessible captions 
 npm.cmd test --prefix docs-site
 ```
 
-DOM checks cover search from a nested page, mobile-menu state, code copying, and section-anchor targets. The build checks page/asset links. Browser visual verification remains separate; check wide and narrow layouts, keyboard focus, search dialog interaction, and long code/table overflow.
+DOM checks cover search from a nested page, mobile-menu state, code copying, and local section-anchor targets within and across generated pages. The build checks page/asset links. Browser visual verification remains separate; check wide and narrow layouts, keyboard focus, search dialog interaction, and long code/table overflow.
 
 The checks also parse every Mermaid block with the bundled renderer and verify diagram publication, local assets,
 readable-size controls and source fallback. Real-browser rendering remains a separate check because DOM-only tests

@@ -1,7 +1,11 @@
 # ADR-0005: Runtime lifecycle, scheduling, and transform authority
 
 Status: Accepted core direction for serial ordering, movement authority, bounded actions and explicit commit/failure
-scope; expanded scheduling and lifecycle systems remain proposed. Existing simulation remains the implementation base.
+scope. Bounded runtime spawn/despawn, tick timers, runtime handles and native component state are implemented;
+expanded animation/physics phases and a general parallel scheduler remain proposed.
+
+The [Milestone 4–6 review](../milestones-4-6-review.md#milestone-6-runtime-entities-and-lifecycle) records the current
+prepared-admission boundary, cleanup and read-only runtime inspection. The baseline inspection below is historical.
 
 Date: 2026-10-27
 
@@ -28,7 +32,7 @@ behavior.
 We need one declared movement authority and an explicit schedule. The schedule must work in editor Play, an installed
 player, and headless tests without Angular determining simulation timing.
 
-## Existing implementation inspected
+## Historical implementation inspected
 
 The current inspection baseline is `b6ec4ba5a88c5ef66eff82fa61eb5747b940400d` plus staged, unstaged, and untracked
 changes on 2026-10-29. The drafting baseline was `fcb748b`. Current optimization and transition changes were inspected

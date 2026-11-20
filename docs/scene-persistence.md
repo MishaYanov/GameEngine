@@ -51,7 +51,8 @@ resource adapters; transient IDs are not persistent scene/entity identities.
 `LoadedScene { scene, assets, camera, entity_ids, source_schema_version }`. Identical model-path strings share one
 Arc<Model> within that load. `entity_ids` follows file order. AssetManager also retains bounded static-scene metadata
 and selected-mesh resource snapshots; this is scoped cache reuse, not a global hot-reload system. Static scene import
-can traverse glTF hierarchy; animation and live-linked prefab behavior remain separate.
+can traverse glTF hierarchy. Animation remains separate; linked prefab source changes require an explicit reviewed
+update rather than automatic live propagation.
 
 `scene_io::save(path, &scene, &camera)` serializes first, creates an exclusive sibling temporary file, writes/syncs/closes it, then renames it over the destination. Failures clean up the temporary file where possible; the previous file is not deliberately deleted before replacement. The parent must exist. This replacement pattern is not a universal crash-durability guarantee or a multi-writer conflict policy.
 

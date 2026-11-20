@@ -30,7 +30,7 @@ relationships between object instances.
 The source baseline is commit `a377b1f87dcc2972851c1518e4fd3cf1dc1e8951`, plus the staged, unstaged, and untracked
 working tree inspected on the date above. The following distinctions matter for migration:
 
-| Source                                                   | Current behavior                                                                                                                                                                                                                   |
+| Source                                                   | Behavior at the historical baseline                                                                                                                                                                                                |
 |----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `crates/engine-core/src/scene_data.rs`                   | Scene schema 3 stores `EntityData` with identity, name, model path, transform, renderability, optional parent/material/collider/mesh index. Camera and lights are separate scene fields. There is no general component collection. |
 | `crates/engine-core/src/entity_key.rs`                   | `EntityKey` is a validated string; newly generated keys use UUIDs. Names are independent of identity.                                                                                                                              |

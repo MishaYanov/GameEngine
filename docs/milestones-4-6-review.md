@@ -1,9 +1,9 @@
 # Components, linked prefabs and runtime lifecycle
 
-This review covers the eighteen features in Milestones 4–6. The inspection baseline is commit `c34555e`, plus
-the working tree on 2026-11-20. The earlier [sixteen-feature review](milestones-review.md) remains the record
-for Milestones 1–3. The repository checkpoint records final source fingerprints and aggregate verification;
-individual results below identify their scope rather than implying visible desktop acceptance.
+This review covers the eighteen features in Milestones 4–6, committed as `b835718` after baseline `c34555e`, plus
+the post-commit review changes on 2026-11-20. The earlier [sixteen-feature review](milestones-review.md) remains the
+record for Milestones 1–3. The repository checkpoint identifies inspected source fingerprints and verification
+stages; individual results below identify their scope rather than implying visible desktop acceptance.
 The [machine-readable verification record](verification/milestones-4-6-tests-2026-11-20.json) preserves the
 reported commands, results and artifact fingerprints.
 
@@ -70,7 +70,8 @@ multiple roots are supported. Nested linked sources and variants remain outside 
    editable locally with an error; it is not overwritten automatically. Save updates the source baseline only
    after native acceptance.
 6. Select the source in Assets and choose **Link Prefab…**. Bind every declared slot to a current scene entity,
-   then instantiate. Placement begins at the origin; moving the anchor positions the assembly.
+   then instantiate. Link uses the reviewed source draft; a changed source or authoring context requires reopening
+   it. Placement begins at the origin; moving the anchor positions the assembly.
 7. Make another instance with its own Actor binding. Edit a member's name, transform or component in the normal
    Inspector. Its linked section shows typed Base and Local values for the resulting overrides.
 
@@ -88,6 +89,12 @@ Use **Review Source Update…** to load the latest source, review reference bind
 **Reject overlapping changes** reports conflicts without changing the instance. **Keep local values** or
 **Use source values** makes the overlap policy explicit. Non-overlapping changes merge. New source slots need
 explicit bindings. Source member removal can be blocked by local overrides or external scene references.
+
+Link and Update require the open source `draft_id`. The host checks workspace generation, authoring revision,
+source asset ID, resolved catalog path and the fingerprint of the exact bytes parsed. Changed or expired captures
+fail without changing authored state; reopening reviews the new content. Generic host execute/receipt paths reject
+caller-supplied linked source DTOs. Dedicated host commands apply them only after those checks; trusted Rust callers
+retain the core commands and their structural validation.
 
 Override granularity is explicit: name, each transform vector, or a typed component record. **Revert Property**
 restores that group, and **Revert All Overrides** restores the supported groups together. **Unpack Linked Prefab**
@@ -113,6 +120,11 @@ The host stops catch-up at a prefab request boundary, prepares the requested dat
 then drains retained simulation steps with `tick(0)`. Player input edges are not replayed during that drain.
 Admission and timer behavior therefore follow simulation boundaries rather than the number of render calls.
 Restart, Stop and runtime scene replacement clear the relevant runtime ownership and timer state.
+
+Unchanged tick snapshots share ownership records and their entity/owner/component indexes through one `Arc`.
+Admission/removal detaches them together with copy-on-write, preserving transaction isolation. Indexed ownership,
+live-count and child-owner queries avoid repeated instance scans. Structural changes still validate/rebuild world
+data, and the indexes add storage and structural copy cost; no frame-time or FPS improvement was measured.
 
 While Play and Game are selected, **Runtime Inspector** replaces the authoring Inspector. **Refresh Runtime**
 captures a page of at most 32 entities; native queries allow at most 128. Previous/Next changes pages explicitly.
@@ -144,7 +156,7 @@ The installer creates `D:\Projects\Component Lifecycle Lab`. Keep its `game.exe`
 together. Player does not support `--project`; use editor Open Project, headless `--project`, or the completed
 export/verified launch flow to select authored content. **F10** restarts a Player run.
 
-## Source boundaries and verification
+## Implementation-stage source boundaries and verification
 
 | Boundary | Relevant source |
 | --- | --- |
@@ -155,10 +167,10 @@ export/verified launch flow to select authored content. **F10** restarts a Playe
 | Runtime lifecycle | Core simulation/world ownership and the shared host admission boundary |
 | Read-only runtime UI | `runtime-inspection.ts` and workspace `runtime-inspector/` |
 
-The Angular suite passes **455 tests across 49 files**, including structural accessibility checks. Production
-bundle validation passes with the existing project-setup stylesheet budget warning. Logs:
+At the implementation stage, the Angular suite passed **455 tests across 49 files**, including structural accessibility
+checks. Production bundle validation passed with the existing project-setup stylesheet budget warning. Logs:
 `target/milestones46-angular-tests.log` and `target/milestones46-angular-production.log`.
-The documentation build link-checks 61 pages and passes 8 site tests, including publication of its referenced
+That documentation build link-checked 61 pages and passed 8 site tests, including publication of its referenced
 verification JSON without changing its bytes. Log: `target/milestone46-docs-site.log`.
 Focused tests cover component drafts and history intent, source isolation and dirty closure, explicit external
 references, conflict retries, authoritative save adoption, stale contexts and bounded runtime inspection.
@@ -175,8 +187,8 @@ resource counts returning to baseline, runtime transition and restart. Logs are
 These use actual native resources; they are not visible desktop authoring sessions or OS-delivered manual input.
 The workspace run reported 849 passed, 1 failed and 9 ignored across 75 test binaries. Its single failure was
 an outdated prefab-v2 assertion, corrected to v3; the Courtyard target then passed all 6 tests on a corrective
-rerun. This evidence is the aggregate plus its successful corrective rerun. A clean post-commit run remains
-part of the independent test review. Logs: `target/milestone46-workspace-tests.log` and
+rerun. This historical evidence is the aggregate plus its successful corrective rerun; the clean post-commit result
+is recorded separately below. Logs: `target/milestone46-workspace-tests.log` and
 `target/milestone46-courtyard-regression.log`.
 
 The completed export is
@@ -187,3 +199,31 @@ GameApp harness loading exported content, without visible UI or manual OS input 
 The native editor embedding build passed in `target/milestone46-native-final-build.log`.
 Final source hashes and export evidence belong to the root verification checkpoint.
 Game App Developer remains empty.
+
+## Post-commit review
+
+The [independent review findings](verification/milestones-4-6-review-findings.md) summarize documentation, optimization,
+security and test review. Security review reproduced source changes being accepted after Link/Update review, then
+fixed the draft checks and generic-command bypass described above. Eight focused host source tests passed. The
+Windows junction containment test passed separately with its required filesystem access.
+
+Optimization review added shared ownership/indexes and visibility membership checks. Four focused internal tests,
+the existing 10 lifecycle and 13 admission-boundary tests, and three headless replay tests passed. Two independent
+public API regressions also passed: separate spawner attachment limits/deadlines, and simultaneous parent/child
+expiry with duplicate despawn. These focused suites overlap aggregate coverage and are not added to its total.
+
+The clean initial post-commit workspace run passed **850 tests, zero failed, nine ignored** across 76 result blocks.
+It covered `b835718` before concurrent review fixes. The Rust documentation command passed across ten crate result
+blocks with zero actual doctests. Logs: `target/m46-review-test-workspace.log` and `target/m46-review-test-rust-docs.log`.
+The review-stage Angular run passed **456 tests across 49 files**; production and native editor embedding builds
+passed. Logs: `target/m46-review-angular-tests.log`, `target/m46-review-angular-production.log` and
+`target/m46-review-native-editor-build.log`. Documentation review rebuilt and link-checked **62 pages**, passed
+**eight site tests**, checked local section links within and across pages, preserved referenced JSON bytes and
+confirmed the Game App Developer space remains empty (`target/m46-review-docs-site.log`).
+The final combined source passed **864 Rust tests, zero failed, nine ignored** across 77 test targets
+(`target/m46-final-workspace-tests.log`). Clippy completed with only pre-existing source warnings and environment
+cache warnings; new warnings from this change were resolved. The reviewed release export is
+`C:/Users/misha/Documents/Codex/Milestones 4-6 Reviewed 2026-11-20/Component Lifecycle Lab`. Its headless route
+matched the authored state hash and lifecycle counts above, and the hidden native lifecycle test passed against
+that exported content (`target/m46-final-native-export-lifecycle.log`). The verification ledger retains the exact
+commands, hashes and scope. No visible UI/CUA acceptance was performed in this review.

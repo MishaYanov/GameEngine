@@ -1044,6 +1044,23 @@ describe('EditorService native command and viewport queues', () => {
         expect((await service.assets())[0].fingerprint).toBe('updated');
     });
 
+    it('carries reviewed prefab draft tokens and revisions through link and update publication', async () => {
+        vi.mocked(invoke).mockResolvedValueOnce(snapshot(5))
+            .mockResolvedValueOnce(snapshot(6)).mockResolvedValueOnce(snapshot(7));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        const generation = service.workspaceGeneration();
+        await service.instantiateLinkedPrefab('source.json', 'reviewed-link', [0, 0, 0], {Actor: 'player'}, generation, 4);
+        expect(invoke).toHaveBeenLastCalledWith('editor_instantiate_linked_prefab', {
+            path: 'source.json', draftId: 'reviewed-link', position: [0, 0, 0], bindings: {Actor: 'player'}, expectedRevision: 4,
+        });
+        await service.updateLinkedPrefab('anchor', 'reviewed-update', 'keep_local', {Actor: 'player'}, generation, 5);
+        expect(invoke).toHaveBeenLastCalledWith('editor_update_linked_prefab', {
+            rootKey: 'anchor', draftId: 'reviewed-update', resolution: 'keep_local', bindings: {Actor: 'player'}, expectedRevision: 5,
+        });
+        expect(service.snapshot()?.revision).toBe(7);
+    });
+
     it('queries bounded runtime state without requesting an authored snapshot or changing global feedback', async () => {
         const page = {play_session_id: 'play', run_id: 'run', scene_id: 'main', tick: 0, topology_revision: 0,
             total_entities: 0, entities: [], timer_count: 0, pending_spawns: 0, last_error: null};

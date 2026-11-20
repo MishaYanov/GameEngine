@@ -1,12 +1,13 @@
 # Editor flow: startup to project builds
 
-Trace the current method calls from desktop startup through project creation, editor state, native rendering,
-simulation, packaging, and repeated builds in the admin UI. The diagrams distinguish working UI actions from APIs
-that exist without a caller in the main editor screen.
+This historical trace follows method calls from desktop startup through project creation, editor state, native
+rendering, simulation, packaging and repeated admin builds at its 2026-11-06 baseline. Its connected-control table
+and diagrams retain that scope. Current authoring controls are documented in [Editor workspace](editor-workspace.md),
+with component, linked prefab and runtime workflows in the [Milestone 4–6 review](milestones-4-6-review.md).
 
 Source inspection: **2026-11-06**, commit `c3a3e95` plus staged, unstaged and untracked workspace changes. This is a source trace, not native runtime acceptance. [Editor workspace](editor-workspace.md) describes current UI behavior; [project lifecycle](project-lifecycle.md) defines document contracts and [the ADR guide](adr/README.md) retains proposals.
 
-## What is connected today
+## What was connected at this baseline
 
 | Surface or operation           | Current entry point                           | Result and boundary                                                                                                                        |
 |--------------------------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|

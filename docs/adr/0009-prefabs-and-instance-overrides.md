@@ -1,6 +1,12 @@
 # ADR-0009: Linked prefabs, instance overrides, and update conflicts
 
-Status: Proposed; current prefab copies remain unchanged until a new schema and resolver are implemented.
+Status: Partially implemented. Canonical prefab schema 3 supports copied placement and linked source versions,
+explicit external slots, typed property overrides, update conflicts, revert and unpack. Nested linked sources,
+variants and structural instance overrides remain proposals.
+
+The [Milestone 4–6 review](../milestones-4-6-review.md#milestone-5-linked-prefab-authoring) describes current source
+editing and reviewed Link/Update commands. The earlier inspection and broader design below preserve the proposal's
+context; they are not the current schema/API reference.
 
 Date: 2026-10-27
 
@@ -16,7 +22,7 @@ Recommend explicit linked instances with stable source identities and typed over
 operation as an independent workflow. Source updates are reconciled through validated editor commands; unavailable
 or incompatible source data must produce visible conflicts rather than silent data loss.
 
-## Existing implementation inspected
+## Historical implementation inspected
 
 At `fcb748b04853209b5e17e680c38c847c19f7f365` and the inspected working tree,
 `crates/engine-core/src/editor/prefab.rs` defines schema-1 `PrefabData { schema_version, entities }`. It permits
@@ -28,9 +34,9 @@ recenters the roots. Instantiation creates fresh entity keys, remaps internal pa
 adds the expanded entities through one edit. Scene role bindings continue to refer to the original scene. The
 host reads/writes prefab JSON; it does not retain a link from instantiated entities to that file.
 
-These are reusable copies. There is no override table, source revision, nested source dependency, linked update, or
-apply/revert operation. [Scene persistence](../scene-persistence.md) already describes that limit. This proposal does
-not reinterpret existing scenes as linked instances or infer links from similar names and values.
+At that baseline these were reusable copies, without an override table, source revision, nested source dependency,
+linked update or apply/revert operation. [Scene persistence](../scene-persistence.md) now records the implemented
+linked format. Existing copies are not reinterpreted as linked instances or linked by similar names and values.
 
 ## Dependencies and assumptions
 

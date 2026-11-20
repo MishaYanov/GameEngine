@@ -6,12 +6,12 @@ interaction or the current engine test results. [PROJECT3 handoff](project3-hand
 36–45 report and original next-step prompt.
 
 For the method-by-method path from UI startup through save/reload and packaging, see
-[Editor flow: startup to project builds](editor-flow.md). Its diagrams also distinguish admin Cargo rebuilds from
-new project installations and native viewport reconstruction.
+[Editor flow: startup to project builds](editor-flow.md) preserves the earlier method trace. For current component,
+linked prefab and runtime inspection workflows, see the [Milestone 4–6 review](milestones-4-6-review.md).
 
 ## Project format and scene identity
 
-Project manifests now use **schema 3**, while individual scene documents also use **schema 3**. These versions are
+Project manifests use **schema 3**, while individual scene documents save as **schema 4**. These versions are
 independent of **editor protocol 2**. `ProjectData::from_json` upgrades a schema-2 manifest containing only inline
 behaviors to schema 3 in memory. Subsequent serialization writes schema 3. Schema 2 rejects
 `behavior_definitions`, shared behavior attachments, `input_profile`, and `gameplay_module`. Unsupported versions,
@@ -129,7 +129,7 @@ not contribute to scene/project dirty flags or change saved baselines.
 
 ## Gameplay role bindings
 
-A scene's schema-3 `bindings` map stores role names and entity keys in that authored document. In Edit,
+A scene's `bindings` map, retained in schema 4, stores role names and entity keys in that authored document. In Edit,
 **Gameplay Roles** presents the selected module's advertised roles for the active scene. The host catalog supplies
 default roles and explicit per-scene overrides; an empty override intentionally presents no roles. Courtyard's
 course roles are **Player**, **Key** and **Exit**, with **Player** and **Finish** for `finish`. Choose **Unassigned**
@@ -201,10 +201,10 @@ build; saving the manifest alone cannot make those documents clean.
 
 ## Angular and host contract
 
-The host advertises editor protocol 2 / scene schema 3, and `EditorService.loadCapabilities()` requires that pair.
-Models mirror project schema 3, scene descriptors, scene-scoped/shared behaviors and expanded snapshots. Existing
-widgets still
-need to consume these APIs; no completed scene-browser layout or interactive acceptance follows from service additions.
+The host advertises editor protocol 2 / scene schema 4. `EditorService.loadCapabilities()` requires protocol 2 and
+accepts scene schema 4 or legacy 3. Models mirror project schema 3, scene descriptors, scene-scoped/shared behaviors,
+typed component views and expanded snapshots. The current workspace connects scene controls, component editing and
+linked prefab authoring; [editor workspace](editor-workspace.md) records the controls and their limits.
 
 ```typescript
 await editor.loadCapabilities();

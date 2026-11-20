@@ -1,11 +1,8 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
 #[path = "prefab_sources.rs"]
-mod prefab_sources;
+pub(crate) mod prefab_sources;
 use crate::project_location::ProjectLocation;
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto};
-pub use prefab_sources::{
-	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
-};
 use runtime::scene_catalog::SceneId;
 use runtime::{
 	asset_jobs::{AssetJobError, AssetJobId, AssetJobLimits},
@@ -498,6 +495,9 @@ impl EditorWorkspace {
 		// Prepare filesystem-dependent intent before the coordinator mutates.
 		let preflight: Result<(), String> = (|| {
 			match &request.command {
+				Command::InstantiateLinkedPrefab { .. } | Command::UpdateLinkedPrefab { .. } => {
+					return Err("Linked source changes require the guarded prefab command and a reviewed source draft".into());
+				}
 				Command::AddScene { asset_path, .. } => {
 					if self.scene_output(asset_path, None)?.exists() {
 						return Err("Scene creation requires a new path; register an existing file explicitly".into());

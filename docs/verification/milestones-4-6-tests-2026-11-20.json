@@ -2,7 +2,7 @@
   "date": "2026-11-20",
   "inspected_head": "c34555e33f276493837de85183a73c5ac7b8996f",
   "scope": "Milestones 4–6: component model, linked prefab authoring, runtime lifecycle; HEAD plus pending implementation working tree.",
-  "stage": "Implementation verification before the requested commit and four independent reviews.",
+  "stage": "Initial implementation evidence retained below; completed independent review and final combined-source verification are recorded in post_commit_review.",
   "runs": {
     "workspace": {
       "log": "target/milestone46-workspace-tests.log",
@@ -124,5 +124,157 @@
     "Focused test counts overlap the workspace aggregate and must not be added to it.",
     "The state hash covers project and render scene; lifecycle counters are checked separately.",
     "Post-commit documentation, optimization, security and test reviews are still pending in this initial evidence record."
-  ]
+  ],
+  "post_commit_review": {
+    "date": "2026-11-20",
+    "implementation_commit": "b835718",
+    "inspected_head": "b835718b8d64d5157a08919623d524024226e8cb",
+    "working_tree": "Final review fixes after b835718; source fingerprints are in docs-site/docs-state.json. A later checkpoint will record the committed source baseline.",
+    "roles": {
+      "documentation": {
+        "findings": "Corrected stale current schema/capability references and historical framing; cross-page fragment checks extended.",
+        "report": "target/m46-review-docs.md",
+        "report_sha256": "1c2d4123f8743244c738f61374ad61332e6b925e2c08b74ccdcbac4a14f933d1"
+      },
+      "optimization": {
+        "findings": "Arc/COW ownership topology, indexed ownership/count/descendant lookups, linear visibility membership; no measured FPS claim.",
+        "report": "target/m46-review-optimization.md",
+        "report_sha256": "63c854b6bdd9cc5f0c88f1d910c3596596e03448cea848023011a663532d6af3"
+      },
+      "security": {
+        "findings": "Required reviewed source draft tokens for Link/Update and rejected generic host source-command bypass.",
+        "report": "target/m46-review-security.md",
+        "report_sha256": "a0b97dca07a289b8ccc879884b9215d20c870cd1c513741b6f7c868b5bcd233b"
+      },
+      "test": {
+        "findings": "Clean initial post-commit aggregate plus two independent public lifecycle regressions.",
+        "report": "target/m46-review-test-report.json",
+        "report_sha256": "a94be80be68163773afeaa3c69b1ac3a929cdcd43e3312a8ca74e7a0a5cc23b2"
+      }
+    },
+    "runs": {
+      "workspace": {
+        "command": "cargo test --workspace --all-targets --all-features --offline --locked --no-fail-fast",
+        "log": "target/m46-final-workspace-tests.log",
+        "sha256": "0c976df2363542163a5713f03ebc4f1c8e1be6d6cf2a2f1a66c3eaffb5b4bcb5",
+        "exit_code": 0,
+        "passed": 864,
+        "failed": 0,
+        "ignored": 9,
+        "test_targets": 77
+      },
+      "rust_docs": {
+        "command": "cargo test --workspace --all-features --doc --offline --locked",
+        "log": "target/m46-final-rust-doc-tests.log",
+        "sha256": "f8561be79fd56a7c0c75a496e54f50dbf27b25c2caf4556c4ae7023b43439f62",
+        "exit_code": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "test_targets": 10
+      },
+      "clippy": {
+        "command": "cargo clippy --workspace --all-targets --all-features --offline --locked",
+        "log": "target/m46-final-clippy.log",
+        "sha256": "fabc9dc2aa3e812762a07a0c9ed7b9141928f28688040bc2eb26c4cada4808ca",
+        "exit_code": 0
+      },
+      "rustfmt": {
+        "command": "cargo fmt --all -- --check",
+        "log": "target/m46-final-format-check.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exit_code": 0
+      },
+      "editor_tests": {
+        "command": "npm --prefix apps/editor test -- --watch=false",
+        "log": "target/m46-review-angular-tests.log",
+        "sha256": "89d755b5cc1b3ab4a48441a7c003641cf9fe3882dc033e3ed1ef20576cfa5700",
+        "exit_code": 0
+      },
+      "editor_production": {
+        "command": "npm --prefix apps/editor run check:production",
+        "log": "target/m46-review-angular-production.log",
+        "sha256": "19ef8723fa540846f68487ab45ba14c9c5578164ccbdad077176d1b41a72b4d8",
+        "exit_code": 0
+      },
+      "native_editor": {
+        "command": "cargo build --locked --offline -p app --features custom-protocol",
+        "log": "target/m46-final-native-editor-build.log",
+        "sha256": "6b72cfedfb96a5cabe6492c862d716d030b8419752d2325e8b552c0e1ea2ea4a",
+        "exit_code": 0
+      },
+      "native_export": {
+        "command": "Set GAME_ENGINE_QA_COMPONENT_PROJECT to reviewed exported project.json; cargo test --locked --offline -p game --bin game component_lab_retires_spawned_resources_and_restarts_in_native_player -- --ignored --test-threads=1",
+        "log": "target/m46-final-native-export-lifecycle.log",
+        "sha256": "1a13d634a4403fe7949d38b7fc1c630b9e5ff797cfcda91a55e9cd9646e3fff2",
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "test_targets": 1
+      },
+      "export": {
+        "command": "cargo run --locked --offline -p compiler -- --export apps/game/component-demo.json \"C:\\Users\\misha\\Documents\\Codex\\Milestones 4-6 Reviewed 2026-11-20\"",
+        "log": "target/m46-final-fresh-export.log",
+        "sha256": "32d72a001bda5a3c3f130436d94d2aa5a28c3bbcbc9686b91f65bf486116e925",
+        "exit_code": 0
+      },
+      "docs_site": {
+        "command": "npm --prefix docs-site test",
+        "log": "target/m46-final-docs-site.log",
+        "sha256": "0d98dcb5fe450d6448d6a4e3b24efaa47e24c3b01242af464fa4813743a719fd",
+        "exit_code": 0,
+        "pages": 62,
+        "tests_passed": 8,
+        "game_app_developer_empty": true
+      }
+    },
+    "editor": {
+      "passed": 456,
+      "files": 49,
+      "production": "passed"
+    },
+    "admin": {
+      "passed": 15,
+      "log": "target/milestone46-admin-tests.log",
+      "scope": "Unchanged frontend; initial implementation run retained."
+    },
+    "python": {
+      "passed": 51,
+      "log": "target/milestone46-python-tests.log",
+      "scope": "Unchanged Python sources; initial implementation run retained."
+    },
+    "headless_parity": {
+      "authored": "target/m46-final-authored-replay.json",
+      "exported": "target/m46-final-export-replay.json",
+      "state_hash": "9e7bf1d490b2adb5",
+      "hash_scope": "project_and_render_scene",
+      "tick": 1245,
+      "topology_revision": 20,
+      "total_entities": 6,
+      "timer_count": 0,
+      "pending_spawns": 0,
+      "last_error": null
+    },
+    "reviewed_export": {
+      "path": "C:\\Users\\misha\\Documents\\Codex\\Milestones 4-6 Reviewed 2026-11-20\\Component Lifecycle Lab",
+      "manifest_sha256": "bd31bbb8b244f61d1c40fc1790712089de17da54faccd309381ad6ee24b0c531",
+      "player_sha256": "c75bd93bad72b41798c4b7729b2da95da3b59b77d01777ed9771aacaf965d3b2",
+      "files": 12,
+      "hidden_native_test_passed": true
+    },
+    "warnings": [
+      "Existing renderer argument-count, bridge enum-size and viewport helper/dead-code Clippy warnings remain in unchanged source.",
+      "Windows incremental-cache hard-link fallback warnings remain environmental.",
+      "Angular production retains the existing project-setup stylesheet budget warning."
+    ],
+    "verification_limits": [
+      "Nine normal-suite tests remain ignored; the relevant hidden native lifecycle test and Windows junction loader test were exercised separately.",
+      "No visible editor/player walkthrough, another-machine acceptance, exhaustive fuzzing or hostile same-user filesystem race test was performed.",
+      "The native acceptance harness uses real GPU resources with exported assets, not a visible launch of the exported executable.",
+      "Source-derived operation counts do not measure FPS, wall-clock latency or GPU wait costs.",
+      "Focused suites overlap aggregate counts.",
+      "The M7–9 guides are future implementation instructions, not implemented features or compiled/tested sample patches."
+    ]
+  }
 }

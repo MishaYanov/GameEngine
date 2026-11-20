@@ -441,13 +441,13 @@ export class EditorService {
         });
     }
 
-    instantiateLinkedPrefab(path: string, position: Vec3, bindings: Readonly<Record<string, string>>, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_instantiate_linked_prefab', {path, position, bindings}, false, {expectedGeneration, expectedRevision});
+    instantiateLinkedPrefab(path: string, draftId: string, position: Vec3, bindings: Readonly<Record<string, string>>, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_instantiate_linked_prefab', {path, draftId, position, bindings}, false, {expectedGeneration, expectedRevision});
     }
 
-    updateLinkedPrefab(rootKey: string, resolution: 'reject' | 'keep_local' | 'use_source', bindings: Readonly<Record<string, string>> | null,
+    updateLinkedPrefab(rootKey: string, draftId: string, resolution: 'reject' | 'keep_local' | 'use_source', bindings: Readonly<Record<string, string>> | null,
         expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_update_linked_prefab', {rootKey, resolution, bindings}, false, {expectedGeneration, expectedRevision});
+        return this.snapshotOperation('editor_update_linked_prefab', {rootKey, draftId, resolution, bindings}, false, {expectedGeneration, expectedRevision});
     }
 
     private prefabDraftOperation<T>(operation: string, args: Record<string, unknown>, expectedGeneration?: number, expectedRevision?: number): Promise<T> {

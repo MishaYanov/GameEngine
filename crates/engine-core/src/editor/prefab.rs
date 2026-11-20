@@ -111,7 +111,7 @@ impl PrefabData {
 
 	fn validated(self) -> Result<Self, String> {
 		self.validate_settings()?;
-		if !matches!(self.schema_version, 1 | 2 | 3)
+		if !matches!(self.schema_version, 1..=3)
 			|| self.entities.is_empty()
 			|| self.entities.len() > MAX_PREFAB_ENTITIES
 			|| (self.schema_version == 1 && self.gameplay.is_some())

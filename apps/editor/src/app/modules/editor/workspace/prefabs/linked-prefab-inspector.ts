@@ -173,6 +173,7 @@ export class LinkedPrefabInspector {
 		await this.run(async (generation, _revision, current) => {
 			await this.editor.updateLinkedPrefab(
 				status.root_key,
+				source.draft_id,
 				this.resolution(),
 				this.bindings(),
 				generation,

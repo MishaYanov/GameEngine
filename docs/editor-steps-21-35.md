@@ -1,5 +1,9 @@
 # Angular editor integration and engine foundations: steps 21–35
 
+**Historical milestone:** this report preserves its original foundation-only implementation and verification.
+The composed editor, scene schema 4, prefab schema 3 and typed components are now covered by
+[Editor workspace](editor-workspace.md) and the [Milestone 4–6 review](milestones-4-6-review.md).
+
 This is a separate learning report for the steps after [11–20](editor-steps-11-20.md). It reviews HEAD `a48ff6c` and
 current staged/unstaged/untracked implementation, not a new commit authored by DOC_MANAGER. Verification results and
 remaining acceptance limits are recorded below.

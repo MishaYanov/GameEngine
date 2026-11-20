@@ -1,7 +1,7 @@
 //! Typed source drafts and explicit link boundaries. No source file watcher
 //! mutates an authored instance; updates remain undoable commands.
 use super::*;
-use crate::editor::{
+use crate::editor::prefab_sources::{
 	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
 };
 use runtime::{linked_prefab::PrefabConflictResolution, EntityKey};
@@ -88,6 +88,7 @@ pub async fn editor_instantiate_linked_prefab(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	path: String,
+	draft_id: String,
 	position: [f32; 3],
 	bindings: Option<BTreeMap<String, EntityKey>>,
 	expected_revision: u64,
@@ -96,6 +97,7 @@ pub async fn editor_instantiate_linked_prefab(
 	workspace(state, true, Some("instantiate_linked_prefab"), move |w| {
 		w.instantiate_linked_source(
 			&path,
+			&draft_id,
 			position,
 			bindings.unwrap_or_default(),
 			expected_revision,
@@ -121,13 +123,20 @@ pub async fn editor_update_linked_prefab(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	root_key: String,
+	draft_id: String,
 	resolution: PrefabConflictResolution,
 	bindings: Option<BTreeMap<String, EntityKey>>,
 	expected_revision: u64,
 ) -> Result<EditorSnapshotDto, String> {
 	trusted_window(&window)?;
 	workspace(state, true, Some("update_linked_prefab"), move |w| {
-		w.update_linked_source(&root_key, resolution, bindings, expected_revision)
+		w.update_linked_source(
+			&root_key,
+			&draft_id,
+			resolution,
+			bindings,
+			expected_revision,
+		)
 	})
 	.await
 }

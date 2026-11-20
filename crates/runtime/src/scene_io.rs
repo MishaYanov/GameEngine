@@ -94,12 +94,11 @@ pub fn instantiate_with_progress(
 			Some(entity.mesh_index.unwrap_or(0)),
 		)?
 		.with_asset_id(entity.asset_id.clone());
-		let model = if !entity.has_mesh_component() {
-			Arc::clone(&group_model)
-		} else if !entity.renderable
-			&& !assets
-				.asset_exists(&cache_key)
-				.map_err(|error| error.to_string())?
+		let model = if !entity.has_mesh_component()
+			|| (!entity.renderable
+				&& !assets
+					.asset_exists(&cache_key)
+					.map_err(|error| error.to_string())?)
 		{
 			Arc::clone(&group_model)
 		} else if let Some(model) = models.get(&cache_key) {

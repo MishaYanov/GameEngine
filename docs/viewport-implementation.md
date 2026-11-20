@@ -8,8 +8,10 @@ movement through the authored scene command queue.
 
 This guide describes the current implementation in the combined working tree.
 The [viewport design](../designs/editor-viewport/README.md) remains the broader
-product proposal; features such as visibility/prefab authoring,
+product proposal; features such as visibility/layer tools,
 triangle-accurate picking, and arbitrary editor extensions have separate scope.
+The [Milestone 4–6 review](milestones-4-6-review.md) documents the implemented Component Inspector, linked source
+authoring and Runtime Inspector alongside this viewport reference.
 
 ## 1. Start the editor
 
@@ -66,11 +68,11 @@ The native path validation and no-overwrite rules remain authoritative.
 | Viewport toolstrip | Navigation, tool, basis, pivot, grid, snapping and projection controls. |
 | Hierarchy | Browse parent/child entities, select stable keys and change parents. |
 | Inspector | Edit the selected name and local transform numerically. |
-| Assets | Browse catalogued scenes/models and place models. |
+| Assets | Browse scenes/models/prefabs, place models and copies, create/edit linked sources and link instances. |
 | Export controls | Stage, compile, retry and explicitly run a standalone output. |
 
 Hierarchy supplies expand/collapse, virtual rows and parent-changing actions.
-It does not yet supply a visibility/layer tree, entity ordering or prefab browser.
+It does not yet supply a visibility/layer tree or entity ordering. Prefab actions use Assets and the Inspector.
 The existing generic Drawers retain resize/collapse preferences.
 The scene list's maximum width is 45% of the available container.
 
@@ -304,7 +306,7 @@ dashed pink for sensors. It is view state, does not dirty the scene, and is hidd
 Box collision follows a transformed world AABB; sphere scale conservatively encloses hierarchy shear. Sensor pairs
 can overlap but do not block movement, and both layer/mask directions must match. Outline work is cached/bounded;
 omissions or invalid world geometry produce a nonfatal collider diagnostic. See [collider semantics and limits](scene-editing.md#colliders-and-interaction-settings).
-Enter/Stay/Exit event delivery remains planned Feature 1.4, not a current Inspector/runtime feature.
+Sensor overlaps feed fixed-step Enter/Stay/Exit delivery and native component behaviors; the overlay remains view-only.
 
 ## 12. Place a catalogued model
 
@@ -490,7 +492,7 @@ No camera movement requires Angular to accept a new full scene document.
 
 Rust contracts live in `crates/bridge/src/viewport.rs`.
 Their TypeScript mirror is `core/editor/viewport-editor.models.ts`.
-They are separate from scene schema 3 and editor document protocol 2.
+They are separate from scene schema 4 and editor document protocol 2.
 These view/tool settings are not additional fields in project or scene JSON.
 
 | Native command | Input | Result |
@@ -736,7 +738,7 @@ for the complete native authoring workflow.
 - Native picking and placement use bounds approximations.
 - Selection decoration is a bounds box rather than a geometry silhouette.
 - The placement ghost is a lightweight marker rather than the final loaded mesh.
-- Hierarchy does not yet provide visibility/layers, manual ordering or prefab authoring.
+- Hierarchy does not yet provide visibility/layers or manual ordering; prefab authoring uses Assets and the Inspector.
 - View preferences/bookmarks are session state, not persisted per-user viewport files.
 - Rotate/Scale can reject affine results the scene's TRS format cannot represent.
 - Snap settings do not provide vertex/socket snapping or arbitrary surface alignment.

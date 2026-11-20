@@ -208,6 +208,7 @@ export class PrefabAuthoring {
 		await this.run(async (generation, _revision, current) => {
 			await this.editor.instantiateLinkedPrefab(
 				source.path,
+				source.draft_id,
 				[0, 0, 0],
 				this.bindings(),
 				generation,

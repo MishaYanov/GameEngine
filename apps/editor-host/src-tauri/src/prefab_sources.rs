@@ -141,10 +141,27 @@ impl EditorWorkspace {
 		}
 		if capture.revision != revision {
 			return Err(
-				"Authoring changed after opening this source draft; reopen it before saving".into(),
+				"Authoring changed after opening this source draft; reopen it before applying it"
+					.into(),
 			);
 		}
 		Ok(capture)
+	}
+	fn reviewed_prefab_source(
+		&self,
+		id: &str,
+		path: &str,
+		revision: u64,
+	) -> Result<LinkedPrefabSource, String> {
+		let capture = self.source_draft(id, revision)?;
+		let source = self.prefab_source(path)?;
+		if source.source_id != capture.source_id || source.path != capture.path {
+			return Err("Prefab source differs from the reviewed draft; reopen it".into());
+		}
+		if source.fingerprint != capture.fingerprint {
+			return Err("Prefab source changed on disk since this draft opened; reopen it to review the changes".into());
+		}
+		Ok(source)
 	}
 	pub fn validate_prefab_source(
 		&self,
@@ -224,12 +241,12 @@ impl EditorWorkspace {
 	pub fn instantiate_linked_source(
 		&mut self,
 		path: &str,
+		draft_id: &str,
 		position: [f32; 3],
 		bindings: std::collections::BTreeMap<String, EntityKey>,
 		revision: u64,
 	) -> Result<EditorSnapshotDto, String> {
-		self.prefab_edit_context(revision)?;
-		let source = self.prefab_source(path)?;
+		let source = self.reviewed_prefab_source(draft_id, path, revision)?;
 		source.validate()?;
 		self.backend
 			.execute(EditorCommandRequest {
@@ -303,6 +320,7 @@ impl EditorWorkspace {
 	pub fn update_linked_source(
 		&mut self,
 		key: &str,
+		draft_id: &str,
 		resolution: PrefabConflictResolution,
 		bindings: Option<std::collections::BTreeMap<String, EntityKey>>,
 		revision: u64,
@@ -323,7 +341,7 @@ impl EditorWorkspace {
 		let asset = catalog
 			.by_id(&id)
 			.ok_or("Linked source identity is unavailable")?;
-		let source = self.prefab_source(&asset.path)?;
+		let source = self.reviewed_prefab_source(draft_id, &asset.path, revision)?;
 		drop(scene);
 		self.backend
 			.execute(EditorCommandRequest {
@@ -394,6 +412,228 @@ mod tests {
 		(Fixture(root), workspace)
 	}
 	#[test]
+	fn reviewed_link_rejects_source_changes_before_instance_publication() {
+		let (_fixture, mut workspace) = fixture();
+		let revision = workspace.backend.session().revision();
+		let draft = workspace
+			.create_linked_prefab_source("prefabs/prop.json", BTreeMap::new(), revision)
+			.unwrap();
+		let before = workspace.backend.session().authored_document().clone();
+		let mut external = draft.prefab.clone();
+		external["entities"][0]["name"] = "Unreviewed replacement".into();
+		std::fs::write(
+			workspace.asset_root.join("prefabs/prop.json"),
+			external.to_string(),
+		)
+		.unwrap();
+		assert!(
+			workspace
+				.instantiate_linked_source(
+					"prefabs/prop.json",
+					&draft.draft_id,
+					[0.0; 3],
+					BTreeMap::new(),
+					revision
+				)
+				.is_err(),
+			"a reviewed source must not silently instantiate later disk content"
+		);
+		assert_eq!(workspace.backend.session().revision(), revision);
+		assert_eq!(workspace.backend.session().authored_document(), before);
+	}
+	#[test]
+	fn reviewed_update_rejects_replaced_bytes_and_accepts_a_fresh_review() {
+		let (_fixture, mut workspace) = fixture();
+		let revision = workspace.backend.session().revision();
+		let draft = workspace
+			.create_linked_prefab_source("prefabs/prop.json", BTreeMap::new(), revision)
+			.unwrap();
+		workspace
+			.instantiate_linked_source(
+				"prefabs/prop.json",
+				&draft.draft_id,
+				[0.0; 3],
+				BTreeMap::new(),
+				revision,
+			)
+			.unwrap();
+		workspace.close_prefab_source(&draft.draft_id).unwrap();
+		let revision = workspace.backend.session().revision();
+		let before = workspace.backend.session().authored_document().clone();
+		let root = before
+			.entities
+			.iter()
+			.find(|entity| entity.linked_prefab.is_some())
+			.unwrap()
+			.key
+			.clone();
+		let reviewed = workspace
+			.open_prefab_source("prefabs/prop.json", revision)
+			.unwrap();
+		let mut external = reviewed.prefab.clone();
+		external["entities"][0]["name"] = "Changed after review".into();
+		std::fs::write(
+			workspace.asset_root.join("prefabs/prop.json"),
+			external.to_string(),
+		)
+		.unwrap();
+		let error = workspace
+			.update_linked_source(
+				root.as_str(),
+				&reviewed.draft_id,
+				PrefabConflictResolution::UseSource,
+				None,
+				revision,
+			)
+			.err()
+			.unwrap();
+		assert!(error.contains("changed on disk"), "{error}");
+		assert_eq!(workspace.backend.session().revision(), revision);
+		assert_eq!(workspace.backend.session().authored_document(), before);
+		workspace.close_prefab_source(&reviewed.draft_id).unwrap();
+		let fresh = workspace
+			.open_prefab_source("prefabs/prop.json", revision)
+			.unwrap();
+		workspace
+			.update_linked_source(
+				root.as_str(),
+				&fresh.draft_id,
+				PrefabConflictResolution::UseSource,
+				None,
+				revision,
+			)
+			.unwrap();
+		assert!(workspace
+			.backend
+			.session()
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.name == "Changed after review"));
+		workspace
+			.backend
+			.execute(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command: EditorCommandDto::Undo,
+			})
+			.unwrap();
+		assert_eq!(workspace.backend.session().authored_document(), before);
+	}
+	#[test]
+	fn reviewed_link_rejects_foreign_expired_and_replaced_identity_captures() {
+		let (_fixture, mut workspace) = fixture();
+		let revision = workspace.backend.session().revision();
+		let draft = workspace
+			.create_linked_prefab_source("prefabs/prop.json", BTreeMap::new(), revision)
+			.unwrap();
+		let foreign = workspace
+			.create_linked_prefab_source("prefabs/other.json", BTreeMap::new(), revision)
+			.unwrap();
+		let before = workspace.backend.session().authored_document().clone();
+		assert!(workspace
+			.instantiate_linked_source(
+				"prefabs/prop.json",
+				&foreign.draft_id,
+				[0.0; 3],
+				BTreeMap::new(),
+				revision
+			)
+			.err()
+			.unwrap()
+			.contains("differs"));
+		workspace.close_prefab_source(&foreign.draft_id).unwrap();
+		assert!(workspace
+			.instantiate_linked_source(
+				"prefabs/other.json",
+				&foreign.draft_id,
+				[0.0; 3],
+				BTreeMap::new(),
+				revision
+			)
+			.err()
+			.unwrap()
+			.contains("expired"));
+		let catalog_path = workspace
+			.asset_root
+			.join(runtime::asset_catalog::CATALOG_FILE);
+		let mut catalog =
+			runtime::assets::project_assets::load_catalog(&workspace.asset_root).unwrap();
+		catalog
+			.assets
+			.iter_mut()
+			.find(|asset| asset.path == "prefabs/prop.json")
+			.unwrap()
+			.id = AssetId::generate();
+		std::fs::write(catalog_path, catalog.to_json().unwrap()).unwrap();
+		assert!(workspace
+			.instantiate_linked_source(
+				"prefabs/prop.json",
+				&draft.draft_id,
+				[0.0; 3],
+				BTreeMap::new(),
+				revision
+			)
+			.err()
+			.unwrap()
+			.contains("differs"));
+		assert_eq!(workspace.backend.session().revision(), revision);
+		assert_eq!(workspace.backend.session().authored_document(), before);
+	}
+	#[test]
+	fn generic_host_commands_cannot_bypass_reviewed_source_authority() {
+		let (_fixture, mut workspace) = fixture();
+		let revision = workspace.backend.session().revision();
+		let draft = workspace
+			.create_linked_prefab_source("prefabs/prop.json", BTreeMap::new(), revision)
+			.unwrap();
+		let source = workspace.prefab_source("prefabs/prop.json").unwrap();
+		let error = workspace
+			.execute_receipt(EditorCommandRequest {
+				expected_revision: revision,
+				command: EditorCommandDto::InstantiateLinkedPrefab {
+					source: source.clone(),
+					position: [0.0; 3],
+					bindings: BTreeMap::new(),
+				},
+			})
+			.unwrap_err();
+		assert!(error.message.contains("guarded prefab"));
+		assert_eq!(workspace.backend.session().revision(), revision);
+		workspace
+			.instantiate_linked_source(
+				"prefabs/prop.json",
+				&draft.draft_id,
+				[0.0; 3],
+				BTreeMap::new(),
+				revision,
+			)
+			.unwrap();
+		let revision = workspace.backend.session().revision();
+		let before = workspace.backend.session().authored_document().clone();
+		let root = before
+			.entities
+			.iter()
+			.find(|entity| entity.linked_prefab.is_some())
+			.unwrap()
+			.key
+			.as_str()
+			.to_owned();
+		let error = workspace
+			.execute_receipt(EditorCommandRequest {
+				expected_revision: revision,
+				command: EditorCommandDto::UpdateLinkedPrefab {
+					root_key: root,
+					source,
+					resolution: PrefabConflictResolution::UseSource,
+					bindings: None,
+				},
+			})
+			.unwrap_err();
+		assert!(error.message.contains("guarded prefab"));
+		assert_eq!(workspace.backend.session().revision(), revision);
+		assert_eq!(workspace.backend.session().authored_document(), before);
+	}
+	#[test]
 	fn source_draft_saves_canonical_components_and_conflicts_with_external_disk_edits() {
 		let (_fixture, mut workspace) = fixture();
 		let revision = workspace.backend.session().revision();
@@ -450,6 +690,7 @@ mod tests {
 		workspace
 			.instantiate_linked_source(
 				"prefabs/prop.json",
+				&draft.draft_id,
 				[2.0, 0.0, 0.0],
 				BTreeMap::new(),
 				revision,
@@ -503,6 +744,7 @@ mod tests {
 		workspace
 			.update_linked_source(
 				root.as_str(),
+				&opened.draft_id,
 				PrefabConflictResolution::Reject,
 				None,
 				revision,
@@ -551,6 +793,7 @@ mod tests {
 		assert!(workspace
 			.update_linked_source(
 				root.as_str(),
+				&opened.draft_id,
 				PrefabConflictResolution::Reject,
 				None,
 				revision
@@ -674,6 +917,7 @@ mod tests {
 		assert!(workspace
 			.instantiate_linked_source(
 				"prefabs/door.json",
+				&draft.draft_id,
 				[1.0, 0.0, 0.0],
 				BTreeMap::new(),
 				revision
@@ -682,6 +926,7 @@ mod tests {
 		workspace
 			.instantiate_linked_source(
 				"prefabs/door.json",
+				&draft.draft_id,
 				[1.0, 0.0, 0.0],
 				BTreeMap::from([("actor".into(), actor)]),
 				revision,

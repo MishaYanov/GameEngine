@@ -28,9 +28,10 @@ The expected revision is null when no workspace is open. A direct caller replaci
 | Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
 | Scene / Game tabs         | Select the native view through editor-only actions, with arrow/Home/End keyboard navigation. They do not themselves start/stop Play or switch catalog scenes     |
 | Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
-| Inspector                 | Edits selected name, local transform and Box/Sphere colliders, including sensor mode and symmetric collision filters, with grouped previews and cancellation       |
+| Inspector                 | Edits name/transform and typed Mesh Renderer, Collider and Native Behavior components; linked members expose overrides and explicit update/revert/unpack |
+| Runtime Inspector         | Game during Play exposes read-only handles, origins, component state and bounded entity pages through explicit Refresh |
 | Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                 |
-| Assets                    | Catalogued scenes can be opened; catalogued models can be added at origin or pointer-captured into a native placement preview                                    |
+| Assets                    | Open scenes, place models, copy prefabs, create/edit linked sources and link instances with explicit external reference bindings |
 | Scene controls            | Switch retained scenes, choose startup/gameplay module, assign module-aware Gameplay Roles, register scene files and save the active scene at a new path           |
 | Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                          |
 | Settings portal           | Placeholder component; not a completed settings editor                                                                                                           |
@@ -41,8 +42,8 @@ The overall dirty flag can include project settings or inactive drafts. Therefor
 Gameplay options and role requirements come from the host module catalog, including per-scene overrides. The generic
 module uses configured behaviors without inventing Courtyard roles. Collider fields and discrete sensor/layer changes
 share the existing edit reservation, history and Save/Play barriers. Colliders is a view-only toggle: continuous cyan
-outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlap classification does not yet
-provide Enter/Stay/Exit events. See the [building-blocks review](building-blocks-review.md).
+outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlaps provide fixed-step Enter/Stay/Exit
+events. See the [Milestone 4–6 workflow](milestones-4-6-review.md) for component editing, source review and runtime inspection.
 
 ## One native surface, two views
 
@@ -58,7 +59,7 @@ Windows child-window airspace constraints remain. The native project chooser/con
 
 The editor camera and grid/tool settings remain outside authored scene data and history. Native transform/placement/loading states lock competing Inspector authoring; ordinary camera navigation does not. Numeric Inspector edits and native handle gestures both use the existing typed scene commands and history. Picking/placement currently approximate model bounds, and rotation/scaling that cannot be represented by the scene's TRS format can be rejected.
 
-Hierarchy supports arrow/Home/End navigation, typeahead and keyboard parenting. Reparenting commits the current Inspector draft, requests keep-world behavior and waits for Rust's accepted state. Virtual rows bound DOM size; tree construction and core transform work still depend on scene size. Visibility/layer controls, manual ordering and prefab authoring remain separate work.
+Hierarchy supports arrow/Home/End navigation, typeahead and keyboard parenting. Reparenting commits the current Inspector draft, requests keep-world behavior and waits for Rust's accepted state. Virtual rows bound DOM size; tree construction and core transform work still depend on scene size. Visibility/layer controls and manual ordering remain separate work; prefab authoring uses Assets and the Inspector.
 
 View actions are bound to their original frontend/native workspace contexts. Replacement clears stale gestures and Inspector previews; native generations and frontend counters are mapped as separate namespaces. Unfinished asset drags cancel on WebView blur, while a submitted load survives expected focus transfer to the native child and remains cancellable with Escape.
 

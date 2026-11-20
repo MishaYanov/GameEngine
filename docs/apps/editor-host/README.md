@@ -76,7 +76,7 @@ Game. [Runtime and authoring identity](../../project-lifecycle.md#editor-play-an
 
 `editor_open_project` uses ProjectLocation and prepares every catalog scene before installing a candidate. Project
 schema 3 uses stable scene IDs, scene-scoped behaviors, shared settings, and an optional `gameplay_module`.
-Inline-only schema-2 JSON upgrades on load. Capabilities advertise protocol 2 / scene schema 3.
+Inline-only schema-2 JSON upgrades on load. Capabilities advertise protocol 2 / scene schema 4.
 The host installs the shared project resolver when opening or reloading a workspace. `StartPlay` resolves the
 current in-memory manifest before creating a runtime session. An unsupported ID rejects Play and preserves the
 authored state. The existing project snapshot and `set_project` command carry the field over protocol 2.
@@ -93,6 +93,16 @@ failed tokens for retry unless superseded. `editor_run_build` checks the latest 
 executable fingerprints, and launches that player. Use an output folder writable only by trusted users.
 See [project lifecycle](../../project-lifecycle.md) for failure behavior and frontend
 helpers.
+
+## Reviewed linked sources
+
+Source editing uses workspace-owned drafts. Dedicated Link and Update commands require the open source `draft_id`,
+then check its workspace generation, authoring revision, asset identity, resolved catalog path and exact parsed-byte
+fingerprint. If the source changes after review, reopen it before applying the operation. Generic `editor_execute`,
+incremental and receipt commands reject caller-supplied `InstantiateLinkedPrefab` and `UpdateLinkedPrefab` source
+DTOs. Dedicated host paths validate before applying the source; trusted core Rust callers retain the typed commands.
+See the
+[linked prefab workflow](../../milestones-4-6-review.md#milestone-5-linked-prefab-authoring).
 
 ## Guarded project replacement and native dialogs
 

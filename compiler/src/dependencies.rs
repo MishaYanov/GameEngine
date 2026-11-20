@@ -239,15 +239,17 @@ impl Closure<'_> {
 				self.linked_sources
 					.insert(link.source.path.to_ascii_lowercase());
 			}
-			for component in &entity.native_behaviors {
-				if component.enabled {
-					if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
-						prefab_path,
-						..
-					} = &component.behavior
-					{
-						self.prefab_dependency(prefab_path)?;
-					}
+			for component in entity
+				.native_behaviors
+				.iter()
+				.filter(|component| component.enabled)
+			{
+				if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
+					prefab_path,
+					..
+				} = &component.behavior
+				{
+					self.prefab_dependency(prefab_path)?;
 				}
 			}
 			if !entity.has_mesh_component() {
@@ -683,13 +685,12 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 			.retain(|asset| closure.ids.contains(&asset.id));
 		for asset in &mut exported.assets {
 			asset.source_path = None;
-			if let Ok(path) = checked_asset_path(root, Path::new(&asset.path)) {
-				if let Ok(relative) = path.strip_prefix(root) {
-					if let Some(bytes) = closure.generated_files.get(relative) {
-						asset.bytes = bytes.len() as u64;
-						asset.fingerprint = format!("{:x}", Sha256::digest(bytes));
-					}
-				}
+			if let Ok(path) = checked_asset_path(root, Path::new(&asset.path))
+				&& let Ok(relative) = path.strip_prefix(root)
+				&& let Some(bytes) = closure.generated_files.get(relative)
+			{
+				asset.bytes = bytes.len() as u64;
+				asset.fingerprint = format!("{:x}", Sha256::digest(bytes));
 			}
 		}
 		let bytes = exported.to_json()?.into_bytes();

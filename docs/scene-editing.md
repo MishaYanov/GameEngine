@@ -1,9 +1,9 @@
 # Editor commands and document ownership
 
 The editor uses **Angular controls plus a native game pane**, with runtime logic behind a typed bridge. The current
-workspace composes Hierarchy, transform/Collider Inspector, scene/model controls, module/role/input authoring and
+workspace composes Hierarchy, transform/Component Inspector, scene/model controls, module/role/input authoring and
 save/export actions. The older [steps 21–35 report](editor-steps-21-35.md) retains its original foundation-only scope;
-read the [building-blocks review](building-blocks-review.md) for current implementation and verification boundaries.
+read the [Milestone 4–6 review](milestones-4-6-review.md) for component, linked prefab and runtime lifecycle workflows.
 
 ## Authoritative document API
 
@@ -41,8 +41,9 @@ viewport, observes layout/visibility and emits status/raw input/errors.
 
 The Windows child viewport has native airspace and lifecycle/DPI/focus constraints; ordinary HTML is not a free overlay
 atop it. Angular keeps Inspector and toolbar controls beside the child window. Native selection, marquee, transform
-gestures and snapping share Rust command/history semantics with numeric edits. The prefab browser and general
-component Inspector remain future work.
+gestures and snapping share Rust command/history semantics with numeric edits. The Component Inspector edits typed
+mesh, collider and native behavior records. Assets exposes copied placement, linked source creation/editing and
+explicit Link/Update workflows; nested linked sources and arbitrary script components remain future work.
 
 ## Colliders and interaction settings
 
@@ -61,8 +62,8 @@ accept the other's membership. Sensors produce overlaps but never block kinemati
 The optional Colliders Scene overlay shows selected effective shapes, using dashed pink sensor outlines and continuous
 cyan blocking outlines. It is editor-only, cached and bounded; errors and omitted outlines are reported without
 failing scene rendering. Boxes use transformed world AABBs, and spheres conservatively enclose hierarchy scale/shear.
-This is not an oriented-box/rigid-body solver. `Contact.sensor` is overlap classification; Feature 1.4 Enter/Stay/Exit
-delivery is not implemented. See the [review](building-blocks-review.md#collider-inspector-and-sensorfilter-authoring).
+This is not an oriented-box/rigid-body solver. Sensor contacts feed fixed-step Enter/Stay/Exit trigger delivery and
+native component behavior. See the [trigger lifecycle review](milestones-review.md).
 
 ## Multi-scene documents and native adapter
 

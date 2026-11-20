@@ -233,10 +233,10 @@ impl GameApp {
 			self.fulfill_runtime_spawns()?;
 			// synchronize_world can retire runtime models; submitted frames have
 			// completed before each mutating tick above/below.
-			if outcome.changes.topology_changed {
-				if let Some(assets) = &mut self.asset_manager {
-					assets.prune_unused();
-				}
+			if outcome.changes.topology_changed
+				&& let Some(assets) = &mut self.asset_manager
+			{
+				assets.prune_unused();
 			}
 			if outcome.pending_steps == 0 {
 				break;

@@ -5,13 +5,13 @@ supplies shared asset/model/GPU-scene adapters and GraphicsProbe; Angular owns p
 
 ## EditorSession: the Angular domain boundary
 
-`runtime::editor::EditorSession` owns schema3 authored/saved data, persistent-key multi-selection, snapping, a temporary
+`runtime::editor::EditorSession` owns schema-4 authored/saved scene data, persistent-key multi-selection, snapping, a temporary
 Play copy, revisions, transactions, and bounded patch history. `execute(EditorCommandRequest)` validates
 expected_revision and returns an authoritative bridge snapshot. `CommandFactory::capabilities()` advertises
 intent/categories/undoability/Play availability without assigning physical keys.
 
 Operations cover camera frame/orbit/pan/dolly, local/world/group transforms, hierarchy parenting, identity-preserving
-edits, prefab export/instantiate, tint/light/collider changes, undo/redo and Play input/pause. `tick` uses a bounded
+edits, copied and linked prefab operations, typed component changes, tint/light/collider changes, undo/redo and Play input/pause. `tick` uses a bounded
 fixed step and updates scene_revision without turning every rendered frame into a command revision conflict. Saving uses
 authored content and rejects an uncommitted transaction.
 
@@ -158,19 +158,31 @@ and input over 4 KiB. The native game exposes [profile loading](../../apps/game/
 Mouse support in InputState does not make mouse buttons valid movement-profile keys. General action mapping,
 contexts, gamepad support and possession remain proposed in ADR-0010.
 
+## Runtime entity lifecycle
+
+Core lifecycle state tracks world/key/generation handles, spawned-instance ownership, per-component native state,
+bounded pending requests and simulation-tick timers. Hosts prepare CPU/native prefab candidates before admission,
+stop catch-up at each request boundary, and drain retained steps with `tick(0)` after admission. Despawn, runtime
+transition, restart and Stop retire the relevant ownership and resources without changing authored documents.
+
+Ownership records and their entity/owner/component indexes share one `Arc` across unchanged tick snapshots.
+Structural writes use copy-on-write, keeping failed candidates isolated. Indexed queries avoid repeated ownership
+scans; spawning and removal still validate/rebuild scene state. This is a source-level optimization, not a measured
+frame-time claim. See the [runtime lifecycle review](../../milestones-4-6-review.md#milestone-6-runtime-entities-and-lifecycle).
+
 ## Scene and asset modules
 
 | Module                          | Current role                                                                            |
 |---------------------------------|-----------------------------------------------------------------------------------------|
-| scene_data / scene_io           | Schema3 parse/migration/validation, hierarchy/world matrices, bounded CPU/GPU load/save |
-| editor/prefab                   | Isolated version-1 prefabs, subtree export, remapped instance keys/parents              |
+| scene_data / scene_io           | Schema-4 parse/migration/validation, hierarchy/world matrices, bounded CPU/GPU load/save |
+| editor/prefab / linked_prefab   | Canonical schema-3 prefabs, copied placement and linked source versions/typed overrides |
 | assets/scene_import             | Selected static glTF scene traversal and node/mesh metadata                             |
 | assets/asset_manager, model     | CPU metadata plus cached selected-mesh GPU resources                                    |
 | camera / editor camera commands | View state and validated frame/orbit/pan/dolly intent                                   |
 | simulation / collision          | Default 60 Hz bounded steps; conservative overlap/swept movement foundation             |
 | bounds / picking / visibility   | World-aware bounds, nearest-box picking, conservative frustum selection                 |
 
-Schema3 can store transform-only nodes, parents, mesh selection, material tint, collider data and up to 16 scene lights.
+Schema 4 stores transform-only nodes, parents, typed mesh/material, collider and native behavior components, plus up to 16 scene lights.
 Full static scene import is not skinning, morph playback or animation. Collision is not full physics. Model resources
 still contain Vulkan types, so the asset/GPU-scene side is not backend-independent.
 
