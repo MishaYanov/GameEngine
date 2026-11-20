@@ -20,6 +20,17 @@ See [project lifecycle](../../project-lifecycle.md) for incompatible project-v1 
 Command descriptors report categories, undoability and Play availability so UI owners need
 not hardcode backend assumptions.
 
+The optional `gameplay_modules` capability catalog defaults to empty for older hosts. Descriptors contain module IDs,
+display text, default role descriptors and per-scene overrides. Core defines this generic metadata shape; the shared
+gameplay crate supplies Courtyard's entries and the host publishes them. It does not change the module's native-code
+execution model or permit arbitrary code loading.
+
+Box/Sphere collider DTOs accept optional `interaction` objects with `sensor`, u32 `layers` and u32 `mask`.
+Absent/partial settings default to false/1/u32::MAX, fully default settings serialize omitted, and malformed nested
+objects or out-of-range integers fail. `Contact.sensor` defaults false for legacy contact data. Viewport settings
+add `colliders` defaulting false, `set_colliders { visible }`, and a separate optional `collider_error` diagnostic.
+These view fields never enter authored scenes. [Collider semantics](../../scene-editing.md#colliders-and-interaction-settings).
+
 The optional `incremental_commands` capability defaults to false when absent. Supporting hosts expose
 `EditorCommandUpdateDto`, tagged by `kind`: `snapshot` carries a receipt and full snapshot; `delta` carries the receipt,
 `EditorStateDto`, changed entity records and optional camera/lights. State excludes document/project copies. Structural,

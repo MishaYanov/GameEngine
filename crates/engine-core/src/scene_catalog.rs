@@ -100,7 +100,7 @@ impl SceneCatalog {
 			.ok_or(SceneDescriptorErrors::SceneNotFound)
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item=&SceneDescriptor> {
+	pub fn iter(&self) -> impl Iterator<Item = &SceneDescriptor> {
 		self.scenes.values()
 	}
 

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use support::*;
 fn cube(name: &str, position: [f32; 3]) -> engine_core::scene_data::EntityData {
 	entity(name, position).with_collider(Some(ColliderData::Box {
+		interaction: Default::default(),
 		half_extents: [0.5; 3],
 		offset: [0.0; 3],
 	}))

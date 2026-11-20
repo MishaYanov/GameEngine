@@ -5,15 +5,27 @@ dependencies first.
 
 ## Current editor workspace documentation scope
 
-The 2026-11-06 update inspects commit c3a3e95 plus staged/unstaged/untracked Angular workspace, local generator and host replacement/dialog changes. It runs documentation-site checks only. New component and schematic specs are source coverage, not current passed results here. Prior Rust/frontend/GPU totals below remain attributed historical snapshots; native File Open/discard races, viewport interaction, accessibility and current production build need fresh application evidence. See [workspace guide](editor-workspace.md).
+The 2026-11-20 reconciliation inspects `e0f2148`, history since `85269c8`, and staged/unstaged/new source including
+module/role authoring, Collider Inspector, sensors/filtering and resource/cache changes. The
+[building-blocks review](building-blocks-review.md#validation-evidence-and-limits) attributes current focused checks,
+final completion artifacts and remaining native limits. `docs-site/docs-state.json` records the inspection baseline
+and hashes; it is not certification of an index-only snapshot. Older totals below remain historical.
+
+Current completion evidence includes 734 workspace all-target/all-feature Rust passes with five intentional skips,
+Rust documentation checks, 401 editor tests across 43 specs, production-bundle success with the existing setup
+stylesheet warning, 15 admin tests and 51 Python tests. Hidden real-Vulkan probe, transition/restart/resource-reuse,
+renderer/resize/zero-size and exported-course execution are separately attributed in the review. The exported-course
+test drives production GameApp code against packaged data and dispatches focus events directly; it does not prove
+OS keyboard delivery or interactively drive the standalone exported executable. Targeted follow-up checks and
+documentation-site publication results belong to the completion report/checkpoint, not these historical totals below.
 
 ## Current project lifecycle changes
 
 The [project lifecycle guide](project-lifecycle.md) covers project schema 3 / editor protocol 2: root validation,
 retained drafts, scene-aware history, save/reload policies and catalog-wide build/headless preparation. Focused tests
 exist in engine-core/tests/multi_scene_api.rs, host editor_workspace.rs, frontend editor.service.spec.ts and
-compiler/headless tests. This documentation update executes site checks only. Earlier engine counts below are
-historical, not certification of the current working tree.
+compiler/headless tests. Documentation maintenance executes site checks; current application evidence is separately
+attributed in the completion review. Earlier engine counts below remain historical.
 
 ## Historical steps 21�35 verification
 
@@ -114,16 +126,17 @@ Default suites are offline/locked all-target Rust workspace tests, Rust document
 without watching, and Python tool tests. They continue after failures; exit codes are 0 success, 1 failure, and 130
 Ctrl+C. Dependencies are not installed automatically. Tkinter/display-dependent tests can skip.
 
-The current native option adds runtime initialization, generated-project validation, and renderer_smoke. scene_io_smoke
-is invoked separately. Native generated-project compilation retains output and is not the same as launching the
+The current native option adds runtime initialization, generated-project validation, renderer_smoke and scene_io_smoke.
+Native generated-project compilation retains output and is not the same as launching the
 generated scene. The JSON asset omission is fixed with bounded validation; generation compilation still does not
 establish final installed runtime acceptance.
 
 ## Remaining independent checks
 
-Visible native UI/control/lighting acceptance, measured performance budgets, clean-checkout reproducibility, installed
-release
-execution, composed Angular/Tauri pane acceptance, and Jenkins execution evidence remain separate. The Jenkins
+Current visible native UI/control/lighting acceptance, measured performance budgets, clean-checkout reproducibility,
+another-machine installed-release execution and Jenkins execution evidence remain separate. Historical composed
+Angular/Tauri and exported-player smoke has fixture-specific limits; it is not repeated by current CPU or hidden
+Vulkan tests. The Jenkins
 draft/default
 headless pipeline does not exercise native GPU or Windows packaging. Do not infer those results from this report.
 

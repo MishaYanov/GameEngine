@@ -3,9 +3,11 @@ import {Drawer} from "../../../../shared/components/drawer/drawer";
 import {EditorPane} from "../../../../shared/components/pane/pane";
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
-import type {SceneEntity, Vec3} from '../../../../core/editor/editor.models';
+import type {Collider, SceneEntity, Vec3} from '../../../../core/editor/editor.models';
 import {type Vector3Change, Vector3Field} from '../../../../shared/components/vector3-field/vector3-field';
 import type {InspectorField, TransformFieldEdit} from '../scene-editing.service';
+import {ColliderInspector} from '../collider/collider-inspector';
+import type {ColliderInteractionChange, ColliderKind} from '../collider/collider';
 
 export type {InspectorField} from '../scene-editing.service';
 export type TransformProperty = TransformFieldEdit['field'];
@@ -18,7 +20,8 @@ let nextInspectorId = 0;
     imports: [
         Drawer,
         EditorPane,
-        Vector3Field
+        Vector3Field,
+        ColliderInspector,
     ],
     templateUrl: './inspector-panel.html',
     styleUrl: './inspector-panel.scss',
@@ -31,6 +34,10 @@ export class InspectorPanel {
     readonly editStarted = output<InspectorField>();
     readonly nameChanged = output<string>();
     readonly transformChanged = output<InspectorTransformChange>();
+    readonly colliderChanged = output<Collider>();
+    readonly colliderInvalid = output<void>();
+    readonly colliderShapeChanged = output<ColliderKind>();
+    readonly colliderInteractionChanged = output<ColliderInteractionChange>();
     readonly editCommitted = output<void>();
     readonly editCancelled = output<void>();
 

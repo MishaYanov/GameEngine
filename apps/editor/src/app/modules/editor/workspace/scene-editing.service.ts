@@ -1,5 +1,6 @@
 import {computed, DestroyRef, effect, inject, Injectable, signal} from '@angular/core';
 import {
+    type Collider,
     CommandBuilder,
     type EditorCommand,
     type EntityKey,
@@ -8,10 +9,24 @@ import {
 } from '../../../core/editor/editor.models';
 import {EditorService} from '../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
+import {
+    changeColliderInteraction, COLLIDER_NUMBER_ERROR, defaultCollider, normalizeCollider, sameCollider,
+    type ColliderInteractionChange, type ColliderKind,
+} from './collider/collider';
 
-export type InspectorField = 'name' | 'position' | 'rotation' | 'scale';
+export type InspectorField =
+    | 'name'
+    | TransformField
+    | 'collider';
+
+
+export type TransformField =
+    | 'position'
+    | 'rotation'
+    | 'scale';
+
 export interface TransformFieldEdit {
-    readonly field: Exclude<InspectorField, 'name'>;
+    readonly field: TransformField;
     readonly axis: 0 | 1 | 2;
     readonly value: number;
     readonly linked?: boolean;
@@ -44,6 +59,7 @@ interface FieldEdit {
     cancelled: boolean;
     failed: boolean;
     changed: boolean;
+    invalid: boolean;
 }
 
 /** Workspace drafts and edit lifetimes. Rust remains the document/history owner. */
@@ -52,7 +68,7 @@ export class SceneEditingService {
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService, {optional: true});
     readonly blocked = signal(false);
-    private readonly draft = signal<{edit: FieldEdit; entity: SceneEntity} | null>(null);
+    private readonly draft = signal<{ edit: FieldEdit; entity: SceneEntity } | null>(null);
     private readonly owner = signal<FieldEdit | null>(null);
     private readonly ownRequests = signal(0);
     private readonly rollbackFailed = signal(false);
@@ -84,6 +100,8 @@ export class SceneEditingService {
     readonly editable = computed(() => this.ready() && !this.rollbackFailed());
     private active: FieldEdit | null = null;
     private queue: Promise<void> = Promise.resolve();
+    private colliderActions: Promise<boolean> = Promise.resolve(true);
+    private colliderActionCount = 0;
     private destroyed = false;
 
     constructor() {
@@ -108,7 +126,7 @@ export class SceneEditingService {
             field, sceneId: this.editor.snapshot()!.active_scene_id,
             generation: this.editor.workspaceGeneration(),
             original: entity, entity, label: `Edit ${field}`,
-            pending: null, draining: false, cancelled: false, failed: false, changed: false,
+            pending: null, draining: false, cancelled: false, failed: false, changed: false, invalid: false,
         };
         this.active = edit;
         this.draft.set({edit, entity});
@@ -154,7 +172,10 @@ export class SceneEditingService {
         }
         edit.entity = {...edit.entity, transform: {...edit.entity.transform, [change.field]: values}};
         this.errorState.set(null);
-        this.update(edit, CommandBuilder.transforms([{key: edit.entity.key, transform: edit.entity.transform}], 'local'));
+        this.update(edit, CommandBuilder.transforms([{
+            key: edit.entity.key,
+            transform: edit.entity.transform
+        }], 'local'));
     }
 
     /** Finish queued preview updates before Save, Play, Undo, or selection changes. */
@@ -164,6 +185,7 @@ export class SceneEditingService {
         this.active = null;
         if (edit.field === 'name' && (!edit.entity.name.trim() || /\p{Cc}/u.test(edit.entity.name) ||
             new TextEncoder().encode(edit.entity.name).length > 1024)) edit.cancelled = true;
+        if (edit.invalid) edit.cancelled = true;
         return this.enqueue(async () => {
             if (edit.cancelled || this.destroyed || !this.isCurrent(edit)) {
                 await this.rollback(edit);
@@ -172,7 +194,7 @@ export class SceneEditingService {
             if (edit.failed) return false;
             try {
                 if (this.owner() === edit) {
-                    await this.execute(CommandBuilder.commit());
+                    await this.execute(CommandBuilder.commit(), edit.generation);
                     this.owner.set(null);
                 }
                 this.clearDraft(edit);
@@ -203,6 +225,83 @@ export class SceneEditingService {
         });
     }
 
+    collider(next: Collider | null): void {
+        if (this.destroyed || !this.editable()) return;
+        this.begin('collider');
+        const edit = this.active;
+        if (!edit || edit.field !== 'collider' || !this.isCurrent(edit)) return;
+        let collider: Collider | null;
+        try {
+            collider = normalizeCollider(next);
+        } catch {
+            this.invalidateCollider();
+            return;
+        }
+        const wasInvalid = edit.invalid;
+        edit.invalid = false;
+        this.errorState.set(null);
+        if (!wasInvalid && sameCollider(edit.entity.collider, collider)) return;
+        edit.entity = {...edit.entity, collider};
+        this.update(edit, CommandBuilder.collider(edit.entity.key, collider));
+    }
+
+    invalidateCollider(): void {
+        this.begin('collider');
+        const edit = this.active;
+        if (!edit || edit.field !== 'collider' || !this.editable()) return;
+        edit.invalid = true;
+        edit.pending = null;
+        this.errorState.set(COLLIDER_NUMBER_ERROR);
+    }
+
+    replaceCollider(kind: ColliderKind): Promise<boolean> {
+        return this.applyColliderChange(collider => (collider?.kind ?? 'none') === kind
+            ? collider : defaultCollider(kind, collider?.offset, collider?.interaction));
+    }
+
+    changeColliderInteraction(change: ColliderInteractionChange): Promise<boolean> {
+        return this.applyColliderChange(collider => collider ? changeColliderInteraction(collider, change) : null);
+    }
+
+    private applyColliderChange(update: (collider: Collider | null) => Collider | null): Promise<boolean> {
+        const context = this.editor.snapshot();
+        const generation = this.editor.workspaceGeneration();
+        const key = context?.selection[0];
+        if (!context || context.mode !== 'edit' || !key || this.destroyed) return Promise.resolve(false);
+        const current = () => {
+            const snapshot = this.editor.snapshot();
+            return !this.destroyed && this.editor.workspaceGeneration() === generation &&
+                snapshot?.mode === 'edit' && snapshot.active_scene_id === context.active_scene_id && snapshot.selection[0] === key;
+        };
+        // Each intent reads the latest dimensions and other filter bits after its predecessor commits.
+        this.colliderActionCount++;
+        const result = this.colliderActions.then(async () => {
+            if (!current()) return false;
+            let applied = false;
+            const completed = await this.commitAndRun(async () => {
+                if (!current()) return;
+                const entity = this.editor.snapshot()!.document.entities.find(entity => entity.key === key);
+                if (!entity) return;
+                const collider = normalizeCollider(update(entity.collider ?? null));
+                if (!sameCollider(entity.collider, collider)) {
+                    try {
+                        await this.execute(CommandBuilder.collider(key, collider), generation);
+                    } catch (error) {
+                        if (current()) throw error;
+                        return;
+                    }
+                }
+                applied = true;
+            });
+            return completed && applied;
+        });
+        this.colliderActions = result.catch(error => {
+            if (current()) this.report(error);
+            return false;
+        }).finally(() => this.colliderActionCount--);
+        return this.colliderActions;
+    }
+
     async select(key: EntityKey): Promise<void> {
         await this.withCommittedEdit(async () => {
             const snapshot = this.editor.snapshot();
@@ -216,6 +315,14 @@ export class SceneEditingService {
 
     /** Reserve the editing surface through the commit and the following action. */
     async withCommittedEdit(action: () => Promise<void>): Promise<boolean> {
+        const generation = this.editor.workspaceGeneration();
+        const sceneId = this.editor.snapshot()?.active_scene_id;
+        while (this.colliderActionCount > 0) await this.colliderActions;
+        if (this.editor.workspaceGeneration() !== generation || this.editor.snapshot()?.active_scene_id !== sceneId) return false;
+        return this.commitAndRun(action);
+    }
+
+    private async commitAndRun(action: () => Promise<void>): Promise<boolean> {
         if (!this.ready()) return false;
         const completion = this.commit();
         this.transitioning.set(true);
@@ -232,7 +339,7 @@ export class SceneEditingService {
     }
 
     private update(edit: FieldEdit, command: EditorCommand): void {
-        edit.changed = edit.entity.name !== edit.original.name ||
+        edit.changed = edit.entity.name !== edit.original.name || !sameCollider(edit.entity.collider, edit.original.collider) ||
             (['position', 'rotation', 'scale'] as const).some(field =>
                 edit.entity.transform[field].some((value, axis) => value !== edit.original.transform[field][axis]));
         this.draft.set({edit, entity: edit.entity});
@@ -251,12 +358,12 @@ export class SceneEditingService {
                     this.owner.set(edit);
                     // A rejected response may still have opened the transaction;
                     // rollback checks the recovered authoritative snapshot.
-                    await this.execute(CommandBuilder.begin(edit.label));
+                    await this.execute(CommandBuilder.begin(edit.label), edit.generation);
                 }
                 while (edit.pending && !edit.cancelled && !edit.failed) {
                     const pending = edit.pending;
                     edit.pending = null;
-                    await this.execute(pending);
+                    await this.execute(pending, edit.generation);
                 }
                 return true;
             } catch (error) {
@@ -281,10 +388,13 @@ export class SceneEditingService {
             const snapshot = this.editor.snapshot();
             if (this.editor.workspaceGeneration() === edit.generation && snapshot?.mode === 'edit' &&
                 snapshot.active_scene_id === edit.sceneId && snapshot.transaction === edit.label) {
-                await this.execute(CommandBuilder.cancel());
+                await this.execute(CommandBuilder.cancel(), edit.generation);
             }
             this.owner.set(null);
             this.rollbackFailed.set(false);
+        }
+        if (this.draft()?.edit === edit && edit.field === 'collider' && this.errorState() === COLLIDER_NUMBER_ERROR) {
+            this.errorState.set(null);
         }
         this.clearDraft(edit);
     }
@@ -300,17 +410,17 @@ export class SceneEditingService {
             this.report(`${error instanceof Error ? error.message : String(error)} Cancellation failed: ${String(rollbackError)}`);
             return;
         }
-        this.report(error);
+        if (this.isCurrent(edit)) this.report(error);
     }
 
     private clearDraft(edit: FieldEdit): void {
         if (this.draft()?.edit === edit) this.draft.set(null);
     }
 
-    private async execute(command: EditorCommand): Promise<void> {
+    private async execute(command: EditorCommand, generation = this.editor.workspaceGeneration()): Promise<void> {
         this.ownRequests.update(count => count + 1);
         try {
-            await this.editor.execute(command);
+            await this.editor.execute(command, generation, this.editor.snapshot()?.revision);
         } finally {
             this.ownRequests.update(count => count - 1);
         }
@@ -328,4 +438,5 @@ export class SceneEditingService {
     private report(error: unknown): void {
         this.errorState.set(error instanceof Error ? error.message : String(error));
     }
+
 }

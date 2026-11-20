@@ -1,7 +1,7 @@
 //! CPU-only runner for an authored project and bounded command/tick replay.
 use engine_core::{
 	Bounds3, Engine, EngineBuilder,
-	command::{EditorCommandDto, EditorCommandRequest},
+	command::{EditorCommandDto, EditorCommandRequest, PlayStatusDto},
 	project::{MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::SceneId,
 	scene_data::{MAX_SCENE_BYTES, SceneData, validate_model_path},
@@ -24,7 +24,7 @@ use std::{
 const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REPLAY_ACTIONS: usize = 10_000;
 const MAX_TICK_CALLS: u32 = 100_000;
-const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Version-1 typed command/tick/asset_metadata actions.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No models, GPU or window are loaded.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\n";
+const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Version-1 command/tick/restart_run/asset_metadata actions.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No models, GPU or window are loaded.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\n";
 
 #[derive(Default)]
 struct Options {
@@ -49,10 +49,11 @@ struct Replay {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ReplayAction {
+	RestartRun {},
 	Command {
 		#[serde(default)]
 		expected_revision: Option<u64>,
-		command: EditorCommandDto,
+		command: Box<EditorCommandDto>,
 	},
 	Tick {
 		#[serde(default = "one")]
@@ -102,6 +103,8 @@ struct Summary {
 	active_scene_id: SceneId,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	play_scene_id: Option<SceneId>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	play_status: Option<PlayStatusDto>,
 	revision: u64,
 	scene_revision: u64,
 	change_cursor: u64,
@@ -290,18 +293,30 @@ fn run(options: Options) -> Result<Summary, String> {
 		for action in replay.actions {
 			check_budget(started, budget)?;
 			match action {
+				ReplayAction::RestartRun {} => {
+					let status = engine
+						.play_status()
+						.ok_or("Restart Run requires Play mode")?;
+					let (prepared, _) = engine
+						.prepare_restart_play(&status.run_id, engine.session().revision())
+						.map_err(|error| format!("Cannot prepare Restart Run: {error}"))?;
+					engine
+						.commit_play_scene(prepared)
+						.map_err(|error| format!("Cannot install Restart Run: {error}"))?;
+					measures.commands += 1;
+				}
 				ReplayAction::Command {
 					expected_revision,
 					command,
 				} => {
 					measures.fresh_ids |= matches!(
-						command,
+						command.as_ref(),
 						EditorCommandDto::Spawn { .. }
 							| EditorCommandDto::DuplicateSelection { .. }
 					);
 					let request = EditorCommandRequest {
 						expected_revision: expected_revision.unwrap_or(engine.session().revision()),
-						command,
+						command: *command,
 					};
 					engine
 						.execute(request)
@@ -385,6 +400,7 @@ fn run(options: Options) -> Result<Summary, String> {
 		},
 		active_scene_id: engine.session().active_scene_id().clone(),
 		play_scene_id: engine.session().play_scene_id().cloned(),
+		play_status: engine.play_status(),
 		revision: engine.session().revision(),
 		scene_revision: engine.session().scene_revision(),
 		change_cursor: engine.change_cursor(),

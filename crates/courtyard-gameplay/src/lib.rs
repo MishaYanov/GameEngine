@@ -2,7 +2,7 @@
 
 use engine_core::{
 	EntityKey,
-	command::GameplayStatus,
+	command::{GameplayModuleDescriptorDto, GameplayRoleDescriptorDto, GameplayStatus},
 	game_progress::{GameProgress, ProgressState, ProgressView},
 	project::{BehaviorSettings, ProjectData},
 	scene_catalog::SceneId,
@@ -12,10 +12,50 @@ use engine_core::{
 	},
 	world::RuntimeWorld,
 };
-use std::{mem::size_of, sync::Arc};
+use std::{collections::BTreeMap, mem::size_of, sync::Arc};
 
 pub const COURTYARD_RUN_ID: &str = "courtyard_run";
 const FINISH_SCENE_ID: &str = "finish";
+
+pub fn descriptor() -> GameplayModuleDescriptorDto {
+	GameplayModuleDescriptorDto {
+		id: COURTYARD_RUN_ID.into(),
+		label: "Courtyard Run".into(),
+		description: "Collect a key, reach the exit, then complete the finish scene.".into(),
+		default_roles: vec![
+			GameplayRoleDescriptorDto {
+				name: "player".into(),
+				label: "Player".into(),
+				requirement_hint: "Required when Key or Exit is assigned. Needs controlled movement with positive speed.".into(),
+			},
+			GameplayRoleDescriptorDto {
+				name: "key".into(),
+				label: "Key".into(),
+				requirement_hint: "Assigning Key or Exit requires Player, Key, and Exit on different entities.".into(),
+			},
+			GameplayRoleDescriptorDto {
+				name: "exit".into(),
+				label: "Exit".into(),
+				requirement_hint: "Assigning Key or Exit requires all three roles and a scene with ID finish in the project.".into(),
+			},
+		],
+		scene_roles: BTreeMap::from([(
+			FINISH_SCENE_ID.into(),
+			vec![
+				GameplayRoleDescriptorDto {
+					name: "player".into(),
+					label: "Player".into(),
+					requirement_hint: "Required in the finish scene. Needs controlled movement with positive speed.".into(),
+				},
+				GameplayRoleDescriptorDto {
+					name: "finish".into(),
+					label: "Finish".into(),
+					requirement_hint: "Required in the finish scene and must reference a different entity from Player.".into(),
+				},
+			],
+		)]),
+	}
+}
 
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
 	if project.gameplay_module.as_deref() == Some(COURTYARD_RUN_ID) {
@@ -415,6 +455,73 @@ mod tests {
 		(project, scene_id, document)
 	}
 
+	#[test]
+	fn module_descriptor_matches_the_registered_module_and_scene_role_sets() {
+		let descriptor = descriptor();
+		let (mut project, course_id, _) = course();
+		project.gameplay_module = Some(descriptor.id.clone());
+		assert!(resolve(&project).is_ok());
+		assert!(!descriptor.label.is_empty());
+		assert!(!descriptor.description.is_empty());
+		let names = |roles: &[GameplayRoleDescriptorDto]| {
+			roles
+				.iter()
+				.map(|role| role.name.clone())
+				.collect::<Vec<_>>()
+		};
+		assert_eq!(names(&descriptor.default_roles), ["player", "key", "exit"]);
+		assert_eq!(descriptor.scene_roles.len(), 1);
+		assert_eq!(
+			names(&descriptor.scene_roles[FINISH_SCENE_ID]),
+			["player", "finish"]
+		);
+		assert!(!descriptor.scene_roles.contains_key(course_id.as_str()));
+		for role in descriptor
+			.default_roles
+			.iter()
+			.chain(descriptor.scene_roles.values().flatten())
+		{
+			assert!(!role.label.is_empty());
+			assert!(!role.requirement_hint.is_empty());
+		}
+	}
+
+	#[test]
+	fn selecting_courtyard_run_accepts_unfinished_roles_and_play_checks_them() {
+		use engine_core::{
+			EngineBuilder,
+			command::{EditorCommandDto, EditorCommandRequest},
+		};
+		let (mut project, _, document) = course();
+		project.gameplay_module = None;
+		let mut incomplete = (*document).clone();
+		incomplete.bindings.retain(|name, _| name == "key");
+		let mut engine = EngineBuilder::new(incomplete.clone(), project)
+			.module_resolver(Arc::new(resolve))
+			.build()
+			.unwrap();
+		let mut project = engine.session().project().clone();
+		project.gameplay_module = Some(descriptor().id);
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: engine.session().revision(),
+				command: EditorCommandDto::SetProject { project },
+			})
+			.unwrap();
+		let revision = engine.session().revision();
+		assert_eq!(*engine.session().authored_document(), incomplete);
+		let error = engine
+			.execute(EditorCommandRequest {
+				expected_revision: revision,
+				command: EditorCommandDto::StartPlay,
+			})
+			.unwrap_err();
+		assert!(error.message.contains("player"));
+		assert!(!engine.session().is_playing());
+		assert_eq!(engine.session().revision(), revision);
+		assert_eq!(*engine.session().authored_document(), incomplete);
+	}
+
 	fn finish_document() -> SceneData {
 		SceneData::from_json(include_str!("../../../apps/game/assets/scenes/finish.json")).unwrap()
 	}
@@ -565,6 +672,115 @@ mod tests {
 		assert_eq!(restarted.play_session_id, initial_status.play_session_id);
 		assert_ne!(restarted.run_id, initial_status.run_id);
 		assert_eq!(restarted.gameplay, initial_status.gameplay);
+	}
+
+	#[test]
+	fn failed_finish_preparation_preserves_progress_and_stop_restores_authored_history() {
+		use engine_core::{
+			EngineBuilder,
+			command::{EditorCommandDto as Command, EditorCommandRequest},
+		};
+		fn command(engine: &mut engine_core::Engine, command: Command) {
+			engine
+				.execute(EditorCommandRequest {
+					expected_revision: engine.session().revision(),
+					command,
+				})
+				.unwrap();
+		}
+		let (project, startup, document) = course();
+		let player = document.bindings["player"].clone();
+		let original_name = document
+			.entities
+			.iter()
+			.find(|entity| entity.key == player)
+			.unwrap()
+			.name
+			.clone();
+		let mut invalid_finish = finish_document();
+		invalid_finish.bindings.remove("finish");
+		let mut engine = EngineBuilder::new((*document).clone(), project)
+			.with_scenes(vec![(SceneId::new("finish").unwrap(), invalid_finish)])
+			.module_resolver(Arc::new(resolve))
+			.build()
+			.unwrap();
+		command(
+			&mut engine,
+			Command::Rename {
+				key: player.as_str().into(),
+				name: "Unsaved authored player".into(),
+			},
+		);
+		command(
+			&mut engine,
+			Command::Select {
+				keys: vec![player.as_str().into()],
+			},
+		);
+		let authored = engine.snapshot().unwrap();
+		command(&mut engine, Command::StartPlay);
+		for (direction, steps) in [(1.0, 90), (-1.0, 180)] {
+			command(
+				&mut engine,
+				Command::SetPlayInput {
+					movement: [direction, 0.0, 0.0],
+				},
+			);
+			for _ in 0..steps {
+				engine.tick(1.0 / 60.0).unwrap();
+			}
+		}
+		let accepted = engine.play_status().unwrap();
+		assert_eq!(
+			accepted.pending_scene_id.as_ref().unwrap().as_str(),
+			"finish"
+		);
+		assert_eq!(accepted.gameplay.as_ref().unwrap().score, Some(1));
+		let progress = engine
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.clone();
+		assert!(
+			progress.has_courtyard_key && progress.courtyard_exit_reached && !progress.completed
+		);
+		let world = engine.session().render_document();
+		let revision = engine.session().revision();
+		let cursor = engine.change_cursor();
+		let error = engine.prepare_pending_play_scene().err().unwrap();
+		assert!(error.message.contains(r#"requires a "finish" binding"#));
+		assert_eq!(engine.play_status().unwrap(), accepted);
+		assert_eq!(engine.session().render_document(), world);
+		assert!(engine.session().play_progress::<CampaignProgress>() == Some(&progress));
+		assert_eq!(engine.session().revision(), revision);
+		assert_eq!(engine.change_cursor(), cursor);
+		let moved = engine.tick(1.0 / 60.0).unwrap();
+		assert!(
+			!moved.changes.is_empty(),
+			"The source scene remains playable after preparation fails"
+		);
+		assert!(moved.requested_scene.is_none());
+		assert!(engine.session().play_progress::<CampaignProgress>() == Some(&progress));
+		command(&mut engine, Command::StopPlay);
+		let stopped = engine.snapshot().unwrap();
+		assert_eq!(stopped.active_scene_id, startup);
+		assert_eq!(stopped.document, authored.document);
+		assert_eq!(stopped.project, authored.project);
+		assert_eq!(stopped.selection, authored.selection);
+		assert!(stopped.dirty && stopped.can_undo);
+		assert!(engine.play_status().is_none());
+		command(&mut engine, Command::Undo);
+		assert_eq!(
+			engine
+				.session()
+				.authored_document()
+				.entities
+				.iter()
+				.find(|entity| entity.key == player)
+				.unwrap()
+				.name,
+			original_name
+		);
 	}
 
 	#[test]

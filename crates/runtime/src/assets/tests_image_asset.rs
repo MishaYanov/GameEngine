@@ -28,3 +28,15 @@ fn rgba_input_preserves_row_order_and_alpha() {
 	assert_eq!((image.width(), image.height()), (1, 2));
 	assert_eq!(image.pixels(), pixels);
 }
+
+#[test]
+fn rgba_input_moves_pixels_and_clones_share_the_allocation() {
+	let pixels = vec![1, 2, 3, 4];
+	let address = pixels.as_ptr();
+	let image = ImageAsset::from_rgba8(1, 1, pixels).unwrap();
+	assert_eq!(image.pixels().as_ptr(), address);
+	let shared = image.clone();
+	drop(image);
+	assert_eq!(shared.pixels().as_ptr(), address);
+	assert_eq!(shared.pixels(), &[1, 2, 3, 4]);
+}

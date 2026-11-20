@@ -2,12 +2,27 @@ import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import axe from 'axe-core';
-import type {EditorSnapshot, SceneEntity} from '../../../../core/editor/editor.models';
+import type {EditorSnapshot, GameplayModuleDescriptor, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneActions} from './scene-actions';
 import {SceneSwitchService} from './scene-switch.service';
+
+const courtyard: GameplayModuleDescriptor = {
+    id: 'courtyard_run', label: 'Courtyard Run', description: 'Collect the key and reach the finish.',
+    default_roles: [
+        {name: 'player', label: 'Player', requirement_hint: 'Choose a movable player.'},
+        {name: 'key', label: 'Key', requirement_hint: 'Choose the key marker.'},
+        {name: 'exit', label: 'Exit', requirement_hint: 'Choose the exit marker.'},
+    ],
+    scene_roles: {
+        finish: [
+            {name: 'player', label: 'Player', requirement_hint: 'Choose a movable player.'},
+            {name: 'finish', label: 'Finish', requirement_hint: 'Choose the finish marker.'},
+        ],
+    },
+};
 
 function entity(key: string): SceneEntity {
     return {
@@ -32,6 +47,7 @@ function snapshot(): EditorSnapshot {
         ],
         project: {
             schema_version: 3, name: 'Scene actions fixture', startup_scene_id: 'main',
+            gameplay_module: courtyard.id,
             scenes: [{id: 'main', asset_path: 'scenes/main.json'}, {id: 'second', asset_path: 'scenes/second.json'}],
             fixed_hz: 60, max_catchup_steps: 8, behaviors: [], behavior_definitions: [],
         },
@@ -43,10 +59,11 @@ function snapshot(): EditorSnapshot {
     };
 }
 
-async function createActions(initial = snapshot()) {
+async function createActions(initial = snapshot(), modules: readonly GameplayModuleDescriptor[] | undefined = [courtyard]) {
     const current = signal(initial);
     const busy = signal(false);
     const generation = signal(1);
+    const capabilities = signal<{gameplay_modules: readonly GameplayModuleDescriptor[] | undefined}>({gameplay_modules: modules});
     const switchScene = vi.fn(async (sceneId: string) => {
         current.update(value => ({...value, active_scene_id: sceneId, scene_revision: value.scene_revision + 1}));
         return current();
@@ -70,7 +87,7 @@ async function createActions(initial = snapshot()) {
             SceneSwitchService,
             {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
         {provide: EditorService, useValue: {
-            nativeAvailable: true, snapshot: current, busy,
+            nativeAvailable: true, snapshot: current, busy, capabilities,
             playing: computed(() => current().mode === 'play'),
                 workspaceGeneration: generation,
                 switchScene, save, registerScene, saveSceneAs, execute,
@@ -98,6 +115,7 @@ async function createActions(initial = snapshot()) {
         current,
         busy,
         generation,
+        capabilities,
         sceneSwitch,
         switchScene,
         save,
@@ -335,6 +353,182 @@ describe('SceneActions', () => {
         expect(player.value).toBe('scout');
     });
 
+    it('uses catalog labels, hints and scene overrides for an alternate module', async () => {
+        const module: GameplayModuleDescriptor = {
+            id: 'race', label: 'Race course', description: 'Cross the checkpoint.',
+            default_roles: [{name: 'checkpoint', label: 'Checkpoint flag', requirement_hint: 'Choose the lap marker.'}],
+            scene_roles: {finish: []},
+        };
+        const initial = snapshot();
+        const {fixture, root, current} = await createActions({
+            ...initial,
+            project: {...initial.project, gameplay_module: module.id},
+        }, [courtyard, module]);
+        const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
+        expect(selector.value).toBe('race');
+        expect(root.querySelector('.gameplay-settings')?.textContent).toContain('Cross the checkpoint.');
+        const role = root.querySelector<HTMLSelectElement>('.gameplay-roles select')!;
+        expect(role.closest('label')?.textContent).toContain('Checkpoint flag');
+        expect(root.querySelector('#' + role.getAttribute('aria-describedby'))?.textContent).toContain('Choose the lap marker.');
+        expect(root.querySelector('.gameplay-roles')?.textContent).not.toContain('Player');
+
+        current.update(value => ({...value, active_scene_id: 'finish'}));
+        await fixture.whenStable();
+        expect(root.querySelector('.gameplay-roles')).toBeNull();
+        current.update(value => ({...value, active_scene_id: 'constructor'}));
+        await fixture.whenStable();
+        expect(root.querySelector('.gameplay-roles')?.textContent).toContain('Checkpoint flag');
+        current.update(value => ({...value, active_scene_id: '__proto__'}));
+        await fixture.whenStable();
+        expect(root.querySelector('.gameplay-roles')?.textContent).toContain('Checkpoint flag');
+    });
+
+    it('shows the course and finish roles from their metadata', async () => {
+        const {fixture, root, current} = await createActions();
+        const labels = () => [...root.querySelectorAll('.gameplay-roles label')]
+            .map(label => label.firstChild?.textContent?.trim());
+        expect(labels()).toEqual(['Player', 'Key', 'Exit']);
+        current.update(value => ({...value, active_scene_id: 'finish'}));
+        await fixture.whenStable();
+        expect(labels()).toEqual(['Player', 'Finish']);
+    });
+
+    it('treats a prototype-named role as unassigned and restores it after rejection', async () => {
+        const initial = snapshot();
+        const {fixture, root, execute} = await createActions({
+            ...initial,
+            document: {...initial.document, entities: [entity('actor')]},
+        }, [{
+            ...courtyard,
+            default_roles: [{name: 'constructor', label: 'Builder', requirement_hint: 'Choose the builder.'}],
+        }]);
+        const role = root.querySelector<HTMLSelectElement>('.gameplay-roles select')!;
+        expect(role.value).toBe('');
+        execute.mockRejectedValueOnce(new Error('Role update rejected.'));
+        choose(role, 'actor');
+        expect(role.value).toBe('');
+        await fixture.whenStable();
+        expect(role.value).toBe('');
+        expect(execute).toHaveBeenCalledExactlyOnceWith({
+            type: 'set_scene_binding', scene_id: 'main', name: 'constructor', target: {kind: 'assign', key: 'actor'},
+        }, 1);
+    });
+
+    it('keeps generic projects free of module roles and disables selection when metadata is missing', async () => {
+        const initial = snapshot();
+        const {fixture, root, capabilities, execute} = await createActions({
+            ...initial, project: {...initial.project, gameplay_module: null},
+        });
+        const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
+        expect(selector.value).toBe('');
+        expect(root.querySelector('.gameplay-roles')).toBeNull();
+        capabilities.set({gameplay_modules: undefined});
+        await fixture.whenStable();
+        expect(selector.disabled).toBe(true);
+        expect(root.querySelector('#gameplay-module-help')?.textContent).toContain('unavailable in this editor host');
+        choose(selector, courtyard.id);
+        await fixture.whenStable();
+        expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('preserves an unavailable selection and repairs it through an authoritative project update', async () => {
+        const initial = snapshot();
+        const authored = {...initial, project: {...initial.project, gameplay_module: 'missing_module'}};
+        const {fixture, root, current, execute} = await createActions(authored);
+        const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
+        expect(selector.value).toBe('missing_module');
+        expect(selector.selectedOptions[0].textContent).toContain('missing_module (unavailable)');
+        expect(root.querySelector('#gameplay-module-help')?.textContent).toContain('repair');
+        expect(root.querySelector('.gameplay-roles')).toBeNull();
+        let accept!: () => void;
+        execute.mockImplementationOnce(() => new Promise(resolve => {
+            accept = () => {
+                current.set({...authored, revision: 2, project: {...authored.project, gameplay_module: null}});
+                resolve(current());
+            };
+        }));
+        choose(selector, '');
+        await vi.waitFor(() => expect(accept).toBeDefined());
+        expect(selector.value).toBe('missing_module');
+        expect(execute).toHaveBeenCalledExactlyOnceWith({
+            type: 'set_project', project: {...authored.project, gameplay_module: null},
+        }, 1, 1);
+        accept();
+        await fixture.whenStable();
+        expect(selector.value).toBe('');
+        current.set({...authored, revision: 3});
+        await fixture.whenStable();
+        expect(selector.value).toBe('missing_module');
+    });
+
+    it('builds the module update after the Inspector commit and retains the latest project and bindings', async () => {
+        const base = snapshot();
+        const initial: EditorSnapshot = {
+            ...base,
+            project: {
+                ...base.project,
+                behaviors: [{scene_id: 'main', behavior: {kind: 'controlled_move', entity: 'actor', speed: 2, space: 'world'}}],
+            },
+        };
+        const {fixture, root, current, execute, withCommittedEdit} = await createActions({
+            ...initial,
+            document: {...initial.document, bindings: {other: 'actor'}},
+        });
+        withCommittedEdit.mockImplementationOnce(async action => {
+            current.update(value => ({
+                ...value, revision: 4,
+                project: {...value.project, name: 'Updated during commit', fixed_hz: 30},
+            }));
+            await action();
+            return true;
+        });
+        execute.mockImplementationOnce(async command => {
+            if (command.type !== 'set_project') throw new Error('Expected a project update.');
+            current.update(value => ({...value, revision: 5, project: command.project}));
+            return current();
+        });
+        choose(root.querySelector<HTMLSelectElement>('.gameplay-settings select')!, '');
+        await fixture.whenStable();
+        expect(execute).toHaveBeenCalledExactlyOnceWith({
+            type: 'set_project',
+            project: {...initial.project, name: 'Updated during commit', fixed_hz: 30, gameplay_module: null},
+        }, 1, 4);
+        expect(current().document.bindings).toEqual({other: 'actor'});
+        expect(current().project.behaviors).toEqual(initial.project.behaviors);
+    });
+
+    it('keeps the selected module on rejection and ignores an old workspace failure', async () => {
+        const {fixture, root, generation, execute} = await createActions();
+        const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
+        execute.mockRejectedValueOnce(new Error('Project changed elsewhere.'));
+        choose(selector, '');
+        await fixture.whenStable();
+        expect(selector.value).toBe(courtyard.id);
+        expect(root.querySelector('[role="alert"]')?.textContent).toContain('Project changed elsewhere.');
+
+        let reject!: (reason: Error) => void;
+        execute.mockImplementationOnce(() => new Promise((_resolve, fail) => reject = fail));
+        choose(selector, '');
+        await vi.waitFor(() => expect(reject).toBeDefined());
+        generation.set(2);
+        await fixture.whenStable();
+        reject(new Error('Old workspace failure.'));
+        await fixture.whenStable();
+        expect(root.querySelector('[role="alert"]')).toBeNull();
+    });
+
+    it('drops a module choice if the workspace changes during the Inspector commit', async () => {
+        const {fixture, root, generation, execute, withCommittedEdit} = await createActions();
+        withCommittedEdit.mockImplementationOnce(async action => {
+            generation.set(2);
+            await action();
+            return true;
+        });
+        choose(root.querySelector<HTMLSelectElement>('.gameplay-settings select')!, '');
+        await fixture.whenStable();
+        expect(execute).not.toHaveBeenCalled();
+    });
+
     it('assigns, reassigns and clears a role only after the command is accepted', async () => {
         const initial = snapshot();
         const {fixture, root, current, execute} = await createActions({
@@ -425,6 +619,7 @@ describe('SceneActions', () => {
         current.update(value => ({...value, active_scene_id: 'second', mode: 'play'}));
         await fixture.whenStable();
         expect(root.querySelector('select')!.disabled).toBe(true);
+        expect(root.querySelector<HTMLSelectElement>('.gameplay-settings select')!.disabled).toBe(true);
         expect(root.querySelector('fieldset')!.disabled).toBe(true);
         expect(path.disabled).toBe(true);
         for (const action of ['Use as Startup', 'Register Existing Scene', 'Save Scene As']) {

@@ -82,7 +82,7 @@ fn project_configuration_is_undoable_groupable_and_rejected_changes_preserve_pro
 	let mut editor = EditorSession::new(data.clone()).unwrap();
 	let original = editor.project().clone();
 	assert!(original.behaviors.is_empty());
-	 let project = configure(original.clone());
+	let project = configure(original.clone());
 	run(
 		&mut editor,
 		Command::SetProject {
@@ -98,7 +98,7 @@ fn project_configuration_is_undoable_groupable_and_rejected_changes_preserve_pro
 	assert_eq!(editor.project(), &project);
 	let snapshot = serde_json::to_value(editor.snapshot().unwrap()).unwrap();
 	let mut invalid = project;
-	 invalid.behaviors[0].behavior = BehaviorSpec::ControlledMove {
+	invalid.behaviors[0].behavior = BehaviorSpec::ControlledMove {
 		entity: key("missing"),
 		speed: 1.0,
 		space: BehaviorSpace::World,

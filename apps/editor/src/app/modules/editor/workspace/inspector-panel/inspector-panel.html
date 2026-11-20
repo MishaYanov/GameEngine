@@ -78,6 +78,12 @@
                             (editCancelled)="editCancelled.emit()"
                     />
                 </section>
+                <editor-collider-inspector
+                    [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"
+                    (editStarted)="editStarted.emit('collider')" (colliderChanged)="colliderChanged.emit($event)"
+                    (draftInvalid)="colliderInvalid.emit()" (shapeChanged)="colliderShapeChanged.emit($event)"
+                    (interactionChanged)="colliderInteractionChanged.emit($event)"
+                    (editCommitted)="editCommitted.emit()" (editCancelled)="editCancelled.emit()"/>
             </div>
         } @empty {
             <p class="placeholder">Select an entity to inspect its properties.</p>

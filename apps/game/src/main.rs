@@ -754,18 +754,26 @@ impl GameApp {
 			.renderer
 			.as_ref()
 			.ok_or("Renderer is not initialized")?;
-		let mut assets = AssetManager::new(&asset_root).map_err(|error| error.to_string())?;
-		let (scene, camera) = scene_io::instantiate(&document, &mut assets, renderer)?;
+		let assets = self
+			.asset_manager
+			.as_mut()
+			.ok_or("Assets are not initialized")?;
+		let candidate = scene_io::instantiate(&document, assets, renderer);
 
-		// The old scene remains installed until CPU/GPU preparation succeeds.
+		// Both scenes share one cache and budget until the candidate commits.
+		// Completion also makes cache-only allocations from rejected loads safe to prune.
 		renderer.wait_idle()?;
-		self.editor
-			.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
-		// No fallible operations between committing the CPU world and its view.
-		self.scene = scene;
-		self.camera = camera;
+		let installed = candidate.and_then(|(scene, camera)| {
+			self.editor
+				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
+			// No fallible operations between committing the CPU world and its view.
+			self.scene = scene;
+			self.camera = camera;
+			Ok(())
+		});
+		assets.prune_unused();
+		installed?;
 		if self.standalone_runtime {
-			self.asset_manager = Some(assets);
 			self.scene_path = Some(scene_path);
 		}
 		self.clock.reset();
@@ -1272,10 +1280,18 @@ impl ApplicationHandler for GameApp {
 
 impl Drop for GameApp {
 	fn drop(&mut self) {
-		// Wait before automatic field destruction releases scene meshes/textures.
+		// Transfer every external GPU owner so an uncertain wait retains them together.
 		if let Some(renderer) = self.renderer.as_ref() {
 			let _ = renderer
-				.wait_idle()
+				.retire_resources((
+					std::mem::take(&mut self.scene),
+					self.authored.take(),
+					std::mem::take(&mut self.editor),
+					std::mem::take(&mut self.tools),
+					self.selection_overlay.take(),
+					self.spawn_template.take(),
+					self.asset_manager.take(),
+				))
 				.map_err(std::io::Error::other)
 				.log_error_for("game::renderer", "wait before releasing scene");
 		}
@@ -1424,3 +1440,7 @@ fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
 #[cfg(test)]
 #[path = "tests_app_scene_io.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "tests_exported_run.rs"]
+mod exported_run_tests;

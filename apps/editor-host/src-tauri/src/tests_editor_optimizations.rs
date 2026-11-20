@@ -55,6 +55,224 @@ impl Drop for Fixture {
 	}
 }
 
+fn open_workspace(
+	fixture: &Fixture,
+	scene: &SceneData,
+) -> (EditorWorkspace, std::sync::mpsc::Receiver<()>) {
+	fs::write(fixture.0.join("main.json"), scene.to_json().unwrap()).unwrap();
+	let (notify, ready) = std::sync::mpsc::channel();
+	let workspace =
+		EditorWorkspace::open_with_notifier(fixture.0.to_str().unwrap(), "main.json", move || {
+			let _ = notify.send(());
+		})
+		.unwrap();
+	(workspace, ready)
+}
+
+fn command(workspace: &mut EditorWorkspace, command: Command) {
+	workspace
+		.execute_receipt(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command,
+		})
+		.unwrap();
+}
+
+fn drain_until_idle(
+	workspace: &mut EditorWorkspace,
+	ready: &std::sync::mpsc::Receiver<()>,
+) -> Vec<AssetCompletion> {
+	let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+	let mut results = Vec::new();
+	loop {
+		results.extend(workspace.drain_asset_jobs());
+		if workspace.jobs.try_stats().unwrap().pending_jobs == 0
+			&& workspace.bounds_queue.is_empty()
+		{
+			assert!(workspace.pending.is_empty());
+			return results;
+		}
+		ready
+			.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+			.unwrap();
+	}
+}
+
+#[test]
+fn user_import_keeps_capacity_during_bounds_backlog_and_reload() {
+	for reload in [false, true] {
+		let fixture = Fixture::new();
+		let scene = fixture.document(12);
+		let (mut workspace, ready) = open_workspace(&fixture, &scene);
+		assert_eq!(
+			workspace.jobs.try_stats().unwrap().reserved_bytes,
+			128 * 1024 * 1024
+		);
+		assert_eq!(workspace.pending.len(), 2);
+		assert!(!workspace.bounds_queue.is_empty());
+		if reload {
+			workspace
+				.reload_with_policy(
+					workspace.backend.session().revision(),
+					ReloadPolicy::RequireClean,
+				)
+				.unwrap();
+			// Old-generation reservations survive reload until drained. They must
+			// count toward the background limit even though pending was cleared.
+			assert!(workspace.pending.is_empty());
+			assert_eq!(
+				workspace.jobs.try_stats().unwrap().reserved_bytes,
+				128 * 1024 * 1024
+			);
+		}
+		let ticket = workspace
+			.submit_import(
+				"triangle-0.gltf".into(),
+				[0.0; 3],
+				workspace.backend.session().revision(),
+				128 * 1024 * 1024,
+			)
+			.unwrap();
+		assert_eq!(
+			workspace.jobs.try_stats().unwrap().reserved_bytes,
+			256 * 1024 * 1024
+		);
+		workspace.refill_bounds();
+		assert_eq!(
+			workspace.jobs.try_stats().unwrap().reserved_bytes,
+			256 * 1024 * 1024
+		);
+		let results = drain_until_idle(&mut workspace, &ready);
+		assert!(results.iter().all(|result| result.accepted));
+		assert!(results
+			.iter()
+			.any(|result| result.job_id == ticket.job_id && result.accepted));
+		assert_eq!(workspace.jobs.try_stats().unwrap().reserved_bytes, 0);
+		for reference in &workspace.bounds_references {
+			assert!(workspace.backend.assets().find(reference).is_some());
+		}
+	}
+}
+
+#[test]
+fn scene_switch_cancels_obsolete_bounds_but_preserves_pending_import() {
+	let fixture = Fixture::new();
+	let scene = fixture.document(12);
+	let (mut workspace, ready) = open_workspace(&fixture, &scene);
+	let bounds_ids: Vec<_> = workspace.pending.keys().copied().collect();
+	let empty_id = SceneId::new("empty").unwrap();
+	let mut empty = scene;
+	empty.entities.clear();
+	command(
+		&mut workspace,
+		Command::AddScene {
+			id: empty_id.clone(),
+			asset_path: "empty.json".into(),
+			document: empty,
+		},
+	);
+	let ticket = workspace
+		.submit_import(
+			"triangle-0.gltf".into(),
+			[0.0; 3],
+			workspace.backend.session().revision(),
+			128 * 1024 * 1024,
+		)
+		.unwrap();
+	command(&mut workspace, Command::SwitchScene { scene_id: empty_id });
+	assert!(workspace.bounds_references.is_empty());
+	assert!(workspace.bounds_queue.is_empty());
+	assert!(matches!(
+		workspace.pending.get(&ticket.job_id),
+		Some(PendingAsset::Import { .. })
+	));
+	// Cancellation does not release reservations or forget in-flight jobs.
+	assert_eq!(workspace.pending.len(), 3);
+	assert_eq!(
+		workspace.jobs.try_stats().unwrap().reserved_bytes,
+		256 * 1024 * 1024
+	);
+	let results = drain_until_idle(&mut workspace, &ready);
+	assert_eq!(results.len(), 3);
+	for id in bounds_ids {
+		let result = results.iter().find(|result| result.job_id == id).unwrap();
+		assert_eq!(result.error_code, Some("cancelled"));
+	}
+	// Foreground jobs retain the existing stale-revision rejection; switching
+	// scenes must not silently cancel them along with background metadata.
+	assert_eq!(
+		results
+			.iter()
+			.find(|result| result.job_id == ticket.job_id)
+			.unwrap()
+			.error_code,
+		Some("conflict")
+	);
+	assert!(workspace.bounds_seen.is_empty());
+	assert_eq!(workspace.jobs.try_stats().unwrap().reserved_bytes, 0);
+	for index in 0..12 {
+		assert!(workspace
+			.backend
+			.assets()
+			.find(&AssetRef::new(format!("triangle-{index}.gltf"), Some(0)).unwrap())
+			.is_none());
+	}
+}
+
+#[test]
+fn undo_requeues_cancelled_bounds_only_after_the_reservation_is_drained() {
+	let fixture = Fixture::new();
+	let scene = fixture.document(12);
+	let (mut workspace, ready) = open_workspace(&fixture, &scene);
+	let (cancelled_id, reference) = workspace
+		.pending
+		.iter()
+		.find_map(|(id, purpose)| {
+			if let PendingAsset::Bounds(reference) = purpose {
+				Some((*id, reference.clone()))
+			} else {
+				None
+			}
+		})
+		.unwrap();
+	let key = scene
+		.entities
+		.iter()
+		.find(|entity| entity.model_path == reference.path)
+		.unwrap()
+		.key
+		.as_str()
+		.to_owned();
+	command(&mut workspace, Command::Select { keys: vec![key] });
+	command(&mut workspace, Command::DeleteSelection);
+	assert!(!workspace.bounds_references.contains(&reference));
+	assert!(workspace.pending.contains_key(&cancelled_id));
+	command(&mut workspace, Command::Undo);
+	assert!(workspace.bounds_references.contains(&reference));
+	assert!(workspace.bounds_seen.contains(&reference));
+	assert_eq!(workspace.pending.len(), 2);
+	assert_eq!(
+		workspace.jobs.try_stats().unwrap().reserved_bytes,
+		128 * 1024 * 1024
+	);
+	let results = drain_until_idle(&mut workspace, &ready);
+	assert_eq!(
+		results
+			.iter()
+			.find(|result| result.job_id == cancelled_id)
+			.unwrap()
+			.error_code,
+		Some("cancelled")
+	);
+	assert!(results
+		.iter()
+		.filter(|result| result.job_id != cancelled_id)
+		.all(|result| result.accepted));
+	assert!(workspace.backend.assets().find(&reference).is_some());
+	assert_eq!(workspace.bounds_seen.len(), 12);
+	assert_eq!(workspace.jobs.try_stats().unwrap().reserved_bytes, 0);
+}
+
 #[test]
 fn bounded_metadata_queue_refills_without_repeated_scene_scans() {
 	let fixture = Fixture::new();

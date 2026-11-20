@@ -82,17 +82,17 @@ Native application-specific progress is demonstrated in `crates/courtyard-gamepl
 | Scene catalog                        | Project data and editor UI present                                           | Use stable scene IDs                                         |
 | Retained scene edits                 | Rust workspace support present                                               | Switching scenes should preserve drafts                      |
 | Entity name and transform            | Inspector and commands present                                               | Numeric editing is the fallback for every gizmo              |
-| Entity parent key                    | Scene data and reparent command present                                      | A visual hierarchy is still a separate UI task               |
+| Entity parent key                    | Virtual Hierarchy, drag/explicit keep-world reparent and typed commands       | Unsupported shear/singular conversions fail explicitly       |
 | Model catalog                        | Explicit discovery and selection present                                     | Existing project models can be placed                        |
 | Models from external folders         | No complete authoring flow established here                                  | Do not claim arbitrary file import is solved                 |
 | Duplicate and delete                 | Toolbar and Rust commands present                                            | Use undoable structural operations                           |
-| Grid visualization                   | Proposed viewport work                                                       | It is editor-only visual guidance                            |
-| Pointer transform gizmos             | Proposed viewport work                                                       | Must share Inspector command semantics                       |
+| Grid visualization                   | Native analytic grid and editor-only controls implemented                     | Display spacing remains independent from authoring snap      |
+| Pointer transform gizmos             | Move/Rotate/Scale, grouped preview/commit/cancel implemented                   | Share Rust history and validation with Inspector             |
 | Local and world transforms           | Command support present                                                      | Presentation and mixed selection rules need design           |
-| Materials and colliders              | DTOs and commands present                                                    | Full component authoring is not implied                      |
+| Materials and colliders              | Collider Inspector, sensor/filter editing and selected Scene outlines present | General material/light/component authoring remains open      |
 | Prefab data operations               | APIs exist                                                                   | Linked overrides and a complete prefab UI are future work    |
 | Controlled movement and spin         | Configured behavior types present                                            | Reuse these before creating a scripting framework            |
-| Gameplay roles                       | Assign and clear four named scene bindings in Gameplay Roles                 | Save or undo role changes using the scene workflow           |
+| Gameplay roles                       | Module catalog supplies default/per-scene role descriptors to Gameplay Roles  | Generic projects do not invent Courtyard roles               |
 | Typed game progress                  | Key pickup, exit and completion with status and run reset                    | Observe objective and score during Play                      |
 | Scene transitions                    | Authored exit requests `finish` in editor, Player and headless Play          | Observe the runtime scene separately from authored selection |
 | Animation and shader workspace kinds | Type definitions exist                                                       | Do not display them as finished editors                      |
@@ -102,7 +102,8 @@ Native application-specific progress is demonstrated in `crates/courtyard-gamepl
 
 `CampaignProgress` contains score, key ownership, exit reached and completion.
 `CampaignFactory` composes configured behavior with application-specific progress logic.
-Gameplay Roles writes scene bindings for Player, Key, Exit and Finish. The module uses them for
+Gameplay Roles uses the selected module's role descriptors and writes persistent scene bindings. Courtyard advertises
+Player/Key/Exit and Player/Finish in its finish scene. The module uses them for
 the key, exit and finish proximity checks. The editor shows status and Restart Run in Game.
 [Role configuration](../../docs/project-lifecycle.md#gameplay-role-bindings).
 
@@ -424,6 +425,11 @@ The support agent should diagnose input ownership before recommending a new inpu
 Rendering a wall and assigning a collision shape are distinct tasks.
 A collision debug outline should be an optional editor overlay.
 The current collider DTOs include box and sphere shapes.
+The current Inspector authors those shapes, offsets, dimensions, sensor flags and unsigned layer/mask bits.
+The optional Colliders Scene overlay shows selected effective shapes with dashed sensor and continuous blocking
+outlines. Both participants' layer/mask directions must match; sensors overlap without blocking motion.
+This is implemented overlap classification. Feature 1.4 Enter/Stay/Exit delivery remains unimplemented.
+[Current review and limits](../../docs/building-blocks-review.md#collider-inspector-and-sensorfilter-authoring).
 Collision query or debug-shape support is not proof of a complete character controller.
 The reference game must define which interactions require collision response and which require overlap detection.
 A visible goal marker can initially use an explicit trigger rule rather than a general physics simulation.
@@ -490,8 +496,9 @@ The finish screen should make the supported restart operation obvious.
 ## 12. Workflow H: inspect components, scripts, and graphs
 
 The Inspector should eventually present editable capabilities rather than a growing list of unrelated fields.
-The present Inspector edits name and local transform.
-Material, collider, light, camera, and behavior authoring can build on typed commands as separate features.
+The present Inspector edits name, local transform and collider shape/interaction settings. Module/role/input
+configuration is exposed through separate workspace controls. Material, light, camera and behavior property authoring
+can build on typed commands as separate features.
 Support reusable property controls for numeric vectors, references, enums, and validation.
 Keep each property's label aligned with the runtime meaning.
 Show read-only values as read-only instead of rendering inert controls that resemble editors.

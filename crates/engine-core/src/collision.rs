@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	Bounds3, EntityKey,
+	collider::ColliderInteraction,
 	scene_data::{ColliderData, MAX_SCENE_ENTITIES, SceneData},
 };
 
@@ -30,6 +31,7 @@ struct CachedCollider {
 	entity_index: usize,
 	bounds: Bounds3,
 	shape: Shape,
+	interaction: ColliderInteraction,
 }
 impl CachedCollider {
 	fn borrowed(&self) -> WorldCollider<'_> {
@@ -38,6 +40,7 @@ impl CachedCollider {
 			entity_index: self.entity_index,
 			bounds: self.bounds,
 			shape: self.shape,
+			interaction: self.interaction,
 		}
 	}
 }
@@ -88,6 +91,7 @@ impl CollisionWorld {
 				entity_index: c.entity_index,
 				bounds: c.bounds,
 				shape: c.shape,
+				interaction: c.interaction,
 			})
 			.collect::<Vec<_>>();
 		let indices = records
@@ -169,6 +173,7 @@ impl CollisionWorld {
 					entity_index: index,
 					bounds,
 					shape,
+					interaction: collider.interaction(),
 				},
 			));
 		}
@@ -222,6 +227,7 @@ impl CollisionWorld {
 						b: second.clone(),
 						normal: normal.to_array(),
 						penetration,
+						sensor: a.interaction.sensor || b.interaction.sensor,
 					});
 				}
 			}
@@ -336,6 +342,10 @@ pub struct Contact {
 	/// Unit normal from a toward b. Move a along the negative normal to separate.
 	pub normal: [f32; 3],
 	pub penetration: f32,
+	/// True when either participant is a sensor. Sensors report overlaps and
+	/// never block kinematic movement.
+	#[serde(default)]
+	pub sensor: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -366,6 +376,7 @@ struct WorldCollider<'a> {
 	entity_index: usize,
 	bounds: Bounds3,
 	shape: Shape,
+	interaction: ColliderInteraction,
 }
 
 /// Deterministic sweep-and-prune on minimum X, followed by box/sphere tests.
@@ -407,6 +418,7 @@ pub fn query_overlaps(data: &SceneData) -> Result<Vec<Contact>, String> {
 					b: second.clone(),
 					normal: normal.to_array(),
 					penetration,
+					sensor: a.interaction.sensor || b.interaction.sensor,
 				});
 			}
 		}
@@ -422,27 +434,41 @@ pub fn query_overlaps(data: &SceneData) -> Result<Vec<Contact>, String> {
 /// World-space debug geometry independent of renderer or frontend controls.
 pub fn debug_shapes(data: &SceneData) -> Result<Vec<DebugShape>, String> {
 	let matrices = checked_matrices(data)?;
-	Ok(world_colliders(data, &matrices)?
-		.into_iter()
-		.map(|collider| {
-			let min = collider.bounds.min();
-			let max = collider.bounds.max();
-			match collider.shape {
-				Shape::Box => DebugShape::Box {
-					entity: collider.entity.clone(),
-					min,
-					max,
-				},
-				Shape::Sphere { center, radius } => DebugShape::Sphere {
-					entity: collider.entity.clone(),
-					center: center.to_array(),
-					radius,
-					min,
-					max,
-				},
-			}
+	data.entities
+		.iter()
+		.zip(matrices)
+		.filter_map(|(entity, matrix)| {
+			entity
+				.collider
+				.as_ref()
+				.map(|collider| debug_shape(&entity.key, collider, matrix))
 		})
-		.collect())
+		.collect()
+}
+
+/// Effective collision geometry for one collider under its world transform.
+pub fn debug_shape(
+	entity: &EntityKey,
+	collider: &ColliderData,
+	world_matrix: Mat4,
+) -> Result<DebugShape, String> {
+	let (bounds, shape) = collider_geometry(collider, world_matrix)?;
+	let min = bounds.min();
+	let max = bounds.max();
+	Ok(match shape {
+		Shape::Box => DebugShape::Box {
+			entity: entity.clone(),
+			min,
+			max,
+		},
+		Shape::Sphere { center, radius } => DebugShape::Sphere {
+			entity: entity.clone(),
+			center: center.to_array(),
+			radius,
+			min,
+			max,
+		},
+	})
 }
 
 /// Translate an entity subtree in world space, preserving its local rotation
@@ -547,6 +573,7 @@ fn world_colliders<'a>(
 			entity_index: index,
 			bounds,
 			shape,
+			interaction: collider.interaction(),
 		});
 	}
 	Ok(colliders)
@@ -558,6 +585,7 @@ fn collider_geometry(collider: &ColliderData, matrix: Mat4) -> Result<(Bounds3, 
 		ColliderData::Box {
 			half_extents,
 			offset,
+			..
 		} => {
 			let offset = Vec3::from_array(*offset);
 			let half = Vec3::from_array(*half_extents);
@@ -565,7 +593,7 @@ fn collider_geometry(collider: &ColliderData, matrix: Mat4) -> Result<(Bounds3, 
 				.transformed(matrix)?;
 			(bounds, Shape::Box)
 		}
-		ColliderData::Sphere { radius, offset } => {
+		ColliderData::Sphere { radius, offset, .. } => {
 			let center = matrix.transform_point3(Vec3::from_array(*offset));
 			let radius = (*radius as f64 * conservative_scale(matrix)) as f32;
 			if !radius.is_finite() || !center.is_finite() {
@@ -610,6 +638,9 @@ fn bounds_overlap(a: Bounds3, b: Bounds3) -> bool {
 }
 
 fn contact_geometry(a: &WorldCollider<'_>, b: &WorldCollider<'_>) -> Option<(Vec3, f32)> {
+	if !a.interaction.detects(b.interaction) {
+		return None;
+	}
 	match (a.shape, b.shape) {
 		(Shape::Box, Shape::Box) => box_box(a.bounds, b.bounds),
 		(
@@ -713,6 +744,7 @@ fn translated<'a>(collider: &WorldCollider<'a>, delta: Vec3) -> Result<WorldColl
 		entity_index: collider.entity_index,
 		bounds,
 		shape,
+		interaction: collider.interaction,
 	})
 }
 
@@ -722,6 +754,12 @@ fn blocks_motion(
 	obstacle: &WorldCollider<'_>,
 	delta: Vec3,
 ) -> Result<bool, String> {
+	if start.interaction.sensor
+		|| obstacle.interaction.sensor
+		|| !start.interaction.detects(obstacle.interaction)
+	{
+		return Ok(false);
+	}
 	if let Some((normal, penetration)) = contact_geometry(start, obstacle) {
 		if !normal.is_finite() || !penetration.is_finite() {
 			return Err("Collision contact exceeds finite numeric limits".into());

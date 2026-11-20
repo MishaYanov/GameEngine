@@ -6,14 +6,27 @@ schema 3, shared behavior settings and multi-scene authoring.
 
 ## CLI and library
 
-The compatibility CLI still takes exactly a project name and an existing absolute destination parent:
+The release-install CLI takes a project name and an existing absolute destination parent:
 
 ```powershell
 cargo run -p compiler -- 'My Game' 'D:\Projects'
 ```
 
+An additive stage-only form accepts an authored manifest instead of the bundled starter:
+
+```powershell
+cargo run -p compiler --offline --locked -- --stage 'D:\Authoring\My Game\project.json' 'D:\Snapshots'
+```
+
+It derives the source asset root from the manifest's adjacent `assets`, runs the same preparation/copy/catalog
+validation and creates a new child folder named from the authored project. It does not compile or publish a player;
+there is no `game.exe` in stage-only output. Its README distinguishes staged data from a completed executable export.
+Existing destinations are rejected and incomplete new output is
+retained on failure. This snapshot can be opened or tested with the CPU runner; executable production still uses
+the existing finish/install API or editor export flow. [Replay and parity example](../building-blocks-review.md#headless-replay-and-stage-only-snapshots).
+
 It uses the bundled starter configuration with the `courtyard_run` module, installs without launching, and exits
-0 on success, 1 on build/install failure or 2 on wrong argument count. `install_project(name, destination)` remains
+0 on success, 1 on preparation/build/install failure or 2 on unsupported argument form. `install_project(name, destination)` remains
 the starter adapter. The editor's New Project uses `create_authoring_project`, which copies the starter scenes and
 behaviors with the generic gameplay default. Application hosts can use:
 

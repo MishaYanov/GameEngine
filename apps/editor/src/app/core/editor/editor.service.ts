@@ -2,6 +2,7 @@ import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {applyEditorUpdate} from './editor-updates';
+import {validGameplayModules} from './gameplay-modules';
 import type {
     BuildLaunchResult,
     CollisionSnapshot,
@@ -106,6 +107,13 @@ export class EditorService {
                         'backend',
                         'editor_capabilities',
                         'The native editor protocol or scene schema is incompatible with this frontend.',
+                    );
+                }
+                if (capabilities.gameplay_modules !== undefined && !validGameplayModules(capabilities.gameplay_modules)) {
+                    throw new EditorClientError(
+                        'backend',
+                        'editor_capabilities',
+                        'The native editor returned invalid gameplay module metadata.',
                     );
                 }
                 this.capabilitiesState.set(capabilities);
@@ -242,6 +250,7 @@ export class EditorService {
     execute(
         command: EditorCommand,
         expectedGeneration?: number,
+        expectedRevision?: number,
     ): Promise<EditorSnapshot> {
         return this.enqueue(
             'editor_execute_incremental',
@@ -251,12 +260,12 @@ export class EditorService {
                     expectedGeneration !== this.workspaceGeneration()
                 ) {
                     throw new Error(
-                        'The workspace changed. Select the gameplay role again.'
+                        'The workspace changed. Select the gameplay setting again.'
                     );
                 }
 
                 const request: EditorCommandRequest = {
-                    expected_revision: this.revision(),
+                    expected_revision: expectedRevision ?? this.revision(),
                     command,
                 };
                 const capabilities = await this.loadCapabilities();

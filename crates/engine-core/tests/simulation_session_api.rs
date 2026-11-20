@@ -351,6 +351,7 @@ fn configured_move_and_spin_compose_on_the_same_entity_instead_of_overwriting_mo
 #[test]
 fn shared_simulation_uses_persistent_swept_collision_and_keeps_blocked_actor_stationary() {
 	let collider = Some(ColliderData::Box {
+		interaction: Default::default(),
 		half_extents: [0.5; 3],
 		offset: [0.0; 3],
 	});
@@ -513,6 +514,7 @@ fn aggregate_subtree_matrix_and_collision_work_limits_restore_all_earlier_moves(
 			// collision allowance, without causing an early blocked move.
 			entities.push(
 				entity("distant", [10000.0; 3]).with_collider(Some(ColliderData::Box {
+					interaction: Default::default(),
 					half_extents: [0.5; 3],
 					offset: [0.0; 3],
 				})),

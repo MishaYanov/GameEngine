@@ -11,6 +11,7 @@ import type {
     EditorCommand,
     EditorCommandRequest,
     EditorSnapshot,
+    ProjectData,
     SceneDocument,
     ViewportSceneLoad,
     ViewportStatus
@@ -64,11 +65,37 @@ function initialSnapshot(): EditorSnapshot {
 }
 
 describe('Workspace live editing flow', () => {
+    const dialogPrototype = HTMLDialogElement.prototype;
+    const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
+    const originalClose = Object.getOwnPropertyDescriptor(dialogPrototype, 'close');
+
+    beforeAll(() => {
+        Object.defineProperty(dialogPrototype, 'showModal', {
+            configurable: true,
+            value(this: HTMLDialogElement) { this.setAttribute('open', ''); },
+        });
+        Object.defineProperty(dialogPrototype, 'close', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                this.removeAttribute('open');
+                this.dispatchEvent(new Event('close'));
+            },
+        });
+    });
+
+    afterAll(() => {
+        if (originalShow) Object.defineProperty(dialogPrototype, 'showModal', originalShow);
+        else Reflect.deleteProperty(dialogPrototype, 'showModal');
+        if (originalClose) Object.defineProperty(dialogPrototype, 'close', originalClose);
+        else Reflect.deleteProperty(dialogPrototype, 'close');
+    });
+
     let fixture: ComponentFixture<EditorWorkspace>;
     let editor: EditorService;
     let editing: SceneEditingService;
     let nativeState: EditorSnapshot;
     let savedDocument: SceneDocument;
+    let savedProject: ProjectData;
     let transactionBefore: SceneDocument | null;
     let undo: SceneDocument[];
     let redo: SceneDocument[];
@@ -82,6 +109,7 @@ describe('Workspace live editing flow', () => {
         localStorage.clear();
         nativeState = initialSnapshot();
         savedDocument = structuredClone(nativeState.document);
+        savedProject = structuredClone(nativeState.project);
         transactionBefore = null;
         undo = [];
         redo = [];
@@ -112,13 +140,21 @@ describe('Workspace live editing flow', () => {
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
             };
             if (operation === 'editor_open_project') {
-                nativeState = {...initialSnapshot(), revision: nativeState.revision + 1, document: structuredClone(savedDocument)};
+                nativeState = {...initialSnapshot(), revision: nativeState.revision + 1,
+                    project: structuredClone(savedProject), document: structuredClone(savedDocument)};
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_save') {
                 expect(nativeState.transaction).toBeNull();
                 savedDocument = structuredClone(nativeState.document);
                 nativeState = {...nativeState, revision: nativeState.revision + 1, dirty: false};
+                return structuredClone(nativeState);
+            }
+            if (operation === 'editor_save_all') {
+                expect(nativeState.transaction).toBeNull();
+                savedDocument = structuredClone(nativeState.document);
+                savedProject = structuredClone(nativeState.project);
+                nativeState = {...nativeState, revision: nativeState.revision + 1, dirty: false, project_dirty: false};
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
@@ -143,6 +179,10 @@ describe('Workspace live editing flow', () => {
             commands.push(command);
             switch (command.type) {
                 case 'select': nativeState = {...nativeState, selection: command.keys}; break;
+                case 'set_project':
+                    expect(nativeState.transaction).toBeNull();
+                    nativeState = {...nativeState, project: command.project, project_dirty: true, dirty: true};
+                    break;
                 case 'begin_transaction':
                     expect(nativeState.transaction).toBeNull();
                     transactionBefore = structuredClone(nativeState.document);
@@ -158,6 +198,15 @@ describe('Workspace live editing flow', () => {
                 case 'rename':
                     nativeState = {...nativeState, dirty: true, document: {...nativeState.document,
                         entities: nativeState.document.entities.map(entity => entity.key === command.key ? {...entity, name: command.name} : entity)}};
+                    break;
+                case 'set_collider':
+                    if (nativeState.transaction === null) {
+                        undo.push(nativeState.document);
+                        redo = [];
+                    }
+                    nativeState = {...nativeState, dirty: true, can_undo: undo.length > 0, document: {...nativeState.document,
+                        entities: nativeState.document.entities.map(entity =>
+                            entity.key === command.key ? {...entity, collider: command.collider} : entity)}};
                     break;
                 case 'reparent':
                     expect(nativeState.transaction).toBeNull();
@@ -246,6 +295,40 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
     }
 
+    it('applies game bindings, saves the project and reopens with the authored profile before Play', async () => {
+        const inputManagerButton = () => fixture.nativeElement.querySelector('editor-game-input > button') as HTMLButtonElement;
+        inputManagerButton().click();
+        await fixture.whenStable();
+        const forward: HTMLSelectElement = fixture.nativeElement.querySelectorAll('editor-game-input .movement-keys select')[3];
+        forward.value = 'arrow_up';
+        forward.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        const apply: HTMLButtonElement = [...fixture.nativeElement.querySelectorAll('editor-game-input button') as NodeListOf<HTMLButtonElement>]
+            .find(button => button.textContent?.trim() === 'Apply Bindings')!;
+        apply.click();
+        await fixture.whenStable();
+        expect(editor.snapshot()?.project.input_profile?.movement.positive_y).toBe('arrow_up');
+        expect(editor.snapshot()?.project_dirty).toBe(true);
+        const dialog: HTMLDialogElement = fixture.nativeElement.querySelector('editor-game-input dialog');
+        dialog.close();
+        await fixture.whenStable();
+        action('Save All').click();
+        await fixture.whenStable();
+        expect(editor.dirty()).toBe(false);
+        await editor.openProject('fixture/project.json');
+        await fixture.whenStable();
+        expect(editor.snapshot()?.project.input_profile?.movement.positive_y).toBe('arrow_up');
+        inputManagerButton().click();
+        await fixture.whenStable();
+        expect((fixture.nativeElement.querySelectorAll('editor-game-input .movement-keys select')[3] as HTMLSelectElement).value).toBe('arrow_up');
+        (fixture.nativeElement.querySelector('editor-game-input dialog') as HTMLDialogElement).close();
+        await fixture.whenStable();
+        action('Play').click();
+        await fixture.whenStable();
+        expect(editor.playing()).toBe(true);
+        expect(editor.snapshot()?.project.input_profile?.movement.positive_y).toBe('arrow_up');
+    });
+
     it('selects, edits local transforms, saves, and displays persisted values after reopening', async () => {
         await selectRobot();
         const name = fixture.nativeElement.querySelector('inspector-panel input[type="text"]') as HTMLInputElement;
@@ -276,6 +359,120 @@ describe('Workspace live editing flow', () => {
         expect(input('Position X').valueAsNumber).toBe(4.5);
         expect(input('Rotation Y (degrees)').valueAsNumber).toBeCloseTo(90);
         expect(input('Scale Z').valueAsNumber).toBe(-2);
+    });
+
+    it('authors collider shapes and values through history, saving and reopening', async () => {
+        await selectRobot();
+        const shape = () => fixture.nativeElement.querySelector('editor-collider-inspector select') as HTMLSelectElement;
+        const choose = async (kind: string) => {
+            shape().value = kind;
+            shape().dispatchEvent(new Event('change'));
+            await fixture.whenStable();
+        };
+        await choose('box');
+        expect(editor.document()!.entities[0].collider?.kind).toBe('box');
+        await change(input('Collider Offset X'), '1.1');
+        input('Collider Offset X').blur();
+        await editing.commit();
+        await fixture.whenStable();
+        expect(input('Collider Offset X').value).toBe('1.1');
+        action('Undo').click();
+        await fixture.whenStable();
+        expect(input('Collider Offset X').value).toBe('0');
+        action('Redo').click();
+        await fixture.whenStable();
+        expect(input('Collider Offset X').value).toBe('1.1');
+        await choose('sphere');
+        expect(editor.document()!.entities[0].collider).toEqual({kind: 'sphere', radius: 0.5, offset: [1.1, 0, 0]});
+        await choose('none');
+        expect(editor.document()!.entities[0].collider).toBeNull();
+        action('Save Scene').click();
+        await fixture.whenStable();
+        await editor.openProject('fixture/project.json');
+        await selectRobot();
+        expect(shape().value).toBe('none');
+        expect(fixture.nativeElement.querySelector('[aria-label="Collider Radius"]')).toBeNull();
+    });
+
+    it('discards the whole collider gesture when its final numeric draft is incomplete', async () => {
+        await selectRobot();
+        await editing.replaceCollider('sphere');
+        await fixture.whenStable();
+        await change(input('Collider Radius'), '2');
+        await change(input('Collider Radius'), '1e-');
+        expect(input('Collider Radius').getAttribute('aria-invalid')).toBe('true');
+        input('Collider Radius').blur();
+        await editing.commit();
+        await fixture.whenStable();
+        expect(editor.document()!.entities[0].collider).toEqual({kind: 'sphere', radius: 0.5, offset: [0, 0, 0]});
+        expect(input('Collider Radius').value).toBe('0.5');
+        expect(commands.filter(command => command.type === 'commit_transaction')).toHaveLength(0);
+        expect(commands.filter(command => command.type === 'cancel_transaction')).toHaveLength(1);
+        expect(fixture.nativeElement.querySelector('.edit-error')).toBeNull();
+    });
+
+    it('commits the previous field before atomically changing the collider shape', async () => {
+        await selectRobot();
+        await editing.replaceCollider('sphere');
+        await fixture.whenStable();
+        const start = commands.length;
+        await change(input('Collider Radius'), '2');
+        const shape: HTMLSelectElement = fixture.nativeElement.querySelector('editor-collider-inspector select');
+        shape.value = 'box';
+        shape.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        expect(commands.slice(start).map(command => command.type)).toEqual([
+            'begin_transaction', 'set_collider', 'commit_transaction', 'set_collider',
+        ]);
+        expect(editor.document()!.entities[0].collider?.kind).toBe('box');
+    });
+
+    it('edits sensor mode and collision layers through Undo, saving and reopening', async () => {
+        await selectRobot();
+        await editing.replaceCollider('sphere');
+        await fixture.whenStable();
+        const mode = () => fixture.nativeElement.querySelectorAll('editor-collider-inspector select')[1] as HTMLSelectElement;
+        const layer = () => fixture.nativeElement.querySelector('[aria-label="Belongs to layer 32"]') as HTMLInputElement;
+        mode().value = 'sensor';
+        mode().dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        layer().click();
+        await fixture.whenStable();
+        expect(editor.document()!.entities[0].collider?.interaction).toEqual({
+            sensor: true, layers: 0x80000001, mask: 0xffffffff,
+        });
+        action('Undo').click();
+        await fixture.whenStable();
+        expect(layer().checked).toBe(false);
+        expect(mode().value).toBe('sensor');
+        action('Redo').click();
+        await fixture.whenStable();
+        expect(layer().checked).toBe(true);
+        action('Save Scene').click();
+        await fixture.whenStable();
+        await editor.openProject('fixture/project.json');
+        await selectRobot();
+        expect(mode().value).toBe('sensor');
+        expect(layer().checked).toBe(true);
+    });
+
+    it('clears a whole detection mask with one undoable UI action', async () => {
+        await selectRobot();
+        await editing.replaceCollider('sphere');
+        await editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        await fixture.whenStable();
+        const original = editor.document()!.entities[0].collider;
+        const before = commands.length;
+        const clear: HTMLButtonElement = fixture.nativeElement.querySelector('[aria-label="Detect no layers"]');
+        clear.click();
+        await fixture.whenStable();
+        expect(commands.slice(before).map(command => command.type)).toEqual(['set_collider']);
+        expect(editor.document()!.entities[0].collider?.interaction?.mask).toBe(0);
+        expect(fixture.nativeElement.textContent).toContain('Collision and overlap detection are disabled');
+        action('Undo').click();
+        await fixture.whenStable();
+        expect(editor.document()!.entities[0].collider).toEqual(original);
+        expect(fixture.nativeElement.textContent).not.toContain('Collision and overlap detection are disabled');
     });
 
     it('cancels with Escape and routes undo/redo through the shared history', async () => {

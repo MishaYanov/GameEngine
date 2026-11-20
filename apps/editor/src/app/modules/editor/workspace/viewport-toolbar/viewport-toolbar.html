@@ -13,6 +13,9 @@
             [disabled]="!available()"
             type="button">Grid
     </button>
+    <button (click)="dispatch({type: 'set_colliders', visible: !settings().colliders})"
+            [attr.aria-pressed]="settings().colliders" [disabled]="!available()"
+            title="Show collision outlines for selected entities" type="button">Colliders</button>
     <label>Plane <select #planeInput [value]="settings().plane" [disabled]="!available()" (change)="plane(planeInput.value)"><option value="xz">XZ</option><option value="xy">XY</option><option value="yz">YZ</option></select></label>
     <label>Grid step <input #spacing type="number" min="0.0001" step="any" [value]="settings().grid_spacing" [disabled]="!available()" (change)="gridSpacing(spacing)"/></label>
     <button (click)="dispatch({type: 'set_snap', enabled: !settings().snap})" [attr.aria-pressed]="settings().snap"
@@ -49,3 +52,6 @@
     </div>
 }
 @if (viewport.error(); as message) { <p class="viewport-error" role="alert">{{ message }}</p> }
+@if (viewport.state()?.collider_error; as message) {
+    <p class="viewport-error" role="status">Collider preview: {{ message }}</p>
+}

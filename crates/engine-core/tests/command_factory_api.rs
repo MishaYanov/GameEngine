@@ -31,7 +31,7 @@ fn factory_builder_requires_an_action_preserves_expected_revision_and_shares_exe
 			name: "Stale".into(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	assert!(session.execute(stale).is_err());
 	assert_eq!(session.authored_document(), before);
 	assert_eq!(session.revision(), revision);
@@ -93,7 +93,7 @@ fn factory_bounds_pick_extent_and_coordinates_and_rejects_nonfinite_transform_in
 					additive: false
 				}
 			)
-				.is_err()
+			.is_err()
 		);
 	}
 	for command in [
@@ -125,6 +125,6 @@ fn factory_bounds_pick_extent_and_coordinates_and_rejects_nonfinite_transform_in
 				additive: false
 			}
 		)
-			.is_ok()
+		.is_ok()
 	);
 }

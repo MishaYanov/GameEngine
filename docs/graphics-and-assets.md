@@ -107,11 +107,15 @@ See [steps 29–31](editor-steps-21-35.md#step-29-static-gltf-scenes-nodes-and-m
 
 ### Models, instances, and GPU caches
 
-`AssetManager::load_model` resolves a path inside its canonical root, reimports CPU data, and returns a `Model`
-containing one `ModelPart` per primitive. GPU meshes are cached by canonical path plus mesh/primitive indices; imported
-images are cached by canonical path plus image index. AssetManager now also caches static-scene metadata/selected mesh
-models and prunes/reconciles reuse. Cache identity is not a guarantee of automatic file reload; a project refresh/reload
-is explicit.
+`AssetManager::load_model` resolves a path inside its canonical root and returns a `Model` containing one `ModelPart`
+per primitive. Selected-mesh models, static-scene metadata and source resource snapshots are cached separately.
+Snapshots retain bounded buffers/encoded images and prepare decoded images only when the selected mesh references
+them; a failed preparation leaves the previous snapshot/accounting intact. The source snapshot cache allows four
+entries/256 MiB, with 64 MiB resource and decoded-image limits. Image buffers can share immutable storage rather
+than copying the same decoded pixels for each material primitive. GPU meshes are cached by canonical path plus
+mesh/primitive indices; imported images use canonical path plus image index. Pruning retains sources needed by live
+model owners or retained metadata and reconciles accounting. These caches do not detect external file changes or
+provide hot reload; project refresh/reload remains explicit.
 
 `load_image_texture` caches decoded image uploads by caller ID. `load_material` uses the imported image or shared `builtin:white` 1×1 texture, enabling factor-only materials. Its `VulkanMaterial` stores factor/sidedness independently even when textures are shared. `loaded_texture_count` includes both file and imported-image caches. Reused IDs keep existing uploads; there is no hot reload/invalidation.
 

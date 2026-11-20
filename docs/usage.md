@@ -99,6 +99,11 @@ In the desktop `/editor` route, choose **File → Open Project…** and select p
 
 Select an entity from Hierarchy or the viewport, then edit its name/local transform in Inspector or use native Move/Rotate/Scale handles. Hierarchy expands parent/child rows and supports keep-world reparenting by internal drag or Set Parent/Move to Root. Alt-left drag orbits, middle drag pans, the wheel zooms, and F frames selection. Navigation changes only the editor camera. Grid, snapping, projection and orientation have adjacent controls. Scene remains inspectable during Play with authoring locked.
 
+The Collider Inspector adds Box/Sphere shapes, local offset/size, sensor mode and collision layers/masks. Colliders
+toggles selected Scene outlines; sensor outlines are dashed pink and blocking outlines continuous cyan. Module
+selection and module-aware Gameplay Roles live in the scene controls. These changes support Undo and the normal
+scene/project saves. [Five building-blocks review](building-blocks-review.md).
+
 Assets opens registered scenes and loads/refreshes models explicitly. Add to Scene places a selected model at the origin; dragging it into Scene uses a native preview and asynchronous adoption. Escape/cancellation ends a pending gesture. Native selection and placement currently approximate model bounds. Read [native scene editor implementation](viewport-implementation.md) for the complete workflow and limits, including Windows airspace and the desktop acceptance checklist.
 
 Open the bundled `apps/game/project.json` to try Courtyard Run. Gameplay Roles binds Player, Key, Exit and Finish

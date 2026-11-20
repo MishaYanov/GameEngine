@@ -646,6 +646,9 @@ impl EditorSession {
 					return Err("Use scene catalog commands to change scene entries".into());
 				}
 				self.require_edit()?;
+				if project.gameplay_module != self.project.gameplay_module {
+					(self.module_resolver)(&project)?;
+				}
 				self.commit_project(
 					(*self.data).clone(),
 					project,
@@ -768,10 +771,10 @@ impl EditorSession {
 			mutation => {
 				self.require_edit()?;
 
-				if let Command::SetSceneBinding { scene_id, .. } = &mutation {
-					if scene_id != &self.active_scene_id {
-						return Err("Scene binding command must target the active scene".into());
-					}
+				if let Command::SetSceneBinding { scene_id, .. } = &mutation
+					&& scene_id != &self.active_scene_id
+				{
+					return Err("Scene binding command must target the active scene".into());
 				}
 
 				let mut next = (*self.data).clone();

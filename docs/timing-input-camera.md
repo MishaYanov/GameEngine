@@ -1,11 +1,10 @@
 # Timing, input, and camera
 
-**Current scope:** the low-level clock/key/camera APIs remain shared; authoritative editor commands and fixed-step
-simulation now add the steps21–35 integration. This guide describes the current staged/unstaged implementation of
-`crates/runtime/src/time.rs`, `input.rs`, and `camera.rs`, the new `camera_controller.rs`, plus integration in
-`apps/game/src/main.rs` and robot rules in `game.rs`. The native editing extension is implemented and automated
-tests/hidden examples are reported in [steps 11–20](editor-steps-11-20.md). Human-visible control acceptance remains
-unverified; no complete gameplay framework is claimed.
+The low-level clock/key/camera APIs remain shared. Core fixed-step simulation, authored project input profiles,
+the Angular Game Input Manager and native Scene/Game focus routing build on them. Older native-demo details below
+retain their milestone context; the [building-blocks review](building-blocks-review.md) records current input,
+course/restart and verification scope. Automated and hidden native focus tests remain distinct from visible desktop
+interaction.
 
 ## time.rs: FrameClock
 
@@ -34,6 +33,18 @@ input and releases mouse capture. The game now routes native panel text, clicks,
 held movement during editing contexts. Key rebinding, general action mapping, and gamepad support are not provided by
 InputState itself.
 
+## Authored game input
+
+Project input profiles map four movement directions and bounded named actions to serialized physical key names.
+The Game Input Manager supplies binding selection/key capture and a held-key movement/action preview. Apply uses
+the current reviewed workspace generation/revision and preserves unrelated current project settings; a changed
+input profile requires reopening/review rather than overwriting it. Save All/Save Project persists the accepted
+profile. Scene/project replacement and late responses cannot apply stale settings or feedback to a new workspace.
+
+Core resolves native codes and Player keys through the same input profile. Focus loss and the existing pause,
+mode, scene activation and restart boundaries clear or suppress held input. This is configured keyboard routing,
+not a general gamepad/possession system or animation player. [Input persistence review](building-blocks-review.md#input-and-project-authoring).
+
 ## camera.rs: Camera
 
 `runtime::Camera` stores public position, yaw, pitch, vertical FOV, near, and far values. Defaults are position `[0, 0, 3]`, yaw/pitch zero, 60-degree FOV in radians, near 0.1, and far 100.
@@ -54,7 +65,8 @@ and delegates edits or simulation according to mode. See [scene save/reload](sce
 
 The new Angular editor contract does not assign physical keys. EditorSession offers frame/orbit/pan/dolly, snapping,
 multi-key transforms and Play input as typed commands; its capability descriptors tell UI owners what is available. A UI
-owner chooses how raw viewport events map to intent. No new app layout/toolbars were composed.
+owner chooses how raw viewport events map to intent. The current Angular workspace composes the controls and native
+pane, while focused native Scene tools own spatial shortcuts and Game routes authored input bindings.
 
 The earlier WASD/Tab/QE/RF/F-key native demonstration controls apply only when GAME_ENGINE_NATIVE_EDITOR_DEMO=1, not
 normal game launch or default EditorSession policy. Normal game mode is overlay-free.
@@ -81,4 +93,6 @@ cargo run -p game --offline --locked
 
 Unit tests cover clock precision/capping/reset/backwards timestamps, key transitions/repeats/reset, camera direction math, yaw wrapping, pitch limits, and reusable controller movement/mouse math. Game tests cover selection and robot behavior; scene-I/O checks are described separately. They do not prove native cursor capture, focus handling, perceived speed, or movement during minimize/restore.
 
-Before declaring this milestone complete, exercise the provisional controls visibly: verify diagonal speed, held/released keys, focus loss, capture fallback/error behavior, Escape release, minimized/resumed timing, and camera orientation. Fixed-step gameplay, binding configuration, and broader input devices remain future design work. See [testing](testing.md) and [pipeline](pipeline.md).
+Visible acceptance should still verify diagonal speed, held/released keys, focus loss, capture fallback/error behavior,
+Escape release, minimized/resumed timing and camera orientation. Fixed-step gameplay and keyboard binding
+configuration are implemented; broader input devices remain future work. See [testing](testing.md) and [pipeline](pipeline.md).

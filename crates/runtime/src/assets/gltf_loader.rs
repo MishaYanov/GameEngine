@@ -1,5 +1,5 @@
 use std::{
-	collections::HashMap,
+	collections::HashSet,
 	error::Error,
 	fmt::{self, Display, Formatter},
 	path::Path,
@@ -161,8 +161,12 @@ impl From<ImageAssetError> for GltfLoaderError {
 /// applied yet; all returned geometry remains in mesh-local coordinates.
 pub fn load_first_mesh(path: impl AsRef<Path>) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
 	let path = path.as_ref();
-	let (document, buffers, images) = load_resources(path)?;
-	let parts = import_first_mesh(&document, &buffers, &images)?;
+	let mut resources = load_resources(path)?;
+	if resources.document.meshes().next().is_none() {
+		return Err(GltfLoaderError::NoMeshes);
+	}
+	resources.prepare_mesh_images(0)?;
+	let parts = import_first_mesh(&resources.document, &resources.buffers, &resources.images)?;
 	engine_logger::info!("Imported {} parts from {}", parts.len(), path.display());
 	Ok(parts)
 }
@@ -236,11 +240,98 @@ fn read_uri_in_root(
 	read_bounded(&path, budget)
 }
 
-pub(super) type Resources = (
-	gltf::Document,
-	Vec<gltf::buffer::Data>,
-	Vec<gltf::image::Data>,
-);
+pub(super) struct Resources {
+	document: gltf::Document,
+	buffers: Vec<gltf::buffer::Data>,
+	images: Vec<ImageResource>,
+	budget: usize,
+}
+
+enum ImageResource {
+	Encoded(Vec<u8>),
+	View {
+		buffer: usize,
+		offset: usize,
+		end: usize,
+	},
+	Decoded(ImageAsset),
+}
+
+impl ImageResource {
+	fn retained_bytes(&self) -> usize {
+		match self {
+			Self::Encoded(bytes) => bytes.len(),
+			Self::View { .. } => 0,
+			Self::Decoded(image) => image.pixels().len(),
+		}
+	}
+}
+
+impl Resources {
+	pub(super) fn retained_bytes(&self) -> usize {
+		// Every buffer, encoded image and decoded image was charged to the
+		// bounded import budget before being retained.
+		self.buffers
+			.iter()
+			.map(|buffer| buffer.0.len())
+			.sum::<usize>()
+			+ self
+				.images
+				.iter()
+				.map(ImageResource::retained_bytes)
+				.sum::<usize>()
+	}
+
+	pub(super) fn import_mesh(
+		&self,
+		mesh_index: usize,
+	) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
+		import_mesh(&self.document, &self.buffers, &self.images, mesh_index)
+	}
+
+	pub(super) fn prepare_mesh_images(&mut self, mesh_index: usize) -> Result<(), GltfLoaderError> {
+		preflight_meshes(&self.document, [mesh_index])?;
+		let mesh = self
+			.document
+			.meshes()
+			.nth(mesh_index)
+			.ok_or_else(|| rejected(format!("mesh index {mesh_index} does not exist")))?;
+		let required: HashSet<_> = mesh
+			.primitives()
+			.filter_map(|primitive| {
+				primitive
+					.material()
+					.pbr_metallic_roughness()
+					.base_color_texture()
+					.map(|texture| texture.texture().source().index())
+			})
+			.collect();
+		let mut budget = self.budget;
+		let mut prepared = Vec::new();
+		// Visit image indices in source order, preserving deterministic failures.
+		for (index, image) in self.images.iter().enumerate() {
+			if !required.contains(&index) || matches!(image, ImageResource::Decoded(_)) {
+				continue;
+			}
+			let encoded = match image {
+				ImageResource::Encoded(bytes) => bytes.as_slice(),
+				ImageResource::View {
+					buffer,
+					offset,
+					end,
+				} => &self.buffers[*buffer].0[*offset..*end],
+				ImageResource::Decoded(_) => unreachable!(),
+			};
+			prepared.push((index, decode_image(encoded, &mut budget)?));
+		}
+		// Failed decoding leaves the cached snapshot and its accounting intact.
+		for (index, image) in prepared {
+			self.images[index] = ImageResource::Decoded(image);
+		}
+		self.budget = budget;
+		Ok(())
+	}
+}
 
 fn load_resources(path: &Path) -> Result<Resources, GltfLoaderError> {
 	let path = path.canonicalize().map_err(rejected)?;
@@ -263,14 +354,6 @@ pub(super) fn load_resources_in_root(
 	path: &Path,
 	root: &Path,
 ) -> Result<Resources, GltfLoaderError> {
-	load_resources_with_images(path, root, true)
-}
-
-fn load_resources_with_images(
-	path: &Path,
-	root: &Path,
-	decode_images: bool,
-) -> Result<Resources, GltfLoaderError> {
 	let path = contained_model(path, root)?;
 	let root = root.canonicalize().map_err(rejected)?;
 	let base = path
@@ -279,6 +362,7 @@ fn load_resources_with_images(
 	let mut budget = IMPORT_LIMIT;
 	let bytes = read_bounded(&path, &mut budget)?;
 	let gltf::Gltf { document, mut blob } = gltf::Gltf::from_slice(&bytes)?;
+	drop(bytes);
 	if document.nodes().len() > 10_000
 		|| document.meshes().len() > 10_000
 		|| document.images().len() > 10_000
@@ -304,16 +388,11 @@ fn load_resources_with_images(
 		}
 		buffers.push(gltf::buffer::Data(data));
 	}
-	let mut images = Vec::new();
-	if !decode_images {
-		return Ok((document, buffers, images));
-	}
+	let mut images = Vec::with_capacity(document.images().len());
 	for image in document.images() {
-		let external;
-		let encoded = match image.source() {
+		let source = match image.source() {
 			gltf::image::Source::Uri { uri, .. } => {
-				external = read_uri_in_root(base, &root, uri, &mut budget)?;
-				external.as_slice()
+				ImageResource::Encoded(read_uri_in_root(base, &root, uri, &mut budget)?)
 			}
 			gltf::image::Source::View { view, .. } => {
 				let end = view
@@ -323,38 +402,51 @@ fn load_resources_with_images(
 				buffers
 					.get(view.buffer().index())
 					.and_then(|b| b.0.get(view.offset()..end))
-					.ok_or_else(|| rejected("image view outside buffer"))?
+					.ok_or_else(|| rejected("image view outside buffer"))?;
+				ImageResource::View {
+					buffer: view.buffer().index(),
+					offset: view.offset(),
+					end,
+				}
 			}
 		};
-		let mut reader = image::ImageReader::new(std::io::Cursor::new(encoded))
-			.with_guessed_format()
-			.map_err(rejected)?;
-		let mut limits = image::Limits::default();
-		limits.max_image_width = Some(4096);
-		limits.max_image_height = Some(4096);
-		limits.max_alloc = Some(RESOURCE_LIMIT.min(budget) as u64);
-		reader.limits(limits);
-		let decoded = reader.decode().map_err(rejected)?;
-		let size = (decoded.width() as usize)
-			.checked_mul(decoded.height() as usize)
-			.and_then(|n| n.checked_mul(4))
-			.ok_or_else(|| rejected("image size overflow"))?;
-		charge(&mut budget, size)?;
-		let rgba = decoded.into_rgba8();
-		images.push(gltf::image::Data {
-			width: rgba.width(),
-			height: rgba.height(),
-			format: gltf::image::Format::R8G8B8A8,
-			pixels: rgba.into_raw(),
-		});
+		images.push(source);
 	}
-	Ok((document, buffers, images))
+	Ok(Resources {
+		document,
+		buffers,
+		images,
+		budget,
+	})
+}
+
+fn decode_image(encoded: &[u8], budget: &mut usize) -> Result<ImageAsset, GltfLoaderError> {
+	let mut reader = image::ImageReader::new(std::io::Cursor::new(encoded))
+		.with_guessed_format()
+		.map_err(rejected)?;
+	let mut limits = image::Limits::default();
+	limits.max_image_width = Some(4096);
+	limits.max_image_height = Some(4096);
+	limits.max_alloc = Some(RESOURCE_LIMIT.min(*budget) as u64);
+	reader.limits(limits);
+	let decoded = reader.decode().map_err(rejected)?;
+	let size = (decoded.width() as usize)
+		.checked_mul(decoded.height() as usize)
+		.and_then(|n| n.checked_mul(4))
+		.ok_or_else(|| rejected("image size overflow"))?;
+	charge(budget, size)?;
+	let rgba = decoded.into_rgba8();
+	Ok(ImageAsset::from_rgba8(
+		rgba.width(),
+		rgba.height(),
+		rgba.into_raw(),
+	)?)
 }
 
 fn import_first_mesh(
 	document: &gltf::Document,
 	buffers: &[gltf::buffer::Data],
-	images: &[gltf::image::Data],
+	images: &[ImageResource],
 ) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
 	if document.meshes().next().is_none() {
 		return Err(GltfLoaderError::NoMeshes);
@@ -362,10 +454,10 @@ fn import_first_mesh(
 	import_mesh(document, buffers, images, 0)
 }
 
-pub(super) fn import_mesh(
+fn import_mesh(
 	document: &gltf::Document,
 	buffers: &[gltf::buffer::Data],
-	images: &[gltf::image::Data],
+	images: &[ImageResource],
 	mesh_index: usize,
 ) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
 	preflight_meshes(document, [mesh_index])?;
@@ -378,7 +470,7 @@ pub(super) fn import_mesh(
 	}
 	let mut parts = Vec::new();
 	let mut budget = IMPORT_LIMIT;
-	let mut shared_images = HashMap::new();
+	let mut shared_images = HashSet::new();
 	for primitive in mesh.primitives() {
 		// Accessor counts are checked before allocating decoded vertex buffers.
 		let vertices = primitive
@@ -478,8 +570,8 @@ fn import_primitive(
 	mesh_index: usize,
 	primitive: gltf::Primitive<'_>,
 	buffers: &[gltf::buffer::Data],
-	images: &[gltf::image::Data],
-	shared_images: &mut HashMap<usize, ImageAsset>,
+	images: &[ImageResource],
+	shared_images: &mut HashSet<usize>,
 	budget: &mut usize,
 ) -> Result<ImportedPrimitive, GltfLoaderError> {
 	if primitive.mode() != Mode::Triangles {
@@ -516,58 +608,28 @@ fn import_primitive(
 		.map(|info| info.texture().source().index());
 
 	let base_color_image = match base_color_texture {
-		Some(info) if shared_images.contains_key(&info.texture().source().index()) => {
-			Some(shared_images[&info.texture().source().index()].clone())
-		}
 		Some(info) => {
 			let image_index = info.texture().source().index();
-
-			let image = images
-				.get(image_index)
-				.ok_or(GltfLoaderError::InvalidImageReference(image_index))?;
-			let rgba_bytes = (image.width as usize)
-				.checked_mul(image.height as usize)
-				.and_then(|pixels| pixels.checked_mul(4))
-				.ok_or_else(|| rejected("image size overflow"))?;
-			charge(budget, rgba_bytes)?;
-
-			let rgba_pixels = match image.format {
-				gltf::image::Format::R8G8B8 => {
-					if image.pixels.len() % 3 != 0 {
-						return Err(GltfLoaderError::InvalidRgbByteCount(image.pixels.len()));
-					}
-
-					let mut rgba = Vec::with_capacity(rgba_bytes);
-
-					for rgb in image.pixels.chunks_exact(3) {
-						rgba.extend_from_slice(rgb);
-						rgba.push(255);
-					}
-
-					rgba
-				}
-
-				gltf::image::Format::R8G8B8A8 => image.pixels.clone(),
-
-				format => {
-					return Err(GltfLoaderError::UnsupportedImageFormat(format));
-				}
+			let Some(ImageResource::Decoded(image)) = images.get(image_index) else {
+				return Err(GltfLoaderError::InvalidImageReference(image_index));
 			};
-
-			let image_asset = ImageAsset::from_rgba8(image.width, image.height, rgba_pixels)?;
+			if shared_images.insert(image_index) {
+				// Preserve the per-mesh geometry/image budget even though pixels
+				// now share the file cache's allocation across meshes.
+				charge(budget, image.pixels().len())?;
+			}
 
 			engine_logger::info!(
 				"Primitive {}: image {}, {}x{}, {} RGBA bytes, UV set {}",
 				primitive_index,
 				image_index,
-				image_asset.width(),
-				image_asset.height(),
-				image_asset.pixels().len(),
+				image.width(),
+				image.height(),
+				image.pixels().len(),
 				tex_coord_set,
 			);
 
-			shared_images.insert(image_index, image_asset.clone());
-			Some(image_asset)
+			Some(image.clone())
 		}
 
 		None => {

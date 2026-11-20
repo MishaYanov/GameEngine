@@ -193,6 +193,129 @@ fn help_and_invalid_options_exit_without_graphics_or_project_io() {
 }
 
 #[test]
+fn bundled_route_reports_locked_exit_key_completion_restart_and_restored_authored_state() {
+	let fixture = Fixture::new();
+	let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
+	let manifest = sample.join("project.json");
+	let project = ProjectData::load(&manifest).unwrap();
+	let source = sample
+		.join("assets")
+		.join(project.startup_scene_path().unwrap());
+	let source_bytes = fs::read(&source).unwrap();
+	let authored = SceneData::from_json(std::str::from_utf8(&source_bytes).unwrap()).unwrap();
+	let mut actions = vec![json!({"type":"command","command":{"type":"start_play"}})];
+	for (index, movement, count, scene_id, score, objective, completed) in [
+		(0, -1.0, 90, "courtyard", 0, "Find the courtyard key", false),
+		(
+			1,
+			1.0,
+			190,
+			"courtyard",
+			1,
+			"Reach the courtyard exit",
+			false,
+		),
+		(2, -1.0, 180, "finish", 1, "Reach the finish marker", false),
+		(3, 1.0, 90, "finish", 1, "Courtyard Run complete", true),
+	] {
+		actions.extend([
+			json!({"type":"command","command":{"type":"set_play_input","movement":[movement,0,0]}}),
+			json!({"type":"tick","count":count}),
+		]);
+		let replay = fixture.replay(actions.clone());
+		let summary = success(
+			Command::new(env!("CARGO_BIN_EXE_engine-headless"))
+				.current_dir(&fixture.root)
+				.arg("--project")
+				.arg(&manifest)
+				.arg("--replay")
+				.arg(replay)
+				.output()
+				.unwrap(),
+		);
+		assert_eq!(summary["active_scene_id"], "courtyard", "phase {index}");
+		assert_eq!(summary["play_scene_id"], scene_id);
+		assert_eq!(summary["play_status"]["scene_id"], scene_id);
+		assert_eq!(summary["play_status"]["gameplay"]["score"], score);
+		assert_eq!(summary["play_status"]["gameplay"]["objective"], objective);
+		assert_eq!(summary["play_status"]["gameplay"]["completed"], completed);
+	}
+	actions.extend([
+		json!({"type":"restart_run"}),
+		json!({"type":"tick","count":5}),
+	]);
+	let replay = fixture.replay(actions.clone());
+	let state = fixture.root.join("restarted.json");
+	let run = |replay: &PathBuf, state: &PathBuf| {
+		success(
+			Command::new(env!("CARGO_BIN_EXE_engine-headless"))
+				.current_dir(&fixture.root)
+				.arg("--project")
+				.arg(&manifest)
+				.arg("--replay")
+				.arg(replay)
+				.arg("--state-output")
+				.arg(state)
+				.output()
+				.unwrap(),
+		)
+	};
+	let restarted = run(&replay, &state);
+	assert_eq!(restarted["play_scene_id"], "courtyard");
+	assert_eq!(restarted["play_status"]["gameplay"]["score"], 0);
+	assert_eq!(restarted["play_status"]["gameplay"]["completed"], false);
+	assert_eq!(
+		restarted["play_status"]["gameplay"]["objective"],
+		"Find the courtyard key"
+	);
+	assert_eq!(restarted["simulation_tick"], 0, "Restart clears held input");
+	assert_eq!(
+		SceneData::from_json(&fs::read_to_string(state).unwrap()).unwrap(),
+		authored
+	);
+	actions.push(json!({"type":"command","command":{"type":"stop_play"}}));
+	let replay = fixture.replay(actions);
+	let state = fixture.root.join("restored.json");
+	let stopped = run(&replay, &state);
+	assert_eq!(stopped["mode"], "edit");
+	assert!(stopped.get("play_status").is_none());
+	assert_eq!(
+		SceneData::from_json(&fs::read_to_string(state).unwrap()).unwrap(),
+		authored
+	);
+	assert_eq!(fs::read(&source).unwrap(), source_bytes);
+}
+
+#[test]
+fn replay_restart_requires_play_and_rejects_unrecognized_fields() {
+	let fixture = Fixture::new();
+	for action in [
+		json!({"type":"restart_run"}),
+		json!({"type":"restart_run","unexpected":true}),
+	] {
+		let replay = fixture.replay(vec![action]);
+		let output = failure(
+			fixture
+				.command()
+				.arg("--replay")
+				.arg(replay)
+				.output()
+				.unwrap(),
+		);
+		assert!(
+			output["error"]["message"]
+				.as_str()
+				.unwrap()
+				.contains("Play mode")
+				|| output["error"]["message"]
+					.as_str()
+					.unwrap()
+					.contains("unknown field")
+		);
+	}
+}
+
+#[test]
 fn headless_collects_the_bound_key_without_input_only_when_the_campaign_is_selected() {
 	let fixture = Fixture::new();
 	let mut scene = SceneData::from_json(&fs::read_to_string(&fixture.scene).unwrap()).unwrap();

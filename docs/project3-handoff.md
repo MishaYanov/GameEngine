@@ -10,6 +10,10 @@ Current follow-up: [project lifecycle and multi-scene authoring](project-lifecyc
 project-v1 and proposed steps 46�47 descriptions. The prompt below preserves the original handoff; inspect current
 source before following it.
 
+The [five building-blocks review](building-blocks-review.md) is the current completion report for module/role/input
+authoring, course completion/restart, collider sensors/filters, bounded replay and export parity. The historical
+steps and verification below are not a current source inventory.
+
 ## Current authoring-to-player workflow
 
 ```text

@@ -7,6 +7,23 @@ Line estimates describe the likely changed implementation and test scope, not gu
 estimation uncertainty; regression risk is listed separately. Validate benefit with representative measurements before
 expanding each change.
 
+## Implementation progress inspected on 2026-11-20
+
+The original estimates below are historical planning ranges. The current source has narrowed several items:
+
+- Bounded synchronous mesh/texture upload batches are implemented. AssetManager also caches bounded glTF resource
+  snapshots, lazily prepares selected-mesh images and reconciles cache retention/accounting. Asynchronous streaming
+  and measured before/after loading results remain open.
+- Instance storage is reusable and survives compatible resize through an explicit completed-frame transfer. Opaque
+  order/batches are still rebuilt and instance data is still written per draw; changed-range caching remains open.
+- Acquisition/submission completion and per-swapchain-image presentation semaphores are explicit, with failed-target
+  retirement before reuse. There is still one in-flight frame; the two-frame proposal remains unimplemented.
+- Retained document cost caches and bounded patch history exist, but some authoring commands still clone scene data.
+  The broader allocation/latency profiling and persistent-storage proposal remains open.
+
+These are source capabilities and regression-test targets, not measured performance gains. Current evidence and
+remaining native limits are in the [building-blocks review](../../docs/building-blocks-review.md#optimization-review).
+
 | Follow-up                                               | Affected project / crate                                             | Estimated changed lines | Estimate margin | Complexity | Regression risk                                      |
 |---------------------------------------------------------|----------------------------------------------------------------------|------------------------:|----------------:|------------|------------------------------------------------------|
 | Cache render batches and update changed instance ranges | `renderer`, `runtime`; integration in `game` and `app` (editor host) |                 250–550 |            ±40% | High       | High: stale instances, ordering and invalidation     |

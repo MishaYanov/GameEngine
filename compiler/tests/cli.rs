@@ -1,0 +1,137 @@
+use engine_core::{project::ProjectData, scene_catalog::SceneId, scene_data::SceneData};
+use std::{
+	fs,
+	path::PathBuf,
+	process::Command,
+	sync::atomic::{AtomicU64, Ordering},
+};
+
+struct Fixture(PathBuf);
+impl Fixture {
+	fn new() -> Self {
+		static NEXT: AtomicU64 = AtomicU64::new(0);
+		let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+			.join("../target")
+			.join(format!(
+				"qa-compiler-cli-{}-{}",
+				std::process::id(),
+				NEXT.fetch_add(1, Ordering::Relaxed)
+			));
+		fs::create_dir(&root).unwrap();
+		Self(root)
+	}
+	fn command(&self) -> Command {
+		let mut command = Command::new(env!("CARGO_BIN_EXE_compiler"));
+		command.current_dir(&self.0);
+		command
+	}
+}
+impl Drop for Fixture {
+	fn drop(&mut self) {
+		let _ = fs::remove_dir_all(&self.0);
+	}
+}
+
+#[test]
+fn stage_cli_exports_authored_inputs_without_a_native_build_and_never_overwrites() {
+	let fixture = Fixture::new();
+	let authoring = fixture.0.join("authoring");
+	let destination = fixture.0.join("exports");
+	fs::create_dir_all(authoring.join("assets/scenes")).unwrap();
+	fs::create_dir(&destination).unwrap();
+	let scene = SceneData::from_json(
+		r#"{
+		"schema_version":3,"bindings":{},"entities":[],"lights":[],
+		"camera":{"position":[0,0,5],"yaw":0,"pitch":0,"vertical_fov":1,"near":0.1,"far":100}
+	}"#,
+	)
+	.unwrap();
+	let project = ProjectData::for_scene_with_id(
+		"CPU stage",
+		SceneId::new("main").unwrap(),
+		"scenes/main.json",
+		&scene,
+	)
+	.unwrap();
+	let manifest = authoring.join("project.json");
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	let scene_bytes = scene.to_json().unwrap();
+	fs::write(authoring.join("assets/scenes/main.json"), &scene_bytes).unwrap();
+	let invoke = || {
+		fixture
+			.command()
+			.arg("--stage")
+			.arg(&manifest)
+			.arg(&destination)
+			.output()
+			.unwrap()
+	};
+	let staged = invoke();
+	assert!(
+		staged.status.success(),
+		"{}",
+		String::from_utf8_lossy(&staged.stderr)
+	);
+	let exported = destination.join("CPU stage");
+	assert!(String::from_utf8_lossy(&staged.stdout).contains("Project staged at"));
+	assert_eq!(
+		ProjectData::load(exported.join("project.json")).unwrap(),
+		project
+	);
+	assert_eq!(
+		fs::read_to_string(exported.join("assets/scenes/main.json")).unwrap(),
+		scene_bytes
+	);
+	assert!(
+		!exported
+			.join(format!("game{}", std::env::consts::EXE_SUFFIX))
+			.exists()
+	);
+	let manifest_bytes = fs::read(exported.join("project.json")).unwrap();
+	let rejected = invoke();
+	assert!(!rejected.status.success());
+	assert!(String::from_utf8_lossy(&rejected.stderr).contains("already exists"));
+	assert_eq!(
+		fs::read(exported.join("project.json")).unwrap(),
+		manifest_bytes
+	);
+	let mut unknown = project;
+	unknown.gameplay_module = Some("unavailable".into());
+	unknown.name = "Rejected module".into();
+	fs::write(&manifest, unknown.to_json().unwrap()).unwrap();
+	let rejected = invoke();
+	assert!(!rejected.status.success());
+	assert!(String::from_utf8_lossy(&rejected.stderr).contains("unavailable"));
+	assert!(!destination.join("Rejected module").exists());
+}
+
+#[test]
+fn stage_cli_rejects_incomplete_or_unknown_argument_forms() {
+	let fixture = Fixture::new();
+	for args in [
+		vec![],
+		vec!["--stage"],
+		vec!["--stage", "project.json"],
+		vec!["--unknown", "destination"],
+		vec!["Name", "destination", "extra"],
+	] {
+		let output = fixture.command().args(args).output().unwrap();
+		assert_eq!(output.status.code(), Some(2));
+		assert!(String::from_utf8_lossy(&output.stderr).contains("Usage: compiler"));
+	}
+}
+
+#[test]
+fn legacy_names_starting_with_a_hyphen_reach_project_validation() {
+	let fixture = Fixture::new();
+	let output = fixture
+		.command()
+		.arg("-Game")
+		.arg(fixture.0.join("missing-destination"))
+		.output()
+		.unwrap();
+	assert_eq!(output.status.code(), Some(1));
+	let error = String::from_utf8_lossy(&output.stderr);
+	assert!(error.contains("Destination must be an existing absolute folder path"));
+	assert!(!error.contains("Usage: compiler"));
+}

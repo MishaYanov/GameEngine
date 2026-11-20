@@ -12,7 +12,7 @@ use image::{ImageError, ImageReader};
 pub struct ImageAsset {
 	width: u32,
 	height: u32,
-	pixels: Arc<[u8]>,
+	pixels: Arc<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -104,7 +104,7 @@ impl ImageAsset {
 		Ok(Self {
 			width,
 			height,
-			pixels: pixels.into(),
+			pixels: Arc::new(pixels),
 		})
 	}
 

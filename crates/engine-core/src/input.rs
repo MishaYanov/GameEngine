@@ -236,7 +236,7 @@ impl InputProfile {
 			if binding.id.len() > 32
 				|| !id.next().is_some_and(|byte| byte.is_ascii_lowercase())
 				|| !id
-				.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+					.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 			{
 				return Err("Action IDs must use 1–32 lowercase letters, digits, or underscores and begin with a letter".into());
 			}
@@ -250,8 +250,8 @@ impl InputProfile {
 				let mut bytes = parameter.bytes();
 				if parameter.len() > 32
 					|| !bytes
-					.next()
-					.is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+						.next()
+						.is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
 					|| !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 				{
 					return Err("Animation parameters must use 1–32 ASCII letters, digits, or underscores and begin with a letter or underscore".into());

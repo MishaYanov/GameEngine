@@ -4,6 +4,7 @@ pub mod asset_registry;
 pub mod bounds;
 pub mod camera;
 pub mod camera_controller;
+pub mod collider;
 pub mod collision;
 pub mod command;
 pub mod editor;

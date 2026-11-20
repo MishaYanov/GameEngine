@@ -5,6 +5,10 @@ is implemented. The [implementation guide](../../docs/viewport-implementation.md
 records the shipped scope, contracts, verification and remaining boundaries.
 This design remains the broader roadmap; requirements below are not all completed.
 
+The [2026-11-20 building-blocks review](../../docs/building-blocks-review.md) records the completed playable slice,
+module-aware role configuration, Collider Inspector and sensor/filter authoring. Trigger lifecycle events remain a
+teaching proposal; the researched chapters below must not be read as proof that every proposed feature is available.
+
 The next editor milestone is a usable level-building workspace: navigate a scene,
 place an asset, select it, transform it, undo a mistake, and play the result.
 The scene viewport should feel immediate while the surrounding editor supports

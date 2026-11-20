@@ -41,8 +41,8 @@ pub async fn confirm_project_discard(window: tauri::WebviewWindow) -> Result<boo
 			"Keep current project",
 		)
 	})
-		.await
-		.map_err(|error| error.to_string())
+	.await
+	.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -70,11 +70,11 @@ pub async fn editor_exit(
 		};
 		if dirty
 			&& !confirm_discard(
-			&window,
-			"Exiting the editor will discard all unsaved scene and project changes.",
-			"Discard and exit",
-			"Keep editing",
-		) {
+				&window,
+				"Exiting the editor will discard all unsaved scene and project changes.",
+				"Discard and exit",
+				"Keep editing",
+			) {
 			return Ok(false);
 		}
 
@@ -92,8 +92,8 @@ pub async fn editor_exit(
 		drop(retired);
 		Ok(true)
 	})
-		.await
-		.map_err(|error| error.to_string())?
+	.await
+	.map_err(|error| error.to_string())?
 }
 
 fn confirm_discard(

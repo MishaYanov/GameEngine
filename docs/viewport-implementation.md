@@ -293,6 +293,19 @@ Native transform, placement, and asset-loading states lock competing authoring.
 Camera navigation alone does not acquire that authoring lock.
 The Inspector is read-only during Play.
 
+### Collider shape, sensor and filters
+
+The Collider section adds None/Box/Sphere, local offset, half extents/radius, Blocking/Sensor mode and 32 layer/mask
+bits. Numeric previews share the transaction rules above; invalid final input cancels the gesture. Discrete shape,
+mode and bit changes are atomic edits that preserve the latest accepted dimensions and other interaction settings.
+The **Colliders** toolstrip toggle displays selected effective shapes in Scene: continuous cyan for blocking and
+dashed pink for sensors. It is view state, does not dirty the scene, and is hidden in Game.
+
+Box collision follows a transformed world AABB; sphere scale conservatively encloses hierarchy shear. Sensor pairs
+can overlap but do not block movement, and both layer/mask directions must match. Outline work is cached/bounded;
+omissions or invalid world geometry produce a nonfatal collider diagnostic. See [collider semantics and limits](scene-editing.md#colliders-and-interaction-settings).
+Enter/Stay/Exit event delivery remains planned Feature 1.4, not a current Inspector/runtime feature.
+
 ## 12. Place a catalogued model
 
 1. Open the Assets drawer.
@@ -490,7 +503,7 @@ These view/tool settings are not additional fields in project or scene JSON.
 
 View actions include SetTool, SetSpace, SetPivot, SetGrid, SetGridSpacing,
 SetSnap, SetSnapIncrements, SetProjection, SetPlane, SetView, Orient, Zoom,
-FrameSelection, ResetView, Cancel, and the placement lifecycle actions.
+SetColliders, FrameSelection, ResetView, Cancel, and the placement lifecycle actions.
 The wire uses tagged snake_case names, such as `set_tool` and `begin_placement`.
 Host commands retain trusted-main-window checks and validate action values.
 
@@ -499,6 +512,9 @@ workspace generation, current gesture/placement, focus, and an optional error.
 During a native transform, an optional transform_preview carries the primary
 selected entity's key and current local transform for the Inspector.
 It is a presentation summary, not an authored scene snapshot.
+
+`settings.colliders` defaults false for older serialized view state, and optional `collider_error` defaults absent.
+The separate collider diagnostic does not replace the main viewport error or stop scene presentation.
 
 ## 20. Notifications and bounded queues
 

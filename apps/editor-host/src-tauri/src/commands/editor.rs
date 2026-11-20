@@ -82,16 +82,21 @@ async fn workspace<T: Send + 'static>(
 #[tauri::command]
 pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDto, String> {
 	trusted_window(&window)?;
-	Ok(EditorCapabilitiesDto {
+	Ok(capabilities())
+}
+
+fn capabilities() -> EditorCapabilitiesDto {
+	EditorCapabilitiesDto {
 		incremental_commands: true,
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 		commands: CommandFactory::capabilities(),
+		gameplay_modules: vec![courtyard_gameplay::descriptor()],
 		max_selection: 4096,
 		max_history_entries: 128,
 		history_budget_bytes: 16 * 1024 * 1024,
 		embedded_viewport_supported: cfg!(target_os = "windows"),
-	})
+	}
 }
 
 struct ProjectReplacement {
@@ -815,3 +820,7 @@ pub async fn editor_viewport_action(
 #[cfg(test)]
 #[path = "tests_build_launch.rs"]
 mod tests_build_launch;
+
+#[cfg(test)]
+#[path = "tests_gameplay_metadata.rs"]
+mod tests_gameplay_metadata;

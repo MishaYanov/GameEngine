@@ -312,6 +312,7 @@ mod windows {
 	};
 	use std::{
 		collections::VecDeque,
+		mem::ManuallyDrop,
 		num::NonZeroIsize,
 		path::PathBuf,
 		sync::atomic::{AtomicBool, Ordering},
@@ -913,7 +914,7 @@ mod windows {
 	// Order matters: uploaded models/assets retire before the renderer/device.
 	struct GpuState {
 		scene: Scene,
-		assets: AssetManager,
+		assets: ManuallyDrop<AssetManager>,
 		renderer: WindowRenderer,
 		asset_root: PathBuf,
 		camera: Camera,
@@ -973,7 +974,14 @@ mod windows {
 	}
 	impl Drop for GpuState {
 		fn drop(&mut self) {
-			if self.renderer.wait_idle().is_err() {
+			// This is the only path that takes the asset owner. Automatic field
+			// destruction cannot release it again after an uncertain GPU wait.
+			let assets = unsafe { ManuallyDrop::take(&mut self.assets) };
+			if self
+				.renderer
+				.retire_resources((std::mem::take(&mut self.scene), assets))
+				.is_err()
+			{
 				engine_logger::error!(target: "editor_viewport", "Viewport teardown failed: operation=gpu_wait_idle, generation={}", self.generation);
 			}
 			engine_logger::debug!(target: "editor_viewport", "Viewport GPU state retired: generation={}", self.generation);
@@ -1280,47 +1288,49 @@ mod windows {
 				.gpu
 				.as_mut()
 				.ok_or("Native viewport renderer is not initialized")?;
-			let mut assets =
-				AssetManager::new(&gpu.asset_root).map_err(|error| error.to_string())?;
-			let (scene, camera) = scene_io::instantiate(&document, &mut assets, &gpu.renderer)?;
+			let candidate = scene_io::instantiate(&document, &mut gpu.assets, &gpu.renderer);
 			drop(document);
 			gpu.renderer.wait_idle()?;
-
-			let mut shared = self
-				.shared
-				.lock()
-				.map_err(|_| "Editor document lock is poisoned")?;
-			let Some(workspace) = shared.as_mut() else {
-				return match guard {
-					PlayInstall::Transition { .. } => Ok(()),
-					PlayInstall::Restart(_) => Err("The project was closed during restart".into()),
+			let installed = candidate.and_then(|(scene, camera)| {
+				let mut shared = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let Some(workspace) = shared.as_mut() else {
+					return match guard {
+						PlayInstall::Transition { .. } => Ok(()),
+						PlayInstall::Restart(_) => {
+							Err("The project was closed during restart".into())
+						}
+					};
 				};
-			};
-			if !guard.validate(workspace, Instant::now())? {
-				return Ok(());
-			}
+				if !guard.validate(workspace, Instant::now())? {
+					return Ok(());
+				}
 
-			// Lights are validated CPU data. Keep renderer uploads and waits
-			// outside the workspace lock and restore the old lights on rejection.
-			gpu.renderer.set_lights(&scene.renderer_lights())?;
-			if let Err(error) = workspace.backend.commit_play_scene(prepared) {
-				gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
-				return Err(error.to_string());
-			}
-			let retired_scene = std::mem::replace(&mut gpu.scene, scene);
-			let retired_assets = std::mem::replace(&mut gpu.assets, assets);
-			gpu.camera = camera;
-			gpu.revision = workspace.backend.session().scene_revision();
-			gpu.change_cursor = workspace.backend.change_cursor();
-			self.interaction.clear_play_input(workspace);
-			self.interaction.clear_error();
-			self.interaction.sync_game_status(workspace);
-			self.last_tick = None;
-			self.dirty = true;
-			drop(shared);
-			drop(retired_scene);
-			drop(retired_assets);
-			Ok(())
+				// Lights are validated CPU data. Keep renderer uploads and waits
+				// outside the workspace lock and restore the old lights on rejection.
+				gpu.renderer.set_lights(&scene.renderer_lights())?;
+				if let Err(error) = workspace.backend.commit_play_scene(prepared) {
+					gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
+					return Err(error.to_string());
+				}
+				let retired_scene = std::mem::replace(&mut gpu.scene, scene);
+				gpu.camera = camera;
+				gpu.revision = workspace.backend.session().scene_revision();
+				gpu.change_cursor = workspace.backend.change_cursor();
+				self.interaction.clear_play_input(workspace);
+				self.interaction.clear_error();
+				self.interaction.sync_game_status(workspace);
+				self.last_tick = None;
+				self.dirty = true;
+				drop(shared);
+				drop(retired_scene);
+				Ok(())
+			});
+			// Candidate-only resources are also pruned after a stale or failed commit.
+			gpu.assets.prune_unused();
+			installed
 		}
 
 		fn restart_run(&mut self, request: &ActionRequest) -> Result<(), String> {
@@ -1827,7 +1837,7 @@ mod windows {
 				drop(data);
 				self.gpu = Some(GpuState {
 					scene,
-					assets,
+					assets: ManuallyDrop::new(assets),
 					renderer,
 					asset_root,
 					camera: initial_camera,

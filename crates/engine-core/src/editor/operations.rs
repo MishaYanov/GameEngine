@@ -712,8 +712,9 @@ fn collider_bounds(collider: Option<&ColliderData>) -> Option<Result<Bounds3, St
 			ColliderData::Box {
 				half_extents,
 				offset,
+				..
 			} => (Vec3::from_array(*half_extents), Vec3::from_array(*offset)),
-			ColliderData::Sphere { radius, offset } => {
+			ColliderData::Sphere { radius, offset, .. } => {
 				(Vec3::splat(*radius), Vec3::from_array(*offset))
 			}
 		};

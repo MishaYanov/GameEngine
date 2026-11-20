@@ -69,9 +69,15 @@ export interface MaterialOverride {
     readonly base_color_factor: Vec4;
 }
 
+export interface ColliderInteraction {
+    readonly sensor: boolean;
+    readonly layers: number;
+    readonly mask: number;
+}
+
 export type Collider =
-    | { readonly kind: 'box'; readonly half_extents: Vec3; readonly offset: Vec3 }
-    | { readonly kind: 'sphere'; readonly radius: number; readonly offset: Vec3 };
+    | { readonly kind: 'box'; readonly half_extents: Vec3; readonly offset: Vec3; readonly interaction?: ColliderInteraction }
+    | { readonly kind: 'sphere'; readonly radius: number; readonly offset: Vec3; readonly interaction?: ColliderInteraction };
 
 export interface SceneEntity {
     readonly key: EntityKey;
@@ -283,6 +289,21 @@ export interface EditorCapabilities {
     readonly history_budget_bytes: number;
     readonly embedded_viewport_supported: boolean;
     readonly incremental_commands?: boolean;
+    readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
+}
+
+export interface GameplayRoleDescriptor {
+    readonly name: string;
+    readonly label: string;
+    readonly requirement_hint: string;
+}
+
+export interface GameplayModuleDescriptor {
+    readonly id: string;
+    readonly label: string;
+    readonly description: string;
+    readonly default_roles: readonly GameplayRoleDescriptor[];
+    readonly scene_roles: Readonly<Record<SceneId, readonly GameplayRoleDescriptor[]>>;
 }
 
 export interface ModelAsset {

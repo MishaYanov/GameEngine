@@ -22,6 +22,13 @@ their color/depth formats and renderer-owned descriptor layouts remain compatibl
 FIFO remains the presentation policy. Native Edit waits for invalidation rather than continuously submitting identical
 frames. Fixed-step simulation scheduling is separate from presentation pacing.
 
+Frame synchronization distinguishes image acquisition from graphics submission and tracks both completion paths.
+Each swapchain image has its own presentation semaphore. Failed recording/submission/presentation invalidates the
+frame and forces completed-target retirement before reuse; uncertain GPU completion retains resources rather than
+freeing live objects. Resize can transfer warmed instance-buffer/storage capacity after completion while creating
+fresh swapchain synchronization. The renderer still uses one in-flight frame and waits before reusing it; these
+changes do not implement two frames in flight.
+
 ## Current shader data
 
 | Data               | Layout                                                                                 |
@@ -44,6 +51,9 @@ overlay/unlit/alpha objects form order barriers and cannot be sorted through arb
 instance buffer grows only as needed up to a limit; capacity growth is still an allocation. Dynamic legacy UI/gizmo
 buffers synchronize writes with frame completion, and the Angular product path renders no forked native editor overlay
 UI.
+
+Opaque ordering and draw batches are still rebuilt and submitted instance data is still written each draw.
+Retaining warmed storage across resize is distinct from persistent render-batch caching or changed-range uploads.
 
 `WindowRenderer::upload_batch` accepts `MeshUpload` and `Rgba8Upload` inputs, preserving order in `UploadedBatch`.
 One synchronous transfer submission handles at most 256 resources and 64 MiB of payload; returned resources are ready

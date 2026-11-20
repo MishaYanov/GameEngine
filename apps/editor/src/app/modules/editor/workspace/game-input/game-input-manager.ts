@@ -145,32 +145,39 @@ export class GameInputManager {
     protected async apply(): Promise<void> {
         if (!this.open() || !this.available() || this.validation() || !this.changed()) return;
         const profile = this.profile();
+        const generation = this.projectGeneration;
+        const savedProfile = this.savedProfile();
+        const current = () => this.open() && this.projectGeneration === generation &&
+            this.editor.workspaceGeneration() === generation && this.editor.snapshot()?.mode === 'edit';
         this.pending.set(true);
         this.error.set(null);
         this.message.set(null);
         try {
             const write = async () => {
                 const snapshot = this.editor.snapshot();
-                if (!this.open() || this.editor.workspaceGeneration() !== this.projectGeneration || snapshot?.mode !== 'edit') {
+                if (!current() || !snapshot) {
                     throw new Error('Open the Game Input Manager again for the current project.');
                 }
-                if (this.profileSignature(snapshot.project.input_profile ?? DEFAULT_GAME_INPUT) !== this.savedProfile()) {
+                if (this.profileSignature(snapshot.project.input_profile ?? DEFAULT_GAME_INPUT) !== savedProfile) {
                     throw new Error('Game bindings changed while this dialog was open. Reopen it to review the latest bindings.');
                 }
-                await this.editor.execute({
+                const accepted = await this.editor.execute({
                     type: 'set_project',
                     project: {...snapshot.project, input_profile: profile}
-                });
-                this.savedProfile.set(this.profileSignature(profile));
+                }, generation, snapshot.revision);
+                if (!current()) return;
+                this.savedProfile.set(this.profileSignature(accepted.project.input_profile ?? DEFAULT_GAME_INPUT));
                 this.message.set('Bindings applied. Use Save All to keep them with the project.');
             };
             if (this.editing) {
-                if (!await this.editing.withCommittedEdit(write)) this.error.set(this.editing.error() ?? 'Finish the current edit and try again.');
+                if (!await this.editing.withCommittedEdit(write) && current()) {
+                    this.error.set(this.editing.error() ?? 'Finish the current edit and try again.');
+                }
             } else {
                 await write();
             }
         } catch (error: unknown) {
-            this.error.set(error instanceof Error ? error.message : String(error));
+            if (current()) this.error.set(error instanceof Error ? error.message : String(error));
         } finally {
             this.pending.set(false);
         }

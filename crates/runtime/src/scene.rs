@@ -464,7 +464,9 @@ impl Scene {
 
 	/// Editor picking must use the same authored visibility as scene submission.
 	pub fn is_renderable(&self, id: EntityId) -> bool {
-		self.id_indices.get(&id).is_some_and(|&index| self.entries[index].renderable)
+		self.id_indices
+			.get(&id)
+			.is_some_and(|&index| self.entries[index].renderable)
 	}
 
 	pub fn entity_ids(&self) -> impl ExactSizeIterator<Item = EntityId> + DoubleEndedIterator + '_ {

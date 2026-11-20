@@ -32,17 +32,45 @@
                 existing files are preserved.</p>
         </div>
     }
-    <fieldset [disabled]="!available()">
+    <div class="gameplay-settings">
+        <label>Gameplay module
+            <select #gameplayModule [disabled]="!available() || gameplayModules() === undefined"
+                    aria-describedby="gameplay-module-help" (change)="setGameplayModule(gameplayModule)">
+                <option value="" [selected]="!selectedModuleId()">Configured behaviors only</option>
+                @if (unavailableModule()) {
+                    <option [value]="selectedModuleId()" selected>{{ selectedModuleId() }} (unavailable)</option>
+                }
+                @for (module of gameplayModules(); track module.id) {
+                    <option [value]="module.id" [selected]="module.id === selectedModuleId()">{{ module.label }}</option>
+                }
+            </select>
+        </label>
+        <p id="gameplay-module-help">
+            @if (gameplayModules() === undefined) {
+                Gameplay module selection is unavailable in this editor host.
+            } @else if (unavailableModule()) {
+                This project's module is unavailable. Choose an available module or Configured behaviors only to repair it.
+            } @else if (selectedModule(); as module) {
+                {{ module.description }}
+            } @else {
+                Runs the project's configured movement and spin behaviors.
+            }
+        </p>
+    </div>
+    @if (gameplayRoles().length) {
+    <fieldset class="gameplay-roles" [disabled]="!available()">
         <legend>Gameplay Roles</legend>
 
-        @for (role of gameplayRoles; track role.name) {
-            @let boundEntity = snapshot.document.bindings[role.name];
+        @for (role of gameplayRoles(); track role.name; let index = $index) {
+            @let boundEntity = roleBinding(role.name);
+            <div class="gameplay-role">
             <label>
                 {{ role.label }}
 
                 <select
                     #roleSelect
                     (change)="setRole(role.name, roleSelect)"
+                    [attr.aria-describedby]="'gameplay-role-hint-' + index"
                 >
                     <option [selected]="!boundEntity" value="">Unassigned</option>
 
@@ -53,8 +81,11 @@
                     }
                 </select>
             </label>
+            <p [id]="'gameplay-role-hint-' + index">{{ role.requirement_hint }}</p>
+            </div>
         }
     </fieldset>
+    }
     @if (sceneSwitch.error() ?? error(); as failure) {
         <p class="error" role="alert">{{ failure }}</p>
     } @else if (sceneSwitch.message() ?? message(); as status) {

@@ -16,9 +16,7 @@ use renderer::WindowRenderer;
 use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
 use super::{
 	Model,
-	gltf_loader::{
-		self, GltfLoaderError, ImportedPrimitive, Resources, import_mesh, load_resources_in_root,
-	},
+	gltf_loader::{self, GltfLoaderError, ImportedPrimitive, Resources, load_resources_in_root},
 	model::ModelPart,
 };
 
@@ -193,9 +191,9 @@ impl AssetManager {
 				"model cache entry limit reached; retire unused models first".into(),
 			));
 		}
-		self.cache_resources(&full_path)?;
+		self.cache_resources(&full_path, mesh_index)?;
 		let (resources, _) = &self.resource_cache[&full_path];
-		let imported_parts = import_mesh(&resources.0, &resources.1, &resources.2, mesh_index)?;
+		let imported_parts = resources.import_mesh(mesh_index)?;
 		self.preflight_model_upload(&full_path, &imported_parts)?;
 		self.upload_model_resources(renderer, &full_path, &imported_parts)?;
 		let mut parts = Vec::with_capacity(imported_parts.len());
@@ -289,34 +287,32 @@ impl AssetManager {
 		Ok(scene)
 	}
 
-	fn cache_resources(&mut self, path: &Path) -> Result<(), AssetManagerError> {
-		if self.resource_cache.contains_key(path) {
-			return Ok(());
+	fn cache_resources(&mut self, path: &Path, mesh_index: usize) -> Result<(), AssetManagerError> {
+		if let Some((resources, bytes)) = self.resource_cache.get_mut(path) {
+			resources.prepare_mesh_images(mesh_index)?;
+			let next_bytes = resources.retained_bytes();
+			self.resource_bytes = self.resource_bytes - *bytes + next_bytes;
+			*bytes = next_bytes;
+			// Preparing another mesh can grow an existing entry. Keep that
+			// entry while applying the same aggregate limit to other files.
+			self.resource_order.retain(|cached| cached != path);
+			self.resource_order.push_back(path.to_path_buf());
+		} else {
+			let mut resources = load_resources_in_root(path, &self.root)?;
+			resources.prepare_mesh_images(mesh_index)?;
+			let bytes = resources.retained_bytes();
+			self.resource_order.push_back(path.to_path_buf());
+			self.resource_bytes += bytes;
+			self.resource_cache
+				.insert(path.to_path_buf(), (resources, bytes));
 		}
-		let resources = load_resources_in_root(path, &self.root)?;
-		let bytes = resources
-			.1
-			.iter()
-			.map(|buffer| buffer.0.len())
-			.chain(resources.2.iter().map(|image| image.pixels.len()))
-			.try_fold(0usize, |total, bytes| total.checked_add(bytes))
-			.ok_or_else(|| GltfLoaderError::Resource("CPU asset size overflow".into()))?;
-		if bytes > gltf_loader::IMPORT_LIMIT {
-			return Err(GltfLoaderError::Resource("CPU asset cache exceeds 256 MiB".into()).into());
-		}
-		while self.resource_cache.len() >= 4
-			|| self.resource_bytes.saturating_add(bytes) > gltf_loader::IMPORT_LIMIT
-		{
+		while self.resource_cache.len() > 4 || self.resource_bytes > gltf_loader::IMPORT_LIMIT {
 			if let Some(oldest) = self.resource_order.pop_front()
 				&& let Some((_, bytes)) = self.resource_cache.remove(&oldest)
 			{
 				self.resource_bytes -= bytes;
 			}
 		}
-		self.resource_order.push_back(path.to_path_buf());
-		self.resource_bytes += bytes;
-		self.resource_cache
-			.insert(path.to_path_buf(), (resources, bytes));
 		Ok(())
 	}
 
@@ -477,15 +473,43 @@ impl AssetManager {
 	/// submitted frame using them to finish. Active scenes and legacy Model
 	/// clones retain their own resource Arcs; those allocations remain cached.
 	/// Prune models first so their mesh/material references no longer keep
-	/// otherwise-unused GPU allocations alive.
+	/// otherwise-unused GPU allocations alive. CPU source snapshots are retained
+	/// only for live model paths or externally retained hierarchy metadata.
 	pub fn prune_unused(&mut self) {
-		self.models.retain(|_, model| Arc::strong_count(model) > 1);
+		self.models.retain(|_, model| {
+			// A legacy owned Model clone retains meshes rather than Arc<Model>.
+			// The cache and this model account for the first two mesh owners.
+			Arc::strong_count(model) > 1
+				|| model
+					.parts()
+					.iter()
+					.any(|part| Arc::strong_count(part.mesh_arc()) > 2)
+		});
+		let retained_paths: HashSet<_> = self
+			.models
+			.keys()
+			.map(|reference| self.root.join(&reference.path))
+			.collect();
 		self.meshes.retain(|_, mesh| Arc::strong_count(mesh) > 1);
 		self.textures
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
 		self.image_textures
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
 		self.reap_gpu_allocations();
+		self.scenes
+			.retain(|path, scene| Arc::strong_count(scene) > 1 || retained_paths.contains(path));
+		self.scene_order
+			.retain(|path| self.scenes.contains_key(path));
+		self.scene_bytes = self
+			.scenes
+			.iter()
+			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
+			.sum();
+		self.resource_cache
+			.retain(|path, _| retained_paths.contains(path) || self.scenes.contains_key(path));
+		self.resource_order
+			.retain(|path| self.resource_cache.contains_key(path));
+		self.resource_bytes = self.resource_cache.values().map(|(_, bytes)| bytes).sum();
 	}
 
 	pub fn load_image_texture(
@@ -795,6 +819,10 @@ fn mesh_bytes(data: &MeshData) -> Result<usize, AssetManagerError> {
 		})
 		.ok_or_else(|| AssetManagerError::ResourceBudget("mesh byte count overflow".into()))
 }
+
+#[cfg(test)]
+#[path = "tests_resource_cache.rs"]
+mod resource_cache_tests;
 
 #[cfg(test)]
 mod accounting_tests {

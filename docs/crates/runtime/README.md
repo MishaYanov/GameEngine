@@ -113,7 +113,10 @@ full synchronization. Lost events or document replacement require full resync; a
 caller contract. The host uses this path for compatible Edit changes and `synchronize_world` for Play changes.
 
 AssetManager batches missing model primitives/textures within renderer upload limits and caches imported source
-resources. Logical GPU accounting still counts externally retained allocations until release. `GizmoPose::from_scene`
+snapshots (up to four sources/256 MiB). It prepares only images used by the requested mesh, retains shared image bytes
+and preserves cached accounting on failed preparation. Pruning keeps sources required by live models or externally
+retained hierarchy metadata and reconciles source/metadata totals. This is scoped reuse, not file hot reload.
+Logical GPU accounting still counts externally retained allocations until release. `GizmoPose::from_scene`
 uses the entity's world position and parent transform; parent-aware segments/hit testing/drags convert the resulting
 world gesture back into local authored transforms. The native tools now use this path for parented objects.
 
@@ -122,6 +125,16 @@ The simulation caches distinct resolved controlled-movement entity keys for its 
 adapter expose it while Play is active. `set_controlled_input` supplies normalized movement to all those targets;
 `set_input` requires an individual target on that list. SceneEditor also provides `set_play_input` and
 `set_entity_play_input` adapters. These helpers preserve the existing input-transition clock reset behavior.
+
+## Collider interactions
+
+`scene_data::{ColliderData, ColliderInteraction}` re-exports the extracted core collider module. Box/Sphere retain
+local dimensions/offset and accept optional interaction settings: sensor false, layers 1 and mask u32::MAX by default.
+Cached and stateless overlap/movement paths use the same symmetric pair filter. Either sensor disables blocking for
+that pair while leaving eligible overlaps detectable; `Contact.sensor` classifies sensor contacts and defaults false
+for legacy input. Metadata-only changes refresh cached interaction records without requiring a geometry rebuild.
+Filtered and sensor candidates still count toward collision work budgets. Enter/Stay/Exit lifecycle events are not
+implemented. [Authoring and transform semantics](../../scene-editing.md#colliders-and-interaction-settings).
 
 `MovementTarget::{AllControlled, Entity(key)}` routes normalized movement through `set_targeted_input`. SceneEditor
 starts Play with `AllControlled`; `set_play_input_target(target, input)` validates a selected controlled entity, clears

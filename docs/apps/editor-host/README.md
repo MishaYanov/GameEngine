@@ -24,6 +24,12 @@ for opening the shell.
 
 ## Editor IPC
 
+`editor_capabilities` includes the native gameplay-module catalog and module-owned role hints. The Angular selector
+uses this data rather than a hardcoded Courtyard list. `set_collider` continues through the ordinary core command path;
+collider presence changes use full snapshots and interaction/dimension changes use authoritative entity deltas.
+`collider_visuals.rs` adds cached selected-shape outlines with bounded line/hierarchy work and nonfatal diagnostics;
+continuous cyan blocking outlines and dashed pink sensor outlines remain Scene-only. [Implementation review](../../building-blocks-review.md).
+
 | Commands                                                                                          | Scope                                                                                |
 |---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
 | editor_capabilities / editor_open / editor_snapshot                                               | Protocol/schema descriptors and authoritative document                               |

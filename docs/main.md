@@ -2,6 +2,9 @@
 
 Start with [setup and usage](usage.md), then read [architecture](architecture.md). Project guides follow the source layout under `apps`, `crates`, and `compiler`. Run commands from the directory stated in each guide.
 
+Read the [five building-blocks review](building-blocks-review.md) for the current playable proof of concept,
+module/role authoring, Collider Inspector, sensors/filtering, optimization boundaries and attributed verification.
+
 ## Workspace and development
 
 - [Vulkan scene editor design](../designs/editor-viewport/README.md): Researched navigation, grid, selection, transform tools, native asset placement, rendering architecture, and a game-creation support profile. Proposed viewport work is distinguished from current implementation.

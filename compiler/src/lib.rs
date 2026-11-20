@@ -263,7 +263,7 @@ pub fn stage_prepared_project(
 		)?;
 		write_new(
 			&path.join("README.txt"),
-			b"Game Engine project\nRun game.exe to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
+			b"Game Engine project\nA data-only stage contains the project and assets without a player executable.\nA completed export also contains game.exe; run it to open the Vulkan game window.\nRequires a Vulkan-capable GPU and driver.\nScene JSON and its model, image, material and prefab assets are installed beneath assets.\nAuthoring belongs to the Angular/Tauri editor; keep the assets folder beside the executable.\n",
 		)?;
 		Ok(())
 	})();

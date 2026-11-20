@@ -28,15 +28,21 @@ The expected revision is null when no workspace is open. A direct caller replaci
 | Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
 | Scene / Game tabs         | Select the native view through editor-only actions, with arrow/Home/End keyboard navigation. They do not themselves start/stop Play or switch catalog scenes     |
 | Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
-| Inspector                 | Edits selected name and local position/rotation/scale with live previews, grouped history, Enter/blur commit and Escape cancellation                             |
-| Viewport tools            | Editor-only camera, grid/planes, projection/orientation, native picking and Move/Rotate/Scale handles                                                            |
+| Inspector                 | Edits selected name, local transform and Box/Sphere colliders, including sensor mode and symmetric collision filters, with grouped previews and cancellation       |
+| Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                 |
 | Assets                    | Catalogued scenes can be opened; catalogued models can be added at origin or pointer-captured into a native placement preview                                    |
-| Scene controls            | Switch retained scenes, choose startup, assign Gameplay Roles, register scene files and save the active scene at a new path                                      |
+| Scene controls            | Switch retained scenes, choose startup/gameplay module, assign module-aware Gameplay Roles, register scene files and save the active scene at a new path           |
 | Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                          |
 | Settings portal           | Placeholder component; not a completed settings editor                                                                                                           |
 | Reload                    | Service API exists; the workspace does not expose a destructive Reload action                                                                                    |
 
 The overall dirty flag can include project settings or inactive drafts. Therefore an enabled Save Scene button does not promise that the whole workspace will become clean. Use Save All before Export Game. [Project lifecycle](project-lifecycle.md) defines the separate saved baselines.
+
+Gameplay options and role requirements come from the host module catalog, including per-scene overrides. The generic
+module uses configured behaviors without inventing Courtyard roles. Collider fields and discrete sensor/layer changes
+share the existing edit reservation, history and Save/Play barriers. Colliders is a view-only toggle: continuous cyan
+outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlap classification does not yet
+provide Enter/Stay/Exit events. See the [building-blocks review](building-blocks-review.md).
 
 ## One native surface, two views
 
@@ -85,6 +91,8 @@ npm.cmd run generate:panel -- scene-tools-panel
 | `apps/editor-host/src-tauri/src/viewport{,_interaction,_tools}.rs` | Native window/render ownership, tool state and spatial math |
 | `apps/editor/projects/editor-schematics/` | Local generator collection, name schema and external-file templates |
 
-Frontend paths after the first row are relative to `apps/editor/src/app`. This guide comes from commit/history plus staged, unstaged and untracked source inspection on 2026-11-06. The last commit includes already documented shared behavior definitions, prepared transitions, typed progress, resource ownership and optimization work; it does not imply that the new Angular workspace is committed.
+Frontend paths after the first row are relative to `apps/editor/src/app`. The 2026-11-20 reconciliation inspects
+commit `e0f2148` plus staged, unstaged and new working-tree files. Source inspection, automated checks and visible
+desktop acceptance are separately attributed in the [review](building-blocks-review.md#validation-evidence-and-limits).
 
 Documentation maintenance rebuilds and checks the site. The feature's implementation checks and current evidence belong in [native scene editor implementation](viewport-implementation.md) and the completion report; a site build does not establish GPU or cross-HWND acceptance. See `docs-site/docs-state.json` for the inspection baseline and verification limits. The Game App Developer space remains empty.

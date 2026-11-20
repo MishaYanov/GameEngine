@@ -3,6 +3,7 @@ use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
 use crate::scene_data::{CameraData, ColliderData, LightData, MaterialOverrideData, SceneData};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -267,10 +268,26 @@ pub struct CommandDescriptorDto {
 	pub undoable: bool,
 	pub available_in_play: bool,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameplayRoleDescriptorDto {
+	pub name: String,
+	pub label: String,
+	pub requirement_hint: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameplayModuleDescriptorDto {
+	pub id: String,
+	pub label: String,
+	pub description: String,
+	pub default_roles: Vec<GameplayRoleDescriptorDto>,
+	pub scene_roles: BTreeMap<String, Vec<GameplayRoleDescriptorDto>>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorCapabilitiesDto {
 	#[serde(default)]
 	pub incremental_commands: bool,
+	#[serde(default)]
+	pub gameplay_modules: Vec<GameplayModuleDescriptorDto>,
 	pub protocol_version: u32,
 	pub scene_schema_version: u32,
 	pub commands: Vec<CommandDescriptorDto>,

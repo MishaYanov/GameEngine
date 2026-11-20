@@ -1,8 +1,9 @@
 # Editor commands and document ownership
 
-The current editor direction is **Angular controls plus a game pane**, with runtime logic behind a typed bridge. Steps
-21–35 implement the integration contracts and engine foundations; no editor layout, mock screen, or composed template
-was added. Read the [learning report](editor-steps-21-35.md) for each step's rationale, file map, example and resources.
+The editor uses **Angular controls plus a native game pane**, with runtime logic behind a typed bridge. The current
+workspace composes Hierarchy, transform/Collider Inspector, scene/model controls, module/role/input authoring and
+save/export actions. The older [steps 21–35 report](editor-steps-21-35.md) retains its original foundation-only scope;
+read the [building-blocks review](building-blocks-review.md) for current implementation and verification boundaries.
 
 ## Authoritative document API
 
@@ -35,13 +36,33 @@ document data and use the same validated command path.
 ## Frontend and viewport integration
 
 The files under `apps/editor/src/app/core/editor` provide typed models, EditorService, and EngineViewportDirective. The
-directive attaches one enabled Angular DOM pane to an on-demand native viewport, observes layout/visibility and emits
-status/raw input/errors. It has not been applied by newly composed app layout in this batch.
+workspace's SceneViewport applies that directive to one persistent Scene/Game pane. It attaches an on-demand native
+viewport, observes layout/visibility and emits status/raw input/errors.
 
 The Windows child viewport has native airspace and lifecycle/DPI/focus constraints; ordinary HTML is not a free overlay
-atop it. The UI owner must surface platform capability limits and input/error states. Raw mouse/key notifications are
-not document edits until mapped by the frontend owner. No finished inspector, multi-selection gesture UI, snapping
-toolbar, or prefab browser is claimed.
+atop it. Angular keeps Inspector and toolbar controls beside the child window. Native selection, marquee, transform
+gestures and snapping share Rust command/history semantics with numeric edits. The prefab browser and general
+component Inspector remain future work.
+
+## Colliders and interaction settings
+
+The selected entity supports None, Box and Sphere, local offset, positive local half extents/radius, Blocking/Sensor
+mode, membership layers and detection masks. Numeric drafts keep incomplete text local, coalesce valid previews,
+commit on Enter/blur and cancel on Escape or an invalid final value. Type, mode and filter changes are atomic edits;
+queued filter intents rebase the latest collider so they preserve dimensions and other bits. Selection/scene/project
+changes invalidate drafts, and Play disables authoring.
+
+`ColliderData` and `ColliderInteraction` live in `engine-core/src/collider.rs` and remain re-exported by `scene_data`.
+`set_collider` validates geometry and uses ordinary history/delta/snapshot handling. Absent interaction defaults to
+`sensor: false`, `layers: 1`, `mask: 4294967295`; partial objects default individual fields and fully default settings
+are omitted on serialization. Filters accept all u32 values, including zero and bit 31. Both participants' masks must
+accept the other's membership. Sensors produce overlaps but never block kinematic motion on either side.
+
+The optional Colliders Scene overlay shows selected effective shapes, using dashed pink sensor outlines and continuous
+cyan blocking outlines. It is editor-only, cached and bounded; errors and omitted outlines are reported without
+failing scene rendering. Boxes use transformed world AABBs, and spheres conservatively enclose hierarchy scale/shear.
+This is not an oriented-box/rigid-body solver. `Contact.sensor` is overlap classification; Feature 1.4 Enter/Stay/Exit
+delivery is not implemented. See the [review](building-blocks-review.md#collider-inspector-and-sensorfilter-authoring).
 
 ## Multi-scene documents and native adapter
 

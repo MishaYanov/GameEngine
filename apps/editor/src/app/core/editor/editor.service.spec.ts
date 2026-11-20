@@ -9,6 +9,7 @@ import type {
     EditorCapabilities,
     EditorCommandUpdate,
     EditorSnapshot,
+    GameplayModuleDescriptor,
     Light,
     ModelAsset,
     SceneEntity,
@@ -131,6 +132,11 @@ const capabilities: EditorCapabilities = {
     embedded_viewport_supported: true,
     incremental_commands: true,
 };
+const gameplayModule: GameplayModuleDescriptor = {
+    id: 'alternate_game', label: 'Alternate game', description: 'Reach the goal.',
+    default_roles: [{name: 'goal', label: 'Goal', requirement_hint: 'Choose the goal marker.'}],
+    scene_roles: {finish: []},
+};
 const status: ViewportStatus = {
     attached: true,
     visible: true,
@@ -237,6 +243,31 @@ describe('EditorService native command and viewport queues', () => {
             expect(service.error()).toBeNull();
         },
     );
+
+    it('retains the captured revision for a queued whole-project update', async () => {
+        const initial = snapshot(1);
+        const changed = {...snapshot(2), project: {...initial.project, name: 'Concurrent project name'}};
+        const preceding = deferred<EditorCommandUpdate>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(initial)
+            .mockResolvedValueOnce(capabilities)
+            .mockReturnValueOnce(preceding.promise)
+            .mockRejectedValueOnce({code: 'conflict', message: 'The project revision changed.'})
+            .mockResolvedValueOnce(changed);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        const first = service.execute({type: 'set_project', project: changed.project});
+        const command = {type: 'set_project', project: {...initial.project, gameplay_module: 'alternate_game'}} as const;
+        const moduleChange = service.execute(command, service.workspaceGeneration(), initial.revision);
+        const rejected = expect(moduleChange).rejects.toThrow('The project revision changed.');
+        preceding.resolve(commandUpdate(changed));
+        await first;
+        await rejected;
+        expect(invoke).toHaveBeenNthCalledWith(4, 'editor_execute_incremental', {
+            request: {expected_revision: 1, command},
+        });
+        expect(service.snapshot()?.project).toEqual(changed.project);
+    });
 
     it('refreshes authoritative memory after a conflict without retrying the rejected edit', async () => {
         vi.mocked(invoke)
@@ -871,6 +902,45 @@ describe('EditorService native command and viewport queues', () => {
         expect(await service.loadCapabilities()).toEqual(capabilities);
         await service.loadCapabilities();
         expect(invoke).toHaveBeenCalledTimes(3);
+    });
+
+    it('caches module metadata for alternate modules and accepts older hosts without metadata', async () => {
+        const service = TestBed.inject(EditorService);
+        const advertised = {...capabilities, gameplay_modules: [gameplayModule]};
+        vi.mocked(invoke).mockResolvedValueOnce(advertised);
+        expect(await service.loadCapabilities()).toEqual(advertised);
+        expect(service.capabilities()?.gameplay_modules?.[0].scene_roles['finish']).toEqual([]);
+        await service.loadCapabilities();
+        expect(invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['null catalog', null],
+        ['object catalog', {}],
+        ['empty module ID', [{...gameplayModule, id: ''}]],
+        ['invalid module ID', [{...gameplayModule, id: 'Uppercase'}]],
+        ['long module ID', [{...gameplayModule, id: 'a'.repeat(33)}]],
+        ['duplicate module IDs', [gameplayModule, gameplayModule]],
+        ['empty label', [{...gameplayModule, label: '  '}]],
+        ['missing description', [{...gameplayModule, description: undefined}]],
+        ['invalid role collection', [{...gameplayModule, default_roles: {}}]],
+        ['empty role name', [{...gameplayModule, default_roles: [{...gameplayModule.default_roles[0], name: ''}]}]],
+        ['long UTF-8 role name', [{...gameplayModule, default_roles: [{...gameplayModule.default_roles[0], name: 'é'.repeat(513)}]}]],
+        ['role control character', [{...gameplayModule, default_roles: [{...gameplayModule.default_roles[0], name: 'bad\nrole'}]}]],
+        ['missing role hint', [{...gameplayModule, default_roles: [{name: 'goal', label: 'Goal'}]}]],
+        ['duplicate roles', [{...gameplayModule, default_roles: [...gameplayModule.default_roles, ...gameplayModule.default_roles]}]],
+        ['invalid scene overrides', [{...gameplayModule, scene_roles: []}]],
+        ['invalid scene ID', [{...gameplayModule, scene_roles: {'two scenes': []}}]],
+        ['long scene ID', [{...gameplayModule, scene_roles: {['x'.repeat(257)]: []}}]],
+        ['malformed scene roles', [{...gameplayModule, scene_roles: {finish: null}}]],
+    ])('rejects malformed %s before caching gameplay metadata', async (_label, modules) => {
+        const service = TestBed.inject(EditorService);
+        vi.mocked(invoke).mockResolvedValueOnce({...capabilities, gameplay_modules: modules});
+        await expect(service.loadCapabilities()).rejects.toThrow('invalid gameplay module metadata');
+        expect(service.capabilities()).toBeNull();
+        vi.mocked(invoke).mockResolvedValueOnce(capabilities);
+        await service.loadCapabilities();
+        expect(service.capabilities()?.gameplay_modules).toBeUndefined();
     });
 
     it('coalesces queued viewport bounds to the latest geometry', async () => {

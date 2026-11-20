@@ -1,0 +1,64 @@
+<section class="collider" aria-label="Collider">
+    <h3>Collider <span>Local space</span></h3>
+    <label class="shape">Shape
+        <select #shape [disabled]="!editable()" (change)="changeShape(shape)">
+            <option value="none" [selected]="kind() === 'none'">None</option>
+            <option value="box" [selected]="kind() === 'box'">Box</option>
+            <option value="sphere" [selected]="kind() === 'sphere'">Sphere</option>
+        </select>
+    </label>
+    <div class="numbers">
+        @for (field of fields(); track field.key) {
+            <label>
+                <span>{{ field.label.replace('Collider ', '') }}</span>
+                <input #numberInput type="text" inputmode="decimal" autocomplete="off"
+                       [attr.aria-label]="field.label" [disabled]="!editable()" [value]="display(field)"
+                       [attr.aria-invalid]="active()?.key === field.key && active()?.invalid ? 'true' : null"
+                       [attr.aria-describedby]="active()?.key === field.key && active()?.invalid ? errorId : null"
+                       (focus)="start(field, numberInput)" (input)="change(field, numberInput)"
+                       (blur)="finish(field, numberInput)" (keydown)="keydown($event, field, numberInput)"/>
+            </label>
+        }
+    </div>
+    @if (active()?.invalid) {
+        <p class="error" [id]="errorId" role="status">{{ numberError }}</p>
+    }
+    @if (collider()) {
+        <label class="shape">Interaction
+            <select #interactionMode [disabled]="!editable()" (change)="changeMode(interactionMode)">
+                <option value="blocking" [selected]="!interaction().sensor">Blocking</option>
+                <option value="sensor" [selected]="interaction().sensor">Sensor</option>
+            </select>
+        </label>
+        <p class="hint">Sensors detect overlaps without blocking movement. Sensor outlines are dashed pink. Blocking outlines are cyan.</p>
+        <details>
+            <summary>Collision layers</summary>
+            <p class="hint" [id]="filterHelpId">Both colliders must detect each other's layers to interact.</p>
+            @for (group of filterGroups; track group.field) {
+                <fieldset [disabled]="!editable()" [attr.aria-describedby]="filterHelpId">
+                    <legend>{{ group.label }}</legend>
+                    <div class="filter-actions">
+                        <button type="button" [disabled]="!editable()" [attr.aria-label]="group.allLabel"
+                                (click)="changeFilter(group.field, 4294967295)">All</button>
+                        <button type="button" [disabled]="!editable()" [attr.aria-label]="group.noneLabel"
+                                (click)="changeFilter(group.field, 0)">None</button>
+                    </div>
+                    <div class="layer-grid">
+                        @for (layer of collisionLayers; track layer.bit) {
+                            <label class="layer-choice">
+                                <input #layerInput type="checkbox" [checked]="layerEnabled(group.field, layer.bit)"
+                                       [disabled]="!editable()"
+                                       [attr.aria-label]="group.checkboxLabel + ' ' + layer.label"
+                                       (change)="changeLayer(group.field, layer.bit, layerInput)"/>
+                                <span>{{ layer.label }}</span>
+                            </label>
+                        }
+                    </div>
+                </fieldset>
+            }
+            @if (interaction().layers === 0 || interaction().mask === 0) {
+                <p class="hint" role="status">Collision and overlap detection are disabled while either group has no layers selected.</p>
+            }
+        </details>
+    }
+</section>

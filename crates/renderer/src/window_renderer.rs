@@ -1,4 +1,10 @@
-use std::{mem::ManuallyDrop, sync::Arc};
+use std::{
+	mem::ManuallyDrop,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
+};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -15,6 +21,7 @@ pub struct WindowRenderer {
 	dirty: bool,
 	lighting: LightingUniform,
 	editor_visuals: crate::EditorVisuals,
+	external_resources_retained: AtomicBool,
 }
 
 struct RendererResources {
@@ -119,6 +126,7 @@ impl WindowRenderer {
 			dirty: true,
 			lighting: LightingUniform::default(),
 			editor_visuals: crate::EditorVisuals::default(),
+			external_resources_retained: AtomicBool::new(false),
 		};
 		renderer.prepare()?;
 		Ok(renderer)
@@ -200,8 +208,16 @@ impl WindowRenderer {
 					self.resources.material_layout.raw(),
 				)?);
 			}
-			let frame =
-				VulkanFrame::new(&self.resources.device, &swapchain).map_err(|e| e.to_string())?;
+			let frame = match old {
+				Some(old)
+					if old.swapchain.format() == swapchain.format()
+						&& old.depth.format() == depth.format() =>
+				{
+					VulkanFrame::recreate(&self.resources.device, &swapchain, old.frame)
+				}
+				_ => VulkanFrame::new(&self.resources.device, &swapchain),
+			}
+			.map_err(|e| e.to_string())?;
 			self.resources.targets = Some(RenderTargets {
 				frame,
 				depth,
@@ -297,6 +313,18 @@ impl WindowRenderer {
 		self.wait_idle_raw().map_err(|e| e.to_string())
 	}
 
+	/// Release external GPU owners after completion or device loss. If completion
+	/// cannot be established, retain both these resources and the renderer's
+	/// device/window ownership tree, even if a later wait succeeds.
+	pub fn retire_resources<T: 'static>(&self, resources: T) -> Result<(), String> {
+		retire_external(
+			resources,
+			self.wait_idle_raw(),
+			&self.external_resources_retained,
+		)
+		.map_err(|error| error.to_string())
+	}
+
 	fn wait_idle_raw(&self) -> Result<(), ash::vk::Result> {
 		if let Some(targets) = &self.resources.targets {
 			targets.frame.wait_complete_raw()?;
@@ -329,12 +357,28 @@ impl Drop for WindowRenderer {
 		let completed = self.wait_idle_raw();
 		// Drop is the only path that takes this owner; the field cannot drop again.
 		let resources = unsafe { ManuallyDrop::take(&mut self.resources) };
+		if *self.external_resources_retained.get_mut() {
+			std::mem::forget(resources);
+			return;
+		}
 		if let Err(error) = release_after_idle(resources, completed) {
 			engine_logger::error!(
 				"Retaining renderer resources after unrecoverable shutdown wait failure: {error:?}"
 			);
 		}
 	}
+}
+
+fn retire_external<T>(
+	resources: T,
+	completed: Result<(), ash::vk::Result>,
+	retained: &AtomicBool,
+) -> Result<(), ash::vk::Result> {
+	if let Err(error) = release_after_idle(resources, completed) {
+		retained.store(true, Ordering::Release);
+		return Err(error);
+	}
+	Ok(())
 }
 
 fn release_after_idle<T>(
@@ -357,8 +401,11 @@ fn release_after_idle<T>(
 
 #[cfg(test)]
 mod tests {
-	use super::{DrawStatus, FrameStatus, VulkanFrameError, finish_draw, release_after_idle};
+	use super::{
+		DrawStatus, FrameStatus, VulkanFrameError, finish_draw, release_after_idle, retire_external,
+	};
 	use std::cell::RefCell;
+	use std::sync::atomic::{AtomicBool, Ordering};
 	struct Resource<'a>(&'a RefCell<Vec<u8>>, u8);
 	impl Drop for Resource<'_> {
 		fn drop(&mut self) {
@@ -390,6 +437,37 @@ mod tests {
 			DrawStatus::Rendered
 		);
 		assert!(!dirty);
+	}
+
+	#[test]
+	fn retained_external_children_keep_the_parent_retained_after_later_wait_success() {
+		let retained = AtomicBool::new(false);
+		let dropped = RefCell::new(Vec::new());
+		assert!(
+			retire_external(
+				Resource(&dropped, 1),
+				Err(ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY),
+				&retained
+			)
+			.is_err()
+		);
+		assert!(retained.load(Ordering::Acquire));
+		assert!(dropped.borrow().is_empty());
+		retire_external(Resource(&dropped, 2), Ok(()), &retained).unwrap();
+		assert!(
+			retained.load(Ordering::Acquire),
+			"earlier forgotten children still own Vulkan handles"
+		);
+		assert_eq!(*dropped.borrow(), [2]);
+		let retained = AtomicBool::new(false);
+		retire_external(
+			Resource(&dropped, 3),
+			Err(ash::vk::Result::ERROR_DEVICE_LOST),
+			&retained,
+		)
+		.unwrap();
+		assert!(!retained.load(Ordering::Acquire));
+		assert_eq!(*dropped.borrow(), [2, 3]);
 	}
 
 	#[test]

@@ -1,4 +1,7 @@
 //! Native editor interaction ownership, independent of the window and DOM.
+#[path = "collider_visuals.rs"]
+mod collider_visuals;
+
 use std::{
 	cell::{Ref, RefCell},
 	collections::{HashMap, HashSet},
@@ -78,6 +81,7 @@ pub(crate) struct ViewportInteraction {
 	drag_generation: Option<u64>,
 	move_targets: Vec<MoveTarget>,
 	transform_cache: RefCell<Option<TransformCache>>,
+	collider_visuals: collider_visuals::ColliderVisuals,
 	click: Option<Click>,
 	placement: Option<Placement>,
 	import: Option<AssetTicket>,
@@ -115,6 +119,7 @@ impl Default for ViewportInteraction {
 			drag_generation: None,
 			move_targets: Vec::new(),
 			transform_cache: RefCell::new(None),
+			collider_visuals: Default::default(),
 			click: None,
 			placement: None,
 			import: None,
@@ -174,6 +179,7 @@ impl ViewportInteraction {
 				}),
 			focused: self.focused,
 			error: self.error.clone(),
+			collider_error: self.collider_visuals.error().map(str::to_owned),
 			transform_preview: self.preview.clone(),
 			game_status: self.game_status.clone(),
 		}
@@ -219,6 +225,15 @@ impl ViewportInteraction {
 
 	pub fn take_document_changed(&mut self) -> bool {
 		std::mem::take(&mut self.document_changed)
+	}
+
+	fn sync_colliders(&mut self, workspace: &EditorWorkspace) {
+		if self.collider_visuals.sync(
+			workspace,
+			self.settings.colliders && self.settings.view == ViewportView::Scene,
+		) {
+			self.changed();
+		}
 	}
 
 	pub fn sync(&mut self, workspace: &mut EditorWorkspace) -> Result<(), String> {
@@ -273,6 +288,7 @@ impl ViewportInteraction {
 		if self.game_status_revision != Some((generation, workspace.backend.session().revision())) {
 			self.sync_game_status(workspace);
 		}
+		self.sync_colliders(workspace);
 		Ok(())
 	}
 
@@ -381,6 +397,7 @@ impl ViewportInteraction {
 		} else {
 			self.document_changed = true;
 		}
+		self.sync_colliders(workspace);
 		Ok(())
 	}
 
@@ -405,10 +422,9 @@ impl ViewportInteraction {
 			ViewportActionDto::UpdatePlacement { .. }
 				| ViewportActionDto::CommitPlacement
 				| ViewportActionDto::CancelPlacement
-		) {
-			if self.drag.is_some() {
-				self.cancel_transform(workspace)?;
-			}
+		) && self.drag.is_some()
+		{
+			self.cancel_transform(workspace)?;
 		}
 		match action {
 			ViewportActionDto::RestartRun { .. } => {
@@ -418,6 +434,7 @@ impl ViewportInteraction {
 			ViewportActionDto::SetSpace { space } => self.settings.space = space,
 			ViewportActionDto::SetPivot { pivot } => self.settings.pivot = pivot,
 			ViewportActionDto::SetGrid { visible } => self.settings.grid = visible,
+			ViewportActionDto::SetColliders { visible } => self.settings.colliders = visible,
 			ViewportActionDto::SetGridSpacing { spacing } => self.settings.grid_spacing = spacing,
 			ViewportActionDto::SetSnap { enabled } => self.settings.snap = enabled,
 			ViewportActionDto::SetSnapIncrements {
@@ -518,6 +535,7 @@ impl ViewportInteraction {
 			}
 			ViewportActionDto::CancelPlacement => self.cancel_placement(workspace)?,
 		}
+		self.sync_colliders(workspace);
 		self.changed();
 		Ok(())
 	}
@@ -1159,15 +1177,14 @@ impl ViewportInteraction {
 					self.changed();
 				}
 			}
-			"key_up" => {
+			"key_up"
 				if input
 					.code
 					.as_ref()
 					.is_some_and(|code| self.keys.remove(code))
-					&& self.focused && self.game_keyboard_active()
-				{
-					self.route_game_input(workspace)?;
-				}
+					&& self.focused && self.game_keyboard_active() =>
+			{
+				self.route_game_input(workspace)?;
 			}
 			_ => {}
 		}
@@ -1544,6 +1561,9 @@ impl ViewportInteraction {
 					});
 				}
 			}
+		}
+		if self.settings.colliders {
+			self.collider_visuals.append(&mut visuals, dpi);
 		}
 		Ok(visuals)
 	}

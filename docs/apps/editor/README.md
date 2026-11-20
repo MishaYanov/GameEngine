@@ -67,9 +67,16 @@ active scene; `saveProject()` persists only the manifest. `reload()` explicitly 
 `refresh()` reads in-memory state. `saveAll()` persists all dirty retained scenes and project settings without changing the active scene. The UI must make destructive reload intent clear.
 See [project lifecycle](../../project-lifecycle.md) for the data model. The workspace now exposes scene switching, startup selection, registration and Save As, plus selectable model/scene catalogue entries and origin/native-drag model placement.
 
-**Gameplay Roles** in the scene controls lets you assign Player, Key, Exit and Finish to entities in the current
-scene. **Unassigned** clears a role. Assignment and clearing support Undo and Redo and persist with the scene.
+**Gameplay Module** selects the generic configured behavior or a host-advertised native module. **Gameplay Roles**
+uses that module's default or per-scene role descriptors; Courtyard advertises Player/Key/Exit and Player/Finish in
+its `finish` scene. **Unassigned** clears a role. Module selection is a project edit; assignments are scene edits.
+Both support history and persist through the appropriate save action. Unknown saved modules remain visible for repair.
 [Scene role requirements](../../project-lifecycle.md#gameplay-role-bindings).
+
+The extracted workspace `collider/` component/value helpers expose None/Box/Sphere, local dimensions/offset,
+Blocking/Sensor mode and 32 membership/detection bits. `SceneEditingService` owns their transaction and context
+guards, coalesces numeric previews and rebases queued interaction intents on authoritative collider data. The
+Colliders toggle is editor-only; Game hides the selected-shape overlay. [Collider workflow](../../scene-editing.md#colliders-and-interaction-settings).
 
 `core/project/project.service.ts` creates authoring projects and chooses a destination. Setup opens the created manifest through EditorService, retaining a retry path after open cancellation/failure. `prepareBuild()` stages saved inputs inside the edit reservation; `finishBuild()` compiles outside the document queue. `runBuild(expectedPath)` explicitly launches the remembered successful output.
 

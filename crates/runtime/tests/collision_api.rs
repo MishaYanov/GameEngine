@@ -7,12 +7,14 @@ use support::*;
 
 fn cube(name: &str, position: [f32; 3]) -> runtime::scene_data::EntityData {
 	entity(name, position).with_collider(Some(ColliderData::Box {
+		interaction: Default::default(),
 		half_extents: [0.5; 3],
 		offset: [0.0; 3],
 	}))
 }
 fn sphere(name: &str, position: [f32; 3]) -> runtime::scene_data::EntityData {
 	entity(name, position).with_collider(Some(ColliderData::Sphere {
+		interaction: Default::default(),
 		radius: 0.5,
 		offset: [0.0; 3],
 	}))
@@ -41,6 +43,7 @@ fn curved_narrow_phase_excludes_aabb_corner_false_positives_and_reports_containm
 	assert!(collision::query_overlaps(&data).unwrap().is_empty());
 	let mut large = cube("box", [0.0; 3]);
 	large.collider = Some(ColliderData::Box {
+		interaction: Default::default(),
 		half_extents: [2.0; 3],
 		offset: [0.0; 3],
 	});
@@ -126,6 +129,7 @@ fn sphere_debug_bounds_conservatively_enclose_hierarchy_shear_and_offset() {
 	let mut child = sphere("child", [0.0; 3]).with_parent(Some(key("parent")));
 	child.transform.rotation[2] = 0.7;
 	child.collider = Some(ColliderData::Sphere {
+		interaction: Default::default(),
 		radius: 1.0,
 		offset: [1.0, 0.0, 0.0],
 	});

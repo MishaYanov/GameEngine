@@ -89,6 +89,88 @@ fn run(workspace: &mut EditorWorkspace, command: Command) {
 		.unwrap();
 }
 
+#[test]
+fn game_input_profile_save_all_reopens_and_routes_remapped_input() {
+	use runtime::{
+		input::{GameInputBinding, InputProfile, Key, MovementBindings},
+		project::BehaviorSpec,
+	};
+	use std::collections::HashSet;
+
+	let fixture = Fixture::new();
+	let manifest = fixture.write_project("scenes/main.json");
+	let scene_bytes = fs::read(fixture.0.join("scenes/main.json")).unwrap();
+	let mut workspace = fixture.open();
+	let mut project = workspace.backend.session().project().clone();
+	let profile = InputProfile {
+		movement: MovementBindings::ARROWS,
+		actions: vec![GameInputBinding {
+			id: "interact".into(),
+			key: Key::Space,
+			animation_parameter: Some("IsInteracting".into()),
+		}],
+		..Default::default()
+	};
+	project.input_profile = Some(profile.clone());
+	project.add_behavior(BehaviorSpec::ControlledMove {
+		entity: EntityKey::new("a").unwrap(),
+		speed: 2.0,
+		space: Default::default(),
+	});
+	run(&mut workspace, Command::SetProject { project });
+	assert!(workspace.backend.snapshot().unwrap().project_dirty);
+	let saved = workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	assert!(!saved.project_dirty);
+	assert!(!saved.dirty);
+	assert_eq!(
+		runtime::project::ProjectData::load(&manifest)
+			.unwrap()
+			.input_profile,
+		Some(profile.clone())
+	);
+
+	let mut reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	assert_eq!(
+		reopened.backend.session().project().input_profile.as_ref(),
+		Some(&profile)
+	);
+	run(&mut reopened, Command::StartPlay);
+	let position = |workspace: &EditorWorkspace| {
+		workspace.backend.session().render_document().entities[0]
+			.transform
+			.position
+	};
+	reopened
+		.backend
+		.set_game_keyboard_input_from_codes(&HashSet::from(["KeyD".into()]))
+		.unwrap();
+	reopened.backend.tick(0.1).unwrap();
+	assert_eq!(position(&reopened), [0.0; 3]);
+	reopened
+		.backend
+		.set_game_keyboard_input_from_codes(&HashSet::from(["ArrowRight".into(), "Space".into()]))
+		.unwrap();
+	reopened.backend.tick(0.1).unwrap();
+	let moved = position(&reopened);
+	assert!(moved[0] > 0.0);
+	assert!(!reopened.backend.session().is_paused());
+	reopened.backend.clear_play_input();
+	reopened.backend.tick(0.1).unwrap();
+	assert_eq!(position(&reopened), moved);
+	run(&mut reopened, Command::StopPlay);
+	assert_eq!(position(&reopened), [0.0; 3]);
+	assert_eq!(
+		fs::read(fixture.0.join("scenes/main.json")).unwrap(),
+		scene_bytes
+	);
+}
+
 #[cfg(windows)]
 #[test]
 fn unsaved_scene_case_alias_is_rejected_without_mutation_or_files() {
@@ -270,7 +352,6 @@ fn play_selects_the_current_gameplay_module_after_history_and_workspace_reopen()
 
 	let mut project = workspace.backend.session().project().clone();
 	project.gameplay_module = Some("missing_module".into());
-	run(&mut workspace, Command::SetProject { project });
 	let session = workspace.backend.session();
 	let (revision, scene_revision, cursor) = (
 		session.revision(),
@@ -280,7 +361,7 @@ fn play_selects_the_current_gameplay_module_after_history_and_workspace_reopen()
 	let error = workspace
 		.execute(EditorCommandRequest {
 			expected_revision: revision,
-			command: Command::StartPlay,
+			command: Command::SetProject { project },
 		})
 		.unwrap_err();
 	assert!(error.contains("missing_module"));
@@ -289,6 +370,90 @@ fn play_selects_the_current_gameplay_module_after_history_and_workspace_reopen()
 	assert_eq!(session.revision(), revision);
 	assert_eq!(session.scene_revision(), scene_revision);
 	assert_eq!(workspace.backend.change_cursor(), cursor);
+	assert_eq!(
+		session.project().gameplay_module.as_deref(),
+		Some(COURTYARD_RUN_ID)
+	);
+}
+
+#[test]
+fn unavailable_saved_module_can_be_opened_edited_and_repaired_without_losing_bindings() {
+	use bridge::editor::SceneBindingTarget;
+	use runtime::project::ProjectData;
+	let fixture = Fixture::new();
+	let manifest = fixture.write_project("scenes/main.json");
+	let mut project = ProjectData::load(&manifest).unwrap();
+	project.gameplay_module = Some("unavailable".into());
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	let mut workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	let scene_id = workspace.backend.session().active_scene_id().clone();
+	run(
+		&mut workspace,
+		Command::SetSceneBinding {
+			scene_id,
+			name: "player".into(),
+			target: SceneBindingTarget::Assign { key: "a".into() },
+		},
+	);
+	let mut project = workspace.backend.session().project().clone();
+	project.name = "Editable unavailable module".into();
+	run(&mut workspace, Command::SetProject { project });
+	let revision = workspace.backend.session().revision();
+	assert!(workspace
+		.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: Command::StartPlay,
+		})
+		.unwrap_err()
+		.contains("unavailable"));
+	assert_eq!(workspace.backend.session().revision(), revision);
+	let before = workspace.backend.snapshot().unwrap();
+	let mut project = before.project.clone();
+	project.gameplay_module = None;
+	let update = workspace
+		.execute_incremental(EditorCommandRequest {
+			expected_revision: before.revision,
+			command: Command::SetProject { project },
+		})
+		.unwrap();
+	let EditorCommandUpdateDto::Snapshot { snapshot, receipt } = update else {
+		panic!("Module selection must return the changed project");
+	};
+	assert!(receipt.project_changed);
+	assert!(snapshot.project.gameplay_module.is_none());
+	assert_eq!(snapshot.document, before.document);
+	assert_eq!(snapshot.project.behaviors, before.project.behaviors);
+	run(&mut workspace, Command::Undo);
+	assert_eq!(
+		workspace
+			.backend
+			.session()
+			.project()
+			.gameplay_module
+			.as_deref(),
+		Some("unavailable")
+	);
+	run(&mut workspace, Command::Redo);
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	let mut reopened = fixture.open();
+	assert!(reopened
+		.backend
+		.session()
+		.project()
+		.gameplay_module
+		.is_none());
+	assert_eq!(
+		reopened.backend.session().authored_document().bindings,
+		before.document.bindings
+	);
+	run(&mut reopened, Command::StartPlay);
+	run(&mut reopened, Command::StopPlay);
 }
 
 #[test]
@@ -2495,4 +2660,499 @@ fn scene_binding_edits_return_authoritative_snapshots_and_persist_after_reopen()
 	assert_eq!(reopened.document.bindings["player"].as_str(), "b");
 	assert!(!reopened.dirty);
 	assert!(!reopened.can_undo);
+}
+
+fn collider_fixture() -> Fixture {
+	let fixture = Fixture::new();
+	fs::copy(
+		PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game/assets/props/cube.glb"),
+		fixture.0.join("models/crate.glb"),
+	)
+	.unwrap();
+	let path = fixture.0.join("scenes/main.json");
+	let mut document = runtime::scene_io::load_data(&path).unwrap().data;
+	document.entities = vec![EntityData::new(
+		EntityKey::new("crate").unwrap(),
+		"Collision prop",
+		"models/crate.glb",
+	)];
+	fs::write(path, document.to_json().unwrap()).unwrap();
+	fixture.write_project("scenes/main.json");
+	fixture
+}
+
+fn apply_collider_update(
+	workspace: &mut EditorWorkspace,
+	client: &mut EditorSnapshotDto,
+	command: Command,
+) -> EditorCommandUpdateDto {
+	let update = incremental(workspace, command);
+	let wire = serde_json::to_vec(&update).unwrap();
+	let update = serde_json::from_slice(&wire).unwrap();
+	*client = apply_incremental(client.clone(), &update);
+	assert_eq!(
+		serde_json::to_value(&*client).unwrap(),
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+	);
+	update
+}
+
+#[test]
+fn collider_actions_on_a_base_prop_roundtrip_incremental_state_and_each_undo_once() {
+	use runtime::scene_data::{ColliderData, ColliderInteraction};
+	let fixture = collider_fixture();
+	let mut workspace = fixture.open();
+	let mut client = workspace.backend.snapshot().unwrap();
+	assert!(client.project.gameplay_module.is_none());
+	let original = client.document.clone();
+	let project = client.project.clone();
+	let states = [
+		None,
+		Some(ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [0.5; 3],
+			offset: [0.0; 3],
+		}),
+		Some(ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [0.5; 3],
+			offset: [1.0, -0.25, 2.0],
+		}),
+		Some(ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [0.25, 0.75, 1.5],
+			offset: [1.0, -0.25, 2.0],
+		}),
+		Some(ColliderData::Box {
+			interaction: ColliderInteraction {
+				sensor: true,
+				..Default::default()
+			},
+			half_extents: [0.25, 0.75, 1.5],
+			offset: [1.0, -0.25, 2.0],
+		}),
+		Some(ColliderData::Box {
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 1 << 31,
+				mask: 0,
+			},
+			half_extents: [0.25, 0.75, 1.5],
+			offset: [1.0, -0.25, 2.0],
+		}),
+		Some(ColliderData::Sphere {
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 1 << 31,
+				mask: 0,
+			},
+			radius: 1.25,
+			offset: [1.0, -0.25, 2.0],
+		}),
+		None,
+	];
+	for (index, collider) in states.iter().enumerate().skip(1) {
+		let update = apply_collider_update(
+			&mut workspace,
+			&mut client,
+			Command::SetCollider {
+				key: "crate".into(),
+				collider: collider.clone(),
+			},
+		);
+		assert_eq!(
+			matches!(update, EditorCommandUpdateDto::Snapshot { .. }),
+			states[index - 1].is_some() != collider.is_some()
+		);
+		let mut expected = original.clone();
+		expected.entities[0].collider = collider.clone();
+		assert_eq!(client.document, expected);
+		assert_eq!(client.project, project);
+		assert!(!client.project_dirty);
+	}
+	for collider in states[..states.len() - 1].iter().rev() {
+		apply_collider_update(&mut workspace, &mut client, Command::Undo);
+		assert_eq!(&client.document.entities[0].collider, collider);
+	}
+	assert!(
+		!client.can_undo,
+		"Each accepted collider action must create exactly one history entry"
+	);
+	assert_eq!(client.document, original);
+	for collider in &states[1..] {
+		apply_collider_update(&mut workspace, &mut client, Command::Redo);
+		assert_eq!(&client.document.entities[0].collider, collider);
+	}
+	assert!(!client.can_redo);
+}
+
+#[test]
+fn collider_previews_cancel_without_history_and_commit_as_one_edit() {
+	use runtime::scene_data::{ColliderData, ColliderInteraction};
+	let fixture = collider_fixture();
+	let mut workspace = fixture.open();
+	let mut client = workspace.backend.snapshot().unwrap();
+	let original = client.document.clone();
+	let previews = [
+		ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [0.5; 3],
+			offset: [0.0; 3],
+		},
+		ColliderData::Box {
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 4,
+				mask: 8,
+			},
+			half_extents: [1.0, 0.5, 0.25],
+			offset: [2.0, 0.0, -1.0],
+		},
+		ColliderData::Sphere {
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 4,
+				mask: 8,
+			},
+			radius: 0.75,
+			offset: [2.0, 0.0, -1.0],
+		},
+	];
+	for commit in [false, true] {
+		apply_collider_update(
+			&mut workspace,
+			&mut client,
+			Command::BeginTransaction {
+				label: "Edit collider".into(),
+			},
+		);
+		for collider in &previews {
+			apply_collider_update(
+				&mut workspace,
+				&mut client,
+				Command::SetCollider {
+					key: "crate".into(),
+					collider: Some(collider.clone()),
+				},
+			);
+			assert_eq!(
+				client.document.entities[0].collider.as_ref(),
+				Some(collider)
+			);
+		}
+		apply_collider_update(
+			&mut workspace,
+			&mut client,
+			if commit {
+				Command::CommitTransaction
+			} else {
+				Command::CancelTransaction
+			},
+		);
+		assert!(client.transaction.is_none());
+		if !commit {
+			assert_eq!(client.document, original);
+			assert!(!client.can_undo);
+			assert!(!client.can_redo);
+			assert!(!client.dirty);
+		}
+	}
+	let accepted = client.document.clone();
+	apply_collider_update(&mut workspace, &mut client, Command::Undo);
+	assert_eq!(client.document, original);
+	assert!(!client.can_undo);
+	apply_collider_update(&mut workspace, &mut client, Command::Redo);
+	assert_eq!(client.document, accepted);
+	assert!(!client.can_redo);
+}
+
+#[test]
+fn collider_scene_drafts_and_project_settings_save_together_and_reopen_independently() {
+	use runtime::scene_data::{ColliderData, ColliderInteraction};
+	let fixture = collider_fixture();
+	let main_path = fixture.0.join("scenes/main.json");
+	let document = runtime::scene_io::load_data(&main_path).unwrap().data;
+	fs::write(
+		fixture.0.join("scenes/second.json"),
+		document.to_json().unwrap(),
+	)
+	.unwrap();
+	let manifest = fixture.0.parent().unwrap().join("project.json");
+	let mut project = runtime::project::ProjectData::load(&manifest).unwrap();
+	let second = SceneId::new("second").unwrap();
+	project
+		.scenes
+		.insert(SceneDescriptor::new(second.clone(), "scenes/second.json").unwrap())
+		.unwrap();
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	let mut workspace = fixture.open();
+	let mut client = workspace.backend.snapshot().unwrap();
+	let first_shape = Some(ColliderData::Box {
+		interaction: ColliderInteraction {
+			sensor: true,
+			layers: 1 << 31,
+			mask: 0,
+		},
+		half_extents: [0.5, 1.0, 2.0],
+		offset: [0.0, 0.5, 0.0],
+	});
+	let second_shape = Some(ColliderData::Sphere {
+		interaction: ColliderInteraction {
+			sensor: false,
+			layers: 0,
+			mask: u32::MAX,
+		},
+		radius: 0.75,
+		offset: [1.0, 0.0, 0.0],
+	});
+	apply_collider_update(
+		&mut workspace,
+		&mut client,
+		Command::SetCollider {
+			key: "crate".into(),
+			collider: first_shape.clone(),
+		},
+	);
+	assert!(matches!(
+		apply_collider_update(
+			&mut workspace,
+			&mut client,
+			Command::SwitchScene {
+				scene_id: second.clone()
+			}
+		),
+		EditorCommandUpdateDto::Snapshot { .. }
+	));
+	assert!(
+		client.document.entities[0].collider.is_none(),
+		"Reused entity keys must not leak the first scene's collider"
+	);
+	apply_collider_update(
+		&mut workspace,
+		&mut client,
+		Command::SetCollider {
+			key: "crate".into(),
+			collider: second_shape.clone(),
+		},
+	);
+	let mut project = client.project.clone();
+	project.name = "Collision authoring".into();
+	assert!(matches!(
+		apply_collider_update(&mut workspace, &mut client, Command::SetProject { project }),
+		EditorCommandUpdateDto::Snapshot { .. }
+	));
+	assert_eq!(client.document.entities[0].collider, second_shape);
+	let saved = workspace.save_all(client.revision).unwrap();
+	assert_eq!(saved.active_scene_id, second);
+	assert!(!saved.dirty);
+	assert!(saved.scenes.iter().all(|scene| !scene.dirty));
+	for (path, expected) in [
+		("scenes/main.json", &first_shape),
+		("scenes/second.json", &second_shape),
+	] {
+		assert_eq!(
+			&runtime::scene_io::load_data(&fixture.0.join(path))
+				.unwrap()
+				.data
+				.entities[0]
+				.collider,
+			expected
+		);
+	}
+	let mut reopened = fixture.open();
+	assert_eq!(
+		reopened.backend.session().project().name,
+		"Collision authoring"
+	);
+	assert_eq!(
+		reopened.backend.session().authored_document().entities[0].collider,
+		first_shape
+	);
+	run(&mut reopened, Command::SwitchScene { scene_id: second });
+	let snapshot = reopened.backend.snapshot().unwrap();
+	assert_eq!(snapshot.document.entities[0].collider, second_shape);
+	assert!(!snapshot.dirty);
+	assert!(!snapshot.can_undo);
+	let unrelated = collider_fixture();
+	assert!(unrelated
+		.open()
+		.backend
+		.session()
+		.authored_document()
+		.entities[0]
+		.collider
+		.is_none());
+}
+
+#[test]
+fn invalid_collider_sizes_preserve_host_state_redo_and_event_journal() {
+	use runtime::scene_data::ColliderData;
+	let fixture = collider_fixture();
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::SetCollider {
+			key: "crate".into(),
+			collider: Some(ColliderData::Sphere {
+				interaction: Default::default(),
+				radius: 0.5,
+				offset: [0.0; 3],
+			}),
+		},
+	);
+	run(&mut workspace, Command::Undo);
+	assert!(workspace.backend.snapshot().unwrap().can_redo);
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let cursor = workspace.backend.change_cursor();
+	let event_bytes = workspace.backend.retained_event_bytes();
+	let scene_bytes = fs::read(fixture.0.join("scenes/main.json")).unwrap();
+	let mut invalid = vec![
+		ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [0.0, 1.0, 1.0],
+			offset: [0.0; 3],
+		},
+		ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [1.0, -1.0, 1.0],
+			offset: [0.0; 3],
+		},
+		ColliderData::Box {
+			interaction: Default::default(),
+			half_extents: [1.0, 1.0, f32::INFINITY],
+			offset: [0.0; 3],
+		},
+		ColliderData::Sphere {
+			interaction: Default::default(),
+			radius: f32::NAN,
+			offset: [0.0; 3],
+		},
+		ColliderData::Sphere {
+			interaction: Default::default(),
+			radius: 1.0,
+			offset: [f32::INFINITY, 0.0, 0.0],
+		},
+	];
+	// Exercise real JSON-to-f32 conversion at the host boundary, including a
+	// positive JavaScript number that rounds to zero and an overflowing number.
+	for radius in [1.0e-50, 1.0e40] {
+		let request: EditorCommandRequest = serde_json::from_value(serde_json::json!({
+			"expected_revision": workspace.backend.session().revision(),
+			"command": {"type": "set_collider", "key": "crate", "collider": {"kind": "sphere", "radius": radius, "offset": [0, 0, 0]}}
+		})).unwrap();
+		let Command::SetCollider {
+			collider: Some(collider),
+			..
+		} = request.command
+		else {
+			unreachable!()
+		};
+		invalid.push(collider);
+	}
+	for collider in invalid {
+		let error = workspace
+			.execute_incremental(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command: Command::SetCollider {
+					key: "crate".into(),
+					collider: Some(collider),
+				},
+			})
+			.unwrap_err();
+		assert_eq!(error.code, runtime::BackendErrorCode::InvalidCommand);
+		assert_eq!(
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+			before
+		);
+		assert_eq!(workspace.backend.change_cursor(), cursor);
+		assert_eq!(workspace.backend.retained_event_bytes(), event_bytes);
+		assert_eq!(
+			fs::read(fixture.0.join("scenes/main.json")).unwrap(),
+			scene_bytes
+		);
+	}
+	run(&mut workspace, Command::Redo);
+	assert_eq!(
+		workspace.backend.session().authored_document().entities[0].collider,
+		Some(ColliderData::Sphere {
+			interaction: Default::default(),
+			radius: 0.5,
+			offset: [0.0; 3]
+		})
+	);
+}
+
+#[test]
+fn collider_interaction_authoring_is_rejected_during_play_without_changing_history_or_events() {
+	use runtime::scene_data::{ColliderData, ColliderInteraction};
+	let fixture = collider_fixture();
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::SetCollider {
+			key: "crate".into(),
+			collider: Some(ColliderData::Box {
+				half_extents: [0.5; 3],
+				offset: [0.0; 3],
+				interaction: ColliderInteraction {
+					sensor: false,
+					layers: 1 << 31,
+					mask: u32::MAX,
+				},
+			}),
+		},
+	);
+	let authored = workspace.backend.session().authored_document();
+	run(&mut workspace, Command::StartPlay);
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let cursor = workspace.backend.change_cursor();
+	let bytes = workspace.backend.retained_event_bytes();
+	for collider in [
+		Some(ColliderData::Box {
+			half_extents: [0.5; 3],
+			offset: [0.0; 3],
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 0,
+				mask: 0,
+			},
+		}),
+		Some(ColliderData::Sphere {
+			radius: 0.75,
+			offset: [1.0, 0.0, 0.0],
+			interaction: ColliderInteraction {
+				sensor: true,
+				layers: 1 << 31,
+				mask: 0,
+			},
+		}),
+		None,
+	] {
+		let error = workspace
+			.execute_incremental(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command: Command::SetCollider {
+					key: "crate".into(),
+					collider,
+				},
+			})
+			.unwrap_err();
+		assert_eq!(error.code, runtime::BackendErrorCode::CommandRejected);
+		assert_eq!(
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+			before
+		);
+		assert_eq!(workspace.backend.change_cursor(), cursor);
+		assert_eq!(workspace.backend.retained_event_bytes(), bytes);
+		assert_eq!(workspace.backend.session().authored_document(), authored);
+	}
+	run(&mut workspace, Command::StopPlay);
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+	run(&mut workspace, Command::Undo);
+	let restored = workspace.backend.snapshot().unwrap();
+	assert!(restored.document.entities[0].collider.is_none());
+	assert!(
+		!restored.can_undo,
+		"Rejected Play edits must not create history entries"
+	);
 }

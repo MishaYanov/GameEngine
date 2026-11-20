@@ -12,7 +12,11 @@ milestones.
 For a method-level walkthrough with diagrams, read [Editor flow: startup to project builds](editor-flow.md).
 It distinguishes the current setup UI, the partially connected editor workspace, available native APIs, and admin Cargo rebuild jobs.
 
-Current Angular workspace wiring mounts the native SceneViewport and connects guarded File Open plus Save Scene/Undo/Redo/Play/Stop. Entity/assets lists do not yet provide full selection/inspection/import workflows, and build UI remains open. See [workspace guide](editor-workspace.md); the latest committed backend and this uncommitted UI are separate snapshots.
+Current Angular workspace wiring includes guarded project creation/opening, Scene/Game views, Hierarchy and Inspector
+editing, module/role/input configuration, scene/model placement, Save All and staged export/retry/run controls.
+The Collider Inspector authors shapes, sensors and symmetric collision filters through the existing command path.
+See the [workspace guide](editor-workspace.md) and [five building-blocks review](building-blocks-review.md) for the
+combined committed and current working-tree scope; broader component/script editors remain future work.
 
 ## Projects and boundaries
 

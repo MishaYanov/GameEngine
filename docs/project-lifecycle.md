@@ -74,6 +74,11 @@ The manifest parser checks that format. The shared native resolver recognizes `c
 ID fails when starting Play or preparing an export. The editor resolves the current in-memory project each time
 Play starts, so project edits and Undo/Redo affect the next run. The Player and headless runner use the same resolver.
 
+The scene controls expose Gameplay Module through the host capability catalog. Selecting a different unsupported ID
+is rejected before mutation; an already saved unavailable ID remains openable/editable so it can be repaired. Changing
+the selector preserves configured behaviors and scene bindings. Selecting a supported module does not require its
+roles to be complete immediately; scene-specific preparation validates them on Play and export.
+
 The selected factory supplies both the scene module and its initial progress. Ordinary runtime scene replacement
 retains that progress, while New Game initializes fresh progress. The module ID is authored project data. Play state
 lives in memory. See [the game demo](apps/game/README.md#demo-progress-and-new-game) for its current rule.
@@ -124,10 +129,13 @@ not contribute to scene/project dirty flags or change saved baselines.
 
 ## Gameplay role bindings
 
-A scene's schema-3 `bindings` map stores role names and entity keys in that authored document. In Edit, use
-**Gameplay Roles** to assign **Player**, **Key**, **Exit**, or **Finish** from the active scene. Choose **Unassigned**
-to clear a role. The editor applies each change as an undoable scene command. Save Scene or Save All writes the
-binding changes. Entity deletion can clear its bindings, so check the roles before Play or export.
+A scene's schema-3 `bindings` map stores role names and entity keys in that authored document. In Edit,
+**Gameplay Roles** presents the selected module's advertised roles for the active scene. The host catalog supplies
+default roles and explicit per-scene overrides; an empty override intentionally presents no roles. Courtyard's
+course roles are **Player**, **Key** and **Exit**, with **Player** and **Finish** for `finish`. Choose **Unassigned**
+to clear a role. Each change is an undoable scene command; Save Scene or Save All writes it. The generic module
+does not invent Courtyard roles, and changing modules preserves the binding map. Entity deletion can clear its
+bindings, so check the selected module's requirements before Play or export.
 
 For `courtyard_run`, a scene with Key or Exit needs Player, Key and Exit bound to distinct entities. Player needs
 a controlled movement behavior with positive speed. The catalog needs the scene ID `finish`; that scene needs
@@ -231,8 +239,11 @@ Player launch resolves the configured startup ID to a scene path and uses that s
 gameplay module. Staged output preserves the saved module ID. Headless project loading prepares all catalog documents
 through `with_scenes`, rejects file aliases and budget overflow, and supports typed scene commands in replay.
 Gameplay scene requests use the same retained-document preparation and commit in headless Play. Its diagnostic
-summary shows `active_scene_id` and, while playing, `play_scene_id`. A standalone headless scene gets a stable
-transient ID for comparable diagnostic hashes. The hash covers the project and rendered scene.
+summary shows `active_scene_id` and, while playing, `play_scene_id` plus generic `play_status` (objective/detail/score,
+completion, run identity and pending destination). Replay's `{"type":"restart_run"}` requires Play and uses the
+same startup/fresh-progress preparation as the native restart. Stop omits Play status. A standalone headless scene
+gets a stable transient ID for comparable diagnostic hashes. The hash still covers only project and rendered scene;
+random run IDs and timing/status diagnostics are not part of that hash. [Replay example](building-blocks-review.md#headless-replay-and-stage-only-snapshots).
 
 ## Source map and verification
 

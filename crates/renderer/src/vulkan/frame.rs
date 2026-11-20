@@ -1,6 +1,7 @@
 use std::{
 	error::Error,
 	fmt::{Display, Formatter},
+	sync::atomic::{AtomicBool, Ordering},
 };
 
 use ash::vk::Handle;
@@ -20,6 +21,31 @@ struct DrawBatch {
 	first_instance: u32,
 	count: u32,
 	instanced: bool,
+}
+
+/// Extent-independent allocation and scratch retained between ordinary resizes.
+struct InstanceStorage {
+	buffer: VulkanBuffer,
+	capacity: usize,
+	data: Vec<InstanceData>,
+	order: Vec<usize>,
+	batches: Vec<DrawBatch>,
+}
+
+impl InstanceStorage {
+	fn new(device: &VulkanDevice) -> Result<Self, VulkanFrameError> {
+		let capacity = 64;
+		Ok(Self {
+			buffer: VulkanBuffer::host_vertex(
+				device,
+				(capacity * size_of::<InstanceData>()) as u64,
+			)?,
+			capacity,
+			data: Vec::with_capacity(capacity),
+			order: Vec::with_capacity(capacity),
+			batches: Vec::with_capacity(capacity),
+		})
+	}
 }
 
 struct GpuTimer {
@@ -108,12 +134,10 @@ pub struct VulkanFrame {
 	acquisition_fence: vk::Fence,
 	acquisition_pending: bool,
 	submission_pending: bool,
+	completion_observed: AtomicBool,
 	invalidated: bool,
-	instance_buffer: VulkanBuffer,
-	instance_capacity: usize,
-	instance_data: Vec<InstanceData>,
-	order: Vec<usize>,
-	batches: Vec<DrawBatch>,
+	// None only while consuming a completed frame to transfer its storage.
+	instances: Option<InstanceStorage>,
 	timer: Option<GpuTimer>,
 	metrics: DrawMetrics,
 	lighting: LightingUniform,
@@ -200,6 +224,9 @@ impl VulkanFrame {
 	}
 
 	pub(crate) fn wait_complete_raw(&self) -> Result<(), vk::Result> {
+		if self.completion_observed.load(Ordering::Acquire) {
+			return Ok(());
+		}
 		let mut fences = [vk::Fence::null(); 2];
 		let mut count = 0;
 		if self.acquisition_pending {
@@ -216,6 +243,7 @@ impl VulkanFrame {
 					.wait_for_fences(&fences[..count], true, u64::MAX)?;
 			}
 		}
+		self.completion_observed.store(true, Ordering::Release);
 		Ok(())
 	}
 	pub fn new(
@@ -229,12 +257,31 @@ impl VulkanFrame {
 		device: &VulkanDevice,
 		image_count: usize,
 	) -> Result<Self, VulkanFrameError> {
+		Self::with_storage(device, image_count, None)
+	}
+
+	/// The caller must establish device idle before retiring the previous frame.
+	/// Synchronization handles are always fresh, including after failed draws.
+	pub(crate) fn recreate(
+		device: &VulkanDevice,
+		swapchain: &VulkanSwapchain,
+		previous: Self,
+	) -> Result<Self, VulkanFrameError> {
+		Self::with_storage(device, swapchain.images().len(), Some(previous))
+	}
+
+	fn with_storage(
+		device: &VulkanDevice,
+		image_count: usize,
+		previous: Option<Self>,
+	) -> Result<Self, VulkanFrameError> {
 		let ash_device = device.raw().clone();
-		let instance_capacity = 64;
-		let instance_buffer = VulkanBuffer::host_vertex(
-			device,
-			(instance_capacity * size_of::<InstanceData>()) as u64,
-		)?;
+		let instances = match previous {
+			Some(mut previous) if !previous.invalidated => {
+				previous.instances.take().expect("live frame storage")
+			}
+			_ => InstanceStorage::new(device)?,
+		};
 		let timer = GpuTimer::new(device)?;
 		let metrics = DrawMetrics {
 			gpu_timestamps_supported: timer.is_some(),
@@ -355,12 +402,9 @@ impl VulkanFrame {
 			acquisition_fence,
 			acquisition_pending: false,
 			submission_pending: false,
+			completion_observed: AtomicBool::new(true),
 			invalidated: false,
-			instance_buffer,
-			instance_capacity,
-			instance_data: Vec::with_capacity(instance_capacity),
-			order: Vec::with_capacity(instance_capacity),
-			batches: Vec::with_capacity(instance_capacity),
+			instances: Some(instances),
 			timer,
 			metrics,
 			lighting: LightingUniform::default(),
@@ -482,6 +526,7 @@ impl VulkanFrame {
 			}
 		};
 		self.acquisition_pending = true;
+		*self.completion_observed.get_mut() = false;
 
 		unsafe {
 			self.device
@@ -524,10 +569,11 @@ impl VulkanFrame {
 		let (editor_draws, editor_triangles) = editor
 			.as_ref()
 			.map_or((0, 0), |editor| editor.pass.draw_counts());
+		let instances = self.instances.as_ref().expect("live frame storage");
 		self.metrics = DrawMetrics {
-			draw_calls: self.batches.len() as u64 + editor_draws,
+			draw_calls: instances.batches.len() as u64 + editor_draws,
 			instances: objects.len() as u64,
-			triangles: self
+			triangles: instances
 				.batches
 				.iter()
 				.map(|batch| {
@@ -535,8 +581,11 @@ impl VulkanFrame {
 				})
 				.sum::<u64>()
 				+ editor_triangles,
-			instanced_draw_calls: self.batches.iter().filter(|batch| batch.count > 1).count()
-				as u64,
+			instanced_draw_calls: instances
+				.batches
+				.iter()
+				.filter(|batch| batch.count > 1)
+				.count() as u64,
 			gpu_time_ms: self.timer.as_ref().and_then(|timer| timer.last_ms),
 			gpu_timestamps_supported: self.timer.is_some(),
 		};
@@ -570,14 +619,15 @@ impl VulkanFrame {
 		if objects.len() > MAX_FRAME_INSTANCES {
 			return Err(VulkanFrameError::TooManyInstances);
 		}
-		if objects.len() > self.instance_capacity {
+		let instances = self.instances.as_mut().expect("live frame storage");
+		if objects.len() > instances.capacity {
 			let capacity = objects.len().next_power_of_two().min(MAX_FRAME_INSTANCES);
-			self.instance_buffer =
+			instances.buffer =
 				VulkanBuffer::host_vertex(device, (capacity * size_of::<InstanceData>()) as u64)?;
-			self.instance_capacity = capacity;
+			instances.capacity = capacity;
 		}
-		self.order.clear();
-		self.order.extend(0..objects.len());
+		instances.order.clear();
+		instances.order.extend(0..objects.len());
 		// Reorder only opaque runs. Every overlay/unlit/alpha object is an
 		// ordering barrier, so editor UI and debug draws retain submission order.
 		let mut start = 0;
@@ -589,23 +639,23 @@ impl VulkanFrame {
 			let end = (start..objects.len())
 				.find(|&i| !batchable(&objects[i]))
 				.unwrap_or(objects.len());
-			self.order[start..end].sort_unstable_by_key(|&i| (batch_key(&objects[i]), i));
+			instances.order[start..end].sort_unstable_by_key(|&i| (batch_key(&objects[i]), i));
 			start = end;
 		}
-		self.instance_data.clear();
-		self.batches.clear();
-		for &index in &self.order {
+		instances.data.clear();
+		instances.batches.clear();
+		for &index in &instances.order {
 			let object = &objects[index];
 			let instanced = batchable(object);
-			let first_instance = self.instance_data.len() as u32;
-			self.instance_data.push(InstanceData::from_object(object));
-			if let Some(batch) = self.batches.last_mut()
+			let first_instance = instances.data.len() as u32;
+			instances.data.push(InstanceData::from_object(object));
+			if let Some(batch) = instances.batches.last_mut()
 				&& instanced && batch.instanced
 				&& batch_key(&objects[batch.object]) == batch_key(object)
 			{
 				batch.count += 1;
 			} else {
-				self.batches.push(DrawBatch {
+				instances.batches.push(DrawBatch {
 					object: index,
 					first_instance,
 					count: 1,
@@ -613,7 +663,7 @@ impl VulkanFrame {
 				});
 			}
 		}
-		self.instance_buffer.write(&self.instance_data)?;
+		instances.buffer.write(&instances.data)?;
 		Ok(())
 	}
 
@@ -792,7 +842,8 @@ impl VulkanFrame {
 			let mut bound_material = vk::DescriptorSet::null();
 			let mut bound_mesh = None;
 			let mut camera_bound = false;
-			for batch in &self.batches {
+			let instances = self.instances.as_ref().expect("live frame storage");
+			for batch in &instances.batches {
 				let object = &objects[batch.object];
 				let mesh = object.mesh();
 
@@ -841,7 +892,7 @@ impl VulkanFrame {
 					bound_material = material_sets[0];
 				}
 
-				let vertex_buffers = [mesh.vertex_buffer().raw(), self.instance_buffer.raw()];
+				let vertex_buffers = [mesh.vertex_buffer().raw(), instances.buffer.raw()];
 
 				let vertex_offsets = [0, 0];
 
@@ -977,6 +1028,117 @@ mod construction_tests {
 	use crate::vulkan::test_driver::{device, reset, state};
 
 	#[test]
+	fn resized_frames_keep_warmed_instance_storage_with_fresh_image_synchronization() {
+		reset();
+		let device = device();
+		let mut frame = VulkanFrame::with_image_count(&device, 3).unwrap();
+		let instances = frame.instances.as_mut().unwrap();
+		instances.buffer =
+			VulkanBuffer::host_vertex(&device, (512 * size_of::<InstanceData>()) as u64).unwrap();
+		instances.capacity = 512;
+		instances.data.reserve(512);
+		instances.order.reserve(512);
+		instances.batches.reserve(512);
+		let buffer = instances.buffer.raw();
+		let scratch = (
+			instances.data.as_ptr(),
+			instances.order.as_ptr(),
+			instances.batches.as_ptr(),
+		);
+		let allocations = state(|state| state.calls["allocate_memory"]);
+		for image_count in [2, 4, 3] {
+			let acquisition = frame.image_available;
+			let fence = frame.in_flight;
+			frame = VulkanFrame::with_storage(&device, image_count, Some(frame)).unwrap();
+			let instances = frame.instances.as_ref().unwrap();
+			assert_eq!(instances.buffer.raw(), buffer);
+			assert_eq!(instances.capacity, 512);
+			assert_eq!(
+				(
+					instances.data.as_ptr(),
+					instances.order.as_ptr(),
+					instances.batches.as_ptr()
+				),
+				scratch
+			);
+			assert_eq!(frame.render_finished.len(), image_count);
+			assert_ne!(frame.image_available, acquisition);
+			assert_ne!(frame.in_flight, fence);
+			frame.wait_complete().unwrap();
+			state(|state| {
+				assert_eq!(state.calls["allocate_memory"], allocations);
+				assert!(
+					!state.calls.contains_key("wait"),
+					"new synchronization has no pending work"
+				);
+			});
+		}
+		drop(frame);
+		state(|state| assert!(state.memory.is_empty()));
+	}
+
+	#[test]
+	fn failed_resize_construction_releases_transferred_storage_and_can_retry() {
+		for (call, offset) in [
+			("create_pool", 1),
+			("create_semaphore", 2),
+			("create_fence", 2),
+		] {
+			reset();
+			let device = device();
+			let frame = VulkanFrame::with_image_count(&device, 3).unwrap();
+			state(|state| state.fail = Some((call, state.calls[call] + offset)));
+			assert!(VulkanFrame::with_storage(&device, 2, Some(frame)).is_err());
+			state(|state| {
+				assert!(state.memory.is_empty(), "{call}");
+				state.fail = None;
+			});
+			let frame = VulkanFrame::with_image_count(&device, 2).unwrap();
+			assert_eq!(frame.render_finished.len(), 2);
+			drop(frame);
+			state(|state| assert!(state.memory.is_empty()));
+		}
+	}
+
+	#[test]
+	fn successful_completion_is_reused_between_updates_but_failed_waits_are_retried() {
+		fn assert_send_sync<T: Send + Sync>() {}
+		assert_send_sync::<VulkanFrame>();
+		reset();
+		let device = device();
+		let swapchain = VulkanSwapchain::for_test(device.raw());
+		let camera = VulkanCamera::for_test(&device);
+		let depth = VulkanDepthBuffer::for_test(device.raw());
+		let pipelines = VulkanMaterialPipelines::for_test(device.raw());
+		let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
+		let uniform = CameraUniform {
+			view_projection: glam::Mat4::IDENTITY.to_cols_array(),
+		};
+		for completed in 0..3 {
+			frame
+				.draw(
+					&device,
+					FrameTargets {
+						swapchain: &swapchain,
+						depth_buffer: &depth,
+					},
+					&pipelines,
+					&camera,
+					&uniform,
+					&[],
+				)
+				.unwrap();
+			state(|state| assert_eq!(state.calls.get("wait").copied().unwrap_or(0), completed * 2));
+			state(|state| state.wait_error = Some(vk::Result::ERROR_OUT_OF_HOST_MEMORY));
+			assert!(frame.wait_complete().is_err());
+			state(|state| state.wait_error = None);
+			frame.wait_complete().unwrap();
+			frame.wait_complete().unwrap();
+			state(|state| assert_eq!(state.calls["wait"], (completed + 1) * 2));
+		}
+	}
+
+	#[test]
 	fn successive_draws_wait_and_reset_acquisition_and_render_fences_together() {
 		reset();
 		let device = device();
@@ -1099,8 +1261,13 @@ mod construction_tests {
 			unsafe {
 				device.raw().device_wait_idle().unwrap();
 			}
-			drop(frame);
-			let mut fresh = VulkanFrame::new(&device, &swapchain).unwrap();
+			let previous_buffer = frame.instances.as_ref().unwrap().buffer.raw();
+			let mut fresh = VulkanFrame::recreate(&device, &swapchain, frame).unwrap();
+			assert_ne!(
+				fresh.instances.as_ref().unwrap().buffer.raw(),
+				previous_buffer,
+				"failed-frame recovery must keep its fresh allocation path"
+			);
 			assert_eq!(
 				draw(&mut fresh).unwrap(),
 				FrameStatus::Rendered,

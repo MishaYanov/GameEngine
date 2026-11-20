@@ -25,7 +25,7 @@ fn finite_negative_and_zero_scale_are_valid() {
 			rotation: [-3.0, 0.0, 3.0],
 			scale: [-1.0, 0.0, 2.0]
 		}
-			.validate()
-			.is_ok()
+		.validate()
+		.is_ok()
 	);
 }

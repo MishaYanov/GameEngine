@@ -65,6 +65,8 @@ pub struct ViewportSettingsDto {
 	pub space: ViewportSpace,
 	pub pivot: ViewportPivot,
 	pub grid: bool,
+	#[serde(default)]
+	pub colliders: bool,
 	pub grid_spacing: f32,
 	pub snap: bool,
 	pub move_snap: f32,
@@ -81,6 +83,7 @@ impl Default for ViewportSettingsDto {
 			space: ViewportSpace::World,
 			pivot: ViewportPivot::Pivot,
 			grid: true,
+			colliders: false,
 			grid_spacing: 1.0,
 			snap: false,
 			move_snap: 1.0,
@@ -117,6 +120,8 @@ pub struct ViewportEditorStateDto {
 	pub placement: Option<ViewportPlacementDto>,
 	pub focused: bool,
 	pub error: Option<String>,
+	#[serde(default)]
+	pub collider_error: Option<String>,
 	pub transform_preview: Option<ViewportTransformPreviewDto>,
 	#[serde(default)]
 	pub game_status: Option<crate::editor::PlayStatusDto>,
@@ -134,6 +139,7 @@ impl Default for ViewportEditorStateDto {
 			placement: None,
 			focused: false,
 			error: None,
+			collider_error: None,
 			transform_preview: None,
 			game_status: None,
 		}
@@ -157,6 +163,9 @@ pub enum ViewportActionDto {
 		pivot: ViewportPivot,
 	},
 	SetGrid {
+		visible: bool,
+	},
+	SetColliders {
 		visible: bool,
 	},
 	SetGridSpacing {

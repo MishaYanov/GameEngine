@@ -1,3 +1,4 @@
+pub use crate::collider::{ColliderData, ColliderInteraction};
 use crate::{Transform, entity_key::EntityKey};
 use glam::{EulerRot, Mat4};
 use serde::{Deserialize, Serialize};
@@ -87,19 +88,6 @@ impl EntityData {
 #[serde(deny_unknown_fields)]
 pub struct MaterialOverrideData {
 	pub base_color_factor: [f32; 4],
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ColliderData {
-	Box {
-		half_extents: [f32; 3],
-		offset: [f32; 3],
-	},
-	Sphere {
-		radius: f32,
-		offset: [f32; 3],
-	},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -596,25 +584,6 @@ fn validate_name(name: &str) -> Result<(), String> {
 		);
 	}
 	Ok(())
-}
-
-impl ColliderData {
-	pub fn validate(&self) -> Result<(), String> {
-		let (offset, valid_size) = match self {
-			Self::Box {
-				half_extents,
-				offset,
-			} => (
-				offset,
-				half_extents.iter().all(|v| v.is_finite() && *v > 0.0),
-			),
-			Self::Sphere { radius, offset } => (offset, radius.is_finite() && *radius > 0.0),
-		};
-		if !valid_size || !offset.iter().all(|v| v.is_finite()) {
-			return Err("Collider extents/radius must be positive and all values finite".into());
-		}
-		Ok(())
-	}
 }
 
 impl CameraData {

@@ -32,6 +32,9 @@ pub enum ReloadPolicy {
 }
 
 static NEXT_WORKSPACE: AtomicU64 = AtomicU64::new(1);
+const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
+// Keep half of the default 256 MiB broker available for a user import.
+const BOUNDS_RESERVATION_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct EditorWorkspace {
 	pub generation: u64,
@@ -60,7 +63,7 @@ enum WorkspaceKind {
 }
 
 enum PendingAsset {
-	Bounds,
+	Bounds(AssetRef),
 	Import { position: [f32; 3], revision: u64 },
 }
 #[derive(Clone, serde::Serialize)]
@@ -223,27 +226,50 @@ impl EditorWorkspace {
 				.ok()
 			})
 			.collect();
-		self.bounds_seen
-			.retain(|reference| self.bounds_references.contains(reference));
+		for (id, purpose) in &self.pending {
+			if let PendingAsset::Bounds(reference) = purpose {
+				if !self.bounds_references.contains(reference) {
+					let _ = self.jobs.cancel(*id);
+				}
+			}
+		}
+		// Cancellation releases a reservation only when its completion is drained.
+		// Keep its marker until then, including if an undo restores the reference.
+		self.bounds_seen.retain(|reference| {
+			self.bounds_references.contains(reference)
+				|| self.pending.values().any(
+					|purpose| matches!(purpose, PendingAsset::Bounds(pending) if pending == reference),
+				)
+		});
 		self.bounds_queue = self.bounds_references.iter().cloned().collect();
 		self.refill_bounds();
 	}
 	fn refill_bounds(&mut self) {
+		let Some(stats) = self.jobs.try_stats() else {
+			return;
+		};
+		// Include undrained cancelled/old-generation reservations, not just the
+		// current pending map. Foreground imports retain the full broker budget.
+		let mut available = BOUNDS_RESERVATION_LIMIT_BYTES.saturating_sub(stats.reserved_bytes);
 		while let Some(reference) = self.bounds_queue.pop_front() {
 			if self.bounds_seen.contains(&reference)
 				|| self.backend.assets().find(&reference).is_some()
 			{
 				continue;
 			}
-			if let Ok(id) = self.jobs.try_submit(reference.clone(), 64 * 1024 * 1024) {
-				self.pending.insert(id, PendingAsset::Bounds);
-				self.bounds_seen.insert(reference);
-			} else {
-				// Capacity is released when completed jobs are drained. Keep the
-				// remaining references without rescanning the authored document.
-				self.bounds_queue.push_front(reference);
-				break;
+			if available >= BOUNDS_JOB_BYTES {
+				if let Ok(id) = self.jobs.try_submit(reference.clone(), BOUNDS_JOB_BYTES) {
+					self.pending
+						.insert(id, PendingAsset::Bounds(reference.clone()));
+					self.bounds_seen.insert(reference);
+					available -= BOUNDS_JOB_BYTES;
+					continue;
+				}
 			}
+			// Capacity is released when completed jobs are drained. Keep the
+			// remaining references without rescanning the authored document.
+			self.bounds_queue.push_front(reference);
+			break;
 		}
 	}
 	pub fn submit_import(
@@ -283,10 +309,19 @@ impl EditorWorkspace {
 	}
 	pub fn drain_asset_jobs(&mut self) -> Vec<AssetCompletion> {
 		let mut completions = Vec::new();
-		while let Some(completed) = self.jobs.try_drain() {
+		while let Some(mut completed) = self.jobs.try_drain() {
 			let Some(purpose) = self.pending.remove(&completed.id) else {
 				continue;
 			};
+			if let PendingAsset::Bounds(reference) = &purpose {
+				if !self.bounds_references.contains(reference) {
+					self.bounds_seen.remove(reference);
+					completed.result = Err(AssetJobError::Cancelled);
+				} else if matches!(completed.result, Err(AssetJobError::Cancelled)) {
+					self.bounds_seen.remove(reference);
+					self.bounds_queue.push_back(reference.clone());
+				}
+			}
 			let result = completed
 				.result
 				.map_err(|error| match error {

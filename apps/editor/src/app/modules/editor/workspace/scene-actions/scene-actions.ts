@@ -1,19 +1,10 @@
-import {Component, computed, inject, input, signal} from '@angular/core';
+import {Component, computed, effect, inject, input, signal} from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
-import {EditorCommand} from "../../../../core/editor/editor.models";
-
-const GAMEPLAY_ROLES = [
-    {name: 'player', label: 'Player'},
-    {name: 'key', label: 'Key'},
-    {name: 'exit', label: 'Exit'},
-    {name: 'finish', label: 'Finish'},
-] as const;
-
-type GameplayRole = typeof GAMEPLAY_ROLES[number]['name'];
+import type {EditorCommand} from '../../../../core/editor/editor.models';
 
 @Component({
     selector: 'editor-scene-actions',
@@ -45,7 +36,26 @@ export class SceneActions {
             path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
     });
 
-    protected readonly gameplayRoles = GAMEPLAY_ROLES;
+    protected readonly gameplayModules = computed(() => this.editor.capabilities()?.gameplay_modules);
+    protected readonly selectedModuleId = computed(() => this.editor.snapshot()?.project.gameplay_module ?? '');
+    protected readonly selectedModule = computed(() =>
+        this.gameplayModules()?.find(module => module.id === this.selectedModuleId()),
+    );
+    protected readonly unavailableModule = computed(() => this.selectedModuleId() !== '' && !this.selectedModule());
+    protected readonly gameplayRoles = computed(() => {
+        const module = this.selectedModule();
+        const sceneId = this.editor.snapshot()?.active_scene_id;
+        if (!module || sceneId === undefined) return [];
+        return Object.hasOwn(module.scene_roles, sceneId) ? module.scene_roles[sceneId] : module.default_roles;
+    });
+
+    constructor() {
+        effect(() => {
+            this.editor.workspaceGeneration();
+            this.error.set(null);
+            this.message.set(null);
+        });
+    }
 
     protected switchScene(select: HTMLSelectElement): void {
         const id = select.value;
@@ -77,8 +87,25 @@ export class SceneActions {
         });
     }
 
+    protected async setGameplayModule(select: HTMLSelectElement): Promise<void> {
+        const selected = select.value;
+        select.value = this.selectedModuleId();
+        if (this.gameplayModules() === undefined || selected === this.selectedModuleId() ||
+            (selected !== '' && !this.gameplayModules()?.some(module => module.id === selected))) return;
+        const generation = this.editor.workspaceGeneration();
+        await this.run(async () => {
+            if (this.editor.workspaceGeneration() !== generation) return;
+            const snapshot = this.editor.snapshot();
+            if (!snapshot || snapshot.mode !== 'edit' || snapshot.transaction !== null) return;
+            await this.editor.execute({
+                type: 'set_project',
+                project: {...snapshot.project, gameplay_module: selected || null},
+            }, generation, snapshot.revision);
+        });
+    }
+
     protected async setRole(
-        role: GameplayRole,
+        role: string,
         select: HTMLSelectElement,
     ): Promise<void> {
         const snapshot = this.editor.snapshot();
@@ -90,7 +117,8 @@ export class SceneActions {
         const sceneId = snapshot.active_scene_id;
 
         // Keep displaying the confirmed value until Rust accepts the edit.
-        select.value = snapshot.document.bindings[role] ?? '';
+        select.value = this.roleBinding(role) ?? '';
+        if (!this.gameplayRoles().some(descriptor => descriptor.name === role)) return;
 
         const command: EditorCommand = {
             type: 'set_scene_binding',
@@ -106,19 +134,29 @@ export class SceneActions {
         });
     }
 
+    protected roleBinding(name: string): string | undefined {
+        const bindings = this.editor.snapshot()?.document.bindings;
+        return bindings && Object.hasOwn(bindings, name) ? bindings[name] : undefined;
+    }
+
     private async run(action: () => Promise<void>): Promise<void> {
         if (!this.available()) return;
+        const generation = this.editor.workspaceGeneration();
         this.pending.set(true);
         this.sceneSwitch.clearFeedback();
         this.error.set(null);
         this.message.set(null);
         try {
             if (this.editing) {
-                if (!await this.editing.withCommittedEdit(action)) this.error.set(this.editing.error() ?? 'Finish the current edit and try again.');
+                if (!await this.editing.withCommittedEdit(action) && this.editor.workspaceGeneration() === generation) {
+                    this.error.set(this.editing.error() ?? 'Finish the current edit and try again.');
+                }
             }
             else await action();
         } catch (error) {
-            this.error.set(error instanceof Error ? error.message : String(error));
+            if (this.editor.workspaceGeneration() === generation) {
+                this.error.set(error instanceof Error ? error.message : String(error));
+            }
         } finally {
             this.pending.set(false);
         }

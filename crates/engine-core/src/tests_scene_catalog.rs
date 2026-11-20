@@ -431,7 +431,7 @@ fn catalog_scene_limit_rejects_overflow_atomically_and_removal_restores_capacity
 					SceneId::new(format!("scene-{index}")).unwrap(),
 					format!("scenes/{index}.json"),
 				)
-					.unwrap(),
+				.unwrap(),
 			)
 			.unwrap();
 	}

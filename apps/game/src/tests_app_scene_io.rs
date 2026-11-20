@@ -1332,3 +1332,147 @@ fn development_stop_after_a_scene_transition_restores_authored_topology_and_undo
 	press(&mut app, &[Key::ControlLeft, Key::Z], 0.0);
 	assert_eq!(snapshot(&app), before_delete);
 }
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires native Vulkan and a window server"]
+#[allow(clippy::field_reassign_with_default)]
+fn player_scene_transitions_reuse_gpu_assets_and_rejected_scenes_preserve_the_run() {
+	use winit::platform::windows::EventLoopBuilderExtWindows;
+
+	#[derive(Default)]
+	struct NativeCacheCheck {
+		completed: bool,
+	}
+	impl ApplicationHandler for NativeCacheCheck {
+		fn resumed(&mut self, events: &ActiveEventLoop) {
+			let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+			let fixture = TestDirectory::new();
+			let asset_root = fixture.0.join("assets");
+			for directory in ["props", "scenes"] {
+				fs::create_dir_all(asset_root.join(directory)).unwrap();
+			}
+			for file in [
+				"props/capsule.glb",
+				"props/cube.glb",
+				"props/sphere.glb",
+				"scenes/courtyard.json",
+				"scenes/finish.json",
+			] {
+				fs::copy(root.join("assets").join(file), asset_root.join(file)).unwrap();
+			}
+			fs::copy(
+				asset_root.join("props/capsule.glb"),
+				asset_root.join("props/candidate.glb"),
+			)
+			.unwrap();
+			let mut rejected = scene_io::load_data(&asset_root.join("scenes/finish.json"))
+				.unwrap()
+				.data;
+			rejected.entities[0].model_path = "props/candidate.glb".into();
+			rejected.entities[1].model_path = "props/missing.glb".into();
+			scene_io::save_data(&asset_root.join("scenes/rejected.json"), &rejected).unwrap();
+			let mut project = ProjectData::load(root.join("project.json")).unwrap();
+			project
+				.scenes
+				.insert(
+					runtime::scene_catalog::SceneDescriptor::new(
+						SceneId::new("rejected").unwrap(),
+						"scenes/rejected.json",
+					)
+					.unwrap(),
+				)
+				.unwrap();
+			let startup_path = asset_root.join(project.startup_scene_path().unwrap());
+			let window = Arc::new(
+				events
+					.create_window(Window::default_attributes().with_visible(false))
+					.unwrap(),
+			);
+			let size = window.inner_size();
+			let renderer =
+				WindowRenderer::new(Arc::clone(&window), size.width, size.height).unwrap();
+			let mut loaded = scene_io::load(&startup_path, &asset_root, &renderer).unwrap();
+			let mut editor = GameApp::prepare_editor(&mut loaded).unwrap();
+			editor.set_initial_project(project).unwrap();
+			editor
+				.set_module_resolver(Arc::new(progress::resolve))
+				.unwrap();
+			editor.start_play(&mut loaded.scene).unwrap();
+			let mut app = GameApp::default();
+			app.scene = loaded.scene;
+			app.camera = loaded.camera;
+			app.editor = editor;
+			app.asset_manager = Some(loaded.assets);
+			app.renderer = Some(renderer);
+			app.window = Some(window);
+			app.asset_root = Some(asset_root);
+			app.scene_path = Some(startup_path);
+			app.standalone_runtime = true;
+			let original = app
+				.asset_manager
+				.as_mut()
+				.unwrap()
+				.load_model_mesh(app.renderer.as_ref().unwrap(), "props/capsule.glb", 0)
+				.unwrap();
+			let created = app
+				.renderer
+				.as_ref()
+				.unwrap()
+				.resource_metrics()
+				.map(|metrics| metrics.totals.created_resources);
+			app.restart_player_game().unwrap();
+			app.switch_player_scene(SceneId::new("finish").unwrap())
+				.unwrap();
+			let reused = app
+				.asset_manager
+				.as_mut()
+				.unwrap()
+				.load_model_mesh(app.renderer.as_ref().unwrap(), "props/capsule.glb", 0)
+				.unwrap();
+			assert!(Arc::ptr_eq(&original, &reused));
+			assert_eq!(
+				app.renderer
+					.as_ref()
+					.unwrap()
+					.resource_metrics()
+					.map(|metrics| metrics.totals.created_resources),
+				created,
+				"restart and transition to shared assets must avoid new GPU allocations"
+			);
+			let scene = app.editor.play_scene_id().cloned();
+			let data = snapshot(&app);
+			let resources = app.asset_manager.as_ref().unwrap().gpu_resource_count();
+			assert!(
+				app.switch_player_scene(SceneId::new("rejected").unwrap())
+					.is_err()
+			);
+			assert_eq!(app.editor.play_scene_id(), scene.as_ref());
+			assert_eq!(snapshot(&app), data);
+			assert_eq!(
+				app.asset_manager.as_ref().unwrap().gpu_resource_count(),
+				resources,
+				"a partial failed candidate must release its unique GPU assets"
+			);
+			drop(original);
+			drop(reused);
+			drop(app);
+			self.completed = true;
+			events.exit();
+		}
+		fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+	}
+	let mut config = engine_logger::Config::new("native-asset-cache-test");
+	config.console = false;
+	let _logging = engine_logger::init(config).unwrap();
+	let events = EventLoop::builder().with_any_thread(true).build().unwrap();
+	let mut check = NativeCacheCheck::default();
+	events.run_app(&mut check).unwrap();
+	assert!(check.completed);
+	assert!(
+		!engine_logger::snapshot(Default::default())
+			.entries
+			.iter()
+			.any(|entry| entry.level == engine_logger::Level::Error)
+	);
+}

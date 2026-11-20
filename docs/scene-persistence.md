@@ -12,6 +12,12 @@ renderable state, selected mesh_index, tint material override, collider data, an
 Nonrenderable entities can preserve imported transform-only nodes. Names are labels; keys provide document identity.
 Runtime EntityIds and GPU handles are not serialized.
 
+Box/Sphere colliders may contain `interaction` with sensor state and unsigned membership/detection masks. Legacy
+absence defaults to a blocking collider on layer bit 0 accepting all masks. Partial objects default fields; fully
+default settings serialize omitted. Both filters must match for detection, and sensor pairs do not block movement.
+These remain schema-3 authored fields, participate in ordinary undo/save/reopen and are separate from editor-only
+outline visibility or future trigger lifecycle events. [Collider reference](scene-editing.md#colliders-and-interaction-settings).
+
 Version-1 and version-2 input migrates in memory to v3. V1 receives deterministic legacy keys; V2 preserves
 keys/bindings. New fields receive compatible defaults and older scenes receive a migrated default light. Reading alone
 does not rewrite files. Unknown future versions fail; the current to_json writes v3.
@@ -39,15 +45,16 @@ resource adapters; transient IDs are not persistent scene/entity identities.
 
 `scene_io::load(path, asset_root, &renderer)` reads/validates JSON, loads models through a new AssetManager, and returns
 `LoadedScene { scene, assets, camera, entity_ids, source_schema_version }`. Identical model-path strings share one
-Arc<Model> within that load. `entity_ids` follows file order. This does not implement a global model cache or glTF node
-traversal.
+Arc<Model> within that load. `entity_ids` follows file order. AssetManager also retains bounded static-scene metadata
+and selected-mesh resource snapshots; this is scoped cache reuse, not a global hot-reload system. Static scene import
+can traverse glTF hierarchy; animation and live-linked prefab behavior remain separate.
 
 `scene_io::save(path, &scene, &camera)` serializes first, creates an exclusive sibling temporary file, writes/syncs/closes it, then renames it over the destination. Failures clean up the temporary file where possible; the previous file is not deliberately deleted before replacement. The parent must exist. This replacement pattern is not a universal crash-durability guarantee or a multi-writer conflict policy.
 
 ## Application ownership and packaging
 
 Angular owns editor controls and the chosen game pane. Its service supplies open/execute/save/reload and prefab/import
-operations; no new layout or hardcoded keys were added. The host's EditorWorkspace resolves scoped project paths and
+operations. The current workspace composes those controls and the native pane. The host's EditorWorkspace resolves scoped project paths and
 owns CPU session data, while the Windows viewport worker owns render resources.
 
 Source game execution defaults to Development mode with the existing panels/gizmos; installed projects default to

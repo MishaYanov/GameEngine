@@ -62,13 +62,22 @@ fn project_edit_persists_input_profile_and_remains_undoable() {
 			project: project.clone(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	assert!(editor.snapshot().unwrap().project_dirty);
 	assert_eq!(editor.authored_document().as_ref(), &data);
 	let serialized = editor.project().to_json().unwrap();
 	assert_eq!(ProjectData::from_json(&serialized).unwrap(), project);
+	let directory = Directory::new("saved-game-input");
+	let manifest = directory.0.join("project.json");
+	std::fs::write(&manifest, &serialized).unwrap();
+	let saved = ProjectData::load(&manifest).unwrap();
+	let reopened = EditorSession::for_project(data, saved.clone()).unwrap();
+	assert_eq!(reopened.project().input_profile.as_ref(), Some(&profile()));
+	assert!(!reopened.snapshot().unwrap().project_dirty);
 	execute(&mut editor, Command::Undo).unwrap();
 	assert!(editor.project().input_profile.is_none());
+	execute(&mut editor, Command::Redo).unwrap();
+	assert_eq!(editor.project(), &saved);
 }
 
 #[test]
@@ -219,4 +228,30 @@ fn native_codes_and_player_keys_feed_the_same_actions_and_parameters() {
 		}
 	}
 	assert_eq!(editor.revision(), revision);
+	assert_eq!(editor.authored_document().as_ref(), &data);
+	assert!(!editor.snapshot().unwrap().can_undo);
+
+	// Lifecycle reset starts a neutral frame even when the preceding run used held actions.
+	execute(&mut editor, Command::StopPlay).unwrap();
+	execute(&mut player, Command::StopPlay).unwrap();
+	execute(&mut editor, Command::StartPlay).unwrap();
+	execute(&mut player, Command::StartPlay).unwrap();
+	*editor_recorder.latest.lock().unwrap() = None;
+	*player_recorder.latest.lock().unwrap() = None;
+	editor.tick(1.0 / 30.0).unwrap();
+	player.tick(1.0 / 30.0).unwrap();
+	let neutral = RecordedInput {
+		movement: [0.0; 3],
+		move_right: false,
+		interact: false,
+		moving_parameter: false,
+	};
+	assert_eq!(
+		editor_recorder.latest.lock().unwrap().as_ref(),
+		Some(&neutral)
+	);
+	assert_eq!(
+		player_recorder.latest.lock().unwrap().as_ref(),
+		Some(&neutral)
+	);
 }

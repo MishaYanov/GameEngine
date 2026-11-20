@@ -59,7 +59,7 @@ class EditorBridge {
         this.failure = {type, message};
     }
 
-    readonly execute = vi.fn(async (command: EditorCommand): Promise<EditorSnapshot> => {
+    readonly execute = vi.fn(async (command: EditorCommand, generation?: number, revision?: number): Promise<EditorSnapshot> => {
         this.commands.push(command);
         this.pending.update(count => count + 1);
         try {
@@ -69,6 +69,8 @@ class EditorBridge {
                 gate.entered.resolve();
                 await gate.released.promise;
             }
+            if (generation !== undefined && generation !== this.workspaceGeneration()) throw new Error('The workspace changed.');
+            if (revision !== undefined && revision !== this.snapshot().revision) throw new Error('The revision changed.');
             if (this.failure?.type === command.type) {
                 const message = this.failure.message;
                 this.failure = null;
@@ -94,6 +96,14 @@ class EditorBridge {
                         ...previous, dirty: true,
                         document: {...previous.document, entities: previous.document.entities.map(entity =>
                             entity.key === command.key ? {...entity, name: command.name} : entity)},
+                    });
+                    break;
+                case 'set_collider':
+                    if (previous.transaction === null) this.history.push(previous.document);
+                    this.snapshot.set({
+                        ...previous, dirty: true,
+                        document: {...previous.document, entities: previous.document.entities.map(entity =>
+                            entity.key === command.key ? {...entity, collider: command.collider} : entity)},
                     });
                     break;
                 case 'commit_transaction':
@@ -174,6 +184,211 @@ describe('SceneEditingService', () => {
         viewportState.set({...state, gesture: null});
         expect(editing.entity()?.transform.position).toEqual([0, 0, 0]);
         expect(bridge.execute).not.toHaveBeenCalled();
+    });
+
+    it('adds, changes and removes collider shapes as atomic edits preserving offsets', async () => {
+        expect(await editing.replaceCollider('box')).toBe(true);
+        expect(editing.entity()?.collider).toEqual({kind: 'box', half_extents: [0.5, 0.5, 0.5], offset: [0, 0, 0]});
+        editing.collider({kind: 'box', half_extents: [1, 2, 3], offset: [4, 5, 6]});
+        expect(editing.hasChanges()).toBe(true);
+        await editing.commit();
+        expect(await editing.replaceCollider('sphere')).toBe(true);
+        expect(editing.entity()?.collider).toEqual({kind: 'sphere', radius: 0.5, offset: [4, 5, 6]});
+        expect(await editing.replaceCollider('none')).toBe(true);
+        expect(editing.entity()?.collider).toBeNull();
+        expect(bridge.history).toHaveLength(4);
+        expect(bridge.types().filter(type => type === 'begin_transaction')).toHaveLength(1);
+    });
+
+    it('coalesces collider previews into one history entry and cancels an in-flight gesture', async () => {
+        await editing.replaceCollider('sphere');
+        const held = bridge.holdNext('set_collider');
+        editing.collider({kind: 'sphere', radius: 1, offset: [0, 0, 0]});
+        await held.started;
+        for (const radius of [2, 3, 4]) editing.collider({kind: 'sphere', radius, offset: [0, 0, 0]});
+        expect(editing.entity()?.collider).toEqual({kind: 'sphere', radius: 4, offset: [0, 0, 0]});
+        held.release();
+        await editing.commit();
+        expect(bridge.commands.filter(command => command.type === 'set_collider')).toHaveLength(3);
+        expect(bridge.history).toHaveLength(2);
+
+        const cancellation = bridge.holdNext('set_collider');
+        editing.collider({kind: 'sphere', radius: 5, offset: [0, 0, 0]});
+        await cancellation.started;
+        const cancel = editing.cancel();
+        cancellation.release();
+        await cancel;
+        expect(editing.entity()?.collider).toEqual({kind: 'sphere', radius: 4, offset: [0, 0, 0]});
+        expect(bridge.history).toHaveLength(2);
+    });
+
+    it('rolls back the complete collider gesture if its final draft is invalid', async () => {
+        await editing.replaceCollider('sphere');
+        editing.collider({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+        await vi.waitFor(() => expect(bridge.types().filter(type => type === 'set_collider')).toHaveLength(2));
+        editing.invalidateCollider();
+        await editing.commit();
+        expect(editing.entity()?.collider).toEqual({kind: 'sphere', radius: 0.5, offset: [0, 0, 0]});
+        expect(bridge.history).toHaveLength(1);
+        expect(bridge.types()).not.toContain('commit_transaction');
+        expect(bridge.types()).toContain('cancel_transaction');
+        expect(editing.error()).toBeNull();
+    });
+
+    it.each(['begin_transaction', 'set_collider'] as const)(
+        'keeps a late collider %s response from changing a replacement workspace', async type => {
+            const held = bridge.holdNext(type);
+            editing.collider({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+            await held.started;
+            const replacement = initialSnapshot();
+            bridge.workspaceGeneration.set(2);
+            bridge.snapshot.set(replacement);
+            await fixture.whenStable();
+            held.release();
+            await editing.commit();
+            expect(bridge.snapshot()).toBe(replacement);
+            expect(bridge.types()).not.toContain('cancel_transaction');
+            expect(editing.ownsTransaction()).toBe(false);
+            expect(editing.error()).toBeNull();
+        },
+    );
+
+    it('requeues a corrected valid value when an invalid draft discarded its pending preview', async () => {
+        await editing.replaceCollider('sphere');
+        const held = bridge.holdNext('set_collider');
+        editing.collider({kind: 'sphere', radius: 1, offset: [0, 0, 0]});
+        await held.started;
+        editing.collider({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+        editing.invalidateCollider();
+        editing.collider({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+        held.release();
+        await editing.commit();
+        expect(bridge.snapshot().document.entities[0].collider).toEqual({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+        expect(bridge.history).toHaveLength(2);
+        expect(bridge.types().filter(type => type === 'set_collider')).toHaveLength(3);
+    });
+
+    it('cancels collider drafts across scenes that reuse entity keys', async () => {
+        const held = bridge.holdNext('set_collider');
+        editing.collider({kind: 'sphere', radius: 2, offset: [0, 0, 0]});
+        await held.started;
+        const replacement = {...initialSnapshot(), active_scene_id: 'second', revision: 2};
+        bridge.snapshot.set(replacement);
+        await fixture.whenStable();
+        held.release();
+        await editing.commit();
+        expect(bridge.snapshot()).toBe(replacement);
+        expect(editing.entity()?.collider).toBeUndefined();
+        expect(bridge.snapshot().transaction).toBeNull();
+        expect(bridge.history).toHaveLength(0);
+        expect(bridge.types()).not.toContain('cancel_transaction');
+    });
+
+    it('leaves equal f32 values and invalid collider numbers outside history', async () => {
+        await editing.replaceCollider('sphere');
+        editing.collider({kind: 'sphere', radius: 0.5 + Number.EPSILON, offset: [0, 0, 0]});
+        await editing.commit();
+        editing.collider({kind: 'sphere', radius: 1e-50, offset: [0, 0, 0]});
+        expect(editing.error()).toContain('positive');
+        await editing.commit();
+        expect(bridge.types()).toEqual(['set_collider']);
+        expect(bridge.history).toHaveLength(1);
+        expect(editing.error()).toBeNull();
+    });
+
+    it('rebases rapid interaction changes on the latest bits and preserves dimensions through shape changes', async () => {
+        await editing.replaceCollider('sphere');
+        const held = bridge.holdNext('set_collider');
+        const sensor = editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        await held.started;
+        const topLayer = editing.changeColliderInteraction({kind: 'layer', field: 'layers', bit: 31, enabled: true});
+        const mask = editing.changeColliderInteraction({kind: 'layer', field: 'mask', bit: 0, enabled: false});
+        held.release();
+        expect(await Promise.all([sensor, topLayer, mask])).toEqual([true, true, true]);
+        const interaction = {sensor: true, layers: 0x80000001, mask: 0xfffffffe};
+        expect(editing.entity()?.collider).toEqual({kind: 'sphere', radius: 0.5, offset: [0, 0, 0], interaction});
+        await editing.replaceCollider('box');
+        expect(editing.entity()?.collider?.interaction).toEqual(interaction);
+        editing.collider({kind: 'box', half_extents: [1, 2, 3], offset: [4, 5, 6], interaction});
+        await editing.commit();
+        expect(editing.entity()?.collider).toEqual({kind: 'box', half_extents: [1, 2, 3], offset: [4, 5, 6], interaction});
+        expect(bridge.history).toHaveLength(6);
+    });
+
+    it('commits a pending dimension gesture before applying an interaction intent', async () => {
+        await editing.replaceCollider('sphere');
+        const held = bridge.holdNext('set_collider');
+        editing.collider({kind: 'sphere', radius: 2, offset: [3, 0, 0]});
+        await held.started;
+        const filter = editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        held.release();
+        expect(await filter).toBe(true);
+        expect(editing.entity()?.collider).toEqual({
+            kind: 'sphere', radius: 2, offset: [3, 0, 0], interaction: {sensor: true, layers: 1, mask: 0xffffffff},
+        });
+        expect(bridge.types().slice(-4)).toEqual(['begin_transaction', 'set_collider', 'commit_transaction', 'set_collider']);
+        expect(bridge.history).toHaveLength(3);
+    });
+
+    it('flushes accepted interaction changes before an immediate Save or Play barrier', async () => {
+        await editing.replaceCollider('sphere');
+        const filter = editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        const action = vi.fn(async () => {
+            expect(editing.entity()?.collider?.interaction?.sensor).toBe(true);
+            expect(bridge.snapshot().transaction).toBeNull();
+        });
+        const barrier = editing.withCommittedEdit(action);
+        expect(await filter).toBe(true);
+        expect(await barrier).toBe(true);
+        expect(action).toHaveBeenCalledOnce();
+        expect(bridge.history).toHaveLength(2);
+    });
+
+    it('drops queued interaction intents after workspace replacement without applying old errors', async () => {
+        await editing.replaceCollider('sphere');
+        const held = bridge.holdNext('set_collider');
+        const first = editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        await held.started;
+        const queued = editing.changeColliderInteraction({kind: 'layer', field: 'layers', bit: 31, enabled: true});
+        const action = vi.fn(async () => undefined);
+        const barrier = editing.withCommittedEdit(action);
+        const replacement = initialSnapshot();
+        bridge.workspaceGeneration.set(2);
+        bridge.snapshot.set(replacement);
+        held.release();
+        expect(await Promise.all([first, queued])).toEqual([false, false]);
+        expect(await barrier).toBe(false);
+        expect(action).not.toHaveBeenCalled();
+        expect(bridge.snapshot()).toBe(replacement);
+        expect(editing.error()).toBeNull();
+    });
+
+    it('keeps interaction settings on cancelled dimension gestures and ignores unchanged defaults', async () => {
+        await editing.replaceCollider('sphere');
+        await editing.changeColliderInteraction({kind: 'sensor', sensor: false});
+        expect(bridge.history).toHaveLength(1);
+        await editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        const original = editing.entity()!.collider!;
+        editing.collider({...original, offset: [8, 0, 0]});
+        await vi.waitFor(() => expect(bridge.snapshot().transaction).not.toBeNull());
+        await editing.cancel();
+        expect(editing.entity()?.collider).toEqual(original);
+        expect(bridge.history).toHaveLength(2);
+    });
+
+    it('applies a bulk filter selection as one command and history entry', async () => {
+        await editing.replaceCollider('sphere');
+        await editing.changeColliderInteraction({kind: 'sensor', sensor: true});
+        const original = editing.entity()!.collider!;
+        const commandCount = bridge.commands.length;
+        const historyCount = bridge.history.length;
+        await editing.changeColliderInteraction({kind: 'filter', field: 'mask', value: 0});
+        expect(bridge.commands.slice(commandCount)).toHaveLength(1);
+        expect(bridge.history).toHaveLength(historyCount + 1);
+        expect(bridge.history.at(-1)!.entities[0].collider).toEqual(original);
+        expect(editing.entity()?.collider).toEqual({
+            ...original, interaction: {...original.interaction!, mask: 0},
+        });
     });
 
     it('coalesces pending previews to the latest value and commits one history entry', async () => {

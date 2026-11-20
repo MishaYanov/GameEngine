@@ -508,6 +508,7 @@ fn material_collider_and_light_changes_are_validated_and_undoable() {
 		Command::SetCollider {
 			key: "a".into(),
 			collider: Some(runtime::scene_data::ColliderData::Sphere {
+				interaction: Default::default(),
 				radius: 0.5,
 				offset: [0.0; 3],
 			}),
@@ -534,6 +535,7 @@ fn material_collider_and_light_changes_are_validated_and_undoable() {
 		Command::SetCollider {
 			key: "a".into(),
 			collider: Some(runtime::scene_data::ColliderData::Sphere {
+				interaction: Default::default(),
 				radius: -1.0,
 				offset: [0.0; 3],
 			}),

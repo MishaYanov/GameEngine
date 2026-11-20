@@ -1,0 +1,137 @@
+:host {
+  display: block;
+}
+
+.collider {
+  display: grid;
+  gap: var(--space-2);
+  border-top: var(--border-width) solid var(--color-input-edge);
+  padding-top: var(--space-3);
+}
+
+h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+h3 span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+}
+
+label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.shape {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+input, select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 1.75rem;
+  padding: var(--space-1);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text);
+  font: inherit;
+}
+
+input:disabled, select:disabled {
+  color: var(--color-text-disabled);
+  background: var(--color-control-disabled);
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+}
+
+.hint {
+  margin: var(--space-1) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+summary, legend {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+summary {
+  cursor: var(--cursor-action);
+}
+
+fieldset {
+  min-width: 0;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+}
+
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr));
+  gap: var(--space-2);
+}
+
+.layer-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 1.75rem;
+}
+
+.filter-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.filter-actions button {
+  min-height: 1.75rem;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-input-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.filter-actions button:disabled {
+  color: var(--color-text-disabled);
+  background: var(--color-control-disabled);
+}
+
+input[type='checkbox'] {
+  width: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  accent-color: var(--color-action);
+}

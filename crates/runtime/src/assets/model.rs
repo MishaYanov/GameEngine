@@ -28,6 +28,10 @@ impl ModelPart {
 		self.mesh.as_ref()
 	}
 
+	pub(super) fn mesh_arc(&self) -> &Arc<VulkanMesh> {
+		&self.mesh
+	}
+
 	pub fn material(&self) -> &VulkanMaterial {
 		&self.material
 	}
