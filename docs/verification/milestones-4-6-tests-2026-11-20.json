@@ -128,8 +128,8 @@
   "post_commit_review": {
     "date": "2026-11-20",
     "implementation_commit": "b835718",
-    "inspected_head": "b835718b8d64d5157a08919623d524024226e8cb",
-    "working_tree": "Final review fixes after b835718; source fingerprints are in docs-site/docs-state.json. A later checkpoint will record the committed source baseline.",
+    "inspected_head": "d5f34d2cb62510332801a7ae5f2fd85799a776af",
+    "working_tree": "All implementation and review fixes committed in checked_source_commit. Final source fingerprints were rechecked after commit; the following commit records documentation evidence only.",
     "roles": {
       "documentation": {
         "findings": "Corrected stale current schema/capability references and historical framing; cross-page fragment checks extended.",
@@ -275,6 +275,7 @@
       "Source-derived operation counts do not measure FPS, wall-clock latency or GPU wait costs.",
       "Focused suites overlap aggregate counts.",
       "The M7–9 guides are future implementation instructions, not implemented features or compiled/tested sample patches."
-    ]
+    ],
+    "checked_source_commit": "d5f34d2cb62510332801a7ae5f2fd85799a776af"
   }
 }

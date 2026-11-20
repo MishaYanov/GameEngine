@@ -1,9 +1,9 @@
 {
-  "last_checked_commit": "b835718b8d64d5157a08919623d524024226e8cb",
+  "last_checked_commit": "d5f34d2cb62510332801a7ae5f2fd85799a776af",
   "last_checked_date": "2026-11-20",
-  "last_documentation_update_commit": "b835718b8d64d5157a08919623d524024226e8cb",
+  "last_documentation_update_commit": "d5f34d2cb62510332801a7ae5f2fd85799a776af",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "milestones_4_6_post_commit_review records the final combined-tree review and source fingerprints after the implementation commit. It is an inspection baseline, not commit equivalence. Older entries retain historical evidence.",
+  "baseline_note": "milestones_4_6_post_commit_review records the inspected reviewed source commit and rechecked source fingerprints. Older entries retain historical evidence. This is an inspection baseline, not an assertion that a later documentation-only commit is identical.",
   "courtyard_run_completion_update": {
     "date": "2026-11-15",
     "previous_inspection_commit": "ba2f766211c053b94dcfbe92b8724ad8ed8f65e3",
@@ -5298,7 +5298,7 @@
   "milestones_4_6_post_commit_review": {
     "date": "2026-11-20",
     "implementation_commit": "b835718",
-    "inspected_head": "b835718b8d64d5157a08919623d524024226e8cb",
+    "inspected_head": "d5f34d2cb62510332801a7ae5f2fd85799a776af",
     "scope": "Completed all 18 M4–6 features, independent documentation/optimization/security/test reviews, reviewed-source authority fixes, ownership-index refactor, final tests and fresh native export.",
     "review_findings": "docs/verification/milestones-4-6-review-findings.md",
     "verification_ledger": "docs/verification/milestones-4-6-tests-2026-11-20.json",
@@ -5428,6 +5428,8 @@
       "crates/engine-core/tests/command_factory_api.rs~",
       "crates/renderer/src/vulkan/mesh.rs~",
       "crates/renderer/src/vulkan/render_object.rs~"
-    ]
+    ],
+    "review_fix_commit": "d5f34d2cb62510332801a7ae5f2fd85799a776af",
+    "source_baseline_note": "These source fingerprints were rechecked against the reviewed source commit. The following documentation checkpoint commit contains only documentation evidence updates; the checkpoint remains an inspection baseline."
   }
 }

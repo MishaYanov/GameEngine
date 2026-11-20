@@ -1,7 +1,7 @@
 # Milestones 4–6 independent review findings
 
 The implementation was committed as `b835718` before four independent reviews, as requested.
-The reviewers compared it with `c34555e` and inspected the subsequent fixes. This document records
+The reviewers compared it with `c34555e` and inspected the subsequent fixes, committed as `d5f34d2`. This document records
 confirmed findings and how they were resolved; it is not a claim of exhaustive verification.
 
 ## Findings and resolutions
