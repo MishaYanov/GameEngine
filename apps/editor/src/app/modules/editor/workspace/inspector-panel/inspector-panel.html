@@ -78,12 +78,17 @@
                             (editCancelled)="editCancelled.emit()"
                     />
                 </section>
+                @if (selected.component_views !== undefined) {
+                    <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>
+                    <editor-linked-prefab-inspector [entity]="selected" [editable]="editable()"/>
+                } @else {
                 <editor-collider-inspector
                     [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"
                     (editStarted)="editStarted.emit('collider')" (colliderChanged)="colliderChanged.emit($event)"
                     (draftInvalid)="colliderInvalid.emit()" (shapeChanged)="colliderShapeChanged.emit($event)"
                     (interactionChanged)="colliderInteractionChanged.emit($event)"
                     (editCommitted)="editCommitted.emit()" (editCancelled)="editCancelled.emit()"/>
+                }
             </div>
         } @empty {
             <p class="placeholder">Select an entity to inspect its properties.</p>

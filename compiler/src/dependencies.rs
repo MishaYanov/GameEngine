@@ -11,6 +11,8 @@ const MAX_URI_EDGES: usize = 100_000;
 
 pub(super) struct DependencySnapshot {
 	pub files: Vec<PackageAsset>,
+	pub source_files: Vec<PackageAsset>,
+	pub generated_files: BTreeMap<PathBuf, Vec<u8>>,
 	pub catalog_source: Option<PackageAsset>,
 	pub catalog_output: Option<Vec<u8>>,
 }
@@ -40,6 +42,11 @@ struct Closure<'a> {
 	files: BTreeMap<PathBuf, PackageAsset>,
 	ids: HashSet<AssetId>,
 	models: HashMap<PathBuf, usize>,
+	prefabs: HashSet<PathBuf>,
+	prefab_stack: HashSet<PathBuf>,
+	generated_files: BTreeMap<PathBuf, Vec<u8>>,
+	generated_bytes: u64,
+	linked_sources: HashSet<String>,
 	resolved_paths: HashMap<PathBuf, PathBuf>,
 	bytes: u64,
 	depth: usize,
@@ -48,6 +55,21 @@ struct Closure<'a> {
 	file_reads: usize,
 }
 impl Closure<'_> {
+	fn generate(&mut self, path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
+		let prior = self
+			.generated_files
+			.get(&path)
+			.map_or(0, |bytes| bytes.len() as u64);
+		let total = self.generated_bytes - prior + bytes.len() as u64;
+		if bytes.len() > 16 * 1024 * 1024 || total > 512 * 1024 * 1024 {
+			return Err(
+				"Resolved JSON output exceeds its 16 MiB file or 512 MiB aggregate budget".into(),
+			);
+		}
+		self.generated_bytes = total;
+		self.generated_files.insert(path, bytes);
+		Ok(())
+	}
 	fn key(&mut self, relative: &Path) -> Result<PathBuf, String> {
 		if let Some(key) = self.resolved_paths.get(relative) {
 			return Ok(key.clone());
@@ -208,6 +230,29 @@ impl Closure<'_> {
 	}
 	fn entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
 		for entity in entities {
+			if let Some(link) = &entity.linked_prefab {
+				let path = self
+					.catalog
+					.by_id(&link.source.source_id)
+					.map_or(link.source.path.as_str(), |asset| asset.path.as_str());
+				self.linked_sources.insert(path.to_ascii_lowercase());
+				self.linked_sources
+					.insert(link.source.path.to_ascii_lowercase());
+			}
+			for component in &entity.native_behaviors {
+				if component.enabled {
+					if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
+						prefab_path,
+						..
+					} = &component.behavior
+					{
+						self.prefab_dependency(prefab_path)?;
+					}
+				}
+			}
+			if !entity.has_mesh_component() {
+				continue;
+			}
 			let resolved = self
 				.catalog
 				.resolve(
@@ -287,6 +332,39 @@ impl Closure<'_> {
 		Ok(())
 	}
 	fn prefab(&mut self, relative: &Path) -> Result<(), String> {
+		let relative = self.key(relative)?;
+		if self.prefab_stack.contains(&relative) {
+			return Err(
+				"Cyclic runtime prefab dependency; remove the recursive spawner reference".into(),
+			);
+		}
+		if self.prefabs.contains(&relative) {
+			return Ok(());
+		}
+		if self.prefab_stack.len() >= 32 {
+			return Err("Runtime prefab dependencies exceed 32 levels".into());
+		}
+		self.prefab_stack.insert(relative.clone());
+		let result = self.prefab_contents(&relative);
+		self.prefab_stack.remove(&relative);
+		if result.is_ok() {
+			self.prefabs.insert(relative);
+		}
+		result
+	}
+	fn prefab_dependency(&mut self, path: &str) -> Result<(), String> {
+		let asset = self.catalog.by_path(path).cloned();
+		if let Some(asset) = asset {
+			if asset.kind != AssetKind::Prefab {
+				return Err("Runtime spawner reference resolves to a non-prefab asset".into());
+			}
+			self.record(&asset.id)?;
+			self.prefab(Path::new(&asset.path))
+		} else {
+			self.prefab(Path::new(path))
+		}
+	}
+	fn prefab_contents(&mut self, relative: &Path) -> Result<(), String> {
 		let bytes = self.file(relative)?;
 		let prefab =
 			PrefabData::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)?;
@@ -320,7 +398,9 @@ impl Closure<'_> {
 				}
 			}
 		}
-		self.entities(&prefab.entities)
+		self.entities(&prefab.entities)?;
+		self.generate(relative.to_path_buf(), prefab.to_json()?.into_bytes())?;
+		Ok(())
 	}
 }
 
@@ -348,16 +428,21 @@ fn uri_path(model: &Path, uri: &str) -> Result<Option<PathBuf>, String> {
 	Ok(Some(result))
 }
 
-fn prefab_paths(root: &Path, project: &ProjectData) -> Result<Vec<PathBuf>, String> {
-	prefab_paths_with_budget(root, project, 512 * 1024 * 1024)
-}
-
 // Old authoring allowed saving a prefab at any relative JSON path. Discover
 // recognizable assemblies globally without adding unrelated JSON to the export.
+#[cfg(test)]
 fn prefab_paths_with_budget(
 	root: &Path,
 	project: &ProjectData,
 	byte_budget: u64,
+) -> Result<Vec<PathBuf>, String> {
+	prefab_paths_excluding(root, project, byte_budget, &HashSet::new())
+}
+fn prefab_paths_excluding(
+	root: &Path,
+	project: &ProjectData,
+	byte_budget: u64,
+	ignored: &HashSet<String>,
 ) -> Result<Vec<PathBuf>, String> {
 	let scene_paths = project
 		.scenes
@@ -377,6 +462,14 @@ fn prefab_paths_with_budget(
 			return Err("Prefab inventory exceeds its traversal budget".into());
 		}
 		let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+		if ignored.contains(
+			&relative
+				.to_string_lossy()
+				.replace('\\', "/")
+				.to_ascii_lowercase(),
+		) {
+			continue;
+		}
 		let path = checked_asset_path(root, relative).map_err(|error| error.to_string())?;
 		let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
 		if metadata.is_dir() {
@@ -478,6 +571,11 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 		files: BTreeMap::new(),
 		ids: HashSet::new(),
 		models: HashMap::new(),
+		prefabs: HashSet::new(),
+		prefab_stack: HashSet::new(),
+		generated_files: BTreeMap::new(),
+		generated_bytes: 0,
+		linked_sources: HashSet::new(),
 		resolved_paths: HashMap::new(),
 		bytes: 0,
 		depth: 0,
@@ -502,7 +600,21 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 					));
 				}
 			}
-			closure.entities(&scene.entities)
+			closure.entities(&scene.entities)?;
+			if scene
+				.entities
+				.iter()
+				.any(|entity| entity.linked_prefab.is_some())
+			{
+				let key = closure.key(Path::new(entry.asset_path()))?;
+				closure.generate(
+					key,
+					engine_core::linked_prefab::resolve_scene(&scene)
+						.to_json()?
+						.into_bytes(),
+				)?;
+			}
+			Ok::<_, String>(())
 		})();
 		if let Err(error) = result {
 			append_scene_error(&mut report, &scene_error(entry, error), &mut truncated);
@@ -511,20 +623,18 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 	if !report.is_empty() {
 		return Err(report);
 	}
-	for path in prefab_paths(root, project)? {
+	for path in prefab_paths_excluding(root, project, 512 * 1024 * 1024, &closure.linked_sources)? {
+		if closure.linked_sources.contains(
+			&path
+				.to_string_lossy()
+				.replace('\\', "/")
+				.to_ascii_lowercase(),
+		) {
+			continue;
+		}
 		closure
 			.prefab(&path)
 			.map_err(|error| format!("Prefab {}: {error}", path.display()))?;
-	}
-	let prefab_ids = closure
-		.catalog
-		.assets
-		.iter()
-		.filter(|asset| asset.kind == AssetKind::Prefab)
-		.map(|asset| asset.id.clone())
-		.collect::<Vec<_>>();
-	for id in prefab_ids {
-		closure.record(&id)?;
 	}
 	// Include metadata for any dependency addressed by path, not only explicit IDs.
 	let catalog_paths: Vec<_> = closure
@@ -552,6 +662,20 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 			closure.record(&id)?;
 		}
 	}
+	let source_files: Vec<_> = closure.files.values().cloned().collect();
+	for (relative, bytes) in &closure.generated_files {
+		if bytes.len() > 16 * 1024 * 1024 {
+			return Err("Generated JSON exceeds the 16 MiB package limit".into());
+		}
+		closure.files.insert(
+			relative.clone(),
+			PackageAsset {
+				relative: relative.clone(),
+				bytes: bytes.len() as u64,
+				fingerprint: Sha256::digest(bytes).into(),
+			},
+		);
+	}
 	let catalog_output = if catalog_source.is_some() {
 		let mut exported = closure.catalog.clone();
 		exported
@@ -559,6 +683,14 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 			.retain(|asset| closure.ids.contains(&asset.id));
 		for asset in &mut exported.assets {
 			asset.source_path = None;
+			if let Ok(path) = checked_asset_path(root, Path::new(&asset.path)) {
+				if let Ok(relative) = path.strip_prefix(root) {
+					if let Some(bytes) = closure.generated_files.get(relative) {
+						asset.bytes = bytes.len() as u64;
+						asset.fingerprint = format!("{:x}", Sha256::digest(bytes));
+					}
+				}
+			}
 		}
 		let bytes = exported.to_json()?.into_bytes();
 		if closure.files.len() == 10_000 || closure.bytes + bytes.len() as u64 > 512 * 1024 * 1024 {
@@ -576,8 +708,13 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 	} else {
 		None
 	};
+	if closure.files.values().map(|file| file.bytes).sum::<u64>() > 512 * 1024 * 1024 {
+		return Err("Resolved dependency package exceeds 512 MiB".into());
+	}
 	Ok(DependencySnapshot {
 		files: closure.files.into_values().collect(),
+		source_files,
+		generated_files: closure.generated_files,
 		catalog_source,
 		catalog_output,
 	})
@@ -613,6 +750,11 @@ mod tests {
 			files: BTreeMap::new(),
 			ids: HashSet::new(),
 			models: HashMap::new(),
+			prefabs: HashSet::new(),
+			prefab_stack: HashSet::new(),
+			generated_files: BTreeMap::new(),
+			generated_bytes: 0,
+			linked_sources: HashSet::new(),
 			resolved_paths: HashMap::new(),
 			bytes: 0,
 			depth: 0,
@@ -633,10 +775,13 @@ mod tests {
 			1,
 			"case aliases reuse one parsed model"
 		);
+		let frozen: Vec<_> = closure.files.into_values().collect();
 		let prepared = PreparedProject {
 			project: project.clone(),
 			asset_root: root.clone(),
-			files: closure.files.into_values().collect(),
+			files: frozen.clone(),
+			source_files: frozen,
+			generated_files: BTreeMap::new(),
 			total_bytes: closure.bytes,
 			catalog_source: None,
 			catalog_output: None,
@@ -666,6 +811,11 @@ mod tests {
 			files: BTreeMap::new(),
 			ids: HashSet::new(),
 			models: HashMap::new(),
+			prefabs: HashSet::new(),
+			prefab_stack: HashSet::new(),
+			generated_files: BTreeMap::new(),
+			generated_bytes: 0,
+			linked_sources: HashSet::new(),
 			resolved_paths: HashMap::new(),
 			bytes: 0,
 			depth: 0,
@@ -733,6 +883,7 @@ mod discovery_tests {
 		fs::copy(&model, fixture.root.join("models/prefab-only.glb")).unwrap();
 		fs::copy(&model, fixture.root.join("models/unreferenced.glb")).unwrap();
 		let prefab = PrefabData {
+			reference_slots: Default::default(),
 			schema_version: 1,
 			entities: vec![EntityData::new(
 				engine_core::EntityKey::new("legacy").unwrap(),

@@ -1,26 +1,27 @@
-# Scene data, save, and reload — in progress
+# Scene data, save, and reload
 
 Scene documents are owned by engine-core and exposed through runtime adapters. Current authoring retains multiple drafts
-under project schema 3, while scene saves remain schema 3. Read [project lifecycle](project-lifecycle.md) for scene IDs,
+under project schema 3, while scene saves use schema 4. Read [project lifecycle](project-lifecycle.md) for scene IDs,
 project opening, per-scene dirty state, Save As, register, reload policies and catalog-wide build checks. Native visual
 acceptance remains separate.
 
-## Schema version 3 and persistent identity
+## Schema version 4 and persistent identity
 
-Current saves use version **3**, retaining entity keys/bindings/transforms/camera and adding optional parent keys,
-renderable state, selected mesh_index, tint material override, collider data, and a bounded scene light list.
+Current saves use version **4**, retaining entity keys/bindings/transforms/camera, optional parent keys and scene lights.
+Objects store typed component arrays for mesh rendering, material overrides, colliders and native behaviors. Existing
+flat internal adapters and computed transport views preserve the runtime/editor boundary.
 Nonrenderable entities can preserve imported transform-only nodes. Names are labels; keys provide document identity.
 Runtime EntityIds and GPU handles are not serialized.
 
 Box/Sphere colliders may contain `interaction` with sensor state and unsigned membership/detection masks. Legacy
 absence defaults to a blocking collider on layer bit 0 accepting all masks. Partial objects default fields; fully
 default settings serialize omitted. Both filters must match for detection, and sensor pairs do not block movement.
-These remain schema-3 authored fields, participate in ordinary undo/save/reopen and are separate from editor-only
-outline visibility or future trigger lifecycle events. [Collider reference](scene-editing.md#colliders-and-interaction-settings).
+These remain authored component fields, participate in ordinary undo/save/reopen and are separate from editor-only
+outline visibility. Sensor edges drive the implemented trigger lifecycle. [Collider reference](scene-editing.md#colliders-and-interaction-settings).
 
-Version-1 and version-2 input migrates in memory to v3. V1 receives deterministic legacy keys; V2 preserves
+Version-1, version-2 and version-3 input migrates in memory to v4. V1 receives deterministic legacy keys; V2 preserves
 keys/bindings. New fields receive compatible defaults and older scenes receive a migrated default light. Reading alone
-does not rewrite files. Unknown future versions fail; the current to_json writes v3.
+does not rewrite files. Unknown future versions fail; the current to_json writes v4.
 
 Validation rejects malformed identities/paths, duplicates, missing/cyclic parents, invalid world transforms, non-finite
 values, projection errors, and invalid materials/colliders/lights. The ceiling is 32 MiB scene JSON, 100,000 entities
@@ -34,9 +35,12 @@ commands. It provides multi-key selection, grouped transactions and bounded patc
 Save/reload reject an active transaction; commit/cancel is explicit. Authored content is separate from the temporary
 Play copy and saving never implicitly adopts simulated changes.
 
-PrefabData has its own schema version 1 and bounded isolated entity subtrees. Export detaches external roots while
-preserving placement; instantiation creates new keys and remaps internal parents as one edit. Prefabs are not
-live-linked overrides or copies of every referenced asset. See [steps 21–35](editor-steps-21-35.md).
+Canonical prefab files use schema 3, migrating legacy versions 1/2. They retain bounded entity subtrees, typed
+components, optional legacy gameplay data and explicit external reference slots. Copy export detaches external
+roots; copy instantiation creates new keys and remaps parents as one edit. Linked instances separately retain a
+source identity/version and typed overrides with explicit update/revert/unpack. See the
+[current prefab workflow](milestones-4-6-review.md#milestone-5-linked-prefab-authoring); the
+[steps 21–35](editor-steps-21-35.md) remain the historical introduction.
 
 Native SceneEditor delegates authored edits/history to the core session. Scene/EntityId and GPU snapshots remain
 resource adapters; transient IDs are not persistent scene/entity identities.

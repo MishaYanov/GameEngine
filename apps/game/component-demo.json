@@ -1,0 +1,29 @@
+{
+  "schema_version": 3,
+  "name": "Component Lifecycle Lab",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behavior_definitions": [],
+  "behaviors": [
+    {
+      "scene_id": "component-lab",
+      "behavior": {
+        "kind": "controlled_move",
+        "entity": "lab-player",
+        "speed": 2,
+        "space": "world"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "component-lab",
+      "asset_path": "scenes/component-lab.json"
+    },
+    {
+      "id": "component-rest",
+      "asset_path": "scenes/component-rest.json"
+    }
+  ],
+  "startup_scene_id": "component-lab"
+}

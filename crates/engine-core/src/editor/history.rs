@@ -101,6 +101,13 @@ impl Patch {
 					.saturating_add(entity.model_path.capacity())
 					.saturating_add(entity.asset_id.as_ref().map_or(0, |id| id.as_str().len()))
 					.saturating_add(entity.parent.as_ref().map_or(0, |key| key.as_str().len()));
+				bytes = bytes.saturating_add(entity.component_retained_bytes());
+				if let Some(link) = &entity.linked_prefab {
+					bytes = bytes.saturating_add(
+						serde_json::to_vec(link)
+							.map_or(usize::MAX, |bytes| bytes.len().saturating_mul(4)),
+					);
+				}
 			}
 		}
 		for selection in [selection_before, selection_after] {

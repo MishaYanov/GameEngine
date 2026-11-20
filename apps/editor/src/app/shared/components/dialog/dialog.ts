@@ -40,6 +40,8 @@ export class EditorDialog {
     readonly renderFields = input(true);
     readonly submitLabel = input('Apply');
     readonly closeLabel = input('Close');
+    readonly closeBlocked = input(false);
+    readonly closeAttempted = output<void>();
     readonly submitted = output<void>();
     readonly closed = output<void>();
     protected readonly titleId = `editor-dialog-${nextDialogId++}`;
@@ -100,6 +102,7 @@ export class EditorDialog {
     }
 
     close(): void {
+        if (this.closeBlocked()) {this.closeAttempted.emit(); return;}
         this.stopDrag();
         this.open.set(false);
     }

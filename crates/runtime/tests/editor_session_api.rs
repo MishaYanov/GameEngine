@@ -737,16 +737,19 @@ fn prefab_detaches_external_parent_and_invalid_prefabs_do_not_change_document_or
 	let before = s.authored_document();
 	for prefab in [
 		PrefabData {
+			reference_slots: Default::default(),
 			schema_version: 1,
 			gameplay: None,
 			entities: vec![],
 		},
 		PrefabData {
-			schema_version: 3,
+			reference_slots: Default::default(),
+			schema_version: u32::MAX,
 			gameplay: None,
 			entities: exported.entities.clone(),
 		},
 		PrefabData {
+			reference_slots: Default::default(),
 			schema_version: 1,
 			gameplay: None,
 			entities: vec![entity("child", [0.0; 3]).with_parent(Some(key("outside")))],

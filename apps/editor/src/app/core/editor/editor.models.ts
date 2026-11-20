@@ -1,4 +1,6 @@
 import type {GameInputProfile} from '../game-input/game-input.models';
+import type {ComponentRecord, ComponentTypeDescriptor, NativeBehaviorAttachment} from './editor-components';
+import type {LinkedPrefabOverrideTarget, PrefabSourceDocument} from './linked-prefabs.models';
 
 export type SceneId = string;
 
@@ -100,6 +102,9 @@ export interface SceneEntity {
     readonly material?: MaterialOverride | null;
     readonly collider?: Collider | null;
     readonly mesh_index?: number | null;
+    readonly component_views?: readonly ComponentRecord[];
+    readonly component_ids?: Readonly<Record<string, string>>;
+    readonly native_behaviors?: readonly NativeBehaviorAttachment[];
 }
 
 export interface Light {
@@ -114,17 +119,21 @@ export interface Light {
 }
 
 export interface SceneDocument {
-    readonly schema_version: 3;
+    readonly schema_version: 3 | 4;
     readonly bindings: Readonly<Record<string, EntityKey>>;
     readonly entities: readonly SceneEntity[];
     readonly camera: Camera;
     readonly lights: readonly Light[];
 }
 
-export interface Prefab {
-    readonly schema_version: 1;
+export interface CopiedPrefab {
+    readonly schema_version: 1 | 2 | 3;
     readonly entities: readonly SceneEntity[];
+    readonly gameplay?: unknown;
+    readonly reference_slots?: Readonly<Record<string, string>>;
 }
+
+export type Prefab = CopiedPrefab | PrefabSourceDocument;
 
 export interface EntitySpec {
     readonly name: string;
@@ -198,6 +207,12 @@ export type EditorCommand =
     readonly material: MaterialOverride | null;
 }
     | { readonly type: 'set_collider'; readonly key: EntityKey; readonly collider: Collider | null }
+    | { readonly type: 'add_component'; readonly key: EntityKey; readonly component: ComponentRecord }
+    | { readonly type: 'replace_component'; readonly key: EntityKey; readonly component: ComponentRecord }
+    | { readonly type: 'remove_component'; readonly key: EntityKey; readonly component_id: string }
+    | { readonly type: 'set_component_enabled'; readonly key: EntityKey; readonly component_id: string; readonly enabled: boolean }
+    | { readonly type: 'revert_linked_prefab'; readonly root_key: EntityKey; readonly property?: LinkedPrefabOverrideTarget | null }
+    | { readonly type: 'unpack_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'upsert_light'; readonly light: Light }
     | { readonly type: 'remove_light'; readonly key: EntityKey }
     | { readonly type: 'set_camera'; readonly camera: Camera }
@@ -302,6 +317,7 @@ export interface EditorCapabilities {
     readonly embedded_viewport_supported: boolean;
     readonly incremental_commands?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
+    readonly component_types?: readonly ComponentTypeDescriptor[];
 }
 
 export interface GameplayRoleDescriptor {

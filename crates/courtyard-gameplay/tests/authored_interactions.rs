@@ -297,7 +297,8 @@ fn gameplay_prefab_copies_remap_real_courtyard_settings_independently_and_undo_t
 		},
 	);
 	let prefab = engine.export_prefab().unwrap();
-	assert_eq!(prefab.schema_version, 2);
+	assert_eq!(prefab.schema_version, 3);
+	let prefab = engine_core::editor::PrefabData::from_json(&prefab.to_json().unwrap()).unwrap();
 	assert_eq!(prefab.gameplay.as_ref().unwrap().entity_references.len(), 3);
 	let mut empty = (*course).clone();
 	empty.entities.clear();

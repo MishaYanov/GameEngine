@@ -3,17 +3,20 @@ fn main() {
 		engine_logger::init_application("compiler").expect("failed to initialize compiler logger");
 	let args: Vec<String> = std::env::args().skip(1).collect();
 	let stage = args.first().is_some_and(|argument| argument == "--stage");
+	let export = args.first().is_some_and(|argument| argument == "--export");
 	if !matches!(args.as_slice(), [name, _] if !name.starts_with("--"))
-		&& !(stage && args.len() == 3)
+		&& !((stage || export) && args.len() == 3)
 	{
 		eprintln!(
-			"Usage: compiler <project-name> <destination-folder>\n       compiler --stage <project.json> <destination-folder>"
+			"Usage: compiler <project-name> <destination-folder>\n       compiler --stage <project.json> <destination-folder>\n       compiler --export <project.json> <destination-folder>"
 		);
 		std::process::exit(2);
 	}
 	engine_logger::info!(target: "compiler", "Project build/install started");
 	let result = if stage {
 		stage_manifest(std::path::Path::new(&args[1]), &args[2])
+	} else if export {
+		compiler::install_project_from_manifest(std::path::Path::new(&args[1]), &args[2])
 	} else {
 		compiler::install_project(&args[0], &args[1])
 	};

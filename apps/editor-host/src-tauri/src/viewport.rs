@@ -1296,7 +1296,7 @@ mod windows {
 		}
 
 		fn tick_play(&mut self, elapsed: f64) -> Result<(), String> {
-			let transition = {
+			let (transition, pending_steps) = {
 				let mut workspace = self
 					.shared
 					.lock()
@@ -1325,13 +1325,14 @@ mod windows {
 					.sync_game_status_after_tick(workspace, &outcome);
 				let outcome = outcome.map_err(|error| error.to_string())?;
 				self.dirty |= !outcome.changes.is_empty();
-				outcome.requested_scene.map(|target| {
+				let transition = outcome.requested_scene.map(|target| {
 					(
 						workspace.generation,
 						target,
 						workspace.backend.prepare_pending_play_scene(),
 					)
-				})
+				});
+				(transition, outcome.pending_steps)
 			};
 
 			if let Some((generation, target, prepared)) = transition {
@@ -1361,6 +1362,130 @@ mod windows {
 							target.as_str()
 						));
 					}
+				}
+			}
+			self.fulfill_runtime_spawns()?;
+			if pending_steps > 0 {
+				self.tick_play(0.0)?;
+			}
+			Ok(())
+		}
+
+		fn fulfill_runtime_spawns(&mut self) -> Result<(), String> {
+			let (generation, run_id, root, requests) = {
+				let shared = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let workspace = shared.as_ref().ok_or("No editor document is open")?;
+				if workspace.backend.session().is_paused() {
+					return Ok(());
+				}
+				let Some(status) = workspace.backend.play_status() else {
+					return Ok(());
+				};
+				(
+					workspace.generation,
+					status.run_id,
+					workspace.asset_root.clone(),
+					workspace.backend.pending_runtime_spawns(),
+				)
+			};
+			for request in requests {
+				let result = (|| {
+					let (prefab, fingerprint) =
+						bridge::runtime_prefab::load(&root, &request.prefab_path)?;
+					let (mut prepared, data) = {
+						let shared = self
+							.shared
+							.lock()
+							.map_err(|_| "Editor document lock is poisoned")?;
+						let workspace = shared.as_ref().ok_or("Project closed during spawn")?;
+						if workspace.generation != generation
+							|| workspace
+								.backend
+								.play_status()
+								.is_none_or(|status| status.run_id != run_id)
+						{
+							return Err("Run changed during spawn".into());
+						}
+						let prepared = workspace.backend.prepare_runtime_spawn(
+							&prefab,
+							&fingerprint,
+							request.position,
+							Some(request.id),
+						)?;
+						let data = workspace.backend.runtime_spawn_document(&prepared)?;
+						(prepared, data)
+					};
+					let gpu = self.gpu.as_mut().ok_or("Native viewport is unavailable")?;
+					let candidate = scene_io::instantiate(&data, &mut gpu.assets, &gpu.renderer);
+					gpu.renderer.wait_idle()?;
+					let (mut scene, _) = candidate?;
+					let mut shared = self
+						.shared
+						.lock()
+						.map_err(|_| "Editor document lock is poisoned")?;
+					let workspace = shared.as_mut().ok_or("Project closed during spawn")?;
+					if workspace.generation != generation
+						|| workspace
+							.backend
+							.play_status()
+							.is_none_or(|status| status.run_id != run_id)
+					{
+						return Err("Run changed during spawn".into());
+					}
+					// Recheck the topology token and include transforms from any accepted tick.
+					let current = workspace.backend.runtime_spawn_document(&prepared)?;
+					if !scene.synchronize(&current)? {
+						return Err("Spawn candidate topology changed".into());
+					}
+					let keys: std::collections::HashSet<_> = prepared
+						.entities()
+						.iter()
+						.map(|entity| entity.key.clone())
+						.collect();
+					prepared.set_visibility_capabilities(
+						scene
+							.visibility_capabilities()
+							.into_iter()
+							.filter(|key| keys.contains(key))
+							.collect(),
+					)?;
+					workspace
+						.backend
+						.commit_runtime_spawn(prepared)
+						.map_err(|error| error.to_string())?;
+					let retired = std::mem::replace(&mut gpu.scene, scene);
+					gpu.revision = workspace.backend.session().scene_revision();
+					gpu.change_cursor = workspace.backend.change_cursor();
+					self.dirty = true;
+					drop(shared);
+					drop(retired);
+					Ok::<(), String>(())
+				})();
+				if let Err(error) = result {
+					let mut shared = self
+						.shared
+						.lock()
+						.map_err(|_| "Editor document lock is poisoned")?;
+					if let Some(workspace) = shared.as_mut() {
+						if workspace.generation == generation
+							&& workspace
+								.backend
+								.play_status()
+								.is_some_and(|status| status.run_id == run_id)
+						{
+							workspace
+								.backend
+								.reject_runtime_spawn(request.id, &error)
+								.map_err(|error| error.to_string())?;
+							engine_logger::error!(target:"editor_viewport", "Runtime spawn rejected: operation=prepare_and_admit_runtime_spawn");
+						}
+					}
+				}
+				if let Some(gpu) = self.gpu.as_mut() {
+					gpu.assets.prune_unused();
 				}
 			}
 			Ok(())
@@ -1869,7 +1994,23 @@ mod windows {
 										changes.full_resync = true;
 									}
 									synchronized = if let Some(world) = session.render_world() {
-										gpu.scene.synchronize_world(world, &changes)?
+										{
+											if changes.topology_changed
+												|| !changes.removed_entities.is_empty()
+												|| changes.full_resync
+											{
+												gpu.renderer.wait_idle()?;
+											}
+											let synchronized =
+												gpu.scene.synchronize_world(world, &changes)?;
+											if synchronized
+												&& (changes.topology_changed
+													|| !changes.removed_entities.is_empty())
+											{
+												gpu.assets.prune_unused();
+											}
+											synchronized
+										}
 									} else {
 										gpu.scene.synchronize_authored(
 											session.validated_authored_document(),
@@ -2023,8 +2164,8 @@ mod windows {
 							drop(data);
 							gpu.renderer.wait_idle().map_err(|wait_error| {
 								format!(
-										"{error}; failed to retire rejected candidate GPU resources: {wait_error}"
-									)
+									"{error}; failed to retire rejected candidate GPU resources: {wait_error}"
+								)
 							})?;
 							gpu.assets.prune_unused();
 							return Err(error);

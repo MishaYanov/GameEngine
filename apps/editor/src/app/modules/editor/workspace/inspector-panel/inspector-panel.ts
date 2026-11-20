@@ -8,6 +8,8 @@ import {type Vector3Change, Vector3Field} from '../../../../shared/components/ve
 import type {InspectorField, TransformFieldEdit} from '../scene-editing.service';
 import {ColliderInspector} from '../collider/collider-inspector';
 import type {ColliderInteractionChange, ColliderKind} from '../collider/collider';
+import {SceneComponentInspector} from '../components/scene-component-inspector';
+import {LinkedPrefabInspector} from '../prefabs/linked-prefab-inspector';
 
 export type {InspectorField} from '../scene-editing.service';
 export type TransformProperty = TransformFieldEdit['field'];
@@ -22,6 +24,8 @@ let nextInspectorId = 0;
         EditorPane,
         Vector3Field,
         ColliderInspector,
+        SceneComponentInspector,
+        LinkedPrefabInspector,
     ],
     templateUrl: './inspector-panel.html',
     styleUrl: './inspector-panel.scss',

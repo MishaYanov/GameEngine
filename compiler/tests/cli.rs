@@ -112,6 +112,8 @@ fn stage_cli_rejects_incomplete_or_unknown_argument_forms() {
 		vec![],
 		vec!["--stage"],
 		vec!["--stage", "project.json"],
+		vec!["--export"],
+		vec!["--export", "project.json"],
 		vec!["--unknown", "destination"],
 		vec!["Name", "destination", "extra"],
 	] {
@@ -119,6 +121,21 @@ fn stage_cli_rejects_incomplete_or_unknown_argument_forms() {
 		assert_eq!(output.status.code(), Some(2));
 		assert!(String::from_utf8_lossy(&output.stderr).contains("Usage: compiler"));
 	}
+}
+
+#[test]
+fn export_cli_checks_manifest_before_creating_an_output_folder_or_building_player() {
+	let fixture = Fixture::new();
+	let output = fixture
+		.command()
+		.arg("--export")
+		.arg("missing.json")
+		.arg(&fixture.0)
+		.output()
+		.unwrap();
+	assert_eq!(output.status.code(), Some(1));
+	assert!(!String::from_utf8_lossy(&output.stderr).contains("Usage: compiler"));
+	assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 0);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-import {copyFile, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {marked} from 'marked';
@@ -16,6 +16,7 @@ async function collect(dir) {
 }
 const files = [...await collect('docs'), ...await collect('designs')].sort();
 const routes = new Map(files.map(file => [file, file === 'docs/main.md' ? 'developer/index.html' : file.replace(/\.md$/, '.html')]));
+const verificationArtifacts = new Set();
 const documents = await Promise.all(files.map(async file => {
   const markdown = await readFile(path.join(root, file), 'utf8');
   const title = markdown.match(/^# (.+)$/m)?.[1] ?? path.basename(file, '.md');
@@ -65,6 +66,10 @@ for (const doc of documents) {
     const [href, fragment] = token.href.split('#');
     const target = path.posix.normalize(path.posix.join(path.posix.dirname(doc.file), decodeURIComponent(href)));
     if (routes.has(target)) token.href = relative(doc.route, routes.get(target)) + (fragment ? '#' + fragment : '');
+    else if (token.type === 'link' && !fragment && /^docs\/verification\/[A-Za-z0-9_.-]+\.json$/.test(target)) {
+      verificationArtifacts.add(target);
+      token.href = relative(doc.route, target);
+    }
     else throw new Error(`Unmapped local link in ${doc.file}: ${token.href}`);
   }});
   const nav = groups.map(label => `<div class="nav-group"><p>${label}</p>${documents.filter(d => group(d.file) === label).sort((a,b) => a.file === 'docs/main.md' ? -1 : b.file === 'docs/main.md' ? 1 : a.title.localeCompare(b.title)).map(d => `<a href="${relative(doc.route,d.route)}" ${d.file === doc.file ? 'aria-current="page"' : ''}>${escape(d.file === 'docs/main.md' ? 'Documentation home' : d.title)}</a>`).join('')}</div>`).join('');
@@ -74,6 +79,14 @@ for (const doc of documents) {
   await mkdir(path.dirname(path.join(out,doc.route)), {recursive:true});
   const diagramScripts = diagramCount ? `<script src="${relative(doc.route, 'assets/mermaid.tiny.js')}" defer></script><script src="${relative(doc.route, 'assets/diagrams.js')}" defer></script>` : '';
   await writeFile(path.join(out, doc.route), page.replace('</body>', `${diagramScripts}</body>`));
+}
+for (const artifact of verificationArtifacts) {
+  const source = path.join(root, artifact);
+  const metadata = await lstat(source);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`Verification artifact must be a regular file: ${artifact}`);
+  JSON.parse(await readFile(source, 'utf8'));
+  await mkdir(path.dirname(path.join(out, artifact)), {recursive: true});
+  await copyFile(source, path.join(out, artifact));
 }
 // Space pages deliberately contain no documentation from the other audience.
 function spacePage(route, empty = false) {

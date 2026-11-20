@@ -245,6 +245,55 @@ impl Engine {
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
 		self.session.play_status()
 	}
+	pub fn pending_runtime_spawns(&self) -> Vec<crate::runtime_lifecycle::RuntimeSpawnRequest> {
+		self.session.pending_runtime_spawns()
+	}
+	pub fn prepare_runtime_spawn(
+		&self,
+		prefab: &crate::editor::PrefabData,
+		fingerprint: &str,
+		position: [f32; 3],
+		request: Option<u64>,
+	) -> Result<crate::runtime_lifecycle::PreparedRuntimeSpawn, String> {
+		self.session
+			.prepare_runtime_spawn(prefab, fingerprint, position, request)
+	}
+	pub fn runtime_spawn_document(
+		&self,
+		prepared: &crate::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<SceneData, String> {
+		self.session.runtime_spawn_document(prepared)
+	}
+	pub fn commit_runtime_spawn(
+		&mut self,
+		prepared: crate::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<(), BackendError> {
+		self.ensure_event_capacity()?;
+		let changes = self
+			.session
+			.commit_runtime_spawn(prepared)
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		self.publish_runtime(BackendEventKind::SimulationAdvanced {
+			tick: self.session.simulation_stats().map_or(0, |stats| stats.0),
+			changes,
+		})?;
+		Ok(())
+	}
+	pub fn reject_runtime_spawn(&mut self, id: u64, error: &str) -> Result<(), BackendError> {
+		self.ensure_event_capacity()?;
+		self.session
+			.reject_runtime_spawn(id, error)
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		self.publish_runtime(BackendEventKind::StateChanged)?;
+		Ok(())
+	}
+	pub fn runtime_inspection(
+		&self,
+		offset: usize,
+		limit: usize,
+	) -> Result<crate::runtime_lifecycle::RuntimeInspectionDto, String> {
+		self.session.runtime_inspection(offset, limit)
+	}
 	pub fn set_play_visibility_capabilities(
 		&mut self,
 		available: std::collections::HashSet<crate::EntityKey>,

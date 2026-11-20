@@ -97,6 +97,7 @@ fn deserialize_actions<'de, D: de::Deserializer<'de>>(
 }
 #[derive(Serialize)]
 struct Summary {
+	runtime: Option<engine_core::runtime_lifecycle::RuntimeInspectionDto>,
 	schema_version: u32,
 	project: String,
 	mode: &'static str,
@@ -262,6 +263,7 @@ fn run(options: Options) -> Result<Summary, String> {
 		project,
 		parsed,
 		documents,
+		asset_root,
 	} = source(&options)?;
 	let source_schema = parsed.source_schema_version;
 	let mut engine = EngineBuilder::new(parsed.data, project)
@@ -331,7 +333,15 @@ fn run(options: Options) -> Result<Summary, String> {
 						.or(options.dt)
 						.unwrap_or(1.0 / engine.session().project().fixed_hz as f64);
 					validate_elapsed(elapsed)?;
-					advance(&mut engine, count, elapsed, &mut measures, started, budget)?;
+					advance(
+						&mut engine,
+						&asset_root,
+						count,
+						elapsed,
+						&mut measures,
+						started,
+						budget,
+					)?;
 				}
 				ReplayAction::AssetMetadata {
 					path,
@@ -361,7 +371,15 @@ fn run(options: Options) -> Result<Summary, String> {
 		let elapsed = options
 			.dt
 			.unwrap_or(1.0 / engine.session().project().fixed_hz as f64);
-		advance(&mut engine, steps, elapsed, &mut measures, started, budget)?;
+		advance(
+			&mut engine,
+			&asset_root,
+			steps,
+			elapsed,
+			&mut measures,
+			started,
+			budget,
+		)?;
 	}
 	check_budget(started, budget)?;
 	let final_document = engine.session().render_document();
@@ -391,6 +409,7 @@ fn run(options: Options) -> Result<Summary, String> {
 		.collect();
 	let stats = engine.session().simulation_stats();
 	let summary = Summary {
+		runtime: engine.runtime_inspection(0, 128).ok(),
 		schema_version: 1,
 		project: engine.session().project().name.clone(),
 		mode: if engine.session().is_playing() {
@@ -439,6 +458,7 @@ fn run(options: Options) -> Result<Summary, String> {
 	Ok(summary)
 }
 struct Source {
+	asset_root: PathBuf,
 	project: ProjectData,
 	parsed: engine_core::scene_data::ParsedScene,
 	documents: Vec<(SceneId, SceneData)>,
@@ -483,6 +503,7 @@ fn source(options: &Options) -> Result<Source, String> {
 			}
 		}
 		return Ok(Source {
+			asset_root: root,
 			project,
 			parsed: parsed.ok_or("Startup scene is missing")?,
 			documents,
@@ -519,6 +540,7 @@ fn source(options: &Options) -> Result<Source, String> {
 	// A standalone run has no persisted catalog. Its transient identity must
 	// remain stable so identical inputs produce comparable diagnostic hashes.
 	Ok(Source {
+		asset_root: root,
 		project: ProjectData::for_scene_with_id(
 			"Headless scene",
 			SceneId::new("headless-scene")?,
@@ -559,6 +581,7 @@ fn read_bounded(path: &Path, limit: usize) -> Result<String, String> {
 }
 fn advance(
 	engine: &mut Engine,
+	asset_root: &Path,
 	count: u32,
 	elapsed: f64,
 	measures: &mut Measurements,
@@ -568,22 +591,52 @@ fn advance(
 	for _ in 0..count {
 		check_budget(started, budget)?;
 		let tick_start = Instant::now();
-		let outcome = engine.tick(elapsed).map_err(|e| e.to_string())?;
-		if let Some(destination) = &outcome.requested_scene {
-			check_budget(started, budget)?;
-			let (prepared, _) = engine.prepare_pending_play_scene().map_err(|error| {
-				format!("Cannot prepare requested scene {destination:?}: {error}")
-			})?;
-			engine.commit_play_scene(prepared).map_err(|error| {
-				format!("Cannot install requested scene {destination:?}: {error}")
-			})?;
+		let mut remaining_elapsed = elapsed;
+		loop {
+			let outcome = engine.tick(remaining_elapsed).map_err(|e| e.to_string())?;
+			if let Some(destination) = &outcome.requested_scene {
+				check_budget(started, budget)?;
+				let (prepared, _) = engine.prepare_pending_play_scene().map_err(|error| {
+					format!("Cannot prepare requested scene {destination:?}: {error}")
+				})?;
+				engine.commit_play_scene(prepared).map_err(|error| {
+					format!("Cannot install requested scene {destination:?}: {error}")
+				})?;
+			}
+			if !engine.session().is_paused() {
+				for request in engine.pending_runtime_spawns() {
+					check_budget(started, budget)?;
+					let result = (|| {
+						let (prefab, fingerprint) =
+							bridge::runtime_prefab::load(asset_root, &request.prefab_path)?;
+						let prepared = engine.prepare_runtime_spawn(
+							&prefab,
+							&fingerprint,
+							request.position,
+							Some(request.id),
+						)?;
+						engine
+							.commit_runtime_spawn(prepared)
+							.map_err(|error| error.to_string())
+					})();
+					if let Err(error) = result {
+						engine
+							.reject_runtime_spawn(request.id, &error)
+							.map_err(|error| error.to_string())?;
+					}
+				}
+			}
+			measures.fixed_steps += outcome.steps as u64;
+			measures.dropped += outcome.dropped_seconds;
+			if outcome.pending_steps == 0 {
+				break;
+			}
+			remaining_elapsed = 0.0;
 		}
 		let time = tick_start.elapsed();
 		measures.tick_total += time;
 		measures.tick_max = measures.tick_max.max(time);
 		measures.tick_calls += 1;
-		measures.fixed_steps += outcome.steps as u64;
-		measures.dropped += outcome.dropped_seconds;
 	}
 	Ok(())
 }

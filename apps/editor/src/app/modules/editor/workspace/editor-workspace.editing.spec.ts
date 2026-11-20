@@ -536,8 +536,15 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         const types = commands.map(command => command.type);
         expect(types.indexOf('commit_transaction')).toBeLessThan(types.indexOf('start_play'));
-        expect(input('Position X').matches(':disabled')).toBe(true);
         expect(fixture.nativeElement.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Game');
+        expect(fixture.nativeElement.querySelector('editor-runtime-inspector')).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('input[aria-label="Position X"]')).toBeNull();
+        const workspaceRoot: HTMLElement = fixture.nativeElement;
+        const sceneTab = Array.from(workspaceRoot.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+            .find(tab => tab.textContent?.trim() === 'Scene')!;
+        sceneTab.click();
+        await fixture.whenStable();
+        expect(input('Position X').matches(':disabled')).toBe(true);
         action('Stop').click();
         await vi.waitFor(() => expect(editor.playing()).toBe(false));
         await fixture.whenStable();

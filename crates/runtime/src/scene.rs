@@ -32,6 +32,9 @@ struct SceneEntry {
 	collider: Option<ColliderData>,
 	mesh_index: Option<usize>,
 	renderable: bool,
+	component_ids: BTreeMap<String, engine_core::components::ComponentId>,
+	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
+	linked_prefab: Option<engine_core::linked_prefab::LinkedPrefabInstance>,
 }
 
 #[derive(Clone, Default)]
@@ -129,6 +132,9 @@ impl Scene {
 						&& entry.collider == saved.collider
 						&& entry.mesh_index == saved.mesh_index
 						&& entry.renderable == saved.renderable
+						&& entry.component_ids == saved.component_ids
+						&& entry.native_behaviors == saved.native_behaviors
+						&& entry.linked_prefab == saved.linked_prefab
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -298,6 +304,9 @@ impl Scene {
 			collider: None,
 			mesh_index: None,
 			renderable: true,
+			component_ids: BTreeMap::new(),
+			native_behaviors: Vec::new(),
+			linked_prefab: None,
 		});
 		self.authored_children = None;
 
@@ -450,6 +459,9 @@ impl Scene {
 				collider: entry.collider.clone(),
 				mesh_index: entry.mesh_index,
 				renderable: entry.renderable,
+				component_ids: entry.component_ids.clone(),
+				native_behaviors: entry.native_behaviors.clone(),
+				linked_prefab: entry.linked_prefab.clone(),
 			});
 		}
 
@@ -562,6 +574,15 @@ impl Scene {
 			)
 			.cloned()
 			.ok_or("Source entity is missing")?;
+		if source_metadata.linked_prefab.is_some()
+			|| source_metadata.key.as_ref().is_some_and(|key| {
+				self.entries
+					.iter()
+					.filter_map(|entry| entry.linked_prefab.as_ref())
+					.any(|link| link.entity_map.values().any(|member| member == key))
+			}) {
+			return Err("Duplicate linked assemblies through EditorSession or Unpack first".into());
+		}
 		let id = self.spawn_persistent_model(name, model_path, instance)?;
 		let entry = self
 			.entries
@@ -574,6 +595,15 @@ impl Scene {
 		entry.collider = source_metadata.collider;
 		entry.mesh_index = source_metadata.mesh_index;
 		entry.renderable = source_metadata.renderable;
+		entry.component_ids = source_metadata.component_ids;
+		entry.native_behaviors = source_metadata.native_behaviors;
+		if let (Some(old), Some(new)) = (source_metadata.key, entry.key.clone()) {
+			let remap = HashMap::from([(old, new)]);
+			for component in &mut entry.native_behaviors {
+				component.behavior.remap_entity_references(&remap);
+			}
+		}
+		entry.linked_prefab = source_metadata.linked_prefab;
 		Ok(id)
 	}
 
@@ -593,6 +623,9 @@ impl Scene {
 		entry.collider = data.collider.clone();
 		entry.mesh_index = data.mesh_index;
 		entry.renderable = data.renderable;
+		entry.component_ids.clone_from(&data.component_ids);
+		entry.native_behaviors.clone_from(&data.native_behaviors);
+		entry.linked_prefab.clone_from(&data.linked_prefab);
 		self.authored_children = None;
 		*self.world_cache.get_mut() = None;
 		Ok(())
@@ -636,6 +669,9 @@ impl Scene {
 			entry.collider.clone_from(&entity.collider);
 			entry.collision_enabled = entity.collision_enabled;
 			entry.renderable = entity.renderable;
+			entry.component_ids.clone_from(&entity.component_ids);
+			entry.native_behaviors.clone_from(&entity.native_behaviors);
+			entry.linked_prefab.clone_from(&entity.linked_prefab);
 		}
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
@@ -760,6 +796,9 @@ impl Scene {
 			entry.collider.clone_from(&entity.collider);
 			entry.collision_enabled = entity.collision_enabled;
 			entry.renderable = entity.renderable;
+			entry.component_ids.clone_from(&entity.component_ids);
+			entry.native_behaviors.clone_from(&entity.native_behaviors);
+			entry.linked_prefab.clone_from(&entity.linked_prefab);
 		}
 		if let Some(cache) = self.world_cache.get_mut() {
 			for (index, matrix) in matrices {
@@ -793,7 +832,18 @@ impl Scene {
 			|| self.entries.len() != world.data().entities.len()
 		{
 			if !self.synchronize_entries(world.data()) {
-				return Ok(false);
+				let all_prepared = world.data().entities.iter().all(|entity| {
+					self.entity_by_key(&entity.key).is_some_and(|id| {
+						let entry = &self.entries[self.id_indices[&id]];
+						entry.model_path.as_deref() == Some(entity.model_path.as_str())
+							&& entry.asset_id == entity.asset_id
+							&& entry.mesh_index == entity.mesh_index
+					})
+				});
+				if !all_prepared {
+					return Ok(false);
+				}
+				self.synchronize_retained(world.data(), &HashMap::new(), None)?;
 			}
 			let source = world.world_matrices();
 			match self.world_cache.get_mut() {
@@ -845,6 +895,9 @@ impl Scene {
 			entry.collider.clone_from(&entity.collider);
 			entry.collision_enabled = entity.collision_enabled;
 			entry.renderable = entity.renderable;
+			entry.component_ids.clone_from(&entity.component_ids);
+			entry.native_behaviors.clone_from(&entity.native_behaviors);
+			entry.linked_prefab.clone_from(&entity.linked_prefab);
 			self.world_cache
 				.get_mut()
 				.as_mut()
@@ -981,6 +1034,9 @@ impl Scene {
 					collider: entity.collider.clone(),
 					mesh_index: entity.mesh_index,
 					renderable: entity.renderable,
+					component_ids: entity.component_ids.clone(),
+					native_behaviors: entity.native_behaviors.clone(),
+					linked_prefab: entity.linked_prefab.clone(),
 				}
 			};
 			let transform = entry.instance.transform_mut();
@@ -993,6 +1049,9 @@ impl Scene {
 			entry.collider.clone_from(&entity.collider);
 			entry.collision_enabled = entity.collision_enabled;
 			entry.renderable = entity.renderable;
+			entry.component_ids.clone_from(&entity.component_ids);
+			entry.native_behaviors.clone_from(&entity.native_behaviors);
+			entry.linked_prefab.clone_from(&entity.linked_prefab);
 			object_count = object_count
 				.checked_add(entry.instance.model().parts().len())
 				.ok_or("Scene render-object count overflow")?;

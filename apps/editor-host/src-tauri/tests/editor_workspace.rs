@@ -1744,6 +1744,7 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 		std::collections::HashSet::from([0])
 	);
 	let prefab = runtime::editor::PrefabData {
+		reference_slots: Default::default(),
 		schema_version: 2,
 		entities: secondary.entities.clone(),
 		gameplay: None,
@@ -1906,6 +1907,7 @@ fn direct_prefab_callback_checks_revision_before_expanding_and_rejects_play_edit
 	let fixture = Fixture::new();
 	let mut w = fixture.open();
 	let prefab = runtime::editor::PrefabData {
+		reference_slots: Default::default(),
 		schema_version: 1,
 		gameplay: None,
 		entities: vec![EntityData::new(
@@ -3055,6 +3057,7 @@ fn collider_actions_on_a_base_prop_roundtrip_incremental_state_and_each_undo_onc
 		}),
 		None,
 	];
+	let mut collider_identity = None;
 	for (index, collider) in states.iter().enumerate().skip(1) {
 		let update = apply_collider_update(
 			&mut workspace,
@@ -3070,6 +3073,25 @@ fn collider_actions_on_a_base_prop_roundtrip_incremental_state_and_each_undo_onc
 		);
 		let mut expected = original.clone();
 		expected.entities[0].collider = collider.clone();
+		if collider.is_some() {
+			let id = client.document.entities[0]
+				.component_ids
+				.get(runtime::components::COLLIDER_TYPE)
+				.expect("A newly added collider has its own stable component identity")
+				.clone();
+			if let Some(previous) = &collider_identity {
+				assert_eq!(&id, previous, "Collider edits retain component identity");
+			}
+			assert_ne!(
+				id.as_str(),
+				"collider",
+				"New attachments are distinct from migrated singleton identities"
+			);
+			collider_identity = Some(id.clone());
+			expected.entities[0]
+				.component_ids
+				.insert(runtime::components::COLLIDER_TYPE.into(), id);
+		}
 		assert_eq!(client.document, expected);
 		assert_eq!(client.project, project);
 		assert!(!client.project_dirty);
@@ -3077,6 +3099,12 @@ fn collider_actions_on_a_base_prop_roundtrip_incremental_state_and_each_undo_onc
 	for collider in states[..states.len() - 1].iter().rev() {
 		apply_collider_update(&mut workspace, &mut client, Command::Undo);
 		assert_eq!(&client.document.entities[0].collider, collider);
+		assert_eq!(
+			client.document.entities[0]
+				.component_ids
+				.get(runtime::components::COLLIDER_TYPE),
+			collider.as_ref().and(collider_identity.as_ref())
+		);
 	}
 	assert!(
 		!client.can_undo,

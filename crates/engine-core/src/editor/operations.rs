@@ -230,7 +230,39 @@ pub(super) fn apply(
 			if let Some(collider) = &collider {
 				collider.validate()?;
 			}
+			if collider.is_some() && data.entities[index].collider.is_none() {
+				data.entities[index].component_ids.insert(
+					crate::components::COLLIDER_TYPE.into(),
+					crate::components::ComponentId::generate(),
+				);
+			}
+			if collider.is_none() {
+				data.entities[index]
+					.component_ids
+					.remove(crate::components::COLLIDER_TYPE);
+				data.entities[index].collision_enabled = true;
+			}
 			data.entities[index].collider = collider;
+		}
+		EditorCommandDto::AddComponent { key, component } => {
+			let index = entity_index(data, &key)?;
+			data.entities[index].put_component(component, false)?;
+		}
+		EditorCommandDto::ReplaceComponent { key, component } => {
+			let index = entity_index(data, &key)?;
+			data.entities[index].put_component(component, true)?;
+		}
+		EditorCommandDto::RemoveComponent { key, component_id } => {
+			let index = entity_index(data, &key)?;
+			data.entities[index].remove_component(&component_id)?;
+		}
+		EditorCommandDto::SetComponentEnabled {
+			key,
+			component_id,
+			enabled,
+		} => {
+			let index = entity_index(data, &key)?;
+			data.entities[index].set_component_enabled(&component_id, enabled)?;
 		}
 		EditorCommandDto::UpsertLight { light } => {
 			if let Some(existing) = data.lights.iter_mut().find(|entry| entry.key == light.key) {
@@ -599,13 +631,25 @@ fn duplicate(
 		keys.insert(data.entities[index].key.clone(), key);
 	}
 	let mut copies = Vec::with_capacity(indices.len());
+	let linked_members: HashSet<_> = data
+		.entities
+		.iter()
+		.filter_map(|entity| entity.linked_prefab.as_ref())
+		.flat_map(|link| link.entity_map.values().cloned())
+		.collect();
 	for index in indices {
 		let mut copy = data.entities[index].clone();
+		if !linked_members.contains(&copy.key) {
+			copy.name.push_str(" Copy");
+		}
 		copy.key = keys[&copy.key].clone();
-		copy.name.push_str(" Copy");
 		copy.parent = copy
 			.parent
 			.map(|key| keys.get(&key).cloned().unwrap_or(key));
+		copy.remap_component_references(&keys)?;
+		if let Some(link) = &mut copy.linked_prefab {
+			link.remap_instance(&keys)?;
+		}
 		if roots.contains(&index) && offset != Vec3::ZERO {
 			let target = original_world[index].w_axis.truncate() + offset;
 			let position = match hierarchy.parents[index] {

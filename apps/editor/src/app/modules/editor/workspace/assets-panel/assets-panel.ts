@@ -10,6 +10,7 @@ import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
+import {PrefabAuthoring} from '../prefabs/prefab-authoring';
 
 interface AssetFile {
     readonly path: string;
@@ -22,7 +23,7 @@ type AssetAction = 'models' | 'add';
 
 @Component({
     selector: 'editor-assets-panel',
-    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring],
+    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, PrefabAuthoring],
     templateUrl: './assets-panel.html',
     styleUrl: './assets-panel.scss',
 })

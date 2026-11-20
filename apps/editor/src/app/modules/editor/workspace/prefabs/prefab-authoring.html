@@ -1,0 +1,118 @@
+@if (supported()) {
+	<div class="actions" aria-label="Prefab authoring">
+		<button type="button" [disabled]="!available() || !hasSelection()" (click)="beginCreate()">
+			Create Linked Prefab Source…
+		</button>
+		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(false)">
+			Edit Prefab Source…
+		</button>
+		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(true)">
+			Link Prefab…
+		</button>
+	</div>
+	@if (!createOpen() && !linkOpen()) {
+		@if (error(); as message) {
+			<p role="alert" class="error">{{ message }}</p>
+		}
+	}
+	@if (message(); as message) {
+		<p role="status">{{ message }}</p>
+	}
+	@if (source(); as source) {
+		<editor-prefab-source-editor
+			[source]="source"
+			(closed)="closeSource()"
+			(saved)="this.source.set($event)"
+		/>
+	}
+	<editor-dialog
+		[(open)]="createOpen"
+		title="Create Linked Prefab Source"
+		[renderFields]="false"
+		[config]="{ width: '40rem' }"
+	>
+		<p>
+			Save the selected component assembly. Legacy gameplay bindings and project behaviors require
+			copied prefab placement.
+		</p>
+		<fieldset [disabled]="pending()">
+			<legend>Component source</legend>
+			<label
+				>Source path<input
+					#path
+					[value]="createPath()"
+					(input)="createPath.set(path.value)"
+					placeholder="linked-source.json"
+			/></label>
+			<p>
+				Declare references outside the selection, such as Actor = Player. These become explicit
+				source slots.
+			</p>
+			@for (slot of createSlots(); track $index; let index = $index) {
+				<label
+					>Reference slot name<input
+						#name
+						[value]="slot.name"
+						maxlength="64"
+						(input)="changeSlot(index, 'name', name.value)"
+				/></label>
+				<label
+					>External scene reference<select
+						#target
+						[value]="slot.target"
+						(change)="changeSlot(index, 'target', target.value)"
+					>
+						<option value="">Choose external entity</option>
+						@for (entity of entities(); track entity.key) {
+							<option [value]="entity.key" [selected]="slot.target === entity.key">
+								{{ entity.name }}
+							</option>
+						}
+					</select></label
+				>
+				<button type="button" (click)="removeSlot(index)">Remove reference slot</button>
+			}
+			<button type="button" [disabled]="createSlots().length >= 128" (click)="addSlot()">
+				Add External Reference Slot
+			</button>
+		</fieldset>
+		@if (error(); as message) {
+			<p role="alert" class="error">{{ message }}</p>
+		}
+		<button dialog-actions type="button" [disabled]="!available()" (click)="create()">
+			Create Component Source
+		</button>
+	</editor-dialog>
+	<editor-dialog
+		[(open)]="linkOpen"
+		(openChange)="!$event && closeLink()"
+		title="Link Prefab"
+		[renderFields]="false"
+		[config]="{ width: '40rem' }"
+	>
+		@if (link(); as source) {
+			<p>
+				{{ source.path }} · Place a linked instance at the scene origin. Move its anchor to position
+				the assembly.
+			</p>
+			<editor-reference-bindings
+				[names]="slotNames()"
+				[entities]="entities()"
+				[bindings]="bindings()"
+				[disabled]="pending()"
+				(bindingsChanged)="bindings.set($event)"
+			/>
+		}
+		@if (error(); as message) {
+			<p role="alert" class="error">{{ message }}</p>
+		}
+		<button
+			dialog-actions
+			type="button"
+			[disabled]="!available() || !canLink()"
+			(click)="instantiate()"
+		>
+			Instantiate Linked Prefab
+		</button>
+	</editor-dialog>
+}

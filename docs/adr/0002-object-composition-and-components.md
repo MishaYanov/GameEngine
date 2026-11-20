@@ -1,6 +1,11 @@
 # ADR-0002: Scene objects, components, presets, and inspector subjects
 
-Status: Proposed architectural direction; no object-model migration is implemented by this ADR.
+Status: Partially implemented. Scene4 supports typed mesh, collider and native behavior components through flat
+internal adapters. The broader audio, animation and arbitrary script component proposals remain future work.
+
+The [Milestone 4–6 review](../milestones-4-6-review.md) records the implemented component Inspector, linked prefab
+source/override workflows and runtime lifecycle boundary. The historical inspection and broader design below
+remain context rather than a claim that every proposed component exists.
 
 Date: 2026-10-27
 

@@ -174,6 +174,41 @@ impl CommandFactory {
 				.validate()?;
 			}
 			EditorCommandDto::RemoveLight { key } => validate_key(key)?,
+			EditorCommandDto::InstantiateLinkedPrefab {
+				source,
+				position,
+				bindings,
+			} => {
+				source.validate()?;
+				finite(position, "Prefab position")?;
+				validate_slot_bindings(bindings)?;
+			}
+			EditorCommandDto::UpdateLinkedPrefab {
+				root_key,
+				source,
+				bindings,
+				..
+			} => {
+				validate_key(root_key)?;
+				source.validate()?;
+				if let Some(bindings) = bindings {
+					validate_slot_bindings(bindings)?;
+				}
+			}
+			EditorCommandDto::RevertLinkedPrefab { root_key, .. }
+			| EditorCommandDto::UnpackLinkedPrefab { root_key } => validate_key(root_key)?,
+			EditorCommandDto::AddComponent { key, component }
+			| EditorCommandDto::ReplaceComponent { key, component } => {
+				validate_key(key)?;
+				component.validate()?;
+			}
+			EditorCommandDto::RemoveComponent { key, component_id }
+			| EditorCommandDto::SetComponentEnabled {
+				key, component_id, ..
+			} => {
+				validate_key(key)?;
+				crate::components::ComponentId::new(component_id.as_str())?;
+			}
 			EditorCommandDto::SetCamera { camera } => camera.validate()?,
 			EditorCommandDto::SetProject { project } => project.validate()?,
 			EditorCommandDto::OrbitCamera { yaw, pitch } => {
@@ -231,6 +266,23 @@ impl CommandFactory {
 fn target_count(count: usize) -> Result<(), String> {
 	if count > MAX_TARGETS {
 		return Err("A command may target at most 4096 entities".into());
+	}
+	Ok(())
+}
+fn validate_slot_bindings(bindings: &BTreeMap<String, crate::EntityKey>) -> Result<(), String> {
+	if bindings.len() > 32 {
+		return Err("Prefab reference slot binding count exceeds 32".into());
+	}
+	for (name, key) in bindings {
+		if name.is_empty()
+			|| name.len() > 64
+			|| !name
+				.bytes()
+				.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+		{
+			return Err("Invalid prefab reference slot name".into());
+		}
+		validate_key(key.as_str())?;
 	}
 	Ok(())
 }

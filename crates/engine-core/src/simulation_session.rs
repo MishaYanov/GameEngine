@@ -45,6 +45,9 @@ impl InputFrame {
 	}
 }
 pub enum SimulationAction {
+	Despawn {
+		handle: crate::runtime_lifecycle::RuntimeEntityHandle,
+	},
 	Progress(ProgressAction),
 	RequestScene {
 		scene_id: SceneId,
@@ -343,6 +346,10 @@ impl GameModule for ProjectModule {
 pub struct TickOutcome {
 	pub tick: u64,
 	pub steps: u32,
+	/// Accepted fixed steps retained across a runtime asset-preparation boundary.
+	/// Fulfill/reject pending spawns, then call tick(0.0) before new elapsed time.
+	#[serde(default)]
+	pub pending_steps: u32,
 	pub dropped_seconds: f64,
 	pub changes: WorldChange,
 	#[serde(default)]
@@ -355,6 +362,7 @@ pub struct TickOutcome {
 	pub trigger_events: Vec<TriggerEvent>,
 }
 pub struct SimulationSession {
+	lifecycle: crate::runtime_lifecycle::RuntimeLifecycle,
 	project: Arc<ProjectData>,
 	world: RuntimeWorld,
 	collisions: CollisionWorld,
@@ -406,7 +414,21 @@ impl SimulationSession {
 		factory: &dyn GameModuleFactory,
 	) -> Result<Self, String> {
 		let behaviors = project.resolved_behaviors_for(&scene_id)?;
-		let world = RuntimeWorld::new(document)?;
+		document.validate()?;
+		let runtime_document = if document
+			.entities
+			.iter()
+			.any(|entity| entity.linked_prefab.is_some())
+		{
+			let mut resolved = (*document).clone();
+			for entity in &mut resolved.entities {
+				entity.linked_prefab = None;
+			}
+			Arc::new(resolved)
+		} else {
+			document
+		};
+		let world = RuntimeWorld::new(runtime_document)?;
 		let mut controlled_targets = Vec::new();
 		let mut seen = HashSet::new();
 
@@ -433,8 +455,10 @@ impl SimulationSession {
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
 		let camera = GameCameraController::new(&world)?;
+		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
 
 		Ok(Self {
+			lifecycle,
 			project,
 			world,
 			collisions,
@@ -496,7 +520,9 @@ impl SimulationSession {
 	}
 	pub fn needs_tick(&self) -> bool {
 		!self.paused
-			&& (self.triggers.sample_needed
+			&& (self.lifecycle.needs_tick()
+				|| crate::native_behavior_runtime::needs_tick(&self.world)
+				|| self.triggers.sample_needed
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
 	}
@@ -508,7 +534,9 @@ impl SimulationSession {
 
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
-			&& (self.triggers.sample_needed
+			&& (self.lifecycle.needs_tick()
+				|| crate::native_behavior_runtime::needs_tick(&self.world)
+				|| self.triggers.sample_needed
 				|| self.camera.needs_tick(&self.world)
 				|| self
 					.module
@@ -516,6 +544,101 @@ impl SimulationSession {
 	}
 	pub fn collision_stats(&self) -> CollisionStats {
 		self.collisions.stats()
+	}
+	pub fn has_runtime_instances(&self) -> bool {
+		self.lifecycle.has_instances()
+	}
+	pub fn runtime_handle(
+		&self,
+		key: &EntityKey,
+	) -> Option<crate::runtime_lifecycle::RuntimeEntityHandle> {
+		self.lifecycle.handle(key)
+	}
+	pub fn pending_runtime_spawns(&self) -> Vec<crate::runtime_lifecycle::RuntimeSpawnRequest> {
+		self.lifecycle.requests()
+	}
+	pub fn reject_runtime_spawn(&mut self, id: u64, error: &str) {
+		self.lifecycle.reject_request(id, error);
+	}
+	pub fn prepare_runtime_spawn(
+		&self,
+		prefab: &crate::editor::PrefabData,
+		fingerprint: &str,
+		position: [f32; 3],
+		request: Option<u64>,
+	) -> Result<crate::runtime_lifecycle::PreparedRuntimeSpawn, String> {
+		self.lifecycle
+			.prepare(&self.world, prefab, fingerprint, position, request)
+	}
+	pub fn runtime_spawn_document(
+		&self,
+		prepared: &crate::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<SceneData, String> {
+		self.lifecycle.candidate(&self.world, prepared)
+	}
+	pub fn commit_runtime_spawn(
+		&mut self,
+		prepared: crate::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<WorldChange, String> {
+		if self.paused {
+			return Err("Resume Play before admitting runtime entities".into());
+		}
+		let data = self.runtime_spawn_document(&prepared)?;
+		if self.visibility_capabilities.is_some()
+			&& prepared.entities.iter().any(|entity| {
+				entity.renderable
+					&& prepared
+						.visible
+						.as_ref()
+						.is_none_or(|available| !available.contains(&entity.key))
+			}) {
+			return Err("Prepare native render resources before admitting runtime entities".into());
+		}
+		let world = RuntimeWorld::new(Arc::new(data))?;
+		let collisions = CollisionWorld::new(&world)?;
+		let mut lifecycle = self.lifecycle.clone();
+		lifecycle.admit(&prepared, self.tick)?;
+		let keys = prepared
+			.entities
+			.iter()
+			.map(|entity| entity.key.clone())
+			.collect();
+		if let Some(available) = &mut self.visibility_capabilities {
+			available.extend(prepared.visible.into_iter().flatten());
+		}
+		self.world = world;
+		self.collisions = collisions;
+		self.lifecycle = lifecycle;
+		self.triggers.structural_change(&self.world);
+		Ok(WorldChange {
+			changed_entities: keys,
+			topology_changed: true,
+			full_resync: true,
+			..WorldChange::default()
+		})
+	}
+	pub fn runtime_inspection(
+		&self,
+		play_session_id: &str,
+		run_id: &str,
+		offset: usize,
+		limit: usize,
+	) -> Result<crate::runtime_lifecycle::RuntimeInspectionDto, String> {
+		if !(1..=128).contains(&limit) {
+			return Err("Runtime inspection page size must be 1..=128".into());
+		}
+		Ok(crate::runtime_lifecycle::RuntimeInspectionDto {
+			play_session_id: play_session_id.into(),
+			run_id: run_id.into(),
+			scene_id: self.scene_id.clone(),
+			tick: self.tick,
+			topology_revision: self.lifecycle.topology_revision,
+			total_entities: self.world.data().entities.len(),
+			entities: self.lifecycle.entities(&self.world, offset, limit),
+			timer_count: self.lifecycle.timer_count(),
+			pending_spawns: self.lifecycle.request_count(),
+			last_error: self.lifecycle.last_error.clone(),
+		})
 	}
 	pub fn clear_input(&mut self) {
 		self.inputs.movement.clear();
@@ -639,6 +762,9 @@ impl SimulationSession {
 			return Err("Simulation tick counter is exhausted".into());
 		}
 		let mut before = HashMap::<EntityKey, EntityData>::new();
+		let mut structural_before: Option<Arc<SceneData>> = None;
+		let mut structural_work = 0usize;
+		let mut lifecycle = self.lifecycle.clone();
 		let mut triggers = self.triggers.clone();
 		let mut camera = self.camera.clone();
 		let mut trigger_events = Vec::new();
@@ -646,6 +772,7 @@ impl SimulationSession {
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
 		let mut steps = 0;
+		let mut pending_steps = 0;
 		let mut requested_scene = None;
 		let initial_matrix_updates = self.world.matrix_updates();
 		let mut collision_candidates_remaining = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
@@ -667,6 +794,19 @@ impl SimulationSession {
 					)?;
 				}
 				self.actions.clear();
+				crate::native_behavior_runtime::plan(
+					&self.world,
+					triggers.view(),
+					&mut lifecycle,
+					&mut ActionWriter {
+						actions: &mut self.actions,
+					},
+				)?;
+				for handle in lifecycle.due(self.tick + u64::from(steps) + 1) {
+					if !self.actions.iter().any(|action| matches!(action, SimulationAction::Despawn { handle: existing } if existing == &handle)) {
+						ActionWriter { actions: &mut self.actions }.push(SimulationAction::Despawn { handle })?;
+					}
+				}
 				self.module.plan_with_progress(
 					GameplayContext {
 						world: &self.world,
@@ -680,6 +820,11 @@ impl SimulationSession {
 						actions: &mut self.actions,
 					},
 				)?;
+				// Structural removals become visible at the end of this step, after
+				// all systems have planned against the same stable world.
+				self.actions
+					.sort_by_key(|action| matches!(action, SimulationAction::Despawn { .. }));
+				let mut removed_handles = HashSet::new();
 				for action in self.actions.drain(..) {
 					if actions_applied == Self::MAX_ACTIONS_PER_TICK {
 						return Err("Simulation tick action budget exceeded".into());
@@ -696,6 +841,30 @@ impl SimulationSession {
 					// collision work and must not reset their allowance per step.
 					actions_applied += 1;
 					let action = match action {
+						SimulationAction::Despawn { handle } => {
+							if removed_handles.contains(&handle) {
+								continue;
+							}
+							let keys = lifecycle.removal(&handle)?;
+							structural_work =
+								structural_work.saturating_add(self.world.data().entities.len());
+							if structural_work > 1_000_000 {
+								return Err("Runtime structural work budget exceeded".into());
+							}
+							for key in &keys {
+								if let Some(handle) = lifecycle.handle(key) {
+									removed_handles.insert(handle);
+								}
+							}
+							structural_before.get_or_insert_with(|| self.world.document());
+							let change = self.world.remove_runtime_entities(&keys)?;
+							self.collisions = CollisionWorld::new(&self.world)?;
+							lifecycle.removed(&keys)?;
+							lifecycle.prune_states(&self.world);
+							triggers.invalidate();
+							changes.merge(change);
+							continue;
+						}
 						SimulationAction::Progress(action) => {
 							progress_transaction.apply(&action)?;
 							continue;
@@ -724,7 +893,9 @@ impl SimulationSession {
 						action => action,
 					};
 					let entity = match &action {
-						SimulationAction::Progress(_) | SimulationAction::RequestScene { .. } => {
+						SimulationAction::Progress(_)
+						| SimulationAction::RequestScene { .. }
+						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
 						SimulationAction::Move { entity, .. }
@@ -746,7 +917,9 @@ impl SimulationSession {
 						SimulationAction::SetVisible { .. } | SimulationAction::SetMaterial { .. }
 					);
 					let change = match action {
-						SimulationAction::Progress(_) | SimulationAction::RequestScene { .. } => {
+						SimulationAction::Progress(_)
+						| SimulationAction::RequestScene { .. }
+						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
 						SimulationAction::Move {
@@ -831,13 +1004,24 @@ impl SimulationSession {
 					// A new scene starts at the next step, after the host commits it.
 					break;
 				}
+				if lifecycle.request_count() > 0 {
+					// Publish this completed step so every host can prepare/admit the
+					// same request before planning the following fixed step. Retain
+					// accepted catch-up work rather than discarding it as frame time.
+					pending_steps = report.steps - steps;
+					clock.retain_steps(pending_steps)?;
+					break;
+				}
 			}
 			Ok(())
 		})();
 		if let Err(error) = result {
 			// Cold failure path restores only entities touched by planned
 			// actions. A full document copy is never retained per steady tick.
-			let mut restored = self.world.data().clone();
+			let mut restored = structural_before
+				.as_deref()
+				.unwrap_or(self.world.data())
+				.clone();
 			for entity in &mut restored.entities {
 				if let Some(original) = before.remove(&entity.key) {
 					*entity = original;
@@ -856,11 +1040,19 @@ impl SimulationSession {
 		self.tick += u64::from(steps);
 		outcome.tick = self.tick;
 		outcome.steps = steps;
+		outcome.pending_steps = pending_steps;
 		outcome.dropped_seconds = report.dropped_seconds
-			+ f64::from(report.steps - steps) / f64::from(self.project.fixed_hz);
+			+ f64::from(report.steps - steps - pending_steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();
 		outcome.requested_scene = requested_scene;
 		self.triggers = triggers;
+		self.inputs
+			.movement
+			.retain(|key, _| self.world.entity_index(key).is_some());
+		if let Some(available) = &mut self.visibility_capabilities {
+			available.retain(|key| self.world.entity_index(key).is_some());
+		}
+		self.lifecycle = lifecycle;
 		self.camera = camera;
 		outcome.trigger_events = trigger_events;
 		Ok(outcome)

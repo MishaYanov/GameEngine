@@ -1,0 +1,128 @@
+{
+  "date": "2026-11-20",
+  "inspected_head": "c34555e33f276493837de85183a73c5ac7b8996f",
+  "scope": "Milestones 4–6: component model, linked prefab authoring, runtime lifecycle; HEAD plus pending implementation working tree.",
+  "stage": "Implementation verification before the requested commit and four independent reviews.",
+  "runs": {
+    "workspace": {
+      "log": "target/milestone46-workspace-tests.log",
+      "sha256": "418de264901601b586d45a7040b66317bdd28ec702841ca0fd77fd19216693bb",
+      "passed": 849,
+      "failed": 1,
+      "ignored": 9,
+      "test_binaries": 75
+    },
+    "courtyard_corrective_rerun": {
+      "log": "target/milestone46-courtyard-regression.log",
+      "sha256": "f52783c9b42034adc4a257a532a1592a1c78fe0669f47313a3ed1b6d4a35b7ae",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 1
+    },
+    "runtime_boundary_regression": {
+      "log": "target/milestone46-core-barrier-regression.log",
+      "sha256": "849fab238b99bf11e28e9e68902cbefad4e8ffc57752b14ad1404d4687815697",
+      "passed": 223,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 30
+    },
+    "angular": {
+      "log": "target/milestones46-angular-tests.log",
+      "sha256": "b2609e3a3d0811239e4a480f9673330da893b2a3b2623f7cf58b49b5f124d1e1"
+    },
+    "angular_production": {
+      "log": "target/milestones46-angular-production.log",
+      "sha256": "9b9ad81b42a9970c6f0cbe2fa380ab7b89cd65aa50dfa510589b390b856ecf30"
+    },
+    "native_lifecycle": {
+      "log": "target/milestone46-native-lifecycle.log",
+      "sha256": "a1493db146dfb39eee18696bc476fa407b68cb33fa78f5ab99ed13b4fc2d241d",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 1
+    },
+    "native_export_lifecycle": {
+      "log": "target/milestone46-native-export-lifecycle.log",
+      "sha256": "96149069f50e47cca05e6edd3469deacc664298766ba52e7c9915b1a8eecd4dd",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 1
+    },
+    "fresh_export": {
+      "log": "target/milestone46-fresh-export.log",
+      "sha256": "40979411fd9114df50980f423b9e29be8c30a5aedfca78750b2ffd14e39a1bf0"
+    },
+    "python": {
+      "log": "target/milestone46-python-tests.log",
+      "sha256": "6e294fd6e4fd3ecb5cb17d2bb6e79273582c322924f3a503b78c5cd1f4aa2f91"
+    },
+    "admin": {
+      "log": "target/milestone46-admin-tests.log",
+      "sha256": "905f046d87db64b9267d24fabcaa6242f693e440f3fcf881f70fa27364a0af4b"
+    },
+    "rust_docs": {
+      "log": "target/milestone46-rust-doc-tests.log",
+      "sha256": "bb65e492078450ab3348dc3f7d57e9035bf16a26c9bf0e9f058ec95e83226162",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 10
+    },
+    "rustfmt": {
+      "log": "target/milestone46-format-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native_editor_build": {
+      "log": "target/milestone46-native-final-build.log",
+      "sha256": "d331b892196fd6074867c8f0e12746ba610de43d08d3f419b916cda361d49eb1",
+      "result": "passed with two existing host dead-code warnings"
+    },
+    "docs_site": {
+      "log": "target/milestone46-docs-site.log",
+      "sha256": "43f28fedd91e5bc82e0d5b7da87daaab9895b0b9823ba3d902efa846ad832140",
+      "pages": 61,
+      "tests_passed": 8,
+      "game_app_developer_empty": true
+    }
+  },
+  "workspace_result_note": "The first aggregate run had one failure: a legacy Courtyard prefab test expected schema 2. The schema 3 expectation and canonical roundtrip were corrected, and all six tests in that target passed on rerun. Independent post-commit review will record a fresh aggregate run.",
+  "angular_editor": {
+    "passed": 455,
+    "spec_files": 49,
+    "production_build": "passed; existing project-setup stylesheet budget warning"
+  },
+  "admin": {
+    "passed": 15
+  },
+  "python": {
+    "passed": 51
+  },
+  "headless_parity": {
+    "authored_runs": 2,
+    "fresh_export_runs": 1,
+    "state_hash": "9e7bf1d490b2adb5",
+    "hash_scope": "project_and_render_scene",
+    "tick": 1245,
+    "topology_revision": 20,
+    "total_entities": 6,
+    "timer_count": 0,
+    "pending_spawns": 0,
+    "last_error": null
+  },
+  "export": {
+    "path": "C:\\Users\\misha\\Documents\\Codex\\Milestones 4-6 Review 2026-11-20\\Component Lifecycle Lab",
+    "release_player": true,
+    "hidden_native_asset_acceptance": "passed"
+  },
+  "verification_limits": [
+    "The native acceptance harness creates a hidden window and loads exported assets through GameApp. This is not a visible launch of the exported executable.",
+    "No current interactive Angular/Tauri or visible player acceptance was performed.",
+    "Focused test counts overlap the workspace aggregate and must not be added to it.",
+    "The state hash covers project and render scene; lifecycle counters are checked separately.",
+    "Post-commit documentation, optimization, security and test reviews are still pending in this initial evidence record."
+  ]
+}

@@ -143,6 +143,43 @@ pub enum EditorCommandDto {
 		key: String,
 		collider: Option<ColliderData>,
 	},
+	AddComponent {
+		key: String,
+		component: crate::components::ComponentRecord,
+	},
+	ReplaceComponent {
+		key: String,
+		component: crate::components::ComponentRecord,
+	},
+	RemoveComponent {
+		key: String,
+		component_id: crate::components::ComponentId,
+	},
+	SetComponentEnabled {
+		key: String,
+		component_id: crate::components::ComponentId,
+		enabled: bool,
+	},
+	InstantiateLinkedPrefab {
+		source: crate::linked_prefab::LinkedPrefabSource,
+		position: [f32; 3],
+		#[serde(default)]
+		bindings: BTreeMap<String, crate::EntityKey>,
+	},
+	UpdateLinkedPrefab {
+		root_key: String,
+		source: crate::linked_prefab::LinkedPrefabSource,
+		resolution: crate::linked_prefab::PrefabConflictResolution,
+		#[serde(default)]
+		bindings: Option<BTreeMap<String, crate::EntityKey>>,
+	},
+	RevertLinkedPrefab {
+		root_key: String,
+		property: Option<crate::linked_prefab::LinkedPrefabOverrideTarget>,
+	},
+	UnpackLinkedPrefab {
+		root_key: String,
+	},
 	UpsertLight {
 		light: LightData,
 	},
@@ -286,6 +323,8 @@ pub struct GameplayModuleDescriptorDto {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorCapabilitiesDto {
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub component_types: Vec<crate::components::ComponentTypeDescriptor>,
 	#[serde(default)]
 	pub incremental_commands: bool,
 	#[serde(default)]

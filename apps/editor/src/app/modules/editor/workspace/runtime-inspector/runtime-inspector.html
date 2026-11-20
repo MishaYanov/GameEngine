@@ -1,0 +1,104 @@
+<app-drawer
+	[config]="drawerConfig"
+	icon="object"
+	label="Runtime Inspector"
+	preferenceKey="editor.runtime-inspector"
+	resizeLabel="Resize Runtime Inspector"
+	type="right"
+>
+	<editor-pane icon="object" title="Runtime Inspector">
+		<div class="runtime-content">
+			<p>Read-only runtime state. Refresh captures one page without changing the authored scene.</p>
+			<button type="button" [disabled]="!available()" (click)="refresh()">
+				{{ pending() ? 'Refreshing runtime…' : 'Refresh Runtime' }}
+			</button>
+			@if (error(); as message) {
+				<p role="alert" class="error">{{ message }}</p>
+			}
+			@if (result(); as page) {
+				<p role="status">Scene {{ page.scene_id }} · Snapshot at tick {{ page.tick }}</p>
+				<dl>
+					<dt>Entities</dt>
+					<dd>{{ page.total_entities }}</dd>
+					<dt>Topology revision</dt>
+					<dd>{{ page.topology_revision }}</dd>
+					<dt>Timers</dt>
+					<dd>{{ page.timer_count }}</dd>
+					<dt>Pending spawns</dt>
+					<dd>{{ page.pending_spawns }}</dd>
+				</dl>
+				@if (page.last_error; as message) {
+					<p role="alert" class="error">{{ message }}</p>
+				}
+				<nav aria-label="Runtime entity pages">
+					<button
+						type="button"
+						[disabled]="!available() || offset() === 0"
+						(click)="refresh(offset() - pageSize)"
+					>
+						Previous entities
+					</button>
+					<span
+						>{{ page.entities.length ? offset() + 1 : 0 }}–{{
+							page.entities.length ? pageEnd() : 0
+						}}
+						of {{ page.total_entities }}</span
+					>
+					<button
+						type="button"
+						[disabled]="!available() || pageEnd() >= page.total_entities"
+						(click)="refresh(offset() + pageSize)"
+					>
+						Next entities
+					</button>
+				</nav>
+				<ul aria-label="Runtime entities">
+					@for (item of page.entities; track handleKey(item.handle)) {
+						<li>
+							<button
+								type="button"
+								[attr.aria-pressed]="selected() === handleKey(item.handle)"
+								(click)="selected.set(handleKey(item.handle))"
+							>
+								{{ item.name }} · {{ item.spawned ? 'Spawned' : 'Authored' }}
+							</button>
+						</li>
+					} @empty {
+						<li>No runtime entities on this page.</li>
+					}
+				</ul>
+				@if (entity(); as item) {
+					<section aria-label="Selected runtime entity">
+						<h3>{{ item.name }}</h3>
+						<dl>
+							<dt>Runtime key</dt>
+							<dd>{{ item.handle.key }}</dd>
+							<dt>World</dt>
+							<dd>{{ item.handle.world_id }}</dd>
+							<dt>Generation</dt>
+							<dd>{{ item.handle.generation }}</dd>
+							<dt>Origin</dt>
+							<dd>{{ item.spawned ? 'Spawned during this run' : 'Authored scene' }}</dd>
+							<dt>Instance</dt>
+							<dd>{{ item.instance_id ?? 'None' }}</dd>
+						</dl>
+						<h4>Behavior lifecycle</h4>
+						<ul aria-label="Runtime behavior states">
+							@for (behavior of item.behavior_states; track behavior.component_id) {
+								<li>
+									{{ behavior.kind }} · {{ behavior.activated ? 'Activated' : 'Not activated' }} ·
+									{{ behavior.elapsed_ticks }} ticks
+									<span class="reference">{{ behavior.component_id }}</span>
+								</li>
+							} @empty {
+								<li>No native behavior state.</li>
+							}
+						</ul>
+					</section>
+				}
+			} @else {
+				<p>Refresh to inspect the current run.</p>
+			}
+		</div>
+	</editor-pane>
+</app-drawer>

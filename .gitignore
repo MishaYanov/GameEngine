@@ -22,3 +22,6 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+
+# Local implementation walkthroughs requested for the next learning milestones.
+/.learning-guides/

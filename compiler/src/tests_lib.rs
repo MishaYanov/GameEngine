@@ -204,6 +204,7 @@ fn preparing_an_authored_project_captures_its_actual_scene_assets_and_behavior_c
 	let (project, _) = authored_scene_fixture(&source);
 	fs::create_dir(source.join("prefabs")).unwrap();
 	let prefab = engine_core::editor::PrefabData {
+		reference_slots: Default::default(),
 		schema_version: 1,
 		entities: vec![
 			engine_core::scene_data::EntityData::new(

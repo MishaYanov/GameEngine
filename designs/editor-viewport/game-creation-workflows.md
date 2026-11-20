@@ -1,6 +1,8 @@
 # Game creation workflows and support agent
 
 Status: proposed product design. The capability map reflects the working tree inspected on 2026-11-15.
+The later [Milestone 4–6 review](../../docs/milestones-4-6-review.md) records implemented component Inspector,
+linked prefab and runtime lifecycle workflows; proposed capabilities below retain their historical design scope.
 Audience: Engine Developer.
 This chapter defines the game a usable viewport should help someone finish.
 It complements the interaction and rendering chapters rather than specifying a second editor architecture.

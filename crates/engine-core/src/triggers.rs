@@ -63,6 +63,15 @@ impl TriggerTracker {
 	pub(crate) fn invalidate(&mut self) {
 		self.sample_needed |= self.has_sensors || !self.pairs.is_empty();
 	}
+	pub(crate) fn structural_change(&mut self, world: &RuntimeWorld) {
+		self.has_sensors = world.data().entities.iter().any(|entity| {
+			entity
+				.collider
+				.as_ref()
+				.is_some_and(|collider| collider.interaction().sensor)
+		});
+		self.sample_needed = true;
+	}
 
 	pub(crate) fn sample(
 		&mut self,

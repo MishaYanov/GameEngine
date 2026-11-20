@@ -199,27 +199,109 @@ impl GameApp {
 	}
 
 	fn tick_play(&mut self, delta_seconds: f32) -> Result<(), String> {
-		let destination = if self.input.just_pressed(Key::F8)
-			&& let Some(scene_id) = self.editor.pending_play_scene()
+		if self.input.just_pressed(Key::F8)
+			&& let Some(scene_id) = self.editor.pending_play_scene().cloned()
 		{
-			Some(scene_id.clone())
-		} else {
-			let outcome = self
-				.editor
-				.update_play(&mut self.scene, &self.input, delta_seconds)?;
-			if self.scene.camera_follow().is_some()
-				&& let Some(camera) = self.editor.render_camera()
-			{
-				self.camera = camera;
-			}
-			outcome.requested_scene
-		};
-		if let Some(scene_id) = destination {
 			let result = self.install_play_scene(scene_id, false);
 			if result.is_err() {
 				self.update_selection_title();
 			}
 			return result;
+		}
+		if self.editor.has_runtime_instances() {
+			self.renderer
+				.as_ref()
+				.ok_or("Renderer is unavailable")?
+				.wait_idle()?;
+		}
+		let mut outcome = self
+			.editor
+			.update_play(&mut self.scene, &self.input, delta_seconds)?;
+		loop {
+			if self.scene.camera_follow().is_some()
+				&& let Some(camera) = self.editor.render_camera()
+			{
+				self.camera = camera;
+			}
+			if let Some(scene_id) = outcome.requested_scene {
+				let result = self.install_play_scene(scene_id, false);
+				if result.is_err() {
+					self.update_selection_title();
+				}
+				return result;
+			}
+			self.fulfill_runtime_spawns()?;
+			// synchronize_world can retire runtime models; submitted frames have
+			// completed before each mutating tick above/below.
+			if outcome.changes.topology_changed {
+				if let Some(assets) = &mut self.asset_manager {
+					assets.prune_unused();
+				}
+			}
+			if outcome.pending_steps == 0 {
+				break;
+			}
+			if self.editor.has_runtime_instances() {
+				self.renderer
+					.as_ref()
+					.ok_or("Renderer is unavailable")?
+					.wait_idle()?;
+			}
+			outcome = self.editor.drain_play(&mut self.scene)?;
+		}
+		Ok(())
+	}
+
+	fn fulfill_runtime_spawns(&mut self) -> Result<(), String> {
+		if self.editor.simulation_paused() {
+			return Ok(());
+		}
+		for request in self.editor.pending_runtime_spawns() {
+			let result = (|| {
+				let root = self
+					.asset_root
+					.as_ref()
+					.ok_or("Asset root is unavailable")?;
+				let (prefab, fingerprint) =
+					bridge::runtime_prefab::load(root, &request.prefab_path)?;
+				let mut prepared = self.editor.prepare_runtime_spawn(
+					&prefab,
+					&fingerprint,
+					request.position,
+					Some(request.id),
+				)?;
+				let data = self.editor.runtime_spawn_document(&prepared)?;
+				let renderer = self.renderer.as_ref().ok_or("Renderer is unavailable")?;
+				let assets = self
+					.asset_manager
+					.as_mut()
+					.ok_or("Assets are unavailable")?;
+				let candidate = scene_io::instantiate(&data, assets, renderer);
+				renderer.wait_idle()?;
+				let (scene, _) = candidate?;
+				let keys: std::collections::HashSet<_> = prepared
+					.entities()
+					.iter()
+					.map(|entity| entity.key.clone())
+					.collect();
+				prepared.set_visibility_capabilities(
+					scene
+						.visibility_capabilities()
+						.into_iter()
+						.filter(|key| keys.contains(key))
+						.collect(),
+				)?;
+				self.editor.commit_runtime_spawn(prepared)?;
+				self.scene = scene;
+				Ok::<(), String>(())
+			})();
+			if let Err(error) = result {
+				self.editor.reject_runtime_spawn(request.id, &error)?;
+				engine_logger::error!(target:"game", "Runtime spawn rejected: operation=prepare_and_admit_runtime_spawn");
+			}
+			if let Some(assets) = &mut self.asset_manager {
+				assets.prune_unused();
+			}
 		}
 		Ok(())
 	}
@@ -1506,3 +1588,7 @@ mod performance_tests;
 #[cfg(all(test, windows))]
 #[path = "tests_asset_reimport.rs"]
 mod asset_reimport_tests;
+
+#[cfg(all(test, windows))]
+#[path = "tests_runtime_lifecycle.rs"]
+mod runtime_lifecycle_tests;

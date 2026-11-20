@@ -116,6 +116,9 @@
                 </editor-pane>
             </div>
         </section>
+        @if (gameView() && editorService.playing()) {
+            <editor-runtime-inspector [opening]="workspaceActionBlocked()"/>
+        } @else {
         <inspector-panel
                 data-editor-shortcut-scope="inspector"
                 [entity]="sceneEditing.entity()"
@@ -132,6 +135,7 @@
                 (editCommitted)="sceneEditing.commit()"
                 (editCancelled)="sceneEditing.cancel()"
         />
+        }
     </div>
     <editor-assets-panel [opening]="workspaceActionBlocked()" data-editor-shortcut-scope="assets"/>
 </section>

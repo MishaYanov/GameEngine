@@ -8,6 +8,7 @@
 >
     <editor-pane icon="folder" title="Assets">
         <editor-asset-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
+        <editor-prefab-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
         <button (click)="loadModels()" [disabled]="!canLoadModels()" pane-actions type="button">
             {{ loading() ? 'Loading models…' : models() === null ? 'Load Models' : 'Refresh Models' }}
         </button>

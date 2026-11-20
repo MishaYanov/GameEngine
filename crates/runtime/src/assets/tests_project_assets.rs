@@ -197,6 +197,7 @@ fn migration_is_repeatable_and_prefab_catalog_retains_dependencies() {
 	let id = first.by_path("legacy.glb").unwrap().id.clone();
 	assert_eq!(migrate_catalog(&root).unwrap(), first);
 	let prefab = engine_core::editor::PrefabData {
+		reference_slots: Default::default(),
 		schema_version: 2,
 		entities: vec![
 			engine_core::scene_data::EntityData::new(

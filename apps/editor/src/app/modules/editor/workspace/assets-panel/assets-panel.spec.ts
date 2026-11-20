@@ -62,6 +62,7 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
         {provide: EditorService, useValue: {
             nativeAvailable: options.nativeAvailable ?? true,
+            capabilities: () => ({}),
             snapshot: current, busy, playing: computed(() => current().mode === 'play'),
                 modelAssets, assets, importModel, loadPrefab, workspaceGeneration,
         }},

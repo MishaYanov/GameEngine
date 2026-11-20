@@ -1,0 +1,44 @@
+.source-layout {
+	display: grid;
+	grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr);
+	gap: var(--space-4);
+}
+.source-objects,
+.source-properties {
+	display: grid;
+	align-content: start;
+	gap: var(--space-3);
+	min-width: 0;
+}
+ul {
+	display: grid;
+	gap: var(--space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+li button {
+	width: 100%;
+	text-align: start;
+}
+button[aria-pressed='true'] {
+	border-color: var(--color-text);
+}
+h3 {
+	margin: 0;
+	font-size: var(--font-size-sm);
+}
+.reference {
+	overflow-wrap: anywhere;
+	color: var(--color-text-secondary);
+}
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+@media (max-width: 48rem) {
+	.source-layout {
+		grid-template-columns: 1fr;
+	}
+}

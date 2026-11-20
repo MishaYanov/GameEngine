@@ -94,7 +94,9 @@ pub fn instantiate_with_progress(
 			Some(entity.mesh_index.unwrap_or(0)),
 		)?
 		.with_asset_id(entity.asset_id.clone());
-		let model = if !entity.renderable
+		let model = if !entity.has_mesh_component() {
+			Arc::clone(&group_model)
+		} else if !entity.renderable
 			&& !assets
 				.asset_exists(&cache_key)
 				.map_err(|error| error.to_string())?

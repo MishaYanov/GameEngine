@@ -359,6 +359,7 @@ dependencies = [
  "engine-logger",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1153,6 +1154,7 @@ dependencies = [
 name = "engine-headless"
 version = "0.1.0"
 dependencies = [
+ "bridge",
  "courtyard-gameplay",
  "engine-core",
  "serde",
@@ -1432,6 +1434,7 @@ dependencies = [
 name = "game"
 version = "0.1.0"
 dependencies = [
+ "bridge",
  "courtyard-gameplay",
  "engine-logger",
  "glam",

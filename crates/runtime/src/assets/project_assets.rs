@@ -217,6 +217,12 @@ pub struct PreparedAssetChange {
 	reimport: bool,
 }
 impl PreparedAssetChange {
+	/// Captured disk state to compare with an editor draft opened earlier.
+	pub fn previous_fingerprint(&self) -> Option<&str> {
+		self.original_asset
+			.as_ref()
+			.map(|(_, fingerprint)| fingerprint.as_str())
+	}
 	pub fn operation_id(&self) -> &str {
 		&self.operation_id
 	}

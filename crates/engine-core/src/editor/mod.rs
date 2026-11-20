@@ -4,8 +4,10 @@ mod history;
 mod scene_documents;
 pub use factory::CommandRequestBuilder;
 use scene_documents::{DocumentCostCache, SceneDraft};
+mod linked_prefab;
 mod operations;
 mod prefab;
+mod runtime_lifecycle;
 use crate::command::{
 	CommandDescriptorDto, EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto,
 	PlayStatusDto, SnapSettingsDto,
@@ -81,6 +83,56 @@ impl CommandFactory {
 				false,
 			),
 			("set_project", "Configure project", "project", true, false),
+			("add_component", "Add component", "component", true, false),
+			(
+				"replace_component",
+				"Edit component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"remove_component",
+				"Remove component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"set_component_enabled",
+				"Enable component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"instantiate_linked_prefab",
+				"Instantiate linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"update_linked_prefab",
+				"Update linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"revert_linked_prefab",
+				"Revert linked overrides",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"unpack_linked_prefab",
+				"Unpack linked prefab",
+				"prefab",
+				true,
+				false,
+			),
 			(
 				"set_entity_input",
 				"Set controlled entity input",
@@ -797,6 +849,21 @@ impl EditorSession {
 			Command::Undo | Command::Redo => {
 				self.restore_history(matches!(command, Command::Redo))?
 			}
+			Command::InstantiateLinkedPrefab {
+				source,
+				position,
+				bindings,
+			} => self.instantiate_linked_prefab(source, position, bindings)?,
+			Command::UpdateLinkedPrefab {
+				root_key,
+				source,
+				resolution,
+				bindings,
+			} => self.update_linked_prefab(root_key, source, resolution, bindings)?,
+			Command::RevertLinkedPrefab { root_key, property } => {
+				self.revert_linked_prefab(root_key, property)?
+			}
+			Command::UnpackLinkedPrefab { root_key } => self.unpack_linked_prefab(root_key)?,
 			mutation => {
 				self.require_edit()?;
 
@@ -858,11 +925,12 @@ impl EditorSession {
 	}
 	fn commit_project(
 		&mut self,
-		next: SceneData,
+		mut next: SceneData,
 		project: ProjectData,
 		selection: Vec<EntityKey>,
 		label: &str,
 	) -> Result<(), String> {
+		crate::linked_prefab::capture_overrides(&self.data, &mut next)?;
 		self.validate_project_documents(&project, &self.active_scene_id, &next)?;
 		Self::document_budget(
 			&self.active_scene_id,

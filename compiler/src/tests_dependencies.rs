@@ -159,6 +159,7 @@ fn dependency_export_resolves_ids_and_legacy_aliases_includes_prefab_models_and_
 	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	fs::create_dir(source.join("prefabs")).unwrap();
 	let prefab = PrefabData {
+		reference_slots: Default::default(),
 		schema_version: 1,
 		entities: vec![
 			EntityData::new(
@@ -329,4 +330,220 @@ fn long_catalog_dependency_chains_fail_with_a_bounded_depth_error() {
 			.contains("64 levels")
 	);
 	assert!(!fixture.0.join(&project.name).exists());
+}
+
+#[test]
+fn linked_export_resolves_pinned_entities_without_reading_missing_or_changed_source() {
+	use engine_core::{editor::EditorSession, linked_prefab::LinkedPrefabSource};
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, scene) = authored_scene_fixture(&source);
+	let model = model_record(&source, "models/cube.glb", "cube.glb");
+	let prefab = PrefabData {
+		schema_version: 3,
+		entities: vec![
+			EntityData::new(
+				EntityKey::new("prop").unwrap(),
+				"Pinned prop",
+				"models/cube.glb",
+			)
+			.with_asset_id(Some(model.id.clone())),
+		],
+		gameplay: None,
+		reference_slots: Default::default(),
+	};
+	fs::create_dir(source.join("prefabs")).unwrap();
+	let bytes = prefab.to_json().unwrap().into_bytes();
+	fs::write(source.join("prefabs/source.json"), &bytes).unwrap();
+	let record = PersistentAsset {
+		id: AssetId::generate(),
+		path: "prefabs/source.json".into(),
+		kind: AssetKind::Prefab,
+		aliases: vec![],
+		revision: 1,
+		fingerprint: format!("{:x}", Sha256::digest(&bytes)),
+		bytes: bytes.len() as u64,
+		source_path: None,
+		meshes: vec![],
+		dependencies: vec![model.id.clone()],
+	};
+	save_catalog(&source, vec![model, record.clone()]);
+	let mut session = EditorSession::for_project(scene, project.clone()).unwrap();
+	session
+		.instantiate_linked_prefab(
+			LinkedPrefabSource {
+				source_id: record.id,
+				path: record.path.clone(),
+				fingerprint: record.fingerprint,
+				prefab,
+			},
+			[1.0, 0.0, 0.0],
+			Default::default(),
+		)
+		.unwrap();
+	fs::write(
+		source.join("scenes/main.json"),
+		session.authored_document().to_json().unwrap(),
+	)
+	.unwrap();
+	fs::write(
+		source.join("prefabs/source.json"),
+		b"invalid external source edits are outside the pin",
+	)
+	.unwrap();
+	assert!(
+		prepare_project(&project, &source).is_ok(),
+		"live source contents are not read for a pinned instance"
+	);
+	fs::remove_file(source.join("prefabs/source.json")).unwrap();
+	let prepared = prepare_project(&project, &source).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	validate_export_snapshot(&staged, None).unwrap();
+	let exported = staged.path().join("assets");
+	let scene = read_scene_file(&exported.join("scenes/main.json")).unwrap();
+	assert!(
+		scene
+			.entities
+			.iter()
+			.all(|entity| entity.linked_prefab.is_none())
+	);
+	assert!(
+		scene
+			.entities
+			.iter()
+			.any(|entity| entity.name == "Pinned prop")
+	);
+	assert!(!exported.join("prefabs/source.json").exists());
+	assert!(exported.join("models/cube.glb").is_file());
+	let catalog = dependencies::read_catalog(&exported).unwrap();
+	assert_eq!(catalog.assets.len(), 1);
+	let second = fixture.0.join("second");
+	fs::create_dir(&second).unwrap();
+	let mut changed = (*session.authored_document()).clone();
+	changed
+		.entities
+		.iter_mut()
+		.find(|entity| entity.linked_prefab.is_some())
+		.unwrap()
+		.name = "Changed anchor".into();
+	fs::write(source.join("scenes/main.json"), changed.to_json().unwrap()).unwrap();
+	assert!(stage_prepared_project(&prepared, second.to_str().unwrap()).is_err());
+	assert!(!second.join(&project.name).exists());
+}
+
+fn spawner(entity: &str, path: &str) -> EntityData {
+	use engine_core::components::{
+		ComponentId, NO_MESH_PATH, NativeBehaviorComponent, NativeBehaviorSpec,
+	};
+	let mut entity = EntityData::new(EntityKey::new(entity).unwrap(), "Spawner", NO_MESH_PATH)
+		.with_renderable(false);
+	entity.native_behaviors.push(NativeBehaviorComponent {
+		id: ComponentId::new("spawner").unwrap(),
+		enabled: true,
+		behavior: NativeBehaviorSpec::TimedSpawner {
+			prefab_path: path.into(),
+			interval_ticks: 1,
+			max_alive: 1,
+			lifetime_ticks: 2,
+			spawn_offset: [0.0; 3],
+			bindings: Default::default(),
+		},
+	});
+	entity
+}
+
+#[test]
+fn runtime_spawner_missing_sources_and_dependency_cycles_fail_before_output() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, mut scene) = authored_scene_fixture(&source);
+	scene.entities.push(spawner("controller", "prefabs/a.json"));
+	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+	assert!(prepare_project(&project, &source).is_err());
+	fs::create_dir(source.join("prefabs")).unwrap();
+	for (file, next) in [("a.json", "b.json"), ("b.json", "a.json")] {
+		let prefab = PrefabData {
+			schema_version: 3,
+			entities: vec![spawner("owner", &format!("prefabs/{next}"))],
+			gameplay: None,
+			reference_slots: Default::default(),
+		};
+		fs::write(source.join("prefabs").join(file), prefab.to_json().unwrap()).unwrap();
+	}
+	assert!(
+		prepare_project(&project, &source)
+			.err()
+			.unwrap()
+			.contains("Cyclic runtime prefab")
+	);
+	assert!(!fixture.0.join(&project.name).exists());
+}
+
+#[test]
+fn component_demo_exports_recursive_runtime_prefabs_in_canonical_format() {
+	let fixture = AssetFixture::new();
+	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game");
+	let project = ProjectData::load(root.join("component-demo.json")).unwrap();
+	let prepared = prepare_project(&project, &root.join("assets")).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	validate_export_snapshot(&staged, None).unwrap();
+	let assets = staged.path().join("assets");
+	assert!(assets.join("props/robot.glb").is_file());
+	let value: serde_json::Value =
+		serde_json::from_slice(&fs::read(assets.join("prefabs/timed-collectible.json")).unwrap())
+			.unwrap();
+	assert_eq!(value["schema_version"], 3);
+	assert!(value["entities"][0].get("components").is_some());
+	assert!(value["entities"][0].get("component_views").is_none());
+}
+
+#[test]
+fn runtime_prefab_alias_export_uses_canonical_source_and_matching_catalog_fingerprint() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, mut scene) = authored_scene_fixture(&source);
+	let model = model_record(&source, "models/item.glb", "cube.glb");
+	fs::create_dir(source.join("prefabs")).unwrap();
+	let prefab = PrefabData {
+		schema_version: 1,
+		entities: vec![
+			EntityData::new(EntityKey::new("item").unwrap(), "Item", &model.path)
+				.with_asset_id(Some(model.id.clone())),
+		],
+		gameplay: None,
+		reference_slots: Default::default(),
+	};
+	let bytes = serde_json::to_vec(&prefab).unwrap();
+	fs::write(source.join("prefabs/moved.json"), &bytes).unwrap();
+	let record = PersistentAsset {
+		id: AssetId::generate(),
+		path: "prefabs/moved.json".into(),
+		kind: AssetKind::Prefab,
+		aliases: vec!["prefabs/old.json".into()],
+		revision: 1,
+		fingerprint: format!("{:x}", Sha256::digest(&bytes)),
+		bytes: bytes.len() as u64,
+		source_path: None,
+		meshes: vec![],
+		dependencies: vec![model.id.clone()],
+	};
+	save_catalog(&source, vec![model, record.clone()]);
+	scene.entities.push(spawner("factory", "prefabs/old.json"));
+	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+	let prepared = prepare_project(&project, &source).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	let assets = staged.path().join("assets");
+	let output = fs::read(assets.join("prefabs/moved.json")).unwrap();
+	let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+	assert_eq!(value["schema_version"], 3);
+	assert!(value["entities"][0].get("components").is_some());
+	let catalog = dependencies::read_catalog(&assets).unwrap();
+	let exported = catalog.by_id(&record.id).unwrap();
+	assert_eq!(
+		exported.fingerprint,
+		format!("{:x}", Sha256::digest(&output))
+	);
+	assert_eq!(exported.bytes, output.len() as u64);
+	assert_eq!(catalog.by_path("prefabs/old.json").unwrap().id, record.id);
+	validate_export_snapshot(&staged, None).unwrap();
 }

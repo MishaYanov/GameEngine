@@ -1,0 +1,174 @@
+<editor-dialog
+	[(open)]="open"
+	(openChange)="close($event)"
+	[closeBlocked]="pending() || sourceDirty()"
+	(closeAttempted)="attemptedClose()"
+	title="Prefab Source"
+	[renderFields]="false"
+	[config]="{ width: '64rem' }"
+>
+	<p>
+		<strong>{{ source().path }}</strong> · Edit this source independently from its scene instances.
+	</p>
+	<p>
+		Entity and component identities remain stable. Save publishes the reviewed draft only if the
+		source fingerprint still matches.
+	</p>
+	@if (sourceDirty()) {
+		<p role="status">Unsaved source changes</p>
+	}
+	@if (document(); as document) {
+		<div class="source-layout">
+			<section aria-label="Prefab source objects" class="source-objects">
+				<h3>Source objects</h3>
+				<ul>
+					@for (entity of document.entities; track entity.key) {
+						<li>
+							<button
+								type="button"
+								[disabled]="!available()"
+								[attr.aria-pressed]="entity.key === selected()"
+								(click)="select(entity.key)"
+							>
+								{{ entity.name }}
+							</button>
+						</li>
+					}
+				</ul>
+				<button
+					type="button"
+					[disabled]="!available() || document.entities.length >= 4096"
+					(click)="addEntity()"
+				>
+					Add Source Object
+				</button>
+				<button
+					type="button"
+					[disabled]="!available() || document.entities.length <= 1"
+					(click)="removeEntity()"
+				>
+					Remove Source Object
+				</button>
+				<fieldset [disabled]="!available()">
+					<legend>External reference slots</legend>
+					<p>
+						Declare an external actor or other reference. Instances bind these names to their own
+						scene entities.
+					</p>
+					@for (slot of slots(); track slot.key; let index = $index) {
+						<label
+							>Slot name<input
+								#slotName
+								[value]="slot.name"
+								maxlength="64"
+								(input)="renameSlot(index, slotName.value)"
+						/></label>
+						<small class="reference">{{ slot.key }}</small>
+						<button
+							type="button"
+							[attr.aria-label]="'Remove source slot ' + (slot.name || index + 1)"
+							(click)="removeSlot(index)"
+						>
+							Remove slot
+						</button>
+					}
+					<button type="button" [disabled]="slots().length >= 128" (click)="addSlot()">
+						Add Source Reference Slot
+					</button>
+				</fieldset>
+			</section>
+			<section aria-label="Prefab source properties" class="source-properties">
+				@if (entity(); as entity) {
+					<h3>{{ entity.name }}</h3>
+					<small class="reference">Source key: {{ entity.key }}</small>
+					<fieldset [disabled]="pending() || componentOpen()">
+						<legend>Object properties</legend>
+						<label>Name<input [formField]="fields.name" /></label>
+						<label
+							>Parent<select [formField]="fields.parent">
+								<option value="">Source root</option>
+								@for (parent of document.entities; track parent.key) {
+									@if (parent.key !== entity.key) {
+										<option [value]="parent.key">{{ parent.name }}</option>
+									}
+								}
+							</select></label
+						>
+						@for (vector of vectors; track vector.key) {
+							<fieldset>
+								<legend>{{ vector.label }} · Local</legend>
+								<div class="vector">
+									@for (axis of axes; track axis) {
+										<label
+											>{{ axis.toUpperCase()
+											}}<input
+												[formField]="fields[vector.key][axis]"
+												inputmode="decimal"
+												[attr.aria-label]="'Source ' + vector.label + ' ' + axis.toUpperCase()"
+										/></label>
+									}
+								</div>
+							</fieldset>
+						}
+						<div class="actions">
+							<button type="button" [disabled]="!entityDirty()" (click)="applyEntity()">
+								Apply Source Object Draft
+							</button>
+							<button type="button" [disabled]="!entityDirty()" (click)="select(entity.key, true)">
+								Discard Source Object Draft
+							</button>
+						</div>
+					</fieldset>
+					<editor-component-editor
+						[components]="entity.components"
+						[types]="componentTypes()"
+						[entities]="targets()"
+						[models]="models()"
+						[ownerKey]="entity.key"
+						[contextKey]="source().draft_id + ':' + entity.key"
+						[acknowledged]="acknowledged()"
+						[editable]="!pending() && !entityDirty()"
+						[pending]="pending()"
+						(draftOpenChanged)="componentOpen.set($event)"
+						(actionRequested)="component($event)"
+					/>
+				}
+			</section>
+		</div>
+	}
+	@if (candidate().error; as message) {
+		<p role="status" class="error">{{ message }}</p>
+	}
+	@if (error(); as message) {
+		<p role="alert" class="error">{{ message }}</p>
+	}
+	@if (message(); as text) {
+		<p role="status">{{ text }}</p>
+	}
+	@if (entityDirty() || componentOpen()) {
+		<p role="status">
+			Apply or discard the current property draft before validating or saving the source.
+		</p>
+	}
+	<button
+		dialog-actions
+		type="button"
+		[disabled]="!available() || !candidate().value"
+		(click)="persist(false)"
+	>
+		Validate Prefab Source
+	</button>
+	<button
+		dialog-actions
+		type="button"
+		[disabled]="!available() || !candidate().value"
+		(click)="persist(true)"
+	>
+		{{ pending() ? 'Working…' : 'Save Prefab Source' }}
+	</button>
+	@if (sourceDirty()) {
+		<button dialog-actions type="button" [disabled]="pending()" (click)="discardAndClose()">
+			Discard Source Changes and Close
+		</button>
+	}
+</editor-dialog>

@@ -17,6 +17,7 @@ use crate::commands::project::{
 	choose_project_destination, choose_project_manifest, confirm_project_discard, create_project,
 	editor_exit,
 };
+use crate::commands::runtime_inspection::editor_runtime_inspect;
 use state::EditorState;
 use tauri::Manager;
 
@@ -59,6 +60,7 @@ pub fn run() {
 		})
 		.invoke_handler(tauri::generate_handler![
 			engine_status,
+			editor_runtime_inspect,
 			create_project,
 			choose_project_destination,
 			choose_project_manifest,
@@ -97,6 +99,14 @@ pub fn run() {
 			editor_instantiate_prefab,
 			editor_save_prefab,
 			editor_load_prefab,
+			editor_prefab_source_open,
+			editor_prefab_source_close,
+			editor_prefab_source_validate,
+			editor_prefab_source_save,
+			editor_create_linked_prefab_source,
+			editor_instantiate_linked_prefab,
+			editor_linked_prefab_status,
+			editor_update_linked_prefab,
 			editor_collisions,
 			editor_viewport_attach,
 			editor_viewport_bounds,

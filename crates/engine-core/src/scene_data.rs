@@ -5,12 +5,12 @@ use glam::{EulerRot, Mat4};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
 pub const MAX_SCENE_LIGHTS: usize = 16;
 pub const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneData {
 	pub schema_version: u32,
@@ -21,8 +21,8 @@ pub struct SceneData {
 	pub lights: Vec<LightData>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "EntityProjection")]
 pub struct EntityData {
 	pub key: EntityKey,
 	pub name: String,
@@ -43,6 +43,12 @@ pub struct EntityData {
 	pub collider: Option<ColliderData>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub mesh_index: Option<usize>,
+	#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+	pub component_ids: BTreeMap<String, crate::components::ComponentId>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub native_behaviors: Vec<crate::components::NativeBehaviorComponent>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
 fn default_renderable() -> bool {
@@ -64,6 +70,9 @@ impl EntityData {
 			material: None,
 			collider: None,
 			mesh_index: None,
+			component_ids: BTreeMap::new(),
+			native_behaviors: Vec::new(),
+			linked_prefab: None,
 		}
 	}
 	pub fn with_transform(mut self, transform: TransformData) -> Self {
@@ -93,6 +102,105 @@ impl EntityData {
 	pub fn with_renderable(mut self, renderable: bool) -> Self {
 		self.renderable = renderable;
 		self
+	}
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityProjection {
+	key: EntityKey,
+	name: String,
+	model_path: String,
+	transform: TransformData,
+	#[serde(default)]
+	asset_id: Option<crate::asset_catalog::AssetId>,
+	#[serde(default = "default_renderable")]
+	renderable: bool,
+	#[serde(default = "default_renderable")]
+	collision_enabled: bool,
+	#[serde(default)]
+	parent: Option<EntityKey>,
+	#[serde(default)]
+	material: Option<MaterialOverrideData>,
+	#[serde(default)]
+	collider: Option<ColliderData>,
+	#[serde(default)]
+	mesh_index: Option<usize>,
+	#[serde(default)]
+	component_ids: BTreeMap<String, crate::components::ComponentId>,
+	#[serde(default)]
+	native_behaviors: Vec<crate::components::NativeBehaviorComponent>,
+	#[serde(default)]
+	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
+	/// A read-only transport projection; commands never take this as mutation authority.
+	#[serde(default)]
+	component_views: Option<Vec<crate::components::ComponentRecord>>,
+}
+impl TryFrom<EntityProjection> for EntityData {
+	type Error = String;
+	fn try_from(value: EntityProjection) -> Result<Self, String> {
+		if let Some(views) = &value.component_views {
+			if views.len() > crate::components::MAX_COMPONENTS_PER_OBJECT {
+				return Err("Component projection exceeds its count limit".into());
+			}
+			for view in views {
+				view.validate()?;
+			}
+		}
+		Ok(Self {
+			key: value.key,
+			name: value.name,
+			model_path: value.model_path,
+			asset_id: value.asset_id,
+			transform: value.transform,
+			renderable: value.renderable,
+			collision_enabled: value.collision_enabled,
+			parent: value.parent,
+			material: value.material,
+			collider: value.collider,
+			mesh_index: value.mesh_index,
+			component_ids: value.component_ids,
+			native_behaviors: value.native_behaviors,
+			linked_prefab: value.linked_prefab,
+		})
+	}
+}
+impl Serialize for EntityData {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		use serde::ser::SerializeMap;
+		let mut map = serializer.serialize_map(None)?;
+		map.serialize_entry("key", &self.key)?;
+		map.serialize_entry("name", &self.name)?;
+		map.serialize_entry("model_path", &self.model_path)?;
+		map.serialize_entry("transform", &self.transform)?;
+		map.serialize_entry("renderable", &self.renderable)?;
+		map.serialize_entry("collision_enabled", &self.collision_enabled)?;
+		if let Some(value) = &self.asset_id {
+			map.serialize_entry("asset_id", value)?;
+		}
+		if let Some(value) = &self.parent {
+			map.serialize_entry("parent", value)?;
+		}
+		if let Some(value) = &self.material {
+			map.serialize_entry("material", value)?;
+		}
+		if let Some(value) = &self.collider {
+			map.serialize_entry("collider", value)?;
+		}
+		if let Some(value) = &self.mesh_index {
+			map.serialize_entry("mesh_index", value)?;
+		}
+		if !self.component_ids.is_empty() {
+			map.serialize_entry("component_ids", &self.component_ids)?;
+		}
+		if !self.native_behaviors.is_empty() {
+			map.serialize_entry("native_behaviors", &self.native_behaviors)?;
+		}
+		if let Some(value) = &self.linked_prefab {
+			map.serialize_entry("linked_prefab", value)?;
+		}
+		map.serialize_entry("component_views", &self.component_records())?;
+		map.end()
 	}
 }
 
@@ -304,10 +412,10 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 				},
 			}
 		}
-		CURRENT_SCHEMA_VERSION => ParsedScene {
+		3 | CURRENT_SCHEMA_VERSION => ParsedScene {
 			source_schema_version: header.schema_version,
 			data: serde_json::from_str::<SceneData>(source)
-				.map_err(|error| format!("Invalid version-3 scene JSON: {error}"))?,
+				.map_err(|error| format!("Invalid scene JSON: {error}"))?,
 		},
 		version => return Err(format!("Unsupported schema version: {version}")),
 	};
@@ -510,7 +618,12 @@ impl SceneData {
 				return Err("Directional lights require a nonzero direction".into());
 			}
 		}
+		crate::components::validate_scene_components(self)?;
+		crate::linked_prefab::validate_scene_links(self)?;
 		self.camera.validate()?;
+		let mut count = SceneJsonWriter::new(std::io::sink());
+		serde_json::to_writer(&mut count, &crate::scene_format::StoredSceneRef(self))
+			.map_err(|error| format!("Scene authored byte validation failed: {error}"))?;
 		Ok(world)
 	}
 
@@ -520,7 +633,7 @@ impl SceneData {
 	pub fn to_json(&self) -> Result<String, String> {
 		self.validate()?;
 		let mut writer = SceneJsonWriter::new(Vec::new());
-		serde_json::to_writer_pretty(&mut writer, self)
+		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
 			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
 		String::from_utf8(writer.output).map_err(|error| format!("Failed to encode scene: {error}"))
 	}
@@ -528,7 +641,7 @@ impl SceneData {
 	pub fn serialized_size(&self) -> Result<usize, String> {
 		self.validate()?;
 		let mut writer = SceneJsonWriter::new(std::io::sink());
-		serde_json::to_writer_pretty(&mut writer, self)
+		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
 			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
 		Ok(writer.bytes)
 	}

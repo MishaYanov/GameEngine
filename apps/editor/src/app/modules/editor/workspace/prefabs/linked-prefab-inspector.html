@@ -1,0 +1,121 @@
+@if (status(); as status) {
+	<section aria-label="Linked prefab" class="linked-prefab">
+		<h3>Linked Prefab</h3>
+		<p>{{ status.source_path }}</p>
+		<p>
+			{{
+				status.source_changed
+					? 'Source changed. Update explicitly to review its changes.'
+					: 'Instance uses its saved source version.'
+			}}
+		</p>
+		@if (status.source_error; as message) {
+			<p class="error" role="alert">{{ message }}</p>
+		}
+		<div class="actions">
+			<button
+				type="button"
+				[disabled]="!available() || !!status.source_error"
+				(click)="openSource(false)"
+			>
+				Edit Linked Source…
+			</button>
+			<button
+				type="button"
+				[disabled]="!available() || !!status.source_error"
+				(click)="openSource(true)"
+			>
+				Review Source Update…
+			</button>
+			<button
+				type="button"
+				[disabled]="!available() || !status.overrides.length"
+				(click)="revert(null)"
+			>
+				Revert All Overrides
+			</button>
+			<button type="button" [disabled]="!available()" (click)="unpack()">
+				Unpack Linked Prefab
+			</button>
+		</div>
+		<p>
+			Unpack keeps the current objects and removes their source link. Scene Undo can restore it.
+		</p>
+		<ul aria-label="Prefab overrides">
+			@for (override of status.overrides; track $index) {
+				<li>
+					<h4>{{ property(override.target) }}</h4>
+					<small class="reference">Source object: {{ override.target.source_entity }}</small>
+					<dl>
+						<dt>Base</dt>
+						<dd>{{ value(override.base) }}</dd>
+						<dt>Local</dt>
+						<dd>{{ value(override.value) }}</dd>
+					</dl>
+					<button
+						type="button"
+						[disabled]="!available()"
+						(click)="revert(override.target)"
+						[attr.aria-label]="'Revert ' + property(override.target)"
+					>
+						Revert Property
+					</button>
+				</li>
+			} @empty {
+				<li>No local overrides.</li>
+			}
+		</ul>
+	</section>
+}
+@if (error(); as message) {
+	<p role="alert" class="error">{{ message }}</p>
+}
+@if (source(); as source) {
+	<editor-prefab-source-editor
+		[source]="source"
+		(closed)="closeSource()"
+		(saved)="this.source.set($event)"
+	/>
+}
+<editor-dialog
+	[(open)]="updateOpen"
+	(openChange)="!$event && closeUpdate()"
+	title="Update Linked Prefab"
+	[renderFields]="false"
+	[config]="{ width: '42rem' }"
+>
+	<p>
+		Non-overlapping changes merge. Reject conflicts first, or explicitly choose which values to keep
+		where source and local edits overlap.
+	</p>
+	<label
+		>Conflict resolution<select
+			#resolution
+			[value]="this.resolution()"
+			[disabled]="pending()"
+			(change)="chooseResolution(resolution.value)"
+		>
+			<option value="reject">Reject overlapping changes</option>
+			<option value="keep_local">Keep local values</option>
+			<option value="use_source">Use source values</option>
+		</select></label
+	>
+	<editor-reference-bindings
+		[names]="names()"
+		[entities]="entities()"
+		[bindings]="bindings()"
+		[disabled]="pending()"
+		(bindingsChanged)="bindings.set($event)"
+	/>
+	@if (error(); as message) {
+		<p role="alert" class="error">{{ message }}</p>
+	}
+	<button
+		dialog-actions
+		type="button"
+		[disabled]="!available() || !validBindings()"
+		(click)="update()"
+	>
+		Update Linked Instance
+	</button>
+</editor-dialog>

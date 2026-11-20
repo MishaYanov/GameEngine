@@ -1,4 +1,5 @@
 import type {EditorCommandUpdate, EditorSnapshot, SceneEntity} from './editor.models';
+import {validComponentViews} from './editor-components';
 
 function record(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -38,6 +39,7 @@ function entity(value: unknown): value is SceneEntity {
         typeof value['name'] === 'string' &&
         typeof value['model_path'] === 'string' &&
         typeof value['renderable'] === 'boolean' &&
+        (value['component_views'] === undefined || validComponentViews(value['component_views'])) &&
         ['position', 'rotation', 'scale'].every((key) => vector(transform[key], 3))
     );
 }
@@ -57,7 +59,7 @@ function light(value: unknown): boolean {
 function validDocument(value: unknown): boolean {
     return (
         record(value) &&
-        value['schema_version'] === 3 &&
+        (value['schema_version'] === 3 || value['schema_version'] === 4) &&
         record(value['bindings']) &&
         Object.values(value['bindings']).every((key) => typeof key === 'string') &&
         camera(value['camera']) &&

@@ -33,6 +33,8 @@ pub struct PreparedProject {
 	project: ProjectData,
 	asset_root: PathBuf,
 	files: Vec<PackageAsset>,
+	source_files: Vec<PackageAsset>,
+	generated_files: std::collections::BTreeMap<PathBuf, Vec<u8>>,
 	total_bytes: u64,
 	catalog_source: Option<PackageAsset>,
 	catalog_output: Option<Vec<u8>>,
@@ -51,12 +53,7 @@ impl PreparedProject {
 		self.total_bytes
 	}
 	fn validate_inputs(&self) -> Result<(), String> {
-		for asset in &self.files {
-			if asset.relative == Path::new(engine_core::asset_catalog::CATALOG_FILE)
-				&& self.catalog_output.is_some()
-			{
-				continue;
-			}
+		for asset in &self.source_files {
 			checked_asset_path(&self.asset_root, &asset.relative)
 				.and_then(|input| copy_verified_asset(&input, asset, &mut io::sink()))
 				.map_err(|cause| {
@@ -137,6 +134,8 @@ pub fn prepare_project(
 	let asset_root = asset_root.canonicalize().map_err(|e| e.to_string())?;
 	let dependencies::DependencySnapshot {
 		files,
+		source_files,
+		generated_files,
 		catalog_source,
 		catalog_output,
 	} = dependencies::prepare(project, &asset_root)?;
@@ -148,6 +147,8 @@ pub fn prepare_project(
 		project: project.clone(),
 		asset_root,
 		files,
+		source_files,
+		generated_files,
 		total_bytes,
 		catalog_source,
 		catalog_output,
@@ -475,12 +476,22 @@ fn copy_prepared_project(
 		.files
 		.iter()
 		.filter(|asset| {
-			prepared.catalog_output.is_none()
-				|| asset.relative != Path::new(engine_core::asset_catalog::CATALOG_FILE)
+			!prepared.generated_files.contains_key(&asset.relative)
+				&& (prepared.catalog_output.is_none()
+					|| asset.relative != Path::new(engine_core::asset_catalog::CATALOG_FILE))
 		})
 		.cloned()
 		.collect();
 	copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &source_files)?;
+	for (relative, bytes) in &prepared.generated_files {
+		let output = path.join("assets").join(relative);
+		fs::create_dir_all(
+			output
+				.parent()
+				.ok_or_else(|| io::Error::other("Missing generated asset parent"))?,
+		)?;
+		write_new(&output, bytes)?;
+	}
 	if let Some(catalog) = &prepared.catalog_output {
 		write_new(
 			&path

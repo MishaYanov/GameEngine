@@ -60,6 +60,19 @@ test('spaces separate existing developer documentation from the empty game app s
   landing.window.close();developer.window.close();game.window.close();
 });
 
+test('milestone review publishes its linked verification JSON unchanged', async () => {
+  const route = 'docs/milestones-4-6-review.html';
+  const dom = new JSDOM(await readFile(new URL('./dist/' + route, import.meta.url), 'utf8'));
+  try {
+    const link = dom.window.document.querySelector('a[href$="milestones-4-6-tests-2026-11-20.json"]');
+    assert.ok(link);
+    const published = new URL(link.getAttribute('href'), new URL('./dist/' + route, import.meta.url));
+    const actual = await readFile(published, 'utf8');
+    assert.equal(actual, await readFile(new URL('../docs/verification/milestones-4-6-tests-2026-11-20.json', import.meta.url), 'utf8'));
+    assert.match(JSON.parse(actual).inspected_head, /^[0-9a-f]{40}$/);
+  } finally {dom.window.close();}
+});
+
 test('Mermaid fences publish local diagrams with complete source fallback and valid syntax', async () => {
     const parser = new JSDOM('', {runScripts: 'outside-only'});
     parser.window.structuredClone = globalThis.structuredClone;

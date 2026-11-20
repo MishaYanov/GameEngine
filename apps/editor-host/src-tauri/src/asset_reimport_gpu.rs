@@ -120,6 +120,7 @@ mod tests {
 		)
 		.unwrap();
 		let prefab = runtime::editor::PrefabData {
+			reference_slots: Default::default(),
 			schema_version: 2,
 			entities: vec![EntityData::new(
 				EntityKey::new("prefab").unwrap(),

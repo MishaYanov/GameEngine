@@ -12,18 +12,21 @@ use std::{
 pub const MAX_PREFAB_ENTITIES: usize = 4096;
 pub const MAX_PREFAB_BYTES: usize = 16 * 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrefabData {
 	pub schema_version: u32,
+	#[serde(deserialize_with = "crate::scene_format::deserialize_entities")]
 	pub entities: Vec<EntityData>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub gameplay: Option<PrefabGameplay>,
+	#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+	pub reference_slots: BTreeMap<String, EntityKey>,
 }
 
 /// A portable gameplay assembly. References into opaque module settings are
 /// explicit JSON pointers, so remapping never guesses that arbitrary text is an ID.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrefabGameplay {
 	pub source_scene: crate::scene_catalog::SceneId,
@@ -72,32 +75,100 @@ impl PrefabData {
 
 	pub fn to_json(&self) -> Result<String, String> {
 		self.validate()?;
-		let source = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
+		struct Canonical<'a>(&'a PrefabData);
+		impl Serialize for Canonical<'_> {
+			fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+				self.0.serialize_canonical(serializer)
+			}
+		}
+		let source =
+			serde_json::to_string_pretty(&Canonical(self)).map_err(|error| error.to_string())?;
 		if source.len() > MAX_PREFAB_BYTES {
 			return Err("Formatted prefab JSON exceeds the 16 MiB size limit".into());
 		}
 		Ok(source)
 	}
+	pub fn serialize_canonical<S: serde::Serializer>(
+		&self,
+		serializer: S,
+	) -> Result<S::Ok, S::Error> {
+		#[derive(Serialize)]
+		struct Stored<'a> {
+			schema_version: u32,
+			#[serde(serialize_with = "crate::scene_format::serialize_entities")]
+			entities: &'a [EntityData],
+			gameplay: &'a Option<PrefabGameplay>,
+			reference_slots: &'a BTreeMap<String, EntityKey>,
+		}
+		Stored {
+			schema_version: 3,
+			entities: &self.entities,
+			gameplay: &self.gameplay,
+			reference_slots: &self.reference_slots,
+		}
+		.serialize(serializer)
+	}
 
 	fn validated(self) -> Result<Self, String> {
 		self.validate_settings()?;
-		if !matches!(self.schema_version, 1 | 2)
+		if !matches!(self.schema_version, 1 | 2 | 3)
 			|| self.entities.is_empty()
 			|| self.entities.len() > MAX_PREFAB_ENTITIES
 			|| (self.schema_version == 1 && self.gameplay.is_some())
+			|| (self.schema_version < 3 && !self.reference_slots.is_empty())
 		{
 			return Err(
-				"A version-1/2 prefab requires 1–4096 entities; gameplay requires version 2".into(),
+				"A version-1/2/3 prefab requires 1–4096 entities; gameplay requires version 2 and reference slots version 3".into(),
 			);
 		}
 		// A byte-counting writer checks the owned DTO without allocating a
 		// second JSON document. Direct bridge DTOs use the same size contract.
-		serde_json::to_writer(SizeBudget(0), &self)
+		self.serialize_canonical(&mut serde_json::Serializer::new(SizeBudget(0)))
 			.map_err(|error| format!("Prefab size validation failed: {error}"))?;
 		let camera = crate::Camera::default();
-		let validation = SceneData {
+		if self
+			.entities
+			.iter()
+			.any(|entity| entity.linked_prefab.is_some())
+		{
+			return Err("Prefab sources cannot contain linked instances; export a resolved copy or Unpack them first".into());
+		}
+		if self.reference_slots.len() > 128 {
+			return Err("Prefab exceeds 128 reference slots".into());
+		}
+		let original_count = self.entities.len();
+		let mut entities = self.entities;
+		let mut keys: HashSet<_> = entities.iter().map(|entity| entity.key.clone()).collect();
+		if entities.iter().any(|entity| {
+			entity
+				.parent
+				.as_ref()
+				.is_some_and(|parent| !keys.contains(parent))
+		}) {
+			return Err("Prefab parents must be owned source entities; reference slots bind component references, not external parents".into());
+		}
+		for (name, key) in &self.reference_slots {
+			if name.is_empty()
+				|| name.len() > 64
+				|| !name
+					.bytes()
+					.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+				|| !keys.insert(key.clone())
+			{
+				return Err("Reference slots require unique external placeholder keys and 1–64 character ASCII names".into());
+			}
+			entities.push(
+				EntityData::new(
+					key.clone(),
+					format!("Reference slot {name}"),
+					crate::components::NO_MESH_PATH,
+				)
+				.with_renderable(false),
+			);
+		}
+		let mut validation = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
-			entities: self.entities,
+			entities,
 			bindings: self
 				.gameplay
 				.as_ref()
@@ -115,7 +186,32 @@ impl PrefabData {
 		};
 		// The isolated scene rejects duplicate/invalid keys, external parents,
 		// cycles, invalid paths and every material/collider/transform defect.
+		let enabled: Vec<Vec<bool>> = validation
+			.entities
+			.iter_mut()
+			.map(|entity| {
+				entity
+					.native_behaviors
+					.iter_mut()
+					.map(|component| {
+						let enabled = component.enabled;
+						component.enabled = false;
+						enabled
+					})
+					.collect()
+			})
+			.collect();
 		validation.validate()?;
+		for (entity, enabled) in validation.entities.iter_mut().zip(enabled) {
+			for (component, enabled) in entity.native_behaviors.iter_mut().zip(enabled) {
+				component.enabled = enabled;
+			}
+		}
+		crate::components::validate_scene_components_with_slots(
+			&validation,
+			&self.reference_slots.values().cloned().collect(),
+		)?;
+		validation.entities.truncate(original_count);
 		if let Some(gameplay) = &self.gameplay {
 			let keys: HashSet<_> = validation
 				.entities
@@ -178,10 +274,88 @@ impl PrefabData {
 			}
 		}
 		Ok(Self {
-			schema_version: self.schema_version,
+			schema_version: 3,
 			entities: validation.entities,
 			gameplay: self.gameplay,
+			reference_slots: self.reference_slots,
 		})
+	}
+
+	/// Pure ownership remapping for editor copies, linked instances and runtime
+	/// spawn candidates. Component IDs remain stable within their remapped owner.
+	pub fn remap_entities(
+		&self,
+		keys: &HashMap<EntityKey, EntityKey>,
+		bindings: &BTreeMap<String, EntityKey>,
+	) -> Result<Vec<EntityData>, String> {
+		self.validate()?;
+		if bindings.len() != self.reference_slots.len()
+			|| bindings
+				.keys()
+				.any(|name| !self.reference_slots.contains_key(name))
+		{
+			return Err(
+				"Supply exactly one entity binding for every declared prefab reference slot".into(),
+			);
+		}
+		let mut remap = keys.clone();
+		let mut unique = HashSet::new();
+		for entity in &self.entities {
+			let key = keys
+				.get(&entity.key)
+				.ok_or("Prefab entity mapping is incomplete")?;
+			key.validate()?;
+			if !unique.insert(key.clone()) {
+				return Err("Prefab mapped entity keys must be distinct".into());
+			}
+		}
+		for (name, placeholder) in &self.reference_slots {
+			let target = bindings
+				.get(name)
+				.ok_or("A prefab reference slot is unbound")?;
+			target.validate()?;
+			if unique.contains(target) {
+				return Err("Prefab reference slots must bind an existing external entity".into());
+			}
+			remap.insert(placeholder.clone(), target.clone());
+		}
+		self.entities
+			.iter()
+			.map(|source| {
+				let mut entity = source.clone();
+				entity.key = remap
+					.get(&source.key)
+					.expect("owned mapping checked")
+					.clone();
+				entity.parent = source
+					.parent
+					.as_ref()
+					.map(|parent| {
+						keys.get(parent)
+							.cloned()
+							.ok_or("Prefab parent is outside its owned entities")
+					})
+					.transpose()?;
+				entity.remap_component_references(&remap)?;
+				Ok(entity)
+			})
+			.collect()
+	}
+
+	pub fn into_component_source(mut self) -> Result<Self, String> {
+		if self.gameplay.as_ref().is_some_and(|gameplay| {
+			!gameplay.bindings.is_empty()
+				|| !gameplay.behaviors.is_empty()
+				|| !gameplay.definitions.is_empty()
+				|| gameplay.scene_settings.is_some()
+				|| !gameplay.entity_references.is_empty()
+				|| !gameplay.scene_references.is_empty()
+		}) {
+			return Err("This selection contains legacy project gameplay. Use Instantiate Copy or convert its gameplay to entity components before creating a linked source".into());
+		}
+		self.gameplay = None;
+		self.schema_version = 3;
+		self.validated()
 	}
 }
 
@@ -207,8 +381,26 @@ impl Write for SizeBudget {
 
 impl EditorSession {
 	pub fn export_prefab(&self) -> Result<PrefabData, String> {
+		self.export_prefab_with_slots(BTreeMap::new())
+	}
+	pub fn export_prefab_with_slots(
+		&self,
+		reference_slots: BTreeMap<String, EntityKey>,
+	) -> Result<PrefabData, String> {
 		self.require_edit()?;
 		self.require_no_transaction()?;
+		for target in reference_slots.values() {
+			if !self
+				.data
+				.entities
+				.iter()
+				.any(|entity| &entity.key == target)
+			{
+				return Err(
+					"Prefab reference slot must declare an existing external scene entity".into(),
+				);
+			}
+		}
 		if self.selection.is_empty() {
 			return Err("Select entities to create a prefab".into());
 		}
@@ -258,6 +450,7 @@ impl EditorSession {
 				continue;
 			}
 			let mut entity = entity.clone();
+			entity.linked_prefab = None;
 			if entity
 				.parent
 				.as_ref()
@@ -343,7 +536,8 @@ impl EditorSession {
 			}
 		}
 		PrefabData {
-			schema_version: 2,
+			schema_version: 3,
+			reference_slots,
 			entities,
 			gameplay: Some(gameplay),
 		}
@@ -364,7 +558,25 @@ impl EditorSession {
 		prefab: PrefabData,
 		position: [f32; 3],
 	) -> Result<(), String> {
+		self.instantiate_prefab_command_with_bindings(prefab, position, &BTreeMap::new())
+	}
+	pub fn instantiate_prefab_command_with_bindings(
+		&mut self,
+		prefab: PrefabData,
+		position: [f32; 3],
+		bindings: &BTreeMap<String, EntityKey>,
+	) -> Result<(), String> {
 		self.require_edit()?;
+		for target in bindings.values() {
+			if !self
+				.data
+				.entities
+				.iter()
+				.any(|entity| &entity.key == target)
+			{
+				return Err("Prefab reference binding targets a missing scene entity".into());
+			}
+		}
 		if !position.iter().all(|value| value.is_finite()) {
 			return Err("Prefab position must be finite".into());
 		}
@@ -398,20 +610,9 @@ impl EditorSession {
 				(entity.key.clone(), key)
 			})
 			.collect();
-		let mut entities = prefab.entities;
+		let mut entities = prefab.remap_entities(&remap, bindings)?;
 		let mut selection = Vec::new();
 		for entity in &mut entities {
-			entity.key = remap.get(&entity.key).ok_or("Missing prefab key")?.clone();
-			entity.parent = entity
-				.parent
-				.as_ref()
-				.map(|parent| {
-					remap
-						.get(parent)
-						.cloned()
-						.ok_or("Prefab references an external parent")
-				})
-				.transpose()?;
 			if entity.parent.is_none() {
 				entity.transform.position = (glam::Vec3::from_array(entity.transform.position)
 					+ glam::Vec3::from_array(position))

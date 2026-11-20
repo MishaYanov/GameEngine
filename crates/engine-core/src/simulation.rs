@@ -35,6 +35,17 @@ impl FixedStepper {
 	pub fn reset(&mut self) {
 		self.accumulator = 0.0;
 	}
+	/// Return accepted, unexecuted steps to the clock when the simulation yields
+	/// at a resource-preparation boundary. This does not accept new wall time.
+	pub(crate) fn retain_steps(&mut self, steps: u32) -> Result<(), String> {
+		let retained = self.accumulator + f64::from(steps) * self.step;
+		let whole_steps = ((retained + 1e-12) / self.step).floor();
+		if steps > self.max_steps || whole_steps > f64::from(self.max_steps) {
+			return Err("Retained simulation steps exceed the catch-up budget".into());
+		}
+		self.accumulator = retained;
+		Ok(())
+	}
 	pub fn advance(&mut self, elapsed: f64) -> Result<StepReport, String> {
 		if !elapsed.is_finite() || elapsed < 0.0 {
 			return Err("Elapsed time must be finite and nonnegative".into());

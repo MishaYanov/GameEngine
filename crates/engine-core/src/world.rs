@@ -226,6 +226,41 @@ impl RuntimeWorld {
 	pub fn document(&self) -> Arc<SceneData> {
 		Arc::clone(&self.document)
 	}
+	pub(crate) fn remove_runtime_entities(
+		&mut self,
+		keys: &HashSet<EntityKey>,
+	) -> Result<WorldChange, String> {
+		let mut data = self.data().clone();
+		data.entities.retain(|entity| !keys.contains(&entity.key));
+		data.bindings.retain(|_, key| !keys.contains(key));
+		if data
+			.camera
+			.follow
+			.as_ref()
+			.is_some_and(|follow| keys.contains(&follow.target))
+		{
+			data.camera.follow = None;
+		}
+		for entity in &mut data.entities {
+			entity.native_behaviors.retain(|component| {
+				component
+					.behavior
+					.entity_references()
+					.iter()
+					.all(|key| !keys.contains(*key))
+			});
+		}
+		let next = Self::new(Arc::new(data))?;
+		*self = next;
+		let mut removed: Vec<_> = keys.iter().cloned().collect();
+		removed.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+		Ok(WorldChange {
+			removed_entities: removed,
+			topology_changed: true,
+			full_resync: true,
+			..WorldChange::default()
+		})
+	}
 	pub fn set_visible(&mut self, key: &EntityKey, visible: bool) -> Result<WorldChange, String> {
 		let index = self
 			.entity_index(key)

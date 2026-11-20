@@ -1,12 +1,15 @@
 # Shared engine contracts
 
-Source: `crates/bridge`. The crate defines serializable engine/editor data; it owns no UI layout, native input bindings,
-scene mutation, filesystem access, or GPU lifecycle.
+Source: `crates/bridge`. The serializable engine/editor DTOs own no UI layout, native input bindings, scene mutation
+or GPU lifecycle. The shared `runtime_prefab::load` adapter additionally performs bounded CPU filesystem/catalog
+reads and fingerprint validation for the three hosts; it prepares prefab data without owning GPU resources.
 
 ## Editor protocol
 
 `bridge::editor` adds typed command requests, snapshots, capabilities, transforms, snapping, prefab/collision and
-viewport status/input DTOs. Current capability negotiation is protocol version 2 with scene schema 3; project manifests
+viewport status/input DTOs. Current capability negotiation is protocol version 2 with scene schema 4; the Angular
+adapter also accepts legacy scene3 transport. Typed component metadata and per-entity views extend that protocol.
+Project manifests
 use schema 3, including shared behavior definitions; the native parser upgrades inline-only schema-2 files. Core
 command/snapshot DTOs are re-exported from engine-core, while viewport DTOs remain bridge-owned. The
 Angular

@@ -29,6 +29,8 @@ pub use bounds::Bounds3;
 pub use camera::Camera;
 pub use camera_controller::CameraController;
 pub use engine::{GraphicsProbe, GraphicsProbeError};
+pub use engine_core::components;
+pub use engine_core::linked_prefab;
 pub use engine_core::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineBuilder};
 pub use entity_key::EntityKey;
 pub use input::{InputButton, InputState, Key, MouseButton, NativeKeyCode};
@@ -37,3 +39,5 @@ pub use scene_editor::SceneEditor;
 pub use selection::EntitySelection;
 pub use time::FrameClock;
 pub use transform::Transform;
+
+pub use engine_core::runtime_lifecycle;

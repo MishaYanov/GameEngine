@@ -24,6 +24,8 @@ use std::{
 use tauri::{Emitter, State, WebviewWindow};
 mod asset_authoring;
 pub use asset_authoring::*;
+mod linked_prefabs;
+pub use linked_prefabs::*;
 
 pub(super) fn trusted_window(window: &WebviewWindow) -> Result<(), String> {
 	let url = window.url().map_err(|e| e.to_string())?;
@@ -89,6 +91,7 @@ pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDt
 
 fn capabilities() -> EditorCapabilitiesDto {
 	EditorCapabilitiesDto {
+		component_types: runtime::components::descriptors(),
 		incremental_commands: true,
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,

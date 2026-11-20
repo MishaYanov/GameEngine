@@ -1,5 +1,8 @@
 # Original game-building milestones
 
+This is the completed Milestone 1–3 review. The later [Milestone 4–6 implementation](milestones-4-6-review.md)
+adds scene4 components, linked source/override workflows and runtime entity lifecycle inspection.
+
 This ledger records the recovered sixteen-feature plan. The baseline is commit `1c24b9f`, inspected with the
 working tree on 2026-11-20. Source state and test evidence are recorded separately so an implemented API or
 mocked frontend check does not imply native acceptance.

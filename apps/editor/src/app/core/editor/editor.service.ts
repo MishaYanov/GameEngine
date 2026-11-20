@@ -3,6 +3,9 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {applyEditorUpdate} from './editor-updates';
 import {validGameplayModules} from './gameplay-modules';
+import {validComponentTypes} from './editor-components';
+import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
+import type {LinkedPrefabStatus, PrefabSourceDocument, PrefabSourceDraft, PrefabSourceSave, PrefabSourceValidation} from './linked-prefabs.models';
 import type {
     BuildLaunchResult,
     AssetOperation,
@@ -104,7 +107,7 @@ export class EditorService {
         if (this.capabilitiesRequest) return this.capabilitiesRequest;
         this.capabilitiesRequest = this.native<EditorCapabilities>('editor_capabilities')
             .then((capabilities) => {
-                if (capabilities.protocol_version !== 2 || capabilities.scene_schema_version !== 3) {
+                if (capabilities.protocol_version !== 2 || ![3, 4].includes(capabilities.scene_schema_version)) {
                     throw new EditorClientError(
                         'backend',
                         'editor_capabilities',
@@ -117,6 +120,9 @@ export class EditorService {
                         'editor_capabilities',
                         'The native editor returned invalid gameplay module metadata.',
                     );
+                }
+                if (capabilities.component_types !== undefined && !validComponentTypes(capabilities.component_types)) {
+                    throw new EditorClientError('backend', 'editor_capabilities', 'The native editor returned invalid component metadata.');
                 }
                 this.capabilitiesState.set(capabilities);
                 return capabilities;
@@ -395,12 +401,75 @@ export class EditorService {
         return this.snapshotOperation('editor_load_prefab', {path, position}, false, {expectedGeneration, expectedRevision});
     }
 
+    openPrefabSource(path: string, expectedGeneration?: number, expectedRevision?: number): Promise<PrefabSourceDraft> {
+        return this.prefabDraftOperation('editor_prefab_source_open', {path}, expectedGeneration, expectedRevision);
+    }
+
+    createLinkedPrefabSource(path: string, referenceSlots: Readonly<Record<string, string>>, expectedGeneration?: number, expectedRevision?: number): Promise<PrefabSourceDraft> {
+        return this.enqueue('editor_create_linked_prefab_source', async () => {
+            this.requireGeneration(expectedGeneration);
+            const draft = await this.native<PrefabSourceDraft>('editor_create_linked_prefab_source', {path, referenceSlots, expectedRevision: expectedRevision ?? this.revision()});
+            this.invalidateAssetCatalog();
+            return draft;
+        }, true, expectedGeneration);
+    }
+
+    validatePrefabSource(draftId: string, prefab: PrefabSourceDocument, expectedGeneration?: number, expectedRevision?: number): Promise<PrefabSourceValidation> {
+        return this.prefabDraftOperation('editor_prefab_source_validate', {draftId, prefab}, expectedGeneration, expectedRevision);
+    }
+
+    savePrefabSource(draftId: string, prefab: PrefabSourceDocument, expectedGeneration?: number, expectedRevision?: number): Promise<PrefabSourceSave> {
+        return this.enqueue('editor_prefab_source_save', async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<PrefabSourceSave>('editor_prefab_source_save', {draftId, prefab, expectedRevision: expectedRevision ?? this.revision()});
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result;
+        }, true, expectedGeneration);
+    }
+
+    closePrefabSource(draftId: string): Promise<void> {
+        return this.native<void>('editor_prefab_source_close', {draftId});
+    }
+
+    linkedPrefabStatus(rootKey: string, expectedGeneration?: number, expectedRevision?: number): Promise<LinkedPrefabStatus | null> {
+        return this.queue.then(async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<LinkedPrefabStatus | null>('editor_linked_prefab_status', {rootKey, expectedRevision: expectedRevision ?? this.revision()});
+            this.requireGeneration(expectedGeneration);
+            return result;
+        });
+    }
+
+    instantiateLinkedPrefab(path: string, position: Vec3, bindings: Readonly<Record<string, string>>, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_instantiate_linked_prefab', {path, position, bindings}, false, {expectedGeneration, expectedRevision});
+    }
+
+    updateLinkedPrefab(rootKey: string, resolution: 'reject' | 'keep_local' | 'use_source', bindings: Readonly<Record<string, string>> | null,
+        expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_update_linked_prefab', {rootKey, resolution, bindings}, false, {expectedGeneration, expectedRevision});
+    }
+
+    private prefabDraftOperation<T>(operation: string, args: Record<string, unknown>, expectedGeneration?: number, expectedRevision?: number): Promise<T> {
+        return this.enqueue(operation, () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<T>(operation, {...args, expectedRevision: expectedRevision ?? this.revision()});
+        }, false, expectedGeneration);
+    }
+
     queryCollisions(): Promise<CollisionSnapshot> {
         return this.enqueue('editor_collisions', async () => {
             const result = await this.native<CollisionSnapshot>('editor_collisions');
             this.collisionsState.set(result);
             return result;
         });
+    }
+
+    async inspectRuntime(offset = 0, limit = 32): Promise<RuntimeInspection> {
+        if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 128) {
+            throw new Error('Choose a runtime page with a nonnegative offset and 1–128 entities.');
+        }
+        return readRuntimeInspection(await this.native<unknown>('editor_runtime_inspect', {offset, limit}), limit);
     }
 
     /** One Angular host can own the single embedded viewport at a time. */

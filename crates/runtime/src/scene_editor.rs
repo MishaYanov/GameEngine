@@ -232,6 +232,27 @@ impl SceneEditor {
 		}
 		session.set_game_keyboard_input(&self.play_input_target, keyboard)?;
 		let outcome = session.tick(elapsed as f64)?;
+		Self::synchronize_play_tick(scene, session, &outcome)?;
+		Ok(outcome)
+	}
+
+	/// Drain accepted fixed steps after the host fulfills prefab requests. Input
+	/// edges were consumed by update_play and must not be applied a second time.
+	pub fn drain_play(&mut self, scene: &mut Scene) -> Result<TickOutcome, String> {
+		let session = self
+			.session
+			.as_mut()
+			.ok_or("Native session is unavailable")?;
+		let outcome = session.tick(0.0)?;
+		Self::synchronize_play_tick(scene, session, &outcome)?;
+		Ok(outcome)
+	}
+
+	fn synchronize_play_tick(
+		scene: &mut Scene,
+		session: &EditorSession,
+		outcome: &TickOutcome,
+	) -> Result<(), String> {
 		if !outcome.changes.is_empty()
 			&& let Some(world) = session.render_world()
 			&& !scene.synchronize_world(world, &outcome.changes)?
@@ -241,7 +262,7 @@ impl SceneEditor {
 					.into(),
 			);
 		}
-		Ok(outcome)
+		Ok(())
 	}
 
 	pub fn from_scene(scene: &Scene) -> Self {
@@ -751,4 +772,57 @@ impl SceneEditor {
 
 pub fn movement_direction(input: &InputState) -> [f32; 2] {
 	MovementBindings::WASD.direction(input)
+}
+
+impl SceneEditor {
+	pub fn has_runtime_instances(&self) -> bool {
+		self.session
+			.as_ref()
+			.is_some_and(EditorSession::has_runtime_instances)
+	}
+	pub fn pending_runtime_spawns(
+		&self,
+	) -> Vec<engine_core::runtime_lifecycle::RuntimeSpawnRequest> {
+		self.session
+			.as_ref()
+			.map(EditorSession::pending_runtime_spawns)
+			.unwrap_or_default()
+	}
+	pub fn reject_runtime_spawn(&mut self, id: u64, error: &str) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native session is unavailable")?
+			.reject_runtime_spawn(id, error)
+	}
+	pub fn prepare_runtime_spawn(
+		&self,
+		prefab: &engine_core::editor::PrefabData,
+		fingerprint: &str,
+		position: [f32; 3],
+		request: Option<u64>,
+	) -> Result<engine_core::runtime_lifecycle::PreparedRuntimeSpawn, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native session is unavailable")?
+			.prepare_runtime_spawn(prefab, fingerprint, position, request)
+	}
+	pub fn runtime_spawn_document(
+		&self,
+		prepared: &engine_core::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<SceneData, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native session is unavailable")?
+			.runtime_spawn_document(prepared)
+	}
+	pub fn commit_runtime_spawn(
+		&mut self,
+		prepared: engine_core::runtime_lifecycle::PreparedRuntimeSpawn,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native session is unavailable")?
+			.commit_runtime_spawn(prepared)?;
+		Ok(())
+	}
 }

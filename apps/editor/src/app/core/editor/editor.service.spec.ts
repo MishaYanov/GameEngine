@@ -1009,6 +1009,53 @@ describe('EditorService native command and viewport queues', () => {
         });
     });
 
+    it('accepts schema4 component metadata and carries its per-entity views through deltas', async () => {
+        const component = {id: 'mesh', schema_version: 1 as const, enabled: true,
+            data: {kind: 'mesh_renderer' as const, model_path: 'actor.glb', asset_id: null, mesh_index: null, material: null}};
+        const original = {...snapshot(1), document: {...snapshot(1).document, schema_version: 4 as const,
+            entities: [{...entity('actor'), component_views: [component]}]}};
+        const next = {...original, revision: 2, scene_revision: 2, document: {...original.document,
+            entities: [{...original.document.entities[0], renderable: false, component_views: [{...component, enabled: false}]}]}};
+        vi.mocked(invoke).mockResolvedValueOnce(original).mockResolvedValueOnce({...capabilities, scene_schema_version: 4,
+            component_types: [{type_id: 'engine.mesh_renderer', kind: 'mesh_renderer', label: 'Mesh Renderer', description: 'Shared model', max_per_object: 1}]})
+            .mockResolvedValueOnce(delta(next, next.document.entities));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.execute({type: 'set_component_enabled', key: 'actor', component_id: 'mesh', enabled: false});
+        expect(service.document()?.schema_version).toBe(4);
+        expect(service.document()?.entities[0].component_views?.[0].enabled).toBe(false);
+        expect(service.document()?.entities[0].renderable).toBe(false);
+    });
+
+    it('adopts a source-save snapshot while preserving catalog selection until a fresh query', async () => {
+        const prefab = {schema_version: 3 as const, gameplay: null, reference_slots: {}, entities: [{key: 'source', name: 'Source',
+            transform: {position: [0, 0, 0] as const, rotation: [0, 0, 0] as const, scale: [1, 1, 1] as const}, components: []}]};
+        const draft = {draft_id: 'draft', workspace_generation: 101, revision: 1, path: 'source.json', asset_id: 'source-id', fingerprint: 'updated', prefab};
+        const old = [{name: 'Source', path: 'source.json', kind: 'prefab', asset_id: 'source-id', fingerprint: 'old'}];
+        const current = snapshot(1);
+        vi.mocked(invoke).mockResolvedValueOnce(current).mockResolvedValueOnce(old)
+            .mockResolvedValueOnce({draft, snapshot: current}).mockResolvedValueOnce([{...old[0], fingerprint: 'updated'}]);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json'); await service.assets();
+        await service.savePrefabSource('draft', prefab, service.workspaceGeneration(), 1);
+        expect(invoke).toHaveBeenLastCalledWith('editor_prefab_source_save', {draftId: 'draft', prefab, expectedRevision: 1});
+        expect(service.snapshot()).toBe(current);
+        expect(service.modelAssets()).toEqual(old);
+        expect((await service.assets())[0].fingerprint).toBe('updated');
+    });
+
+    it('queries bounded runtime state without requesting an authored snapshot or changing global feedback', async () => {
+        const page = {play_session_id: 'play', run_id: 'run', scene_id: 'main', tick: 0, topology_revision: 0,
+            total_entities: 0, entities: [], timer_count: 0, pending_spawns: 0, last_error: null};
+        vi.mocked(invoke).mockResolvedValueOnce(page);
+        const service = TestBed.inject(EditorService);
+        expect(await service.inspectRuntime(32, 32)).toEqual(page);
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_runtime_inspect', {offset: 32, limit: 32});
+        await expect(service.inspectRuntime(0, 129)).rejects.toThrow('1–128');
+        expect(invoke).toHaveBeenCalledTimes(1);
+        expect(service.error()).toBeNull();
+    });
+
     it('rejects queued asset publication when its workspace was replaced', async () => {
         const replacement = deferred<EditorSnapshot>();
         vi.mocked(invoke)

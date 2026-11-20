@@ -1,5 +1,8 @@
 # Game-building workflow review
 
+For subsequent component, linked prefab and runtime lifecycle work, use the
+[Milestone 4–6 review](milestones-4-6-review.md). The evidence below preserves the earlier completion audit.
+
 Reviewed on 2026-11-20 against commit `1c24b9f` and the current working tree. The five blocks below describe the
 earlier playable proof of concept. The original requested plan contains sixteen features across three milestones.
 The [milestone ledger and walkthrough](milestones-review.md) records that complete scope and the new trigger,
@@ -230,6 +233,6 @@ added to the workspace count as though they were one unique suite.
 
 The [sixteen-feature ledger](milestones-review.md) records feature coverage and the aggregate verification status.
 Collision uses conservative world bounds and bounded sweep/slide. Native compiled modules own gameplay rules.
-Material, light and general behavior Inspector sections, linked prefab overrides, an animation editor,
+General light and arbitrary script Inspector sections, nested linked prefab variants, an animation editor,
 runtime apply-back and persisted progress remain separate product work. Full desktop input acceptance and
 another-machine export acceptance require their own recorded results.

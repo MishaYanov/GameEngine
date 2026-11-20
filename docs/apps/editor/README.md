@@ -4,6 +4,8 @@ Source: `apps/editor`. The Angular 22 app supplies project creation/opening, Sce
 
 Read [Angular editor workspace](../../editor-workspace.md) for the desktop workflow, exact connected controls, project replacement guards, component generators and remaining UI gaps. [Editor flow](../../editor-flow.md) traces the underlying methods.
 The [native scene editor implementation](../../viewport-implementation.md) documents the new viewport gestures, grid/handle rendering, pointer-captured placement and current limits.
+The [components, linked prefabs and runtime review](../../milestones-4-6-review.md) covers the current component
+Inspector, guarded source drafts, instance overrides/update/revert/unpack and read-only Runtime Inspector.
 
 ## Run
 
@@ -22,7 +24,7 @@ demand in the host, not unconditionally before the window opens.
 
 | File under src/app/core/editor | Role                                                                                                           |
 |--------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `editor.models.ts`             | Typed scene3 documents, commands, snapshot/capability/error and viewport metrics/input shapes                  |
+| `editor.models.ts`             | Typed scene4 transport documents with legacy scene3 compatibility, commands and editor state                  |
 | `editor.service.ts`            | Read-only signals, native command queues, revision-aware edits, imports/prefabs/collisions, viewport lifecycle |
 | `editor-updates.ts`            | Validate incremental command replies and merge authoritative deltas before publishing signals                  |
 | `engine-viewport.directive.ts` | Attach a native child to one existing Angular DOM pane; observe bounds/visibility and emit input/status/errors |
@@ -58,8 +60,9 @@ EditorService does not assign shortcuts. Native ViewportInteraction owns focused
 
 ## Project and scene operations
 
-The service requires editor protocol 2 / scene schema 3; ProjectData mirrors project schema 3, including reusable
-behavior definitions and scene/entity attachments. Incremental snapshot validation accepts that schema; schema-2
+The service requires editor protocol 2 and accepts scene schema 4 or legacy 3; ProjectData mirrors project schema 3,
+including reusable behavior definitions and scene/entity attachments. Incremental validation checks typed component
+views in changed entities. Schema-2
 project files are upgraded by the native JSON loader before reaching the frontend.
 `openProject(manifestPath)`, `registerScene(path)`, `switchScene(id)`, `saveSceneAs(path)` and `saveProject()` wrap the
 host APIs. Snapshots expose active scene identity, project state and per-scene dirty flags. `save()` persists only the
@@ -84,8 +87,8 @@ Colliders toggle is editor-only; Game hides the selected-shape overlay. [Collide
 
 Play starts from the active authoring scene. With Game selected, the status panel beside the native viewport shows
 the runtime scene, Running/Paused/Completed, and any objective, detail and score supplied by the gameplay module.
-During a run, transitions can change the runtime scene while the Scene selector and Inspector retain their authored
-context.
+During a run, transitions can change the runtime scene while Scene retains its authored context. Game displays the
+read-only Runtime Inspector with explicit bounded Refresh; Scene still exposes disabled authoring fields.
 
 **Restart Run** prepares the configured startup scene and fresh progress. The button is disabled until the viewport
 is attached and has current Play status, and stays disabled while work is pending. The current run remains visible

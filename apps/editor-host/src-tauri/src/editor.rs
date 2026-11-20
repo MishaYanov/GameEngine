@@ -1,6 +1,11 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
+#[path = "prefab_sources.rs"]
+mod prefab_sources;
 use crate::project_location::ProjectLocation;
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto};
+pub use prefab_sources::{
+	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
+};
 use runtime::scene_catalog::SceneId;
 use runtime::{
 	asset_jobs::{AssetJobError, AssetJobId, AssetJobLimits},
@@ -37,6 +42,7 @@ const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
 const BOUNDS_RESERVATION_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct EditorWorkspace {
+	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
 	pub backend: runtime::Engine,
 	pub asset_root: PathBuf,
@@ -1064,6 +1070,7 @@ impl EditorWorkspace {
 		jobs: AssetImportService,
 	) -> EditorWorkspace {
 		Self {
+			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			backend,
 			asset_root,
