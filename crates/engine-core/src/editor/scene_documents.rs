@@ -453,6 +453,7 @@ mod tests {
 				"models/actor.glb",
 			)],
 			camera: CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

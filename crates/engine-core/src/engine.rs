@@ -148,6 +148,52 @@ impl Engine {
 			.map_err(|message| self.error(BackendErrorCode::InvalidCursor, message))
 	}
 
+	/// Check before publishing prepared filesystem changes while holding the host lock.
+	pub fn validate_asset_invalidation(&self) -> Result<(), BackendError> {
+		self.ensure_event_capacity()?;
+		if self.session.is_playing() || self.session.has_transaction() {
+			return Err(self.error(
+				BackendErrorCode::CommandRejected,
+				"Stop Play and finish the current edit before changing assets",
+			));
+		}
+		if self.session.revision() == u64::MAX || self.session.scene_revision() == u64::MAX {
+			return Err(self.error(
+				BackendErrorCode::ResourceLimit,
+				"Editor revision space is exhausted",
+			));
+		}
+		Ok(())
+	}
+	pub fn invalidate_assets(&mut self) -> Result<CommandReceipt, BackendError> {
+		self.validate_asset_invalidation()?;
+		self.session
+			.invalidate_assets()
+			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
+		let changes = WorldChange {
+			full_resync: true,
+			..WorldChange::default()
+		};
+		self.publish(BackendEventKind::DocumentChanged {
+			changes: changes.clone(),
+		})?;
+		Ok(CommandReceipt {
+			revision: self.session.revision(),
+			scene_revision: self.session.scene_revision(),
+			change_cursor: self.journal.cursor(),
+			changes,
+			state_changed: true,
+			project_changed: false,
+			active_scene_id: self.session.active_scene_id().clone(),
+			affected_scenes: self
+				.session
+				.scene_states()
+				.into_iter()
+				.map(|scene| scene.id)
+				.collect(),
+		})
+	}
+
 	pub fn execute(
 		&mut self,
 		request: EditorCommandRequest,
@@ -198,6 +244,15 @@ impl Engine {
 
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
 		self.session.play_status()
+	}
+	pub fn set_play_visibility_capabilities(
+		&mut self,
+		available: std::collections::HashSet<crate::EntityKey>,
+	) -> Result<(), String> {
+		self.session.set_play_visibility_capabilities(available)
+	}
+	pub fn has_play_visibility_capabilities(&self) -> bool {
+		self.session.has_play_visibility_capabilities()
 	}
 
 	/// Validates the UI's source run and authoring revision before preparing

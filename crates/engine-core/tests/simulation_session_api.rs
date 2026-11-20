@@ -349,7 +349,7 @@ fn configured_move_and_spin_compose_on_the_same_entity_instead_of_overwriting_mo
 }
 
 #[test]
-fn shared_simulation_uses_persistent_swept_collision_and_keeps_blocked_actor_stationary() {
+fn shared_simulation_uses_persistent_swept_collision_and_advances_to_contact() {
 	let collider = Some(ColliderData::Box {
 		interaction: Default::default(),
 		half_extents: [0.5; 3],
@@ -370,12 +370,16 @@ fn shared_simulation_uses_persistent_swept_collision_and_keeps_blocked_actor_sta
 	session.set_controlled_input([1.0, 0.0, 0.0]).unwrap();
 	let stats = session.collision_stats();
 	let outcome = session.tick(1.0 / 60.0).unwrap();
-	assert!(outcome.changes.is_empty());
-	assert_eq!(session.document(), data);
+	assert!(!outcome.changes.is_empty());
+	close(
+		session.document().entities[0].transform.position[0],
+		-1.0001,
+	);
+	assert_eq!(data.entities[0].transform.position[0], -2.0);
 	assert_eq!(session.collision_stats().rebuilds, stats.rebuilds);
 	assert_eq!(
 		session.collision_stats().updated_colliders,
-		stats.updated_colliders
+		stats.updated_colliders + 1
 	);
 }
 

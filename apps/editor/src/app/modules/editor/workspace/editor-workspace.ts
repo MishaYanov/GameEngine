@@ -21,12 +21,14 @@ import {ViewportEditorService} from '../../../core/editor/viewport-editor.servic
 import {ViewportAssetDragService} from './viewport-asset-drag.service';
 import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
+import {GameplaySettings} from './game-settings/gameplay-settings';
+import {CameraSettings} from './game-settings/camera-settings';
 import {CommandBuilder} from '../../../core/editor/editor.models';
 
 @Component({
     selector: 'editor-workspace',
     providers: [SceneEditingService, ViewportEditorService, ViewportAssetDragService, SceneSwitchService],
-    imports: [EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel, WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager],
+    imports: [EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel, WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager, GameplaySettings, CameraSettings],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
     host: {'(keydown)': 'handleEditorShortcut($event)', 'data-editor-shortcut-scope': 'workspace'},

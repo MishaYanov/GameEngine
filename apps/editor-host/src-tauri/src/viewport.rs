@@ -187,6 +187,48 @@ impl ViewportHost {
 		}
 	}
 
+	/// Called from an IPC blocking task, never from the UI/event-loop thread.
+	/// The native owner prepares GPU resources before the publication boundary.
+	pub fn request_asset_change(
+		&self,
+		change: runtime::assets::project_assets::PreparedAssetChange,
+		generation: u64,
+		revision: u64,
+	) -> crate::asset_reimport_gpu::AssetChangeResult {
+		#[cfg(windows)]
+		{
+			self.reap();
+			let control = self
+				.running
+				.lock()
+				.map_err(|_| "Viewport lifecycle lock is poisoned")?
+				.as_ref()
+				.map(|running| Arc::clone(&running.control));
+			if let Some(control) = control {
+				let (reply, receiver) = mpsc::sync_channel(1);
+				control.request_asset_change(
+					crate::asset_reimport_gpu::AssetChangeRequest::new(
+						change, generation, revision, reply,
+					),
+				)?;
+				return receiver.recv().map_err(|_| {
+					"Native asset worker stopped before completing the operation".to_string()
+				})?;
+			}
+		}
+		// No live native owner means there are no GPU caches to replace. Future
+		// viewport creation imports the freshly published, validated bytes.
+		let mut shared = self
+			.shared
+			.lock()
+			.map_err(|_| "Editor document lock is poisoned")?;
+		let workspace = shared
+			.as_mut()
+			.ok_or("Open a project before changing assets")?;
+		crate::asset_reimport_gpu::validate_context(workspace, &change, generation, revision)?;
+		crate::asset_reimport_gpu::publish(change, workspace, || {})
+	}
+
 	pub fn detach(&mut self) {
 		#[cfg(windows)]
 		if let Ok(running) = self.running.lock() {
@@ -680,6 +722,7 @@ mod windows {
 		latest: Mutex<Latest>,
 		proxy: Mutex<Option<EventLoopProxy<Wake>>>,
 		actions: Mutex<VecDeque<ActionRequest>>,
+		asset_changes: Mutex<VecDeque<crate::asset_reimport_gpu::AssetChangeRequest>>,
 		keyboard_blurred: AtomicBool,
 	}
 	impl Control {
@@ -718,6 +761,7 @@ mod windows {
 				}),
 				proxy: Mutex::new(None),
 				actions: Mutex::new(VecDeque::new()),
+				asset_changes: Mutex::new(VecDeque::new()),
 				keyboard_blurred: AtomicBool::new(false),
 			})
 		}
@@ -746,6 +790,39 @@ mod windows {
 			drop(actions);
 			self.wake();
 			Ok(())
+		}
+		pub(super) fn request_asset_change(
+			&self,
+			request: crate::asset_reimport_gpu::AssetChangeRequest,
+		) -> Result<(), String> {
+			if self.stopping() {
+				return Err("Viewport is shutting down".into());
+			}
+			let mut requests = self
+				.asset_changes
+				.lock()
+				.map_err(|_| "Asset publication queue is poisoned")?;
+			if self.stopping() {
+				return Err("Viewport is shutting down".into());
+			}
+			if requests.len() >= 4 {
+				return Err(
+					"Asset publication queue is full; wait for the current operation".into(),
+				);
+			}
+			requests.push_back(request);
+			drop(requests);
+			self.wake();
+			Ok(())
+		}
+		fn cancel_asset_changes(&self) {
+			if let Ok(mut requests) = self.asset_changes.lock() {
+				for request in requests.drain(..) {
+					let _ = request.reply.send(Err(
+						"Native viewport stopped before asset publication".into(),
+					));
+				}
+			}
 		}
 		fn validate_bounds(bounds: ViewportBoundsDto, dpi: f64) -> Result<(), String> {
 			bounds.validate()?;
@@ -832,6 +909,7 @@ mod windows {
 			if let Ok(mut latest) = self.latest.lock() {
 				latest.stop = true;
 			}
+			self.cancel_asset_changes();
 			self.wake();
 		}
 		pub(super) fn stopping(&self) -> bool {
@@ -904,6 +982,7 @@ mod windows {
 				if let Ok(mut proxy) = control.proxy.lock() {
 					*proxy = None;
 				}
+				control.cancel_asset_changes();
 			})
 			.map_err(|error| {
 				engine_logger::error!(target: "editor_viewport", "Viewport worker failed: operation=thread_start");
@@ -921,6 +1000,7 @@ mod windows {
 		revision: u64,
 		generation: u64,
 		change_cursor: u64,
+		assets_invalidated: bool,
 	}
 
 	struct RenderPacket {
@@ -1227,6 +1307,19 @@ mod windows {
 					self.dirty = true;
 					return Ok(());
 				}
+				if !workspace.backend.has_play_visibility_capabilities() {
+					let gpu = self.gpu.as_ref().expect("matching GPU scene checked above");
+					if gpu.revision != workspace.backend.session().scene_revision()
+						|| gpu.assets_invalidated
+					{
+						self.last_tick = None;
+						self.dirty = true;
+						return Ok(());
+					}
+					workspace
+						.backend
+						.set_play_visibility_capabilities(gpu.scene.visibility_capabilities())?;
+				}
 				let outcome = workspace.backend.tick(elapsed);
 				self.interaction
 					.sync_game_status_after_tick(workspace, &outcome);
@@ -1466,6 +1559,79 @@ mod windows {
 				let _ = reply.send(result.map(|()| self.interaction.state()));
 			}
 		}
+		fn process_asset_changes(&mut self) {
+			let requests: Vec<_> = self
+				.control
+				.asset_changes
+				.lock()
+				.map(|mut requests| requests.drain(..).collect())
+				.unwrap_or_default();
+			for request in requests {
+				let reply = request.reply.clone();
+				let result = self.apply_asset_change(request);
+				self.dirty = true;
+				let _ = reply.send(result);
+			}
+		}
+		fn apply_asset_change(
+			&mut self,
+			request: crate::asset_reimport_gpu::AssetChangeRequest,
+		) -> crate::asset_reimport_gpu::AssetChangeResult {
+			{
+				let shared = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let workspace = shared
+					.as_ref()
+					.ok_or("Open a project before changing assets")?;
+				request.validate(workspace)?;
+				if self.gpu.as_ref().is_some_and(|gpu| {
+					gpu.generation != workspace.generation || gpu.asset_root != workspace.asset_root
+				}) {
+					return Err(
+						"Viewport is synchronizing the current project; retry asset publication"
+							.into(),
+					);
+				}
+			}
+			let prepared = if let Some(gpu) = self.gpu.as_mut() {
+				let candidate = gpu
+					.assets
+					.prepare_gpu_asset(&gpu.renderer, &request.change)
+					.map_err(|error| error.to_string())?;
+				// Dropping cache owners must not race a submitted frame. This wait
+				// and all uploads run outside the authored workspace lock.
+				if let Err(error) = gpu.renderer.wait_idle() {
+					gpu.assets.discard_gpu_asset(candidate);
+					return Err(error.to_string());
+				}
+				Some(candidate)
+			} else {
+				None
+			};
+			let mut prepared = prepared;
+			let result = (|| {
+				let mut shared = self
+					.shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				let workspace = shared
+					.as_mut()
+					.ok_or("Open a project before changing assets")?;
+				request.validate(workspace)?;
+				crate::asset_reimport_gpu::publish(request.change, workspace, || {
+					if let (Some(gpu), Some(candidate)) = (self.gpu.as_mut(), prepared.take()) {
+						gpu.assets.promote_gpu_asset(candidate);
+						gpu.assets_invalidated = true;
+					}
+				})
+			})();
+			if let (Some(gpu), Some(candidate)) = (self.gpu.as_mut(), prepared) {
+				gpu.assets.discard_gpu_asset(candidate);
+			}
+			result
+		}
 		fn process_input(
 			&mut self,
 			kind: &str,
@@ -1633,6 +1799,7 @@ mod windows {
 				self.last_status = Instant::now() - Duration::from_secs(1);
 			}
 			self.process_actions();
+			self.process_asset_changes();
 			self.refresh_game_keyboard_focus();
 		}
 
@@ -1669,6 +1836,7 @@ mod windows {
 						if let Some(gpu) = self.gpu.as_mut() {
 							if gpu.asset_root == workspace.asset_root
 								&& gpu.generation == generation
+								&& !gpu.assets_invalidated
 							{
 								if gpu.revision == revision {
 									synchronized = true;
@@ -1721,23 +1889,10 @@ mod windows {
 						} else {
 							Some(session.render_document())
 						};
-						let camera = if let Some(world) = session.render_world() {
-							world.data().camera.clone()
-						} else if let Some(document) = document.as_ref() {
-							document.camera.clone()
-						} else {
-							session.authored_document().camera.clone()
-						};
+						let camera = session.render_camera();
 						Some(RenderPacket {
 							document,
-							camera: Camera {
-								position: camera.position,
-								yaw: camera.yaw,
-								pitch: camera.pitch,
-								vertical_fov: camera.vertical_fov,
-								near: camera.near_plane,
-								far: camera.far_plane,
-							},
+							camera,
 							revision,
 							generation,
 							scene_id: (!session.is_playing()
@@ -1844,6 +1999,7 @@ mod windows {
 					revision,
 					generation,
 					change_cursor,
+					assets_invalidated: false,
 				});
 			}
 			let gpu = self
@@ -1851,11 +2007,11 @@ mod windows {
 				.as_mut()
 				.ok_or("Viewport GPU state is not initialized")?;
 			let generation_changed = gpu.generation != generation;
-			if gpu.revision != revision || generation_changed {
+			if gpu.revision != revision || generation_changed || gpu.assets_invalidated {
 				let data = document
 					.take()
 					.ok_or("Full viewport synchronization packet is missing scene data")?;
-				let replacement = if !gpu.scene.synchronize(&data)? {
+				let replacement = if gpu.assets_invalidated || !gpu.scene.synchronize(&data)? {
 					let (scene, _) = match scene_io::instantiate_with_progress(
 						&data,
 						&mut gpu.assets,
@@ -1891,6 +2047,7 @@ mod windows {
 				gpu.revision = revision;
 				gpu.generation = generation;
 				gpu.change_cursor = change_cursor;
+				gpu.assets_invalidated = false;
 			} else if lights_changed {
 				gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
 			}

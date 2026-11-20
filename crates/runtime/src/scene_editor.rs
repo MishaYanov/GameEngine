@@ -107,6 +107,12 @@ impl SceneEditor {
 	pub fn play_progress<P: GameProgress>(&self) -> Option<&P> {
 		self.session.as_ref()?.play_progress::<P>()
 	}
+	pub fn play_status(&self) -> Option<engine_core::command::PlayStatusDto> {
+		self.session.as_ref()?.play_status()
+	}
+	pub fn render_camera(&self) -> Option<Camera> {
+		self.session.as_ref().map(EditorSession::render_camera)
+	}
 	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
 		self.session
 			.as_mut()
@@ -221,6 +227,9 @@ impl SceneEditor {
 		let keyboard = profile.resolve_keyboard(input);
 
 		let session = self.session.as_mut().expect("initialized session");
+		if !session.has_play_visibility_capabilities() {
+			session.set_play_visibility_capabilities(scene.visibility_capabilities())?;
+		}
 		session.set_game_keyboard_input(&self.play_input_target, keyboard)?;
 		let outcome = session.tick(elapsed as f64)?;
 		if !outcome.changes.is_empty()
@@ -643,6 +652,7 @@ impl SceneEditor {
 			scene,
 			Command::Spawn {
 				entity: EntitySpecDto {
+					asset_id: None,
 					name: name.into(),
 					model_path: path.into(),
 					transform: TransformDto {

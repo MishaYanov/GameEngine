@@ -62,11 +62,11 @@ fn swept_motion_cannot_tunnel_through_box_or_sphere_and_free_motion_moves_exactl
 	] {
 		for obstacle in [cube("obstacle", [0.0; 3]), sphere("obstacle", [0.0; 3])] {
 			let mut data = scene(vec![moving.clone(), obstacle]);
-			let before = data.clone();
 			collision::move_entity(&mut data, &key("moving"), [4.0, 0.0, 0.0]).unwrap();
-			assert_eq!(data, before);
+			close(data.entities[0].transform.position[0], -1.0001);
 			collision::move_entity(&mut data, &key("moving"), [0.0, 2.0, 0.0]).unwrap();
-			assert_eq!(data.entities[0].transform.position, [-2.0, 2.0, 0.0]);
+			close(data.entities[0].transform.position[0], -1.0001);
+			close(data.entities[0].transform.position[1], 2.0);
 		}
 	}
 }
@@ -91,11 +91,11 @@ fn moving_noncollider_parent_sweeps_its_children_and_ignores_contacts_within_its
 		cube("sibling", [0.2, 0.0, 0.0]).with_parent(Some(key("parent"))),
 		cube("wall", [0.0; 3]),
 	]);
-	let before = data.clone();
 	collision::move_entity(&mut data, &key("parent"), [4.0, 0.0, 0.0]).unwrap();
-	assert_eq!(data, before);
+	close(data.entities[0].transform.position[0], -1.2001);
 	collision::move_entity(&mut data, &key("parent"), [0.0, 2.0, 0.0]).unwrap();
-	assert_eq!(data.entities[0].transform.position, [-2.0, 2.0, 0.0]);
+	close(data.entities[0].transform.position[0], -1.2001);
+	close(data.entities[0].transform.position[1], 2.0);
 	assert_eq!(data.entities[1].transform.position, [0.0; 3]);
 }
 

@@ -26,6 +26,15 @@
           0.4,
           0.4
         ]
+      },
+      "collider": {
+        "kind": "sphere",
+        "radius": 0.25,
+        "offset": [
+          0,
+          0,
+          0
+        ]
       }
     },
     {
@@ -81,11 +90,98 @@
       },
       "material": {
         "base_color_factor": [
-          0.2,
-          1.0,
-          0.3,
-          1.0
+          0.9,
+          0.15,
+          0.1,
+          1
         ]
+      },
+      "collider": {
+        "kind": "box",
+        "half_extents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "offset": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "key": "courtyard-key-trigger",
+      "name": "Courtyard Key Trigger",
+      "model_path": "props/sphere.glb",
+      "renderable": false,
+      "transform": {
+        "position": [
+          1.5,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "collider": {
+        "kind": "sphere",
+        "radius": 0.25,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "interaction": {
+          "sensor": true,
+          "layers": 2,
+          "mask": 1
+        }
+      }
+    },
+    {
+      "key": "courtyard-exit-trigger",
+      "name": "Courtyard Exit Trigger",
+      "model_path": "props/sphere.glb",
+      "renderable": false,
+      "transform": {
+        "position": [
+          -1.5,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "collider": {
+        "kind": "sphere",
+        "radius": 0.25,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "interaction": {
+          "sensor": true,
+          "layers": 2,
+          "mask": 1
+        }
       }
     }
   ],
@@ -123,6 +219,20 @@
     "pitch": 0.0,
     "vertical_fov": 1.0471976,
     "near": 0.1,
-    "far": 100.0
+    "far": 100.0,
+    "follow": {
+      "target": "courtyard-player",
+      "offset": [
+        0,
+        0,
+        5
+      ],
+      "look_offset": [
+        0,
+        0,
+        0
+      ],
+      "smoothing_seconds": 0.12
+    }
   }
 }

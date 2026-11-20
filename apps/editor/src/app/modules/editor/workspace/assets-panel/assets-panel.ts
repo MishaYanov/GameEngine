@@ -1,5 +1,5 @@
 import {Component, computed, effect, inject, input, linkedSignal, signal} from '@angular/core';
-import type {SceneId} from '../../../../core/editor/editor.models';
+import type {ModelAsset, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
@@ -9,6 +9,7 @@ import type {Config} from '../../../../shared/models/config.model';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
+import {AssetAuthoring} from './asset-authoring';
 
 interface AssetFile {
     readonly path: string;
@@ -16,12 +17,12 @@ interface AssetFile {
 }
 
 type SceneAsset = AssetFile & { readonly kind: 'scene'; readonly sceneId: SceneId };
-type AssetEntry = SceneAsset | (AssetFile & { readonly kind: 'model' });
+type AssetEntry = SceneAsset | (ModelAsset & {readonly kind: 'model' | 'prefab'});
 type AssetAction = 'models' | 'add';
 
 @Component({
     selector: 'editor-assets-panel',
-    imports: [Drawer, EditorPane, EditorIcon],
+    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring],
     templateUrl: './assets-panel.html',
     styleUrl: './assets-panel.scss',
 })
@@ -61,7 +62,7 @@ export class AssetsPanel {
             kind: 'scene' as const,
             sceneId: scene.id,
         })),
-        ...(this.models() ?? []).map(model => ({...model, kind: 'model' as const})),
+        ...(this.models() ?? []).map(model => ({...model, kind: model.kind ?? 'model' as const})),
     ]);
     protected readonly selected = linkedSignal({
         source: this.entries,
@@ -70,6 +71,10 @@ export class AssetsPanel {
             if (!selected) return null;
             return entries.find(entry => this.sameFile(entry, selected)) ?? null;
         },
+    });
+    protected readonly selectedCatalogAsset = computed(() => {
+        const selected = this.selected();
+        return selected && selected.kind !== 'scene' ? selected : null;
     });
     protected readonly folder = linkedSignal({
         source: this.entries,
@@ -127,6 +132,7 @@ export class AssetsPanel {
     }
 
     protected canDrag(file: AssetEntry): boolean {
+        if (file.kind === 'prefab') return false;
         return this.assetDrag?.canBegin() === true && (file.kind === 'scene'
             ? this.canOpenScene() && !this.isActiveScene(file)
             : this.canRunAction());
@@ -161,10 +167,14 @@ export class AssetsPanel {
 
     protected async addModel(): Promise<void> {
         const selected = this.selected();
-        if (selected?.kind !== 'model') return;
+        if (!selected || selected.kind === 'scene') return;
+        const generation = this.editor.workspaceGeneration();
         await this.addAsset(async () => {
-            await this.editor.importModel(selected.path, [0, 0, 0]);
-            this.status.set(`Added ${selected.name} to the scene.`);
+            if (generation !== this.editor.workspaceGeneration()) return;
+            if (selected.kind === 'prefab') {
+                await this.editor.loadPrefab(selected.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
+            } else await this.editor.importModel(selected.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
+            if (generation === this.editor.workspaceGeneration()) this.status.set(`Added ${selected.name} to the scene.`);
         });
     }
 
@@ -192,26 +202,29 @@ export class AssetsPanel {
 
     private async addAsset(action: () => Promise<void>): Promise<void> {
         if (!this.canRunAction()) return;
+        const generation = this.editor.workspaceGeneration();
         this.pendingAction.set('add');
         this.error.set(null);
         this.status.set(null);
         try {
             if (this.sceneEditing) {
-                if (!await this.sceneEditing.withCommittedEdit(action)) {
+                if (!await this.sceneEditing.withCommittedEdit(action) && generation === this.editor.workspaceGeneration()) {
                     this.error.set(this.sceneEditing.error() ?? 'Finish or discard the current edit before changing assets.');
                 }
             } else {
                 await action();
             }
         } catch (error) {
-            this.error.set(error instanceof Error ? error.message : String(error));
+            if (generation === this.editor.workspaceGeneration()) this.error.set(error instanceof Error ? error.message : String(error));
         } finally {
             this.pendingAction.set(null);
         }
     }
 
     private sameFile(a: AssetEntry, b: AssetEntry): boolean {
-        return a.kind === b.kind && a.path === b.path &&
-            (a.kind !== 'scene' || (b.kind === 'scene' && a.sceneId === b.sceneId));
+        if (a.kind !== b.kind) return false;
+        if (a.kind === 'scene') return b.kind === 'scene' && a.sceneId === b.sceneId;
+        if (b.kind === 'scene') return false;
+        return a.asset_id && b.asset_id ? a.asset_id === b.asset_id : a.path === b.path;
     }
 }

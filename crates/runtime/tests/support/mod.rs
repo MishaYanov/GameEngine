@@ -25,6 +25,7 @@ pub fn scene(entities: Vec<EntityData>) -> SceneData {
 		bindings: Default::default(),
 		entities,
 		camera: CameraData {
+			follow: None,
 			position: camera.position,
 			yaw: camera.yaw,
 			pitch: camera.pitch,

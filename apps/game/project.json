@@ -78,5 +78,21 @@
       "asset_path": "scenes/robots.json"
     }
   ],
-  "startup_scene_id": "courtyard"
+  "startup_scene_id": "courtyard",
+  "gameplay_settings": {
+    "schema_version": 1,
+    "scenes": {
+      "courtyard": {
+        "kind": "course",
+        "key_trigger": "courtyard-key-trigger",
+        "exit_trigger": "courtyard-exit-trigger",
+        "destination_scene": "finish",
+        "exit_blocker": "courtyard-exit"
+      },
+      "finish": {
+        "kind": "finish",
+        "finish_trigger": "finish-trigger"
+      }
+    }
+  }
 }

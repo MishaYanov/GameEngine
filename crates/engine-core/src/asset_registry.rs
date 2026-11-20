@@ -13,6 +13,8 @@ use crate::{Bounds3, scene_data::validate_model_path};
 pub struct AssetRef {
 	pub path: String,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub asset_id: Option<crate::asset_catalog::AssetId>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub mesh_index: Option<usize>,
 }
 
@@ -20,9 +22,14 @@ impl AssetRef {
 	pub fn new(path: impl Into<String>, mesh_index: Option<usize>) -> Result<Self, String> {
 		Self {
 			path: path.into(),
+			asset_id: None,
 			mesh_index,
 		}
 		.canonical()
+	}
+	pub fn with_asset_id(mut self, asset_id: Option<crate::asset_catalog::AssetId>) -> Self {
+		self.asset_id = asset_id;
+		self
 	}
 	/// Compact direct Rust inputs as well as validating their logical form.
 	/// A short path must not retain an arbitrarily oversized String allocation.
@@ -438,6 +445,13 @@ fn metadata_cost(reference: &AssetRef) -> Result<usize, String> {
 	reference
 		.path
 		.len()
+		.checked_add(
+			reference
+				.asset_id
+				.as_ref()
+				.map_or(0, |id| id.as_str().len()),
+		)
+		.ok_or("Asset metadata size overflow")?
 		.checked_mul(2)
 		.and_then(|bytes| bytes.checked_add(192))
 		.ok_or_else(|| "Asset metadata size overflow".into())

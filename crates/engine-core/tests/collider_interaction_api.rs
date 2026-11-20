@@ -226,7 +226,7 @@ fn sensors_and_filtered_pairs_never_block_cached_or_stateless_swept_movement() {
 		);
 		assert_eq!(
 			authored.entities[0].transform.position[0],
-			if blocked { -2.0 } else { 2.0 }
+			if blocked { -1.0001 } else { 2.0 }
 		);
 		assert_eq!(
 			cache.query_overlaps().unwrap(),
@@ -256,7 +256,7 @@ fn moving_a_parent_checks_solid_descendants_and_ignores_sensor_descendants() {
 		assert_eq!(result.blocked_by.is_some(), blocked);
 		assert_eq!(
 			document.entities[0].transform.position[0],
-			if blocked { -2.0 } else { 2.0 }
+			if blocked { -1.0001 } else { 2.0 }
 		);
 		assert_eq!(document.entities[1].transform.position[1], solid_y);
 		assert_eq!(document.entities[2].transform.position[1], sensor_y);

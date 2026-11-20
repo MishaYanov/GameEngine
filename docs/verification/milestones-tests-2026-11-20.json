@@ -1,0 +1,104 @@
+{
+  "date": "2026-11-20",
+  "inspected_head": "1c24b9f4d998fc12ea2036e517653e3862795b3f",
+  "scope": "All three original milestones, sixteen features; HEAD plus final working tree.",
+  "reproduction_commands": {
+    "rust_workspace": "cargo test --workspace --all-targets --all-features --offline --locked --no-fail-fast",
+    "rust_documentation": "cargo test --workspace --doc --offline --locked",
+    "clippy": "cargo clippy --workspace --all-targets --all-features --offline --locked",
+    "format": "cargo fmt --all -- --check",
+    "native_editor": "cargo build -p app --features custom-protocol --offline --locked",
+    "angular_editor_workdir_apps_editor": "npm test -- --watch=false",
+    "angular_production_workdir_apps_editor": "npm run check:production",
+    "angular_admin_workdir_apps_admin_dashboard": "npm test",
+    "python": "python -m unittest discover -s tests -v",
+    "docs_workdir_docs_site": "npm test",
+    "cpu_performance": "./scripts/measure-core-performance.ps1 -EnforceBudget",
+    "native_performance": "ENGINE_METRICS=1 cargo test --release -p game --bin game representative_native_scene_performance_baseline -- --ignored --nocapture (set environment using your shell)",
+    "native_export": "Set GAME_ENGINE_QA_PROJECT to exported project.json, then cargo test --offline -p game --bin game exported_courtyard_completes_and_restarts_in_a_hidden_native_player -- --ignored --nocapture"
+  },
+  "rust_workspace_all_targets_all_features": {
+    "passed": 793,
+    "failed": 0,
+    "ignored": 7,
+    "test_binaries": 70
+  },
+  "rust_doc_tests": "passed; no runnable examples",
+  "angular_editor": {
+    "passed": 425,
+    "spec_files": 46,
+    "production_build": "passed"
+  },
+  "angular_admin": {
+    "passed": 15
+  },
+  "python": {
+    "passed": 51
+  },
+  "docs_site": {
+    "pages": 60,
+    "tests_passed": 7,
+    "game_app_developer_empty": true
+  },
+  "clippy": "passed with existing warnings; see log",
+  "rustfmt": "passed",
+  "native_acceptance": [
+    "hidden authored course",
+    "hidden GPU reimport and visibility",
+    "hidden exported course",
+    "copied native template build",
+    "final custom-protocol editor build",
+    "release performance baseline",
+    "native transition recovery",
+    "Vulkan runtime probe",
+    "exported executable launch contract and tamper rejection"
+  ],
+  "ignored_workspace_tests_run_separately": {
+    "passed": 7,
+    "failed": 0
+  },
+  "headless_export_checkpoints": [
+    "locked exit",
+    "key",
+    "transition",
+    "finish",
+    "restart",
+    "stop"
+  ],
+  "export": {
+    "path": "C:\\Users\\misha\\Documents\\Codex\\Courtyard Run Milestones Final 2026-11-20",
+    "manifest_sha256": "c7607f8efa826769fee8514aaddeefc9cbc1e4f22018fb769e4378bb538196d2",
+    "player_sha256": "3b5a878b5734318200407636444144d51f6ae585a6cc9743b7ee6146ceeb9f85",
+    "file_count": 11
+  },
+  "verification_limits": [
+    "Native acceptance uses hidden windows; no current interactive desktop session.",
+    "Timings describe this machine and build, not other hardware.",
+    "Publication rollback handles ordinary failures, not process/power loss.",
+    "Focused test counts overlap the workspace aggregate."
+  ],
+  "verification_artifact_sha256": {
+    "target/milestones-rust-tests.log": "313808dc9a4f1ad594cfda3c457c791ee733c195af9130a87bf999f83b94ab63",
+    "target/milestones-rust-doc-tests.log": "5db6d2860134720111d9606d8930fb5c98cf54282d72f308070679e19401a480",
+    "target/milestones-clippy.log": "24d8551862d754ea593be01cbc6e2561dfcf3e64d07bc7723666f9dc9a804248",
+    "target/milestones-format-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/milestones-angular-tests.log": "12e7a9d3f97ce4f6bfc406ee7f2ce9a09e7c520a4b2f648d50f41d9da4902012",
+    "target/milestones-angular-production.log": "0f13e81a2aadbb288df82efc27d2ef08c9e07ac0d0748816db2b78e6fd3d2b20",
+    "target/milestones-admin-tests.log": "eb1de252ba48257c3d418db0d0dbc69f0358b40fa1ab4cc8a0163d586d00cc1e",
+    "target/milestones-python-tests.log": "3ffd0cdcd7853bbdc3f7875425e1f586e019d772376cb9b52bc607f3f153d281",
+    "target/milestones-native-template.log": "43966a852f9d52806d6661f10b70fd5935cbd9a9e7e44c73f4057cca31ce9d82",
+    "target/milestones-native-editor-build.log": "d03edbc4202510b96cdde76450f2dfd25f461cf228435fbda7959213ecebc3b1",
+    "target/milestones-native-launch-contract.log": "1c4cdcf76e0fcc217ec9e9a92d758dc80240eb043e2af08d9436517e925e4fe1",
+    "target/milestones-native-transitions.log": "585076390b5b040c594d26fa1b3cb05779b3923cf71063eee3127aebec4570aa",
+    "target/milestones-native-probe.log": "283cfdc199cde56903f7e48e8364014cc5837d65407d54c2ea1bf06504db3fc5",
+    "target/milestones-native-visibility-restore.log": "3419ad6527d85aef44e154eb58324ff0726b74fb162fc178bd6e3756fbaff450",
+    "target/milestone2-native-course.log": "356029465178bde5264549432ec1aba5c230b5bbebb4dbc907e15ecdb3956e20",
+    "target/milestone3-native-reimport.log": "db457b84e8da8047412af98fd75568d2b14b60316c2065eae40e3b1faf6673fa",
+    "target/milestone3-native-performance-release.log": "ad77732082f33e1d406dc54d0e6e72870423466dbfa0a16c032a09f63fb5e6cd",
+    "target/milestones-core-performance-final.log": "e0d219123fcaac2b572c9bb31ca2463d1d852342a99fa083161a8ae8f40fc304",
+    "target/milestones-release-export.log": "1244646334dc3b396370ad8a7dbf5fe16b6052d0e8bf30376e2ac14aeebba508",
+    "target/milestone3-export-native.log": "6ee7b626e48e02b40d229de67860d175d29b97c5f22f11fabf6cbd21b573ab1b",
+    "target/milestones-export-headless.log": "14cbb21793a22016f9e32b7f67bf67306279f5156e396d944585aedb5e1757c3",
+    "target/milestones-docs-site.log": "dfba849583132381452ff7613eeeb4d0201ff3f979f1b8a78cfbde393c537ff5"
+  }
+}

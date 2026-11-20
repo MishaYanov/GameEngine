@@ -3,6 +3,8 @@
         <workspace-toolbar (viewSelected)="selectView($event)" [opening]="workspaceActionBlocked()"/>
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
+        <editor-gameplay-settings [opening]="workspaceActionBlocked()"/>
+        <editor-camera-settings [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
         @if (gameView() && editorService.playing()) {
             <section aria-label="Game status" class="game-status">

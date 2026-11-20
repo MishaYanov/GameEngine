@@ -46,7 +46,7 @@ impl CpuAssetImporter for SceneMetadataImporter {
 		reference: &AssetRef,
 		context: &AssetJobContext,
 	) -> Result<ImportedAsset<Self::Output>, String> {
-		reference.validate()?;
+		let reference = super::project_assets::resolve_asset(&self.root, reference)?;
 		let scene = load_scene_metadata(
 			&self.root.join(&reference.path),
 			&self.root,

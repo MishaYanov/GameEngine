@@ -161,6 +161,7 @@ impl CommandFactory {
 					bindings: BTreeMap::new(),
 					entities: Vec::new(),
 					camera: CameraData {
+						follow: None,
 						position: camera.position,
 						yaw: camera.yaw,
 						pitch: camera.pitch,

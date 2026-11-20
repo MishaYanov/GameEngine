@@ -47,6 +47,7 @@ impl Fixture {
 				"models/triangle.glb",
 			)],
 			camera: runtime::scene_data::CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -203,6 +204,49 @@ fn unsaved_scene_case_alias_is_rejected_without_mutation_or_files() {
 	);
 	assert!(!fixture.0.join("scenes/New.json").exists());
 	assert!(!fixture.0.join("scenes/new.json").exists());
+}
+
+#[test]
+fn saving_prefab_respects_registered_unsaved_scene_destinations_without_mutation() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let document = (*workspace.backend.session().authored_document()).clone();
+	run(
+		&mut workspace,
+		Command::AddScene {
+			id: SceneId::new("reserved").unwrap(),
+			asset_path: "scenes/Reserved.json".into(),
+			document,
+		},
+	);
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	let before = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let cursor = workspace.backend.change_cursor();
+	let mut destinations = vec!["scenes/Reserved.json"];
+	#[cfg(windows)]
+	destinations.push("SCENES/reserved.json");
+	for path in destinations {
+		let error = workspace
+			.save_prefab(path, workspace.backend.session().revision())
+			.unwrap_err();
+		assert!(error.contains("reserved"), "{error}");
+		assert_eq!(
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+			before
+		);
+		assert_eq!(workspace.backend.change_cursor(), cursor);
+		assert!(!fixture.0.join(path).exists());
+	}
+	assert!(!fixture
+		.0
+		.join(runtime::asset_catalog::CATALOG_FILE)
+		.exists());
+	assert_eq!(fs::read_dir(fixture.0.join("prefabs")).unwrap().count(), 0);
 }
 
 #[cfg(windows)]
@@ -1520,6 +1564,265 @@ fn prefab_save_replaces_file_load_is_one_undo_and_stale_request_preserves_it() {
 }
 
 #[test]
+fn persistent_assets_and_gameplay_prefab_copies_save_reopen_and_follow_supported_moves() {
+	use runtime::{
+		asset_registry::AssetRef,
+		assets::project_assets,
+		project::{BehaviorSpace, BehaviorSpec},
+	};
+	let fixture = Fixture::new();
+	let manifest = fixture.write_project("scenes/main.json");
+	let catalog = project_assets::migrate_catalog(&fixture.0).unwrap();
+	let model = catalog.by_path("models/triangle.glb").unwrap().clone();
+	let mut w = fixture.open();
+	let before = w.backend.session().authored_document();
+	w.import_model(
+		"models/triangle.glb",
+		[2., 0., 0.],
+		w.backend.session().revision(),
+	)
+	.unwrap();
+	assert!(w
+		.backend
+		.session()
+		.authored_document()
+		.entities
+		.iter()
+		.skip(before.entities.len())
+		.all(|entity| entity.asset_id.as_ref() == Some(&model.id)));
+	run(&mut w, Command::Undo);
+	assert_eq!(w.backend.session().authored_document(), before);
+	let mut project = w.backend.session().project().clone();
+	project.add_behavior(BehaviorSpec::ControlledMove {
+		entity: EntityKey::new("a").unwrap(),
+		speed: 3.,
+		space: BehaviorSpace::World,
+	});
+	run(&mut w, Command::SetProject { project });
+	run(
+		&mut w,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	w.save_prefab("prefabs/assembly.json", w.backend.session().revision())
+		.unwrap();
+	let saved_catalog = project_assets::load_catalog(&fixture.0).unwrap();
+	let prefab = saved_catalog.by_path("prefabs/assembly.json").unwrap();
+	assert_eq!(prefab.dependencies, vec![model.id.clone()]);
+	let prefab_id = prefab.id.clone();
+	assert_eq!(
+		w.used_asset_meshes(&model.id).unwrap(),
+		std::collections::HashSet::from([0])
+	);
+	let authored = w.backend.session().authored_document();
+	let project = w.backend.session().project().clone();
+	let dirty = w.backend.snapshot().unwrap();
+	let revision = w.backend.session().revision();
+	project_assets::prepare_move(&fixture.0, &model.id, "models/moved.glb")
+		.unwrap()
+		.publish()
+		.unwrap();
+	let refreshed = w.asset_published().unwrap();
+	assert_eq!(refreshed.revision, revision + 1);
+	assert_eq!(refreshed.dirty, dirty.dirty);
+	assert_eq!(refreshed.project_dirty, dirty.project_dirty);
+	assert!(refreshed.can_undo);
+	assert_eq!(w.backend.session().authored_document(), authored);
+	assert_eq!(w.backend.session().project(), &project);
+	project_assets::prepare_move(&fixture.0, &prefab_id, "prefabs/moved.json")
+		.unwrap()
+		.publish()
+		.unwrap();
+	w.asset_published().unwrap();
+	let mut copies = Vec::new();
+	for position in [[4., 0., 0.], [8., 0., 0.]] {
+		w.load_prefab(
+			"prefabs/assembly.json",
+			position,
+			w.backend.session().revision(),
+		)
+		.unwrap();
+		copies.push(w.backend.session().selection()[0].clone());
+	}
+	assert_ne!(copies[0], copies[1]);
+	assert!(copies.iter().all(|key| key.as_str() != "a"));
+	let targets: std::collections::HashSet<_> = w
+		.backend
+		.session()
+		.project()
+		.behaviors
+		.iter()
+		.map(|behavior| behavior.entity().clone())
+		.collect();
+	assert_eq!(
+		targets,
+		std::collections::HashSet::from([
+			EntityKey::new("a").unwrap(),
+			copies[0].clone(),
+			copies[1].clone()
+		])
+	);
+	run(
+		&mut w,
+		Command::Rename {
+			key: copies[0].as_str().into(),
+			name: "Independent copy".into(),
+		},
+	);
+	let expected = w.backend.session().authored_document();
+	assert_eq!(
+		expected
+			.entities
+			.iter()
+			.find(|entity| entity.key == copies[1])
+			.unwrap()
+			.name,
+		"Original"
+	);
+	w.save_all(w.backend.session().revision()).unwrap();
+	let reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	assert_eq!(reopened.backend.session().authored_document(), expected);
+	assert_eq!(
+		reopened.backend.session().project(),
+		w.backend.session().project()
+	);
+	for entity in &reopened.backend.session().authored_document().entities {
+		let reference = AssetRef::new(&entity.model_path, entity.mesh_index)
+			.unwrap()
+			.with_asset_id(entity.asset_id.clone());
+		let resolved = project_assets::resolve_asset(&fixture.0, &reference).unwrap();
+		assert_eq!(resolved.asset_id, Some(model.id.clone()));
+		assert_eq!(resolved.path, "models/moved.glb");
+	}
+	assert!(!fixture.0.join("models/triangle.glb").exists());
+	assert!(!fixture.0.join("prefabs/assembly.json").exists());
+	assert_eq!(
+		project_assets::load_catalog(&fixture.0)
+			.unwrap()
+			.by_id(&prefab_id)
+			.unwrap()
+			.path,
+		"prefabs/moved.json"
+	);
+}
+
+#[test]
+fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_prefabs() {
+	use runtime::assets::project_assets;
+	let (fixture, project, second) = two_scene_project();
+	let catalog = project_assets::migrate_catalog(&fixture.0).unwrap();
+	let model = catalog.by_path("models/triangle.glb").unwrap().clone();
+	let mut main = runtime::scene_io::load_data(&fixture.0.join("scenes/main.json"))
+		.unwrap()
+		.data;
+	main.entities.clear();
+	main.bindings.clear();
+	fs::write(fixture.0.join("scenes/main.json"), main.to_json().unwrap()).unwrap();
+	let mut secondary = runtime::scene_io::load_data(&fixture.0.join("scenes/second.json"))
+		.unwrap()
+		.data;
+	secondary.entities[0].renderable = false;
+	secondary.entities[0].asset_id = Some(model.id.clone());
+	fs::write(
+		fixture.0.join("scenes/second.json"),
+		secondary.to_json().unwrap(),
+	)
+	.unwrap();
+	let mut w = fixture.open();
+	assert_eq!(
+		w.backend.session().active_scene_id(),
+		&project.startup_scene_id
+	);
+	assert!(w.backend.session().authored_document().entities.is_empty());
+	assert_eq!(
+		w.used_asset_meshes(&model.id).unwrap(),
+		std::collections::HashSet::from([0])
+	);
+	let prefab = runtime::editor::PrefabData {
+		schema_version: 2,
+		entities: secondary.entities.clone(),
+		gameplay: None,
+	};
+	let prefab_record = project_assets::prepare_prefab(&fixture.0, "prefabs/hidden.json", &prefab)
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(prefab_record.dependencies, vec![model.id.clone()]);
+	run(&mut w, Command::SwitchScene { scene_id: second });
+	run(
+		&mut w,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	run(&mut w, Command::DeleteSelection);
+	run(
+		&mut w,
+		Command::SwitchScene {
+			scene_id: project.startup_scene_id,
+		},
+	);
+	assert!(w.backend.session().project().scenes.iter().all(|entry| w
+		.backend
+		.session()
+		.scene_document(entry.id())
+		.unwrap()
+		.entities
+		.is_empty()));
+	let used = w.used_asset_meshes(&model.id).unwrap();
+	assert_eq!(
+		used,
+		std::collections::HashSet::from([0]),
+		"hidden prefab remains a dependant after every scene stops using the model"
+	);
+	let model_path = fixture.0.join("models/triangle.glb");
+	let original = fs::read(&model_path).unwrap();
+	let json_bytes = u32::from_le_bytes(original[12..16].try_into().unwrap()) as usize;
+	let mut value: serde_json::Value =
+		serde_json::from_slice(&original[20..20 + json_bytes]).unwrap();
+	value["meshes"][0]["name"] =
+		serde_json::json!(format!("{}-Incompatible", model.meshes[0].name));
+	let mut json = value.to_string().into_bytes();
+	while !json.len().is_multiple_of(4) {
+		json.push(b' ');
+	}
+	let tail = &original[20 + json_bytes..];
+	let mut bytes = original[..8].to_vec();
+	bytes.extend_from_slice(&((20 + json.len() + tail.len()) as u32).to_le_bytes());
+	bytes.extend_from_slice(&(json.len() as u32).to_le_bytes());
+	bytes.extend_from_slice(b"JSON");
+	bytes.extend_from_slice(&json);
+	bytes.extend_from_slice(tail);
+	let source = fixture.0.parent().unwrap().join("incompatible.glb");
+	fs::write(&source, bytes).unwrap();
+	let revision = w.backend.session().revision();
+	let cursor = w.backend.change_cursor();
+	let document = w.backend.session().authored_document();
+	let catalog_before = fs::read(fixture.0.join(runtime::asset_catalog::CATALOG_FILE)).unwrap();
+	assert!(project_assets::prepare_reimport(
+		&fixture.0,
+		&model.id,
+		Some(&source),
+		&model.fingerprint,
+		&used
+	)
+	.is_err());
+	assert_eq!(fs::read(model_path).unwrap(), original);
+	assert_eq!(
+		fs::read(fixture.0.join(runtime::asset_catalog::CATALOG_FILE)).unwrap(),
+		catalog_before
+	);
+	assert_eq!(w.backend.session().revision(), revision);
+	assert_eq!(w.backend.change_cursor(), cursor);
+	assert_eq!(w.backend.session().authored_document(), document);
+}
+
+#[test]
 fn saving_in_play_persists_authored_document_and_reloading_stops_simulation() {
 	let fixture = Fixture::new();
 	let mut w = fixture.open();
@@ -1604,6 +1907,7 @@ fn direct_prefab_callback_checks_revision_before_expanding_and_rejects_play_edit
 	let mut w = fixture.open();
 	let prefab = runtime::editor::PrefabData {
 		schema_version: 1,
+		gameplay: None,
 		entities: vec![EntityData::new(
 			EntityKey::new("prefab").unwrap(),
 			"Prefab",

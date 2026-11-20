@@ -65,11 +65,14 @@ fn persistent_swept_move_reports_blocker_and_only_updates_caches_for_applied_mot
 		.move_entity(&mut world, &key("actor"), [4.0, 0.0, 0.0])
 		.unwrap();
 	assert_eq!(blocked.requested_delta, [4.0, 0.0, 0.0]);
-	assert_eq!(blocked.applied_delta, [0.0; 3]);
+	close(blocked.applied_delta[0], 0.9999);
 	assert_eq!(blocked.blocked_by, Some(key("wall")));
-	assert!(blocked.changes.is_empty());
-	assert_eq!(world.document(), before);
-	assert_eq!(collision.stats().updated_colliders, stats.updated_colliders);
+	assert!(!blocked.changes.is_empty());
+	assert_ne!(world.document(), before);
+	assert_eq!(
+		collision.stats().updated_colliders,
+		stats.updated_colliders + 1
+	);
 	let moved = collision
 		.move_entity(&mut world, &key("actor"), [0.0, 2.0, 0.0])
 		.unwrap();
@@ -78,7 +81,7 @@ fn persistent_swept_move_reports_blocker_and_only_updates_caches_for_applied_mot
 	assert_eq!(collision.stats().rebuilds, 1);
 	assert_eq!(
 		collision.stats().updated_colliders - stats.updated_colliders,
-		1
+		2
 	);
 	assert_eq!(
 		collision.query_overlaps().unwrap(),

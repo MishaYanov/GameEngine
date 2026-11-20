@@ -24,7 +24,7 @@ use crate::{
 	},
 };
 use history::{History, Patch};
-pub use prefab::PrefabData;
+pub use prefab::{PrefabData, PrefabGameplay};
 use std::{
 	collections::{HashMap, HashSet},
 	sync::Arc,
@@ -398,6 +398,35 @@ impl EditorSession {
 		self.play
 			.as_ref()
 			.map_or_else(|| Arc::clone(&self.data), |play| play.active().document())
+	}
+	pub fn render_camera(&self) -> crate::Camera {
+		if let Some(play) = &self.play {
+			return play.active().camera().clone();
+		}
+		let camera = &self.data.camera;
+		crate::Camera {
+			position: camera.position,
+			yaw: camera.yaw,
+			pitch: camera.pitch,
+			vertical_fov: camera.vertical_fov,
+			near: camera.near_plane,
+			far: camera.far_plane,
+		}
+	}
+	pub fn set_play_visibility_capabilities(
+		&mut self,
+		available: HashSet<EntityKey>,
+	) -> Result<(), String> {
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut()
+			.set_visibility_capabilities(available)
+	}
+	pub fn has_play_visibility_capabilities(&self) -> bool {
+		self.play
+			.as_ref()
+			.is_some_and(|play| play.active().has_visibility_capabilities())
 	}
 
 	pub fn has_transaction(&self) -> bool {
@@ -880,6 +909,15 @@ impl EditorSession {
 	}
 	fn bump(&mut self) {
 		self.revision += 1;
+	}
+	/// Asset publication changes rendering, not authored scene/project content or history.
+	pub fn invalidate_assets(&mut self) -> Result<(), String> {
+		self.require_edit()?;
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		self.scene_revision += 1;
+		self.bump();
+		Ok(())
 	}
 	fn ensure_revision_capacity(&self) -> Result<(), String> {
 		if self.revision == u64::MAX || self.scene_revision == u64::MAX {

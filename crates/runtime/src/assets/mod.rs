@@ -8,10 +8,12 @@ mod mesh_data;
 mod metadata_import;
 pub mod model;
 mod primitives;
+pub mod project_assets;
 mod scene_import;
 
 pub use asset_manager::AssetManager;
 pub use asset_manager::AssetManagerError;
+pub use asset_manager::PreparedGpuAsset;
 pub use metadata_import::{AssetImportService, SceneMetadataImporter};
 pub use scene_import::{
 	ImportedMaterial, ImportedMesh, ImportedNode, ImportedPrimitiveMetadata, ImportedScene,

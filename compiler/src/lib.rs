@@ -11,6 +11,7 @@ use std::{
 };
 
 use sha2::{Digest, Sha256};
+mod dependencies;
 
 use engine_core::{
 	game_session::GameSession,
@@ -33,6 +34,8 @@ pub struct PreparedProject {
 	asset_root: PathBuf,
 	files: Vec<PackageAsset>,
 	total_bytes: u64,
+	catalog_source: Option<PackageAsset>,
+	catalog_output: Option<Vec<u8>>,
 }
 impl PreparedProject {
 	pub fn project(&self) -> &ProjectData {
@@ -49,6 +52,11 @@ impl PreparedProject {
 	}
 	fn validate_inputs(&self) -> Result<(), String> {
 		for asset in &self.files {
+			if asset.relative == Path::new(engine_core::asset_catalog::CATALOG_FILE)
+				&& self.catalog_output.is_some()
+			{
+				continue;
+			}
 			checked_asset_path(&self.asset_root, &asset.relative)
 				.and_then(|input| copy_verified_asset(&input, asset, &mut io::sink()))
 				.map_err(|cause| {
@@ -57,6 +65,12 @@ impl PreparedProject {
 						asset.relative
 					)
 				})?;
+		}
+		if let Some(asset) = &self.catalog_source {
+			let input = checked_asset_path(&self.asset_root, &asset.relative)
+				.map_err(|error| error.to_string())?;
+			copy_verified_asset(&input, asset, &mut io::sink())
+				.map_err(|error| format!("Asset catalog changed after preflight: {error}"))?;
 		}
 		Ok(())
 	}
@@ -121,7 +135,11 @@ pub fn prepare_project(
 		return Err("Asset root must be a directory without symbolic links".into());
 	}
 	let asset_root = asset_root.canonicalize().map_err(|e| e.to_string())?;
-	let files = prepare_assets(&asset_root).map_err(|e| format!("Asset preflight failed: {e}"))?;
+	let dependencies::DependencySnapshot {
+		files,
+		catalog_source,
+		catalog_output,
+	} = dependencies::prepare(project, &asset_root)?;
 
 	validate_catalog_scenes(project, &asset_root, &files)?;
 
@@ -131,6 +149,8 @@ pub fn prepare_project(
 		asset_root,
 		files,
 		total_bytes,
+		catalog_source,
+		catalog_output,
 	})
 }
 
@@ -172,6 +192,7 @@ pub fn create_authoring_project(name: &str, destination: &str) -> Result<PathBuf
 	project_path(name, destination)?;
 	let (mut project, root) = bundled_starter(name)?;
 	project.gameplay_module = None;
+	project.gameplay_settings = None;
 	let prepared = prepare_project(&project, &root)?;
 	let path = project_path(&project.name, destination)?;
 	prepared.validate_inputs()?;
@@ -450,7 +471,24 @@ fn copy_prepared_project(
 	path: &Path,
 	project_json: &str,
 ) -> io::Result<()> {
-	copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &prepared.files)?;
+	let source_files: Vec<_> = prepared
+		.files
+		.iter()
+		.filter(|asset| {
+			prepared.catalog_output.is_none()
+				|| asset.relative != Path::new(engine_core::asset_catalog::CATALOG_FILE)
+		})
+		.cloned()
+		.collect();
+	copy_prepared_assets(&prepared.asset_root, &path.join("assets"), &source_files)?;
+	if let Some(catalog) = &prepared.catalog_output {
+		write_new(
+			&path
+				.join("assets")
+				.join(engine_core::asset_catalog::CATALOG_FILE),
+			catalog,
+		)?;
+	}
 	let copied_root = path.join("assets").canonicalize()?;
 	validate_catalog_scenes(&prepared.project, &copied_root, &prepared.files)
 		.map_err(io::Error::other)?;
@@ -747,13 +785,24 @@ fn validate_model_references(
 	packaged: &HashSet<&Path>,
 ) -> Result<(), String> {
 	let mut checked = HashSet::new();
+	let catalog = dependencies::read_catalog(root)?;
 
 	for entity in scene.entities.iter().filter(|entity| entity.renderable) {
-		if !checked.insert(entity.model_path.as_str()) {
+		let resolved = catalog.resolve(
+			entity.asset_id.as_ref(),
+			&entity.model_path,
+			entity.mesh_index,
+		)?;
+		if resolved.is_some_and(|asset| asset.kind != engine_core::asset_catalog::AssetKind::Model)
+		{
+			return Err("Renderable entity references a non-model asset identity".into());
+		}
+		let model_path = resolved.map_or(entity.model_path.as_str(), |asset| asset.path.as_str());
+		if !checked.insert(model_path) {
 			continue;
 		}
 
-		let relative = Path::new(&entity.model_path);
+		let relative = Path::new(model_path);
 		let supported = relative
 			.extension()
 			.and_then(|value| value.to_str())

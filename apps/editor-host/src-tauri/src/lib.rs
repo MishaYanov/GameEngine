@@ -1,3 +1,4 @@
+mod asset_reimport_gpu;
 mod commands;
 mod editor;
 mod layout_preferences;
@@ -88,6 +89,10 @@ pub fn run() {
 			editor_reload,
 			editor_assets,
 			editor_import_model,
+			editor_choose_external_glb,
+			editor_import_external_glb,
+			editor_reimport_asset,
+			editor_move_asset,
 			editor_export_prefab,
 			editor_instantiate_prefab,
 			editor_save_prefab,

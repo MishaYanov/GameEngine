@@ -70,7 +70,7 @@ fn exported_courtyard_completes_and_restarts_in_a_hidden_native_player() {
 			for (key, count, scene, expected) in [
 				(Key::A, 90, "courtyard", (0, false, false, false)),
 				(Key::D, 190, "courtyard", (1, true, false, false)),
-				(Key::A, 180, "finish", (1, true, true, false)),
+				(Key::A, 240, "finish", (1, true, true, false)),
 				(Key::D, 90, "finish", (1, true, true, true)),
 			] {
 				app.input.reset();
@@ -119,6 +119,11 @@ fn exported_courtyard_completes_and_restarts_in_a_hidden_native_player() {
 				(0, false, false, false)
 			);
 			assert_eq!(app.scene.to_data(&app.camera).unwrap(), original);
+			// Fresh sensors sample their initial occupancy on the first fixed step.
+			assert!(app.editor.needs_tick());
+			app.input.reset();
+			app.tick_play(dt).unwrap();
+			assert_eq!(app.scene.to_data(&app.camera).unwrap(), original);
 			assert!(!app.editor.needs_tick());
 			app.render().unwrap();
 			app.input.reset();
@@ -134,8 +139,24 @@ fn exported_courtyard_completes_and_restarts_in_a_hidden_native_player() {
 			assert!(!app.input.is_held(Key::D));
 			let blurred = app.scene.to_data(&app.camera).unwrap();
 			app.tick_play(dt).unwrap();
-			assert_eq!(app.scene.to_data(&app.camera).unwrap(), blurred);
+			assert_eq!(
+				app.scene.to_data(&app.camera).unwrap().entities,
+				blurred.entities
+			);
+			// Input is neutral immediately; the authored follow rig may finish its
+			// bounded smoothing after the actor stops, then the scheduler sleeps.
+			for _ in 0..120 {
+				if !app.editor.needs_tick() {
+					break;
+				}
+				app.tick_play(dt).unwrap();
+				assert_eq!(
+					app.scene.to_data(&app.camera).unwrap().entities,
+					blurred.entities
+				);
+			}
 			assert!(!app.editor.needs_tick());
+			let settled = app.scene.to_data(&app.camera).unwrap();
 			ApplicationHandler::window_event(
 				&mut app,
 				events,
@@ -143,7 +164,7 @@ fn exported_courtyard_completes_and_restarts_in_a_hidden_native_player() {
 				WindowEvent::Focused(true),
 			);
 			app.tick_play(0.0).unwrap();
-			assert_eq!(app.scene.to_data(&app.camera).unwrap(), blurred);
+			assert_eq!(app.scene.to_data(&app.camera).unwrap(), settled);
 			for (path, bytes) in source_files {
 				assert_eq!(fs::read(path).unwrap(), bytes);
 			}

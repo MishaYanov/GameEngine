@@ -50,6 +50,7 @@ impl Fixture {
 				}),
 			],
 			camera: CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -215,7 +216,9 @@ fn bundled_route_reports_locked_exit_key_completion_restart_and_restored_authore
 			"Reach the courtyard exit",
 			false,
 		),
-		(2, -1.0, 180, "finish", 1, "Reach the finish marker", false),
+		// The locked door now stops the actor at contact; leave enough travel
+		// to return from the pickup and sample the authored exit sensor.
+		(2, -1.0, 240, "finish", 1, "Reach the finish marker", false),
 		(3, 1.0, 90, "finish", 1, "Courtyard Run complete", true),
 	] {
 		actions.extend([
@@ -268,7 +271,10 @@ fn bundled_route_reports_locked_exit_key_completion_restart_and_restored_authore
 		restarted["play_status"]["gameplay"]["objective"],
 		"Find the courtyard key"
 	);
-	assert_eq!(restarted["simulation_tick"], 0, "Restart clears held input");
+	assert_eq!(
+		restarted["simulation_tick"], 1,
+		"Restart clears held input and samples fresh sensors once"
+	);
 	assert_eq!(
 		SceneData::from_json(&fs::read_to_string(state).unwrap()).unwrap(),
 		authored

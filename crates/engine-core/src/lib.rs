@@ -1,4 +1,5 @@
 //! Renderer-independent engine data, authoring commands and simulation math.
+pub mod asset_catalog;
 pub mod asset_jobs;
 pub mod asset_registry;
 pub mod bounds;
@@ -11,6 +12,7 @@ pub mod editor;
 pub mod engine;
 pub mod entity_key;
 pub mod events;
+pub mod game_camera;
 pub mod game_progress;
 pub mod game_session;
 pub mod input;
@@ -23,6 +25,7 @@ pub mod simulation;
 pub mod simulation_session;
 pub mod time;
 pub mod transform;
+pub mod triggers;
 pub mod visibility;
 pub mod world;
 

@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests_dependencies.rs"]
+mod dependency_tests;
 #[test]
 fn project_names_enforce_length_and_normalize_surrounding_whitespace() {
 	let root = env!("CARGO_MANIFEST_DIR");
@@ -162,6 +164,7 @@ fn authored_scene_fixture(source: &Path) -> (ProjectData, SceneData) {
 		bindings: Default::default(),
 		lights: vec![],
 		camera: engine_core::scene_data::CameraData {
+			follow: None,
 			position: camera.position,
 			yaw: camera.yaw,
 			pitch: camera.pitch,
@@ -175,13 +178,44 @@ fn authored_scene_fixture(source: &Path) -> (ProjectData, SceneData) {
 	(project, scene)
 }
 
+fn attach_payload_dependency(source: &Path, uri: &str, bytes: usize) {
+	let mut scene = read_scene_file(&source.join("scenes/main.json")).unwrap();
+	scene
+		.entities
+		.push(engine_core::scene_data::EntityData::new(
+			engine_core::EntityKey::new("payload-model").unwrap(),
+			"Payload model",
+			"models/payload.gltf",
+		));
+	fs::create_dir_all(source.join("models")).unwrap();
+	let model = serde_json::json!({"asset":{"version":"2.0"},"buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","byteLength":36},{"uri":uri,"byteLength":bytes}],"bufferViews":[{"buffer":0,"byteLength":36}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[0,0,0]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}]});
+	fs::write(
+		source.join("models/payload.gltf"),
+		serde_json::to_vec(&model).unwrap(),
+	)
+	.unwrap();
+	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+}
+
 #[test]
 fn preparing_an_authored_project_captures_its_actual_scene_assets_and_behavior_config() {
 	let fixture = AssetFixture::new();
 	let source = fixture.0.join("source");
 	let (project, _) = authored_scene_fixture(&source);
 	fs::create_dir(source.join("prefabs")).unwrap();
-	fs::write(source.join("prefabs/one.json"), "{}").unwrap();
+	let prefab = engine_core::editor::PrefabData {
+		schema_version: 1,
+		entities: vec![
+			engine_core::scene_data::EntityData::new(
+				engine_core::EntityKey::new("marker").unwrap(),
+				"Marker",
+				"missing.glb",
+			)
+			.with_renderable(false),
+		],
+		gameplay: None,
+	};
+	fs::write(source.join("prefabs/one.json"), prefab.to_json().unwrap()).unwrap();
 	let prepared = prepare_project(&project, &source).unwrap();
 	assert_eq!(prepared.project(), &project);
 	assert_eq!(prepared.asset_root(), source.canonicalize().unwrap());
@@ -215,6 +249,7 @@ fn staged_export_keeps_its_frozen_assets_and_manifest_when_authoring_changes_bef
 	let (mut project, _) = authored_scene_fixture(&source);
 	project.gameplay_module = Some("courtyard_run".into());
 	fs::write(source.join("payload.bin"), b"snapshot bytes").unwrap();
+	attach_payload_dependency(&source, "../payload.bin", 14);
 	let prepared = prepare_project(&project, &source).unwrap();
 	let expected_scene = fs::read(source.join("scenes/main.json")).unwrap();
 	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
@@ -324,6 +359,7 @@ fn changed_assets_after_project_preparation_are_rejected_even_when_byte_length_m
 	let source = fixture.0.join("source");
 	let (project, _) = authored_scene_fixture(&source);
 	fs::write(source.join("payload.bin"), b"original").unwrap();
+	attach_payload_dependency(&source, "../payload.bin", 8);
 	let prepared = prepare_project(&project, &source).unwrap();
 	prepared.validate_inputs().unwrap();
 	fs::write(source.join("payload.bin"), b"modified").unwrap();
@@ -353,6 +389,7 @@ fn prepared_input_validation_rejects_resized_missing_and_nonregular_assets_with_
 		let input = source.join(&relative);
 		fs::create_dir(source.join("nested")).unwrap();
 		fs::write(&input, b"original").unwrap();
+		attach_payload_dependency(&source, "../nested/payload.bin", 8);
 		let prepared = prepare_project(&project, &source).unwrap();
 		prepared.validate_inputs().unwrap();
 		match mutation {
@@ -614,7 +651,11 @@ fn copied_catalog_validation_uses_copied_scene_and_model_files() {
 			"models/actor.glb",
 		));
 	fs::create_dir(source.join("models")).unwrap();
-	fs::write(source.join("models/actor.glb"), b"model fixture").unwrap();
+	fs::copy(
+		Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game/assets/props/cube.glb"),
+		source.join("models/actor.glb"),
+	)
+	.unwrap();
 	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	let prepared = prepare_project(&project, &source).unwrap();
 	let copied = fixture.0.join("copied");
@@ -651,7 +692,11 @@ fn catalog_validation_rejects_existing_scene_and_model_files_missing_from_the_sn
 			"models/actor.glb",
 		));
 	fs::create_dir(source.join("models")).unwrap();
-	fs::write(source.join("models/actor.glb"), b"model fixture").unwrap();
+	fs::copy(
+		Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game/assets/props/cube.glb"),
+		source.join("models/actor.glb"),
+	)
+	.unwrap();
 	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	let prepared = prepare_project(&project, &source).unwrap();
 	let copied = fixture.0.join("copied");
@@ -817,7 +862,7 @@ fn exported_courtyard_plays_and_restarts_like_the_authoring_preview() {
 	for (x, count, scene_id, expected) in [
 		(-1.0, 90, "courtyard", (0, false, false, false)),
 		(1.0, 190, "courtyard", (1, true, false, false)),
-		(-1.0, 180, "finish", (1, true, true, false)),
+		(-1.0, 240, "finish", (1, true, true, false)),
 		(1.0, 90, "finish", (1, true, true, true)),
 	] {
 		let movement = [x, 0.0, 0.0];

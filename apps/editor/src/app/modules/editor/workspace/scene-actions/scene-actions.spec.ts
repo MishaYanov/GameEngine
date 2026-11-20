@@ -393,6 +393,23 @@ describe('SceneActions', () => {
         expect(labels()).toEqual(['Player', 'Finish']);
     });
 
+    it('shows Finish authoring for a configured destination with a custom scene ID', async () => {
+        const initial = snapshot();
+        const {fixture, root, current} = await createActions({
+            ...initial,
+            active_scene_id: 'ending',
+            project: {...initial.project, gameplay_settings: {
+                schema_version: 1, scenes: {ending: {kind: 'finish', finish_trigger: 'goal-sensor'}},
+            }},
+        });
+        const labels = () => [...root.querySelectorAll('.gameplay-roles label')]
+            .map(label => label.firstChild?.textContent?.trim());
+        expect(labels()).toEqual(['Player', 'Finish']);
+        current.update(value => ({...value, active_scene_id: 'main'}));
+        await fixture.whenStable();
+        expect(labels()).toEqual(['Player', 'Key', 'Exit']);
+    });
+
     it('treats a prototype-named role as unassigned and restores it after rejection', async () => {
         const initial = snapshot();
         const {fixture, root, execute} = await createActions({

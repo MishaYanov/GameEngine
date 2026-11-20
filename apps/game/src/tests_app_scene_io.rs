@@ -122,10 +122,95 @@ fn player_uses_authored_keys_without_running_conflicting_camera_or_pause_shortcu
 }
 
 #[test]
+fn generic_hud_uses_module_status_and_follow_camera_ignores_debug_camera_input_while_paused() {
+	use runtime::editor::command::{GameplayStatus, PlayStatusDto};
+	let status = PlayStatusDto {
+		play_session_id: "play".into(),
+		run_id: "run".into(),
+		scene_id: SceneId::new("race").unwrap(),
+		paused: true,
+		pending_scene_id: None,
+		gameplay: Some(GameplayStatus {
+			objective: "Win the race".into(),
+			detail: Some("Lap three".into()),
+			score: Some(42),
+			completed: true,
+		}),
+	};
+	assert_eq!(
+		gameplay_hud_rows(Some(&status)),
+		[
+			"Win the race",
+			"Lap three",
+			"Score 42",
+			"F10 to restart",
+			"Paused"
+		]
+	);
+	assert!(gameplay_hud_rows(None).is_empty());
+	let (mut app, ids) = fixture();
+	let fixed = app.camera.clone();
+	let actor = app.scene.key(ids[0]).unwrap().clone();
+	app.scene
+		.set_camera_follow(Some(runtime::scene_data::FollowCameraSettings {
+			target: actor,
+			offset: [0.0, 2.0, 5.0],
+			look_offset: [0.0; 3],
+			smoothing_seconds: 0.2,
+		}));
+	app.editor =
+		SceneEditor::for_project(&app.scene, &fixed, app.project.clone().unwrap()).unwrap();
+	app.editor.start_play(&mut app.scene).unwrap();
+	app.standalone_runtime = true;
+	app.input.reset();
+	app.input.press(Key::ArrowRight);
+	app.update_player(0.0);
+	let follow = app.editor.render_camera().unwrap();
+	assert_eq!(app.camera.position, follow.position);
+	app.input.reset();
+	app.input.press(Key::Space);
+	app.update_player(0.0);
+	assert!(app.editor.simulation_paused());
+	app.input.reset();
+	app.input.press(Key::D);
+	app.input.press(Key::ArrowRight);
+	app.update_player(0.5);
+	assert_eq!(app.camera.position, follow.position);
+}
+
+#[test]
 fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available() {
-	let (mut app, _) = fixture();
+	let (mut app, [player, exit]) = fixture();
 	let mut project = app.editor.project().unwrap().clone();
 	project.gameplay_module = Some(progress::COURTYARD_RUN_ID.into());
+	let key = app
+		.scene
+		.spawn_keyed_model(
+			EntityKey::new("course-key").unwrap(),
+			"Key",
+			"props/robot.glb",
+			ModelInstance::new(
+				Arc::new(Model::new(Vec::new())),
+				Transform {
+					position: [100.0, 0.0, 0.0],
+					..Default::default()
+				},
+			),
+		)
+		.unwrap();
+	app.scene.set_binding("player", player).unwrap();
+	app.scene.set_binding("key", key).unwrap();
+	app.scene.set_binding("exit", exit).unwrap();
+	project
+		.scenes
+		.insert(
+			runtime::scene_catalog::SceneDescriptor::new(
+				SceneId::new("finish").unwrap(),
+				"scenes/finish.json",
+			)
+			.unwrap(),
+		)
+		.unwrap();
 	project.input_profile = Some(InputProfile {
 		actions: vec![runtime::input::GameInputBinding {
 			id: "interact".into(),
@@ -134,7 +219,7 @@ fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available()
 		}],
 		..InputProfile::default()
 	});
-	app.editor.set_initial_project(project).unwrap();
+	app.editor = SceneEditor::for_project(&app.scene, &app.camera, project).unwrap();
 	app.editor
 		.set_module_resolver(Arc::new(progress::resolve))
 		.unwrap();
@@ -147,7 +232,7 @@ fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available()
 		!app.play_update_error_reported,
 		"F10 belongs to gameplay before completion"
 	);
-	assert!(!app.campaign_completed());
+	assert!(!app.game_completed());
 	app.input.reset();
 	for action in [
 		progress::ProgressAction::CollectCourtyardKey,
@@ -188,7 +273,7 @@ fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available()
 	app.input.press(Key::F10);
 	app.update_player(0.1);
 	assert!(app.play_update_error_reported);
-	assert!(app.campaign_completed());
+	assert!(app.game_completed());
 	assert_eq!(snapshot(&app), completed_scene);
 }
 

@@ -50,6 +50,7 @@ fn factory_rejects_malformed_keys_names_paths_and_duplicate_transform_targets_be
 		},
 		Command::Spawn {
 			entity: EntitySpecDto {
+				asset_id: None,
 				name: "New".into(),
 				model_path: "../escape.glb".into(),
 				transform: TransformDto::default(),

@@ -5,6 +5,7 @@ import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
 import type {EditorCommand} from '../../../../core/editor/editor.models';
+import {courtyardScene, readCourtyardSettings} from '../game-settings/courtyard-settings';
 
 @Component({
     selector: 'editor-scene-actions',
@@ -46,6 +47,17 @@ export class SceneActions {
         const module = this.selectedModule();
         const sceneId = this.editor.snapshot()?.active_scene_id;
         if (!module || sceneId === undefined) return [];
+        if (module.id === 'courtyard_run') {
+            const settings = readCourtyardSettings(this.editor.snapshot()?.project.gameplay_settings);
+            const configured = settings ? courtyardScene(settings, sceneId) : undefined;
+            if (configured) {
+                const names = configured.kind === 'finish' ? ['player', 'finish'] : ['player', 'key', 'exit'];
+                const descriptors = configured.kind === 'finish'
+                    ? [...Object.values(module.scene_roles).flat(), ...module.default_roles]
+                    : [...module.default_roles, ...Object.values(module.scene_roles).flat()];
+                return names.map(name => descriptors.find(role => role.name === name)).filter(role => role !== undefined);
+            }
+        }
         return Object.hasOwn(module.scene_roles, sceneId) ? module.scene_roles[sceneId] : module.default_roles;
     });
 

@@ -1,6 +1,7 @@
+use renderer::ui::{ScreenCanvas as Draw, bitmap_font_pixels};
 use renderer::{
 	WindowRenderer,
-	vulkan::{ModelPushConstants, RenderObject, Vertex, VulkanMaterial, VulkanMesh},
+	vulkan::{ModelPushConstants, RenderObject, VulkanMaterial, VulkanMesh},
 };
 use runtime::{
 	SceneEditor,
@@ -88,19 +89,7 @@ impl EditorPanel {
 		renderer: &WindowRenderer,
 		assets: &mut AssetManager,
 	) -> Result<(), String> {
-		let mut pixels = vec![0; 128 * 64 * 4];
-		for code in 0..128 {
-			let glyph = glyph(code as u8 as char);
-			for (y, row) in glyph.iter().enumerate() {
-				for x in 0..5 {
-					if row & (1 << (4 - x)) != 0 {
-						let index = (((code / 16) * 8 + y) * 128 + (code % 16) * 8 + x) * 4;
-						pixels[index..index + 4].fill(255);
-					}
-				}
-			}
-		}
-		pixels[..4].fill(255); // Solid rectangle UV.
+		let pixels = bitmap_font_pixels();
 		let image = ImageAsset::from_rgba8(128, 64, pixels).map_err(|e| e.to_string())?;
 		let texture = assets
 			.load_image_texture(renderer, "builtin:editor-font", &image)
@@ -404,7 +393,7 @@ impl EditorPanel {
 			TEXT,
 		);
 		if let Some(gpu) = self.gpu.as_mut() {
-			renderer.write_dynamic_mesh(&mut gpu.mesh, &draw.vertices, &draw.indices)?;
+			renderer.write_dynamic_mesh(&mut gpu.mesh, draw.vertices(), draw.indices())?;
 		}
 		Ok(())
 	}
@@ -485,119 +474,3 @@ const SELECT: [f32; 3] = [0.12, 0.30, 0.45];
 const TEXT: [f32; 3] = [0.86, 0.91, 0.96];
 const MUTED: [f32; 3] = [0.48, 0.62, 0.73];
 const ACCENT: [f32; 3] = [0.35, 0.82, 0.92];
-
-struct Draw {
-	vertices: Vec<Vertex>,
-	indices: Vec<u32>,
-	size: [f32; 2],
-}
-impl Draw {
-	fn new(size: [f32; 2]) -> Self {
-		Self {
-			vertices: Vec::new(),
-			indices: Vec::new(),
-			size,
-		}
-	}
-	fn quad(&mut self, r: [f32; 4], uv: [f32; 4], color: [f32; 3]) {
-		let base = self.vertices.len() as u32;
-		for [x, y, u, v] in [
-			[r[0], r[1], uv[0], uv[1]],
-			[r[0] + r[2], r[1], uv[2], uv[1]],
-			[r[0] + r[2], r[1] + r[3], uv[2], uv[3]],
-			[r[0], r[1] + r[3], uv[0], uv[3]],
-		] {
-			self.vertices.push(
-				Vertex::new(
-					[
-						x * 2.0 / self.size[0] - 1.0,
-						y * 2.0 / self.size[1] - 1.0,
-						0.0,
-					],
-					[u, v],
-				)
-				.with_normal(color),
-			);
-		}
-		self.indices
-			.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-	}
-	fn rect(&mut self, r: [f32; 4], color: [f32; 3]) {
-		self.quad(r, [0.5 / 128.0, 0.5 / 64.0, 0.5 / 128.0, 0.5 / 64.0], color);
-	}
-	fn text(&mut self, x: f32, y: f32, text: &str, color: [f32; 3]) {
-		for (i, c) in text.chars().enumerate() {
-			let code = if c.is_ascii() {
-				c as usize
-			} else {
-				b'?' as usize
-			};
-			let [u, v] = [(code % 16 * 8) as f32, (code / 16 * 8) as f32];
-			self.quad(
-				[x + i as f32 * 12.0, y, 10.0, 14.0],
-				[u / 128.0, v / 64.0, (u + 5.0) / 128.0, (v + 7.0) / 64.0],
-				color,
-			);
-		}
-	}
-}
-
-// A small built-in bitmap alphabet keeps the native editor independent of
-// platform fonts and additional UI runtimes. Lowercase shares uppercase glyphs.
-fn glyph(c: char) -> [u8; 7] {
-	match c.to_ascii_uppercase() {
-		'A' => [14, 17, 17, 31, 17, 17, 17],
-		'B' => [30, 17, 17, 30, 17, 17, 30],
-		'C' => [14, 17, 16, 16, 16, 17, 14],
-		'D' => [30, 17, 17, 17, 17, 17, 30],
-		'E' => [31, 16, 16, 30, 16, 16, 31],
-		'F' => [31, 16, 16, 30, 16, 16, 16],
-		'G' => [14, 17, 16, 23, 17, 17, 15],
-		'H' => [17, 17, 17, 31, 17, 17, 17],
-		'I' => [14, 4, 4, 4, 4, 4, 14],
-		'J' => [7, 2, 2, 2, 18, 18, 12],
-		'K' => [17, 18, 20, 24, 20, 18, 17],
-		'L' => [16, 16, 16, 16, 16, 16, 31],
-		'M' => [17, 27, 21, 21, 17, 17, 17],
-		'N' => [17, 25, 21, 19, 17, 17, 17],
-		'O' => [14, 17, 17, 17, 17, 17, 14],
-		'P' => [30, 17, 17, 30, 16, 16, 16],
-		'Q' => [14, 17, 17, 17, 21, 18, 13],
-		'R' => [30, 17, 17, 30, 20, 18, 17],
-		'S' => [15, 16, 16, 14, 1, 1, 30],
-		'T' => [31, 4, 4, 4, 4, 4, 4],
-		'U' => [17, 17, 17, 17, 17, 17, 14],
-		'V' => [17, 17, 17, 17, 17, 10, 4],
-		'W' => [17, 17, 17, 21, 21, 21, 10],
-		'X' => [17, 17, 10, 4, 10, 17, 17],
-		'Y' => [17, 17, 10, 4, 4, 4, 4],
-		'Z' => [31, 1, 2, 4, 8, 16, 31],
-		'0' => [14, 17, 19, 21, 25, 17, 14],
-		'1' => [4, 12, 4, 4, 4, 4, 14],
-		'2' => [14, 17, 1, 2, 4, 8, 31],
-		'3' => [30, 1, 1, 14, 1, 1, 30],
-		'4' => [2, 6, 10, 18, 31, 2, 2],
-		'5' => [31, 16, 16, 30, 1, 1, 30],
-		'6' => [14, 16, 16, 30, 17, 17, 14],
-		'7' => [31, 1, 2, 4, 8, 8, 8],
-		'8' => [14, 17, 17, 14, 17, 17, 14],
-		'9' => [14, 17, 17, 15, 1, 1, 14],
-		'.' => [0, 0, 0, 0, 0, 6, 6],
-		',' => [0, 0, 0, 0, 6, 6, 4],
-		'-' => [0, 0, 0, 31, 0, 0, 0],
-		'+' => [0, 4, 4, 31, 4, 4, 0],
-		'*' => [0, 21, 14, 31, 14, 21, 0],
-		'/' => [1, 2, 2, 4, 8, 8, 16],
-		'\\' => [16, 8, 8, 4, 2, 2, 1],
-		'[' => [14, 8, 8, 8, 8, 8, 14],
-		']' => [14, 2, 2, 2, 2, 2, 14],
-		'(' => [2, 4, 8, 8, 8, 4, 2],
-		')' => [8, 4, 2, 2, 2, 4, 8],
-		':' => [0, 6, 6, 0, 6, 6, 0],
-		'_' => [0, 0, 0, 0, 0, 0, 31],
-		'>' => [16, 8, 4, 2, 4, 8, 16],
-		'=' => [0, 0, 31, 0, 31, 0, 0],
-		' ' => [0; 7],
-		_ => [14, 17, 1, 2, 4, 0, 4],
-	}
-}

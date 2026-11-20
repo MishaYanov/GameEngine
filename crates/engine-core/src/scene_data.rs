@@ -1,4 +1,5 @@
 pub use crate::collider::{ColliderData, ColliderInteraction};
+pub use crate::game_camera::FollowCameraSettings;
 use crate::{Transform, entity_key::EntityKey};
 use glam::{EulerRot, Mat4};
 use serde::{Deserialize, Serialize};
@@ -26,9 +27,14 @@ pub struct EntityData {
 	pub key: EntityKey,
 	pub name: String,
 	pub model_path: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub asset_id: Option<crate::asset_catalog::AssetId>,
 	pub transform: TransformData,
 	#[serde(default = "default_renderable")]
 	pub renderable: bool,
+	/// Runtime actions mutate the Play copy; Stop/Restart restores this authored value.
+	#[serde(default = "default_renderable")]
+	pub collision_enabled: bool,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub parent: Option<EntityKey>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,8 +56,10 @@ impl EntityData {
 			key,
 			name: name.into(),
 			model_path: model_path.into(),
+			asset_id: None,
 			transform: TransformData::default(),
 			renderable: true,
+			collision_enabled: true,
 			parent: None,
 			material: None,
 			collider: None,
@@ -60,6 +68,10 @@ impl EntityData {
 	}
 	pub fn with_transform(mut self, transform: TransformData) -> Self {
 		self.transform = transform;
+		self
+	}
+	pub fn with_asset_id(mut self, asset_id: Option<crate::asset_catalog::AssetId>) -> Self {
+		self.asset_id = asset_id;
 		self
 	}
 	pub fn with_parent(mut self, parent: Option<EntityKey>) -> Self {
@@ -180,6 +192,8 @@ impl TransformData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CameraData {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub follow: Option<crate::game_camera::FollowCameraSettings>,
 	pub position: [f32; 3],
 	pub yaw: f32,
 	pub pitch: f32,
@@ -439,6 +453,12 @@ impl SceneData {
 				return Err(format!("{context}: mesh index exceeds supported limit"));
 			}
 		}
+		if let Some(follow) = &self.camera.follow {
+			charge(256, &[follow.target.as_str()])?;
+			if !keys.contains(follow.target.as_str()) {
+				return Err("Follow camera target must reference an entity in this scene".into());
+			}
+		}
 		for (name, key) in &self.bindings {
 			charge(32, &[name, key.as_str()])?;
 			validate_name(name).map_err(|error| format!("Binding {name:?}: {error}"))?;
@@ -588,6 +608,9 @@ fn validate_name(name: &str) -> Result<(), String> {
 
 impl CameraData {
 	pub fn validate(&self) -> Result<(), String> {
+		if let Some(follow) = &self.follow {
+			follow.validate()?;
+		}
 		if !self
 			.position
 			.iter()

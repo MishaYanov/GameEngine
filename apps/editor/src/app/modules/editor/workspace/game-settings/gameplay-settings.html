@@ -1,0 +1,64 @@
+@if (supported()) {
+    <button type="button" [disabled]="!available()" (click)="show()">Interaction Settings…</button>
+    @if (!settings()) { <p class="error" role="alert">This gameplay settings format is unsupported. Its data has been preserved.</p> }
+}
+<editor-dialog [(open)]="open" title="Interaction Settings" [renderFields]="false" [config]="{width: '36rem'}">
+    <p>Configure this scene's sensor triggers. Gameplay Roles continue to identify the visible player and markers.</p>
+    <fieldset class="fields" [disabled]="pending()">
+        <legend>Scene interactions</legend>
+        <label>Interaction mode
+            <select [formField]="fields.mode">
+                <option value="legacy">Legacy proximity</option><option value="course">Course sensors</option><option value="finish">Finish sensor</option>
+            </select>
+        </label>
+        @if (draft().mode === 'course') {
+            <label>Key trigger
+                <select [formField]="fields.key">
+                    <option value="">Choose a sensor</option>
+                    @for (entity of sensors(); track entity.key) {
+                        <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                    }
+                </select>
+            </label>
+            <label>Exit trigger
+                <select [formField]="fields.exit">
+                    <option value="">Choose a sensor</option>
+                    @for (entity of sensors(); track entity.key) {
+                        <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                    }
+                </select>
+            </label>
+            <label>Destination scene
+                <select [formField]="fields.destination">
+                    <option value="">Choose a scene</option>
+                    @for (scene of editor.snapshot()?.scenes; track scene.id) {
+                        <option [value]="scene.id">{{ scene.asset_path }} ({{ scene.id }})</option>
+                    }
+                </select>
+            </label>
+            <label>Exit blocker
+                <select [formField]="fields.blocker">
+                    <option value="">None</option>
+                    @for (entity of blockers(); track entity.key) {
+                        <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                    }
+                </select>
+            </label>
+        } @else if (draft().mode === 'finish') {
+            <label>Finish trigger
+                <select [formField]="fields.finish">
+                    <option value="">Choose a sensor</option>
+                    @for (entity of sensors(); track entity.key) {
+                        <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                    }
+                </select>
+            </label>
+        } @else {
+            <p>Applying Legacy proximity removes this scene's sensor override.</p>
+        }
+    </fieldset>
+    @if (validation(); as failure) { <p class="error" role="status">{{ failure }}</p> }
+    @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
+    @if (message(); as text) { <p role="status">{{ text }}</p> }
+    <button dialog-actions type="button" [disabled]="!available() || !!validation()" (click)="apply()">Apply Interaction Settings</button>
+</editor-dialog>

@@ -183,6 +183,9 @@ describe('Workspace live editing flow', () => {
                     expect(nativeState.transaction).toBeNull();
                     nativeState = {...nativeState, project: command.project, project_dirty: true, dirty: true};
                     break;
+                case 'set_camera':
+                    nativeState = {...nativeState, dirty: true, document: {...nativeState.document, camera: command.camera}};
+                    break;
                 case 'begin_transaction':
                     expect(nativeState.transaction).toBeNull();
                     transactionBefore = structuredClone(nativeState.document);
@@ -327,6 +330,33 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         expect(editor.playing()).toBe(true);
         expect(editor.snapshot()?.project.input_profile?.movement.positive_y).toBe('arrow_up');
+    });
+
+    it('authors and persists follow camera settings through the real editor command queue', async () => {
+        const open = () => (fixture.nativeElement.querySelector('editor-camera-settings > button') as HTMLButtonElement).click();
+        open();
+        await fixture.whenStable();
+        const mode: HTMLSelectElement = fixture.nativeElement.querySelector('editor-camera-settings select');
+        mode.value = 'follow';
+        mode.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        const apply = [...fixture.nativeElement.querySelectorAll('editor-camera-settings button') as NodeListOf<HTMLButtonElement>]
+            .find(button => button.textContent.trim() === 'Apply Game Camera')!;
+        apply.click();
+        await fixture.whenStable();
+        expect(editor.document()?.camera.follow).toEqual({
+            target: 'robot', offset: [0, 2, 5], look_offset: [0, 0, 0], smoothing_seconds: 0.15,
+        });
+        (fixture.nativeElement.querySelector('editor-camera-settings dialog') as HTMLDialogElement).close();
+        await fixture.whenStable();
+        action('Save Scene').click();
+        await fixture.whenStable();
+        await editor.openProject('fixture/project.json');
+        await fixture.whenStable();
+        expect(editor.document()?.camera.follow?.target).toBe('robot');
+        open();
+        await fixture.whenStable();
+        expect((fixture.nativeElement.querySelector('editor-camera-settings select') as HTMLSelectElement).value).toBe('follow');
     });
 
     it('selects, edits local transforms, saves, and displays persisted values after reopening', async () => {

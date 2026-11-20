@@ -21,6 +21,43 @@ pub const MAX_PROJECT_BYTES: usize = 1024 * 1024;
 pub const MAX_BEHAVIORS: usize = 1024;
 pub const MAX_BEHAVIOR_DEFINITIONS: usize = 1024;
 
+/// Shared traversal budget for opaque native-module settings. Run this before
+/// cloning/serializing a direct DTO as well as before accepting a project.
+pub fn validate_gameplay_payload(settings: &serde_json::Value) -> Result<(), String> {
+	let mut pending = vec![(settings, 0usize)];
+	let mut nodes = 0usize;
+	let mut bytes = 0usize;
+	while let Some((value, depth)) = pending.pop() {
+		nodes += 1;
+		if depth > 16 || nodes > 16_384 || bytes > 256 * 1024 {
+			return Err("Gameplay settings exceed their size or nesting budget".into());
+		}
+		match value {
+			serde_json::Value::Object(fields) => {
+				if fields.len() + pending.len() > 16_384 - nodes {
+					return Err("Gameplay settings exceed their node budget".into());
+				}
+				for (key, value) in fields {
+					bytes = bytes.saturating_add(key.len());
+					pending.push((value, depth + 1));
+				}
+			}
+			serde_json::Value::Array(values) => {
+				if values.len() + pending.len() > 16_384 - nodes {
+					return Err("Gameplay settings exceed their node budget".into());
+				}
+				pending.extend(values.iter().map(|value| (value, depth + 1)));
+			}
+			serde_json::Value::String(value) => bytes = bytes.saturating_add(value.len()),
+			_ => {}
+		}
+	}
+	if bytes > 256 * 1024 {
+		return Err("Gameplay settings exceed their size budget".into());
+	}
+	Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BehaviorSpace {
@@ -118,6 +155,9 @@ pub struct ProjectData {
 	pub input_profile: Option<InputProfile>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub gameplay_module: Option<String>,
+	/// Native modules own the typed schema. Core bounds the generic payload.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub gameplay_settings: Option<serde_json::Value>,
 }
 
 fn default_hz() -> u32 {
@@ -161,6 +201,7 @@ impl ProjectData {
 			behavior_definitions: Vec::new(),
 			input_profile: None,
 			gameplay_module: None,
+			gameplay_settings: None,
 		};
 		project.validate_scene(scene)?;
 		Ok(project)
@@ -224,6 +265,9 @@ impl ProjectData {
 			}
 		}
 		let mut definitions = HashMap::with_capacity(self.behavior_definitions.len());
+		if let Some(settings) = &self.gameplay_settings {
+			validate_gameplay_payload(settings)?;
+		}
 		for (index, definition) in self.behavior_definitions.iter().enumerate() {
 			definition
 				.validate()

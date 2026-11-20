@@ -38,6 +38,7 @@ fn empty_and_single_entry_batches_preserve_handles_limits_and_accounting() {
 		),
 		(
 			AssetRef {
+				asset_id: None,
 				path: "../a.glb".into(),
 				mesh_index: None,
 			},
@@ -153,6 +154,7 @@ fn batch_registration_rolls_back_existing_updates_and_new_handles_on_every_rejec
 			(reference.clone(), updated.clone()),
 			(
 				AssetRef {
+					asset_id: None,
 					path: "../outside.glb".into(),
 					mesh_index: None,
 				},

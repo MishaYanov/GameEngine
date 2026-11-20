@@ -26,6 +26,8 @@ impl Default for TransformDto {
 pub struct EntitySpecDto {
 	pub name: String,
 	pub model_path: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub asset_id: Option<crate::asset_catalog::AssetId>,
 	#[serde(default)]
 	pub transform: TransformDto,
 	#[serde(default)]

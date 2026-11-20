@@ -1,4 +1,5 @@
 import type {Collider, ColliderInteraction, Vec3} from '../../../../core/editor/editor.models';
+import {parseF32} from '../../../../core/editor/authoring-number';
 
 export type ColliderKind = 'none' | Collider['kind'];
 export type ColliderNumberField = 'offset' | 'half_extents' | 'radius';
@@ -54,10 +55,8 @@ function validF32(value: number, positive = false): boolean {
 }
 
 export function parseColliderNumber(raw: string, positive = false): number | null {
-    if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw.trim())) return null;
-    const value = Number(raw);
-    if (value === 0 && /[1-9]/.test(raw.split(/[eE]/)[0])) return null;
-    return validF32(value, positive) ? value : null;
+    const value = parseF32(raw);
+    return value !== null && (!positive || value > 0) ? value : null;
 }
 
 function vector(value: Vec3, positive = false): Vec3 {

@@ -84,6 +84,7 @@ pub fn instantiate_with_progress(
 	let total = data.entities.len();
 	prepared(0, total);
 	let mut scene = Scene::default();
+	scene.set_camera_follow(data.camera.follow.clone());
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
 	let mut render_objects = 0usize;
@@ -91,8 +92,13 @@ pub fn instantiate_with_progress(
 		let cache_key = engine_core::asset_registry::AssetRef::new(
 			entity.model_path.clone(),
 			Some(entity.mesh_index.unwrap_or(0)),
-		)?;
-		let model = if !entity.renderable {
+		)?
+		.with_asset_id(entity.asset_id.clone());
+		let model = if !entity.renderable
+			&& !assets
+				.asset_exists(&cache_key)
+				.map_err(|error| error.to_string())?
+		{
 			Arc::clone(&group_model)
 		} else if let Some(model) = models.get(&cache_key) {
 			Arc::clone(model)

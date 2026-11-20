@@ -36,6 +36,7 @@ export interface ProjectData {
     readonly behavior_definitions: readonly { readonly id: string; readonly settings: BehaviorSettings }[];
     readonly input_profile?: GameInputProfile | null;
     readonly gameplay_module?: string | null;
+    readonly gameplay_settings?: unknown;
 }
 
 export interface SceneState extends SceneDescriptor {
@@ -63,6 +64,14 @@ export interface Camera {
     readonly vertical_fov: number;
     readonly near: number;
     readonly far: number;
+    readonly follow?: FollowCamera | null;
+}
+
+export interface FollowCamera {
+    readonly target: EntityKey;
+    readonly offset: Vec3;
+    readonly look_offset: Vec3;
+    readonly smoothing_seconds: number;
 }
 
 export interface MaterialOverride {
@@ -83,7 +92,9 @@ export interface SceneEntity {
     readonly key: EntityKey;
     readonly name: string;
     readonly model_path: string;
+    readonly asset_id?: string | null;
     readonly renderable: boolean;
+    readonly collision_enabled?: boolean;
     readonly transform: Transform;
     readonly parent?: EntityKey | null;
     readonly material?: MaterialOverride | null;
@@ -118,6 +129,7 @@ export interface Prefab {
 export interface EntitySpec {
     readonly name: string;
     readonly model_path: string;
+    readonly asset_id?: string | null;
     readonly transform?: Transform;
     readonly parent?: EntityKey | null;
     readonly mesh_index?: number | null;
@@ -309,6 +321,18 @@ export interface GameplayModuleDescriptor {
 export interface ModelAsset {
     readonly name: string;
     readonly path: string;
+    readonly kind?: 'model' | 'prefab';
+    readonly asset_id?: string | null;
+    readonly fingerprint?: string | null;
+    readonly revision?: number | null;
+    readonly source_path?: string | null;
+    readonly mesh_count?: number | null;
+}
+
+export interface AssetOperation {
+    readonly operation_id: string;
+    readonly asset: ModelAsset;
+    readonly snapshot: EditorSnapshot;
 }
 
 export interface ProjectBuildResult {

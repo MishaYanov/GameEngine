@@ -42,6 +42,7 @@ pub(super) fn apply(
 				.transpose()?;
 			let key = fresh_key(data);
 			let entity = EntityData::new(key.clone(), entity.name, entity.model_path)
+				.with_asset_id(entity.asset_id)
 				.with_parent(parent)
 				.with_transform(transform_from_dto(entity.transform)?)
 				.with_mesh_index(entity.mesh_index);
@@ -205,6 +206,14 @@ pub(super) fn apply(
 			data.entities
 				.retain(|entity| !removed.contains(&entity.key));
 			data.bindings.retain(|_, key| !removed.contains(key));
+			if data
+				.camera
+				.follow
+				.as_ref()
+				.is_some_and(|follow| removed.contains(&follow.target))
+			{
+				data.camera.follow = None;
+			}
 			selection.clear();
 		}
 		EditorCommandDto::Reparent {
@@ -848,6 +857,7 @@ mod tests {
 				EntityData::new(key("b"), "B", "model.glb"),
 			],
 			camera: CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

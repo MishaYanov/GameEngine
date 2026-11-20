@@ -153,10 +153,12 @@ const bounds: ViewportBounds = {x: 0, y: 0, width: 800, height: 600, visible: tr
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>((done) => {
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((done, fail) => {
         resolve = done;
+        reject = fail;
     });
-    return {promise, resolve};
+    return {promise, resolve, reject};
 }
 
 describe('EditorService native command and viewport queues', () => {
@@ -212,7 +214,6 @@ describe('EditorService native command and viewport queues', () => {
             vi.mocked(invoke)
                 .mockResolvedValueOnce(initial)
                 .mockReturnValueOnce(replacement.promise)
-                .mockResolvedValueOnce(reopened)
                 .mockResolvedValueOnce(capabilities)
                 .mockResolvedValueOnce(commandUpdate(assigned));
             const service = TestBed.inject(EditorService);
@@ -232,6 +233,8 @@ describe('EditorService native command and viewport queues', () => {
             await rejected;
             expect(service.workspaceGeneration()).toBe(generation + 1);
             expect(service.snapshot()).toEqual(reopened);
+            expect(service.error()).toBeNull();
+            expect(vi.mocked(invoke).mock.calls.some(([name]) => name === 'editor_snapshot')).toBe(false);
             expect(vi.mocked(invoke).mock.calls.some(([name]) =>
                 name === 'editor_execute' || name === 'editor_execute_incremental')).toBe(false);
 
@@ -941,6 +944,109 @@ describe('EditorService native command and viewport queues', () => {
         vi.mocked(invoke).mockResolvedValueOnce(capabilities);
         await service.loadCapabilities();
         expect(service.capabilities()?.gameplay_modules).toBeUndefined();
+    });
+
+    it('accepts an asset operation snapshot and retains the displayed catalog until refresh', async () => {
+        const asset = {name: 'Imported', path: 'models/imported.glb', kind: 'model' as const,
+            asset_id: 'imported-id', fingerprint: 'new-fingerprint'};
+        const previous = [{name: 'Old model', path: 'models/old.glb'}];
+        const next = snapshot(2);
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockResolvedValueOnce(previous)
+            .mockResolvedValueOnce({operation_id: 'import-operation', asset, snapshot: next});
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.assets();
+        const result = await service.importExternalGlb('C:/Models/source.glb', 'models/imported.glb', service.workspaceGeneration(), 1);
+        expect(result.asset).toEqual(asset);
+        expect(service.snapshot()).toBe(next);
+        expect(service.modelAssets()).toEqual(previous);
+        expect(invoke).toHaveBeenLastCalledWith('editor_import_external_glb', {
+            sourcePath: 'C:/Models/source.glb', destinationPath: 'models/imported.glb', expectedRevision: 1,
+        });
+        vi.mocked(invoke).mockResolvedValueOnce([asset]);
+        expect(await service.assets()).toEqual([asset]);
+        expect(service.modelAssets()).toEqual([asset]);
+    });
+
+    it('ignores a pre-publication catalog reply and requests fresh entries after a move', async () => {
+        const original: ModelAsset = {name: 'Actor', path: 'actor.glb', asset_id: 'actor-id'};
+        const moved = {...original, path: 'moved.glb'};
+        const stale = deferred<readonly ModelAsset[]>();
+        const fresh = deferred<readonly ModelAsset[]>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockResolvedValueOnce([original])
+            .mockReturnValueOnce(stale.promise)
+            .mockResolvedValueOnce({operation_id: 'move', asset: moved, snapshot: snapshot(2)})
+            .mockReturnValueOnce(fresh.promise);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.assets();
+        const oldRequest = service.assets(true);
+        await service.moveAsset('actor-id', 'moved.glb', service.workspaceGeneration(), 1);
+        const newRequest = service.assets();
+        expect(newRequest).not.toBe(oldRequest);
+        expect(service.modelAssets()).toEqual([original]);
+        fresh.resolve([moved]);
+        await newRequest;
+        stale.resolve([original]);
+        await oldRequest;
+        expect(service.modelAssets()).toEqual([moved]);
+        expect(vi.mocked(invoke).mock.calls.filter(([name]) => name === 'editor_assets')).toHaveLength(3);
+    });
+
+    it('carries reimport fingerprint and captured revision without rewriting the request', async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(5))
+            .mockResolvedValueOnce({operation_id: 'reimport', asset: {name: 'Actor', path: 'actor.glb'}, snapshot: snapshot(6)});
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.reimportAsset('actor-id', 'captured-fingerprint', 'C:/Models/new.glb', service.workspaceGeneration(), 4);
+        expect(invoke).toHaveBeenLastCalledWith('editor_reimport_asset', {
+            assetId: 'actor-id', expectedFingerprint: 'captured-fingerprint', sourcePath: 'C:/Models/new.glb', expectedRevision: 4,
+        });
+    });
+
+    it('rejects queued asset publication when its workspace was replaced', async () => {
+        const replacement = deferred<EditorSnapshot>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockReturnValueOnce(replacement.promise);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('first/project.json');
+        const generation = service.workspaceGeneration();
+        const reopen = service.openProject('second/project.json');
+        const stale = service.importExternalGlb('C:/Models/old.glb', 'old.glb', generation, 1);
+        const rejected = expect(stale).rejects.toThrow('workspace changed');
+        replacement.resolve(snapshot(10));
+        await reopen;
+        await rejected;
+        expect(vi.mocked(invoke).mock.calls.some(([name]) => name === 'editor_import_external_glb')).toBe(false);
+        expect(vi.mocked(invoke).mock.calls.some(([name]) => name === 'editor_snapshot')).toBe(false);
+        expect(service.snapshot()?.revision).toBe(10);
+        expect(service.error()).toBeNull();
+    });
+
+    it('does not replace current workspace feedback with a late source-picker rejection', async () => {
+        const picker = deferred<string | null>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockReturnValueOnce(picker.promise)
+            .mockResolvedValueOnce(snapshot(10))
+            .mockRejectedValueOnce('Current workspace picker failure');
+        const service = TestBed.inject(EditorService);
+        await service.openProject('first/project.json');
+        const stale = service.chooseExternalGlb();
+        const rejected = expect(stale).rejects.toThrow('Old workspace picker failure');
+        await service.openProject('second/project.json');
+        await expect(service.chooseExternalGlb()).rejects.toThrow('Current workspace picker failure');
+        const currentError = service.error();
+        picker.reject('Old workspace picker failure');
+        await rejected;
+        expect(service.error()).toBe(currentError);
+        expect(service.snapshot()?.revision).toBe(10);
     });
 
     it('coalesces queued viewport bounds to the latest geometry', async () => {

@@ -468,7 +468,10 @@ fn game_status_publishes_progress_only_completion_restart_and_new_play_identity(
 	let outcome = workspace.backend.tick(1.0 / 60.0);
 	controller.sync_game_status_after_tick(&workspace, &outcome);
 	let outcome = outcome.unwrap();
-	assert!(outcome.progress_changed && outcome.changes.is_empty());
+	// Coincident authored sensors collect the key, publish its visual feedback,
+	// and request the unlocked exit in the same accepted step.
+	assert!(outcome.progress_changed && !outcome.changes.is_empty());
+	assert_eq!(outcome.requested_scene.unwrap().as_str(), "finish");
 	assert!(controller.state().revision > before);
 	assert_eq!(
 		controller
@@ -481,9 +484,6 @@ fn game_status_publishes_progress_only_completion_restart_and_new_play_identity(
 		Some(1)
 	);
 	assert!(!controller.take_document_changed());
-	let outcome = workspace.backend.tick(1.0 / 60.0);
-	controller.sync_game_status_after_tick(&workspace, &outcome);
-	assert_eq!(outcome.unwrap().requested_scene.unwrap().as_str(), "finish");
 	assert_eq!(
 		controller
 			.state()
@@ -686,6 +686,7 @@ impl Fixture {
 				})
 				.collect(),
 			camera: CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

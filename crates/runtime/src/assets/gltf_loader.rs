@@ -241,6 +241,7 @@ fn read_uri_in_root(
 }
 
 pub(super) struct Resources {
+	pub(super) source_fingerprint: String,
 	document: gltf::Document,
 	buffers: Vec<gltf::buffer::Data>,
 	images: Vec<ImageResource>,
@@ -287,6 +288,29 @@ impl Resources {
 		mesh_index: usize,
 	) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
 		import_mesh(&self.document, &self.buffers, &self.images, mesh_index)
+	}
+	/// Authoring publication validates even unused embedded images. Runtime
+	/// scene loading retains the cheaper selected-mesh image preparation path.
+	pub(super) fn prepare_all_images(&mut self) -> Result<(), GltfLoaderError> {
+		let mut budget = self.budget;
+		let mut prepared = Vec::new();
+		for (index, image) in self.images.iter().enumerate() {
+			let encoded = match image {
+				ImageResource::Encoded(bytes) => bytes.as_slice(),
+				ImageResource::View {
+					buffer,
+					offset,
+					end,
+				} => &self.buffers[*buffer].0[*offset..*end],
+				ImageResource::Decoded(_) => continue,
+			};
+			prepared.push((index, decode_image(encoded, &mut budget)?));
+		}
+		for (index, image) in prepared {
+			self.images[index] = ImageResource::Decoded(image);
+		}
+		self.budget = budget;
+		Ok(())
 	}
 
 	pub(super) fn prepare_mesh_images(&mut self, mesh_index: usize) -> Result<(), GltfLoaderError> {
@@ -361,6 +385,7 @@ pub(super) fn load_resources_in_root(
 		.ok_or_else(|| rejected("missing model directory"))?;
 	let mut budget = IMPORT_LIMIT;
 	let bytes = read_bounded(&path, &mut budget)?;
+	let source_fingerprint = super::project_assets::fingerprint(&bytes);
 	let gltf::Gltf { document, mut blob } = gltf::Gltf::from_slice(&bytes)?;
 	drop(bytes);
 	if document.nodes().len() > 10_000
@@ -413,6 +438,7 @@ pub(super) fn load_resources_in_root(
 		images.push(source);
 	}
 	Ok(Resources {
+		source_fingerprint,
 		document,
 		buffers,
 		images,

@@ -3,6 +3,7 @@ mod metrics;
 mod renderer;
 mod window_renderer;
 
+pub mod ui;
 pub mod vulkan;
 
 pub use editor_visuals::{EditorGrid, EditorLine, EditorVisuals, MAX_EDITOR_LINES};

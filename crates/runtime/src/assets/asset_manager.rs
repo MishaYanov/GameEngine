@@ -26,6 +26,7 @@ pub struct AssetManager {
 	meshes: HashMap<String, Arc<VulkanMesh>>,
 	image_textures: HashMap<String, Arc<VulkanTexture>>,
 	models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>>,
+	source_fingerprints: HashMap<PathBuf, String>,
 	scenes: HashMap<PathBuf, Arc<super::ImportedScene>>,
 	scene_order: VecDeque<PathBuf>,
 	scene_bytes: usize,
@@ -34,6 +35,19 @@ pub struct AssetManager {
 	resource_bytes: usize,
 	gpu_allocations: Vec<GpuAllocation>,
 	gpu_bytes: usize,
+	gpu_byte_limit: usize,
+	gpu_resource_limit: usize,
+}
+
+/// Uploaded resources remain private under the temporary source key until the
+/// caller publishes the matching CPU asset. Promotion performs no I/O or GPU
+/// allocation. Discard candidates on a rejected/stale publication.
+pub struct PreparedGpuAsset {
+	candidate: PathBuf,
+	destination: PathBuf,
+	candidate_relative: String,
+	destination_relative: String,
+	reuses_source: bool,
 }
 
 enum GpuReference {
@@ -193,6 +207,7 @@ impl AssetManager {
 		}
 		self.cache_resources(&full_path, mesh_index)?;
 		let (resources, _) = &self.resource_cache[&full_path];
+		let source_fingerprint = resources.source_fingerprint.clone();
 		let imported_parts = resources.import_mesh(mesh_index)?;
 		self.preflight_model_upload(&full_path, &imported_parts)?;
 		self.upload_model_resources(renderer, &full_path, &imported_parts)?;
@@ -242,6 +257,8 @@ impl AssetManager {
 		);
 		let model = Arc::new(Model::with_bounds(parts, bounds));
 		self.models.insert(model_key, Arc::clone(&model));
+		self.source_fingerprints
+			.insert(full_path, source_fingerprint);
 		Ok(model)
 	}
 
@@ -252,10 +269,157 @@ impl AssetManager {
 		renderer: &WindowRenderer,
 		reference: &engine_core::asset_registry::AssetRef,
 	) -> Result<Arc<Model>, AssetManagerError> {
-		reference
-			.validate()
+		let reference = super::project_assets::resolve_asset(&self.root, reference)
 			.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
 		self.load_model_mesh(renderer, &reference.path, reference.mesh_index.unwrap_or(0))
+	}
+
+	/// Hidden authoring markers may deliberately have no model. Existing glTF
+	/// models are prepared so a later visibility action needs no asset I/O. Test
+	/// the resolved catalog path; aliases may retain an older file extension.
+	pub fn asset_exists(
+		&self,
+		reference: &engine_core::asset_registry::AssetRef,
+	) -> Result<bool, AssetManagerError> {
+		let reference = super::project_assets::resolve_asset(&self.root, reference)
+			.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
+		if !Path::new(&reference.path)
+			.extension()
+			.and_then(|extension| extension.to_str())
+			.is_some_and(|extension| {
+				extension.eq_ignore_ascii_case("gltf") || extension.eq_ignore_ascii_case("glb")
+			}) {
+			return Ok(false);
+		}
+		match self.resolve(&reference.path) {
+			Ok(path) => Ok(path.is_file()),
+			Err(AssetManagerError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+				Ok(false)
+			}
+			Err(error) => Err(error),
+		}
+	}
+
+	/// Upload every compatible mesh without replacing an existing source key.
+	/// Old scene resources and candidates share the same live-allocation budget.
+	pub fn prepare_gpu_asset(
+		&mut self,
+		renderer: &WindowRenderer,
+		change: &super::project_assets::PreparedAssetChange,
+	) -> Result<PreparedGpuAsset, AssetManagerError> {
+		let source = (!change.is_reimport())
+			.then(|| change.asset().aliases.last())
+			.flatten()
+			.and_then(|alias| self.resolve(alias).ok())
+			.filter(|path| self.source_fingerprints.get(path) == Some(&change.asset().fingerprint));
+		let reuses_source = source.is_some();
+		let candidate = match source {
+			Some(path) => path,
+			None => self.resolve(change.candidate_path())?,
+		};
+		let destination =
+			super::project_assets::asset_path(&self.root, change.destination_path(), false)
+				.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
+		let candidate_relative = candidate
+			.strip_prefix(&self.root)
+			.expect("resolved candidate belongs to asset root")
+			.to_string_lossy()
+			.replace('\\', "/");
+		let prepared = PreparedGpuAsset {
+			candidate,
+			destination,
+			candidate_relative,
+			destination_relative: change.destination_path().to_owned(),
+			reuses_source,
+		};
+		for mesh in &change.asset().meshes {
+			if let Err(error) = self.load_model_mesh(renderer, &prepared.candidate, mesh.index) {
+				self.discard_gpu_asset(prepared);
+				return Err(error);
+			}
+		}
+		Ok(prepared)
+	}
+
+	/// Caller must complete submitted frames before retiring source cache owners.
+	/// Existing external Model/Scene Arcs continue owning the old resources.
+	pub fn promote_gpu_asset(&mut self, prepared: PreparedGpuAsset) {
+		self.forget_source(&prepared.destination, &prepared.destination_relative);
+		let models: Vec<_> = self
+			.models
+			.keys()
+			.filter(|key| key.path == prepared.candidate_relative)
+			.cloned()
+			.collect();
+		for key in models {
+			if let Some(model) = self.models.remove(&key) {
+				let mut destination = key;
+				destination.path = prepared.destination_relative.clone();
+				self.models.insert(destination, model);
+			}
+		}
+		let from = prepared.candidate.to_string_lossy();
+		let to = prepared.destination.to_string_lossy();
+		remap_keys(&mut self.meshes, &from, &to);
+		remap_keys(&mut self.image_textures, &from, &to);
+		if let Some(value) = self.resource_cache.remove(&prepared.candidate) {
+			self.resource_cache
+				.insert(prepared.destination.clone(), value);
+		}
+		if let Some(value) = self.source_fingerprints.remove(&prepared.candidate) {
+			self.source_fingerprints
+				.insert(prepared.destination.clone(), value);
+		}
+		for path in &mut self.resource_order {
+			if *path == prepared.candidate {
+				*path = prepared.destination.clone();
+			}
+		}
+		if let Some(value) = self.scenes.remove(&prepared.candidate) {
+			self.scenes.insert(prepared.destination.clone(), value);
+		}
+		for path in &mut self.scene_order {
+			if *path == prepared.candidate {
+				*path = prepared.destination.clone();
+			}
+		}
+		self.scene_bytes = self
+			.scenes
+			.iter()
+			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
+			.sum();
+		if let Some(value) = self.textures.remove(&prepared.candidate) {
+			self.textures.insert(prepared.destination, value);
+		}
+		self.reap_gpu_allocations();
+	}
+
+	pub fn discard_gpu_asset(&mut self, prepared: PreparedGpuAsset) {
+		if !prepared.reuses_source {
+			self.forget_source(&prepared.candidate, &prepared.candidate_relative);
+		}
+		self.reap_gpu_allocations();
+	}
+
+	fn forget_source(&mut self, path: &Path, relative: &str) {
+		self.models.retain(|key, _| key.path != relative);
+		self.source_fingerprints.remove(path);
+		let prefix = format!("{}#", path.display());
+		self.meshes.retain(|key, _| !key.starts_with(&prefix));
+		self.image_textures
+			.retain(|key, _| !key.starts_with(&prefix));
+		self.textures.remove(path);
+		self.scenes.remove(path);
+		self.scene_order.retain(|key| key != path);
+		self.scene_bytes = self
+			.scenes
+			.iter()
+			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
+			.sum();
+		if let Some((_, bytes)) = self.resource_cache.remove(path) {
+			self.resource_bytes -= bytes;
+		}
+		self.resource_order.retain(|key| key != path);
 	}
 
 	/// CPU-only hierarchy metadata for the selected default glTF scene. This
@@ -325,6 +489,7 @@ impl AssetManager {
 			meshes: HashMap::new(),
 			image_textures: HashMap::new(),
 			models: HashMap::new(),
+			source_fingerprints: HashMap::new(),
 			scenes: HashMap::new(),
 			scene_order: VecDeque::new(),
 			scene_bytes: 0,
@@ -333,6 +498,8 @@ impl AssetManager {
 			resource_bytes: 0,
 			gpu_allocations: Vec::new(),
 			gpu_bytes: 0,
+			gpu_byte_limit: Self::GPU_LOGICAL_BYTE_LIMIT,
+			gpu_resource_limit: Self::GPU_RESOURCE_LIMIT,
 		})
 	}
 
@@ -426,6 +593,9 @@ impl AssetManager {
 	pub fn loaded_mesh_count(&self) -> usize {
 		self.meshes.len()
 	}
+	pub fn loaded_model_count(&self) -> usize {
+		self.models.len()
+	}
 
 	pub fn gpu_logical_bytes(&self) -> usize {
 		self.gpu_allocations
@@ -442,6 +612,23 @@ impl AssetManager {
 			.count()
 	}
 
+	/// Hosts may tighten the default upload budgets. Existing external scene Arcs
+	/// stay charged; this never evicts or replaces them to admit a candidate.
+	pub fn set_gpu_budget(
+		&mut self,
+		bytes: usize,
+		resources: usize,
+	) -> Result<(), AssetManagerError> {
+		if bytes > Self::GPU_LOGICAL_BYTE_LIMIT || resources > Self::GPU_RESOURCE_LIMIT {
+			return Err(AssetManagerError::ResourceBudget(
+				"Configured GPU budget exceeds the engine limits".into(),
+			));
+		}
+		self.gpu_byte_limit = bytes;
+		self.gpu_resource_limit = resources;
+		Ok(())
+	}
+
 	pub fn contains_texture(&self, path: impl AsRef<Path>) -> bool {
 		let Ok(full_path) = self.resolve(path) else {
 			return false;
@@ -456,6 +643,7 @@ impl AssetManager {
 
 	pub fn clear(&mut self) {
 		self.models.clear();
+		self.source_fingerprints.clear();
 		self.scenes.clear();
 		self.scene_order.clear();
 		self.scene_bytes = 0;
@@ -490,6 +678,8 @@ impl AssetManager {
 			.keys()
 			.map(|reference| self.root.join(&reference.path))
 			.collect();
+		self.source_fingerprints
+			.retain(|path, _| retained_paths.contains(path));
 		self.meshes.retain(|_, mesh| Arc::strong_count(mesh) > 1);
 		self.textures
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
@@ -600,8 +790,8 @@ impl AssetManager {
 				"request needs {bytes} logical bytes and {entries} resources; {} bytes/{} resources remain live (limits: {} bytes and {}). Release unused scene resources and prune the cache before retrying",
 				self.gpu_bytes,
 				self.gpu_allocations.len(),
-				Self::GPU_LOGICAL_BYTE_LIMIT,
-				Self::GPU_RESOURCE_LIMIT
+				self.gpu_byte_limit,
+				self.gpu_resource_limit
 			)));
 		}
 		Ok(())
@@ -610,12 +800,12 @@ impl AssetManager {
 	fn gpu_budget_fits(&self, bytes: usize, entries: usize) -> bool {
 		self.gpu_bytes
 			.checked_add(bytes)
-			.is_some_and(|total| total <= Self::GPU_LOGICAL_BYTE_LIMIT)
+			.is_some_and(|total| total <= self.gpu_byte_limit)
 			&& self
 				.gpu_allocations
 				.len()
 				.checked_add(entries)
-				.is_some_and(|count| count <= Self::GPU_RESOURCE_LIMIT)
+				.is_some_and(|count| count <= self.gpu_resource_limit)
 	}
 
 	fn preflight_model_upload(
@@ -780,6 +970,20 @@ enum PendingUpload<'a> {
 		id: String,
 		image: &'a ImageAsset,
 	},
+}
+
+fn remap_keys<T>(cache: &mut HashMap<String, T>, from: &str, to: &str) {
+	let prefix = format!("{from}#");
+	let keys: Vec<_> = cache
+		.keys()
+		.filter(|key| key.starts_with(&prefix))
+		.cloned()
+		.collect();
+	for key in keys {
+		if let Some(value) = cache.remove(&key) {
+			cache.insert(format!("{to}{}", &key[from.len()..]), value);
+		}
+	}
 }
 
 impl PendingUpload<'_> {

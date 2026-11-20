@@ -559,6 +559,12 @@ impl EditorWorkspace {
 		}
 		Ok(output)
 	}
+	/// Asset files cannot claim any registered scene destination, including a
+	/// scene whose document is still an unsaved retained draft.
+	#[cfg_attr(test, allow(dead_code))] // IPC/native callers are absent from include-based CPU tests.
+	pub fn validate_asset_destination(&self, path: &str) -> Result<(), String> {
+		self.scene_output(path, None).map(|_| ())
+	}
 	pub fn save(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
 		if self.backend.session().has_transaction() {
@@ -853,6 +859,69 @@ impl EditorWorkspace {
 		}
 		Ok(())
 	}
+	/// Capture every retained authored scene, including inactive unsaved drafts.
+	pub fn used_asset_meshes(
+		&self,
+		id: &runtime::asset_catalog::AssetId,
+	) -> Result<HashSet<usize>, String> {
+		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+		let mut used = HashSet::new();
+		for entry in self.backend.session().project().scenes.iter() {
+			let scene = self.backend.session().scene_document(entry.id())?;
+			for entity in &scene.entities {
+				if catalog
+					.resolve(
+						entity.asset_id.as_ref(),
+						&entity.model_path,
+						entity.mesh_index,
+					)?
+					.is_some_and(|asset| &asset.id == id)
+				{
+					used.insert(entity.mesh_index.unwrap_or(0));
+				}
+			}
+		}
+		// Prefabs are authored dependants too; compatibility must not depend on
+		// whether one happens to be instantiated in the currently open scene.
+		for asset in catalog
+			.assets
+			.iter()
+			.filter(|asset| asset.kind == runtime::asset_catalog::AssetKind::Prefab)
+		{
+			let path = resolve_existing(&self.asset_root, &asset.path)?;
+			let bytes = read_bounded(&path, PrefabData::MAX_JSON_BYTES as u64)?;
+			let prefab =
+				PrefabData::from_json(std::str::from_utf8(&bytes).map_err(|e| e.to_string())?)?;
+			for entity in &prefab.entities {
+				if catalog
+					.resolve(
+						entity.asset_id.as_ref(),
+						&entity.model_path,
+						entity.mesh_index,
+					)?
+					.is_some_and(|asset| &asset.id == id)
+				{
+					used.insert(entity.mesh_index.unwrap_or(0));
+				}
+			}
+		}
+		Ok(used)
+	}
+	pub fn asset_published(&mut self) -> Result<EditorSnapshotDto, String> {
+		self.metadata.clear();
+		if let Err(error) = self.jobs.advance_generation() {
+			engine_logger::error!(target: "editor", "Asset job generation reset failed after publication: {error}");
+		}
+		self.pending.clear();
+		self.bounds_seen.clear();
+		self.bounds_references.clear();
+		self.bounds_queue.clear();
+		self.backend
+			.invalidate_assets()
+			.map_err(|e| e.to_string())?;
+		self.cache_bounds();
+		self.backend.snapshot().map_err(|e| e.to_string())
+	}
 
 	pub fn import_model(
 		&mut self,
@@ -864,6 +933,11 @@ impl EditorWorkspace {
 		if !position.iter().all(|v| v.is_finite()) {
 			return Err("Import position must be finite".into());
 		}
+		let reference = runtime::assets::project_assets::resolve_asset(
+			&self.asset_root,
+			&AssetRef::new(path, None)?,
+		)?;
+		let path = reference.path.as_str();
 		resolve_existing(&self.asset_root, path)?;
 		let imported = file_operation(
 			"import_model",
@@ -878,6 +952,9 @@ impl EditorWorkspace {
 		imported: &ImportedScene,
 		position: [f32; 3],
 	) -> Result<(), String> {
+		let asset_id = runtime::assets::project_assets::load_catalog(&self.asset_root)?
+			.by_path(path)
+			.map(|asset| asset.id.clone());
 		let remap: std::collections::HashMap<_, _> = imported
 			.nodes
 			.iter()
@@ -902,6 +979,7 @@ impl EditorWorkspace {
 				selection.push(key.clone());
 			}
 			let mut entity = EntityData::new(key, node.name.clone(), path)
+				.with_asset_id(asset_id.clone())
 				.with_renderable(node.mesh_index.is_some());
 			entity.parent = parent;
 			entity.mesh_index = node.mesh_index;
@@ -942,11 +1020,13 @@ impl EditorWorkspace {
 	pub fn save_prefab(&self, path: &str, revision: u64) -> Result<String, String> {
 		self.check_revision(revision)?;
 		let prefab = self.backend.session().export_prefab()?;
-		let output = resolve_output(&self.asset_root, path)?;
+		let output = self.scene_output(path, None)?;
 		if output.extension().and_then(|e| e.to_str()) != Some("json") {
 			return Err("Prefab files use .json".into());
 		}
-		file_operation("save_prefab", atomic_json(&output, &prefab))?;
+		let prepared =
+			runtime::assets::project_assets::prepare_prefab(&self.asset_root, path, &prefab)?;
+		file_operation("save_prefab", prepared.publish().map(|_| ()))?;
 		engine_logger::info!(target: "editor", "Prefab saved: generation={}, entities={}", self.generation, prefab.entities.len());
 		Ok(path.into())
 	}
@@ -957,6 +1037,10 @@ impl EditorWorkspace {
 		revision: u64,
 	) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
+		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+		let path = catalog
+			.by_path(path)
+			.map_or(path, |asset| asset.path.as_str());
 		let path = resolve_existing(&self.asset_root, path)?;
 		let bytes = file_operation("read_prefab", read_bounded(&path, 16 * 1024 * 1024))?;
 		let prefab =

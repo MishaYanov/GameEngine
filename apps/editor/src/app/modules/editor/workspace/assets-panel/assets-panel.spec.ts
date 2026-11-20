@@ -1,12 +1,17 @@
 import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
+import {invoke} from '@tauri-apps/api/core';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetsPanel} from './assets-panel';
+
+vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
+vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 
 const robot: ModelAsset = {name: 'Robot', path: 'props/robot.glb'};
 
@@ -48,15 +53,17 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         return true;
     });
     const drag = {canBegin: () => true, candidate: vi.fn(), candidateScene: vi.fn()};
-    const importModel = vi.fn(async (_path: string, _position: readonly [number, number, number]) => {
+    const importModel = vi.fn(async (_path: string, _position: readonly [number, number, number], _generation?: number, _revision?: number) => {
         current.update(value => ({...value, dirty: true}));
         return current();
     });
+    const loadPrefab = vi.fn(async (_path: string, _position: readonly [number, number, number], _generation?: number, _revision?: number) => current());
     TestBed.configureTestingModule({providers: [
+        {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
         {provide: EditorService, useValue: {
             nativeAvailable: options.nativeAvailable ?? true,
             snapshot: current, busy, playing: computed(() => current().mode === 'play'),
-                modelAssets, assets, importModel, workspaceGeneration,
+                modelAssets, assets, importModel, loadPrefab, workspaceGeneration,
         }},
             {provide: SceneSwitchService, useValue: {request, canSwitch: () => true}},
             {provide: ViewportAssetDragService, useValue: drag},
@@ -75,10 +82,66 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         return candidate;
     };
     await fixture.whenStable();
-    return {fixture, root, button, file, current, modelAssets, busy, assets, request, importModel, drag};
+    return {fixture, root, button, file, current, modelAssets, busy, assets, request, importModel, loadPrefab, drag};
 }
 
 describe('AssetsPanel', () => {
+    it('retains selection through real service publication and the following catalog refresh', async () => {
+        const original: ModelAsset = {...robot, asset_id: 'robot-id', kind: 'model'};
+        const moved: ModelAsset = {...original, path: 'props/moved.glb'};
+        let resolve!: (assets: readonly ModelAsset[]) => void;
+        const refreshed = new Promise<readonly ModelAsset[]>(done => resolve = done);
+        vi.mocked(invoke).mockReset()
+            .mockResolvedValueOnce(snapshot())
+            .mockResolvedValueOnce([original])
+            .mockResolvedValueOnce({operation_id: 'move', asset: moved, snapshot: {...snapshot(), revision: 2}})
+            .mockReturnValueOnce(refreshed);
+        TestBed.configureTestingModule({providers: [EditorService,
+            {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
+            {provide: SceneSwitchService, useValue: {request: vi.fn(), canSwitch: () => true}},
+        ]});
+        const editor = TestBed.inject(EditorService);
+        await editor.openProject('project.json');
+        await editor.assets();
+        const fixture = TestBed.createComponent(AssetsPanel);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        [...root.querySelectorAll('button')].find(button => button.textContent.trim() === 'props')!.click();
+        await fixture.whenStable();
+        const file = (path: string) => root.querySelector<HTMLButtonElement>(`.asset-file[title="${path}"] button`);
+        file(original.path)!.click();
+        await fixture.whenStable();
+        await editor.moveAsset('robot-id', moved.path, editor.workspaceGeneration(), 1);
+        await fixture.whenStable();
+        expect(file(original.path)?.getAttribute('aria-pressed')).toBe('true');
+        const refresh = editor.assets();
+        resolve([moved]);
+        await refresh;
+        await fixture.whenStable();
+        expect(file(moved.path)?.getAttribute('aria-pressed')).toBe('true');
+        expect(file(original.path)).toBeNull();
+    });
+
+    it('keeps catalogue selection by identity after an asset move and instantiates catalogued prefabs', async () => {
+        const prefab: ModelAsset = {name: 'Gameplay actor', path: 'prefabs/actor.json', kind: 'prefab', asset_id: 'prefab-id'};
+        const panel = await createPanel({models: [{...robot, asset_id: 'robot-id'}, prefab]});
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        panel.file(robot.path).click();
+        panel.modelAssets.set([{...robot, path: 'props/moved.glb', asset_id: 'robot-id'}, prefab]);
+        await panel.fixture.whenStable();
+        expect(panel.file('props/moved.glb').getAttribute('aria-pressed')).toBe('true');
+        panel.button('Up').click();
+        await panel.fixture.whenStable();
+        panel.button('prefabs').click();
+        await panel.fixture.whenStable();
+        panel.file(prefab.path).click();
+        await panel.fixture.whenStable();
+        panel.button('Instantiate Prefab').click();
+        await panel.fixture.whenStable();
+        expect(panel.loadPrefab).toHaveBeenCalledExactlyOnceWith('prefabs/actor.json', [0, 0, 0], 1, 1);
+        expect(panel.importModel).not.toHaveBeenCalled();
+    });
     it('discovers props automatically and keeps the current folder and selected file when refreshed', async () => {
         const panel = await createPanel();
         expect(panel.assets).toHaveBeenCalledExactlyOnceWith(false);
@@ -153,7 +216,7 @@ describe('AssetsPanel', () => {
         panel.button('Add to Scene').click();
         await panel.fixture.whenStable();
 
-        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith('props/robot.glb', [0, 0, 0]);
+        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith('props/robot.glb', [0, 0, 0], 1, 1);
         expect(panel.assets).not.toHaveBeenCalled();
         expect(panel.current().dirty).toBe(true);
         expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('Added Robot');
@@ -230,7 +293,7 @@ describe('AssetsPanel', () => {
         await withCommittedEdit.mock.results[0].value;
         await panel.fixture.whenStable();
 
-        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith('props/robot.glb', [0, 0, 0]);
+        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith('props/robot.glb', [0, 0, 0], 1, 1);
         expect(withCommittedEdit).toHaveBeenCalledOnce();
     });
 

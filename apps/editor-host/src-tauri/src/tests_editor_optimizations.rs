@@ -39,6 +39,7 @@ impl Fixture {
 			entities,
 			lights: vec![],
 			camera: runtime::scene_data::CameraData {
+				follow: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -404,6 +405,7 @@ fn structural_edits_prune_queued_references_and_refill_new_assets() {
 			expected_revision: workspace.backend.session().revision(),
 			command: Command::Spawn {
 				entity: bridge::editor::EntitySpecDto {
+					asset_id: None,
 					name: "Added".into(),
 					model_path: "added.gltf".into(),
 					mesh_index: Some(0),

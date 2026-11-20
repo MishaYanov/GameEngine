@@ -61,6 +61,7 @@ struct GameApp {
 	editor: SceneEditor,
 	tools: EditorTools,
 	selection_overlay: Option<SelectionOverlay>,
+	game_hud: Option<renderer::ui::ScreenOverlay>,
 	spawn_template: Option<ModelInstance>,
 	asset_manager: Option<AssetManager>,
 	renderer: Option<WindowRenderer>,
@@ -143,7 +144,7 @@ impl GameApp {
 	}
 
 	fn update_player(&mut self, delta_seconds: f32) {
-		let completed = self.campaign_completed();
+		let completed = self.game_completed();
 		// The completion message promises F10 even when gameplay normally owns it.
 		if (completed && self.input.just_pressed(Key::F10))
 			|| self.player_shortcut_pressed(Key::F10)
@@ -203,9 +204,15 @@ impl GameApp {
 		{
 			Some(scene_id.clone())
 		} else {
-			self.editor
-				.update_play(&mut self.scene, &self.input, delta_seconds)?
-				.requested_scene
+			let outcome = self
+				.editor
+				.update_play(&mut self.scene, &self.input, delta_seconds)?;
+			if self.scene.camera_follow().is_some()
+				&& let Some(camera) = self.editor.render_camera()
+			{
+				self.camera = camera;
+			}
+			outcome.requested_scene
 		};
 		if let Some(scene_id) = destination {
 			let result = self.install_play_scene(scene_id, false);
@@ -221,13 +228,17 @@ impl GameApp {
 		self.input.just_pressed(key) && !self.editor.play_input_binds_key(key)
 	}
 
-	fn campaign_completed(&self) -> bool {
+	fn game_completed(&self) -> bool {
 		self.editor
-			.play_progress::<progress::CampaignProgress>()
-			.is_some_and(|progress| progress.completed)
+			.play_status()
+			.and_then(|status| status.gameplay)
+			.is_some_and(|status| status.completed)
 	}
 
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
+		if self.editor.is_playing() && self.scene.camera_follow().is_some() {
+			return;
+		}
 		let game_owns_arrow = self.editor.is_playing()
 			&& [
 				Key::ArrowLeft,
@@ -244,7 +255,7 @@ impl GameApp {
 	}
 
 	fn needs_continuous_redraw(&self) -> bool {
-		if self.window_occluded || (self.standalone_runtime && self.campaign_completed()) {
+		if self.window_occluded || (self.standalone_runtime && self.game_completed()) {
 			return false;
 		}
 
@@ -345,29 +356,16 @@ impl GameApp {
 				.as_deref()
 				.unwrap_or("Game Engine Player")
 				.to_owned();
-			if let Some(progress) = self.editor.play_progress::<progress::CampaignProgress>() {
-				let key = if progress.has_courtyard_key {
-					"yes"
-				} else {
-					"no"
-				};
-				title.push_str(&format!(
-					" | Score: {} | Courtyard key: {key}",
-					progress.score
-				));
-				if progress.completed {
-					title.push_str(" | Complete! F10 to restart");
+			if let Some(gameplay) = self.editor.play_status().and_then(|status| status.gameplay) {
+				title.push_str(&format!(" | {}", gameplay.objective));
+				if let Some(detail) = gameplay.detail {
+					title.push_str(&format!(" | {detail}"));
 				}
-				if self.scene.binding("exit").is_some() {
-					let exit = if progress.courtyard_exit_reached {
-						"reached"
-					} else if progress.has_courtyard_key {
-						"unlocked"
-					} else {
-						"locked"
-					};
-					title.push_str(" | Exit: ");
-					title.push_str(exit);
+				if let Some(score) = gameplay.score {
+					title.push_str(&format!(" | Score: {score}"));
+				}
+				if gameplay.completed {
+					title.push_str(" | Complete! F10 to restart");
 				}
 			}
 			if self.editor.simulation_paused() {
@@ -768,7 +766,11 @@ impl GameApp {
 				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
 			// No fallible operations between committing the CPU world and its view.
 			self.scene = scene;
-			self.camera = camera;
+			self.camera = if self.scene.camera_follow().is_some() {
+				self.editor.render_camera().unwrap_or(camera)
+			} else {
+				camera
+			};
 			Ok(())
 		});
 		assets.prune_unused();
@@ -844,6 +846,17 @@ impl GameApp {
 	}
 
 	fn render(&mut self) -> Result<(), String> {
+		let hud_rows = if self.standalone_runtime {
+			gameplay_hud_rows(self.editor.play_status().as_ref())
+		} else {
+			Vec::new()
+		};
+		if self.editor.is_playing()
+			&& self.scene.camera_follow().is_some()
+			&& let Some(camera) = self.editor.render_camera()
+		{
+			self.camera = camera;
+		}
 		let dirty = !self.standalone_runtime && self.is_dirty();
 		let Some(renderer) = self.renderer.as_mut() else {
 			return Ok(());
@@ -931,6 +944,20 @@ impl GameApp {
 			)?;
 			if let Some(panel) = self.tools.panel.object() {
 				objects.push(panel);
+			}
+		}
+		if self.standalone_runtime && !hud_rows.is_empty() {
+			if self.game_hud.is_none() {
+				self.game_hud = Some(renderer::ui::ScreenOverlay::new(renderer)?);
+			}
+			let hud = self.game_hud.as_mut().expect("initialized HUD");
+			let scale = self
+				.window
+				.as_ref()
+				.map_or(1.0, |window| window.scale_factor());
+			hud.prepare(renderer, [width, height], scale, &hud_rows)?;
+			if let Some(object) = hud.object() {
+				objects.push(object);
 			}
 		}
 		self.tools.stats = stats;
@@ -1289,6 +1316,7 @@ impl Drop for GameApp {
 					std::mem::take(&mut self.editor),
 					std::mem::take(&mut self.tools),
 					self.selection_overlay.take(),
+					self.game_hud.take(),
 					self.spawn_template.take(),
 					self.asset_manager.take(),
 				))
@@ -1296,6 +1324,32 @@ impl Drop for GameApp {
 				.log_error_for("game::renderer", "wait before releasing scene");
 		}
 	}
+}
+
+fn gameplay_hud_rows(status: Option<&runtime::editor::command::PlayStatusDto>) -> Vec<String> {
+	let Some(status) = status else {
+		return Vec::new();
+	};
+	let mut rows = Vec::new();
+	if let Some(gameplay) = &status.gameplay {
+		rows.push(gameplay.objective.clone());
+		if let Some(detail) = &gameplay.detail {
+			rows.push(detail.clone());
+		}
+		if let Some(score) = gameplay.score {
+			rows.push(format!("Score {score}"));
+		}
+		if gameplay.completed {
+			rows.push("F10 to restart".into());
+		}
+	}
+	if status.paused {
+		rows.push("Paused".into());
+	}
+	if let Some(scene) = &status.pending_scene_id {
+		rows.push(format!("Scene {} pending. F8 to retry", scene.as_str()));
+	}
+	rows
 }
 
 fn main() -> Result<(), String> {
@@ -1444,3 +1498,11 @@ mod tests;
 #[cfg(all(test, windows))]
 #[path = "tests_exported_run.rs"]
 mod exported_run_tests;
+
+#[cfg(all(test, windows))]
+#[path = "tests_performance.rs"]
+mod performance_tests;
+
+#[cfg(all(test, windows))]
+#[path = "tests_asset_reimport.rs"]
+mod asset_reimport_tests;

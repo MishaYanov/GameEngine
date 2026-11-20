@@ -17,8 +17,14 @@ function vector(value: unknown, length: number): boolean {
 }
 
 function camera(value: unknown): boolean {
+    const follow = record(value) ? value['follow'] : undefined;
+    const validFollow = follow == null || (record(follow) && typeof follow['target'] === 'string' &&
+        vector(follow['offset'], 3) && vector(follow['look_offset'], 3) &&
+        typeof follow['smoothing_seconds'] === 'number' && Number.isFinite(follow['smoothing_seconds']) &&
+        follow['smoothing_seconds'] >= 0 && follow['smoothing_seconds'] <= 10);
     return (
         record(value) &&
+        validFollow &&
         vector(value['position'], 3) &&
         ['yaw', 'pitch', 'vertical_fov', 'near', 'far'].every((key) => Number.isFinite(value[key]))
     );

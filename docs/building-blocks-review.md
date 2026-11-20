@@ -1,10 +1,11 @@
-# Five game-building blocks: implementation review
+# Game-building workflow review
 
-Reviewed on 2026-11-20 against commit `e0f2148` and the staged, unstaged and new source files in the working tree.
-The earlier documentation checkpoint was `85269c8`. The intervening commit contains the authored Courtyard course,
-runtime scene changes, completion, restart and export-parity work; the current tree adds module metadata authoring,
-collider editing, sensors/filtering and resource-lifetime improvements. This report describes the combined tree,
-not the index alone. Exact inspection hashes and verification limits live in `docs-site/docs-state.json`.
+Reviewed on 2026-11-20 against commit `1c24b9f` and the current working tree. The five blocks below describe the
+earlier playable proof of concept. The original requested plan contains sixteen features across three milestones.
+The [milestone ledger and walkthrough](milestones-review.md) records that complete scope and the new trigger,
+interaction-settings, movement, camera and asset work. Final verification is recorded in
+`docs/verification/milestones-tests-2026-11-20.json`. The inspection checkpoint in `docs-site/docs-state.json`
+records the reviewed source fingerprints and verification limits.
 
 ## Status of the five blocks
 
@@ -13,7 +14,7 @@ not the index alone. Exact inspection hashes and verification limits live in `do
 | 1. Input persistence and focus reset | Project input profiles, key-code preview, configurable movement/actions, shared native-key interpretation and held-input reset at focus/mode/run boundaries | Keyboard routing is implemented; a general possession/controller system and current-turn desktop key acceptance are separate work |
 | 2. Project-selected gameplay module | Undoable module selection, host-supplied module/role metadata, shared resolver in editor/player/headless/export preparation and generic behavior fallback | Modules are native compiled code; this is not arbitrary script loading or hot reload |
 | 3. Authorable course bindings | Module-aware Gameplay Roles assigns or clears persistent entity keys in each scene, with history and scene persistence | Assignment can be incomplete while editing; Play and export preparation enforce the module's role requirements |
-| 4. Complete and restart the run | Bound key pickup, locked exit, prepared transition to `finish`, finish-marker completion, frozen completed movement, status and fresh-run restart | Progress is in memory; Stop restores authored data and there is no game-progress save-file system |
+| 4. Complete and restart the run | Bound key pickup, locked exit, prepared transition to an authored Finish destination, completion, frozen completed movement, status and fresh-run restart | Progress is in memory. Stop restores authored data |
 | 5. Runtime outcomes, headless replay and export parity | Shared fixed-step outcomes and scene requests, CPU command/tick/restart replay with generic Play status, stage-only snapshots and compiler preflight/staged-output parity tests | Hidden native export execution is separately evidenced below; visible desktop/another-machine acceptance remains open, and diagnostic change events are bounded |
 
 These form a playable proof of concept. They do not establish a general-purpose physics, scripting or animation editor.
@@ -37,8 +38,9 @@ it is different from an absent override. Older hosts that omit the catalog do no
 An unavailable saved module can be inspected and repaired; selecting a different unsupported ID is rejected.
 Changing the selected module preserves scene bindings and configured behaviors.
 
-`courtyard_run` advertises Player/Key/Exit for course scenes and Player/Finish for the scene ID `finish`.
-The role panel is generic; Courtyard-specific names and requirements belong to the shared gameplay crate.
+`courtyard_run` advertises Player/Key/Exit for course scenes and Player/Finish for Finish scenes.
+Authored interaction settings can identify a Finish scene with a custom ID. The role controls use the configured
+scene kind to expose the applicable roles while retaining the native descriptor's labels and requirements.
 New Project retains the generic configured movement/spin default. Changing a module selection does not add an
 unconfigured Player behavior automatically.
 
@@ -68,9 +70,10 @@ negative, fractional or overflowing u32 filters are rejected. Zero membership/ma
 are valid. The UI names bits 0–31 as layers 1–32.
 
 A pair is detected only when both tests pass: `(a.layers & b.mask) != 0` and `(b.layers & a.mask) != 0`.
-Sensors participate in overlap queries but neither a sensor mover nor a sensor obstacle blocks kinematic movement.
-`Contact.sensor` identifies a detected pair containing either sensor. This is overlap classification, not an
-Enter/Stay/Exit event stream.
+Sensors participate in overlap queries. A sensor mover or obstacle allows movement through the overlap.
+`Contact.sensor` identifies a detected pair containing a sensor. Directed Enter and Exit events are now delivered
+to gameplay at fixed-step boundaries. The overlap view supplies the current accepted pairs between edges.
+Tracker history and events commit with the complete simulation tick and roll back on rejected actions.
 
 The optional **Colliders** Scene overlay displays selected effective collision geometry. Blocking outlines are
 continuous cyan and sensor outlines are dashed pink, so color is not the only distinction. Game and the exported
@@ -85,11 +88,17 @@ failure must not disable the rest of the viewport. See [scene editing](scene-edi
 
 ## Runtime completion, restart and parity
 
-The bundled Courtyard module resolves Player, Key, Exit and Finish through scene bindings. Its current objective
-rules use world-space proximity, not the new sensor flags. The key is acquired once, the exit requires the key,
-the prepared destination starts without held movement, and the Finish marker completes the run. Completed progress
-suppresses subsequent movement/objective work until a fresh run. The reference course uses the supplied cube,
-capsule and sphere assets; the gameplay contract is not tied to robot model names.
+The bundled Courtyard module resolves Player, Key, Exit and Finish through scene bindings. Authored interaction
+settings select the sensor entities, destination and optional exit blocker. The key is acquired once, hides and
+stops colliding, and the exit changes tint and unlocks. The prepared destination starts with cleared movement.
+Entering its Finish sensor completes the run. Completed progress suppresses further movement and objective work.
+Projects with no interaction settings retain their earlier proximity behavior.
+
+**Interaction Settings…** edits the current scene's override through a revision-checked project command.
+**Game Camera…** edits fixed or follow settings through the scene camera command. Both finish pending Inspector
+edits before building their payloads and reject stale scene or workspace contexts. Follow uses a world-space rig
+with exponential position smoothing. Eye and look offsets translate together, keeping a stable viewing direction
+during reversals. See the [authoring walkthrough](milestones-review.md#author-and-play-the-course).
 
 Ordinary runtime scene changes preserve run progress and leave the authored active scene, dirty flags, history
 and startup setting intact. Candidate CPU/GPU preparation precedes commit. A rejected candidate leaves the source
@@ -142,7 +151,7 @@ layout to reach the locked exit, acquire the key, transition, complete, restart 
 | Source | Responsibility and reason for the boundary |
 | --- | --- |
 | `apps/editor/src/app/modules/editor/workspace/game-input/` and `core/game-input/` | Input drafts and key preview stay in Angular; shared native profiles remain authored project data |
-| `crates/engine-core/src/command.rs`, `crates/courtyard-gameplay/src/lib.rs`, host `commands/editor.rs` | Typed generic module metadata with application-owned role definitions removes Courtyard-specific role lists from the UI |
+| `crates/engine-core/src/command.rs`, `crates/courtyard-gameplay/src/lib.rs`, host `commands/editor.rs` | Typed module metadata supplies application-owned role labels and definitions; Courtyard's settings UI selects the declared Course or Finish role set |
 | `apps/editor/src/app/core/editor/gameplay-modules.ts`, workspace `scene-actions/` | Validate and present available modules/scene overrides; preserve explicit unknown or unavailable states |
 | `crates/engine-core/src/collider.rs` | Collider geometry and interaction serde/default rules live together; `scene_data` re-exports preserve callers' public path |
 | Workspace `collider/`, `scene-editing.service.ts` | Shape/value controls are separated from command ownership, coalescing, context guards and transaction lifetime |
@@ -173,6 +182,15 @@ See [graphics/assets](graphics-and-assets.md), [renderer ownership](crates/rende
 [updated optimization TODO](../designs/found-bugs/TODO.md).
 
 ## Validation evidence and limits
+
+The new Angular authoring surfaces passed 425 tests across 46 files and the production bundle check.
+Those results are in `target/milestones-angular-tests.log` and `target/milestones-angular-production.log`.
+The current Rust workspace all-target/all-feature suite passed 793 tests across 70 test binaries with 7 ignored
+and no failures; see `target/milestones-rust-tests.log`. The existing project-setup stylesheet budget warning
+remains. Current native, asset and compiler checks are
+recorded in the [sixteen-feature ledger](milestones-review.md). The current documentation build link-checks
+60 pages and passes all 7 site tests; Game App Developer remains empty. The following table preserves the previous
+completion audit's evidence.
 
 | Evidence | Observed result | Scope |
 | --- | --- | --- |
@@ -210,14 +228,8 @@ added to the workspace count as though they were one unique suite.
 
 ## Remaining work
 
-Feature **1.4 trigger events is not implemented**. `GameplayContext` and `TickOutcome` do not yet expose
-Enter/Stay/Exit batches. The current `Contact.sensor` flag must not be presented as lifecycle events. The teaching
-proposal samples overlaps at fixed-step start, stages tracker/event state for whole-tick rollback, allows an
-initial bootstrap step, and delivers events to module planning and tick consumers with explicit step latency.
-Its scheduling, pause/transition/restart policy and bounds require implementation and tests before documentation
-can call it available.
-
-Other limits remain: conservative collision rather than rigid-body physics; native compiled gameplay rather than
-hot-loaded scripts; no full material/light/behavior Inspector; no linked prefab overrides, animation editor,
-runtime apply-back or persisted game progress. Full desktop key/focus acceptance, another-machine export acceptance
-and measured performance are separate remaining checks.
+The [sixteen-feature ledger](milestones-review.md) records feature coverage and the aggregate verification status.
+Collision uses conservative world bounds and bounded sweep/slide. Native compiled modules own gameplay rules.
+Material, light and general behavior Inspector sections, linked prefab overrides, an animation editor,
+runtime apply-back and persisted progress remain separate product work. Full desktop input acceptance and
+another-machine export acceptance require their own recorded results.

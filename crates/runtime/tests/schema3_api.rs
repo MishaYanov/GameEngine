@@ -17,12 +17,12 @@ fn v1_and_v2_migrate_one_collision_free_default_light_but_v3_empty_lights_stay_e
 		value["schema_version"] = json!(version);
 		value.as_object_mut().unwrap().remove("lights");
 		for e in value["entities"].as_array_mut().unwrap() {
-			for field in ["renderable", "parent", "material", "collider", "mesh_index"] {
-				e.as_object_mut().unwrap().remove(field);
-			}
-			if version == 1 {
-				e.as_object_mut().unwrap().remove("key");
-			}
+			// Version 2 added identity; neither historical entity schema had
+			// current collision, visibility, asset identity or material fields.
+			e.as_object_mut().unwrap().retain(|field, _| {
+				matches!(field.as_str(), "name" | "model_path" | "transform")
+					|| (version == 2 && field == "key")
+			});
 		}
 		if version == 1 {
 			value.as_object_mut().unwrap().remove("bindings");
@@ -33,6 +33,22 @@ fn v1_and_v2_migrate_one_collision_free_default_light_but_v3_empty_lights_stay_e
 		assert_eq!(parsed.data.lights.len(), 1);
 		assert_eq!(parsed.data.lights[0].kind, LightKind::Directional);
 		assert_ne!(parsed.data.entities[0].key, parsed.data.lights[0].key);
+		assert!(parsed.data.entities[0].collision_enabled);
+		assert!(parsed.data.entities[0].renderable);
+		assert!(parsed.data.entities[0].asset_id.is_none());
+		for (field, extra) in [
+			("collision_enabled", json!(true)),
+			("asset_id", json!("11111111-1111-4111-8111-111111111111")),
+		] {
+			let mut invalid = value.clone();
+			invalid["entities"][0][field] = extra;
+			assert!(
+				parse_json(&invalid.to_string())
+					.unwrap_err()
+					.contains("unknown field"),
+				"version {version} accepted current field {field}"
+			);
+		}
 		assert_eq!(
 			runtime::SceneData::from_json(&parsed.data.to_json().unwrap()).unwrap(),
 			parsed.data

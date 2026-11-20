@@ -99,6 +99,7 @@ impl Patch {
 					.saturating_add(entity.key.as_str().len())
 					.saturating_add(entity.name.capacity())
 					.saturating_add(entity.model_path.capacity())
+					.saturating_add(entity.asset_id.as_ref().map_or(0, |id| id.as_str().len()))
 					.saturating_add(entity.parent.as_ref().map_or(0, |key| key.as_str().len()));
 			}
 		}

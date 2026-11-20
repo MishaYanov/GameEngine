@@ -1,6 +1,6 @@
 //! Bounded CPU collision queries for authoring and simple kinematic movement.
 //! Rotated boxes use enclosing world AABBs. Swept movement is conservative: it
-//! stops the requested translation when its swept bounds may hit an obstacle;
+//! advances to contact and projects remaining motion along at most three contact planes;
 //! it is not a rigid-body solver or triangle-accurate collision system.
 
 use std::collections::HashMap;
@@ -80,7 +80,19 @@ pub struct MovementResult {
 	pub requested_delta: [f32; 3],
 	pub applied_delta: [f32; 3],
 	pub blocked_by: Option<EntityKey>,
+	/// At most three swept contacts, in resolution order.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub contacts: Vec<MovementContact>,
 	pub changes: crate::world::WorldChange,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MovementContact {
+	pub entity: EntityKey,
+	/// Unit normal toward the obstacle. The positive normal component is removed.
+	pub normal: [f32; 3],
+	/// Time of impact in 0..=1 for this iteration's remaining motion, before skin.
+	pub fraction: f64,
 }
 impl CollisionWorld {
 	pub fn new(world: &crate::world::RuntimeWorld) -> Result<Self, String> {
@@ -136,9 +148,10 @@ impl CollisionWorld {
 			.iter()
 			.chain(changes.removed_entities.iter())
 			.any(|key| {
-				let present = world
-					.entity_index(key)
-					.is_some_and(|index| world.data().entities[index].collider.is_some());
+				let present = world.entity_index(key).is_some_and(|index| {
+					world.data().entities[index].collision_enabled
+						&& world.data().entities[index].collider.is_some()
+				});
 				self.indices.contains_key(key) != present
 			});
 		if changes.topology_changed || changes.full_resync || membership_changed {
@@ -195,9 +208,25 @@ impl CollisionWorld {
 		Ok(())
 	}
 	pub fn query_overlaps(&mut self) -> Result<Vec<Contact>, String> {
+		let mut remaining = MAX_CANDIDATES;
+		self.query_with_budget(&mut remaining, false)
+	}
+
+	/// Sensor contacts share the caller's work allowance with movement and other steps.
+	pub fn query_sensor_overlaps_with_budget(
+		&mut self,
+		remaining: &mut usize,
+	) -> Result<Vec<Contact>, String> {
+		self.query_with_budget(remaining, true)
+	}
+
+	fn query_with_budget(
+		&mut self,
+		remaining: &mut usize,
+		sensors_only: bool,
+	) -> Result<Vec<Contact>, String> {
 		self.stats.queries = self.stats.queries.saturating_add(1);
 		let mut contacts = Vec::new();
-		let mut candidates = 0;
 		use std::ops::Bound::{Excluded, Unbounded};
 		for entry in &self.ordered {
 			let a = &self.records[entry.index];
@@ -206,7 +235,12 @@ impl CollisionWorld {
 				if b.bounds.min()[0] > a.bounds.max()[0] {
 					break;
 				}
-				charge_candidate(&mut candidates)?;
+				consume_candidates(remaining, 1).map_err(|_| {
+					format!("Collision query exceeds {MAX_CANDIDATES} broadphase candidates")
+				})?;
+				if sensors_only && !a.interaction.sensor && !b.interaction.sensor {
+					continue;
+				}
 				if let Some((mut normal, penetration)) =
 					contact_geometry(&a.borrowed(), &b.borrowed())
 				{
@@ -262,6 +296,7 @@ impl CollisionWorld {
 			requested_delta: world_delta,
 			applied_delta: [0.0; 3],
 			blocked_by: None,
+			contacts: Vec::new(),
 			changes: Default::default(),
 		};
 		let delta = Vec3::from_array(world_delta);
@@ -278,60 +313,105 @@ impl CollisionWorld {
 		if parent.determinant() == 0.0 {
 			return Err("Cannot move beneath a singular parent transform".into());
 		}
-		let mut transform = world.data().entities[index].transform.clone();
-		let position =
-			Vec3::from_array(transform.position) + parent.inverse().transform_vector3(delta);
-		if !position.is_finite() {
+		let original = world.data().entities[index].transform.clone();
+		let inverse = parent.inverse();
+		if !(Vec3::from_array(original.position) + inverse.transform_vector3(delta)).is_finite() {
 			return Err("Movement produces a nonfinite local position".into());
 		}
-		if !self.records.is_empty() {
-			let moving_indices = world.subtree_indices(index)?;
-			consume_candidates(remaining, moving_indices.len())?;
-			let moving = moving_indices
-				.iter()
-				.copied()
-				.collect::<std::collections::HashSet<_>>();
-			// Look up only this subtree's colliders, rather than scanning the
-			// entire world's collider cache for every movement action.
-			let mut moving_colliders = moving_indices
-				.iter()
-				.filter_map(|&index| self.indices.get(&world.data().entities[index].key).copied())
-				.collect::<Vec<_>>();
-			moving_colliders.sort_unstable();
-			for collider_index in moving_colliders {
-				let collider = &self.records[collider_index];
-				let borrowed = collider.borrowed();
-				let end = translated(&borrowed, delta)?;
-				let swept = collider.bounds.union(end.bounds);
-				for entry in &self.ordered {
-					let obstacle = &self.records[entry.index];
-					if obstacle.bounds.min()[0] > swept.max()[0] {
-						break;
-					}
-					consume_candidates(remaining, 1)?;
-					if moving.contains(&obstacle.entity_index) {
-						continue;
-					}
-					if bounds_overlap(swept, obstacle.bounds)
-						&& blocks_motion(&borrowed, &end, &obstacle.borrowed(), delta)?
-					{
-						result.blocked_by = Some(obstacle.key.clone());
-						return Ok(result);
-					}
-				}
-			}
+		let (applied, contacts) = self.slide_delta(world, index, delta, remaining)?;
+		result.blocked_by = contacts.first().map(|contact| contact.entity.clone());
+		result.contacts = contacts;
+		if applied == Vec3::ZERO {
+			return Ok(result);
 		}
-		let before = transform.clone();
+		let mut transform = original.clone();
+		transform.position =
+			(Vec3::from_array(original.position) + inverse.transform_vector3(applied)).to_array();
 		let before_world = world.world_matrices()[index].w_axis.truncate();
-		transform.position = position.to_array();
 		result.changes = world.set_transform(key, transform)?;
 		if let Err(error) = self.synchronize(world, &result.changes) {
-			let _ = world.set_transform(key, before);
+			let _ = world.set_transform(key, original);
 			return Err(error);
 		}
 		result.applied_delta =
 			(world.world_matrices()[index].w_axis.truncate() - before_world).to_array();
 		Ok(result)
+	}
+
+	fn slide_delta(
+		&self,
+		world: &crate::world::RuntimeWorld,
+		root: usize,
+		delta: Vec3,
+		budget: &mut usize,
+	) -> Result<(Vec3, Vec<MovementContact>), String> {
+		if self.records.is_empty() {
+			return Ok((delta, Vec::new()));
+		}
+		let indices = world.subtree_indices(root)?;
+		consume_candidates(budget, indices.len())?;
+		let moving = indices
+			.iter()
+			.copied()
+			.collect::<std::collections::HashSet<_>>();
+		let colliders = indices
+			.iter()
+			.filter_map(|&index| self.indices.get(&world.data().entities[index].key).copied())
+			.collect::<Vec<_>>();
+		let mut applied = Vec3::ZERO;
+		let mut remainder = delta;
+		let mut contacts = Vec::new();
+		for _ in 0..3 {
+			if remainder.length_squared() <= EPSILON * EPSILON {
+				break;
+			}
+			let mut earliest: Option<(f64, Vec3, &EntityKey)> = None;
+			for &index in &colliders {
+				let initial = self.records[index].borrowed();
+				let start = translated(&initial, applied)?;
+				let end = translated(&start, remainder)?;
+				let swept = start.bounds.union(end.bounds);
+				for entry in &self.ordered {
+					let obstacle = &self.records[entry.index];
+					if obstacle.bounds.min()[0] > swept.max()[0] {
+						break;
+					}
+					consume_candidates(budget, 1)?;
+					if moving.contains(&obstacle.entity_index)
+						|| !bounds_overlap(swept, obstacle.bounds)
+					{
+						continue;
+					}
+					if let Some((fraction, normal)) =
+						sweep_hit(&start, &obstacle.borrowed(), remainder)?
+						&& earliest.as_ref().is_none_or(|(time, _, key)| {
+							fraction < *time
+								|| fraction == *time && obstacle.key.as_str() < key.as_str()
+						}) {
+						earliest = Some((fraction, normal, &obstacle.key));
+					}
+				}
+			}
+			let Some((fraction, normal, entity)) = earliest else {
+				applied += remainder;
+				break;
+			};
+			contacts.push(MovementContact {
+				entity: entity.clone(),
+				normal: normal.to_array(),
+				fraction,
+			});
+			let length = remainder.as_dvec3().length();
+			let travel = (fraction - 0.0001 / length).max(0.0) as f32;
+			applied += remainder * travel;
+			remainder *= 1.0 - travel;
+			let approach = remainder.dot(normal);
+			if approach <= 0.0 {
+				break;
+			}
+			remainder -= normal * approach;
+		}
+		Ok((applied, contacts))
 	}
 }
 
@@ -472,80 +552,22 @@ pub fn debug_shape(
 }
 
 /// Translate an entity subtree in world space, preserving its local rotation
-/// and scale. Blocked motion succeeds without changing the scene. Invalid data
-/// or an exhausted work budget fails before any transform is modified.
+/// and scale. Motion advances to contact and slides along contact planes.
+/// Invalid data or an exhausted work budget fails before any transform is modified.
 pub fn move_entity(
 	data: &mut SceneData,
 	key: &EntityKey,
 	world_delta: [f32; 3],
 ) -> Result<(), String> {
-	let delta = Vec3::from_array(world_delta);
-	if !delta.is_finite() {
-		return Err("Collision movement must contain finite values".into());
+	let mut world = crate::world::RuntimeWorld::new(std::sync::Arc::new(data.clone()))?;
+	let mut collisions = CollisionWorld::new(&world)?;
+	let result = collisions.move_entity(&mut world, key, world_delta)?;
+	if !result.changes.is_empty() {
+		let index = world
+			.entity_index(key)
+			.ok_or("Movement target disappeared")?;
+		data.entities[index].transform = world.data().entities[index].transform.clone();
 	}
-	let index = data
-		.entities
-		.iter()
-		.position(|entity| &entity.key == key)
-		.ok_or_else(|| format!("Entity {:?} does not exist", key.as_str()))?;
-	if delta == Vec3::ZERO {
-		return Ok(());
-	}
-	let matrices = checked_matrices(data)?;
-	let indices: HashMap<_, _> = data
-		.entities
-		.iter()
-		.enumerate()
-		.map(|(index, entity)| (entity.key.as_str(), index))
-		.collect();
-	let parent_matrix = match &data.entities[index].parent {
-		Some(parent) => {
-			matrices[*indices
-				.get(parent.as_str())
-				.ok_or("Missing movement parent")?]
-		}
-		None => Mat4::IDENTITY,
-	};
-	if parent_matrix.determinant() == 0.0 {
-		return Err("Cannot move in world space beneath a singular parent transform".into());
-	}
-	let local_delta = parent_matrix.inverse().transform_vector3(delta);
-	let position = Vec3::from_array(data.entities[index].transform.position) + local_delta;
-	if !position.is_finite() {
-		return Err("Movement produces a nonfinite local position".into());
-	}
-	let moving = subtree_members(data, &indices, index)?;
-	let colliders = world_colliders(data, &matrices)?;
-	let mut stationary: Vec<_> = colliders
-		.iter()
-		.filter(|collider| !moving[collider.entity_index])
-		.collect();
-	stationary.sort_by(|a, b| {
-		a.bounds.min()[0]
-			.total_cmp(&b.bounds.min()[0])
-			.then_with(|| a.entity.as_str().cmp(b.entity.as_str()))
-	});
-	let mut candidates = 0;
-	for collider in colliders
-		.iter()
-		.filter(|collider| moving[collider.entity_index])
-	{
-		let end = translated(collider, delta)?;
-		let swept = collider.bounds.union(end.bounds);
-		for obstacle in &stationary {
-			if obstacle.bounds.min()[0] > swept.max()[0] {
-				break;
-			}
-			charge_candidate(&mut candidates)?;
-			if !bounds_overlap(swept, obstacle.bounds) {
-				continue;
-			}
-			if blocks_motion(collider, &end, obstacle, delta)? {
-				return Ok(());
-			}
-		}
-	}
-	data.entities[index].transform.position = position.to_array();
 	Ok(())
 }
 
@@ -564,6 +586,9 @@ fn world_colliders<'a>(
 ) -> Result<Vec<WorldCollider<'a>>, String> {
 	let mut colliders = Vec::new();
 	for (index, (entity, matrix)) in data.entities.iter().zip(matrices).enumerate() {
+		if !entity.collision_enabled {
+			continue;
+		}
 		let Some(collider) = &entity.collider else {
 			continue;
 		};
@@ -748,37 +773,25 @@ fn translated<'a>(collider: &WorldCollider<'a>, delta: Vec3) -> Result<WorldColl
 	})
 }
 
-fn blocks_motion(
+fn sweep_hit(
 	start: &WorldCollider<'_>,
-	end: &WorldCollider<'_>,
 	obstacle: &WorldCollider<'_>,
 	delta: Vec3,
-) -> Result<bool, String> {
+) -> Result<Option<(f64, Vec3)>, String> {
 	if start.interaction.sensor
 		|| obstacle.interaction.sensor
 		|| !start.interaction.detects(obstacle.interaction)
 	{
-		return Ok(false);
+		return Ok(None);
 	}
 	if let Some((normal, penetration)) = contact_geometry(start, obstacle) {
 		if !normal.is_finite() || !penetration.is_finite() {
-			return Err("Collision contact exceeds finite numeric limits".into());
+			return Err("Collision contact exceeds finite limits".into());
 		}
-		let after = contact_geometry(end, obstacle).map_or(0.0, |(_, depth)| depth);
-		if !after.is_finite() {
-			return Err("Collision contact exceeds finite numeric limits".into());
-		}
-		let approach = motion_dot(delta, normal);
-		if approach < 0.0 && after <= penetration || penetration <= EPSILON && approach <= 0.0 {
-			return Ok(false);
-		}
-		return Ok(true);
+		return Ok((motion_dot(delta, normal) > 0.0).then_some((0.0, normal)));
 	}
 	if bounds_overlap(start.bounds, obstacle.bounds) {
-		// If their bounding boxes overlap but the curved surfaces do not,
-		// permit travel away from a separating plane; otherwise block the
-		// uncertain sweep rather than stepping through a potential contact.
-		let separating = match (start.shape, obstacle.shape) {
+		let normal = match (start.shape, obstacle.shape) {
 			(Shape::Sphere { center: a, .. }, Shape::Sphere { center: b, .. }) => {
 				direction_and_distance(a, b).0
 			}
@@ -804,46 +817,46 @@ fn blocks_motion(
 			}
 			_ => Vec3::ZERO,
 		};
-		return Ok(motion_dot(delta, separating) > 0.0);
+		return Ok((motion_dot(delta, normal) > 0.0).then_some((0.0, normal)));
 	}
-	let min = Vec3::from_array(start.bounds.min());
-	let max = Vec3::from_array(start.bounds.max());
-	let center = min * 0.5 + max * 0.5;
-	let half = max * 0.5 - min * 0.5;
-	let expanded = Bounds3::new(
-		(Vec3::from_array(obstacle.bounds.min()) - half).to_array(),
-		(Vec3::from_array(obstacle.bounds.max()) + half).to_array(),
-	)?;
-	Ok(expanded.ray_distance(center, delta, 1.0).is_some())
+	// Sweep the enclosing world bounds. Curved contacts remain conservative.
+	let min = Vec3::from_array(start.bounds.min()).as_dvec3();
+	let max = Vec3::from_array(start.bounds.max()).as_dvec3();
+	let center = (min + max) * 0.5;
+	let half = (max - min) * 0.5;
+	let low = Vec3::from_array(obstacle.bounds.min()).as_dvec3() - half;
+	let high = Vec3::from_array(obstacle.bounds.max()).as_dvec3() + half;
+	let mut entry = f64::NEG_INFINITY;
+	let mut exit = 1.0_f64;
+	let mut normal = Vec3::ZERO;
+	for axis in 0..3 {
+		let speed = f64::from(delta[axis]);
+		if speed == 0.0 {
+			if center[axis] < low[axis] || center[axis] > high[axis] {
+				return Ok(None);
+			}
+			continue;
+		}
+		let first = (low[axis] - center[axis]) / speed;
+		let second = (high[axis] - center[axis]) / speed;
+		let near = first.min(second);
+		if near > entry {
+			entry = near;
+			normal = Vec3::ZERO;
+			normal[axis] = delta[axis].signum();
+		}
+		exit = exit.min(first.max(second));
+		if entry > exit {
+			return Ok(None);
+		}
+	}
+	Ok((entry <= 1.0 && exit >= 0.0).then_some((entry.max(0.0), normal)))
 }
 
 fn motion_dot(delta: Vec3, direction: Vec3) -> f64 {
 	(0..3)
 		.map(|axis| delta[axis] as f64 * direction[axis] as f64)
 		.sum()
-}
-
-fn subtree_members(
-	data: &SceneData,
-	indices: &HashMap<&str, usize>,
-	root: usize,
-) -> Result<Vec<bool>, String> {
-	let mut children = vec![Vec::new(); data.entities.len()];
-	for (index, entity) in data.entities.iter().enumerate() {
-		if let Some(parent) = &entity.parent {
-			let parent = *indices
-				.get(parent.as_str())
-				.ok_or("Missing collider parent")?;
-			children[parent].push(index);
-		}
-	}
-	let mut moving = vec![false; data.entities.len()];
-	let mut pending = vec![root];
-	while let Some(index) = pending.pop() {
-		moving[index] = true;
-		pending.extend_from_slice(&children[index]);
-	}
-	Ok(moving)
 }
 
 fn charge_candidate(candidates: &mut usize) -> Result<(), String> {

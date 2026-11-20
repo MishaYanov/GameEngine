@@ -1,4 +1,7 @@
 //! Gameplay for projects that opt in to the Courtyard Run module.
+pub mod settings;
+
+use settings::{InteractionSettings, SceneInteractions, validate_trigger};
 
 use engine_core::{
 	EntityKey,
@@ -6,10 +9,12 @@ use engine_core::{
 	game_progress::{GameProgress, ProgressState, ProgressView},
 	project::{BehaviorSettings, ProjectData},
 	scene_catalog::SceneId,
+	scene_data::MaterialOverrideData,
 	simulation_session::{
 		ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameplayContext,
 		InputFrame, PreparedModuleConfig, SimulationAction, resolve_default_gameplay,
 	},
+	triggers::TriggerPhase,
 	world::RuntimeWorld,
 };
 use std::{collections::BTreeMap, mem::size_of, sync::Arc};
@@ -36,7 +41,7 @@ pub fn descriptor() -> GameplayModuleDescriptorDto {
 			GameplayRoleDescriptorDto {
 				name: "exit".into(),
 				label: "Exit".into(),
-				requirement_hint: "Assigning Key or Exit requires all three roles and a scene with ID finish in the project.".into(),
+				requirement_hint: "Assigning Key or Exit requires all three roles. Interaction Settings select a Finish destination; legacy scenes use scene ID finish.".into(),
 			},
 		],
 		scene_roles: BTreeMap::from([(
@@ -59,6 +64,7 @@ pub fn descriptor() -> GameplayModuleDescriptorDto {
 
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
 	if project.gameplay_module.as_deref() == Some(COURTYARD_RUN_ID) {
+		InteractionSettings::from_project(project)?;
 		return Ok(Arc::new(CampaignFactory));
 	}
 	resolve_default_gameplay(project)
@@ -139,6 +145,41 @@ impl GameProgress for CampaignProgress {
 
 pub struct CampaignFactory;
 impl GameModuleFactory for CampaignFactory {
+	fn prefab_references(
+		&self,
+		scene_settings: &serde_json::Value,
+	) -> Result<engine_core::simulation_session::ModuleSettingReferences, String> {
+		let settings: SceneInteractions = serde_json::from_value(scene_settings.clone())
+			.map_err(|error| format!("Courtyard prefab settings: {error}"))?;
+		let mut references = engine_core::simulation_session::ModuleSettingReferences::default();
+		match settings {
+			SceneInteractions::Course {
+				key_trigger,
+				exit_trigger,
+				destination_scene,
+				exit_blocker,
+			} => {
+				references
+					.entities
+					.insert("/key_trigger".into(), key_trigger);
+				references
+					.entities
+					.insert("/exit_trigger".into(), exit_trigger);
+				if let Some(blocker) = exit_blocker {
+					references.entities.insert("/exit_blocker".into(), blocker);
+				}
+				references
+					.scenes
+					.insert("/destination_scene".into(), destination_scene);
+			}
+			SceneInteractions::Finish { finish_trigger } => {
+				references
+					.entities
+					.insert("/finish_trigger".into(), finish_trigger);
+			}
+		}
+		Ok(references)
+	}
 	fn create_progress(&self) -> Result<ProgressState, String> {
 		ProgressState::new(CampaignProgress::default())
 	}
@@ -151,13 +192,69 @@ impl GameModuleFactory for CampaignFactory {
 		&self,
 		config: PreparedModuleConfig<'_>,
 	) -> Result<Box<dyn GameModule>, String> {
-		let (roles, finish) = if config.scene_id().as_str() == FINISH_SCENE_ID {
+		let settings = InteractionSettings::from_project(config.project())?;
+		let interactions = settings
+			.as_ref()
+			.and_then(|settings| settings.scenes.get(config.scene_id().as_str()))
+			.cloned();
+		let is_finish = matches!(&interactions, Some(SceneInteractions::Finish { .. }))
+			|| (interactions.is_none() && config.scene_id().as_str() == FINISH_SCENE_ID);
+		let (roles, finish) = if is_finish {
 			// Finish scene: validate its player and finish marker.
 			(None, Some(FinishRoles::from_config(&config)?))
 		} else {
 			// Other scenes: keep the existing course rules.
-			(CourseRoles::from_config(&config)?, None)
+			let destination = match &interactions {
+				Some(SceneInteractions::Course {
+					destination_scene, ..
+				}) => Some(destination_scene),
+				_ => None,
+			};
+			(CourseRoles::from_config(&config, destination)?, None)
 		};
+		match &interactions {
+			Some(SceneInteractions::Course {
+				key_trigger,
+				exit_trigger,
+				exit_blocker,
+				..
+			}) => {
+				let roles = roles
+					.as_ref()
+					.ok_or("Course interactions require Player, Key, and Exit bindings")?;
+				validate_trigger(&config, key_trigger, &roles.player, "Key trigger")?;
+				validate_trigger(&config, exit_trigger, &roles.player, "Exit trigger")?;
+				if let Some(blocker) = exit_blocker {
+					if blocker == &roles.player
+						|| blocker == key_trigger
+						|| blocker == exit_trigger
+						|| blocker == &roles.key
+					{
+						return Err("Exit blocker must be separate from Player, Key, and interaction sensors".into());
+					}
+					let entity = config
+						.document()
+						.entities
+						.iter()
+						.find(|entity| &entity.key == blocker)
+						.ok_or("Exit blocker references a missing entity")?;
+					if entity
+						.collider
+						.as_ref()
+						.is_none_or(|collider| collider.interaction().sensor)
+					{
+						return Err("Exit blocker needs a blocking collider".into());
+					}
+				}
+			}
+			Some(SceneInteractions::Finish { finish_trigger }) => validate_trigger(
+				&config,
+				finish_trigger,
+				&finish.as_ref().ok_or("Finish roles missing")?.player,
+				"Finish trigger",
+			)?,
+			None => {}
+		}
 
 		let base = ConfiguredBehaviorFactory.create_prepared(config)?;
 
@@ -165,6 +262,7 @@ impl GameModuleFactory for CampaignFactory {
 			base,
 			roles,
 			finish,
+			interactions,
 		}))
 	}
 }
@@ -210,6 +308,7 @@ struct CampaignModule {
 	base: Box<dyn GameModule>,
 	roles: Option<CourseRoles>,
 	finish: Option<FinishRoles>,
+	interactions: Option<SceneInteractions>,
 }
 
 struct CourseRoles {
@@ -220,7 +319,10 @@ struct CourseRoles {
 }
 
 impl CourseRoles {
-	fn from_config(config: &PreparedModuleConfig<'_>) -> Result<Option<Self>, String> {
+	fn from_config(
+		config: &PreparedModuleConfig<'_>,
+		destination: Option<&SceneId>,
+	) -> Result<Option<Self>, String> {
 		let bindings = &config.document().bindings;
 
 		if !bindings.contains_key("key") && !bindings.contains_key("exit") {
@@ -252,7 +354,9 @@ impl CourseRoles {
 				.into());
 		}
 
-		let destination = SceneId::new(FINISH_SCENE_ID)?;
+		let destination = destination
+			.cloned()
+			.unwrap_or(SceneId::new(FINISH_SCENE_ID)?);
 		config.project().scenes.get(&destination).map_err(|_| {
 			format!(
 				"Scene {:?} requires the Courtyard Run destination scene {:?} in the project catalog",
@@ -289,6 +393,9 @@ impl CampaignModule {
 		world: &RuntimeWorld,
 		progress: &CampaignProgress,
 	) -> Option<ProgressAction> {
+		if self.interactions.is_some() {
+			return None;
+		}
 		if progress.completed {
 			return None;
 		}
@@ -319,6 +426,68 @@ impl CampaignModule {
 		}
 
 		None
+	}
+
+	fn feedback_needed(&self, world: &RuntimeWorld, progress: &CampaignProgress) -> bool {
+		let Some(roles) = &self.roles else {
+			return false;
+		};
+		if !progress.has_courtyard_key {
+			return false;
+		}
+		let needs =
+			|key: &EntityKey, predicate: &dyn Fn(&engine_core::scene_data::EntityData) -> bool| {
+				world
+					.entity_index(key)
+					.is_some_and(|index| predicate(&world.data().entities[index]))
+			};
+		needs(&roles.key, &|entity| {
+			entity.renderable || entity.collision_enabled
+		}) || needs(&roles.exit, &|entity| {
+			entity
+				.material
+				.as_ref()
+				.is_none_or(|material| material.base_color_factor != [0.1, 0.9, 0.25, 1.0])
+		}) || matches!(&self.interactions, Some(SceneInteractions::Course { key_trigger, .. }) if needs(key_trigger, &|entity| entity.collision_enabled))
+			|| matches!(&self.interactions, Some(SceneInteractions::Course { exit_blocker: Some(blocker), .. }) if needs(blocker, &|entity| entity.collision_enabled))
+	}
+
+	fn show_unlocked(&self, output: &mut ActionWriter<'_>) -> Result<(), String> {
+		let Some(roles) = &self.roles else {
+			return Ok(());
+		};
+		output.push(SimulationAction::SetVisible {
+			entity: roles.key.clone(),
+			visible: false,
+		})?;
+		output.push(SimulationAction::SetCollisionEnabled {
+			entity: roles.key.clone(),
+			enabled: false,
+		})?;
+		output.push(SimulationAction::SetMaterial {
+			entity: roles.exit.clone(),
+			material: Some(MaterialOverrideData {
+				base_color_factor: [0.1, 0.9, 0.25, 1.0],
+			}),
+		})?;
+		if let Some(SceneInteractions::Course {
+			key_trigger,
+			exit_blocker,
+			..
+		}) = &self.interactions
+		{
+			output.push(SimulationAction::SetCollisionEnabled {
+				entity: key_trigger.clone(),
+				enabled: false,
+			})?;
+			if let Some(blocker) = exit_blocker {
+				output.push(SimulationAction::SetCollisionEnabled {
+					entity: blocker.clone(),
+					enabled: false,
+				})?;
+			}
+		}
+		Ok(())
 	}
 }
 
@@ -383,7 +552,9 @@ impl GameModule for CampaignModule {
 			return false;
 		}
 		self.base.needs_tick_with_progress(world, input, progress)
-			|| campaign.is_some_and(|value| self.pending_objective(world, value).is_some())
+			|| campaign.is_some_and(|value| {
+				self.pending_objective(world, value).is_some() || self.feedback_needed(world, value)
+			})
 	}
 	fn plan(
 		&self,
@@ -409,7 +580,57 @@ impl GameModule for CampaignModule {
 			return Ok(());
 		}
 
-		let objective = self.pending_objective(context.world, progress);
+		let entered = |sensor: &EntityKey, player: &EntityKey| {
+			context.triggers.iter().any(|event| {
+				event.phase == TriggerPhase::Enter
+					&& &event.sensor == sensor
+					&& &event.other == player
+			})
+		};
+		let mut collected = false;
+		let objective = match &self.interactions {
+			Some(SceneInteractions::Course {
+				key_trigger,
+				exit_trigger,
+				..
+			}) => {
+				let roles = self.roles.as_ref().ok_or("Course roles unavailable")?;
+				collected = !progress.has_courtyard_key && entered(key_trigger, &roles.player);
+				if collected {
+					output
+						.push_progress::<CampaignProgress>(ProgressAction::CollectCourtyardKey)?;
+				}
+				if (progress.has_courtyard_key || collected)
+					&& !progress.courtyard_exit_reached
+					&& context
+						.trigger_overlaps
+						.contains(exit_trigger, &roles.player)
+				{
+					Some(ProgressAction::ReachCourtyardExit)
+				} else {
+					None
+				}
+			}
+			Some(SceneInteractions::Finish { finish_trigger }) => {
+				let finish = self.finish.as_ref().ok_or("Finish roles unavailable")?;
+				if progress.courtyard_exit_reached
+					&& context
+						.trigger_overlaps
+						.contains(finish_trigger, &finish.player)
+				{
+					Some(ProgressAction::CompleteRun)
+				} else {
+					None
+				}
+			}
+			None => self.pending_objective(context.world, progress),
+		};
+		if collected
+			|| matches!(&objective, Some(ProgressAction::CollectCourtyardKey))
+			|| self.feedback_needed(context.world, progress)
+		{
+			self.show_unlocked(output)?;
+		}
 
 		if matches!(&objective, Some(ProgressAction::CompleteRun)) {
 			return output.push_progress::<CampaignProgress>(ProgressAction::CompleteRun);
@@ -443,15 +664,17 @@ mod tests {
 	};
 
 	fn course() -> (ProjectData, SceneId, Arc<SceneData>) {
-		let project =
+		// Compatibility fixtures exercise projects saved before authored triggers.
+		let mut project =
 			ProjectData::from_json(include_str!("../../../apps/game/project.json")).unwrap();
+		project.gameplay_settings = None;
 		let scene_id = SceneId::new("courtyard").unwrap();
-		let document = Arc::new(
+		let document = Arc::new(legacy_scene(
 			SceneData::from_json(include_str!(
 				"../../../apps/game/assets/scenes/courtyard.json"
 			))
 			.unwrap(),
-		);
+		));
 		(project, scene_id, document)
 	}
 
@@ -523,7 +746,19 @@ mod tests {
 	}
 
 	fn finish_document() -> SceneData {
-		SceneData::from_json(include_str!("../../../apps/game/assets/scenes/finish.json")).unwrap()
+		legacy_scene(
+			SceneData::from_json(include_str!("../../../apps/game/assets/scenes/finish.json"))
+				.unwrap(),
+		)
+	}
+	fn legacy_scene(mut data: SceneData) -> SceneData {
+		data.entities
+			.retain(|entity| !entity.key.as_str().ends_with("-trigger"));
+		for entity in &mut data.entities {
+			entity.collider = None;
+		}
+		data.camera.follow = None;
+		data
 	}
 
 	fn progress_action(action: ProgressAction) -> TypedProgressAction {
@@ -573,7 +808,7 @@ mod tests {
 	}
 
 	#[test]
-	fn bundled_course_requires_the_key_finishes_at_the_marker_and_restarts() {
+	fn legacy_course_requires_the_key_finishes_at_the_marker_and_restarts() {
 		let (project, scene_id, document) = course();
 		assert_eq!(project.startup_scene_id, scene_id);
 		let authored = (*document).clone();

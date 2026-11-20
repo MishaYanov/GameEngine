@@ -28,6 +28,7 @@ fn valid_data() -> SceneData {
 			})
 			.collect(),
 		camera: CameraData {
+			follow: None,
 			position: [1.0, 2.0, 3.0],
 			yaw: 0.25,
 			pitch: -0.1,
@@ -241,16 +242,12 @@ fn legacy_value() -> Value {
 	value.as_object_mut().unwrap().remove("bindings");
 	value.as_object_mut().unwrap().remove("lights");
 	for entity in value["entities"].as_array_mut().unwrap() {
-		for field in [
-			"key",
-			"renderable",
-			"parent",
-			"material",
-			"collider",
-			"mesh_index",
-		] {
-			entity.as_object_mut().unwrap().remove(field);
-		}
+		// Construct the actual historical entity shape, independently of later
+		// additive fields serialized by the current DTO.
+		entity
+			.as_object_mut()
+			.unwrap()
+			.retain(|field, _| matches!(field.as_str(), "name" | "model_path" | "transform"));
 	}
 	value
 }
@@ -264,6 +261,9 @@ fn legacy_json_migrates_deterministically_and_saves_as_current_version() {
 	assert_eq!(parsed.data.schema_version, CURRENT_SCHEMA_VERSION);
 	assert!(parsed.data.bindings.is_empty());
 	for (index, entity) in parsed.data.entities.iter().enumerate() {
+		assert!(entity.collision_enabled);
+		assert!(entity.renderable);
+		assert!(entity.asset_id.is_none());
 		assert_eq!(entity.key.as_str(), format!("legacy-entity-{index}"));
 		assert_eq!(
 			serde_json::to_value(&entity.transform).unwrap(),
@@ -287,6 +287,12 @@ fn legacy_json_still_rejects_unknown_fields_including_version_two_metadata() {
 	for (pointer, field, extra) in [
 		("", "bindings", json!({})),
 		("/entities/0", "key", json!("unexpected-key")),
+		("/entities/0", "collision_enabled", json!(true)),
+		(
+			"/entities/0",
+			"asset_id",
+			json!("11111111-1111-4111-8111-111111111111"),
+		),
 		("/entities/0/transform", "unexpected", json!(true)),
 		("/camera", "unexpected", json!(true)),
 	] {

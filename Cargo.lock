@@ -633,7 +633,10 @@ dependencies = [
  "courtyard-gameplay",
  "engine-core",
  "engine-logger",
+ "gltf",
+ "serde_json",
  "sha2",
+ "urlencoding",
  "windows-sys 0.52.0",
 ]
 
@@ -735,6 +738,8 @@ name = "courtyard-gameplay"
 version = "0.1.0"
 dependencies = [
  "engine-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3625,8 +3630,10 @@ dependencies = [
  "renderer",
  "serde",
  "serde_json",
+ "sha2",
  "urlencoding",
  "uuid",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

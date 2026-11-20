@@ -25,6 +25,7 @@ pub fn scene(entities: Vec<EntityData>) -> SceneData {
 		entities,
 		lights: vec![],
 		camera: CameraData {
+			follow: None,
 			position: camera.position,
 			yaw: camera.yaw,
 			pitch: camera.pitch,

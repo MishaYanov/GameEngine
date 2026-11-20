@@ -7,6 +7,7 @@
         type="bottom"
 >
     <editor-pane icon="folder" title="Assets">
+        <editor-asset-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
         <button (click)="loadModels()" [disabled]="!canLoadModels()" pane-actions type="button">
             {{ loading() ? 'Loading models…' : models() === null ? 'Load Models' : 'Refresh Models' }}
         </button>
@@ -46,7 +47,7 @@
                             >
                                 <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
                                 <span>{{ file.name }}</span>
-                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : 'Model' }}</span>
+                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : file.kind === 'prefab' ? 'Prefab' : 'Model' }}</span>
                                 @if (isActiveScene(file)) {
                                     <span class="active-scene">Active</span>
                                 }
@@ -69,7 +70,7 @@
                                 Open Scene
                             </button>
                         } @else {
-                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">Add to Scene</button>
+                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">{{ file.kind === 'prefab' ? 'Instantiate Prefab' : 'Add to Scene' }}</button>
                         }
                     </section>
                 }

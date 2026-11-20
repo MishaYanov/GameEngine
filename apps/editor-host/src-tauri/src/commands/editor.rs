@@ -22,6 +22,8 @@ use std::{
 	time::Instant,
 };
 use tauri::{Emitter, State, WebviewWindow};
+mod asset_authoring;
+pub use asset_authoring::*;
 
 pub(super) fn trusted_window(window: &WebviewWindow) -> Result<(), String> {
 	let url = window.url().map_err(|e| e.to_string())?;
@@ -606,6 +608,74 @@ pub async fn editor_save_scene_as(
 pub struct ModelAssetDto {
 	name: String,
 	path: String,
+	kind: &'static str,
+	asset_id: Option<runtime::asset_catalog::AssetId>,
+	fingerprint: Option<String>,
+	revision: Option<u64>,
+	source_path: Option<String>,
+	mesh_count: Option<usize>,
+}
+impl ModelAssetDto {
+	fn from_asset(asset: &runtime::asset_catalog::PersistentAsset) -> Self {
+		Self {
+			name: Path::new(&asset.path)
+				.file_stem()
+				.and_then(|name| name.to_str())
+				.unwrap_or("Asset")
+				.into(),
+			path: asset.path.clone(),
+			kind: if asset.kind == runtime::asset_catalog::AssetKind::Prefab {
+				"prefab"
+			} else {
+				"model"
+			},
+			asset_id: Some(asset.id.clone()),
+			fingerprint: Some(asset.fingerprint.clone()),
+			revision: Some(asset.revision),
+			source_path: asset.source_path.clone(),
+			mesh_count: (asset.kind == runtime::asset_catalog::AssetKind::Model)
+				.then_some(asset.meshes.len()),
+		}
+	}
+}
+#[cfg(test)]
+mod asset_dto_contract {
+	use super::*;
+	#[test]
+	fn catalog_dto_carries_stable_identity_and_explicit_optional_metadata_for_models_and_prefabs() {
+		let mut asset = runtime::asset_catalog::PersistentAsset {
+			id: runtime::asset_catalog::AssetId::generate(),
+			path: "model.glb".into(),
+			kind: runtime::asset_catalog::AssetKind::Model,
+			aliases: vec![],
+			revision: 1,
+			fingerprint: "a".repeat(64),
+			bytes: 128,
+			source_path: None,
+			meshes: vec![runtime::asset_catalog::MeshSignature {
+				index: 0,
+				name: "Mesh".into(),
+				primitives: 1,
+			}],
+			dependencies: vec![],
+		};
+		let model = serde_json::to_value(ModelAssetDto::from_asset(&asset)).unwrap();
+		assert_eq!(model["asset_id"], asset.id.as_str());
+		assert_eq!(model["kind"], "model");
+		assert_eq!(model["fingerprint"], asset.fingerprint);
+		assert_eq!(model["revision"], 1);
+		assert_eq!(model["mesh_count"], 1);
+		assert!(model["source_path"].is_null());
+		asset.path = "assembly.json".into();
+		asset.kind = runtime::asset_catalog::AssetKind::Prefab;
+		asset.meshes.clear();
+		let prefab = serde_json::to_value(ModelAssetDto::from_asset(&asset)).unwrap();
+		assert_eq!(prefab["kind"], "prefab");
+		assert_eq!(prefab["asset_id"], asset.id.as_str());
+		assert_eq!(prefab["path"], "assembly.json");
+		assert!(prefab["mesh_count"].is_null());
+		assert!(prefab["source_path"].is_null());
+	}
 }
 #[tauri::command]
 pub async fn editor_assets(
@@ -615,23 +685,25 @@ pub async fn editor_assets(
 	trusted_window(&window)?;
 	let shared = Arc::clone(&state.editor);
 	tauri::async_runtime::spawn_blocking(move || {
-		let asset_root = shared
-			.lock()
-			.map_err(|_| "Editor state lock failed")?
+		let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+		let workspace = slot
 			.as_ref()
-			.ok_or("Open a scene before using the editor")?
-			.asset_root
-			.clone();
-		// Directory traversal should not block document edits or viewport frames.
-		runtime::assets::catalog::scan_models(asset_root).map(|assets| {
-			assets
-				.into_iter()
-				.map(|a| ModelAssetDto {
-					name: a.name,
-					path: a.path,
-				})
-				.collect()
-		})
+			.ok_or("Open a scene before using the editor")?;
+		let catalog = runtime::assets::project_assets::migrate_catalog(&workspace.asset_root)?;
+		let mut assets: Vec<_> = catalog
+			.assets
+			.iter()
+			.filter(|asset| {
+				matches!(
+					asset.kind,
+					runtime::asset_catalog::AssetKind::Model
+						| runtime::asset_catalog::AssetKind::Prefab
+				)
+			})
+			.map(ModelAssetDto::from_asset)
+			.collect();
+		assets.sort_by(|a, b| a.path.cmp(&b.path));
+		Ok(assets)
 	})
 	.await
 	.map_err(|error| format!("Asset catalog worker failed: {error}"))?

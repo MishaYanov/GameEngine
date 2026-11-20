@@ -24,6 +24,8 @@ struct SceneEntry {
 	key: Option<EntityKey>,
 	name: String,
 	model_path: Option<String>,
+	asset_id: Option<engine_core::asset_catalog::AssetId>,
+	collision_enabled: bool,
 	instance: ModelInstance,
 	parent: Option<EntityKey>,
 	material: Option<MaterialOverrideData>,
@@ -38,6 +40,7 @@ pub struct Scene {
 	bindings: BTreeMap<String, EntityKey>,
 	next_id: u64,
 	lights: Vec<LightData>,
+	camera_follow: Option<engine_core::game_camera::FollowCameraSettings>,
 	id_indices: HashMap<EntityId, usize>,
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
@@ -71,6 +74,15 @@ impl EntitySnapshot {
 }
 
 impl Scene {
+	pub fn camera_follow(&self) -> Option<&engine_core::game_camera::FollowCameraSettings> {
+		self.camera_follow.as_ref()
+	}
+	pub fn set_camera_follow(
+		&mut self,
+		follow: Option<engine_core::game_camera::FollowCameraSettings>,
+	) {
+		self.camera_follow = follow;
+	}
 	pub(crate) fn retain_entity(&self, id: EntityId) -> Result<RetainedEntity, String> {
 		let index = self
 			.id_indices
@@ -96,6 +108,7 @@ impl Scene {
 		let saved_camera = &data.camera;
 		self.bindings == data.bindings
 			&& self.lights == data.lights
+			&& self.camera_follow == data.camera.follow
 			&& self.entries.len() == data.entities.len()
 			&& self
 				.entries
@@ -105,6 +118,8 @@ impl Scene {
 					let transform = entry.instance.transform();
 					entry.key.as_ref() == Some(&saved.key)
 						&& entry.name == saved.name
+						&& entry.asset_id == saved.asset_id
+						&& entry.collision_enabled == saved.collision_enabled
 						&& entry.model_path.as_deref() == Some(saved.model_path.as_str())
 						&& transform.position == saved.transform.position
 						&& transform.rotation == saved.transform.rotation
@@ -275,6 +290,8 @@ impl Scene {
 			key,
 			name,
 			model_path,
+			asset_id: None,
+			collision_enabled: true,
 			instance,
 			parent: None,
 			material: None,
@@ -421,6 +438,8 @@ impl Scene {
 				key: key.clone(),
 				name: entry.name.clone(),
 				model_path: model_path.clone(),
+				asset_id: entry.asset_id.clone(),
+				collision_enabled: entry.collision_enabled,
 				transform: TransformData {
 					position: transform.position,
 					rotation: transform.rotation,
@@ -439,6 +458,7 @@ impl Scene {
 			bindings: self.bindings.clone(),
 			entities,
 			camera: CameraData {
+				follow: self.camera_follow.clone(),
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -467,6 +487,16 @@ impl Scene {
 		self.id_indices
 			.get(&id)
 			.is_some_and(|&index| self.entries[index].renderable)
+	}
+
+	/// Prepared native model resources available to runtime visibility actions.
+	/// Missing invisible authoring markers are deliberately excluded.
+	pub fn visibility_capabilities(&self) -> HashSet<EntityKey> {
+		self.entries
+			.iter()
+			.filter(|entry| !entry.instance.model().parts().is_empty())
+			.filter_map(|entry| entry.key.clone())
+			.collect()
 	}
 
 	pub fn entity_ids(&self) -> impl ExactSizeIterator<Item = EntityId> + DoubleEndedIterator + '_ {
@@ -537,6 +567,8 @@ impl Scene {
 			.entries
 			.get_mut(*self.id_indices.get(&id).ok_or("New entity is missing")?)
 			.ok_or("New entity is missing")?;
+		entry.asset_id = source_metadata.asset_id;
+		entry.collision_enabled = source_metadata.collision_enabled;
 		entry.parent = source_metadata.parent;
 		entry.material = source_metadata.material;
 		entry.collider = source_metadata.collider;
@@ -554,6 +586,8 @@ impl Scene {
 		if entry.key.as_ref() != Some(&data.key) {
 			return Err("Entity metadata key does not match its persistent identity".into());
 		}
+		entry.asset_id = data.asset_id.clone();
+		entry.collision_enabled = data.collision_enabled;
 		entry.parent = data.parent.clone();
 		entry.material = data.material.clone();
 		entry.collider = data.collider.clone();
@@ -584,8 +618,10 @@ impl Scene {
 				.all(|(entry, entity)| {
 					entry.key.as_ref() == Some(&entity.key)
 						&& entry.model_path.as_deref() == Some(entity.model_path.as_str())
+						&& entry.asset_id == entity.asset_id
 						&& entry.mesh_index == entity.mesh_index
-						&& entry.renderable == entity.renderable
+						&& (!entity.renderable
+							|| entry.renderable || !entry.instance.model().parts().is_empty())
 				}) {
 			return false;
 		}
@@ -598,10 +634,13 @@ impl Scene {
 			entry.parent.clone_from(&entity.parent);
 			entry.material.clone_from(&entity.material);
 			entry.collider.clone_from(&entity.collider);
+			entry.collision_enabled = entity.collision_enabled;
+			entry.renderable = entity.renderable;
 		}
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
+		self.camera_follow.clone_from(&data.camera.follow);
 		true
 	}
 
@@ -635,8 +674,11 @@ impl Scene {
 			if entry.key.as_ref() != Some(&entity.key)
 				|| entry.parent != entity.parent
 				|| entry.model_path.as_deref() != Some(entity.model_path.as_str())
+				|| entry.asset_id != entity.asset_id
 				|| entry.mesh_index != entity.mesh_index
-				|| entry.renderable != entity.renderable
+				|| (entity.renderable
+					&& !entry.renderable
+					&& entry.instance.model().parts().is_empty())
 			{
 				return Ok(false);
 			}
@@ -716,6 +758,8 @@ impl Scene {
 			entry.name.clone_from(&entity.name);
 			entry.material.clone_from(&entity.material);
 			entry.collider.clone_from(&entity.collider);
+			entry.collision_enabled = entity.collision_enabled;
+			entry.renderable = entity.renderable;
 		}
 		if let Some(cache) = self.world_cache.get_mut() {
 			for (index, matrix) in matrices {
@@ -728,6 +772,9 @@ impl Scene {
 		}
 		if changes.lights_changed {
 			self.lights.clone_from(&data.lights);
+		}
+		if changes.camera_changed {
+			self.camera_follow.clone_from(&data.camera.follow);
 		}
 		Ok(true)
 	}
@@ -767,8 +814,11 @@ impl Scene {
 			let entity = &world.data().entities[cpu_index];
 			let entry = &self.entries[gpu_index];
 			if entry.model_path.as_deref() != Some(entity.model_path.as_str())
+				|| entry.asset_id != entity.asset_id
 				|| entry.mesh_index != entity.mesh_index
-				|| entry.renderable != entity.renderable
+				|| (entity.renderable
+					&& !entry.renderable
+					&& entry.instance.model().parts().is_empty())
 			{
 				return Ok(false);
 			}
@@ -793,6 +843,8 @@ impl Scene {
 			entry.parent.clone_from(&entity.parent);
 			entry.material.clone_from(&entity.material);
 			entry.collider.clone_from(&entity.collider);
+			entry.collision_enabled = entity.collision_enabled;
+			entry.renderable = entity.renderable;
 			self.world_cache
 				.get_mut()
 				.as_mut()
@@ -801,6 +853,9 @@ impl Scene {
 		if changes.lights_changed {
 			self.lights.clone_from(&world.data().lights);
 		}
+		if changes.camera_changed {
+			self.camera_follow.clone_from(&world.data().camera.follow);
+		}
 		Ok(true)
 	}
 
@@ -808,6 +863,7 @@ impl Scene {
 		let entry = self.entries.get(*self.id_indices.get(&id)?)?;
 		Some(engine_core::asset_registry::AssetRef {
 			path: entry.model_path.clone()?,
+			asset_id: entry.asset_id.clone(),
 			mesh_index: entry.mesh_index,
 		})
 	}
@@ -862,6 +918,7 @@ impl Scene {
 			next_id: self.next_id,
 			bindings: data.bindings.clone(),
 			lights: data.lights.clone(),
+			camera_follow: data.camera.follow.clone(),
 			..Scene::default()
 		};
 		let mut object_count = 0usize;
@@ -873,8 +930,11 @@ impl Scene {
 				.or_else(|| retained.get(&entity.key).map(|retained| &retained.0));
 			let mut entry = if let Some(entry) = existing {
 				if entry.model_path.as_deref() != Some(entity.model_path.as_str())
+					|| entry.asset_id != entity.asset_id
 					|| entry.mesh_index != entity.mesh_index
-					|| entry.renderable != entity.renderable
+					|| (entity.renderable
+						&& !entry.renderable
+						&& entry.instance.model().parts().is_empty())
 				{
 					return Err("Native resource adapter needs a model factory to change an existing asset source".into());
 				}
@@ -882,8 +942,10 @@ impl Scene {
 			} else {
 				let template = retained.values().map(|retained| &retained.0).find(|entry| {
 					entry.model_path.as_deref() == Some(entity.model_path.as_str())
+						&& entry.asset_id == entity.asset_id
 						&& entry.mesh_index == entity.mesh_index
-						&& entry.renderable == entity.renderable
+						&& (!entity.renderable
+							|| entry.renderable || !entry.instance.model().parts().is_empty())
 				});
 				let instance = if let Some(instance) = supplied_model {
 					instance.clone()
@@ -911,6 +973,8 @@ impl Scene {
 					key: Some(entity.key.clone()),
 					name: entity.name.clone(),
 					model_path: Some(entity.model_path.clone()),
+					asset_id: entity.asset_id.clone(),
+					collision_enabled: entity.collision_enabled,
 					instance,
 					parent: entity.parent.clone(),
 					material: entity.material.clone(),
@@ -927,6 +991,8 @@ impl Scene {
 			entry.parent.clone_from(&entity.parent);
 			entry.material.clone_from(&entity.material);
 			entry.collider.clone_from(&entity.collider);
+			entry.collision_enabled = entity.collision_enabled;
+			entry.renderable = entity.renderable;
 			object_count = object_count
 				.checked_add(entry.instance.model().parts().len())
 				.ok_or("Scene render-object count overflow")?;

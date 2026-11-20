@@ -1,0 +1,25 @@
+<button type="button" [disabled]="!available()" (click)="show()">Game Camera…</button>
+<editor-dialog [(open)]="open" title="Game Camera" [renderFields]="false" [config]="{width: '36rem'}">
+    <p>Follow tracks an entity's world position. Scene navigation keeps its own editor camera.</p>
+    <fieldset [disabled]="pending()" class="fields">
+        <legend>Runtime camera</legend>
+        <label>Mode<select [formField]="fields.mode"><option value="fixed">Fixed</option><option value="follow">Follow</option></select></label>
+        @if (draft().mode === 'follow') {
+            <label>Target<select [formField]="fields.target"><option value="">Choose an entity</option>@for (entity of editor.snapshot()?.document.entities; track entity.key) { <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option> }</select></label>
+            @for (group of groups; track group.name) {
+                <fieldset><legend>{{ group.label }} in world units</legend><div class="vector">
+                    @for (axis of axes; track axis) {
+                        <label>{{ axis.toUpperCase() }}<input type="text" inputmode="decimal"
+                            [attr.aria-label]="group.label + ' ' + axis.toUpperCase()" [formField]="fields[group.name][axis]"/></label>
+                    }
+                </div></fieldset>
+            }
+            <label>Smoothing in seconds<input type="text" inputmode="decimal" [formField]="fields.smoothing"/></label>
+            <p>Zero follows immediately. Higher values smooth camera movement.</p>
+        }
+    </fieldset>
+    @if (candidate().error; as failure) { <p class="error" role="status">{{ failure }}</p> }
+    @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
+    @if (message(); as text) { <p role="status">{{ text }}</p> }
+    <button dialog-actions type="button" [disabled]="!available() || !!candidate().error" (click)="apply()">Apply Game Camera</button>
+</editor-dialog>

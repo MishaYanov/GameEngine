@@ -1,7 +1,7 @@
 //! CPU world owned by a running authored project. GPU resources never live here.
 use crate::{
 	EntityKey,
-	scene_data::{SceneData, TransformData},
+	scene_data::{MaterialOverrideData, SceneData, TransformData},
 };
 use glam::Mat4;
 use serde::{Deserialize, Serialize};
@@ -225,6 +225,60 @@ impl RuntimeWorld {
 	}
 	pub fn document(&self) -> Arc<SceneData> {
 		Arc::clone(&self.document)
+	}
+	pub fn set_visible(&mut self, key: &EntityKey, visible: bool) -> Result<WorldChange, String> {
+		let index = self
+			.entity_index(key)
+			.ok_or("Visibility target is missing")?;
+		if self.document.entities[index].renderable == visible {
+			return Ok(WorldChange::default());
+		}
+		Arc::make_mut(&mut self.document).entities[index].renderable = visible;
+		Ok(WorldChange {
+			changed_entities: vec![key.clone()],
+			topology_changed: true,
+			..WorldChange::default()
+		})
+	}
+	pub fn set_collision_enabled(
+		&mut self,
+		key: &EntityKey,
+		enabled: bool,
+	) -> Result<WorldChange, String> {
+		let index = self
+			.entity_index(key)
+			.ok_or("Collision target is missing")?;
+		if self.document.entities[index].collision_enabled == enabled {
+			return Ok(WorldChange::default());
+		}
+		Arc::make_mut(&mut self.document).entities[index].collision_enabled = enabled;
+		Ok(WorldChange {
+			changed_entities: vec![key.clone()],
+			..WorldChange::default()
+		})
+	}
+	pub fn set_material(
+		&mut self,
+		key: &EntityKey,
+		material: Option<MaterialOverrideData>,
+	) -> Result<WorldChange, String> {
+		let index = self.entity_index(key).ok_or("Material target is missing")?;
+		if material.as_ref().is_some_and(|value| {
+			value
+				.base_color_factor
+				.iter()
+				.any(|channel| !channel.is_finite() || !(0.0..=1.0).contains(channel))
+		}) {
+			return Err("Runtime material channels must be finite and within 0..=1".into());
+		}
+		if self.document.entities[index].material == material {
+			return Ok(WorldChange::default());
+		}
+		Arc::make_mut(&mut self.document).entities[index].material = material;
+		Ok(WorldChange {
+			changed_entities: vec![key.clone()],
+			..WorldChange::default()
+		})
 	}
 	pub fn entity_index(&self, key: &EntityKey) -> Option<usize> {
 		self.indices.get(key).copied()

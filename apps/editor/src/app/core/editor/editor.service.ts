@@ -5,6 +5,7 @@ import {applyEditorUpdate} from './editor-updates';
 import {validGameplayModules} from './gameplay-modules';
 import type {
     BuildLaunchResult,
+    AssetOperation,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -62,6 +63,7 @@ export class EditorService {
     readonly capabilities = this.capabilitiesState.asReadonly();
     private readonly assetsState = signal<readonly ModelAsset[] | null>(null);
     readonly modelAssets = this.assetsState.asReadonly();
+    private assetCatalogStale = false;
     private readonly collisionsState = signal<CollisionSnapshot | null>(null);
     readonly collisions = this.collisionsState.asReadonly();
     private readonly viewportState = signal<ViewportStatus | null>(null);
@@ -281,6 +283,7 @@ export class EditorService {
                 return this.accept(applyEditorUpdate(previous, update));
             },
             true,
+            expectedGeneration,
         );
     }
 
@@ -294,14 +297,18 @@ export class EditorService {
 
     assets(refresh = false): Promise<readonly ModelAsset[]> {
         const cached = this.assetsState();
-        if (cached && !refresh) return Promise.resolve(cached);
+        if (cached && !refresh && !this.assetCatalogStale) return Promise.resolve(cached);
         const generation = this.workspaceGeneration();
         if (this.assetRequest?.generation === generation) return this.assetRequest.promise;
-        const current = () => !this.destroyed && this.workspaceGeneration() === generation;
+        const current = () => !this.destroyed && this.workspaceGeneration() === generation &&
+            this.assetRequest?.promise === promise;
         // Discovery reads the asset root. Keep it independent of the document command queue.
         const promise: Promise<readonly ModelAsset[]> = this.native<readonly ModelAsset[]>('editor_assets')
             .then(models => {
-                if (current()) this.assetsState.set(models);
+                if (current()) {
+                    this.assetsState.set(models);
+                    this.assetCatalogStale = false;
+                }
                 return models;
             })
             .catch((cause: unknown) => {
@@ -314,8 +321,49 @@ export class EditorService {
         return promise;
     }
 
-    importModel(path: string, position: Vec3): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_import_model', {path, position});
+    importModel(path: string, position: Vec3, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_import_model', {path, position}, false, {expectedGeneration, expectedRevision});
+    }
+
+    async chooseExternalGlb(): Promise<string | null> {
+        const generation = this.workspaceGeneration();
+        const current = () => !this.destroyed && generation === this.workspaceGeneration();
+        try {
+            const source = await this.native<string | null>('editor_choose_external_glb');
+            return current() ? source : null;
+        } catch (cause) {
+            if (!current()) throw this.clientError('editor_choose_external_glb', cause);
+            throw this.recordError('editor_choose_external_glb', cause);
+        }
+    }
+
+    importExternalGlb(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
+    }
+
+    reimportAsset(
+        assetId: string, expectedFingerprint: string, sourcePath?: string | null,
+        expectedGeneration?: number, expectedRevision?: number,
+    ): Promise<AssetOperation> {
+        return this.mutateAsset('editor_reimport_asset', {assetId, expectedFingerprint, sourcePath: sourcePath ?? null},
+            expectedGeneration, expectedRevision);
+    }
+
+    moveAsset(assetId: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
+        return this.mutateAsset('editor_move_asset', {assetId, destinationPath}, expectedGeneration, expectedRevision);
+    }
+
+    private mutateAsset(
+        operation: string, args: Record<string, unknown>, expectedGeneration?: number, expectedRevision?: number,
+    ): Promise<AssetOperation> {
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<AssetOperation>(operation, {...args, expectedRevision: expectedRevision ?? this.revision()});
+            this.requireGeneration(expectedGeneration);
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result;
+        }, true, expectedGeneration);
     }
 
     exportPrefab(): Promise<Prefab> {
@@ -326,20 +374,25 @@ export class EditorService {
         return this.snapshotOperation('editor_instantiate_prefab', {prefab, position});
     }
 
-    savePrefab(path: string): Promise<{ readonly path: string }> {
+    savePrefab(path: string, expectedGeneration?: number, expectedRevision?: number): Promise<{ readonly path: string }> {
         return this.enqueue(
             'editor_save_prefab',
-            () =>
-                this.native<{ readonly path: string }>('editor_save_prefab', {
+            async () => {
+                this.requireGeneration(expectedGeneration);
+                const result = await this.native<{ readonly path: string }>('editor_save_prefab', {
                     path,
-                    expectedRevision: this.revision(),
-                }),
+                    expectedRevision: expectedRevision ?? this.revision(),
+                });
+                this.invalidateAssetCatalog();
+                return result;
+            },
             true,
+            expectedGeneration,
         );
     }
 
-    loadPrefab(path: string, position: Vec3): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_load_prefab', {path, position});
+    loadPrefab(path: string, position: Vec3, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_load_prefab', {path, position}, false, {expectedGeneration, expectedRevision});
     }
 
     queryCollisions(): Promise<CollisionSnapshot> {
@@ -470,18 +523,21 @@ export class EditorService {
         operation: string,
         args: Record<string, unknown> = {},
         replacesWorkspace = false,
+        expected: {expectedGeneration?: number; expectedRevision?: number} = {},
     ): Promise<EditorSnapshot> {
         return this.enqueue(
             operation,
             async () => {
+                this.requireGeneration(expected.expectedGeneration);
                 const snapshot = await this.native<EditorSnapshot>(operation, {
                     ...args,
-                    expectedRevision: this.revision(),
+                    expectedRevision: expected.expectedRevision ?? this.revision(),
                 });
                 if (replacesWorkspace) this.workspaceGenerationState.update(generation => generation + 1);
                 return this.accept(snapshot);
             },
             true,
+            expected.expectedGeneration,
         );
     }
 
@@ -490,6 +546,19 @@ export class EditorService {
         if (!snapshot)
             throw new EditorClientError('not_open', 'editor_execute', 'Open a scene before editing it.');
         return snapshot.revision;
+    }
+
+    private requireGeneration(expected?: number): void {
+        if (expected !== undefined && expected !== this.workspaceGeneration()) {
+            throw new Error('The workspace changed. Select the asset again.');
+        }
+    }
+
+    private invalidateAssetCatalog(): void {
+        // Retain the displayed catalog until a fresh result can replace it atomically.
+        // Dropping an older request also prevents it from repopulating this cache.
+        this.assetCatalogStale = true;
+        this.assetRequest = null;
     }
 
     private accept(snapshot: EditorSnapshot): EditorSnapshot {
@@ -502,7 +571,11 @@ export class EditorService {
         operation: string,
         action: () => Promise<T>,
         recoverSnapshot = false,
+        expectedGeneration?: number,
     ): Promise<T> {
+        if (expectedGeneration !== undefined && expectedGeneration !== this.workspaceGeneration()) {
+            return Promise.reject(this.clientError(operation, new Error('The workspace changed. Select the setting or asset again.')));
+        }
         if (this.pendingState() >= 256) {
             return Promise.reject(
                 this.recordError(
@@ -523,6 +596,9 @@ export class EditorService {
                 this.errorState.set(null);
                 return value;
             } catch (cause: unknown) {
+                if (expectedGeneration !== undefined && expectedGeneration !== this.workspaceGeneration()) {
+                    throw this.clientError(operation, cause);
+                }
                 // Refresh the in-memory authoritative state, never reload the disk file.
                 // Rejected edits are not retried automatically against a new revision.
                 if (recoverSnapshot && this.snapshotState() && !this.destroyed) {
@@ -621,6 +697,12 @@ export class EditorService {
     }
 
     private recordError(operation: string, cause: unknown): EditorClientError {
+        const error = this.clientError(operation, cause);
+        this.errorState.set(error);
+        return error;
+    }
+
+    private clientError(operation: string, cause: unknown): EditorClientError {
         const backend =
             typeof cause === 'object' &&
             cause !== null &&
@@ -637,7 +719,7 @@ export class EditorService {
                 : typeof cause === 'string'
                     ? cause
                     : 'The native editor operation failed.';
-        const error =
+        return (
             cause instanceof EditorClientError
                 ? cause
                 : new EditorClientError(
@@ -651,8 +733,7 @@ export class EditorService {
                     operation,
                     message,
                     cause,
-                );
-        this.errorState.set(error);
-        return error;
+                )
+        );
     }
 }

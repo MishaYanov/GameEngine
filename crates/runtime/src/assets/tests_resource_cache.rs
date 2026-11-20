@@ -1,5 +1,106 @@
 use super::*;
 
+#[test]
+fn hidden_model_availability_uses_resolved_extension_and_keeps_logical_markers_optional() {
+	let fixture = Fixture::new();
+	std::fs::write(fixture.root.join("marker.txt"), "logical marker").unwrap();
+	let assets = AssetManager::new(&fixture.root).unwrap();
+	let reference = |path| engine_core::asset_registry::AssetRef::new(path, None).unwrap();
+	assert!(!assets.asset_exists(&reference("marker.txt")).unwrap());
+	assert!(!assets.asset_exists(&reference("missing.gltf")).unwrap());
+	assert!(assets.asset_exists(&reference("active.gltf")).unwrap());
+	let bytes = std::fs::read(fixture.root.join("active.gltf")).unwrap();
+	let id = engine_core::asset_catalog::AssetId::generate();
+	let record = engine_core::asset_catalog::PersistentAsset {
+		id: id.clone(),
+		path: "active.gltf".into(),
+		kind: engine_core::asset_catalog::AssetKind::Model,
+		aliases: vec!["marker.txt".into()],
+		revision: 1,
+		fingerprint: super::super::project_assets::fingerprint(&bytes),
+		bytes: bytes.len() as u64,
+		source_path: None,
+		meshes: vec![engine_core::asset_catalog::MeshSignature {
+			index: 0,
+			name: "Mesh".into(),
+			primitives: 1,
+		}],
+		dependencies: vec![],
+	};
+	let catalog = engine_core::asset_catalog::AssetCatalog {
+		schema_version: 1,
+		assets: vec![record],
+	};
+	std::fs::write(
+		fixture.root.join(engine_core::asset_catalog::CATALOG_FILE),
+		catalog.to_json().unwrap(),
+	)
+	.unwrap();
+	assert!(
+		assets.asset_exists(&reference("marker.txt")).unwrap(),
+		"supported resolved model wins over legacy alias extension"
+	);
+	assert!(
+		assets
+			.asset_exists(&reference("unrelated.note").with_asset_id(Some(id)))
+			.unwrap(),
+		"explicit stable identity resolves before extension filtering"
+	);
+}
+
+#[test]
+fn candidate_promotion_replaces_all_source_keys_and_discard_preserves_active_snapshot() {
+	let fixture = Fixture::new();
+	let mut assets = AssetManager::new(&fixture.root).unwrap();
+	let original = Arc::new(Model::new(Vec::new()));
+	let candidate = Arc::new(Model::new(Vec::new()));
+	let active = engine_core::asset_registry::AssetRef::new("active.gltf", Some(0)).unwrap();
+	let pending = engine_core::asset_registry::AssetRef::new("unused.gltf", Some(0)).unwrap();
+	assets.models.insert(active.clone(), Arc::clone(&original));
+	assets
+		.models
+		.insert(pending.clone(), Arc::clone(&candidate));
+	for path in ["active.gltf", "unused.gltf"] {
+		assets.cache_resources(&fixture.root.join(path), 0).unwrap();
+		drop(assets.load_scene(path).unwrap());
+	}
+	let prepared = || PreparedGpuAsset {
+		candidate: fixture.root.join("unused.gltf"),
+		destination: fixture.root.join("active.gltf"),
+		candidate_relative: "unused.gltf".into(),
+		destination_relative: "active.gltf".into(),
+		reuses_source: false,
+	};
+	assets.discard_gpu_asset(prepared());
+	assert!(Arc::ptr_eq(&assets.models[&active], &original));
+	assert!(!assets.models.contains_key(&pending));
+	assert_eq!(assets.resource_cache.len(), 1);
+	assets.models.insert(pending, Arc::clone(&candidate));
+	assets
+		.cache_resources(&fixture.root.join("unused.gltf"), 0)
+		.unwrap();
+	drop(assets.load_scene("unused.gltf").unwrap());
+	assets.promote_gpu_asset(prepared());
+	assert!(Arc::ptr_eq(&assets.models[&active], &candidate));
+	assert_eq!(
+		Arc::strong_count(&original),
+		1,
+		"external old scene keeps its snapshot alive"
+	);
+	assert_eq!(assets.resource_cache.len(), 1);
+	assert_eq!(assets.resource_bytes, 36);
+	assert_eq!(assets.resource_order, [fixture.root.join("active.gltf")]);
+	assert_eq!(assets.scene_order, [fixture.root.join("active.gltf")]);
+	assert_eq!(
+		assets.scene_bytes,
+		assets
+			.scenes
+			.iter()
+			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
+			.sum::<usize>()
+	);
+}
+
 struct Fixture {
 	root: PathBuf,
 }

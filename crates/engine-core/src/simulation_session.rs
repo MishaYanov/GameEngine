@@ -4,10 +4,12 @@ use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
 	collision::{CollisionStats, CollisionWorld},
+	game_camera::GameCameraController,
 	input::{GameKeyboardInput, HeldGameActions},
 	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
-	scene_data::{SceneData, TransformData},
+	scene_data::{EntityData, MaterialOverrideData, SceneData, TransformData},
 	simulation::FixedStepper,
+	triggers::{TriggerEvent, TriggerTracker, TriggerView},
 	world::{ChangeAccumulator, RuntimeWorld, WorldChange},
 };
 use glam::Vec3;
@@ -58,6 +60,18 @@ pub enum SimulationAction {
 	SetTransform {
 		entity: EntityKey,
 		transform: TransformData,
+	},
+	SetVisible {
+		entity: EntityKey,
+		visible: bool,
+	},
+	SetCollisionEnabled {
+		entity: EntityKey,
+		enabled: bool,
+	},
+	SetMaterial {
+		entity: EntityKey,
+		material: Option<MaterialOverrideData>,
 	},
 }
 pub struct ActionWriter<'a> {
@@ -119,6 +133,9 @@ pub struct GameplayContext<'a> {
 	pub input: &'a InputFrame,
 	pub step_seconds: f32,
 	pub progress: ProgressView<'a>,
+	/// Edges sampled before this fixed step's actions. Exit precedes Enter.
+	pub triggers: &'a [TriggerEvent],
+	pub trigger_overlaps: TriggerView<'a>,
 }
 
 pub trait GameModule: Send {
@@ -153,6 +170,14 @@ pub trait GameModule: Send {
 }
 
 pub trait GameModuleFactory: Send + Sync {
+	/// Explicit references for portable authored assemblies. Modules define these
+	/// paths; core must never infer identities from arbitrary matching strings.
+	fn prefab_references(
+		&self,
+		_scene_settings: &serde_json::Value,
+	) -> Result<ModuleSettingReferences, String> {
+		Err("This gameplay module does not declare portable prefab setting references".into())
+	}
 	/// Called once per game run, never while preparing an ordinary scene change.
 	fn create_progress(&self) -> Result<ProgressState, String> {
 		Ok(ProgressState::empty())
@@ -171,6 +196,12 @@ pub trait GameModuleFactory: Send + Sync {
 	) -> Result<Box<dyn GameModule>, String> {
 		self.create(config.project, config.scene_id)
 	}
+}
+
+#[derive(Default)]
+pub struct ModuleSettingReferences {
+	pub entities: std::collections::BTreeMap<String, EntityKey>,
+	pub scenes: std::collections::BTreeMap<String, SceneId>,
 }
 
 /// Resolves the project configuration once, before a new game run is created.
@@ -320,6 +351,8 @@ pub struct TickOutcome {
 	pub progress_revision: u64,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub requested_scene: Option<SceneId>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub trigger_events: Vec<TriggerEvent>,
 }
 pub struct SimulationSession {
 	project: Arc<ProjectData>,
@@ -334,6 +367,9 @@ pub struct SimulationSession {
 	scene_id: SceneId,
 	controlled_targets: Vec<EntityKey>,
 	controlled_target_set: HashSet<EntityKey>,
+	triggers: TriggerTracker,
+	camera: GameCameraController,
+	visibility_capabilities: Option<HashSet<EntityKey>>,
 }
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
@@ -395,6 +431,8 @@ impl SimulationSession {
 		})?;
 		let collisions = CollisionWorld::new(&world)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
+		let triggers = TriggerTracker::new(&world);
+		let camera = GameCameraController::new(&world)?;
 
 		Ok(Self {
 			project,
@@ -409,6 +447,9 @@ impl SimulationSession {
 			scene_id,
 			controlled_targets,
 			controlled_target_set: seen,
+			triggers,
+			camera,
+			visibility_capabilities: None,
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
@@ -423,6 +464,27 @@ impl SimulationSession {
 	pub fn world(&self) -> &RuntimeWorld {
 		&self.world
 	}
+	pub fn camera(&self) -> &crate::Camera {
+		self.camera.camera()
+	}
+	/// Native hosts supply the entities whose models were successfully prepared.
+	/// CPU-only sessions leave this unset. It is runtime capability data, not authored state.
+	pub fn set_visibility_capabilities(
+		&mut self,
+		available: HashSet<EntityKey>,
+	) -> Result<(), String> {
+		if available
+			.iter()
+			.any(|key| self.world.entity_index(key).is_none())
+		{
+			return Err("Visibility capability references a missing runtime entity".into());
+		}
+		self.visibility_capabilities = Some(available);
+		Ok(())
+	}
+	pub fn has_visibility_capabilities(&self) -> bool {
+		self.visibility_capabilities.is_some()
+	}
 	pub fn document(&self) -> Arc<SceneData> {
 		self.world.document()
 	}
@@ -433,7 +495,10 @@ impl SimulationSession {
 		self.tick
 	}
 	pub fn needs_tick(&self) -> bool {
-		!self.paused && self.module.needs_tick(&self.inputs)
+		!self.paused
+			&& (self.triggers.sample_needed
+				|| self.camera.needs_tick(&self.world)
+				|| self.module.needs_tick(&self.inputs))
 	}
 	pub(crate) fn gameplay_status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
 		self.module
@@ -443,9 +508,11 @@ impl SimulationSession {
 
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
-			&& self
-				.module
-				.needs_tick_with_progress(&self.world, &self.inputs, progress)
+			&& (self.triggers.sample_needed
+				|| self.camera.needs_tick(&self.world)
+				|| self
+					.module
+					.needs_tick_with_progress(&self.world, &self.inputs, progress))
 	}
 	pub fn collision_stats(&self) -> CollisionStats {
 		self.collisions.stats()
@@ -571,7 +638,11 @@ impl SimulationSession {
 		if self.tick.checked_add(report.steps as u64).is_none() {
 			return Err("Simulation tick counter is exhausted".into());
 		}
-		let mut before = HashMap::<EntityKey, TransformData>::new();
+		let mut before = HashMap::<EntityKey, EntityData>::new();
+		let mut triggers = self.triggers.clone();
+		let mut camera = self.camera.clone();
+		let mut trigger_events = Vec::new();
+		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
 		let mut steps = 0;
@@ -581,6 +652,20 @@ impl SimulationSession {
 		let mut progress_transaction = progress.transaction();
 		let result = (|| -> Result<(), String> {
 			for _ in 0..report.steps {
+				let event_start = trigger_events.len();
+				if triggers.sample_needed {
+					let contacts = self
+						.collisions
+						.query_sensor_overlaps_with_budget(&mut collision_candidates_remaining)?;
+					triggers.sample(
+						&self.world,
+						&contacts,
+						&self.scene_id,
+						self.tick + u64::from(steps) + 1,
+						&mut trigger_events,
+						&mut trigger_event_bytes,
+					)?;
+				}
 				self.actions.clear();
 				self.module.plan_with_progress(
 					GameplayContext {
@@ -588,6 +673,8 @@ impl SimulationSession {
 						input: &self.inputs,
 						step_seconds: report.step_seconds,
 						progress: progress_transaction.view(),
+						triggers: &trigger_events[event_start..],
+						trigger_overlaps: triggers.view(),
 					},
 					&mut ActionWriter {
 						actions: &mut self.actions,
@@ -642,6 +729,9 @@ impl SimulationSession {
 						}
 						SimulationAction::Move { entity, .. }
 						| SimulationAction::Rotate { entity, .. }
+						| SimulationAction::SetVisible { entity, .. }
+						| SimulationAction::SetCollisionEnabled { entity, .. }
+						| SimulationAction::SetMaterial { entity, .. }
 						| SimulationAction::SetTransform { entity, .. } => entity,
 					};
 					let index = self
@@ -650,7 +740,11 @@ impl SimulationSession {
 						.ok_or("Simulation action target is missing")?;
 					before
 						.entry(entity.clone())
-						.or_insert_with(|| self.world.data().entities[index].transform.clone());
+						.or_insert_with(|| self.world.data().entities[index].clone());
+					let affects_collision = !matches!(
+						&action,
+						SimulationAction::SetVisible { .. } | SimulationAction::SetMaterial { .. }
+					);
 					let change = match action {
 						SimulationAction::Progress(_) | SimulationAction::RequestScene { .. } => {
 							unreachable!("Non-world actions were handled above");
@@ -682,7 +776,32 @@ impl SimulationSession {
 							self.collisions.synchronize(&self.world, &changes)?;
 							changes
 						}
+						SimulationAction::SetVisible { entity, visible } => {
+							if visible
+								&& self
+									.visibility_capabilities
+									.as_ref()
+									.is_some_and(|available| !available.contains(&entity))
+							{
+								return Err(format!(
+									"Cannot show entity {:?}: its render model was not prepared",
+									entity.as_str()
+								));
+							}
+							self.world.set_visible(&entity, visible)?
+						}
+						SimulationAction::SetCollisionEnabled { entity, enabled } => {
+							let change = self.world.set_collision_enabled(&entity, enabled)?;
+							self.collisions.synchronize(&self.world, &change)?;
+							change
+						}
+						SimulationAction::SetMaterial { entity, material } => {
+							self.world.set_material(&entity, material)?
+						}
 					};
+					if affects_collision && !change.is_empty() {
+						triggers.invalidate();
+					}
 					// A single validated action touches at most the scene's
 					// 100k entities. Detect that final bounded overshoot before
 					// applying another action, then restore the whole tick.
@@ -696,6 +815,17 @@ impl SimulationSession {
 					}
 					changes.merge(change);
 				}
+				let before_camera = camera.camera().clone();
+				camera.update(&self.world, report.step_seconds)?;
+				if before_camera.position != camera.camera().position
+					|| before_camera.yaw != camera.camera().yaw
+					|| before_camera.pitch != camera.camera().pitch
+				{
+					changes.merge(WorldChange {
+						camera_changed: true,
+						..WorldChange::default()
+					});
+				}
 				steps += 1;
 				if requested_scene.is_some() {
 					// A new scene starts at the next step, after the host commits it.
@@ -705,12 +835,12 @@ impl SimulationSession {
 			Ok(())
 		})();
 		if let Err(error) = result {
-			// Cold failure path restores only transforms touched by planned
+			// Cold failure path restores only entities touched by planned
 			// actions. A full document copy is never retained per steady tick.
 			let mut restored = self.world.data().clone();
 			for entity in &mut restored.entities {
-				if let Some(transform) = before.remove(&entity.key) {
-					entity.transform = transform;
+				if let Some(original) = before.remove(&entity.key) {
+					*entity = original;
 				}
 			}
 			self.world = RuntimeWorld::new(Arc::new(restored))?;
@@ -730,6 +860,9 @@ impl SimulationSession {
 			+ f64::from(report.steps - steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();
 		outcome.requested_scene = requested_scene;
+		self.triggers = triggers;
+		self.camera = camera;
+		outcome.trigger_events = trigger_events;
 		Ok(outcome)
 	}
 }
