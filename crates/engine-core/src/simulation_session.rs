@@ -263,13 +263,14 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| !self.inputs.action_presses.is_empty()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
 	}
 	pub(crate) fn gameplay_status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
 		self.module
-			.status(progress)
+			.status_in_world(&self.world, &self.collisions, progress)
 			.filter(GameplayStatus::is_valid)
 	}
 
@@ -280,6 +281,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| !self.inputs.action_presses.is_empty()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
@@ -597,6 +599,7 @@ impl SimulationSession {
 				self.module.plan_with_progress(
 					GameplayContext {
 						world: &self.world,
+						collisions: &self.collisions,
 						input: &self.inputs,
 						step_seconds: report.step_seconds,
 						progress: progress_transaction.view(),
@@ -607,6 +610,9 @@ impl SimulationSession {
 						actions: &mut self.actions,
 					},
 				)?;
+				// Later catch-up steps see held state only. A rejected tick
+				// rolls back its actions and clears all input on pause.
+				self.inputs.action_presses.clear();
 				// Structural removals become visible at the end of this step, after
 				let count = characters.keys().count();
 				actions_applied += count;

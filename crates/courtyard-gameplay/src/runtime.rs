@@ -1,5 +1,6 @@
 use engine_core::{
 	EntityKey,
+	collision::CollisionWorld,
 	command::GameplayStatus,
 	game_progress::ProgressView,
 	scene_data::MaterialOverrideData,
@@ -11,7 +12,7 @@ use engine_core::{
 use super::{
 	CampaignProgress, ProgressAction,
 	preparation::{CourseRoles, FinishRoles},
-	settings::SceneInteractions,
+	settings::{RouteGateSettings, SceneInteractions},
 };
 
 pub(super) struct CampaignModule {
@@ -19,6 +20,7 @@ pub(super) struct CampaignModule {
 	roles: Option<CourseRoles>,
 	finish: Option<FinishRoles>,
 	interactions: Option<SceneInteractions>,
+	route_gate: Option<RouteGateSettings>,
 }
 
 pub(super) const INTERACTION_RADIUS: f32 = 0.35;
@@ -29,13 +31,65 @@ impl CampaignModule {
 		roles: Option<CourseRoles>,
 		finish: Option<FinishRoles>,
 		interactions: Option<SceneInteractions>,
+		route_gate: Option<RouteGateSettings>,
 	) -> Self {
 		Self {
 			base,
 			roles,
 			finish,
 			interactions,
+			route_gate,
 		}
+	}
+
+	fn route_gate_needs_projection(&self, world: &RuntimeWorld) -> bool {
+		self.route_gate
+			.as_ref()
+			.and_then(|gate| world.entity_index(&gate.gate))
+			.is_some_and(|index| {
+				let gate = &world.data().entities[index];
+				gate.renderable || gate.collision_enabled
+			})
+	}
+
+	fn route_lever_reachable(&self, world: &RuntimeWorld, collisions: &CollisionWorld) -> bool {
+		let (Some(gate), Some(roles)) = (&self.route_gate, &self.roles) else {
+			return false;
+		};
+		world.entity_index(&gate.gate).is_some()
+			&& within_radius(world, &roles.player, &gate.lever, gate.radius)
+			&& collisions.interaction_segment_clear(world, &roles.player, &gate.lever)
+	}
+
+	fn plan_route_gate(
+		&self,
+		context: &GameplayContext<'_>,
+		progress: &CampaignProgress,
+		output: &mut ActionWriter<'_>,
+	) -> Result<(), String> {
+		let Some(gate) = &self.route_gate else {
+			return Ok(());
+		};
+		let opens_now = !progress.route_gate_open
+			&& progress.has_courtyard_key
+			&& context.input.action_pressed(&gate.action)
+			&& self.route_lever_reachable(context.world, context.collisions);
+		if opens_now {
+			output.push_progress::<CampaignProgress>(ProgressAction::OpenRouteGate)?;
+		}
+		if opens_now
+			|| (progress.route_gate_open && self.route_gate_needs_projection(context.world))
+		{
+			output.push(SimulationAction::SetVisible {
+				entity: gate.gate.clone(),
+				visible: false,
+			})?;
+			output.push(SimulationAction::SetCollisionEnabled {
+				entity: gate.gate.clone(),
+				enabled: false,
+			})?;
+		}
+		Ok(())
 	}
 
 	fn pending_objective(
@@ -188,6 +242,31 @@ impl GameModule for CampaignModule {
 		})
 	}
 
+	fn status_in_world(
+		&self,
+		world: &RuntimeWorld,
+		collisions: &CollisionWorld,
+		progress_view: ProgressView<'_>,
+	) -> Option<GameplayStatus> {
+		let mut status = self.status(progress_view)?;
+		let progress = progress_view.get::<CampaignProgress>()?;
+		if self.route_gate.is_some()
+			&& progress.has_courtyard_key
+			&& !progress.completed
+			&& !progress.courtyard_exit_reached
+		{
+			if progress.route_gate_open {
+				status.detail = Some("The route gate is open".into());
+			} else {
+				status.objective = "Reach the route lever".into();
+				status.detail = self
+					.route_lever_reachable(world, collisions)
+					.then(|| "Use Interact to open the route gate".into());
+			}
+		}
+		Some(status)
+	}
+
 	fn needs_tick(&self, input: &InputFrame) -> bool {
 		self.base.needs_tick(input)
 	}
@@ -203,7 +282,9 @@ impl GameModule for CampaignModule {
 		}
 		self.base.needs_tick_with_progress(world, input, progress)
 			|| campaign.is_some_and(|value| {
-				self.pending_objective(world, value).is_some() || self.feedback_needed(world, value)
+			self.pending_objective(world, value).is_some()
+				|| self.feedback_needed(world, value)
+				|| (value.route_gate_open && self.route_gate_needs_projection(world))
 			})
 	}
 	fn plan(
@@ -252,6 +333,7 @@ impl GameModule for CampaignModule {
 				}
 				if (progress.has_courtyard_key || collected)
 					&& !progress.courtyard_exit_reached
+					&& (self.route_gate.is_none() || progress.route_gate_open)
 					&& context
 						.trigger_overlaps
 						.contains(exit_trigger, &roles.player)
@@ -281,6 +363,7 @@ impl GameModule for CampaignModule {
 		{
 			self.show_unlocked(output)?;
 		}
+		self.plan_route_gate(&context, progress, output)?;
 
 		if matches!(&objective, Some(ProgressAction::CompleteRun)) {
 			return output.push_progress::<CampaignProgress>(ProgressAction::CompleteRun);

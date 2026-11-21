@@ -1,7 +1,7 @@
 use super::{
 	CampaignProgress, FINISH_SCENE_ID,
 	runtime::CampaignModule,
-	settings::{InteractionSettings, SceneInteractions, validate_trigger},
+	settings::{InteractionSettings, RouteGateSettings, SceneInteractions, validate_trigger},
 };
 use engine_core::{
 	EntityKey,
@@ -67,6 +67,11 @@ impl GameModuleFactory for CampaignFactory {
 			.as_ref()
 			.and_then(|settings| settings.scenes.get(config.scene_id().as_str()))
 			.cloned();
+		let route_gate = settings
+			.as_ref()
+			.and_then(|settings| settings.route_gate.as_ref())
+			.filter(|gate| gate.scene_id == *config.scene_id())
+			.cloned();
 		let is_finish = matches!(&interactions, Some(SceneInteractions::Finish { .. }))
 			|| (interactions.is_none() && config.scene_id().as_str() == FINISH_SCENE_ID);
 		let (roles, finish) = if is_finish {
@@ -116,6 +121,16 @@ impl GameModuleFactory for CampaignFactory {
 						return Err("Exit blocker needs a blocking collider".into());
 					}
 				}
+				if let Some(gate) = &route_gate {
+					validate_route_gate(
+						&config,
+						gate,
+						roles,
+						key_trigger,
+						exit_trigger,
+						exit_blocker.as_ref(),
+					)?;
+				}
 			}
 			Some(SceneInteractions::Finish { finish_trigger }) => validate_trigger(
 				&config,
@@ -134,8 +149,60 @@ impl GameModuleFactory for CampaignFactory {
 			roles,
 			finish,
 			interactions,
+			route_gate,
 		)))
 	}
+}
+
+fn validate_route_gate(
+	config: &PreparedModuleConfig<'_>,
+	route: &RouteGateSettings,
+	roles: &CourseRoles,
+	key_trigger: &EntityKey,
+	exit_trigger: &EntityKey,
+	exit_blocker: Option<&EntityKey>,
+) -> Result<(), String> {
+	let reserved = [
+		&roles.player,
+		&roles.key,
+		&roles.exit,
+		key_trigger,
+		exit_trigger,
+	];
+	if reserved.contains(&&route.lever)
+		|| reserved.contains(&&route.gate)
+		|| exit_blocker.is_some_and(|blocker| blocker == &route.lever || blocker == &route.gate)
+	{
+		return Err(
+			"The route lever and gate must be separate from the course roles and sensors".into(),
+		);
+	}
+	let find = |key: &EntityKey| {
+		config
+			.document()
+			.entities
+			.iter()
+			.find(|entity| &entity.key == key)
+	};
+	find(&route.lever).ok_or("Route lever references a missing entity")?;
+	let gate = find(&route.gate).ok_or("Route gate references a missing entity")?;
+	let interaction = gate
+		.collider
+		.as_ref()
+		.ok_or("Route gate needs a solid collider")?
+		.interaction();
+	let player = find(&roles.player)
+		.and_then(|entity| entity.collider.as_ref())
+		.ok_or("The Player needs a collider to use the route lever")?
+		.interaction();
+	if interaction.sensor || !interaction.detects(player) {
+		return Err("Route gate needs a blocking collider that interacts with the Player".into());
+	}
+	// A restored open gate keeps the same authored collider definition.
+	if gate.collision_enabled != gate.renderable {
+		return Err("Route gate visibility and collision must agree".into());
+	}
+	Ok(())
 }
 
 pub(super) struct FinishRoles {

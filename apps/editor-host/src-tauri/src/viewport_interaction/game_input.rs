@@ -94,7 +94,11 @@ impl ViewportInteraction {
 		// Progress, pending scene requests and a pause after rejection can all
 		// change the HUD without touching the authored revision.
 		let changed = match outcome {
-			Ok(outcome) => outcome.progress_changed || outcome.requested_scene.is_some(),
+			Ok(outcome) => {
+				outcome.progress_changed
+					|| outcome.requested_scene.is_some()
+					|| !outcome.changes.is_empty()
+			}
 			Err(_) => true,
 		};
 		if changed {
@@ -141,8 +145,7 @@ impl ViewportInteraction {
 			// Internal asset drags belong to the WebView and handle app blur there.
 			self.navigation = None;
 			self.click = None;
-			self.keys.clear();
-			workspace.backend.clear_play_input();
+			self.clear_play_input(workspace);
 			self.cancel_transform(workspace)?;
 		}
 		Ok(())
@@ -150,15 +153,43 @@ impl ViewportInteraction {
 
 	pub fn clear_play_input(&mut self, workspace: &mut EditorWorkspace) {
 		self.keys.clear();
+		self.play_gamepad.reset();
 		workspace.backend.clear_play_input();
 	}
 
-	pub(super) fn route_game_input(
+	pub(crate) fn route_game_input(
 		&mut self,
 		workspace: &mut EditorWorkspace,
 	) -> Result<(), String> {
 		workspace
 			.backend
-			.set_game_keyboard_input_from_codes(&self.keys)
+			.set_game_controls_from_codes(&self.keys, self.play_gamepad.sample())
+	}
+
+	#[cfg(windows)]
+	pub(crate) fn gamepad_context(&self, workspace: &EditorWorkspace) -> Option<(u64, u64)> {
+		let session = workspace.backend.session();
+		(self.game_keyboard_active()
+			&& self.keyboard_focused()
+			&& !self.preview_active()
+			&& self.generation == Some(workspace.generation)
+			&& session.is_playing()
+			&& !session.is_paused())
+			.then(|| (workspace.generation, session.revision()))
+	}
+
+	#[cfg(windows)]
+	pub(crate) fn poll_gamepad(&mut self, now: std::time::Instant) -> bool {
+		self.play_gamepad.poll(now, runtime::input::poll_gamepad)
+	}
+
+	#[cfg(windows)]
+	pub(crate) fn gamepad_deadline(&self) -> Option<std::time::Instant> {
+		self.play_gamepad.deadline()
+	}
+
+	#[cfg(windows)]
+	pub(crate) fn reset_gamepad(&mut self) {
+		self.play_gamepad.reset();
 	}
 }

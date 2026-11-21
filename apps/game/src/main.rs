@@ -1,10 +1,13 @@
+mod checkpoint_controls;
 mod editor_panel;
 mod editor_tools;
+mod feedback_audio;
 mod frame_metrics;
 mod game;
 mod gizmo_overlay;
 mod native_input;
 mod play;
+mod player_controls;
 mod scene_documents;
 mod scene_rendering;
 mod selection_overlay;
@@ -29,7 +32,7 @@ use runtime::assets::AssetManager;
 use runtime::camera_input::{
 	CameraInputOwner, CameraIntent, WheelSample, normalize_mouse, normalize_wheel,
 };
-use runtime::input::{InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
+use runtime::input::{GamepadOwner, InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
 use runtime::scene_catalog::SceneId;
 use runtime::scene_editor::ProjectData;
 use runtime::scene_io;
@@ -78,6 +81,7 @@ struct GameApp {
 	window: Option<Arc<Window>>,
 	clock: FrameClock,
 	input: InputState,
+	play_gamepad: GamepadOwner,
 	camera: Camera,
 	camera_controller: CameraController,
 	mouse_captured: bool,
@@ -95,6 +99,10 @@ struct GameApp {
 	next_frame_deadline: Option<Instant>,
 	project: Option<ProjectData>,
 	input_profile_override: Option<InputProfile>,
+	player_controls: player_controls::PlayerControls,
+	checkpoints: Option<courtyard_gameplay::checkpoint::CheckpointRegistry>,
+	checkpoint_base: Option<Arc<runtime::scene_data::SceneData>>,
+	interaction_action: Option<String>,
 	project_path: Option<PathBuf>,
 	installed_project: bool,
 	play_update_error_reported: bool,
@@ -107,7 +115,9 @@ struct GameApp {
 impl GameApp {
 	fn update(&mut self, delta_seconds: f32) {
 		if self.standalone_runtime {
-			self.update_player(delta_seconds);
+			if !self.player_controls.is_open() {
+				self.update_player(delta_seconds);
+			}
 			return;
 		}
 		if self.handle_scene_commands() {
@@ -177,7 +187,10 @@ impl GameApp {
 	}
 
 	fn needs_continuous_redraw(&self) -> bool {
-		if self.window_occluded || (self.standalone_runtime && self.game_completed()) {
+		if self.window_occluded
+			|| (self.standalone_runtime
+			&& (self.game_completed() || self.player_controls.is_open()))
+		{
 			return false;
 		}
 
@@ -207,6 +220,37 @@ impl GameApp {
 		if let Some(window) = self.window.as_ref() {
 			window.request_redraw();
 		}
+	}
+
+	#[cfg(windows)]
+	fn poll_play_gamepad(&mut self, now: Instant) -> Option<Instant> {
+		if !self.standalone_runtime
+			|| self.smoke_test
+			|| self.window_occluded
+			|| self.player_controls.is_open()
+			|| !self.editor.is_playing()
+			|| self.editor.simulation_paused()
+			|| self.game_completed()
+			|| !self.window.as_ref().is_some_and(|window| {
+			let size = window.inner_size();
+			window.has_focus() && size.width > 0 && size.height > 0
+		}) {
+			self.play_gamepad.reset();
+			return None;
+		}
+		if self.play_gamepad.poll(now, runtime::input::poll_gamepad) {
+			if let Err(error) = self
+				.editor
+				.sample_play_controls(&self.input, self.play_gamepad.sample())
+			{
+				engine_logger::error!(target: "game", "Controller input rejected: {error}");
+				self.editor.clear_play_input();
+				self.play_gamepad.reset();
+				return Some(now + Duration::from_millis(16));
+			}
+			self.request_input_frame();
+		}
+		self.play_gamepad.deadline()
 	}
 
 	fn handle_scene_commands(&mut self) -> bool {
@@ -344,11 +388,17 @@ impl GameApp {
 		);
 
 		let asset_root = if self.installed_project {
-			std::env::current_exe()
+			let assets = std::env::current_exe()
 				.map_err(|e| e.to_string())?
 				.parent()
 				.ok_or("executable has no parent")?
-				.join("assets")
+				.join("assets");
+			let metadata = std::fs::symlink_metadata(&assets)
+				.map_err(|error| format!("Cannot inspect installed assets: {error}"))?;
+			if !metadata.is_dir() || play::is_linked_package_entry(&metadata) {
+				return Err("Installed assets must be an ordinary directory".into());
+			}
+			assets
 		} else {
 			PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
 		};
@@ -366,8 +416,13 @@ impl GameApp {
 			Some(project) => project.startup_scene_path()?,
 			None => "scenes/robots.json",
 		};
-		let scene_path = asset_root.join(startup_scene);
-		let mut loaded = scene_io::load(&scene_path, &asset_root, &renderer)?;
+		let scene_path = if self.installed_project {
+			play::resolve_scene_path(&asset_root, startup_scene)?
+		} else {
+			asset_root.join(startup_scene)
+		};
+		let parsed = scene_io::load_data(&scene_path)?;
+		let mut loaded = scene_io::load_parsed(&parsed, &asset_root, &renderer)?;
 		let mut editor = Self::prepare_editor(&mut loaded)?;
 		let project = match self.project.clone() {
 			Some(project) => project,
@@ -426,6 +481,7 @@ impl GameApp {
 		self.project = Some(project);
 		self.asset_root = Some(asset_root);
 		self.scene_path = Some(scene_path);
+		self.checkpoint_base = self.checkpoints.is_some().then(|| Arc::new(parsed.data));
 		self.renderer = Some(renderer);
 		self.window = Some(window);
 		self.clock.reset();
@@ -549,6 +605,7 @@ impl GameApp {
 			self.input.suppress_held();
 			if self.editor.owns_camera_input(&owner) {
 				self.editor.clear_play_input();
+				self.play_gamepad.reset();
 			}
 		}
 		let Some(window) = self.window.as_ref() else {
@@ -676,6 +733,12 @@ impl ApplicationHandler for GameApp {
 				self.cursor_position = None;
 			}
 			WindowEvent::MouseInput { state, button, .. } => {
+				if self.player_controls.is_open() {
+					if state == ElementState::Released {
+						self.input.release(native_input::mouse_button(button));
+					}
+					return;
+				}
 				if state == ElementState::Pressed
 					&& !self.mouse_captured
 					&& (self.standalone_runtime || self.editor.is_playing())
@@ -775,6 +838,20 @@ impl ApplicationHandler for GameApp {
 					return;
 				};
 
+				if self.standalone_runtime {
+					if event.state == ElementState::Pressed
+						&& !event.repeat && self.player_controls_key(key)
+					{
+						self.request_input_frame();
+						return;
+					}
+					if self.player_controls.is_open() {
+						if event.state == ElementState::Released {
+							self.input.release(key);
+						}
+						return;
+					}
+				}
 				self.request_input_frame();
 
 				match event.state {
@@ -782,7 +859,10 @@ impl ApplicationHandler for GameApp {
 					ElementState::Pressed => {}
 					ElementState::Released => self.input.release(key),
 				}
-				if let Err(error) = self.editor.sample_play_keyboard(&self.input) {
+				if let Err(error) = self
+					.editor
+					.sample_play_controls(&self.input, self.play_gamepad.sample())
+				{
 					engine_logger::error!(target: "game", "Gameplay input rejected: {error}");
 				}
 			}
@@ -794,6 +874,7 @@ impl ApplicationHandler for GameApp {
 				self.set_mouse_capture(false);
 				self.input.suppress_held();
 				self.editor.clear_play_input();
+				self.play_gamepad.reset();
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -813,6 +894,7 @@ impl ApplicationHandler for GameApp {
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
 					self.editor.clear_play_input();
+					self.play_gamepad.reset();
 				} else {
 					self.window.as_ref().unwrap().request_redraw();
 				}
@@ -831,6 +913,7 @@ impl ApplicationHandler for GameApp {
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
 					self.editor.clear_play_input();
+					self.play_gamepad.reset();
 					self.clock.reset();
 
 					self.next_frame_deadline = None;
@@ -918,27 +1001,33 @@ impl ApplicationHandler for GameApp {
 	}
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+		let now = Instant::now();
+		#[cfg(windows)]
+		let controller_deadline = self.poll_play_gamepad(now);
+		#[cfg(not(windows))]
+		let controller_deadline: Option<Instant> = None;
 		let Some(window) = self.window.as_ref() else {
 			event_loop.set_control_flow(ControlFlow::Wait);
 			return;
 		};
 		let size = window.inner_size();
-		if !self.needs_continuous_redraw() || size.width == 0 || size.height == 0 {
-			self.next_frame_deadline = None;
-			event_loop.set_control_flow(ControlFlow::Wait);
-			return;
-		}
-		match self.next_frame_deadline {
-			Some(deadline) if deadline > Instant::now() => {
-				event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-			}
-			_ => {
-				// Input and resize handlers can still request an immediate
-				// frame. Only continuously scheduled redraws use this cap.
-				window.request_redraw();
-				event_loop.set_control_flow(ControlFlow::Wait);
-			}
-		}
+		let frame_deadline =
+			if !self.needs_continuous_redraw() || size.width == 0 || size.height == 0 {
+				self.next_frame_deadline = None;
+				None
+			} else {
+				match self.next_frame_deadline {
+					Some(deadline) if deadline > now => Some(deadline),
+					_ => {
+						// Input and resize handlers can still request an immediate
+						// frame. Only continuously scheduled redraws use this cap.
+						window.request_redraw();
+						None
+					}
+				}
+			};
+		let deadline = frame_deadline.into_iter().chain(controller_deadline).min();
+		event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 	}
 
 	fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -985,7 +1074,16 @@ fn run() -> Result<(), String> {
 		.ok_or("Executable has no parent directory")?;
 	let installed_config = executable_root.join("project.json");
 	let marker = executable_root.join("project-name.txt");
-	let has_manifest = installed_config.is_file();
+	let has_manifest = match std::fs::symlink_metadata(&installed_config) {
+		Ok(metadata) if metadata.is_file() && !play::is_linked_package_entry(&metadata) => true,
+		Ok(_) => return Err("Installed project manifest must be an ordinary file".into()),
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+		Err(error) => {
+			return Err(format!(
+				"Cannot inspect installed project manifest: {error}"
+			));
+		}
+	};
 	let legacy_install = !has_manifest && marker.is_file();
 	app.installed_project = has_manifest || legacy_install;
 	if legacy_install {
@@ -1032,10 +1130,38 @@ fn run() -> Result<(), String> {
 		suppress_smoke_error_dialogs();
 	}
 	app.standalone_runtime = options.mode == LaunchMode::Player;
+	if app.standalone_runtime && !app.smoke_test {
+		let authored = app
+			.project
+			.as_ref()
+			.and_then(|project| project.input_profile.as_ref());
+		app.checkpoints = app
+			.project
+			.as_ref()
+			.map(courtyard_gameplay::checkpoint::CheckpointRegistry::from_project)
+			.transpose()?
+			.flatten();
+		if let Some(profile) = app.player_controls.configure(
+			app.project_path.as_deref(),
+			app.checkpoints
+				.as_ref()
+				.map(|registry| registry.project_save_id()),
+			authored,
+			app.input_profile_override.is_some(),
+		) {
+			app.input_profile_override = Some(profile);
+		}
+	}
 	if app.standalone_runtime
 		&& let Some(project) = &app.project
 	{
 		progress::resolve(project)?;
+		if project.gameplay_module.as_deref() == Some(progress::COURTYARD_RUN_ID) {
+			app.interaction_action =
+				progress::settings::InteractionSettings::from_project(project)?
+					.and_then(|settings| settings.route_gate)
+					.map(|route| route.action);
+		}
 	}
 	engine_logger::debug!(target: "game", "Launch configuration selected: mode={:?}, installed={}", options.mode, app.installed_project);
 
@@ -1128,7 +1254,11 @@ fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
 	let json = std::str::from_utf8(&bytes)
 		.map_err(|error| format!("Input profile {path:?} is not valid UTF-8: {error}"))?;
 
-	InputProfile::from_json(json).map_err(|error| format!("Input profile {path:?}: {error}"))
+	let profile = InputProfile::from_json(json)
+		.map_err(|error| format!("Input profile {path:?}: {error}"))?;
+	player_controls::validate_profile(&profile)
+		.map_err(|error| format!("Input profile {path:?}: {error}"))?;
+	Ok(profile)
 }
 
 #[cfg(test)]
@@ -1158,3 +1288,7 @@ mod animation_native_tests;
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_camera_native.rs"]
 mod camera_native_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/tests_checkpoint_native.rs"]
+mod checkpoint_native_tests;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::input::GamepadSample;
 
 impl EditorSession {
 	pub(super) fn start_play(&mut self) -> Result<(), String> {
@@ -100,6 +101,18 @@ impl EditorSession {
 		Ok(outcome)
 	}
 
+	/// Samples keyboard and controller input together for the current Play owner.
+	pub fn set_game_controls_from_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+		gamepad: GamepadSample,
+	) -> Result<(), String> {
+		let defaults = InputProfile::default();
+		let profile = self.project.input_profile.as_ref().unwrap_or(&defaults);
+		let input = profile.resolve_controls_from_codes(held_codes, gamepad);
+		self.set_game_keyboard_input(&MovementTarget::AllControlled, input)
+	}
+
 	pub fn camera_input_owner(&self) -> Option<crate::camera_input::CameraInputOwner> {
 		self.play.as_ref()?.camera_input_owner()
 	}
@@ -157,6 +170,20 @@ impl EditorSession {
 			.as_ref()
 			.ok_or("Play mode is not active")?
 			.prepare_new_game(scene_id, document)
+	}
+
+	pub fn prepare_restored_game<P: GameProgress>(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		progress: P,
+	) -> Result<PreparedScene, String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		self.play
+			.as_ref()
+			.ok_or("Play mode is not active")?
+			.prepare_restored_game(scene_id, document, progress)
 	}
 	pub fn play_scene_id(&self) -> Option<&SceneId> {
 		self.play.as_ref().map(|play| play.active().scene_id())

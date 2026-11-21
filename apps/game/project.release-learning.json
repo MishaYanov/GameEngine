@@ -1,0 +1,111 @@
+{
+  "schema_version": 3,
+  "name": "Courtyard Release Learning",
+  "gameplay_module": "courtyard_run",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "interact",
+        "key": "e"
+      }
+    ]
+  },
+  "behavior_definitions": [
+    {
+      "id": "player_move",
+      "settings": {
+        "kind": "controlled_move",
+        "speed": 1.0,
+        "space": "world"
+      }
+    }
+  ],
+  "behaviors": [
+    {
+      "scene_id": "finish",
+      "behavior": {
+        "kind": "shared",
+        "entity": "finish-player",
+        "definition": "player_move"
+      }
+    },
+    {
+      "scene_id": "courtyard",
+      "behavior": {
+        "kind": "shared",
+        "entity": "courtyard-player",
+        "definition": "player_move"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "courtyard",
+      "asset_path": "scenes/courtyard-release-learning.json"
+    },
+    {
+      "id": "finish",
+      "asset_path": "scenes/finish-release-learning.json"
+    }
+  ],
+  "startup_scene_id": "courtyard",
+  "gameplay_settings": {
+    "schema_version": 1,
+    "project_save_id": "c70545a2-181c-42d0-906e-87fb32547914",
+    "route_gate": {
+      "scene_id": "courtyard",
+      "lever": "courtyard-route-lever",
+      "gate": "courtyard-route-gate",
+      "action": "interact",
+      "radius": 0.42
+    },
+    "checkpoints": [
+      {
+        "id": "entry",
+        "scene_id": "courtyard",
+        "player": "courtyard-player",
+        "spawn": [
+          0,
+          0,
+          0
+        ],
+        "activation_radius": 0.20
+      },
+      {
+        "id": "after_gate",
+        "scene_id": "courtyard",
+        "player": "courtyard-player",
+        "spawn": [
+          -0.97,
+          0,
+          0
+        ],
+        "activation_radius": 0.12,
+        "requires_key": true,
+        "requires_gate": true
+      }
+    ],
+    "scenes": {
+      "courtyard": {
+        "kind": "course",
+        "key_trigger": "courtyard-key-trigger",
+        "exit_trigger": "courtyard-exit-trigger",
+        "destination_scene": "finish",
+        "exit_blocker": "courtyard-exit"
+      },
+      "finish": {
+        "kind": "finish",
+        "finish_trigger": "finish-trigger"
+      }
+    }
+  }
+}

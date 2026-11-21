@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "movement": {
+    "negative_x": "arrow_left",
+    "positive_x": "arrow_right",
+    "negative_y": "arrow_down",
+    "positive_y": "arrow_up"
+  }
+}

@@ -22,6 +22,7 @@ pub struct PreparedScene {
 	new_run: Option<(ProgressState, Arc<String>)>,
 	owner: Arc<String>,
 	expected_generation: u64,
+	restore_guard: Option<(u64, u64)>,
 	simulation: SimulationSession,
 }
 
@@ -135,6 +136,7 @@ impl GameSession {
 			new_run: None,
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
+			restore_guard: None,
 			simulation,
 		})
 	}
@@ -171,6 +173,29 @@ impl GameSession {
 		scene_id: SceneId,
 		document: Arc<SceneData>,
 	) -> Result<PreparedScene, String> {
+		self.prepare_replacement_run(scene_id, document, None)
+	}
+
+	/// Rebuild transient state around module-validated durable progress. The
+	/// returned candidate belongs to this exact run, generation, and tick.
+	pub fn prepare_restored_game<P: GameProgress>(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		progress: P,
+	) -> Result<PreparedScene, String> {
+		if self.progress::<P>().is_none() {
+			return Err("Restored progress does not match the active game module".into());
+		}
+		self.prepare_replacement_run(scene_id, document, Some(ProgressState::new(progress)?))
+	}
+
+	fn prepare_replacement_run(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		restored_progress: Option<ProgressState>,
+	) -> Result<PreparedScene, String> {
 		let mut next = Self::with_factory_for_scene(
 			Arc::clone(&self.project),
 			scene_id,
@@ -181,11 +206,15 @@ impl GameSession {
 			next.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		next.active.require_animation_ready()?;
+		let restore_guard = restored_progress
+			.as_ref()
+			.map(|_| (self.active.tick_index(), self.progress_revision()));
 		Ok(PreparedScene {
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
+			restore_guard,
 			simulation: next.active,
-			new_run: Some((next.progress, next.identity)),
+			new_run: Some((restored_progress.unwrap_or(next.progress), next.identity)),
 		})
 	}
 
@@ -229,6 +258,12 @@ impl GameSession {
 		}
 		if prepared.expected_generation != self.scene_generation {
 			return Err("Scene generation counter is out of sync".into());
+		}
+		if prepared
+			.restore_guard
+			.is_some_and(|guard| guard != (self.active.tick_index(), self.progress_revision()))
+		{
+			return Err("Progress advanced while Continue was being prepared".into());
 		}
 
 		let restarted = prepared.new_run.is_some();

@@ -1,9 +1,11 @@
 mod button;
+mod gamepad;
 mod key;
 mod mouse;
 mod profile;
 
 pub use button::InputButton;
+pub use gamepad::GamepadSample;
 pub use key::{Key, NativeKeyCode};
 pub use mouse::MouseButton;
 pub(crate) use profile::HeldGameActions;

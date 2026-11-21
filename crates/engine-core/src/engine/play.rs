@@ -1,4 +1,5 @@
 use super::*;
+use crate::input::GamepadSample;
 
 impl Engine {
 	pub fn camera_replay_state(
@@ -219,6 +220,16 @@ impl Engine {
 		held_codes: &HashSet<String>,
 	) -> Result<(), String> {
 		self.session.set_game_keyboard_input_from_codes(held_codes)
+	}
+
+	/// Updates the merged Play input sample without changing the authored document.
+	pub fn set_game_controls_from_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+		gamepad: GamepadSample,
+	) -> Result<(), String> {
+		self.session
+			.set_game_controls_from_codes(held_codes, gamepad)
 	}
 
 	fn publish_runtime(&mut self, event: BackendEventKind) -> Result<(), BackendError> {

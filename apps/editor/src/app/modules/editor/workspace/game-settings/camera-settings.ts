@@ -37,7 +37,6 @@ export class CameraSettings {
     protected readonly error = signal<string | null>(null);
     protected readonly message = signal<string | null>(null);
     readonly previewing = signal(false);
-    protected readonly fields = form(this.draft);
     protected readonly draft = signal<GameCameraDraft>({
         mode: 'fixed',
         follow: {
@@ -46,6 +45,7 @@ export class CameraSettings {
         },
         orbit: orbitDraft(null),
     });
+    protected readonly fields = form(this.draft);
     protected readonly focusTarget = signal(false);
     protected readonly entityOptions = computed(() => sceneReferenceOptions(this.editor.snapshot()?.document.entities ?? []));
     protected readonly orbitNumbers = [

@@ -3,10 +3,11 @@ use engine_core::{
 	EngineBuilder, EntityKey, SceneData,
 	command::{EditorCommandDto, EditorCommandRequest},
 	game_session::GameSession,
+	input::{GameInputBinding, InputProfile, Key},
 	project::ProjectData,
 	scene_catalog::{SceneDescriptor, SceneId},
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 fn fixture() -> (ProjectData, Arc<SceneData>, Arc<SceneData>) {
 	(
@@ -50,6 +51,189 @@ fn entity<'a>(data: &'a SceneData, key: &str) -> &'a engine_core::scene_data::En
 		.iter()
 		.find(|value| value.key.as_str() == key)
 		.unwrap()
+}
+
+fn deliberate_route(lever_x: f32, occluded: bool) -> (ProjectData, Arc<SceneData>) {
+	let (mut project, mut course, _) = fixture();
+	project.input_profile = Some(InputProfile {
+		actions: vec![GameInputBinding {
+			id: "interact".into(),
+			key: Key::E,
+			animation_parameter: None,
+		}],
+		..InputProfile::default()
+	});
+	project.gameplay_settings.as_mut().unwrap()["route_gate"] = serde_json::json!({
+		"scene_id": "courtyard",
+		"lever": "route-lever",
+		"gate": "route-gate",
+		"action": "interact",
+		"radius": 1.0,
+	});
+	let course_data = Arc::make_mut(&mut course);
+	let mut lever = entity(course_data, "courtyard-key").clone();
+	lever.key = EntityKey::new("route-lever").unwrap();
+	lever.transform.position = [lever_x, 0.0, 0.0];
+	let mut gate = entity(course_data, "courtyard-exit").clone();
+	gate.key = EntityKey::new("route-gate").unwrap();
+	gate.transform.position = [-0.75, 0.0, 0.0];
+	if occluded {
+		let mut blocker = gate.clone();
+		blocker.key = EntityKey::new("between-player-and-lever").unwrap();
+		blocker.transform.position = [lever_x / 2.0, 0.0, 0.0];
+		course_data.entities.push(blocker);
+	}
+	course_data.entities.push(lever);
+	course_data.entities.push(gate);
+	course_data
+		.entities
+		.iter_mut()
+		.find(|entity| entity.key.as_str() == "courtyard-key-trigger")
+		.unwrap()
+		.transform
+		.position = [0.0; 3];
+	(project, course)
+}
+
+fn start_deliberate_route(lever_x: f32, occluded: bool) -> engine_core::Engine {
+	let (project, course) = deliberate_route(lever_x, occluded);
+	let mut engine = EngineBuilder::new((*course).clone(), project)
+		.module_resolver(Arc::new(resolve))
+		.build()
+		.unwrap();
+	engine
+		.execute(EditorCommandRequest {
+			expected_revision: engine.session().revision(),
+			command: EditorCommandDto::StartPlay,
+		})
+		.unwrap();
+	engine.tick(1.0 / 60.0).unwrap();
+	assert!(
+		engine
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.has_courtyard_key
+	);
+	engine
+}
+
+fn submit_keys(engine: &mut engine_core::Engine, keys: &[&str]) {
+	let codes: HashSet<_> = keys.iter().map(|key| (*key).to_owned()).collect();
+	engine.set_game_keyboard_input_from_codes(&codes).unwrap();
+}
+
+#[test]
+fn tap_between_frames_commits_route_gate_once_and_leaves_authored_gate_intact() {
+	let mut engine = start_deliberate_route(0.75, false);
+	let prompt = engine.play_status().unwrap().gameplay.unwrap();
+	assert_eq!(
+		prompt.detail.as_deref(),
+		Some("Use Interact to open the route gate")
+	);
+	submit_keys(&mut engine, &["KeyE"]);
+	submit_keys(&mut engine, &[]);
+	assert!(
+		!engine
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
+	engine.tick(3.0 / 60.0).unwrap();
+	assert!(
+		engine
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
+	assert_eq!(
+		engine
+			.play_status()
+			.unwrap()
+			.gameplay
+			.unwrap()
+			.detail
+			.as_deref(),
+		Some("The route gate is open")
+	);
+	let current = engine.session().render_document();
+	assert!(!entity(&current, "route-gate").collision_enabled);
+	assert!(!entity(&current, "route-gate").renderable);
+	assert!(entity(&engine.session().authored_document(), "route-gate").collision_enabled);
+	submit_keys(&mut engine, &["KeyE"]);
+	engine.tick(2.0 / 60.0).unwrap();
+	assert_eq!(
+		engine
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.score,
+		1
+	);
+}
+
+#[test]
+fn blocked_or_early_press_never_replays_after_movement_or_clear() {
+	let mut blocked = start_deliberate_route(0.75, true);
+	assert_eq!(
+		blocked.play_status().unwrap().gameplay.unwrap().detail,
+		None
+	);
+	submit_keys(&mut blocked, &["KeyE"]);
+	blocked.tick(1.0 / 60.0).unwrap();
+	assert!(
+		!blocked
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
+
+	let mut distant = start_deliberate_route(2.0, false);
+	submit_keys(&mut distant, &["KeyE"]);
+	distant.tick(1.0 / 60.0).unwrap();
+	submit_keys(&mut distant, &["KeyD", "KeyE"]);
+	for _ in 0..90 {
+		distant.tick(1.0 / 60.0).unwrap();
+	}
+	assert!(
+		distant
+			.play_status()
+			.unwrap()
+			.gameplay
+			.unwrap()
+			.detail
+			.is_some()
+	);
+	assert!(
+		!distant
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
+	submit_keys(&mut distant, &[]);
+	submit_keys(&mut distant, &["KeyE"]);
+	distant.clear_play_input();
+	distant.tick(1.0 / 60.0).unwrap();
+	assert!(
+		!distant
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
+	submit_keys(&mut distant, &["KeyE"]);
+	distant.tick(1.0 / 60.0).unwrap();
+	assert!(
+		distant
+			.session()
+			.play_progress::<CampaignProgress>()
+			.unwrap()
+			.route_gate_open
+	);
 }
 
 #[test]

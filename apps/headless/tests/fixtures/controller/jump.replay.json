@@ -1,0 +1,26 @@
+{
+  "schema_version": 4,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "controller_input",
+      "left_x": 0,
+      "left_y": 0,
+      "jump": true,
+      "interact": false
+    },
+    {
+      "type": "tick",
+      "count": 120
+    }
+  ]
+}

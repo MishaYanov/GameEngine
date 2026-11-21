@@ -2,10 +2,10 @@ use super::SimulationSession;
 use crate::{
 	EntityKey,
 	camera_input::CameraIntent,
-	input::{GameKeyboardInput, HeldGameActions},
+	input::{GameKeyboardInput, HeldGameActions, MAX_GAME_INPUT_ACTIONS},
 	simulation::FixedStepper,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum MovementTarget {
@@ -18,16 +18,23 @@ pub enum MovementTarget {
 pub struct InputFrame {
 	pub(super) movement: HashMap<EntityKey, [f32; 3]>,
 	pub(super) game_actions: HeldGameActions,
+	pub(super) action_presses: HashSet<String>,
 }
 impl InputFrame {
 	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
 		self.movement.get(entity).copied().unwrap_or([0.0; 3])
 	}
 	pub fn is_idle(&self) -> bool {
-		self.movement.is_empty() && self.game_actions.ids.is_empty()
+		self.movement.is_empty()
+			&& self.game_actions.ids.is_empty()
+			&& self.action_presses.is_empty()
 	}
 	pub fn action_held(&self, id: &str) -> bool {
 		self.game_actions.ids.contains(id)
+	}
+	/// A keyboard transition pending for this fixed step, even if already released.
+	pub fn action_pressed(&self, id: &str) -> bool {
+		self.action_presses.contains(id)
 	}
 	/// Multiple held actions may feed the same parameter. Any held source sets it.
 	pub fn animation_bool(&self, parameter: &str) -> bool {
@@ -41,6 +48,7 @@ impl SimulationSession {
 		self.camera_input.clear();
 		self.inputs.movement.clear();
 		self.inputs.game_actions = HeldGameActions::default();
+		self.inputs.action_presses.clear();
 		self.clock.reset();
 	}
 	pub fn set_paused(&mut self, paused: bool) {
@@ -87,6 +95,18 @@ impl SimulationSession {
 		if self.paused {
 			return Ok(());
 		}
+		let available = MAX_GAME_INPUT_ACTIONS - self.inputs.action_presses.len();
+		let pressed: Vec<_> = input
+			.actions
+			.ids
+			.difference(&self.inputs.game_actions.ids)
+			.filter(|id| !self.inputs.action_presses.contains(*id))
+			.take(available + 1)
+			.cloned()
+			.collect();
+		if pressed.len() > available {
+			return Err("Game action press budget exceeded".into());
+		}
 		let [x, y] = input.movement;
 		// The legacy controlled mover uses XY; upright characters use XZ.
 		// Route each target once so the legacy path cannot overwrite character Z.
@@ -114,6 +134,7 @@ impl SimulationSession {
 				self.set_input(entity, [x, y, 0.0])?;
 			}
 		}
+		self.inputs.action_presses.extend(pressed);
 		self.inputs.game_actions = input.actions;
 		Ok(())
 	}

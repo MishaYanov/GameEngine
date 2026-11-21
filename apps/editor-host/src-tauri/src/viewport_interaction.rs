@@ -93,6 +93,7 @@ pub(crate) struct ViewportInteraction {
 	placement: Option<Placement>,
 	import: Option<AssetTicket>,
 	keys: HashSet<String>,
+	play_gamepad: runtime::input::GamepadOwner,
 	revision: u64,
 	focused: bool,
 	error: Option<String>,
@@ -133,6 +134,7 @@ impl Default for ViewportInteraction {
 			placement: None,
 			import: None,
 			keys: HashSet::new(),
+			play_gamepad: runtime::input::GamepadOwner::default(),
 			revision: 0,
 			focused: false,
 			error: None,
@@ -240,6 +242,7 @@ impl ViewportInteraction {
 			self.placement = None;
 			self.import = None;
 			self.keys.clear();
+			self.play_gamepad.reset();
 			if self.generation == Some(generation) {
 				if self.bookmarks.len() >= MAX_VIEW_BOOKMARKS {
 					self.bookmarks.clear();
@@ -277,6 +280,7 @@ impl ViewportInteraction {
 			self.end_navigation();
 			self.click = None;
 			self.keys.clear();
+			self.play_gamepad.reset();
 			self.hovered = None;
 			self.hover_handle = None;
 			self.changed();
@@ -346,7 +350,7 @@ impl ViewportInteraction {
 			self.click = None;
 			self.keys.clear();
 			if self.game_keyboard_active() {
-				workspace.backend.clear_play_input();
+				self.clear_play_input(workspace);
 			}
 			if self.import.is_none() {
 				if extent.contains(&0) {
@@ -549,7 +553,7 @@ impl ViewportInteraction {
 		self.cancel_placement(workspace)?;
 		self.navigation = None;
 		self.click = None;
-		self.keys.clear();
+		self.clear_play_input(workspace);
 		self.changed();
 		Ok(())
 	}

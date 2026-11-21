@@ -1,5 +1,38 @@
 use super::*;
 
+pub(super) fn is_linked_package_entry(metadata: &std::fs::Metadata) -> bool {
+	#[cfg(windows)]
+	{
+		use std::os::windows::fs::MetadataExt;
+		if metadata.file_attributes() & 0x400 != 0 {
+			return true;
+		}
+	}
+	metadata.file_type().is_symlink()
+}
+
+pub(super) fn resolve_scene_path(asset_root: &Path, relative: &str) -> Result<PathBuf, String> {
+	let root = asset_root
+		.canonicalize()
+		.map_err(|error| error.to_string())?;
+	let mut path = root.clone();
+	for component in Path::new(relative).components() {
+		let std::path::Component::Normal(name) = component else {
+			return Err("Scene path must be a relative asset path".into());
+		};
+		path.push(name);
+		let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+		if is_linked_package_entry(&metadata) {
+			return Err("Scene path includes a linked package entry".into());
+		}
+	}
+	let scene = path.canonicalize().map_err(|error| error.to_string())?;
+	if !scene.starts_with(root) || !scene.is_file() {
+		return Err("Scene must resolve to a regular file inside the asset root".into());
+	}
+	Ok(scene)
+}
+
 impl GameApp {
 	pub(super) fn update_player(&mut self, delta_seconds: f32) {
 		let completed = self.game_completed();
@@ -19,7 +52,10 @@ impl GameApp {
 		if completed {
 			return;
 		}
-		if self.player_shortcut_pressed(Key::F8) && self.editor.pending_play_scene().is_none() {
+		if !self.installed_project
+			&& self.player_shortcut_pressed(Key::F8)
+			&& self.editor.pending_play_scene().is_none()
+		{
 			let result = self.cycle_player_scene();
 			report_update_result(
 				"player_scene_switch",
@@ -29,7 +65,8 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.player_shortcut_pressed(Key::F7)
+		if !self.installed_project
+			&& self.player_shortcut_pressed(Key::F7)
 			&& self
 				.editor
 				.play_progress::<progress::CampaignProgress>()
@@ -48,7 +85,16 @@ impl GameApp {
 			return;
 		}
 		self.update_keyboard_camera(delta_seconds);
+		let gate_is_open = |editor: &SceneEditor| {
+			editor
+				.play_progress::<progress::CampaignProgress>()
+				.is_some_and(|progress| progress.route_gate_open)
+		};
+		let previously_open = gate_is_open(&self.editor);
 		let result = self.tick_play(delta_seconds);
+		if result.is_ok() && !previously_open && gate_is_open(&self.editor) {
+			feedback_audio::play_gate_cue();
+		}
 		report_update_result(
 			"player_simulation",
 			result,
@@ -84,9 +130,12 @@ impl GameApp {
 				.ok_or("Renderer is unavailable")?
 				.wait_idle()?;
 		}
-		let mut outcome = self
-			.editor
-			.update_play(&mut self.scene, &self.input, delta_seconds)?;
+		let mut outcome = self.editor.update_play_with_gamepad(
+			&mut self.scene,
+			&self.input,
+			self.play_gamepad.sample(),
+			delta_seconds,
+		)?;
 		loop {
 			if let Some(camera) = self.editor.play_rig_camera() {
 				self.camera = camera;
@@ -296,16 +345,8 @@ impl GameApp {
 		let asset_root = self
 			.asset_root
 			.as_ref()
-			.ok_or("Asset root is not initialized")?
-			.canonicalize()
-			.map_err(|error| error.to_string())?;
-		let scene_path = asset_root
-			.join(relative_path)
-			.canonicalize()
-			.map_err(|error| error.to_string())?;
-		if !scene_path.starts_with(&asset_root) {
-			return Err("Scene path is outside the project asset root".into());
-		}
+			.ok_or("Asset root is not initialized")?;
+		let scene_path = resolve_scene_path(asset_root, relative_path)?;
 		let parsed = scene_io::load_data(&scene_path)?;
 		let document = Arc::new(parsed.data);
 		let prepared = if new_game {
@@ -315,6 +356,19 @@ impl GameApp {
 			self.editor
 				.prepare_play_scene(scene_id, Arc::clone(&document))?
 		};
+		self.adopt_prepared_scene(&document, prepared, scene_path)?;
+		if self.checkpoints.is_some() {
+			self.checkpoint_base = Some(document);
+		}
+		Ok(())
+	}
+
+	pub(super) fn adopt_prepared_scene(
+		&mut self,
+		document: &runtime::scene_data::SceneData,
+		prepared: runtime::scene_editor::PreparedScene,
+		scene_path: PathBuf,
+	) -> Result<(), String> {
 		let renderer = self
 			.renderer
 			.as_ref()
@@ -323,7 +377,7 @@ impl GameApp {
 			.asset_manager
 			.as_mut()
 			.ok_or("Assets are not initialized")?;
-		let candidate = scene_io::instantiate(&document, assets, renderer);
+		let candidate = scene_io::instantiate(document, assets, renderer);
 
 		// Both scenes share one cache and budget until the candidate commits.
 		// Completion also makes cache-only allocations from rejected loads safe to prune.
@@ -338,6 +392,7 @@ impl GameApp {
 		});
 		assets.prune_unused();
 		installed?;
+		self.play_gamepad.reset();
 		self.set_mouse_capture(false);
 		if self.standalone_runtime {
 			self.scene_path = Some(scene_path);

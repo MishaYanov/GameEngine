@@ -3,7 +3,27 @@ use super::*;
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
 		let hud_rows = if self.standalone_runtime {
-			gameplay_hud_rows(self.editor.play_status().as_ref())
+			self.player_controls.rows().unwrap_or_else(|| {
+				let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
+				if let Some(prompt) = rows
+					.iter_mut()
+					.find(|row| *row == "Use Interact to open the route gate")
+				{
+					let profile = self
+						.input_profile_override
+						.as_ref()
+						.or_else(|| self.project.as_ref()?.input_profile.as_ref());
+					let binding = self.interaction_action.as_deref().and_then(|action| {
+						profile?.actions.iter().find(|binding| binding.id == action)
+					});
+					*prompt = binding.map_or_else(
+						|| "Interact is unbound in the active profile".into(),
+						|binding| format!("Press {:?} to open the route gate", binding.key),
+					);
+				}
+				rows.push("Esc: controls".into());
+				rows
+			})
 		} else {
 			Vec::new()
 		};

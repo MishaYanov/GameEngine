@@ -746,6 +746,7 @@ dependencies = [
  "engine-logger",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1449,7 +1450,9 @@ dependencies = [
  "image",
  "renderer",
  "runtime",
+ "serde",
  "serde_json",
+ "sha2",
  "tracing",
  "winit",
 ]

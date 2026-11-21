@@ -8,6 +8,7 @@ use engine_core::{
 };
 use settings::InteractionSettings;
 
+pub mod checkpoint;
 mod preparation;
 mod progress;
 mod runtime;
@@ -61,7 +62,8 @@ pub fn descriptor() -> GameplayModuleDescriptorDto {
 
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
 	if project.gameplay_module.as_deref() == Some(COURTYARD_RUN_ID) {
-		InteractionSettings::from_project(project)?;
+		let settings = InteractionSettings::from_project(project)?;
+		checkpoint::CheckpointRegistry::from_settings(project, settings.as_ref())?;
 		return Ok(Arc::new(CampaignFactory));
 	}
 	resolve_default_gameplay(project)

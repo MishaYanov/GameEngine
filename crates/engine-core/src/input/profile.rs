@@ -1,4 +1,4 @@
-use super::{InputState, Key};
+use super::{GamepadSample, InputState, Key};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -34,7 +34,7 @@ pub struct GameInputBinding {
 	pub animation_parameter: Option<String>,
 }
 
-/// A resolved sample from one keyboard owner, shared by the editor and player.
+/// A resolved gameplay sample shared by the editor and Player.
 pub struct GameKeyboardInput {
 	pub(crate) movement: [f32; 2],
 	pub(crate) actions: HeldGameActions,
@@ -133,18 +133,49 @@ impl InputProfile {
 	}
 
 	pub fn resolve_keyboard(&self, input: &InputState) -> GameKeyboardInput {
-		self.resolve(|key| input.is_held(key))
+		self.resolve_controls(input, GamepadSample::default())
+	}
+
+	/// Resolves movement and logical actions from a single keyboard and controller owner.
+	pub fn resolve_controls(
+		&self,
+		input: &InputState,
+		gamepad: GamepadSample,
+	) -> GameKeyboardInput {
+		self.resolve(|key| input.is_held(key), gamepad)
 	}
 
 	pub(crate) fn resolve_keyboard_codes(&self, held_codes: &HashSet<String>) -> GameKeyboardInput {
-		self.resolve(|key| held_codes.contains(&key.physical_code()))
+		self.resolve_controls_from_codes(held_codes, GamepadSample::default())
 	}
 
-	fn resolve(&self, mut is_held: impl FnMut(Key) -> bool) -> GameKeyboardInput {
-		let movement = self.movement.direction_from_held(&mut is_held);
+	pub(crate) fn resolve_controls_from_codes(
+		&self,
+		held_codes: &HashSet<String>,
+		gamepad: GamepadSample,
+	) -> GameKeyboardInput {
+		self.resolve(|key| held_codes.contains(&key.physical_code()), gamepad)
+	}
+
+	fn resolve(
+		&self,
+		mut is_held: impl FnMut(Key) -> bool,
+		gamepad: GamepadSample,
+	) -> GameKeyboardInput {
+		let keyboard = self.movement.direction_from_held(&mut is_held);
+		let movement = if keyboard == [0.0; 2] {
+			gamepad.movement()
+		} else {
+			keyboard
+		};
 		let mut actions = HeldGameActions::default();
 		for binding in &self.actions {
-			if is_held(binding.key) {
+			let controller_held = match binding.id.as_str() {
+				"jump" => gamepad.jump,
+				"interact" => gamepad.interact,
+				_ => false,
+			};
+			if is_held(binding.key) || controller_held {
 				actions.ids.insert(binding.id.clone());
 				if let Some(parameter) = &binding.animation_parameter {
 					actions.animation_parameters.insert(parameter.clone());

@@ -19,10 +19,8 @@ fn bounded_output(mut stream: impl Read) -> Vec<u8> {
 	captured
 }
 
-fn run_smoke(arguments: &[&str], mode: &str) {
-	let mut command = Command::new(env!("CARGO_BIN_EXE_game"));
+fn run_smoke(mut command: Command, mode: &str) {
 	command
-		.args(arguments)
 		.arg("--smoke-test")
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped());
@@ -74,6 +72,48 @@ fn run_smoke(arguments: &[&str], mode: &str) {
 #[test]
 #[ignore = "requires Vulkan and a native hidden window; launches the real executable"]
 fn actual_game_main_stack_initializes_and_draws_development_and_player() {
-	run_smoke(&[], "development");
-	run_smoke(&["--player"], "player");
+	run_smoke(Command::new(env!("CARGO_BIN_EXE_game")), "development");
+	let mut player = Command::new(env!("CARGO_BIN_EXE_game"));
+	player.arg("--player");
+	run_smoke(player, "player");
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires a copied Windows export and Vulkan"]
+fn installed_game_launches_outside_its_package() {
+	use std::{env, path::PathBuf};
+
+	let executable = PathBuf::from(
+		env::var_os("GAME_ENGINE_QA_EXPORTED_GAME").expect("provide copied game.exe"),
+	)
+		.canonicalize()
+		.expect("resolve copied game.exe");
+	let package = executable.parent().expect("installed package directory");
+	assert!(package.join("project.json").is_file());
+	assert!(package.join("assets").is_dir());
+	let work_dir = PathBuf::from(
+		env::var_os("GAME_ENGINE_QA_WORK_DIR").expect("provide an independent working directory"),
+	)
+		.canonicalize()
+		.expect("resolve independent working directory");
+	assert!(work_dir.is_dir());
+	assert!(!work_dir.starts_with(package));
+	assert!(!work_dir.join("project.json").exists());
+	assert!(!work_dir.join("assets").exists());
+
+	let profile =
+		PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rehearsal-arrows.json");
+	let mut clean = Command::new(&executable);
+	clean
+		.current_dir(&work_dir)
+		.env_remove("GAME_ENGINE_NATIVE_EDITOR_DEMO");
+	run_smoke(clean, "player");
+	let mut explicit = Command::new(&executable);
+	explicit
+		.current_dir(&work_dir)
+		.env_remove("GAME_ENGINE_NATIVE_EDITOR_DEMO")
+		.arg("--input-profile")
+		.arg(profile);
+	run_smoke(explicit, "player");
 }

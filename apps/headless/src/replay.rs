@@ -7,6 +7,7 @@ use engine_core::{
 	Bounds3, Engine, EngineBuilder,
 	camera_input::CameraIntent,
 	command::{EditorCommandDto, EditorCommandRequest},
+	input::GamepadSample,
 };
 use serde::{
 	Deserialize,
@@ -21,6 +22,7 @@ use std::{
 
 const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REPLAY_ACTIONS: usize = 10_000;
+const MAX_REPLAY_KEYS: usize = 16;
 pub(super) const MAX_TICK_CALLS: u32 = 100_000;
 
 #[derive(Deserialize)]
@@ -35,6 +37,16 @@ struct Replay {
 enum ReplayAction {
 	RestartRun {},
 	CameraInput(CameraIntent),
+	KeyboardInput {
+		#[serde(deserialize_with = "deserialize_keyboard_keys")]
+		keys: HashSet<String>,
+	},
+	ControllerInput {
+		left_x: i16,
+		left_y: i16,
+		jump: bool,
+		interact: bool,
+	},
 	Command {
 		#[serde(default)]
 		expected_revision: Option<u64>,
@@ -81,6 +93,40 @@ fn deserialize_actions<'de, D: de::Deserializer<'de>>(
 	deserializer.deserialize_seq(Actions)
 }
 
+fn deserialize_keyboard_keys<'de, D: de::Deserializer<'de>>(
+	deserializer: D,
+) -> Result<HashSet<String>, D::Error> {
+	struct KeyboardKeys;
+	impl<'de> Visitor<'de> for KeyboardKeys {
+		type Value = HashSet<String>;
+
+		fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+			f.write_str("a list of held physical key codes")
+		}
+
+		fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+			let mut keys = HashSet::new();
+			while let Some(key) = sequence.next_element::<String>()? {
+				if keys.len() == MAX_REPLAY_KEYS {
+					return Err(de::Error::custom("keyboard_input accepts at most 16 keys"));
+				}
+				let mut bytes = key.bytes();
+				if key.len() > 32
+					|| !bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+					|| !bytes.all(|byte| byte.is_ascii_alphanumeric())
+					|| !keys.insert(key)
+				{
+					return Err(de::Error::custom(
+						"keyboard_input requires distinct physical key codes such as KeyE",
+					));
+				}
+			}
+			Ok(keys)
+		}
+	}
+	deserializer.deserialize_seq(KeyboardKeys)
+}
+
 #[derive(Default)]
 pub(super) struct Measurements {
 	pub(super) commands: u64,
@@ -91,6 +137,18 @@ pub(super) struct Measurements {
 	pub(super) tick_max: Duration,
 	pub(super) fresh_ids: bool,
 	pub(super) bounds: HashSet<(String, usize)>,
+}
+
+#[derive(Default)]
+struct ReplayControls {
+	keyboard: HashSet<String>,
+	gamepad: GamepadSample,
+}
+
+impl ReplayControls {
+	fn submit(&self, engine: &mut Engine) -> Result<(), String> {
+		engine.set_game_controls_from_codes(&self.keyboard, self.gamepad)
+	}
 }
 
 pub(super) fn run(options: Options) -> Result<Summary, String> {
@@ -119,8 +177,8 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 	if let Some(path) = &options.replay {
 		let replay: Replay = serde_json::from_str(&read_bounded(path, MAX_REPLAY_BYTES)?)
 			.map_err(|e| format!("Invalid replay: {e}"))?;
-		if !matches!(replay.schema_version, 1 | 2) {
-			return Err("Supported replay schema versions are 1 and 2".into());
+		if !matches!(replay.schema_version, 1..=4) {
+			return Err("Supported replay schema versions are 1 through 4".into());
 		}
 		replay.actions.iter().try_fold(steps, |total, action| {
 			match action {
@@ -128,6 +186,12 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 					return Err("camera_input requires replay schema version 2".to_string());
 				}
 				ReplayAction::CameraInput(sample) => sample.validate()?,
+				ReplayAction::KeyboardInput { .. } if replay.schema_version < 3 => {
+					return Err("keyboard_input requires replay schema version 3".into());
+				}
+				ReplayAction::ControllerInput { .. } if replay.schema_version < 4 => {
+					return Err("controller_input requires replay schema version 4".into());
+				}
 				ReplayAction::Command { command, .. }
 					if matches!(
 						command.as_ref(),
@@ -151,6 +215,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 				.filter(|value| *value <= MAX_TICK_CALLS)
 				.ok_or_else(|| "Replay and --steps exceed 100000 tick calls".to_string())
 		})?;
+		let mut controls = ReplayControls::default();
 		for action in replay.actions {
 			check_budget(started, budget)?;
 			match action {
@@ -159,6 +224,26 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 						.camera_input_owner()
 						.ok_or("camera_input requires an unpaused orbit camera in Play")?;
 					engine.submit_camera_input(&owner.run_id, owner.scene_generation, sample)?;
+					measures.commands += 1;
+				}
+				ReplayAction::KeyboardInput { keys } => {
+					controls.keyboard = keys;
+					controls.submit(&mut engine)?;
+					measures.commands += 1;
+				}
+				ReplayAction::ControllerInput {
+					left_x,
+					left_y,
+					jump,
+					interact,
+				} => {
+					controls.gamepad = GamepadSample {
+						left_x,
+						left_y,
+						jump,
+						interact,
+					};
+					controls.submit(&mut engine)?;
 					measures.commands += 1;
 				}
 				ReplayAction::RestartRun {} => {
@@ -171,6 +256,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 					engine
 						.commit_play_scene(prepared)
 						.map_err(|error| format!("Cannot install Restart Run: {error}"))?;
+					controls = ReplayControls::default();
 					measures.commands += 1;
 				}
 				ReplayAction::Command {
@@ -182,6 +268,13 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 						EditorCommandDto::Spawn { .. }
 							| EditorCommandDto::DuplicateSelection { .. }
 					);
+					let reset_controls = matches!(
+						command.as_ref(),
+						EditorCommandDto::StartPlay | EditorCommandDto::StopPlay
+					) || matches!(
+						command.as_ref(),
+						EditorCommandDto::SetPaused { paused } if *paused != engine.session().is_paused()
+					);
 					let request = EditorCommandRequest {
 						expected_revision: expected_revision.unwrap_or(engine.session().revision()),
 						command: *command,
@@ -189,6 +282,9 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 					engine
 						.execute(request)
 						.map_err(|e| format!("Replay command failed ({:?}): {e}", e.code))?;
+					if reset_controls {
+						controls = ReplayControls::default();
+					}
 					measures.commands += 1;
 				}
 				ReplayAction::Tick {
@@ -199,7 +295,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 						.or(options.dt)
 						.unwrap_or(1.0 / engine.session().project().fixed_hz as f64);
 					validate_elapsed(elapsed)?;
-					advance(
+					if advance(
 						&mut engine,
 						&asset_root,
 						count,
@@ -207,7 +303,9 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 						&mut measures,
 						started,
 						budget,
-					)?;
+					)? {
+						controls = ReplayControls::default();
+					}
 				}
 				ReplayAction::AssetMetadata {
 					path,
@@ -259,7 +357,8 @@ fn advance(
 	measures: &mut Measurements,
 	started: Instant,
 	budget: Duration,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+	let mut scene_changed = false;
 	for _ in 0..count {
 		check_budget(started, budget)?;
 		let tick_start = Instant::now();
@@ -274,6 +373,7 @@ fn advance(
 				engine.commit_play_scene(prepared).map_err(|error| {
 					format!("Cannot install requested scene {destination:?}: {error}")
 				})?;
+				scene_changed = true;
 			}
 			if !engine.session().is_paused() {
 				for request in engine.pending_runtime_spawns() {
@@ -310,7 +410,7 @@ fn advance(
 		measures.tick_max = measures.tick_max.max(time);
 		measures.tick_calls += 1;
 	}
-	Ok(())
+	Ok(scene_changed)
 }
 pub(super) fn check_budget(started: Instant, budget: Duration) -> Result<(), String> {
 	if started.elapsed() > budget {

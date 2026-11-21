@@ -6,6 +6,7 @@ use engine_core::game_progress::GameProgress;
 pub struct CampaignProgress {
 	pub score: i32,
 	pub has_courtyard_key: bool,
+	pub route_gate_open: bool,
 	pub courtyard_exit_reached: bool,
 	pub completed: bool,
 }
@@ -13,6 +14,7 @@ pub struct CampaignProgress {
 pub enum ProgressAction {
 	AwardScore { amount: i32 },
 	CollectCourtyardKey,
+	OpenRouteGate,
 	ReachCourtyardExit,
 	CompleteRun,
 }
@@ -25,6 +27,9 @@ impl GameProgress for CampaignProgress {
 		}
 		if self.courtyard_exit_reached && !self.has_courtyard_key {
 			return Err("The courtyard exit cannot be reached without its key".into());
+		}
+		if self.route_gate_open && !self.has_courtyard_key {
+			return Err("The route gate cannot be opened before collecting the key".into());
 		}
 		if self.completed && !self.courtyard_exit_reached {
 			return Err("The run cannot be completed before reaching the courtyard exit".into());
@@ -57,6 +62,12 @@ impl GameProgress for CampaignProgress {
 				}
 			}
 
+			ProgressAction::OpenRouteGate => {
+				if !self.has_courtyard_key {
+					return Err("The route gate requires the courtyard key".into());
+				}
+				self.route_gate_open = true;
+			}
 			ProgressAction::ReachCourtyardExit => {
 				if !self.has_courtyard_key {
 					return Err("The courtyard exit requires the key".into());

@@ -28,6 +28,14 @@ pub fn load(
 	renderer: &WindowRenderer,
 ) -> Result<LoadedScene, String> {
 	let parsed = load_data(path)?;
+	load_parsed(&parsed, asset_root, renderer)
+}
+
+pub fn load_parsed(
+	parsed: &crate::scene_data::ParsedScene,
+	asset_root: &Path,
+	renderer: &WindowRenderer,
+) -> Result<LoadedScene, String> {
 	let mut assets = AssetManager::new(asset_root).map_err(|error| {
 		format!(
 			"Failed to open asset root '{}': {error}",

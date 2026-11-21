@@ -1178,6 +1178,7 @@ impl ApplicationHandler<Wake> for Worker {
 		self.sync_workspace_interaction(true);
 		self.refresh_game_keyboard_focus();
 		self.refresh_game_camera();
+		let gamepad_deadline = self.poll_gamepad(now);
 		if (self.pending_motion.is_some() || self.pending_fly_motion != [0.0; 2])
 			&& now.duration_since(self.last_motion) >= FRAME
 		{
@@ -1258,6 +1259,9 @@ impl ApplicationHandler<Wake> for Worker {
 		} else {
 			None
 		};
+		if let Some(gamepad) = gamepad_deadline {
+			deadline = Some(deadline.map_or(gamepad, |deadline| deadline.min(gamepad)));
+		}
 		if self.pending_motion.is_some() || self.pending_fly_motion != [0.0; 2] {
 			let motion = self.last_motion + FRAME;
 			deadline = Some(deadline.map_or(motion, |deadline| deadline.min(motion)));

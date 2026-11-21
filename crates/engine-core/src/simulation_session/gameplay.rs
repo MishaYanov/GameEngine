@@ -1,6 +1,7 @@
 use super::InputFrame;
 use crate::{
 	EntityKey,
+	collision::CollisionWorld,
 	game_progress::{GameProgress, ProgressAction, ProgressState, ProgressView},
 	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
 	scene_catalog::SceneId,
@@ -101,6 +102,7 @@ impl GameplayStatus {
 /// policy remain in the engine, so a game module cannot bypass world validation.
 pub struct GameplayContext<'a> {
 	pub world: &'a RuntimeWorld,
+	pub collisions: &'a CollisionWorld,
 	pub input: &'a InputFrame,
 	pub step_seconds: f32,
 	pub progress: ProgressView<'a>,
@@ -137,6 +139,16 @@ pub trait GameModule: Send {
 	/// Projects optional status from committed run progress for a host to display.
 	fn status(&self, _progress: ProgressView<'_>) -> Option<GameplayStatus> {
 		None
+	}
+
+	/// Projects live affordances from committed state. Ordinary status has no spatial inputs.
+	fn status_in_world(
+		&self,
+		_world: &RuntimeWorld,
+		_collisions: &CollisionWorld,
+		progress: ProgressView<'_>,
+	) -> Option<GameplayStatus> {
+		self.status(progress)
 	}
 }
 

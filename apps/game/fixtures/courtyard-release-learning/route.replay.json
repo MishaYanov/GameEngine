@@ -1,0 +1,83 @@
+{
+  "schema_version": 3,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyD"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 90
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyA"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 84
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyE"
+      ]
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyA"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 64
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyA"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 30
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyD"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 90
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    }
+  ]
+}

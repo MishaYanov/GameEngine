@@ -1,0 +1,88 @@
+use super::*;
+use runtime::input::GameInputBinding;
+
+#[test]
+fn movement_presets_preserve_authored_actions() {
+	let mut authored = InputProfile::default();
+	authored.actions.push(GameInputBinding {
+		id: "interact".into(),
+		key: Key::E,
+		animation_parameter: Some("use".into()),
+	});
+	let arrows = Preset::Arrows.resolve(Some(&authored)).unwrap();
+	assert_eq!(arrows.movement, MovementBindings::ARROWS);
+	assert_eq!(arrows.actions, authored.actions);
+	assert_eq!(Preset::Project.resolve(Some(&authored)).unwrap(), authored);
+	assert_eq!(Preset::Wasd.resolve(None).unwrap(), InputProfile::default());
+
+	authored.actions[0].key = Key::ArrowLeft;
+	assert!(Preset::Arrows.resolve(Some(&authored)).is_err());
+	assert!(Preset::Project.resolve(Some(&authored)).is_ok());
+}
+
+#[test]
+fn escape_cannot_be_assigned_to_a_launch_profile() {
+	let mut profile = InputProfile::default();
+	profile.movement.positive_x = Key::Escape;
+	assert!(validate_profile(&profile).is_err());
+}
+
+#[test]
+fn controls_owns_keyboard_until_cancel() {
+	let mut app = GameApp::default();
+	app.input.press(Key::W);
+	assert!(app.player_controls_key(Key::Escape));
+	assert!(app.player_controls.is_open());
+	assert!(!app.input.is_held(Key::W));
+	assert!(app.player_controls_key(Key::ArrowRight));
+	assert!(app.player_controls.rows().unwrap()[1].starts_with("> Movement: Arrow"));
+	assert!(app.player_controls_key(Key::Escape));
+	assert!(!app.player_controls.is_open());
+	assert_eq!(app.player_controls.applied, Preset::Project);
+	app.input.press(Key::W);
+	assert!(!app.input.is_held(Key::W));
+	app.input.release(Key::W);
+	app.input.press(Key::W);
+	assert!(app.input.is_held(Key::W));
+}
+
+#[test]
+fn command_line_override_cannot_be_changed_in_controls() {
+	let mut app = GameApp::default();
+	assert!(
+		app.player_controls
+			.configure(None, None, None, true)
+			.is_none()
+	);
+	app.player_controls_key(Key::Escape);
+	app.player_controls_key(Key::ArrowRight);
+	app.player_controls_key(Key::ArrowDown);
+	app.player_controls_key(Key::Enter);
+	assert!(app.player_controls.is_open());
+	assert!(app.player_controls.rows().unwrap()[2].contains("Apply disabled"));
+}
+
+#[test]
+fn continue_row_explains_slot_availability_and_keeps_focus() {
+	use ContinueAvailability::*;
+
+	for (availability, label, enabled) in [
+		(Empty, "No saved checkpoint", false),
+		(Current, "Ready", true),
+		(CompatibleEarlierRelease, "Earlier release", true),
+		(IncompatibleRelease, "Incompatible with this release", false),
+		(Unreadable, "Unreadable save", false),
+	] {
+		let controls = PlayerControls {
+			menu: Some(Menu {
+				focus: Row::Continue,
+				draft: Preset::Project,
+				checkpoints: true,
+				continue_availability: availability,
+			}),
+			..PlayerControls::default()
+		};
+		assert_eq!(controls.rows().unwrap()[4], format!("> Continue ({label})"));
+		assert_eq!(availability.can_continue(), enabled);
+	}
+}

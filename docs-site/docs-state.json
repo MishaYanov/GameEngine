@@ -4,6 +4,60 @@
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_16_21": {
+    "date": "2026-11-21",
+    "inspected_head": "8c579a17b07be495d4ae7975f92bed570874ba09",
+    "scope": "Windows controller input, v4 replay, one reviewed Courtyard save upgrade, and Windows release qualification. Learning guides 16 through 18 reflect the implementation. Guides 19 through 21 are planned features.",
+    "verification": [
+      "Engine-core, runtime, Game and headless suites passed. The editor host passed 100 unit and 76 workspace checks.",
+      "Courtyard and Player tests passed. A five-phase native Windows/Vulkan run exercised a prior save, unapproved content rejection, compatible Continue without rewriting, explicit Save, and a current Continue against the copied exports.",
+      "The release tooling built and verified the Windows candidate and its receipt. Two installed smoke modes and controller v4 replay against the copied candidate passed. Fourteen qualification and download-verification tests passed.",
+      "The documentation site rebuilt 65 linked pages and passed eight tests. The local guides passed relative link, code fence, JSON sample and resource-section checks."
+    ],
+    "verification_limits": [
+      "All four XInput slots reported disconnected. Focus, disconnect and action edges were verified with injected inputs, and manual controller acceptance in both hosts remains open.",
+      "The Jenkins job definition was reviewed and its PowerShell parsed. The external job and downloaded-package manual sign-off were not run.",
+      "The qualified local archive records a dirty checkout. Only the current and explicitly approved earlier Courtyard fingerprint and checkpoint pair is compatible."
+    ],
+    "pending_documentation_changes": []
+  },
+  "courtyard_release_milestones_11_18": {
+    "date": "2026-11-21",
+    "inspected_head": "8c579a17b07be495d4ae7975f92bed570874ba09",
+    "scope": "Courtyard interaction, one local checkpoint slot, Windows controls, a two-scene release fixture and standalone rehearsal. Local guides 11 through 15 updated, and guides 16 through 18 added.",
+    "verification": [
+      "Courtyard, compiler, native Player and headless package suites passed. Core game input passed three cases and the native editor workspace passed 76 cases.",
+      "Two Angular settings suites passed all 18 cases after correcting the camera form initialization order.",
+      "The real compiler produced matching independent data stages and a release export. It rejected the occupied stage without changing it.",
+      "The copied standalone executable drew under Vulkan from an unrelated directory, both with default launch and with an explicit input profile. Two native Vulkan processes sharing a disposable profile passed settings persistence, gate, Save, Continue, finish and restart.",
+      "The documentation site rebuilt 65 pages and passed eight tests. The local learning guides were checked for resources, relative links and structured examples."
+    ],
+    "verification_limits": [
+      "The implemented feature set is the Courtyard route. Reusable interactable components and audio catalogs, multiple save slots, backup recovery and expanded authoring interfaces remain guide extensions.",
+      "The checkpoint identity covers the authored manifest and checkpoint scene. Rehearsal hashes compare the trusted local package and are not signatures.",
+      "The automated checkpoint test draws native frames and drives application input methods. It is separate from an uninterrupted, visible standalone keyboard playthrough."
+    ],
+    "pending_documentation_changes": []
+  },
+  "learning_guides_7_15": {
+    "date": "2026-11-21",
+    "inspected_head": "8c579a17b07be495d4ae7975f92bed570874ba09",
+    "compared_to_commit": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
+    "scope": "Local Git-ignored learning guides for milestones 7 through 15, updated for the Rust, native host, Player, compiler, headless, and Angular file layout.",
+    "working_tree_review": "Inspected staged and unstaged changes and untracked paths. Four test files added in the index are absent in the working tree. Existing untracked backups were outside guide scope.",
+    "verification": [
+      "55 Markdown files and 45 feature resource sections checked, with 835 local links and 15 JSON samples validated.",
+      "Documentation site rebuilt and link-checked 65 pages in isolation. All eight site tests passed.",
+      "Ran the four-phase 14.1 copied baseline route with the existing debug headless executable. The route finished with score one.",
+      "Ran two extracted Milestone 13 snippet tests. Checked Milestone 15 scripts and used the existing compiler to stage the bundled sample."
+    ],
+    "verification_limits": [
+      "Milestones 7 through 10 use their existing implementation reviews for product verification. The documentation pass did not rerun the engine suites.",
+      "Milestones 11 through 15 describe build-along work. Milestone 15 export checks used the existing compiler for staging and simulated executable publication. The full release build and the visible two-launch Player rehearsal are future exercises.",
+      "The site generator consumes docs and designs. The learning guides stay local."
+    ],
+    "pending_documentation_changes": []
+  },
   "milestone_10_5_6_camera": {
     "date": "2026-11-21",
     "inspected_head": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",

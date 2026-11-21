@@ -1,10 +1,10 @@
-//! Keyboard and camera input routing for the active Play session.
+//! Gameplay and camera input routing for the active Play session.
 
 use super::{MovementTarget, SceneEditor};
 use crate::{
 	EntityKey, InputState, Key,
 	editor::command::EditorCommandDto as Command,
-	input::{InputProfile, MovementBindings},
+	input::{GamepadSample, InputProfile, MovementBindings},
 };
 use engine_core::camera_input::{CameraInputOwner, CameraIntent};
 
@@ -15,15 +15,22 @@ impl SceneEditor {
 	}
 	/// Capture every physical transition, including a down/up pair before a frame.
 	pub fn sample_play_keyboard(&mut self, input: &InputState) -> Result<(), String> {
+		self.sample_play_controls(input, GamepadSample::default())
+	}
+	pub fn sample_play_controls(
+		&mut self,
+		input: &InputState,
+		gamepad: GamepadSample,
+	) -> Result<(), String> {
 		if !self.is_playing() {
 			return Ok(());
 		}
 		let profile = self.play_input_profile().cloned().unwrap_or_default();
-		let keyboard = profile.resolve_keyboard(input);
+		let controls = profile.resolve_controls(input, gamepad);
 		self.session
 			.as_mut()
 			.expect("playing session")
-			.set_game_keyboard_input(&self.play_input_target, keyboard)
+			.set_game_keyboard_input(&self.play_input_target, controls)
 	}
 	pub fn camera_input_owner(&self) -> Option<CameraInputOwner> {
 		self.session.as_ref()?.camera_input_owner()

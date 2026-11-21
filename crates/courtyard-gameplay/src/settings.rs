@@ -11,6 +11,22 @@ use std::collections::BTreeMap;
 pub struct InteractionSettings {
 	pub schema_version: u32,
 	pub scenes: BTreeMap<String, SceneInteractions>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub route_gate: Option<RouteGateSettings>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub project_save_id: Option<String>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub checkpoints: Vec<crate::checkpoint::CheckpointDef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteGateSettings {
+	pub scene_id: SceneId,
+	pub lever: EntityKey,
+	pub gate: EntityKey,
+	pub action: String,
+	pub radius: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +103,51 @@ impl InteractionSettings {
 				SceneInteractions::Finish { finish_trigger } => finish_trigger.validate()?,
 			}
 		}
+		if let Some(gate) = &settings.route_gate {
+			gate.validate(project, &settings.scenes)?;
+		}
 		Ok(Some(settings))
+	}
+}
+
+impl RouteGateSettings {
+	fn validate(
+		&self,
+		project: &ProjectData,
+		scenes: &BTreeMap<String, SceneInteractions>,
+	) -> Result<(), String> {
+		self.lever.validate()?;
+		self.gate.validate()?;
+		if self.lever == self.gate {
+			return Err("Route lever and gate must be different entities".into());
+		}
+		if !self.radius.is_finite() || self.radius <= 0.0 || self.radius > 3.0 {
+			return Err("Route lever radius must be positive and at most 3 metres".into());
+		}
+		if !matches!(
+			scenes.get(self.scene_id.as_str()),
+			Some(SceneInteractions::Course { .. })
+		) {
+			return Err("Route gate must reference a scene with Course settings".into());
+		}
+		let profile = project
+			.input_profile
+			.as_ref()
+			.ok_or("Route gate needs its Interact action bound in the authored input profile")?;
+		let action = profile
+			.actions
+			.iter()
+			.find(|action| action.id == self.action)
+			.ok_or("Route gate references an unbound game input action")?;
+		if profile.movement.contains_key(action.key)
+			|| profile
+			.actions
+			.iter()
+			.any(|other| other.id != action.id && other.key == action.key)
+		{
+			return Err("Route gate needs a dedicated Interact key".into());
+		}
+		Ok(())
 	}
 }
 

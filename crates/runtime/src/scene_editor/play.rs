@@ -4,7 +4,7 @@ use super::{MovementTarget, PreparedScene, SceneEditor, TickOutcome};
 use crate::{
 	Camera, EntityKey, InputState, Key, SceneData,
 	editor::{EditorSession, command::EditorCommandDto as Command},
-	input::InputProfile,
+	input::{GamepadSample, InputProfile},
 	scene::Scene,
 };
 use engine_core::{
@@ -73,6 +73,23 @@ impl SceneEditor {
 			.as_ref()
 			.ok_or("Native authoring session is not initialized")?
 			.prepare_new_game(scene_id, document)
+	}
+
+	pub fn prepare_restored_game<P: GameProgress>(
+		&self,
+		scene_id: SceneId,
+		document: Arc<SceneData>,
+		progress: P,
+	) -> Result<PreparedScene, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native authoring session is not initialized")?
+			.prepare_restored_game(scene_id, document, progress)
+	}
+
+	pub fn play_document(&self) -> Option<Arc<SceneData>> {
+		let session = self.session.as_ref()?;
+		session.is_playing().then(|| session.render_document())
 	}
 
 	pub fn play_controlled_targets(&self) -> Option<&[EntityKey]> {
@@ -176,21 +193,32 @@ impl SceneEditor {
 		input: &InputState,
 		elapsed: f32,
 	) -> Result<TickOutcome, String> {
+		self.update_play_with_gamepad(scene, input, GamepadSample::default(), elapsed)
+	}
+
+	pub fn update_play_with_gamepad(
+		&mut self,
+		scene: &mut Scene,
+		input: &InputState,
+		mut gamepad: GamepadSample,
+		elapsed: f32,
+	) -> Result<TickOutcome, String> {
 		self.initialize(scene)?;
 		if input.just_pressed(Key::Space) && !self.play_input_binds_key(Key::Space) {
 			self.execute_core(Command::SetPaused {
 				paused: !self.simulation_paused(),
 			})?;
+			gamepad = GamepadSample::default();
 		}
 		let defaults = InputProfile::default();
 		let profile = self.play_input_profile().unwrap_or(&defaults);
-		let keyboard = profile.resolve_keyboard(input);
+		let controls = profile.resolve_controls(input, gamepad);
 
 		let session = self.session.as_mut().expect("initialized session");
 		if !session.has_play_visibility_capabilities() {
 			session.set_play_visibility_capabilities(scene.visibility_capabilities())?;
 		}
-		session.set_game_keyboard_input(&self.play_input_target, keyboard)?;
+		session.set_game_keyboard_input(&self.play_input_target, controls)?;
 		let outcome = session.tick(elapsed as f64)?;
 		Self::synchronize_play_tick(scene, session, &outcome)?;
 		Ok(outcome)

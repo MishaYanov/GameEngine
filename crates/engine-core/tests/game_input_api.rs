@@ -4,7 +4,7 @@ use engine_core::{
 	EntityKey, InputState, Key,
 	command::{EditorCommandDto as Command, EditorCommandRequest},
 	editor::EditorSession,
-	input::{GameInputBinding, InputProfile, MovementBindings},
+	input::{GameInputBinding, GamepadSample, InputProfile, MovementBindings},
 	project::{BehaviorSpace, BehaviorSpec, ProjectData},
 	scene_catalog::SceneId,
 	simulation_session::{ActionWriter, GameModule, GameModuleFactory, InputFrame, MovementTarget},
@@ -12,6 +12,7 @@ use engine_core::{
 };
 use std::{
 	collections::HashSet,
+	sync::atomic::{AtomicUsize, Ordering},
 	sync::{Arc, Mutex},
 };
 use support::*;
@@ -119,6 +120,7 @@ struct RecordedInput {
 struct RecordInput {
 	actor: EntityKey,
 	latest: Arc<Mutex<Option<RecordedInput>>>,
+	interact_presses: Arc<AtomicUsize>,
 }
 
 impl GameModuleFactory for RecordInput {
@@ -139,6 +141,9 @@ impl GameModule for RecordInput {
 		_: f32,
 		_: &mut ActionWriter<'_>,
 	) -> Result<(), String> {
+		if input.action_pressed("interact") {
+			self.interact_presses.fetch_add(1, Ordering::Relaxed);
+		}
 		*self.latest.lock().unwrap() = Some(RecordedInput {
 			movement: input.movement(&self.actor),
 			move_right: input.action_held("move_right"),
@@ -164,6 +169,7 @@ fn native_codes_and_player_keys_feed_the_same_actions_and_parameters() {
 		let recorder = RecordInput {
 			actor: key("actor"),
 			latest: Arc::default(),
+			interact_presses: Arc::default(),
 		};
 		let mut session = EditorSession::for_project(data.clone(), project.clone()).unwrap();
 		session
@@ -254,4 +260,59 @@ fn native_codes_and_player_keys_feed_the_same_actions_and_parameters() {
 		player_recorder.latest.lock().unwrap().as_ref(),
 		Some(&neutral)
 	);
+	assert_eq!(editor_recorder.interact_presses.load(Ordering::Relaxed), 1);
+	assert_eq!(player_recorder.interact_presses.load(Ordering::Relaxed), 1);
+
+	editor
+		.set_game_keyboard_input_from_codes(&HashSet::from(["Space".into()]))
+		.unwrap();
+	editor
+		.set_game_keyboard_input_from_codes(&HashSet::new())
+		.unwrap();
+	editor.tick(0.0).unwrap();
+	assert_eq!(editor_recorder.interact_presses.load(Ordering::Relaxed), 1);
+	editor.tick(3.0 / 60.0).unwrap();
+	assert_eq!(editor_recorder.interact_presses.load(Ordering::Relaxed), 2);
+
+	let start = [
+		editor_recorder.interact_presses.load(Ordering::Relaxed),
+		player_recorder.interact_presses.load(Ordering::Relaxed),
+	];
+	for (keyboard_held, gamepad_held, expected_edges) in [
+		(true, false, 1),
+		(true, true, 1),
+		(false, true, 1),
+		(false, false, 1),
+		(false, true, 2),
+	] {
+		let mut keys = InputState::default();
+		let mut held_codes = HashSet::new();
+		if keyboard_held {
+			keys.press(Key::Space);
+			held_codes.insert("Space".into());
+		}
+		let sample = GamepadSample {
+			interact: gamepad_held,
+			..GamepadSample::default()
+		};
+		editor
+			.set_game_controls_from_codes(&held_codes, sample)
+			.unwrap();
+		player
+			.set_game_keyboard_input(
+				&MovementTarget::AllControlled,
+				profile.resolve_controls(&keys, sample),
+			)
+			.unwrap();
+		editor.tick(1.0 / 30.0).unwrap();
+		player.tick(1.0 / 30.0).unwrap();
+		assert_eq!(
+			editor_recorder.interact_presses.load(Ordering::Relaxed),
+			start[0] + expected_edges
+		);
+		assert_eq!(
+			player_recorder.interact_presses.load(Ordering::Relaxed),
+			start[1] + expected_edges
+		);
+	}
 }

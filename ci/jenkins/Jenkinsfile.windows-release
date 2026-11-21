@@ -1,0 +1,54 @@
+pipeline {
+    agent { label 'engine-windows-vulkan' }
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '5'))
+    }
+    environment {
+        CI = 'true'
+        CARGO_TERM_COLOR = 'never'
+    }
+    stages {
+        stage('Qualify copied Windows Player') {
+            steps {
+                powershell encoding: 'UTF-8', script: '''
+                    $ErrorActionPreference = 'Stop'
+                    $candidate = Join-Path 'target/release-qualification' "build-$env:BUILD_NUMBER"
+                    python -B scripts/qualify_release.py --require-clean apps/game/project.release-learning.json $candidate
+                    $qualificationExit = $LASTEXITCODE
+                    if (Test-Path -LiteralPath $candidate -PathType Container) {
+                        @(
+                            (python --version)
+                            (rustc --version)
+                            (Get-CimInstance Win32_OperatingSystem |
+                                Select-Object Caption, Version, BuildNumber | Format-List | Out-String)
+                            (Get-CimInstance Win32_VideoController |
+                                Select-Object Name, DriverVersion | Format-List | Out-String)
+                        ) | Set-Content -LiteralPath (Join-Path $candidate 'worker.log') -Encoding UTF8
+                    }
+                    if ($qualificationExit -ne 0) { exit $qualificationExit }
+                    python -B scripts/verify_candidate.py (Join-Path $candidate 'qualification.json') (Join-Path $candidate 'candidate.zip')
+                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                def root = "target/release-qualification/build-${env.BUILD_NUMBER}"
+                archiveArtifacts artifacts: "$root/export.log,$root/player-default.log,$root/player-arrows.log,$root/worker.log,$root/staging/courtyard-*/stage-a.log,$root/staging/courtyard-*/stage-b.log,$root/staging/courtyard-*/release.log,$root/staging/courtyard-*/occupied-stage.log",
+                                 allowEmptyArchive: true, followSymlinks: false
+            }
+        }
+        success {
+            script {
+                def root = "target/release-qualification/build-${env.BUILD_NUMBER}"
+                archiveArtifacts artifacts: "$root/candidate.zip,$root/qualification.json",
+                                 fingerprint: true, allowEmptyArchive: false, followSymlinks: false
+            }
+        }
+    }
+}

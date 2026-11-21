@@ -28,6 +28,7 @@ use crate::{
 const MAX_CANDIDATES: usize = 1_000_000;
 const MAX_CONTACTS: usize = 4096;
 const CAMERA_MAX_VISITS: usize = 8192;
+const INTERACTION_MAX_VISITS: usize = 512;
 const CAMERA_CLEARANCE: f64 = 0.001;
 
 /// Persistent broad-phase ordering and cached world geometry. The stateless
@@ -202,6 +203,54 @@ impl CollisionWorld {
 	}
 	pub fn collider_count(&self) -> usize {
 		self.records.len()
+	}
+
+	/// Conservatively tests a short interaction segment against synchronized
+	/// solid collider bounds. An exhausted query grants no interaction.
+	pub fn interaction_segment_clear(
+		&self,
+		world: &RuntimeWorld,
+		actor: &EntityKey,
+		target: &EntityKey,
+	) -> bool {
+		let Some(actor_index) = self.indices.get(actor).copied() else {
+			return false;
+		};
+		let Some(actor_entity) = world.entity_index(actor) else {
+			return false;
+		};
+		let Some(target_index) = world.entity_index(target) else {
+			return false;
+		};
+		let actor_collider = &self.records[actor_index];
+		let from = world.world_matrices()[actor_entity].w_axis.truncate();
+		let to = world.world_matrices()[target_index].w_axis.truncate();
+		let delta = to - from;
+		if !from.is_finite() || !to.is_finite() || !delta.is_finite() {
+			return false;
+		}
+		if delta == Vec3::ZERO {
+			return true;
+		}
+		for (visit, entry) in self.ordered.iter().enumerate() {
+			let obstacle = &self.records[entry.index];
+			if obstacle.bounds.min()[0] > from.x.max(to.x) {
+				break;
+			}
+			if visit >= INTERACTION_MAX_VISITS {
+				return false;
+			}
+			let interaction = obstacle.interaction;
+			if &obstacle.key != actor
+				&& &obstacle.key != target
+				&& !interaction.sensor
+				&& interaction.detects(actor_collider.interaction)
+				&& obstacle.bounds.ray_distance(from, delta, 1.0).is_some()
+			{
+				return false;
+			}
+		}
+		true
 	}
 	pub fn synchronize(
 		&mut self,

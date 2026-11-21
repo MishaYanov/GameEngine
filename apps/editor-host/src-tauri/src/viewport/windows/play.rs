@@ -1,6 +1,45 @@
 use super::*;
 
 impl Worker {
+	pub(super) fn poll_gamepad(&mut self, now: Instant) -> Option<Instant> {
+		let context = if self.active() && !self.failed && self.native_keyboard_focused() {
+			self.shared
+				.lock()
+				.ok()
+				.and_then(|guard| self.interaction.gamepad_context(guard.as_ref()?))
+		} else {
+			None
+		};
+		let Some(context) = context else {
+			self.interaction.reset_gamepad();
+			return None;
+		};
+		// XInput can query multiple slots on discovery. Never do that while
+		// holding the workspace lock used by document and simulation work.
+		if self.interaction.poll_gamepad(now) {
+			let result = self.shared.lock().ok().and_then(|mut guard| {
+				let workspace = guard.as_mut()?;
+				let current = self.interaction.gamepad_context(workspace)?;
+				if current != context {
+					self.interaction.reset_gamepad();
+				}
+				let result = self.interaction.route_game_input(workspace);
+				if result.is_err() {
+					self.interaction.clear_play_input(workspace);
+				}
+				Some(result)
+			});
+			match result {
+				Some(Ok(())) => {}
+				Some(Err(error)) => self
+					.interaction
+					.report(format!("Controller input was rejected: {error}")),
+				None => self.interaction.reset_gamepad(),
+			}
+		}
+		self.interaction.gamepad_deadline().or(Some(now + FRAME))
+	}
+
 	pub(super) fn clear_play_input(&mut self) {
 		if let Ok(mut workspace) = self.shared.lock() {
 			if let Some(workspace) = workspace.as_mut() {

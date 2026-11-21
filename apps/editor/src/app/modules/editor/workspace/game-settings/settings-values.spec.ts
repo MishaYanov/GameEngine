@@ -26,6 +26,19 @@ describe('game settings values', () => {
         }
     });
 
+    it('keeps the gate and checkpoint registry during ordinary scene settings edits', () => {
+        const gate = {scene_id: 'court', lever: 'lever', gate: 'gate', action: 'interact', radius: 0.4};
+        const checkpoint = {id: 'entry', scene_id: 'court', player: 'player', spawn: [0, 0, 0], activation_radius: 0.2};
+        const payload = {
+            schema_version: 1, scenes: {}, route_gate: gate, checkpoints: [checkpoint],
+            project_save_id: 'c70545a2-181c-42d0-906e-87fb32547914',
+        };
+        const settings = readCourtyardSettings(payload)!;
+        const edited = updateCourtyardScene(settings, 'finish', {kind: 'finish', finish_trigger: 'goal'});
+        expect(edited).toEqual({...payload, scenes: {finish: {kind: 'finish', finish_trigger: 'goal'}}});
+        expect(readCourtyardSettings({...payload, checkpoints: [{...checkpoint, spawn: [0, 0]}]})).toBeNull();
+    });
+
     it('uses shared follow defaults and rejects incomplete, overflowing or vertical views', () => {
         const draft = {...cameraDraft(null, 'player'), mode: 'follow' as const};
         expect(followFromDraft(draft, ['player'])).toEqual({

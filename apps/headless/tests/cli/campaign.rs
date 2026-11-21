@@ -1,6 +1,115 @@
 use super::*;
 
 #[test]
+fn release_learning_route_reaches_finish_after_one_deliberate_press() {
+	let fixture = Fixture::new();
+	let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
+	let project = game.join("project.release-learning.json");
+	let script: Value = serde_json::from_str(
+		&fs::read_to_string(game.join("fixtures/courtyard-release-learning/route.replay.json"))
+			.unwrap(),
+	)
+		.unwrap();
+	let actions = script["actions"].as_array().unwrap();
+	let run = |label: &str, actions: Vec<Value>| {
+		let replay = fixture.replay_version(3, actions);
+		let state = fixture.root.join(format!("{label}.json"));
+		let summary = success(
+			Command::new(env!("CARGO_BIN_EXE_engine-headless"))
+				.current_dir(&fixture.root)
+				.arg("--project")
+				.arg(&project)
+				.arg("--replay")
+				.arg(replay)
+				.arg("--state-output")
+				.arg(&state)
+				.output()
+				.unwrap(),
+		);
+		let scene = SceneData::from_json(&fs::read_to_string(state).unwrap()).unwrap();
+		(summary, scene)
+	};
+	let gate = |scene: &SceneData| {
+		let gate = scene
+			.entities
+			.iter()
+			.find(|entity| entity.key.as_str() == "courtyard-route-gate")
+			.unwrap();
+		(gate.renderable, gate.collision_enabled)
+	};
+
+	let (summary, approach) = run("approach", actions[..5].to_vec());
+	assert_eq!(summary["play_status"]["gameplay"]["score"], 1);
+	assert_eq!(gate(&approach), (true, true));
+
+	let (_, opened) = run("opened", actions[..8].to_vec());
+	assert_eq!(gate(&opened), (false, false));
+
+	let (summary, checkpoint) = run("checkpoint", actions[..11].to_vec());
+	assert_eq!(summary["play_scene_id"], "courtyard");
+	let player = checkpoint
+		.entities
+		.iter()
+		.find(|entity| entity.key.as_str() == "courtyard-player")
+		.unwrap();
+	assert!((player.transform.position[0] + 0.97).abs() < 0.12);
+
+	let (summary, _) = run("finished", actions.clone());
+	assert_eq!(summary["active_scene_id"], "courtyard");
+	assert_eq!(summary["play_scene_id"], "finish");
+	assert_eq!(summary["play_status"]["gameplay"]["score"], 1);
+	assert_eq!(summary["play_status"]["gameplay"]["completed"], true);
+
+	let mut restarted = actions.clone();
+	restarted.push(json!({"type":"restart_run"}));
+	let (summary, restarted) = run("restarted", restarted);
+	assert_eq!(summary["play_scene_id"], "courtyard");
+	assert_eq!(summary["play_status"]["gameplay"]["score"], 0);
+	assert_eq!(gate(&restarted), (true, true));
+}
+
+#[test]
+fn release_learning_route_rejects_duplicate_over_limit_and_legacy_keyboard_records() {
+	let fixture = Fixture::new();
+	for (version, keys, expected) in [
+		(2, json!(["KeyE"]), "requires replay schema version 3"),
+		(
+			3,
+			json!(["KeyE", "KeyE"]),
+			"requires distinct physical key codes",
+		),
+		(
+			3,
+			json!((0..17).map(|index| format!("F{index}")).collect::<Vec<_>>()),
+			"accepts at most 16 keys",
+		),
+	] {
+		let replay = fixture.replay_version(
+			version,
+			vec![json!({
+				"type": "keyboard_input",
+				"keys": keys,
+			})],
+		);
+		let result = failure(
+			fixture
+				.command()
+				.arg("--replay")
+				.arg(replay)
+				.output()
+				.unwrap(),
+		);
+		assert!(
+			result["error"]["message"]
+				.as_str()
+				.unwrap()
+				.contains(expected),
+			"{result}"
+		);
+	}
+}
+
+#[test]
 fn bundled_route_reports_locked_exit_key_completion_restart_and_restored_authored_state() {
 	let fixture = Fixture::new();
 	let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
