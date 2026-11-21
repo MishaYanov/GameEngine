@@ -25,8 +25,23 @@ pub fn instantiate_with_progress(
 	data: &SceneData,
 	assets: &mut AssetManager,
 	renderer: &WindowRenderer,
-	mut prepared: impl FnMut(usize, usize),
+	prepared: impl FnMut(usize, usize),
 ) -> Result<(Scene, Camera), String> {
+	instantiate_cancellable(data, assets, renderer, prepared, || false)?
+		.ok_or_else(|| "Scene construction was cancelled".into())
+}
+
+/// Stops at bounded scene assembly boundaries and leaves publication to the caller.
+pub fn instantiate_cancellable(
+	data: &SceneData,
+	assets: &mut AssetManager,
+	renderer: &WindowRenderer,
+	mut prepared: impl FnMut(usize, usize),
+	mut cancelled: impl FnMut() -> bool,
+) -> Result<Option<(Scene, Camera)>, String> {
+	if cancelled() {
+		return Ok(None);
+	}
 	let placements = data.validated_world_matrices()?;
 	validate_animation_placements(data, &placements)?;
 	let total = data.entities.len();
@@ -44,12 +59,18 @@ pub fn instantiate_with_progress(
 				.map(|asset| (entity.key.clone(), asset))
 		})
 		.collect();
+	if cancelled() {
+		return Ok(None);
+	}
 	let animations = bridge::animation_asset::prepare_scene_with_pins(assets.root(), data, &pins)?;
 	scene.synchronize_camera_settings(&data.camera);
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
 	let mut render_objects = 0usize;
 	for (index, entity) in data.entities.iter().enumerate() {
+		if cancelled() {
+			return Ok(None);
+		}
 		let cache_key = engine_core::asset_registry::AssetRef::new(
 			entity.model_path.clone(),
 			Some(entity.mesh_index.unwrap_or(0)),
@@ -125,6 +146,9 @@ pub fn instantiate_with_progress(
 			)
 			.map_err(|error| format!("Scene entity {index}: {error}"))?;
 		scene.set_entity_metadata(id, entity)?;
+		if cancelled() {
+			return Ok(None);
+		}
 		prepared(index + 1, total);
 	}
 
@@ -148,5 +172,5 @@ pub fn instantiate_with_progress(
 		far: data.camera.far_plane,
 	};
 
-	Ok((scene, camera))
+	Ok(Some((scene, camera)))
 }

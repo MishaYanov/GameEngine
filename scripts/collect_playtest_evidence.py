@@ -1,6 +1,7 @@
 """Create or verify a local replay handoff for a trusted release candidate."""
 
 import argparse
+import stat
 from hashlib import sha256
 import json
 from itertools import islice
@@ -13,6 +14,7 @@ from compare_playtrace import (
     MARKER_LABEL, MAX_MARKERS, MAX_REPORT_BYTES, marker_rows, read_local_json,
     valid_flag, valid_scene, valid_score, valid_tick,
 )
+from rehearse_release import ordinary_mode
 from verify_candidate import MAX_RECEIPT_BYTES, SHA256, verify_candidate
 
 
@@ -202,13 +204,15 @@ def collect(receipt, archive, trace, report, folder, *, metadata=None):
             output.write(data)
 
 
-def verify(receipt, archive, folder):
+def verify_handoff(folder, receipt_digest, project_digest):
+    """Verify an attachment for an already authenticated local candidate receipt."""
+    if not stat.S_ISDIR(ordinary_mode(folder)):
+        raise ValueError("Evidence folder must be an ordinary directory")
     with scandir(folder) as entries:
         names = {entry.name for entry in islice(entries, 4)}
     if names != {TRACE, REPORT, EVIDENCE}:
         raise ValueError("Evidence folder must contain exactly the three handoff files")
-    candidate, receipt_digest, project_digest = _candidate_receipt(receipt)
-    evidence = read_local_json(folder / EVIDENCE, MAX_EVIDENCE_BYTES)[0]
+    evidence, evidence_bytes = read_local_json(folder / EVIDENCE, MAX_EVIDENCE_BYTES)
     if (
         not isinstance(evidence, dict)
         or set(evidence) - {"schema_version", "candidate_receipt_sha256", "files", "test"}
@@ -230,6 +234,12 @@ def verify(receipt, archive, folder):
     if trace_digest != inventory[TRACE] or _hash(report_bytes) != inventory[REPORT]:
         raise ValueError("Playtest evidence file hash does not match the inventory")
     _check_report(report, _trace_labels(replay), trace_digest, project_digest)
+    return _hash(evidence_bytes)
+
+
+def verify(receipt, archive, folder):
+    candidate, receipt_digest, project_digest = _candidate_receipt(receipt)
+    verify_handoff(folder, receipt_digest, project_digest)
     verify_candidate(archive, candidate)
 
 

@@ -1,5 +1,6 @@
 //! Typed component adapters over the existing single entity backing store.
 mod entity;
+mod interactable;
 mod native_behavior;
 mod scene_validation;
 
@@ -7,6 +8,9 @@ use crate::{
 	EntityKey,
 	asset_catalog::AssetId,
 	scene_data::{ColliderData, EntityData, MaterialOverrideData, SceneData, validate_model_path},
+};
+pub use interactable::{
+	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
@@ -21,6 +25,7 @@ pub const COLLIDER_TYPE: &str = "engine.collider";
 pub const NATIVE_TYPE: &str = "engine.native_behavior";
 pub const CHARACTER_TYPE: &str = "engine.character_controller";
 pub const ANIMATION_TYPE: &str = "engine.animation";
+pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -63,6 +68,9 @@ pub enum ComponentData {
 	Animation {
 		settings: crate::animation::AnimationSettings,
 	},
+	Interactable {
+		settings: InteractableSettings,
+	},
 	MeshRenderer {
 		model_path: String,
 		#[serde(default)]
@@ -92,6 +100,7 @@ impl ComponentRecord {
 		match self.data {
 			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
 			ComponentData::Animation { .. } => ANIMATION_TYPE,
+			ComponentData::Interactable { .. } => INTERACTABLE_TYPE,
 			ComponentData::MeshRenderer { .. } => MESH_TYPE,
 			ComponentData::Collider { .. } => COLLIDER_TYPE,
 			ComponentData::NativeBehavior { .. } => NATIVE_TYPE,
@@ -105,6 +114,7 @@ impl ComponentRecord {
 		match &self.data {
 			ComponentData::CharacterController { settings } => settings.validate(),
 			ComponentData::Animation { settings } => settings.validate(),
+			ComponentData::Interactable { settings } => settings.validate(),
 			ComponentData::MeshRenderer {
 				model_path,
 				mesh_index,
@@ -154,6 +164,13 @@ pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 			"animation",
 			"Animation",
 			"Deterministic native animation playback.",
+			1,
+		),
+		(
+			INTERACTABLE_TYPE,
+			"interactable",
+			"Interactable",
+			"Game action and reach for a deliberate interaction.",
 			1,
 		),
 		(

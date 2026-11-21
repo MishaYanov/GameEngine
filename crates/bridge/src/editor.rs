@@ -78,6 +78,8 @@ pub enum ViewportSceneLoadStage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewportSceneLoadDto {
+	#[serde(default)]
+	pub request_id: String,
 	pub workspace_generation: u64,
 	pub scene_id: engine_core::scene_catalog::SceneId,
 	pub scene_revision: u64,

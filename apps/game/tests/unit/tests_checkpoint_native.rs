@@ -9,6 +9,9 @@ use std::{
 };
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+#[path = "tests_checkpoint_transfer_native.rs"]
+mod checkpoint_transfer_native;
+
 pub(super) const PHASE_VAR: &str = "GAME_ENGINE_QA_CHECKPOINT_PHASE";
 const PRIOR_PROJECT_VAR: &str = "GAME_ENGINE_QA_PRIOR_PROJECT";
 pub(super) const CURRENT_PROJECT_VAR: &str = "GAME_ENGINE_QA_PROJECT";
@@ -153,6 +156,42 @@ pub(super) fn run_isolated_phase(
 	print!("{stdout}");
 }
 
+#[test]
+#[ignore = "requires the chaptered fixture, a native Windows session and Vulkan"]
+fn chapter_slots_continue_and_recover_across_native_processes() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str =
+		"checkpoint_native_tests::chapter_slots_continue_and_recover_across_native_processes";
+	let manifest = std::env::var_os("GAME_ENGINE_QA_CHAPTER_PROJECT")
+		.map(PathBuf::from)
+		.unwrap_or_else(|| {
+			PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.courtyard-chapters.json")
+		});
+	let profile = ProfileDir::new();
+	let directory = profile
+		.0
+		.join("GameEngine/checkpoints/3ef795f1-4bb8-41ff-bebb-66a170e68878");
+	run_isolated_phase(TEST, "chapters-save", &profile, Some(&manifest));
+	let one = directory.join("slot.json");
+	let two = directory.join("slot-2.json");
+	let previous = directory.join("slot-2.previous.json");
+	let saved_courtyard = fs::read(&one).unwrap();
+	let saved_garden = fs::read(&two).unwrap();
+	let previous_garden = fs::read(&previous).unwrap();
+	assert_ne!(saved_garden, previous_garden);
+	run_isolated_phase(TEST, "chapters-continue", &profile, Some(&manifest));
+	assert_eq!(fs::read(&two).unwrap(), saved_garden);
+	let incomplete = b"{\"saved\":";
+	fs::write(&two, incomplete).unwrap();
+	run_isolated_phase(TEST, "chapters-recover", &profile, Some(&manifest));
+	assert_eq!(fs::read(one).unwrap(), saved_courtyard);
+	assert_eq!(fs::read(two).unwrap(), incomplete);
+	assert_eq!(fs::read(previous).unwrap(), previous_garden);
+}
+
 struct NativePhase {
 	phase: String,
 	completed: bool,
@@ -218,6 +257,15 @@ impl ApplicationHandler for NativePhase {
 			"deny" => reject_unlisted_slot(&mut app),
 			"slots-save" => save_independent_slots(&mut app),
 			"slots-restore" => restore_independent_slots(&mut app),
+			"chapters-save" => save_chapter_slots(&mut app),
+			"chapters-transfer-continue" => {
+				checkpoint_transfer_native::continue_imported_garden(&mut app)
+			}
+			"chapters-continue" => continue_chapter_slots(&mut app, false),
+			"chapters-recover" => continue_chapter_slots(&mut app, true),
+			"controller-menu-save" | "controller-menu-continue" => {
+				super::controller_menu_native_tests::run_phase(&mut app, &self.phase)
+			}
 			"trace-remap" | "trace-record" => {
 				super::playtrace_native_tests::run_phase(&mut app, &self.phase)
 			}
@@ -260,7 +308,7 @@ fn keys(app: &mut GameApp, key: Option<Key>) {
 	app.editor.sample_play_keyboard(&app.input).unwrap();
 }
 
-fn move_for(app: &mut GameApp, key: Key, ticks: u32) {
+pub(super) fn move_for(app: &mut GameApp, key: Key, ticks: u32) {
 	keys(app, Some(key));
 	for _ in 0..ticks {
 		app.tick_play(STEP).unwrap();
@@ -464,6 +512,68 @@ fn open_slot_actions(app: &mut GameApp, saving: bool, slot: SaveSlot) {
 		menu_keys(app, &[Key::ArrowDown]);
 	}
 	menu_keys(app, &[Key::Enter]);
+}
+
+fn save_chapter_slots(app: &mut GameApp) {
+	move_for(app, Key::D, 90);
+	move_for(app, Key::A, 84);
+	keys(app, Some(Key::E));
+	keys(app, None);
+	app.tick_play(STEP).unwrap();
+	move_for(app, Key::A, 64);
+	open_slot_actions(app, true, SaveSlot::One);
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(
+		app.checkpoint_slot(SaveSlot::One).chapter_label.as_deref(),
+		Some("Courtyard")
+	);
+	close_checkpoint_menu(app);
+	move_for(app, Key::A, 30);
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "garden");
+	assert_eq!(progress(app).score, 1);
+	open_slot_actions(app, true, SaveSlot::Two);
+	menu_keys(app, &[Key::Enter]);
+	close_checkpoint_menu(app);
+	move_for(app, Key::A, 90);
+	assert_eq!(progress(app).score, 2);
+	move_for(app, Key::D, 90);
+	open_slot_actions(app, true, SaveSlot::Two);
+	menu_keys(app, &[Key::Enter, Key::ArrowRight, Key::Enter]);
+	assert_eq!(
+		app.checkpoint_slot(SaveSlot::Two).chapter_label.as_deref(),
+		Some("Garden")
+	);
+	close_checkpoint_menu(app);
+}
+
+fn continue_chapter_slots(app: &mut GameApp, recover: bool) {
+	open_slot_actions(app, false, SaveSlot::One);
+	menu_keys(app, &[Key::Enter]);
+	close_checkpoint_menu(app);
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
+	assert_eq!(progress(app).score, 1);
+	open_slot_actions(app, false, SaveSlot::Two);
+	if recover {
+		menu_keys(app, &[Key::ArrowDown]);
+	}
+	menu_keys(app, &[Key::Enter]);
+	close_checkpoint_menu(app);
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "garden");
+	assert_eq!(progress(app).score, if recover { 1 } else { 2 });
+	if recover {
+		move_for(app, Key::A, 90);
+		move_for(app, Key::D, 180);
+	} else {
+		move_for(app, Key::D, 90);
+	}
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "finish");
+	move_for(app, Key::D, 90);
+	assert!(progress(app).completed);
+	assert_eq!(progress(app).score, 2);
+	app.restart_player_game().unwrap();
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
+	assert_eq!(progress(app).score, 0);
+	assert!(!progress(app).completed);
 }
 
 fn close_checkpoint_menu(app: &mut GameApp) {

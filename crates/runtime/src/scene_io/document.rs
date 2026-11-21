@@ -23,7 +23,7 @@ pub fn load_data(path: &Path) -> Result<ParsedScene, String> {
 pub fn save_data(path: &Path, data: &SceneData) -> Result<(), String> {
 	let mut json = data.to_json()?;
 	json.push('\n');
-	save_json(path, &json)
+	replace_bytes(path, json.as_bytes())
 }
 
 /// The development harness persists authored configuration beside its assets.
@@ -31,7 +31,7 @@ pub fn save_data(path: &Path, data: &SceneData) -> Result<(), String> {
 pub fn save_project_data(path: &Path, data: &crate::project::ProjectData) -> Result<(), String> {
 	let mut json = data.to_json()?;
 	json.push('\n');
-	save_json(path, &json)
+	replace_bytes(path, json.as_bytes())
 }
 
 /// Publish a flushed sibling file without replacing an occupied destination.
@@ -46,11 +46,11 @@ pub fn save_new_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 	result
 }
 
-fn save_json(path: &Path, json: &str) -> Result<(), String> {
+/// Atomically replace an authored file with a flushed sibling. The caller owns
+/// path checks and any expected-content comparison before publication.
+pub fn replace_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 	let (temporary_path, mut file) = create_temporary_file(path)?;
-	let write_result = file
-		.write_all(json.as_bytes())
-		.and_then(|()| file.sync_all());
+	let write_result = file.write_all(bytes).and_then(|()| file.sync_all());
 	// Close before rename, including on Windows where an open file can block it.
 	drop(file);
 

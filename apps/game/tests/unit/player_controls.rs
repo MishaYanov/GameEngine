@@ -38,7 +38,7 @@ fn controls_owns_keyboard_until_cancel() {
 	assert!(app.player_controls.rows().unwrap()[1].starts_with("> Movement: Arrow"));
 	assert!(app.player_controls_key(Key::Escape));
 	assert!(!app.player_controls.is_open());
-	assert_eq!(app.player_controls.applied, Preset::Project);
+	assert_eq!(app.player_controls.applied.movement, Preset::Project);
 	app.input.press(Key::W);
 	assert!(!app.input.is_held(Key::W));
 	app.input.release(Key::W);
@@ -107,6 +107,30 @@ fn controller_draft_is_cancelled_and_focus_stays_visible_in_a_short_menu() {
 	assert_eq!(app.player_controls.controller().interact, FaceButton::X);
 }
 
+#[cfg(windows)]
+#[test]
+fn menu_help_follows_accepted_input_and_preserves_the_focus_marker() {
+	use runtime::input::MenuButtons;
+	let mut app = GameApp::default();
+	let released = PhysicalGamepadSample::default();
+	let start = PhysicalGamepadSample {
+		menu: MenuButtons {
+			open: true,
+			..MenuButtons::default()
+		},
+		..released
+	};
+	assert!(!app.player_controls_gamepad(released));
+	assert!(app.player_controls_gamepad(start));
+	assert!(app.player_controls.rows_with_capacity(2).unwrap()[1].starts_with("D-pad"));
+	assert!(app.player_controls_key(Key::ArrowUp));
+	assert_eq!(
+		app.player_controls.rows_with_capacity(1).unwrap(),
+		["> Back"]
+	);
+	assert!(app.player_controls.rows_with_capacity(2).unwrap()[1].starts_with("Arrows"));
+}
+
 #[test]
 fn gate_labels_follow_the_device_and_only_the_bound_logical_action() {
 	let mut profile = InputProfile::default();
@@ -132,5 +156,111 @@ fn gate_labels_follow_the_device_and_only_the_bound_logical_action() {
 			PromptDevice::Controller
 		)
 		.contains("unbound")
+	);
+}
+
+#[test]
+fn accessibility_preview_is_discarded_and_failed_apply_preserves_live_settings() {
+	let mut app = GameApp::default();
+	for key in [
+		Key::Escape,
+		Key::ArrowUp,
+		Key::ArrowUp,
+		Key::Enter,
+		Key::ArrowRight,
+	] {
+		assert!(app.player_controls_key(key));
+	}
+	assert_eq!(
+		app.player_controls.rows_with_layout(2, 25).unwrap()[0],
+		"> Text size: Large"
+	);
+	assert_eq!(app.player_controls.display(), DisplaySettings::default());
+	assert!(app.player_controls_key(Key::Escape));
+	assert!(
+		app.player_controls
+			.rows()
+			.unwrap()
+			.iter()
+			.any(|row| row == "> Accessibility")
+	);
+	app.player_controls_key(Key::Enter);
+	assert_eq!(
+		app.player_controls.rows_with_layout(2, 25).unwrap()[0],
+		"> Text size: Standard"
+	);
+	for key in [
+		Key::ArrowRight,
+		Key::ArrowDown,
+		Key::ArrowDown,
+		Key::ArrowDown,
+		Key::Enter,
+	] {
+		app.player_controls_key(key);
+	}
+	let rows = app.player_controls.rows_with_layout(2, 40).unwrap();
+	assert_eq!(rows[0], "> Apply");
+	assert!(rows[1].contains("storage"));
+	assert_eq!(app.player_controls.display(), DisplaySettings::default());
+}
+
+#[cfg(windows)]
+#[test]
+fn controller_edits_accessibility_and_short_help_matches_accepted_device() {
+	use runtime::input::MenuButtons;
+	let mut app = GameApp::default();
+	let neutral = PhysicalGamepadSample::default();
+	let press = |app: &mut GameApp, menu, face_buttons| {
+		app.player_controls_gamepad(neutral);
+		assert!(app.player_controls_gamepad(PhysicalGamepadSample {
+			menu,
+			face_buttons,
+			..neutral
+		}));
+	};
+	press(
+		&mut app,
+		MenuButtons {
+			open: true,
+			..MenuButtons::default()
+		},
+		[false; 4],
+	);
+	for _ in 0..2 {
+		press(
+			&mut app,
+			MenuButtons {
+				up: true,
+				..MenuButtons::default()
+			},
+			[false; 4],
+		);
+	}
+	press(
+		&mut app,
+		MenuButtons::default(),
+		[true, false, false, false],
+	);
+	press(
+		&mut app,
+		MenuButtons {
+			right: true,
+			..MenuButtons::default()
+		},
+		[false; 4],
+	);
+	assert_eq!(
+		app.player_controls.rows_with_layout(2, 22).unwrap(),
+		["> Text size: Large", "A: select  B: back"]
+	);
+	press(
+		&mut app,
+		MenuButtons::default(),
+		[false, true, false, false],
+	);
+	assert_eq!(app.player_controls.display(), DisplaySettings::default());
+	assert_eq!(
+		app.player_controls.rows_with_layout(1, 22).unwrap(),
+		["> Accessibility"]
 	);
 }

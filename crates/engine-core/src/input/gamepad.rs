@@ -46,12 +46,23 @@ impl FaceButton {
 	pub const ALL: [Self; 4] = [Self::A, Self::B, Self::X, Self::Y];
 }
 
-/// Face button order is A, B, X, Y. Rearming checks all four buttons.
+/// Physical controls reserved for the standalone Player menu.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MenuButtons {
+	pub open: bool,
+	pub up: bool,
+	pub down: bool,
+	pub left: bool,
+	pub right: bool,
+}
+
+/// Face button order is A, B, X, Y. Rearming checks all buttons and the stick.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PhysicalGamepadSample {
 	pub left_x: i16,
 	pub left_y: i16,
 	pub face_buttons: [bool; 4],
+	pub menu: MenuButtons,
 }
 
 impl PhysicalGamepadSample {
@@ -60,7 +71,9 @@ impl PhysicalGamepadSample {
 	}
 
 	pub fn is_neutral(self) -> bool {
-		self.face_buttons == [false; 4] && self.movement() == [0.0; 2]
+		self.face_buttons == [false; 4]
+			&& self.menu == MenuButtons::default()
+			&& self.movement() == [0.0; 2]
 	}
 
 	fn stick(self) -> GamepadSample {

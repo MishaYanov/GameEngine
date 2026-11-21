@@ -107,17 +107,7 @@ impl Closure<'_> {
 				relative.display()
 			));
 		}
-		if relative.as_os_str().len() > 1024 {
-			return Err("Dependency path exceeds 1024 characters".into());
-		}
-		if !self.files.contains_key(&relative) {
-			if self.files.len() == 10_000
-				|| self.bytes.saturating_add(metadata.len()) > 512 * 1024 * 1024
-			{
-				return Err("Dependency closure exceeds 10000 files or 512 MiB".into());
-			}
-			self.bytes += metadata.len();
-		}
+		self.check_budget(&relative, metadata.len())?;
 		let mut bytes = Vec::new();
 		#[cfg(test)]
 		{
@@ -131,19 +121,34 @@ impl Closure<'_> {
 		if bytes.len() as u64 != metadata.len() {
 			return Err("Dependency changed during preflight".into());
 		}
+		self.record_bytes(relative, &bytes)?;
+		Ok(bytes)
+	}
+	fn check_budget(&self, relative: &Path, len: u64) -> Result<(), String> {
+		if !self.files.contains_key(relative)
+			&& (self.files.len() >= 10_000 || self.bytes.saturating_add(len) > 512 * 1024 * 1024)
+		{
+			return Err("Dependency closure exceeds 10000 files or 512 MiB".into());
+		}
+		Ok(())
+	}
+	fn record_bytes(&mut self, relative: PathBuf, bytes: &[u8]) -> Result<(), String> {
+		let len = bytes.len() as u64;
+		self.check_budget(&relative, len)?;
 		let asset = PackageAsset {
-			relative: relative.to_owned(),
-			bytes: metadata.len(),
-			fingerprint: Sha256::digest(&bytes).into(),
+			relative: relative.clone(),
+			bytes: len,
+			fingerprint: Sha256::digest(bytes).into(),
 		};
 		if let Some(previous) = self.files.get(&relative) {
 			if previous != &asset {
 				return Err("Dependency changed during preflight".into());
 			}
 		} else {
-			self.files.insert(relative.to_owned(), asset);
+			self.bytes += len;
+			self.files.insert(relative, asset);
 		}
-		Ok(bytes)
+		Ok(())
 	}
 	fn entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
 		for entity in entities {
@@ -278,6 +283,12 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 		#[cfg(test)]
 		file_reads: 0,
 	};
+	if let Some(audio) = bridge::feedback_audio::load(root)? {
+		for (path, bytes) in audio.files() {
+			let relative = closure.key(Path::new(path))?;
+			closure.record_bytes(relative, bytes)?;
+		}
+	}
 	let mut report = String::new();
 	let mut truncated = false;
 	for entry in ordered_scenes(project) {

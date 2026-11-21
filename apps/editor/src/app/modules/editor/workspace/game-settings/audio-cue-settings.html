@@ -1,0 +1,55 @@
+@if (supported()) {
+    <button (click)="show()" [disabled]="!available()" aria-haspopup="dialog" type="button">Feedback Audio…</button>
+}
+<editor-dialog (openChange)="$event || dismiss()" [closeBlocked]="publishing()" [config]="{width: '38rem'}"
+               [open]="open()" [renderFields]="false" title="Feedback Audio">
+    @if (pending()) {
+        <p role="status">Working with project audio…</p>
+    }
+    <fieldset [disabled]="!ready()" class="fields">
+        <legend>Cue assignments</legend>
+        @for (row of rows; track row.event) {
+            <label>{{ row.label }}
+                <input [attr.aria-describedby]="invalidPath(row.event) ? descriptionPrefix + '-' + row.event : null" [attr.aria-invalid]="invalidPath(row.event) || null" [formField]="fields[row.event]"
+                       placeholder="No clip" spellcheck="false"
+                       type="text">
+            </label>
+            @if (invalidPath(row.event)) {
+                <p [id]="descriptionPrefix + '-' + row.event" class="error" role="status">
+                    Enter a project path such as audio/cue-gate.wav.
+                </p>
+            }
+            <button (click)="togglePreview(row)" [disabled]="audition()?.event !== row.event && !canPreview(row.event)"
+                    type="button">
+                {{ audition()?.event === row.event ? 'Stop preview of' : 'Preview' }} {{ row.label }}
+            </button>
+        }
+    </fieldset>
+    <fieldset [disabled]="!ready()" class="fields">
+        <legend>Import a WAV</legend>
+        <label>Clip filename
+            <input [attr.aria-describedby]="descriptionPrefix + '-filename'" [attr.aria-invalid]="invalidImport() || null" [formField]="imports.slug"
+                   spellcheck="false"
+                   type="text">
+        </label>
+        <p [id]="descriptionPrefix + '-filename'">
+            Use 1–32 lowercase letters, digits or hyphens. The WAV must be 16 kHz, 16-bit mono and at most half a
+            second.
+        </p>
+        <label>Assign imported clip to
+            <select [formField]="imports.event">
+                @for (row of rows; track row.event) {
+                    <option [value]="row.event">{{ row.label }}</option>
+                }
+            </select>
+        </label>
+        <button (click)="importCue()" [disabled]="!ready() || !validImport()" type="button">Choose WAV…</button>
+    </fieldset>
+    @if (error(); as failure) {
+        <p class="error" role="alert">{{ failure }}</p>
+    }
+    @if (status(); as message) {
+        <p role="status">{{ message }}</p>
+    }
+    <button (click)="apply()" [disabled]="!canApply()" dialog-actions type="button">Apply Feedback Audio</button>
+</editor-dialog>

@@ -405,3 +405,75 @@ fn authored_scene_enforces_the_combined_active_native_behavior_budget() {
 	data.entities.last_mut().unwrap().native_behaviors[0].enabled = false;
 	data.validate().unwrap();
 }
+
+#[test]
+fn interactable_records_roundtrip_with_identity_and_reject_invalid_settings() {
+	let id = ComponentId::new("inspect").unwrap();
+	let component = |action: &str, reach, enabled| ComponentRecord {
+		id: id.clone(),
+		schema_version: 1,
+		enabled,
+		data: ComponentData::Interactable {
+			settings: engine_core::components::InteractableSettings {
+				action: action.into(),
+				reach,
+			},
+		},
+	};
+	let mut lever = entity("lever", [0.; 3]);
+	let legacy = scene(vec![lever.clone()]).to_json().unwrap();
+	assert!(
+		SceneData::from_json(&legacy).unwrap().entities[0]
+			.interactable
+			.is_none()
+	);
+	for invalid in [
+		component("Wrong", 1.0, true),
+		component("interact", 0.0, true),
+		component("interact", 3.1, true),
+		component("interact", f32::NAN, true),
+		ComponentRecord {
+			schema_version: 2,
+			..component("interact", 1.0, true)
+		},
+	] {
+		assert!(lever.put_component(invalid, false).is_err());
+		assert!(lever.interactable.is_none());
+	}
+	lever
+		.put_component(component("interact", 1.0, true), false)
+		.unwrap();
+	let mut duplicate = component("interact", 2.0, true);
+	duplicate.id = ComponentId::new("different-id").unwrap();
+	assert!(lever.put_component(duplicate, false).is_err());
+	lever
+		.put_component(component("interact", 1.25, true), true)
+		.unwrap();
+	lever.set_component_enabled(&id, false).unwrap();
+	let data = scene(vec![lever]);
+	let saved = data.to_json().unwrap();
+	let mut json: serde_json::Value = serde_json::from_str(&saved).unwrap();
+	assert!(json["entities"][0].get("interactable").is_none());
+	let mut reopened = SceneData::from_json(&saved).unwrap();
+	assert_eq!(reopened, data);
+	assert_eq!(
+		reopened.entities[0]
+			.interactable
+			.as_ref()
+			.unwrap()
+			.settings
+			.reach,
+		1.25
+	);
+	assert!(!reopened.entities[0].interactable.as_ref().unwrap().enabled);
+	reopened.entities[0].remove_component(&id).unwrap();
+	assert!(reopened.entities[0].interactable.is_none());
+
+	let records = json["entities"][0]["components"].as_array_mut().unwrap();
+	let authored = records
+		.iter_mut()
+		.find(|record| record["id"] == "inspect")
+		.unwrap();
+	authored["data"]["settings"]["effect"] = serde_json::json!("unknown");
+	assert!(SceneData::from_json(&json.to_string()).is_err());
+}

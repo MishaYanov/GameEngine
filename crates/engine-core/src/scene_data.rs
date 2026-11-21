@@ -55,6 +55,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub animation: Option<crate::animation::AnimationComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub interactable: Option<crate::components::InteractableComponent>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
@@ -81,6 +83,7 @@ impl EntityData {
 			native_behaviors: Vec::new(),
 			character_controller: None,
 			animation: None,
+			interactable: None,
 			linked_prefab: None,
 		}
 	}
@@ -144,6 +147,8 @@ struct EntityProjection {
 	#[serde(default)]
 	animation: Option<crate::animation::AnimationComponent>,
 	#[serde(default)]
+	interactable: Option<crate::components::InteractableComponent>,
+	#[serde(default)]
 	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 	/// A read-only transport projection; commands never take this as mutation authority.
 	#[serde(default)]
@@ -176,6 +181,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			native_behaviors: value.native_behaviors,
 			character_controller: value.character_controller,
 			animation: value.animation,
+			interactable: value.interactable,
 			linked_prefab: value.linked_prefab,
 		})
 	}
@@ -216,6 +222,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.animation {
 			map.serialize_entry("animation", value)?;
+		}
+		if let Some(value) = &self.interactable {
+			map.serialize_entry("interactable", value)?;
 		}
 		if let Some(value) = &self.linked_prefab {
 			map.serialize_entry("linked_prefab", value)?;

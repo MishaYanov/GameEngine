@@ -1,9 +1,16 @@
 //! Installed Player Controls and input presentation.
 
+#[cfg(any(windows, test))]
+mod controller_menu_input;
+mod display;
 mod preferences;
 mod save_menu;
 
+#[cfg(windows)]
+use controller_menu_input::ControllerMenuInput;
 use courtyard_gameplay::checkpoint::ContinueAvailability;
+#[cfg(windows)]
+use runtime::input::PhysicalGamepadSample;
 use runtime::{
 	Key,
 	input::{ControllerBindings, FaceButton, InputProfile, MovementBindings},
@@ -12,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use super::GameApp;
+use display::{DisplayAction, DisplayMenu, DisplaySettings};
 use preferences::Preferences;
 use save_menu::{Intent, SaveMenu};
 
@@ -65,6 +73,7 @@ enum Row {
 	Save,
 	Continue,
 	Controller,
+	Display,
 	Back,
 }
 
@@ -77,9 +86,16 @@ impl Row {
 				Self::Save,
 				Self::Continue,
 				Self::Controller,
+				Self::Display,
 				Self::Back,
 			],
-			false => &[Self::Layout, Self::Apply, Self::Controller, Self::Back],
+			false => &[
+				Self::Layout,
+				Self::Apply,
+				Self::Controller,
+				Self::Display,
+				Self::Back,
+			],
 		}
 	}
 
@@ -94,6 +110,7 @@ impl Row {
 struct ControlsSettings {
 	movement: Preset,
 	controller: ControllerBindings,
+	display: DisplaySettings,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -103,12 +120,34 @@ pub(super) enum PromptDevice {
 	Controller,
 }
 
+impl PromptDevice {
+	fn controls_help(self, columns: usize) -> &'static str {
+		let choices = match self {
+			Self::Keyboard => [
+				"Arrows: move  Enter: select  Esc: back",
+				"Enter: select  Esc: back",
+				"Enter / Esc",
+			],
+			Self::Controller => [
+				"D-pad: move  A: select  B: back",
+				"A: select  B: back",
+				"A / B",
+			],
+		};
+		choices
+			.into_iter()
+			.find(|label| label.len() <= columns)
+			.unwrap_or(choices[2])
+	}
+}
+
 enum Page {
 	Main,
 	Controller {
 		focus: usize,
 		draft: ControllerBindings,
 	},
+	Display(DisplayMenu),
 	Saves(SaveMenu),
 }
 
@@ -122,9 +161,11 @@ struct Menu {
 #[derive(Default)]
 pub(super) struct PlayerControls {
 	menu: Option<Menu>,
-	applied: Preset,
-	controller: ControllerBindings,
+	applied: ControlsSettings,
 	prompt_device: PromptDevice,
+	menu_device: PromptDevice,
+	#[cfg(windows)]
+	controller_menu_input: ControllerMenuInput,
 	preferences: Option<Preferences>,
 	override_active: bool,
 	message: Option<String>,
@@ -147,14 +188,15 @@ impl PlayerControls {
 				self.preferences = Some(preferences);
 				match choice {
 					Ok(settings) => {
-						self.controller = settings.controller;
+						self.applied.controller = settings.controller;
+						self.applied.display = settings.display;
 						if override_active {
-							self.applied = settings.movement;
+							self.applied.movement = settings.movement;
 							return None;
 						}
 						match settings.movement.resolve(authored) {
 							Ok(profile) => {
-								self.applied = settings.movement;
+								self.applied.movement = settings.movement;
 								return (settings.movement != Preset::Project).then_some(profile);
 							}
 							Err(error) => self.message = Some(error),
@@ -174,7 +216,11 @@ impl PlayerControls {
 	}
 
 	pub(super) fn controller(&self) -> ControllerBindings {
-		self.controller
+		self.applied.controller
+	}
+
+	pub(super) fn display(&self) -> DisplaySettings {
+		self.applied.display
 	}
 
 	pub(super) fn prompt_device(&self) -> PromptDevice {
@@ -186,12 +232,29 @@ impl PlayerControls {
 		previous != device
 	}
 
+	#[cfg(windows)]
+	pub(super) fn reset_controller_menu_input(&mut self) {
+		self.controller_menu_input.reset();
+	}
+
+	#[cfg(windows)]
+	pub(super) fn controller_disconnected(&mut self) {
+		self.reset_controller_menu_input();
+		self.set_prompt_device(PromptDevice::Keyboard);
+		self.menu_device = PromptDevice::Keyboard;
+	}
+
 	#[cfg(test)]
 	pub(super) fn rows(&self) -> Option<Vec<String>> {
 		self.rows_with_capacity(8)
 	}
 
+	#[cfg(test)]
 	pub(super) fn rows_with_capacity(&self, capacity: usize) -> Option<Vec<String>> {
+		self.rows_with_layout(capacity, usize::MAX)
+	}
+
+	pub(super) fn rows_with_layout(&self, capacity: usize, columns: usize) -> Option<Vec<String>> {
 		let menu = self.menu.as_ref()?;
 		let (title, actions, focus) = match &menu.page {
 			Page::Controller { focus, draft } => (
@@ -204,13 +267,14 @@ impl PlayerControls {
 				],
 				*focus,
 			),
+			Page::Display(display) => display.rows(),
 			Page::Saves(saves) => saves.rows(),
 			Page::Main => self.main_rows(menu),
 		};
 		let help = self
 			.message
 			.as_deref()
-			.unwrap_or("Arrows: navigate  Enter: select  Esc: back");
+			.unwrap_or_else(|| self.menu_device.controls_help(columns));
 		Some(focused_rows(title, actions, focus, help, capacity))
 	}
 
@@ -223,17 +287,15 @@ impl PlayerControls {
 		let available = Row::available(menu.checkpoints);
 		let rows = available
 			.iter()
-			.map(|row| {
-				let name = match row {
-					Row::Layout => format!("Movement: {layout}"),
-					Row::Apply if self.override_active => "Apply disabled".into(),
-					Row::Apply => "Apply".into(),
-					Row::Save => "Save checkpoint".into(),
-					Row::Continue => "Continue from slot".into(),
-					Row::Controller => "Controller".into(),
-					Row::Back => "Back".into(),
-				};
-				name
+			.map(|row| match row {
+				Row::Layout => format!("Movement: {layout}"),
+				Row::Apply if self.override_active => "Apply disabled".into(),
+				Row::Apply => "Apply".into(),
+				Row::Save => "Save checkpoint".into(),
+				Row::Continue => "Continue from slot".into(),
+				Row::Controller => "Controller".into(),
+				Row::Display => "Accessibility".into(),
+				Row::Back => "Back".into(),
 			})
 			.collect();
 		(
@@ -252,30 +314,34 @@ impl PlayerControls {
 		authored: Option<&InputProfile>,
 	) -> Result<InputProfile, String> {
 		let profile = preset.resolve(authored)?;
-		let preferences = self
-			.preferences
-			.as_ref()
-			.ok_or("Local controls storage is unavailable")?;
-		preferences.save(ControlsSettings {
+		self.apply_settings(ControlsSettings {
 			movement: preset,
-			controller: self.controller,
+			..self.applied
 		})?;
-		self.applied = preset;
-		self.message = None;
 		Ok(profile)
 	}
 
 	fn apply_controller(&mut self, controller: ControllerBindings) -> Result<(), String> {
-		let controller = controller.validate()?;
+		self.apply_settings(ControlsSettings {
+			controller,
+			..self.applied
+		})
+	}
+
+	fn apply_display(&mut self, display: DisplaySettings) -> Result<(), String> {
+		self.apply_settings(ControlsSettings {
+			display,
+			..self.applied
+		})
+	}
+
+	fn apply_settings(&mut self, settings: ControlsSettings) -> Result<(), String> {
 		let preferences = self
 			.preferences
 			.as_ref()
 			.ok_or("Local controls storage is unavailable")?;
-		preferences.save(ControlsSettings {
-			movement: self.applied,
-			controller,
-		})?;
-		self.controller = controller;
+		preferences.save(settings)?;
+		self.applied = settings;
 		self.message = None;
 		Ok(())
 	}
@@ -283,14 +349,33 @@ impl PlayerControls {
 
 impl GameApp {
 	pub(super) fn player_controls_key(&mut self, key: Key) -> bool {
+		self.handle_player_controls(key, PromptDevice::Keyboard)
+	}
+
+	#[cfg(windows)]
+	pub(super) fn player_controls_gamepad(&mut self, sample: PhysicalGamepadSample) -> bool {
+		let open = self.player_controls.is_open();
+		self.player_controls
+			.controller_menu_input
+			.update(sample, open)
+			.is_some_and(|intent| {
+				self.handle_player_controls(intent.key(), PromptDevice::Controller)
+			})
+	}
+
+	fn handle_player_controls(&mut self, key: Key, device: PromptDevice) -> bool {
+		match key {
+			Key::Escape => {}
+			Key::Enter | Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
+			if self.player_controls.is_open() => {}
+			_ => return self.player_controls.is_open(),
+		}
+		self.player_controls.menu_device = device;
 		let Some(mut menu) = self.player_controls.menu.take() else {
-			if key != Key::Escape {
-				return false;
-			}
 			let checkpoints = self.checkpoints.is_some();
 			self.player_controls.menu = Some(Menu {
 				focus: Row::Layout,
-				draft: self.player_controls.applied,
+				draft: self.player_controls.applied.movement,
 				checkpoints,
 				page: Page::Main,
 			});
@@ -301,6 +386,12 @@ impl GameApp {
 			Page::Main => self.controls_main_key(&mut menu, key),
 			Page::Controller { focus, draft } => {
 				if self.controller_menu_key(focus, draft, key) {
+					menu.page = Page::Main;
+				}
+				false
+			}
+			Page::Display(display) => {
+				if self.display_menu_key(display, key) {
 					menu.page = Page::Main;
 				}
 				false
@@ -368,12 +459,39 @@ impl GameApp {
 				self.player_controls.message = None;
 				menu.page = Page::Controller {
 					focus: 0,
-					draft: self.player_controls.controller,
+					draft: self.player_controls.controller(),
 				};
+			}
+			Key::Enter if matches!(menu.focus, Row::Display) => {
+				self.player_controls.message = None;
+				menu.page = Page::Display(DisplayMenu::new(self.player_controls.display()));
 			}
 			_ => {}
 		}
 		false
+	}
+
+	fn display_menu_key(&mut self, menu: &mut DisplayMenu, key: Key) -> bool {
+		match menu.key(key) {
+			DisplayAction::Back => {
+				self.player_controls.message = None;
+				true
+			}
+			DisplayAction::Stay => false,
+			DisplayAction::Apply(settings) => match self.player_controls.apply_display(settings) {
+				Ok(()) => {
+					if !settings.cue_captions {
+						self.feedback_captions.clear();
+					}
+					self.player_controls.message = Some("Display settings saved".into());
+					true
+				}
+				Err(error) => {
+					self.player_controls.message = Some(error);
+					false
+				}
+			},
+		}
 	}
 
 	fn controller_menu_key(

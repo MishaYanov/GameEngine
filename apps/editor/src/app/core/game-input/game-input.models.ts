@@ -51,6 +51,10 @@ export function gameKeyFromCode(code: string): string {
         .replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
+export function validGameActionId(value: unknown): value is string {
+    return typeof value === 'string' && /^[a-z][a-z0-9_]{0,31}$/.test(value);
+}
+
 export function validateGameInput(profile: GameInputProfile): string | null {
     const movementKeys = MOVEMENT_AXES.map(axis => profile.movement[axis.field]);
     if (movementKeys.some(key => !key || key === 'escape')) return 'Choose a movement key other than Escape.';
@@ -58,7 +62,7 @@ export function validateGameInput(profile: GameInputProfile): string | null {
     if (actions.length > MAX_GAME_ACTIONS) return `Add up to ${MAX_GAME_ACTIONS} game actions.`;
     const ids = new Set<string>();
     for (const [index, action] of actions.entries()) {
-        if (!/^[a-z][a-z0-9_]{0,31}$/.test(action.id)) {
+        if (!validGameActionId(action.id)) {
             return `Action ${index + 1} needs a name such as jump or use_item.`;
         }
         if (ids.has(action.id)) return `The action name ${action.id} is already in use.`;

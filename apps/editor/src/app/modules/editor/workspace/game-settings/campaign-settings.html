@@ -1,0 +1,79 @@
+<button (click)="show()" [disabled]="!available()" aria-haspopup="dialog" type="button">Campaign Settings…</button>
+@if (!open() && error(); as failure) {
+    <p class="error" role="alert">{{ failure }}</p>
+}
+
+<editor-dialog [(open)]="open" [closeBlocked]="pending()" [config]="{width: '42rem'}" [renderFields]="false"
+               title="Campaign Settings">
+    <p>Use Interaction Settings to configure the Course and Finish roles. Order the courses here to connect their
+        exits.</p>
+    @if (chosenStartup(); as startup) {
+        <p>Game starts in {{ sceneLabel(startup) }}.
+            @if (startup !== currentStartup()) {
+                Applying will change the project's startup scene.
+            }
+        </p>
+    }
+    <fieldset [disabled]="pending()">
+        <legend>Chapter order</legend>
+        <ol class="chapters">
+            @for (chapter of draft().chapters; track chapter.row; let index = $index) {
+                <li>
+                    <fieldset>
+                        <legend>Chapter {{ index + 1 }}</legend>
+                        <label>Chapter ID <input #chapterId [formField]="fields.chapters[index].id" autocomplete="off"/></label>
+                        <label>Chapter label <input [formField]="fields.chapters[index].label"
+                                                    autocomplete="off"/></label>
+                        <label>Course scene
+                            <select [formField]="fields.chapters[index].course_scene">
+                                <option value="">Choose a Course</option>
+                                @for (scene of courses(); track scene.id) {
+                                    <option [disabled]="selectedElsewhere(scene.id, index)" [value]="scene.id">
+                                        {{ scene.asset_path }} ({{ scene.id }})
+                                    </option>
+                                }
+                            </select>
+                        </label>
+                        @if (draft().chapters.at(index + 1)?.course_scene ?? draft().finish_scene; as destination) {
+                            <p>Exit leads to {{ sceneLabel(destination) }}.</p>
+                        }
+                        <div class="chapter-actions">
+                            <button (click)="move(index, -1)" [attr.aria-label]="'Move chapter ' + (index + 1) + ' up'"
+                                    [disabled]="index === 0"
+                                    type="button">Move Up
+                            </button>
+                            <button (click)="move(index, 1)" [attr.aria-label]="'Move chapter ' + (index + 1) + ' down'"
+                                    [disabled]="index === draft().chapters.length - 1"
+                                    type="button">Move Down
+                            </button>
+                            <button (click)="remove(index)" [attr.aria-label]="'Remove chapter ' + (index + 1)"
+                                    type="button">Remove
+                            </button>
+                        </div>
+                    </fieldset>
+                </li>
+            }
+        </ol>
+        <button (click)="add()" [disabled]="!canAdd()" type="button">Add Chapter</button>
+        <label>Finish scene
+            <select #finishSelect [formField]="fields.finish_scene">
+                <option value="">Choose a Finish</option>
+                @for (scene of finishes(); track scene.id) {
+                    <option [value]="scene.id">{{ scene.asset_path }} ({{ scene.id }})</option>
+                }
+            </select>
+        </label>
+    </fieldset>
+    @if (validation(); as failure) {
+        <p class="error" role="status">{{ failure }}</p>
+    }
+    @if (error(); as failure) {
+        <p #failureMessage class="error" role="alert" tabindex="-1">{{ failure }}</p>
+    }
+    @if (message(); as text) {
+        <p role="status">{{ text }}</p>
+    }
+    <button (click)="apply()" [disabled]="!available() || !!validation() || !dirty()" dialog-actions type="button">
+        Apply Campaign
+    </button>
+</editor-dialog>

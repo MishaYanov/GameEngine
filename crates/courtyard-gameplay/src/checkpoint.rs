@@ -21,18 +21,26 @@ use sha2::{Digest, Sha256};
 
 use super::{
 	COURTYARD_RUN_ID, CampaignProgress,
+	chapters::ChapterRun,
 	settings::{InteractionSettings, SceneInteractions},
 };
 
+#[path = "checkpoint_chapters.rs"]
+mod chapters;
 #[path = "checkpoint_compatibility.rs"]
 mod compatibility;
 #[path = "checkpoint_storage.rs"]
 mod storage;
+#[path = "checkpoint_transfer.rs"]
+mod transfer;
 
+use chapters::{SavedChapter, chapter_if_present};
 pub use storage::{RestoreSource, SaveSlot, SlotGeneration, SlotInspection};
 use storage::{SlotFiles, is_ordinary, lock_slot, publish_record, read_record, storage_error};
+pub use transfer::{CheckpointImport, ImportIntent, ImportPreview, ImportReview};
 
 const SAVE_VERSION: u32 = 1;
+const CHAPTER_SAVE_VERSION: u32 = 2;
 const MAX_SAVE_BYTES: usize = 4096;
 const MAX_CHECKPOINTS: usize = 128;
 
@@ -81,10 +89,16 @@ pub struct CheckpointDef {
 
 impl CheckpointDef {
 	fn admits(&self, progress: &CampaignProgress) -> bool {
+		let index = progress
+			.chapters
+			.as_ref()
+			.and_then(|run| run.route.index(&self.scene_id));
+		let course = progress.course_facts(index);
 		!progress.completed
-			&& !progress.courtyard_exit_reached
-			&& (!self.requires_key || progress.has_courtyard_key)
-			&& (!self.requires_gate || progress.route_gate_open)
+			&& progress.course_unlocked(index)
+			&& !course.exited
+			&& (!self.requires_key || course.has_key)
+			&& (!self.requires_gate || course.gate_open)
 	}
 
 	fn admits_position(&self, position: [f32; 3]) -> bool {
@@ -103,6 +117,7 @@ pub struct CheckpointWrite<'a> {
 pub struct CheckpointRegistry {
 	project_save_id: String,
 	definitions: Vec<CheckpointDef>,
+	chapters: Option<ChapterRun>,
 }
 
 impl CheckpointRegistry {
@@ -197,11 +212,52 @@ impl CheckpointRegistry {
 		Ok(Some(Self {
 			project_save_id: project_save_id.clone(),
 			definitions: settings.checkpoints.clone(),
+			chapters: settings.campaign.clone().map(|campaign| {
+				ChapterRun::new(
+					Arc::new(campaign),
+					settings.route_gate.as_ref().map(|route| &route.scene_id),
+				)
+			}),
 		}))
 	}
 
 	pub fn project_save_id(&self) -> &str {
 		&self.project_save_id
+	}
+
+	fn save_version(&self) -> u32 {
+		if self.chapters.is_some() {
+			CHAPTER_SAVE_VERSION
+		} else {
+			SAVE_VERSION
+		}
+	}
+
+	fn same_campaign(&self, progress: &CampaignProgress) -> bool {
+		match (&self.chapters, &progress.chapters) {
+			(Some(expected), Some(actual)) => {
+				expected.route == actual.route && expected.gate_index == actual.gate_index
+			}
+			(None, None) => true,
+			_ => false,
+		}
+	}
+
+	fn chapter_label(&self, scene: &SceneId) -> Option<String> {
+		let run = self.chapters.as_ref()?;
+		Some(run.route.chapters[run.route.index(scene)?].label.clone())
+	}
+
+	fn authored_digest(
+		&self,
+		project: &ProjectData,
+		authored: &SceneData,
+	) -> Result<[u8; 32], String> {
+		if self.chapters.is_some() {
+			versioned_content_digest(project, authored, b"courtyard-checkpoint-content-v2\0")
+		} else {
+			content_digest(project, authored)
+		}
 	}
 
 	/// Select a checkpoint from the current committed Play document and facts.
@@ -211,6 +267,9 @@ impl CheckpointRegistry {
 		live: &SceneData,
 		progress: &CampaignProgress,
 	) -> Option<&CheckpointDef> {
+		if !self.same_campaign(progress) {
+			return None;
+		}
 		self.definitions.iter().find(|checkpoint| {
 			&checkpoint.scene_id == scene_id
 				&& checkpoint.admits(progress)
@@ -316,17 +375,30 @@ impl CheckpointRegistry {
 		} = request;
 		let definition = self.definition(&checkpoint.id, &checkpoint.scene_id)?;
 		self.restore_document(definition, project, authored, progress)?;
+		let facts = progress.scene_facts(&definition.scene_id);
+		let chapter = progress
+			.chapters
+			.as_ref()
+			.map(|run| {
+				let index = run
+					.route
+					.index(&definition.scene_id)
+					.ok_or("Checkpoint is outside the chapter order")?;
+				SavedChapter::capture(run, index)
+			})
+			.transpose()?;
 		let saved = CheckpointSave {
-			version: SAVE_VERSION,
+			version: self.save_version(),
 			project_save_id: self.project_save_id.clone(),
 			checkpoint_id: definition.id.clone(),
 			scene_id: definition.scene_id.clone(),
-			content: content_digest(project, authored)?,
+			content: self.authored_digest(project, authored)?,
 			facts: SavedFacts {
 				score: progress.score,
-				has_key: progress.has_courtyard_key,
-				route_gate_open: progress.route_gate_open,
+				has_key: facts.has_key,
+				route_gate_open: facts.gate_open,
 			},
+			chapter,
 		};
 		let checksum = save_checksum(&saved)?;
 		let bytes = serde_json::to_vec(&SaveEnvelope { saved, checksum })
@@ -359,7 +431,7 @@ impl CheckpointRegistry {
 			return ContinueAvailability::Empty;
 		};
 		match self.decode_save(&bytes) {
-			Ok(saved) => Self::inspect_save(&saved, project, load_authored),
+			Ok(saved) => self.inspect_save(&saved, project, load_authored),
 			Err(SlotReadError::Corrupt(_)) => ContinueAvailability::Unreadable,
 			Err(SlotReadError::Incompatible(_)) => ContinueAvailability::IncompatibleRelease,
 		}
@@ -375,7 +447,7 @@ impl CheckpointRegistry {
 	) -> SlotInspection {
 		self.inspect_slot_with(profile_root, slot, project, |scene| {
 			let document = load_authored(scene)?;
-			let digest = content_digest(project, &document)?;
+			let digest = self.authored_digest(project, &document)?;
 			Ok((Arc::new(document), digest))
 		})
 	}
@@ -394,7 +466,7 @@ impl CheckpointRegistry {
 					.entry(scene.clone())
 					.or_insert_with(|| {
 						let document = load_authored(scene)?;
-						let digest = content_digest(project, &document)?;
+						let digest = self.authored_digest(project, &document)?;
 						Ok((Arc::new(document), digest))
 					})
 					.clone()
@@ -420,31 +492,39 @@ impl CheckpointRegistry {
 			.primary
 			.as_deref()
 			.map(|bytes| self.decode_save(bytes));
-		match decoded {
+		let may_recover = match decoded {
 			Some(Ok(saved)) => {
-				status.primary = load_authored(saved.scene_id())
-					.map_or(ContinueAvailability::Unreadable, |(_, digest)| {
-						Self::compatibility(&saved, digest)
-					});
+				let Ok((_, digest)) = load_authored(saved.scene_id()) else {
+					return status;
+				};
+				status.primary = self.inspect_with_content(&saved, digest);
+				if status.primary.can_continue() {
+					status.chapter_label = self.chapter_label(saved.scene_id());
+				}
 				status.checkpoint_id = Some(saved.checkpoint_id);
+				status.primary == ContinueAvailability::Unreadable
 			}
 			Some(Err(SlotReadError::Incompatible(_))) => {
 				status.primary = ContinueAvailability::IncompatibleRelease;
+				false
 			}
 			primary => {
 				if primary.is_none() {
 					status.primary = ContinueAvailability::Empty;
 				}
-				if let Some(previous) = files.previous.as_deref()
-					&& let Ok(saved) = self.decode_save(previous)
-					&& let Ok((authored, digest)) = load_authored(saved.scene_id())
-					&& self
-						.reconstruct_with_content(&saved, project, &authored, digest)
-						.is_ok()
-				{
-					status.recovery_checkpoint_id = Some(saved.checkpoint_id);
-				}
+				true
 			}
+		};
+		if may_recover
+			&& let Some(previous) = files.previous.as_deref()
+			&& let Ok(saved) = self.decode_save(previous)
+			&& let Ok((authored, digest)) = load_authored(saved.scene_id())
+			&& self
+			.reconstruct_with_content(&saved, project, &authored, digest)
+			.is_ok()
+		{
+			status.recovery_chapter_label = self.chapter_label(saved.scene_id());
+			status.recovery_checkpoint_id = Some(saved.checkpoint_id);
 		}
 		status
 	}
@@ -457,6 +537,38 @@ impl CheckpointRegistry {
 		expected: &SlotGeneration,
 		source: RestoreSource,
 	) -> Result<CheckpointSave, String> {
+		self.load_restore_generation(profile_root, slot, expected, source, |_| false)
+	}
+
+	/// Also permits recovery when an otherwise intact V2 primary has invalid
+	/// facts for the matching authored release. A different fingerprint never
+	/// makes a primary eligible for recovery.
+	pub fn load_slot_for_restore_with_authored(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		source: RestoreSource,
+		project: &ProjectData,
+		load_authored: impl FnOnce(&SceneId) -> Result<SceneData, String>,
+	) -> Result<CheckpointSave, String> {
+		self.load_restore_generation(profile_root, slot, expected, source, |saved| {
+			load_authored(saved.scene_id())
+				.and_then(|authored| self.authored_digest(project, &authored))
+				.is_ok_and(|digest| {
+					self.inspect_with_content(saved, digest) == ContinueAvailability::Unreadable
+				})
+		})
+	}
+
+	fn load_restore_generation(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		source: RestoreSource,
+		invalid_for_authored: impl FnOnce(&CheckpointSave) -> bool,
+	) -> Result<CheckpointSave, String> {
 		let files = self.read_generations(profile_root, slot)?;
 		files.verify(slot, expected)?;
 		let primary = files
@@ -466,7 +578,12 @@ impl CheckpointRegistry {
 		let selected = match source {
 			RestoreSource::Current => primary.ok_or("No saved checkpoint")?,
 			RestoreSource::Previous => {
-				if !matches!(primary, None | Some(Err(SlotReadError::Corrupt(_)))) {
+				let may_recover = match primary {
+					None | Some(Err(SlotReadError::Corrupt(_))) => true,
+					Some(Err(SlotReadError::Incompatible(_))) => false,
+					Some(Ok(saved)) => invalid_for_authored(&saved),
+				};
+				if !may_recover {
 					return Err(
 						"Recovery is available only for a missing or corrupt primary".into(),
 					);
@@ -503,6 +620,7 @@ impl CheckpointRegistry {
 	}
 
 	fn inspect_save(
+		&self,
 		saved: &CheckpointSave,
 		project: &ProjectData,
 		load_authored: impl FnOnce(&SceneId) -> Result<SceneData, String>,
@@ -510,25 +628,47 @@ impl CheckpointRegistry {
 		let Ok(authored) = load_authored(saved.scene_id()) else {
 			return ContinueAvailability::Unreadable;
 		};
-		match content_digest(project, &authored) {
-			Ok(content) => Self::compatibility(saved, content),
+		match self.authored_digest(project, &authored) {
+			Ok(content) => self.inspect_with_content(saved, content),
 			Err(_) => ContinueAvailability::Unreadable,
 		}
+	}
+
+	fn inspect_with_content(
+		&self,
+		saved: &CheckpointSave,
+		digest: [u8; 32],
+	) -> ContinueAvailability {
+		let status = Self::compatibility(saved, digest);
+		if status.can_continue() && self.admitted_progress(saved).is_err() {
+			return ContinueAvailability::Unreadable;
+		}
+		status
 	}
 
 	fn decode_save(&self, bytes: &[u8]) -> Result<CheckpointSave, SlotReadError> {
 		let invalid = |error| SlotReadError::Corrupt(format!("Invalid Courtyard save: {error}"));
 		let header: SaveHeader = serde_json::from_slice(bytes).map_err(invalid)?;
-		if header.saved.version != SAVE_VERSION {
+		if header.saved.version != self.save_version() {
 			return Err(SlotReadError::Incompatible(
 				"Unsupported Courtyard save version".into(),
 			));
 		}
 		let record: SaveEnvelope = serde_json::from_slice(bytes).map_err(invalid)?;
+		if record.saved.chapter.is_some() != (record.saved.version == CHAPTER_SAVE_VERSION) {
+			return Err(SlotReadError::Corrupt(
+				"Courtyard save chapter does not match its record version".into(),
+			));
+		}
 		if record.checksum != save_checksum(&record.saved).map_err(SlotReadError::Corrupt)? {
 			return Err(SlotReadError::Corrupt(
 				"Courtyard save checksum does not match".into(),
 			));
+		}
+		if let Some(chapter) = &record.saved.chapter {
+			chapter
+				.validate_shape(&record.saved.facts)
+				.map_err(SlotReadError::Corrupt)?;
 		}
 		self.saved_definition(&record.saved)
 			.map_err(SlotReadError::Incompatible)?;
@@ -551,7 +691,12 @@ impl CheckpointRegistry {
 		project: &ProjectData,
 		authored: &SceneData,
 	) -> Result<(SceneData, CampaignProgress, ContinueAvailability), String> {
-		self.reconstruct_with_content(saved, project, authored, content_digest(project, authored)?)
+		self.reconstruct_with_content(
+			saved,
+			project,
+			authored,
+			self.authored_digest(project, authored)?,
+		)
 	}
 
 	fn reconstruct_with_content(
@@ -568,24 +713,60 @@ impl CheckpointRegistry {
 				"Courtyard save is incompatible with the current authored project or scene".into(),
 			);
 		}
-		let progress = CampaignProgress {
-			score: saved.facts.score,
-			has_courtyard_key: saved.facts.has_key,
-			route_gate_open: saved.facts.route_gate_open,
-			..CampaignProgress::default()
-		};
+		let progress = self.admitted_progress(saved)?;
 		let document = self.restore_document(checkpoint, project, authored, &progress)?;
 		Ok((document, progress, status))
 	}
 
+	fn admitted_progress(&self, saved: &CheckpointSave) -> Result<CampaignProgress, String> {
+		let definition = self.saved_definition(saved)?;
+		let progress = self.saved_progress(saved)?;
+		if !definition.admits(&progress) {
+			return Err("Saved progress does not satisfy the checkpoint".into());
+		}
+		Ok(progress)
+	}
+
 	fn saved_definition(&self, saved: &CheckpointSave) -> Result<&CheckpointDef, String> {
-		if saved.version != SAVE_VERSION {
+		if saved.version != self.save_version() {
 			return Err("Unsupported Courtyard save version".into());
 		}
 		if saved.project_save_id != self.project_save_id {
 			return Err("Courtyard save belongs to a different project".into());
 		}
+		if let (Some(run), Some(chapter)) = (&self.chapters, &saved.chapter)
+			&& run
+			.route
+			.index(&saved.scene_id)
+			.is_none_or(|index| run.route.chapters[index].id != chapter.id)
+		{
+			return Err("Courtyard save belongs to a different chapter".into());
+		}
 		self.definition(&saved.checkpoint_id, &saved.scene_id)
+	}
+
+	fn saved_progress(&self, saved: &CheckpointSave) -> Result<CampaignProgress, String> {
+		let progress = match (&self.chapters, &saved.chapter) {
+			(Some(initial), Some(chapter)) => {
+				let index = initial
+					.route
+					.index(&saved.scene_id)
+					.ok_or("Unknown chapter scene")?;
+				chapter.restore(initial, index, &saved.facts)?
+			}
+			(None, None) => CampaignProgress {
+				score: saved.facts.score,
+				has_courtyard_key: saved.facts.has_key,
+				route_gate_open: saved.facts.route_gate_open,
+				..CampaignProgress::default()
+			},
+			_ => return Err("Courtyard save chapter does not match the selected project".into()),
+		};
+		progress.validate()?;
+		if saved.facts.has_key && progress.score < 1 {
+			return Err("Saved key requires a positive score".into());
+		}
+		Ok(progress)
 	}
 
 	fn compatibility(saved: &CheckpointSave, authored_content: [u8; 32]) -> ContinueAvailability {
@@ -613,9 +794,10 @@ impl CheckpointRegistry {
 		progress: &CampaignProgress,
 	) -> Result<SceneData, String> {
 		progress.validate()?;
-		if !checkpoint.admits(progress)
-			|| (progress.route_gate_open && !progress.has_courtyard_key)
-			|| (progress.has_courtyard_key && progress.score < 1)
+		let course = progress.scene_facts(&checkpoint.scene_id);
+		if !self.same_campaign(progress)
+			|| !checkpoint.admits(progress)
+			|| (course.has_key && progress.score < 1)
 		{
 			return Err("Courtyard progress does not satisfy the checkpoint".into());
 		}
@@ -623,6 +805,9 @@ impl CheckpointRegistry {
 			.ok_or("Courtyard checkpoint has no authored settings")?;
 		if settings.project_save_id.as_deref() != Some(self.project_save_id.as_str()) {
 			return Err("Courtyard checkpoint project identity changed".into());
+		}
+		if self.chapters.as_ref().map(|run| run.route.as_ref()) != settings.campaign.as_ref() {
+			return Err("Courtyard checkpoint chapter route changed".into());
 		}
 		let Some(SceneInteractions::Course { exit_blocker, .. }) =
 			settings.scenes.get(checkpoint.scene_id.as_str())
@@ -647,7 +832,7 @@ impl CheckpointRegistry {
 		}
 		player.transform.position = checkpoint.spawn;
 
-		if progress.has_courtyard_key {
+		if course.has_key {
 			let key = authored.bindings.get("key").ok_or("Course key is absent")?;
 			let visual = entity_mut(&mut document, key)?;
 			visual.renderable = false;
@@ -665,7 +850,7 @@ impl CheckpointRegistry {
 			// The authored key sensor remains valid for Play validation. The
 			// first fixed step then reconciles it with the already collected key.
 		}
-		if progress.route_gate_open {
+		if course.gate_open {
 			let gate = settings
 				.route_gate
 				.as_ref()
@@ -734,6 +919,12 @@ pub struct CheckpointSave {
 	scene_id: SceneId,
 	content: [u8; 32],
 	facts: SavedFacts,
+	#[serde(
+		default,
+		deserialize_with = "chapter_if_present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	chapter: Option<SavedChapter>,
 }
 
 impl CheckpointSave {
@@ -787,8 +978,16 @@ impl Write for DigestWriter {
 }
 
 fn content_digest(project: &ProjectData, authored: &SceneData) -> Result<[u8; 32], String> {
+	versioned_content_digest(project, authored, b"courtyard-checkpoint-content-v1\0")
+}
+
+fn versioned_content_digest(
+	project: &ProjectData,
+	authored: &SceneData,
+	domain: &[u8],
+) -> Result<[u8; 32], String> {
 	let mut digest = DigestWriter(Sha256::new());
-	digest.0.update(b"courtyard-checkpoint-content-v1\0");
+	digest.0.update(domain);
 	serde_json::to_writer(&mut digest, project).map_err(|error| error.to_string())?;
 	digest.0.update(b"\0");
 	serde_json::to_writer(&mut digest, authored).map_err(|error| error.to_string())?;
@@ -797,7 +996,10 @@ fn content_digest(project: &ProjectData, authored: &SceneData) -> Result<[u8; 32
 
 fn save_checksum(saved: &CheckpointSave) -> Result<[u8; 32], String> {
 	let mut digest = DigestWriter(Sha256::new());
-	digest.0.update(b"courtyard-checkpoint-record-v1\0");
+	digest.0.update(match saved.version {
+		CHAPTER_SAVE_VERSION => b"courtyard-checkpoint-record-v2\0",
+		_ => b"courtyard-checkpoint-record-v1\0",
+	});
 	serde_json::to_writer(&mut digest, saved).map_err(|error| error.to_string())?;
 	Ok(digest.0.finalize().into())
 }

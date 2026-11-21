@@ -22,6 +22,16 @@ impl Scratch {
 	}
 
 	fn invoke(&self, version: u32, actions: &[Value], extra_flags: &[&str]) -> Output {
+		self.invoke_for(project(), version, actions, extra_flags)
+	}
+
+	fn invoke_for(
+		&self,
+		manifest: PathBuf,
+		version: u32,
+		actions: &[Value],
+		extra_flags: &[&str],
+	) -> Output {
 		fs::write(
 			self.0.join("trace.json"),
 			serde_json::to_vec(&json!({ "schema_version": version, "actions": actions })).unwrap(),
@@ -31,7 +41,7 @@ impl Scratch {
 			.current_dir(&self.0)
 			.env("ENGINE_LOG_DIR", self.0.join("logs"))
 			.arg("--project")
-			.arg(project())
+			.arg(manifest)
 			.arg("--replay")
 			.arg(self.0.join("trace.json"))
 			.arg("--output")
@@ -164,4 +174,15 @@ fn malformed_or_out_of_context_marks_fail_before_publishing_report() {
 		assert!(String::from_utf8_lossy(&output.stderr).contains(expected));
 		assert!(!scratch.0.join("report.json").exists());
 	}
+}
+
+#[test]
+fn authored_lever_fixture_replays_an_explicit_controller_press() {
+	let manifest = project().with_file_name("project.courtyard-interactables.json");
+	let trace = marked_route();
+	let report = report(Scratch::new().invoke_for(manifest, 5, &trace, &[]));
+	assert_eq!(report["project"], "Courtyard Interactable Learning");
+	assert_eq!(report["markers"][0]["route_gate_open"], false);
+	assert_eq!(report["markers"][2]["route_gate_open"], true);
+	assert_eq!(report["markers"][3]["completed"], true);
 }

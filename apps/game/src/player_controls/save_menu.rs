@@ -52,6 +52,10 @@ impl SaveMenu {
 							format!("{} ({})", slot.label(), continue_label(status.primary));
 						if status.recovery_checkpoint_id.is_some() {
 							format!("{label}: prior save")
+						} else if let (Some(chapter), Some(checkpoint)) =
+							(&status.chapter_label, &status.checkpoint_id)
+						{
+							format!("{label}: {chapter} / {checkpoint}")
 						} else if let Some(checkpoint) = &status.checkpoint_id {
 							format!("{label}: {checkpoint}")
 						} else {
@@ -75,7 +79,11 @@ impl SaveMenu {
 					Intent::Continue => {
 						let mut rows = vec![format!("Continue ({})", continue_label(slot.primary))];
 						if let Some(checkpoint) = &slot.recovery_checkpoint_id {
-							rows.push(format!("Recover prior ({checkpoint})"));
+							let saved = slot.recovery_chapter_label.as_ref().map_or_else(
+								|| checkpoint.clone(),
+								|chapter| format!("{chapter} / {checkpoint}"),
+							);
+							rows.push(format!("Recover prior ({saved})"));
 						}
 						rows.push("Back".into());
 						rows

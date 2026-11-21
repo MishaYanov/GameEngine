@@ -242,6 +242,7 @@ export class LinkedPrefabInspector {
 			return `${enabled} · Walk ${data.settings.walk_speed} · Jump ${data.settings.jump_action}`;
 		if (data.kind === 'animation')
 			return `${enabled} · ${data.settings.playback.kind.replaceAll('_', ' ')} · ${data.settings.source.asset_id}`;
+        if (data.kind === 'interactable') return [enabled, data.settings.action, data.settings.reach + ' m'].join(' · ');
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;
 	}
 

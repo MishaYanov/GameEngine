@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use super::{
 	CampaignProgress, FINISH_SCENE_ID,
+	chapters::ChapterRun,
 	runtime::CampaignModule,
 	settings::{InteractionSettings, RouteGateSettings, SceneInteractions, validate_trigger},
 };
@@ -63,6 +66,10 @@ impl GameModuleFactory for CampaignFactory {
 		config: PreparedModuleConfig<'_>,
 	) -> Result<Box<dyn GameModule>, String> {
 		let settings = InteractionSettings::from_project(config.project())?;
+		let campaign = settings
+			.as_ref()
+			.and_then(|settings| settings.campaign.as_ref());
+		let chapter_index = campaign.and_then(|campaign| campaign.index(config.scene_id()));
 		let interactions = settings
 			.as_ref()
 			.and_then(|settings| settings.scenes.get(config.scene_id().as_str()))
@@ -73,10 +80,14 @@ impl GameModuleFactory for CampaignFactory {
 			.filter(|gate| gate.scene_id == *config.scene_id())
 			.cloned();
 		let is_finish = matches!(&interactions, Some(SceneInteractions::Finish { .. }))
-			|| (interactions.is_none() && config.scene_id().as_str() == FINISH_SCENE_ID);
+			|| (campaign.is_none()
+			&& interactions.is_none()
+			&& config.scene_id().as_str() == FINISH_SCENE_ID);
 		let (roles, finish) = if is_finish {
 			// Finish scene: validate its player and finish marker.
 			(None, Some(FinishRoles::from_config(&config)?))
+		} else if campaign.is_some() && chapter_index.is_none() {
+			(None, None)
 		} else {
 			// Other scenes: keep the existing course rules.
 			let destination = match &interactions {
@@ -150,7 +161,50 @@ impl GameModuleFactory for CampaignFactory {
 			finish,
 			interactions,
 			route_gate,
+			chapter_index,
 		)))
+	}
+}
+
+pub(super) struct ChapteredFactory(ChapterRun);
+
+impl ChapteredFactory {
+	pub(super) fn new(settings: &InteractionSettings) -> Option<Self> {
+		Some(Self(ChapterRun::new(
+			Arc::new(settings.campaign.clone()?),
+			settings.route_gate.as_ref().map(|route| &route.scene_id),
+		)))
+	}
+}
+
+impl GameModuleFactory for ChapteredFactory {
+	fn create_progress(&self) -> Result<ProgressState, String> {
+		ProgressState::new(CampaignProgress {
+			chapters: Some(self.0.clone()),
+			..CampaignProgress::default()
+		})
+	}
+
+	fn prefab_references(
+		&self,
+		scene_settings: &serde_json::Value,
+	) -> Result<engine_core::simulation_session::ModuleSettingReferences, String> {
+		CampaignFactory.prefab_references(scene_settings)
+	}
+
+	fn create(
+		&self,
+		project: &ProjectData,
+		scene: &SceneId,
+	) -> Result<Box<dyn GameModule>, String> {
+		CampaignFactory.create(project, scene)
+	}
+
+	fn create_prepared(
+		&self,
+		config: PreparedModuleConfig<'_>,
+	) -> Result<Box<dyn GameModule>, String> {
+		CampaignFactory.create_prepared(config)
 	}
 }
 
@@ -184,7 +238,16 @@ fn validate_route_gate(
 			.iter()
 			.find(|entity| &entity.key == key)
 	};
-	find(&route.lever).ok_or("Route lever references a missing entity")?;
+	let lever = find(&route.lever).ok_or("Route lever references a missing entity")?;
+	if lever
+		.interactable
+		.as_ref()
+		.is_some_and(|component| component.enabled && component.settings.action != route.action)
+	{
+		return Err(
+			"Route lever Interactable action must match the bound Route Gate action".into(),
+		);
+	}
 	let gate = find(&route.gate).ok_or("Route gate references a missing entity")?;
 	let interaction = gate
 		.collider

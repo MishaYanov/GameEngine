@@ -7,7 +7,11 @@ use std::sync::{
 	atomic::{AtomicU64, Ordering},
 };
 
+#[path = "checkpoint_chapter_runs.rs"]
+mod checkpoint_chapter_runs;
 mod checkpoint_compatibility;
+#[path = "checkpoint_transfer.rs"]
+mod checkpoint_transfer;
 
 struct ProfileDir(PathBuf);
 

@@ -10,9 +10,11 @@ use crate::{
 
 mod document;
 mod native;
+pub(crate) mod paths;
+pub use paths::resolve_confined_scene_path;
 
-pub use document::{load_data, save_data, save_new_bytes, save_project_data};
-pub use native::{instantiate, instantiate_with_progress};
+pub use document::{load_data, replace_bytes, save_data, save_new_bytes, save_project_data};
+pub use native::{instantiate, instantiate_cancellable, instantiate_with_progress};
 
 pub struct LoadedScene {
 	pub scene: Scene,

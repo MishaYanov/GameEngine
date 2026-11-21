@@ -52,6 +52,21 @@ class ComparePlaytraceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "facts"):
             marker_rows({"markers": [broken]})
 
+    def test_checks_and_compares_optional_chapter_id(self):
+        legacy = mark("entry")
+        garden = dict(legacy, chapter_id="garden")
+        courtyard = dict(legacy, chapter_id="courtyard")
+        for bad in (None, "Garden", "g" * 33, "garden/entry"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "chapter ID"):
+                marker_rows({"markers": [dict(legacy, chapter_id=bad)]})
+        self.assertEqual(marker_rows({"markers": [garden]}), [garden])
+        self.assertEqual(first_difference([legacy], [garden])["fields"], {
+            "chapter_id": {"expected": None, "observed": "garden"},
+        })
+        self.assertEqual(first_difference([courtyard], [garden])["fields"], {
+            "chapter_id": {"expected": "courtyard", "observed": "garden"},
+        })
+
     def test_cli_returns_zero_for_match_one_for_difference_and_two_for_invalid(self):
         with tempfile.TemporaryDirectory() as workdir:
             root = Path(workdir)

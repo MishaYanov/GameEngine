@@ -1,14 +1,25 @@
 use super::*;
+use crate::input::MenuButtons;
+
+const RELEASED_MENU: MenuButtons = MenuButtons {
+	open: false,
+	up: false,
+	down: false,
+	left: false,
+	right: false,
+};
 
 const ACTIVE: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 18_000,
 	left_y: 0,
 	face_buttons: [true, false, false, false],
+	menu: RELEASED_MENU,
 };
 const CENTERED: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 1_000,
 	left_y: -2_000,
 	face_buttons: [false; 4],
+	menu: RELEASED_MENU,
 };
 
 #[test]
@@ -70,4 +81,29 @@ fn unassigned_face_button_still_blocks_rearming() {
 	assert!(!owner.poll(now + CONNECTED_INTERVAL, |_| Some(ACTIVE)));
 	assert!(!owner.poll(now + CONNECTED_INTERVAL * 2, |_| Some(CENTERED)));
 	assert!(owner.poll(now + CONNECTED_INTERVAL * 3, |_| Some(ACTIVE)));
+}
+
+#[test]
+fn held_menu_or_dpad_blocks_rearming_until_every_control_is_released() {
+	let mut owner = GamepadOwner::default();
+	let now = Instant::now();
+	let menu = PhysicalGamepadSample {
+		menu: MenuButtons {
+			open: true,
+			..RELEASED_MENU
+		},
+		..CENTERED
+	};
+	let dpad = PhysicalGamepadSample {
+		menu: MenuButtons {
+			down: true,
+			..RELEASED_MENU
+		},
+		..CENTERED
+	};
+	assert!(!owner.poll(now, |_| Some(menu)));
+	assert!(!owner.poll(now + CONNECTED_INTERVAL, |_| Some(dpad)));
+	assert!(!owner.poll(now + CONNECTED_INTERVAL * 2, |_| Some(CENTERED)));
+	assert!(owner.poll(now + CONNECTED_INTERVAL * 3, |_| Some(menu)));
+	assert_eq!(owner.sample().menu, menu.menu);
 }

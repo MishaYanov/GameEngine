@@ -1,16 +1,27 @@
 @if (supported()) {
     <button type="button" [disabled]="!available()" (click)="show()">Interaction Settings…</button>
+    @if (settings(); as configuration) {
+        <editor-campaign-settings [opening]="opening()" [settings]="configuration"/>
+    }
     @if (!settings()) { <p class="error" role="alert">This gameplay settings format is unsupported. Its data has been preserved.</p> }
 }
 <editor-dialog [(open)]="open" title="Interaction Settings" [renderFields]="false" [config]="{width: '36rem'}">
     <p>Configure this scene's sensor triggers. Gameplay Roles continue to identify the visible player and markers.</p>
     <fieldset class="fields" [disabled]="pending()">
         <legend>Scene interactions</legend>
-        <label>Interaction mode
-            <select [formField]="fields.mode">
-                <option value="legacy">Legacy proximity</option><option value="course">Course sensors</option><option value="finish">Finish sensor</option>
-            </select>
-        </label>
+        @if (campaignAssignment() === undefined) {
+            <label>Interaction mode
+                <select [formField]="fields.mode">
+                    <option value="legacy">Legacy proximity</option>
+                    <option value="course">Course sensors</option>
+                    <option value="finish">Finish sensor</option>
+                </select>
+            </label>
+        } @else if (campaignAssignment(); as assignment) {
+            <p>{{ assignment.kind === 'course' ? 'Campaign Course' : 'Campaign Finish' }}</p>
+        } @else {
+            <p>This scene is outside the campaign route.</p>
+        }
         @if (draft().mode === 'course') {
             <label>Key trigger
                 <select [formField]="fields.key">
@@ -28,14 +39,18 @@
                     }
                 </select>
             </label>
-            <label>Destination scene
-                <select [formField]="fields.destination">
-                    <option value="">Choose a scene</option>
-                    @for (scene of editor.snapshot()?.scenes; track scene.id) {
-                        <option [value]="scene.id">{{ scene.asset_path }} ({{ scene.id }})</option>
-                    }
-                </select>
-            </label>
+            @if (campaignAssignment() === undefined) {
+                <label>Destination scene
+                    <select [formField]="fields.destination">
+                        <option value="">Choose a scene</option>
+                        @for (scene of editor.snapshot()?.scenes; track scene.id) {
+                            <option [value]="scene.id">{{ scene.asset_path }} ({{ scene.id }})</option>
+                        }
+                    </select>
+                </label>
+            } @else {
+                <p>Campaign destination · {{ draft().destination }}</p>
+            }
             <label>Exit blocker
                 <select [formField]="fields.blocker">
                     <option value="">None</option>
@@ -44,6 +59,53 @@
                     }
                 </select>
             </label>
+            <fieldset class="fields">
+                <legend>Route Gate</legend>
+                @if (routeElsewhere(); as sceneId) {
+                    <p>The Route Gate is configured in {{ sceneId }}.</p>
+                } @else {
+                    <label><input [formField]="fields.route.enabled" type="checkbox"/> Use a route lever</label>
+                    @if (draft().route.enabled) {
+                        <label>Route lever
+                            <select [formField]="fields.route.lever">
+                                <option value="">Choose a lever</option>
+                                @for (entity of entities(); track entity.key) {
+                                    <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                                }
+                            </select>
+                        </label>
+                        <label>Route gate collider
+                            <select [formField]="fields.route.gate">
+                                <option value="">Choose a gate</option>
+                                @for (entity of blockers(); track entity.key) {
+                                    <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option>
+                                }
+                            </select>
+                        </label>
+                        @if (selectedInteractable(); as component) {
+                            <p>{{ component.enabled ? 'Active' : 'Inactive' }} Interactable.
+                                {{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
+                        } @else {
+                            <label>Fallback action
+                                <select [formField]="fields.route.action">
+                                    <option value="">Choose an action</option>
+                                    @for (action of actions(); track action) {
+                                        <option [value]="action">{{ action }}</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>Fallback reach (metres)
+                                <input [formField]="fields.route.radius" inputmode="decimal"/>
+                            </label>
+                        }
+                        @if (selectedLever()) {
+                            <button (click)="editLever()" [disabled]="!available()" type="button">Select Lever in
+                                Inspector
+                            </button>
+                        }
+                    }
+                }
+            </fieldset>
         } @else if (draft().mode === 'finish') {
             <label>Finish trigger
                 <select [formField]="fields.finish">

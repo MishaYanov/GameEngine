@@ -38,6 +38,7 @@ struct SceneEntry {
 	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
 	linked_prefab: Option<engine_core::linked_prefab::LinkedPrefabInstance>,
 	animation: Option<engine_core::animation::AnimationComponent>,
+	interactable: Option<engine_core::components::InteractableComponent>,
 	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
 }
 
@@ -72,6 +73,7 @@ impl SceneEntry {
 		self.native_behaviors.clone_from(&entity.native_behaviors);
 		self.linked_prefab.clone_from(&entity.linked_prefab);
 		self.animation.clone_from(&entity.animation);
+		self.interactable.clone_from(&entity.interactable);
 		self.character_controller
 			.clone_from(&entity.character_controller);
 	}
@@ -249,6 +251,7 @@ impl Scene {
 						&& entry.linked_prefab == saved.linked_prefab
 						&& entry.animation == saved.animation
 						&& entry.character_controller == saved.character_controller
+						&& entry.interactable == saved.interactable
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -435,6 +438,7 @@ impl Scene {
 			native_behaviors: Vec::new(),
 			linked_prefab: None,
 			animation: None,
+			interactable: None,
 			character_controller: None,
 		});
 		self.authored_children = None;
@@ -525,6 +529,7 @@ impl Scene {
 				native_behaviors: entry.native_behaviors.clone(),
 				linked_prefab: entry.linked_prefab.clone(),
 				animation: entry.animation.clone(),
+				interactable: entry.interactable.clone(),
 				character_controller: entry.character_controller.clone(),
 			});
 		}
@@ -671,6 +676,7 @@ impl Scene {
 		entry.linked_prefab = source_metadata.linked_prefab;
 		entry.animation = source_metadata.animation;
 		entry.character_controller = source_metadata.character_controller;
+		entry.interactable = source_metadata.interactable;
 		Ok(id)
 	}
 

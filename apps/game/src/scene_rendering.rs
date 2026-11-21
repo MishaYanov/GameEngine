@@ -1,7 +1,31 @@
 use super::*;
+use renderer::ui::ScreenOverlay;
 
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
+		let result = self.render_frame();
+		let outcome = match result {
+			Ok(renderer::DrawStatus::Rendered) => Some(SceneLoadOutcome::Presented),
+			Err(_) => Some(SceneLoadOutcome::Failed),
+			_ => None,
+		};
+		if let Some(outcome) = outcome
+			&& let Some(timing) = self.scene_load_timing.take()
+		{
+			timing.finish(outcome);
+		}
+		if matches!(result, Ok(renderer::DrawStatus::Rendered))
+			&& let (Some(prefetch), Some(current), Some(project)) = (
+			&mut self.scene_prefetch,
+			self.editor.play_scene_id(),
+			self.project.as_ref(),
+		) {
+			prefetch.prime(current, project);
+		}
+		result
+	}
+
+	fn render_frame(&mut self) -> Result<renderer::DrawStatus, String> {
 		if let Some(camera) = self.editor.play_rig_camera() {
 			self.camera = camera;
 		}
@@ -25,38 +49,65 @@ impl GameApp {
 			.window
 			.as_ref()
 			.map_or(1.0, |window| window.scale_factor());
-		let hud_rows = if self.standalone_runtime {
-			let capacity = renderer::ui::ScreenOverlay::row_capacity(content_extent, scale);
-			self.player_controls
-				.rows_with_capacity(capacity)
-				.unwrap_or_else(|| {
-					let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
-					if let Some(prompt) = rows
-						.iter_mut()
-						.find(|row| *row == "Use Interact to open the route gate")
-					{
-						*prompt = interact_hint(
-							self.input_profile_override
-								.as_ref()
-								.or_else(|| self.project.as_ref()?.input_profile.as_ref()),
-							self.interaction_action.as_deref(),
-							self.player_controls.controller(),
-							self.player_controls.prompt_device(),
-						);
-					}
-					if let Some(trace) = &self.play_trace {
-						rows.push(if trace.is_full() {
-							"Playtrace full. Quit to save".into()
-						} else {
-							"Recording playtrace".into()
-						});
-					}
-					rows.push("Esc: controls".into());
-					rows
-				})
-		} else {
-			Vec::new()
-		};
+		let display = self.player_controls.display();
+		let style = display.overlay_style();
+		let mut hud_rows = Vec::new();
+		if self.standalone_runtime {
+			let capacity = ScreenOverlay::capacity_with_style(content_extent, scale, style);
+			if capacity.rows > 0 {
+				hud_rows = self
+					.player_controls
+					.rows_with_layout(capacity.rows, capacity.columns)
+					.unwrap_or_else(|| {
+						let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
+						let mut required = usize::from(!rows.is_empty());
+						if let Some(prompt) = rows
+							.iter()
+							.position(|row| *row == "Use Interact to open the route gate")
+						{
+							rows[prompt] = interact_hint_for_columns(
+								self.input_profile_override
+									.as_ref()
+									.or_else(|| self.project.as_ref()?.input_profile.as_ref()),
+								self.interaction_action.as_deref(),
+								self.player_controls.controller(),
+								self.player_controls.prompt_device(),
+								capacity.columns,
+							);
+							required = (prompt + 1).min(capacity.rows);
+							if capacity.rows == 1 {
+								rows.swap(0, prompt);
+							}
+						}
+						rows.truncate(capacity.rows);
+						if display.cue_captions {
+							insert_captions(
+								&mut rows,
+								required,
+								capacity.rows,
+								self.feedback_captions.rows(Instant::now()),
+							);
+						}
+						if rows.len() < capacity.rows
+							&& let Some(trace) = &self.play_trace
+						{
+							rows.push(if trace.is_full() {
+								"Playtrace full. Quit to save".into()
+							} else {
+								"Recording playtrace".into()
+							});
+						}
+						if rows.len() < capacity.rows {
+							rows.push(if cfg!(windows) {
+								"Esc / Menu: Controls".into()
+							} else {
+								"Esc: Controls".into()
+							});
+						}
+						rows
+					});
+			}
+		}
 		let camera_uniform = CameraUniform::perspective(
 			self.camera.position,
 			self.camera.target(),
@@ -137,10 +188,10 @@ impl GameApp {
 		}
 		if self.standalone_runtime && !hud_rows.is_empty() {
 			if self.game_hud.is_none() {
-				self.game_hud = Some(renderer::ui::ScreenOverlay::new(renderer)?);
+				self.game_hud = Some(ScreenOverlay::new(renderer)?);
 			}
 			let hud = self.game_hud.as_mut().expect("initialized HUD");
-			hud.prepare(renderer, content_extent, scale, &hud_rows)?;
+			hud.prepare_with_style(renderer, content_extent, scale, &hud_rows, style)?;
 			if let Some(object) = hud.object() {
 				objects.push(object);
 			}
@@ -155,20 +206,73 @@ impl GameApp {
 	}
 }
 
+#[cfg(test)]
 pub(super) fn interact_hint(
 	profile: Option<&InputProfile>,
 	action: Option<&str>,
 	bindings: runtime::input::ControllerBindings,
 	device: PromptDevice,
 ) -> String {
+	interact_hint_for_columns(profile, action, bindings, device, usize::MAX)
+}
+
+fn interact_hint_for_columns(
+	profile: Option<&InputProfile>,
+	action: Option<&str>,
+	bindings: runtime::input::ControllerBindings,
+	device: PromptDevice,
+	columns: usize,
+) -> String {
 	let binding =
 		action.and_then(|action| profile?.actions.iter().find(|binding| binding.id == action));
-	match binding {
-		Some(binding) if device == PromptDevice::Controller && binding.id == "interact" => {
-			format!("Press {:?} to open the route gate", bindings.interact)
+	let Some(binding) = binding else {
+		let full = "Interact is unbound in the active profile";
+		return if full.len() <= columns {
+			full
+		} else {
+			"Interact unbound"
 		}
-		Some(binding) => format!("Press {:?} to open the route gate", binding.key),
-		None => "Interact is unbound in the active profile".into(),
+			.into();
+	};
+	let key = if device == PromptDevice::Controller && binding.id == "interact" {
+		format!("{:?}", bindings.interact)
+	} else {
+		format!("{:?}", binding.key)
+	};
+	let full = format!("Press {key} to open the route gate");
+	if full.len() <= columns {
+		full
+	} else {
+		let compact = format!("{key}: Open gate");
+		if compact.len() <= columns {
+			compact
+		} else {
+			key
+		}
+	}
+}
+
+fn insert_captions(
+	rows: &mut Vec<String>,
+	mut after_required: usize,
+	capacity: usize,
+	captions: impl Iterator<Item=&'static str>,
+) {
+	for caption in captions {
+		if after_required >= capacity {
+			break;
+		}
+		if rows.iter().any(|row| {
+			let status = row
+				.rsplit_once(": ")
+				.map_or(row.as_str(), |(_, suffix)| suffix);
+			status.eq_ignore_ascii_case(caption)
+		}) {
+			continue;
+		}
+		rows.insert(after_required, caption.into());
+		rows.truncate(capacity);
+		after_required += 1;
 	}
 }
 
@@ -198,4 +302,29 @@ pub(super) fn gameplay_hud_rows(
 		rows.push(format!("Scene {} pending. F8 to retry", scene.as_str()));
 	}
 	rows
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn captions_keep_objective_and_prompt_before_optional_rows() {
+		let mut rows = vec![
+			"Find gate".to_owned(),
+			"E: Open gate".to_owned(),
+			"Score 1".to_owned(),
+		];
+		insert_captions(
+			&mut rows,
+			2,
+			3,
+			["Key collected", "Gate opened"].into_iter(),
+		);
+		assert_eq!(rows, ["Find gate", "E: Open gate", "Key collected"]);
+
+		let mut rows = vec!["Reach exit".to_owned(), "Garden: Key collected".to_owned()];
+		insert_captions(&mut rows, 1, 3, ["Key collected"].into_iter());
+		assert_eq!(rows, ["Reach exit", "Garden: Key collected"]);
+	}
 }

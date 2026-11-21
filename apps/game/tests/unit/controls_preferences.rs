@@ -118,3 +118,50 @@ fn reads_v1_without_rewriting_and_v2_persists_a_remap() {
 	assert!(settings.save(controls).is_err());
 	assert_eq!(fs::read(&path).unwrap(), persisted);
 }
+
+#[test]
+fn display_settings_promote_v2_to_v3_only_on_apply_and_preserve_other_fields() {
+	use super::super::{PlayerControls, display::TextSize};
+	use runtime::input::FaceButton;
+
+	let root = Scratch::new();
+	let prefs = Preferences {
+		root: root.path().to_owned(),
+		filename: "controls.json".into(),
+	};
+	let path = prefs.folder(true).unwrap().unwrap().join("controls.json");
+	let legacy =
+		br#"{"schema_version":2,"movement":"wasd","controller":{"jump":"a","interact":"b"}}"#;
+	fs::write(&path, legacy).unwrap();
+	let settings = prefs.load().unwrap();
+	assert_eq!(settings.display, DisplaySettings::default());
+	assert_eq!(settings.movement, Preset::Wasd);
+	assert_eq!(settings.controller.interact, FaceButton::B);
+	assert_eq!(fs::read(&path).unwrap(), legacy);
+	let mut controls = PlayerControls {
+		applied: settings,
+		preferences: Some(prefs),
+		..PlayerControls::default()
+	};
+	let display = DisplaySettings {
+		text_size: TextSize::ExtraLarge,
+		high_contrast: true,
+		cue_captions: false,
+	};
+	controls.apply_display(display).unwrap();
+	controls.apply_movement(Preset::Arrows, None).unwrap();
+	let mut controller = settings.controller;
+	controller.interact = FaceButton::Y;
+	controls.apply_controller(controller).unwrap();
+	let prefs = controls.preferences.unwrap();
+	assert_eq!(prefs.load().unwrap().display, display);
+	assert_eq!(prefs.load().unwrap().movement, Preset::Arrows);
+	assert_eq!(prefs.load().unwrap().controller, controller);
+	let mut bad = serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
+	assert_eq!(bad["schema_version"], 3);
+	bad["display"]["text_size"] = "huge".into();
+	let bad = serde_json::to_vec(&bad).unwrap();
+	fs::write(&path, &bad).unwrap();
+	assert!(prefs.load().is_err());
+	assert_eq!(fs::read(&path).unwrap(), bad);
+}

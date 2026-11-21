@@ -1,72 +1,129 @@
 # Courtyard release acceptance
 
-Use Python 3.11 or later. Run the command below from the repository root on Windows with the locked Cargo dependencies
-and native Vulkan available. Choose a fresh candidate directory for each attempt.
+## Build the candidate
+
+Use Python 3.11 or later. On the Windows builder, start from a clean checkout with the locked Cargo dependencies and
+Vulkan available. Run from the repository root with a fresh evidence directory.
 
 ~~~powershell
-python -B scripts/qualify_release.py apps/game/project.release-learning.json target/release-qualification/local-candidate-1
+python -B scripts/qualify_release.py --require-clean apps/game/project.release-learning.json target/release-qualification/build-123
 ~~~
 
-For CI, configure a manual Pipeline job from the trusted repository with script path
-`ci/jenkins/Jenkinsfile.windows-release`. Assign an `engine-windows-vulkan` worker running an interactive native session
-on a disposable account. A successful build provides a ZIP and receipt. Each attempt retains selected logs for
-diagnosis.
+The manual Jenkins builder uses `ci/jenkins/Jenkinsfile.windows-release` on an `engine-windows-vulkan` worker in an
+interactive native session. It archives `candidate.zip` and `qualification.json` after the copied Player runs with both
+input configurations. Keep the pair from the same trusted build. Local builds that report uncommitted changes can be
+rehearsed and stay pending under the release gate.
 
-## Check the delivered package
+## Probe the delivered package on a separate Windows host
 
-Download `qualification.json` and `candidate.zip` from the same trusted build into an empty directory. Run the
-verification from the checkout against the exact download. Then extract to a fresh destination and run `game.exe` with
-an unrelated working directory.
+Use a disposable Windows account or a clean VM snapshot with the supported graphics driver. Transfer the verified build
+artifact pair and trusted probe scripts. The probe needs Python, the Windows GPU inventory service, and Vulkan. Its
+harness consists of `probe_installed_candidate.py`, `player_smoke.py`, `rehearse_release.py`, `verify_candidate.py`, and
+`verify_host_gates.py` in one directory.
 
 ~~~powershell
 $download = 'D:\ReleaseEvidence\build-123'
 $zip = Join-Path $download 'candidate.zip'
 $receipt = Join-Path $download 'qualification.json'
-$package = Join-Path $download 'player'
-python -B scripts/verify_candidate.py $receipt $zip
-if ($LASTEXITCODE -ne 0) { throw 'Candidate verification failed' }
-if (Test-Path -LiteralPath $package) { throw 'Choose a fresh package folder' }
-Expand-Archive -LiteralPath $zip -DestinationPath $package
+$probe = Join-Path $download 'clean-probe'
+python -B scripts/probe_installed_candidate.py $receipt $zip $probe --host-profile clean-windows-vulkan
+$probeStatus = $LASTEXITCODE
+if ($probeStatus -ne 0) { Write-Warning 'Inspect the probe log and host metadata' }
 ~~~
 
-## Record what you observed
+The probe verifies the archive and each member, starts `delivered-player/game.exe` from a separate working directory
+with disposable local application data, and rechecks the package after shutdown. Preserve `clean-player.gate.json`,
+`clean-player.log`, and `windows-host.json` together. Use the host's assigned profile. A probe on the build workstation
+is a local rehearsal.
 
-Copy this section into the build evidence directory. Use the same extracted candidate for every check and a disposable
-Windows account and save profile. Record the machine and controller model for native input failures. A passed smoke test
-confirms a Player frame from the copied package.
+## Collect independent gate results
 
-- Jenkins build or local run
-- Git revision and dirty status
-- Candidate ZIP SHA-256
-- Tester, Windows build, GPU and driver
-- Controller and connection type
+A trusted release operator assigns four host profiles. Keep the clean Player host separate from the workspace and editor
+workers. Run source checks at the exact receipt revision.
 
-| Check                                                                                              | Observation | Result |
-|----------------------------------------------------------------------------------------------------|-------------|--------|
-| Download receipt and all package files verify                                                      |             |        |
-| Keyboard opens Controls, navigates, applies and persists a preset                                  |             |        |
-| Controller loses ownership on focus loss and unplug. Held buttons require release after reconnect. |             |        |
-| Fresh route reaches the gate and saves the `after_gate` checkpoint                                 |             |        |
-| Next process continues, finishes, then New Run resets route progress                               |             |        |
-| Approved prior release `after_gate` save continues and remains byte-identical until Save           |             |        |
-| A changed or unapproved save is rejected and retained                                              |             |        |
+| Gate                | Observation to record                                                                                                                                                                                     |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `headless`          | Run the Courtyard route replay and semantic controller checks from the candidate's verified project against the matching headless build. Retain the report and command log.                               |
+| `editor`            | Run native editor acceptance from the same clean source revision on the assigned Windows Vulkan editor worker. Retain the workspace test results and the in-window Game view and transition observations. |
+| `clean_player`      | Collect the three files from the independent probe.                                                                                                                                                       |
+| `manual_controller` | Run the physical test below on its assigned Windows host. Retain its row-by-row observations.                                                                                                             |
 
-**Decision**  
-Accepted, pending, or rejected. Give a reason and reproduction steps for each failed or blocked check. Keep raw save
-files and profile contents out of the candidate artifacts.
+Use one result per gate. The independent probe writes its own result. For the remaining gates, place the trusted logs in
+the evidence directory and use `record` with the relative names. A rerun uses a new evidence directory so the older
+result remains available. Write logs in UTF-8 and keep diagnostic files under 64 MiB each.
 
-## Playtest evidence
+~~~powershell
+$evidence = Join-Path $download 'evidence'
+$profiles = 'D:\ReleaseEvidence\host-profiles.json'
+python -B scripts/verify_host_gates.py record $receipt $zip $evidence --gate headless --host-profile workspace-replay --status passed --evidence headless-report.json --evidence headless.log
+python -B scripts/verify_host_gates.py verify $receipt $zip $evidence --profiles $profiles
+$verdictStatus = $LASTEXITCODE
+~~~
 
-Verify the candidate ZIP with its trusted local receipt before extracting it into a fresh directory. Record from that
-Player with `--record-playtrace <new-file>` and the authored keyboard profile. Replay the trace against the manifest and
-assets from that same extracted copy.
+Exit 0 records accepted, exit 1 rejected, exit 2 pending, and exit 3 invalid evidence. Failed gates take precedence over
+pending ones. Missing gates, `not_run` results, and dirty-source receipts keep acceptance pending when there are no
+recorded failures. Hashes protect byte identity. Assign host profiles and authenticate build and tester origin through
+the trusted release workflow.
 
-The playtest collector checks the trace and manifest digests reported by headless. The separate candidate verifier
-checks every archived file against the receipt. The handoff records those inputs for reproduction. To verify runtime
-facts independently, replay the trace against the verified candidate and compare the generated report.
+For Jenkins, configure a separate manual Pipeline with `ci/jenkins/Jenkinsfile.windows-host-gates` and the
+`engine-windows-release-coordinator` worker. Provision `ENGINE_WINDOWS_GATE_INBOX` as an administrator-managed inbox and
+`ENGINE_WINDOWS_GATE_PROFILES` as a trusted profile-map file outside that inbox. Stage a new ordinary directory under
+the inbox containing `candidate.zip`, `qualification.json`, and an `evidence` folder using the job's `BUNDLE_ID`. Only
+trusted operators should publish bundles there. Keep successful and failed diagnostic logs together. The job archives
+its decision and verified evidence, flags pending builds as unstable, and fails rejected or malformed submissions.
+
+## Record the physical controller and saves
+
+Run the delivered Player from an unrelated working directory and a disposable `LOCALAPPDATA`. Record the archive digest,
+Git revision, Windows build, GPU, driver, controller model, connection type, tester, and observed result for every row.
+Use physical hardware for controller tests.
+
+| Check                                                                                                                                                           | Observation | Result |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
+| Keyboard opens Controls, navigates, applies and persists a movement preset                                                                                      |             |        |
+| Menu, D-pad, A and B open Controls, remap Interact, and apply with visible focus                                                                                |             |        |
+| The remap persists after relaunch and the small window keeps the focused row visible                                                                            |             |        |
+| Closing Controls with a remapped B cannot interact until B is released and pressed again                                                                        |             |        |
+| Focus loss and unplug clear ownership. Holding a button through reconnect needs release and a fresh press                                                       |             |        |
+| Escape cancels Replace after disconnect. Held A on reconnect does not confirm                                                                                   |             |        |
+| Save to Slots 1 and 2. Relaunch and Continue both checkpoints independently                                                                                     |             |        |
+| Cancelling Replace leaves the slot bytes unchanged. Explicit Replace creates the prior generation                                                               |             |        |
+| With the Player closed, corrupt only the disposable Slot 1 primary. Continue rejects it, Recover restores the prior generation, and Slot 2 bytes stay unchanged |             |        |
+| An approved prior release slot loads without changing its bytes until Save. A separate incompatible save is rejected and preserved                              |             |        |
+
+Record the physical gate as `passed` after all rows are observed, `failed` if a required row fails, or `not_run` when
+the assigned hardware is unavailable. Keep the notes in `manual-controller.txt` within the evidence directory. Save
+hashes and concise observations are enough for the handoff.
+
+~~~powershell
+python -B scripts/verify_host_gates.py record $receipt $zip $evidence --gate manual_controller --host-profile clean-windows-vulkan --status passed --evidence manual-controller.txt
+~~~
+
+## Attach playtest evidence for gameplay differences
+
+Run the recorded Player with `--record-playtrace <new-file>` and the authored keyboard profile. Replay against the
+manifest and assets from the same verified extraction. The playtest collector checks trace and manifest identity, and
+the candidate verifier checks the archived files against the receipt. Re-run headless to confirm the reported runtime
+facts. Keep physical ownership, menus, and save-recovery checks in the manual notes.
+
+## Local review packet and decision
+
+Run the review commands with the same verified receipt, archive, gate directory and trusted host profile map. Inspect
+the packet before recording a held, rejected or accepted decision. Acceptance requires all four verified passes and a
+clean source receipt. A changed receipt, profile, gate record, evidence file, or attached playtest handoff requires a
+new packet and decision.
+
+~~~powershell
+python -B scripts/review_candidate.py prepare $receipt $archive $gateDirectory $packet --profiles $profiles
+python -B scripts/review_candidate.py decide $receipt $archive $gateDirectory $packet $decision --profiles $profiles --scope windows-player --status held --reviewer 'QA operator' --reason 'Independent hardware check is pending'
+python -B scripts/review_candidate.py verify-decision $receipt $archive $gateDirectory $packet $decision --profiles $profiles
+~~~
+
+The reviewer field records operator-entered text. Attach a previously verified reproduction with --playtest on all three
+commands when it belongs to the same candidate. The attachment leaves the gate verdict unchanged.
 
 ## Relevant information and resources
 
-- [Native two-process rehearsal](release-rehearsal-checklist.md)
-- [Windows CI archive and fingerprint behavior](https://www.jenkins.io/doc/pipeline/steps/core/#archiveartifacts-archive-the-artifacts)
-- [ZIP reader and archive modes](https://docs.python.org/3.11/library/zipfile.html#zipfile.ZipFile)
+- [Native two-process rehearsal](release-rehearsal-checklist.md) · [Approved predecessor evidence](../apps/game/fixtures/courtyard-release-learning/save-upgrade-evidence.md)
+- [Candidate verifier](verify_candidate.py) · [Installed Player probe](probe_installed_candidate.py) · [Gate verifier](verify_host_gates.py)
+- [Windows builder](../ci/jenkins/Jenkinsfile.windows-release) · [Host evidence job](../ci/jenkins/Jenkinsfile.windows-host-gates) · [Jenkins artifact archives and fingerprints](https://www.jenkins.io/doc/pipeline/steps/core/#archiveartifacts-archive-the-artifacts)

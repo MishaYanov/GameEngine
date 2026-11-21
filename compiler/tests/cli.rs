@@ -152,3 +152,86 @@ fn legacy_names_starting_with_a_hyphen_reach_project_validation() {
 	assert!(error.contains("Destination must be an existing absolute folder path"));
 	assert!(!error.contains("Usage: compiler"));
 }
+
+#[test]
+fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
+	const KEY_CLIP: &[u8] =
+		include_bytes!("../../apps/game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+	let fixture = Fixture::new();
+	let authoring = fixture.0.join("audio-authoring");
+	let assets = authoring.join("assets");
+	let audio = assets.join("audio");
+	let destination = fixture.0.join("audio-exports");
+	fs::create_dir_all(assets.join("scenes")).unwrap();
+	fs::create_dir(&audio).unwrap();
+	fs::create_dir(&destination).unwrap();
+	let source = r#"{
+		"schema_version":3,"bindings":{},"entities":[],"lights":[],
+		"camera":{"position":[0,0,5],"yaw":0,"pitch":0,"vertical_fov":1,"near":0.1,"far":100}
+	}"#;
+	let scene = SceneData::from_json(source).unwrap();
+	fs::write(assets.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+	let mut project =
+		ProjectData::for_scene("CPU audio stage", "scenes/main.json", &scene).unwrap();
+	let manifest = authoring.join("project.json");
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	use bridge::feedback_audio::{CueAssignment, FeedbackCue, prepare_catalog};
+	fs::write(audio.join("cue-key.wav"), KEY_CLIP).unwrap();
+	fs::write(audio.join("cue-unused.wav"), KEY_CLIP).unwrap();
+	let catalog = prepare_catalog(
+		&assets,
+		vec![
+			CueAssignment {
+				event: FeedbackCue::KeyCollected,
+				path: "audio/cue-key.wav".into(),
+			},
+			CueAssignment {
+				event: FeedbackCue::GateOpened,
+				path: "audio/cue-key.wav".into(),
+			},
+		],
+	)
+		.unwrap();
+	fs::write(audio.join("cues.json"), catalog.manifest()).unwrap();
+
+	let stage = || {
+		fixture
+			.command()
+			.arg("--stage")
+			.arg(&manifest)
+			.arg(&destination)
+			.output()
+			.unwrap()
+	};
+	let success = stage();
+	assert!(
+		success.status.success(),
+		"{}",
+		String::from_utf8_lossy(&success.stderr)
+	);
+	let staged_audio = destination.join("CPU audio stage/assets/audio");
+	assert_eq!(
+		fs::read(staged_audio.join("cues.json")).unwrap(),
+		catalog.manifest()
+	);
+	assert_eq!(
+		fs::read(staged_audio.join("cue-key.wav")).unwrap(),
+		KEY_CLIP
+	);
+	assert_eq!(fs::read_dir(&staged_audio).unwrap().count(), 2);
+
+	project.name = "Rejected audio stage".into();
+	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	let mut corrupt = KEY_CLIP.to_vec();
+	corrupt[24] = 0;
+	fs::write(audio.join("cue-key.wav"), corrupt).unwrap();
+	let invalid = stage();
+	assert!(!invalid.status.success());
+	assert!(String::from_utf8_lossy(&invalid.stderr).contains("canonical 16 kHz"));
+	assert!(!destination.join("Rejected audio stage").exists());
+
+	fs::remove_file(audio.join("cue-key.wav")).unwrap();
+	let missing = stage();
+	assert!(!missing.status.success());
+	assert!(!destination.join("Rejected audio stage").exists());
+}

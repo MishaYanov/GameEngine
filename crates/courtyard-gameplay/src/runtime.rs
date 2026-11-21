@@ -2,6 +2,7 @@ use engine_core::{
 	EntityKey,
 	collision::CollisionWorld,
 	command::GameplayStatus,
+	components::interaction_reachable,
 	game_progress::ProgressView,
 	scene_data::MaterialOverrideData,
 	simulation_session::{ActionWriter, GameModule, GameplayContext, InputFrame, SimulationAction},
@@ -21,6 +22,7 @@ pub(super) struct CampaignModule {
 	finish: Option<FinishRoles>,
 	interactions: Option<SceneInteractions>,
 	route_gate: Option<RouteGateSettings>,
+	chapter_index: Option<usize>,
 }
 
 pub(super) const INTERACTION_RADIUS: f32 = 0.35;
@@ -32,6 +34,7 @@ impl CampaignModule {
 		finish: Option<FinishRoles>,
 		interactions: Option<SceneInteractions>,
 		route_gate: Option<RouteGateSettings>,
+		chapter_index: Option<usize>,
 	) -> Self {
 		Self {
 			base,
@@ -39,6 +42,7 @@ impl CampaignModule {
 			finish,
 			interactions,
 			route_gate,
+			chapter_index,
 		}
 	}
 
@@ -56,9 +60,16 @@ impl CampaignModule {
 		let (Some(gate), Some(roles)) = (&self.route_gate, &self.roles) else {
 			return false;
 		};
+		let Some(lever) = world.entity_index(&gate.lever) else {
+			return false;
+		};
+		let reach = match &world.data().entities[lever].interactable {
+			Some(component) if !component.enabled => return false,
+			Some(component) => component.settings.reach,
+			None => gate.radius,
+		};
 		world.entity_index(&gate.gate).is_some()
-			&& within_radius(world, &roles.player, &gate.lever, gate.radius)
-			&& collisions.interaction_segment_clear(world, &roles.player, &gate.lever)
+			&& interaction_reachable(world, collisions, &roles.player, &gate.lever, reach)
 	}
 
 	fn plan_route_gate(
@@ -70,16 +81,20 @@ impl CampaignModule {
 		let Some(gate) = &self.route_gate else {
 			return Ok(());
 		};
-		let opens_now = !progress.route_gate_open
-			&& progress.has_courtyard_key
+		let course = progress.course_facts(self.chapter_index);
+		let opens_now = !course.gate_open
+			&& course.has_key
 			&& context.input.action_pressed(&gate.action)
 			&& self.route_lever_reachable(context.world, context.collisions);
 		if opens_now {
-			output.push_progress::<CampaignProgress>(ProgressAction::OpenRouteGate)?;
+			let action = self
+				.chapter_index
+				.map_or(ProgressAction::OpenRouteGate, |index| {
+					ProgressAction::OpenChapterGate { index }
+				});
+			output.push_progress::<CampaignProgress>(action)?;
 		}
-		if opens_now
-			|| (progress.route_gate_open && self.route_gate_needs_projection(context.world))
-		{
+		if opens_now || (course.gate_open && self.route_gate_needs_projection(context.world)) {
 			output.push(SimulationAction::SetVisible {
 				entity: gate.gate.clone(),
 				visible: false,
@@ -136,7 +151,7 @@ impl CampaignModule {
 		let Some(roles) = &self.roles else {
 			return false;
 		};
-		if !progress.has_courtyard_key {
+		if !progress.course_facts(self.chapter_index).has_key {
 			return false;
 		}
 		let needs =
@@ -212,31 +227,57 @@ fn within_radius(world: &RuntimeWorld, first: &EntityKey, second: &EntityKey, ra
 impl GameModule for CampaignModule {
 	fn status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
 		let progress = progress.get::<CampaignProgress>()?;
+		let course = progress.course_facts(self.chapter_index);
+		let chapter = self
+			.chapter_index
+			.zip(progress.chapters.as_ref())
+			.map(|(index, run)| &run.route.chapters[index].label);
 		let objective = if self.roles.is_none() && self.finish.is_none() {
 			return None;
 		} else if progress.completed {
 			"Courtyard Run complete"
 		} else if self.finish.is_some() {
-			if progress.courtyard_exit_reached {
+			if progress.exits_reached() {
 				"Reach the finish marker"
+			} else if progress.chapters.is_some() {
+				"Clear every chapter to unlock the finish"
 			} else {
 				"Start in the courtyard to unlock the finish"
 			}
-		} else if progress.courtyard_exit_reached {
+		} else if !progress.course_unlocked(self.chapter_index) {
+			"Clear the earlier chapters to continue"
+		} else if chapter.is_some() {
+			if course.exited {
+				"Chapter exit reached"
+			} else if course.has_key {
+				"Reach the chapter exit"
+			} else {
+				"Find the chapter key"
+			}
+		} else if course.exited {
 			"Courtyard exit reached"
-		} else if progress.has_courtyard_key {
+		} else if course.has_key {
 			"Reach the courtyard exit"
 		} else {
 			"Find the courtyard key"
 		};
-		let detail = if progress.has_courtyard_key {
-			"Courtyard key collected"
+		let detail = if let Some(label) = chapter {
+			format!(
+				"{label}: {}",
+				if course.has_key {
+					"Key collected"
+				} else {
+					"Key not collected"
+				}
+			)
+		} else if course.has_key {
+			"Courtyard key collected".into()
 		} else {
-			"Courtyard key not collected"
+			"Courtyard key not collected".into()
 		};
 		Some(GameplayStatus {
 			objective: objective.into(),
-			detail: Some(detail.into()),
+			detail: Some(detail),
 			score: Some(progress.score),
 			completed: progress.completed,
 		})
@@ -250,12 +291,9 @@ impl GameModule for CampaignModule {
 	) -> Option<GameplayStatus> {
 		let mut status = self.status(progress_view)?;
 		let progress = progress_view.get::<CampaignProgress>()?;
-		if self.route_gate.is_some()
-			&& progress.has_courtyard_key
-			&& !progress.completed
-			&& !progress.courtyard_exit_reached
-		{
-			if progress.route_gate_open {
+		let course = progress.course_facts(self.chapter_index);
+		if self.route_gate.is_some() && course.has_key && !progress.completed && !course.exited {
+			if course.gate_open {
 				status.detail = Some("The route gate is open".into());
 			} else {
 				status.objective = "Reach the route lever".into();
@@ -284,7 +322,8 @@ impl GameModule for CampaignModule {
 			|| campaign.is_some_and(|value| {
 			self.pending_objective(world, value).is_some()
 				|| self.feedback_needed(world, value)
-				|| (value.route_gate_open && self.route_gate_needs_projection(world))
+				|| (value.course_facts(self.chapter_index).gate_open
+				&& self.route_gate_needs_projection(world))
 			})
 	}
 	fn plan(
@@ -310,6 +349,7 @@ impl GameModule for CampaignModule {
 		if progress.completed {
 			return Ok(());
 		}
+		let course = progress.course_facts(self.chapter_index);
 
 		let entered = |sensor: &EntityKey, player: &EntityKey| {
 			context.triggers.iter().any(|event| {
@@ -326,26 +366,38 @@ impl GameModule for CampaignModule {
 				..
 			}) => {
 				let roles = self.roles.as_ref().ok_or("Course roles unavailable")?;
-				collected = !progress.has_courtyard_key && entered(key_trigger, &roles.player);
-				if collected {
-					output
-						.push_progress::<CampaignProgress>(ProgressAction::CollectCourtyardKey)?;
+				if !progress.course_unlocked(self.chapter_index) {
+					return self.base.plan_with_progress(context, output);
 				}
-				if (progress.has_courtyard_key || collected)
-					&& !progress.courtyard_exit_reached
-					&& (self.route_gate.is_none() || progress.route_gate_open)
+				collected = !course.has_key && entered(key_trigger, &roles.player);
+				if collected {
+					let action = self
+						.chapter_index
+						.map_or(ProgressAction::CollectCourtyardKey, |index| {
+							ProgressAction::CollectChapterKey { index }
+						});
+					output.push_progress::<CampaignProgress>(action)?;
+				}
+				if (course.has_key || collected)
+					&& !course.exited
+					&& (self.route_gate.is_none() || course.gate_open)
 					&& context
 						.trigger_overlaps
 						.contains(exit_trigger, &roles.player)
 				{
-					Some(ProgressAction::ReachCourtyardExit)
+					Some(
+						self.chapter_index
+							.map_or(ProgressAction::ReachCourtyardExit, |index| {
+								ProgressAction::ReachChapterExit { index }
+							}),
+					)
 				} else {
 					None
 				}
 			}
 			Some(SceneInteractions::Finish { finish_trigger }) => {
 				let finish = self.finish.as_ref().ok_or("Finish roles unavailable")?;
-				if progress.courtyard_exit_reached
+				if progress.exits_reached()
 					&& context
 						.trigger_overlaps
 						.contains(finish_trigger, &finish.player)
@@ -372,7 +424,10 @@ impl GameModule for CampaignModule {
 		self.base.plan_with_progress(context, output)?;
 
 		if let Some(action) = objective {
-			let reached_exit = matches!(&action, ProgressAction::ReachCourtyardExit);
+			let reached_exit = matches!(
+				&action,
+				ProgressAction::ReachCourtyardExit | ProgressAction::ReachChapterExit { .. }
+			);
 			output.push_progress::<CampaignProgress>(action)?;
 			if reached_exit && let Some(roles) = &self.roles {
 				output.push(SimulationAction::RequestScene {

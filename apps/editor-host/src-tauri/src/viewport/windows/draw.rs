@@ -2,6 +2,19 @@ use super::*;
 
 impl Worker {
 	pub(super) fn draw(&mut self) -> Result<(), String> {
+		let result = self.draw_frame();
+		if result.is_err() {
+			if let Some((_, timing)) = self.authored_load.take() {
+				timing.finish(LoadOutcome::Failed);
+			}
+			if let Some((_, _, _, timing)) = self.play_load.take() {
+				timing.finish(LoadOutcome::Failed);
+			}
+		}
+		result
+	}
+
+	fn draw_frame(&mut self) -> Result<(), String> {
 		if !self.active() {
 			return Ok(());
 		}
@@ -12,9 +25,11 @@ impl Worker {
 					.shared
 					.lock()
 					.map_err(|_| "Editor document lock is poisoned")?;
-				let workspace = workspace
-					.as_mut()
-					.ok_or("Open a scene before attaching a viewport")?;
+				let Some(workspace) = workspace.as_mut() else {
+					self.authored_load = None;
+					self.play_load = None;
+					return Ok(());
+				};
 				self.interaction.sync(workspace)?;
 				if self
 					.gpu
@@ -116,6 +131,7 @@ impl Worker {
 							&& self.interaction.settings.view
 								== bridge::viewport::ViewportView::Scene)
 							.then(|| session.active_scene_id().clone()),
+						switch_clock: workspace.scene_switch,
 						change_cursor: cursor,
 						asset_root: workspace.asset_root.clone(),
 						lights_changed,
@@ -139,31 +155,77 @@ impl Worker {
 			revision,
 			generation,
 			scene_id,
+			switch_clock,
 			change_cursor,
 			asset_root,
 			lights_changed,
 		} = packet;
-		let previous = scene_id.as_ref().and_then(|scene_id| {
+		let key = scene_id.as_ref().map(|scene_id| AuthoredLoadKey {
+			generation,
+			revision,
+			scene_id: scene_id.clone(),
+		});
+		let previous = key.as_ref().and_then(|key| {
 			self.status.lock().ok().and_then(|status| {
 				status.scene_load.as_ref().and_then(|progress| {
-					(progress.workspace_generation == generation && &progress.scene_id == scene_id)
+					(progress.workspace_generation == key.generation
+						&& progress.scene_id == key.scene_id
+						&& switch_clock
+						.is_none_or(|(accepted, _, _)| progress.scene_revision >= accepted))
 						.then_some(progress.stage)
 				})
 			})
 		});
-		let loading = scene_id.is_some() && previous != Some(ViewportSceneLoadStage::Presented);
-		let (parent, control, status) = (&self.parent, &self.control, &self.status);
+		let loading = key.is_some() && previous != Some(ViewportSceneLoadStage::Presented);
+		if !loading
+			|| self
+			.authored_load
+			.as_ref()
+			.is_some_and(|(active, _)| Some(active) != key.as_ref())
+		{
+			self.authored_load = None;
+		}
+		let new_load = loading && self.authored_load.is_none();
+		if let Some(key) = key.as_ref().filter(|_| new_load) {
+			let now = Instant::now();
+			let (_, requested, ready) = switch_clock.unwrap_or((revision, now, now));
+			let mut timing = SceneLoadTiming::new("editor", LoadScope::Authored, requested);
+			timing.cpu_ready_at(ready);
+			self.authored_load = Some((key.clone(), timing));
+		}
+		let request_id = self
+			.authored_load
+			.as_ref()
+			.map(|(_, timing)| timing.id().to_string());
+		let (parent, control, status, shared) =
+			(&self.parent, &self.control, &self.status, &self.shared);
+		let is_current = || {
+			key.as_ref().is_none_or(|key| {
+				shared.lock().ok().is_some_and(|slot| {
+					slot.as_ref()
+						.is_some_and(|workspace| key.matches(workspace))
+				})
+			})
+		};
 		let report = |stage, count: Option<(usize, usize)>| {
-			if let Some(scene_id) = scene_id.as_ref() {
+			if let (Some(key), Some(request_id)) = (key.as_ref(), request_id.as_ref()) {
+				let Ok(workspace) = shared.lock() else { return };
+				if !workspace
+					.as_ref()
+					.is_some_and(|workspace| key.matches(workspace))
+				{
+					return;
+				}
 				let (completed, total) = count.unzip();
 				publish_scene_load(
 					parent,
 					control,
 					status,
 					ViewportSceneLoadDto {
-						workspace_generation: generation,
-						scene_id: scene_id.clone(),
-						scene_revision: revision,
+						request_id: request_id.clone(),
+						workspace_generation: key.generation,
+						scene_id: key.scene_id.clone(),
+						scene_revision: key.revision,
 						stage,
 						completed,
 						total,
@@ -171,8 +233,11 @@ impl Worker {
 				);
 			}
 		};
-		if loading && previous.is_none() {
+		if new_load {
 			report(ViewportSceneLoadStage::Preparing, None);
+		}
+		if let Some((_, timing)) = self.authored_load.as_mut() {
+			timing.gpu_started();
 		}
 		let mut last_count = None;
 		let mut count_prepared = |completed, total| {
@@ -199,12 +264,27 @@ impl Worker {
 			let data = document
 				.take()
 				.ok_or("Initial viewport packet is missing scene data")?;
-			let (scene, _) = scene_io::instantiate_with_progress(
+			let candidate = scene_io::instantiate_cancellable(
 				&data,
 				&mut assets,
 				&renderer,
 				&mut count_prepared,
+				|| !is_current(),
 			)?;
+			renderer.wait_idle()?;
+			let install_guard = shared
+				.lock()
+				.map_err(|_| "Editor document lock is poisoned")?;
+			let current = key.as_ref().is_none_or(|key| {
+				install_guard
+					.as_ref()
+					.is_some_and(|workspace| key.matches(workspace))
+			});
+			let Some((scene, _)) = candidate.filter(|_| current) else {
+				self.authored_load = None;
+				self.dirty = true;
+				return Ok(());
+			};
 			renderer.set_lights(&scene.renderer_lights())?;
 			engine_logger::debug!(target: "editor_viewport", "Viewport GPU state created: generation={generation}, width={width}, height={height}, entities={}, lights={}", data.entities.len(), data.lights.len());
 			drop(data);
@@ -218,6 +298,7 @@ impl Worker {
 				change_cursor,
 				assets_invalidated: false,
 			});
+			drop(install_guard);
 		}
 		let gpu = self
 			.gpu
@@ -228,33 +309,59 @@ impl Worker {
 			let data = document
 				.take()
 				.ok_or("Full viewport synchronization packet is missing scene data")?;
-			let replacement = if gpu.assets_invalidated || !gpu.scene.synchronize(&data)? {
-				let (scene, _) = match scene_io::instantiate_with_progress(
-					&data,
-					&mut gpu.assets,
-					&gpu.renderer,
-					&mut count_prepared,
-				) {
-					Ok(candidate) => candidate,
-					Err(error) => {
-						drop(data);
-						gpu.renderer.wait_idle().map_err(|wait_error| {
-							format!(
+			let replacement =
+				if loading || gpu.assets_invalidated || !gpu.scene.synchronize(&data)? {
+					let (scene, _) = match scene_io::instantiate_cancellable(
+						&data,
+						&mut gpu.assets,
+						&gpu.renderer,
+						&mut count_prepared,
+						|| !is_current(),
+					) {
+						Ok(Some(candidate)) => candidate,
+						Ok(None) => {
+							gpu.renderer.wait_idle()?;
+							gpu.assets.prune_unused();
+							self.authored_load = None;
+							self.dirty = true;
+							return Ok(());
+						}
+						Err(error) => {
+							drop(data);
+							gpu.renderer.wait_idle().map_err(|wait_error| {
+								format!(
 								"{error}; failed to retire rejected candidate GPU resources: {wait_error}"
 							)
-						})?;
-						gpu.assets.prune_unused();
-						return Err(error);
-					}
+							})?;
+							gpu.assets.prune_unused();
+							return Err(error);
+						}
+					};
+					Some(scene)
+				} else {
+					None
 				};
-				Some(scene)
-			} else {
-				None
-			};
 			drop(data);
 			if let Some(scene) = replacement {
 				gpu.renderer.wait_idle()?;
-				gpu.scene = scene;
+				let install_guard = shared
+					.lock()
+					.map_err(|_| "Editor document lock is poisoned")?;
+				if key.as_ref().is_some_and(|key| {
+					!install_guard
+						.as_ref()
+						.is_some_and(|workspace| key.matches(workspace))
+				}) {
+					drop(install_guard);
+					drop(scene);
+					gpu.assets.prune_unused();
+					self.authored_load = None;
+					self.dirty = true;
+					return Ok(());
+				}
+				let retired_scene = std::mem::replace(&mut gpu.scene, scene);
+				drop(install_guard);
+				drop(retired_scene);
 				gpu.assets.prune_unused();
 			} else if generation_changed {
 				gpu.renderer.wait_idle()?;
@@ -267,6 +374,33 @@ impl Worker {
 			gpu.assets_invalidated = false;
 		} else if lights_changed {
 			gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
+		}
+		if !is_current() {
+			self.authored_load = None;
+			self.dirty = true;
+			return Ok(());
+		}
+		if let Some((_, timing)) = self.authored_load.as_mut() {
+			timing.installed();
+		}
+		let play_is_current = |expected_generation: u64, run_id: &str, scene_generation: u64| {
+			shared.lock().ok().is_some_and(|slot| {
+				slot.as_ref().is_some_and(|workspace| {
+					workspace.generation == expected_generation
+						&& workspace
+						.backend
+						.session()
+						.owns_play_scene(run_id, scene_generation)
+				})
+			})
+		};
+		if self
+			.play_load
+			.as_ref()
+			.is_some_and(|(generation, run_id, scene_generation, _)| {
+				!play_is_current(*generation, run_id, *scene_generation)
+			}) {
+			self.play_load = None;
 		}
 		gpu.scene.reset_animation_overrides();
 		if let Some(bank) = &animations {
@@ -343,6 +477,7 @@ impl Worker {
 				.draw_in_rect(&uniform, &objects, rect.pixels())?,
 			None => gpu.renderer.draw(&uniform, &objects)?,
 		};
+		let presented_at = (frame_status == DrawStatus::Rendered).then(Instant::now);
 		match frame_status {
 			DrawStatus::NeedsRedraw => {
 				self.dirty = true;
@@ -372,8 +507,18 @@ impl Worker {
 				}
 			}
 		}
-		if loading && frame_status == DrawStatus::Rendered {
-			report(ViewportSceneLoadStage::Presented, None);
+		if let Some(when) = presented_at {
+			if let Some((_, timing)) = self.authored_load.take() {
+				if is_current() {
+					report(ViewportSceneLoadStage::Presented, None);
+					timing.finish_at(LoadOutcome::Presented, when);
+				}
+			}
+			if let Some((generation, run_id, scene_generation, timing)) = self.play_load.take() {
+				if play_is_current(generation, &run_id, scene_generation) {
+					timing.finish_at(LoadOutcome::Presented, when);
+				}
+			}
 		}
 		self.publish_editor(false);
 		Ok(())

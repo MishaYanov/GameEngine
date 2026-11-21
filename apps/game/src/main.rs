@@ -1,7 +1,10 @@
 mod checkpoint_controls;
+mod checkpoint_transfer;
 mod editor_panel;
 mod editor_tools;
 mod feedback_audio;
+mod feedback_captions;
+
 mod frame_metrics;
 mod game;
 mod gizmo_overlay;
@@ -10,6 +13,7 @@ mod play;
 mod player_controls;
 mod playtrace;
 mod scene_documents;
+mod scene_prefetch;
 mod scene_rendering;
 mod selection_overlay;
 
@@ -20,6 +24,9 @@ use courtyard_gameplay as progress;
 use editor_panel::PanelView;
 use editor_tools::EditorTools;
 use runtime::scene::Scene;
+use runtime::scene_load_timing::{
+	Outcome as SceneLoadOutcome, SceneLoadTiming, Scope as SceneLoadScope,
+};
 use runtime::{Camera, CameraController};
 use runtime::{FrameClock, GameContentRect};
 use runtime::{InputState, Key};
@@ -105,6 +112,11 @@ struct GameApp {
 	input_profile_override: Option<InputProfile>,
 	player_controls: player_controls::PlayerControls,
 	play_trace: Option<playtrace::PlayTrace>,
+	feedback_audio: feedback_audio::FeedbackAudio,
+	feedback_captions: feedback_captions::FeedbackCaptions,
+	scene_load_timing: Option<SceneLoadTiming>,
+	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
+	scene_prefetch_enabled: bool,
 	checkpoints: Option<courtyard_gameplay::checkpoint::CheckpointRegistry>,
 	checkpoint_base: Option<Arc<runtime::scene_data::SceneData>>,
 	interaction_action: Option<String>,
@@ -113,6 +125,8 @@ struct GameApp {
 	play_update_error_reported: bool,
 	edit_update_error_reported: bool,
 	smoke_test: bool,
+	smoke_scene_cycles: u32,
+	smoke_prefetch_probe: bool,
 	smoke_test_completed: bool,
 	fatal_error: Option<String>,
 }
@@ -232,26 +246,37 @@ impl GameApp {
 		if !self.standalone_runtime
 			|| self.smoke_test
 			|| self.window_occluded
-			|| self.player_controls.is_open()
 			|| !self.editor.is_playing()
-			|| self.editor.simulation_paused()
-			|| self.game_completed()
 			|| !self.window.as_ref().is_some_and(|window| {
 				let size = window.inner_size();
-				window.has_focus() && size.width > 0 && size.height > 0
+			window.has_focus() && GameContentRect::fit(size.width, size.height).is_some()
 			}) {
-			self.play_gamepad.reset();
+			self.reset_gamepad_input();
 			return None;
 		}
+		self.sample_standalone_gamepad(now, runtime::input::poll_gamepad)
+	}
+
+	#[cfg(windows)]
+	fn sample_standalone_gamepad(
+		&mut self,
+		now: Instant,
+		read: impl FnMut(u32) -> Option<runtime::input::PhysicalGamepadSample>,
+	) -> Option<Instant> {
 		let was_connected = self.play_gamepad.connected();
 		let previous = self.logical_gamepad();
-		let changed = self.play_gamepad.poll(now, runtime::input::poll_gamepad)
-			&& previous != self.logical_gamepad();
-		let disconnected = was_connected && !self.play_gamepad.connected();
+		let changed = self.play_gamepad.poll(now, read);
+		let connected = self.play_gamepad.connected();
+		let disconnected = was_connected && !connected;
 		if disconnected {
-			self.player_controls
-				.set_prompt_device(PromptDevice::Keyboard);
+			self.player_controls.controller_disconnected();
 		}
+		if connected && self.player_controls_gamepad(self.play_gamepad.sample()) {
+			self.request_input_frame();
+			// Opening, closing, or applying can reset the polling owner.
+			return Some(self.play_gamepad.deadline().unwrap_or(now));
+		}
+		let changed = changed && previous != self.logical_gamepad();
 		if changed {
 			if let Err(error) = self.submit_play_controls() {
 				engine_logger::error!(target: "game", "Controller input rejected: {error}");
@@ -267,9 +292,18 @@ impl GameApp {
 	}
 
 	fn logical_gamepad(&self) -> GamepadSample {
-		self.player_controls
+		let pad = self
+			.player_controls
 			.controller()
-			.resolve(self.play_gamepad.sample())
+			.resolve(self.play_gamepad.sample());
+		if pad != GamepadSample::default()
+			&& (self.player_controls.is_open()
+			|| self.editor.simulation_paused()
+			|| self.game_completed())
+		{
+			return GamepadSample::default();
+		}
+		pad
 	}
 
 	fn effective_input_profile(&self) -> Option<&InputProfile> {
@@ -311,12 +345,18 @@ impl GameApp {
 
 	fn clear_game_controls(&mut self) {
 		self.editor.clear_play_input();
-		self.play_gamepad.reset();
+		self.reset_gamepad_input();
 		self.player_controls
 			.set_prompt_device(PromptDevice::Keyboard);
 		if let Some(trace) = self.play_trace.as_mut() {
 			trace.clear_controls();
 		}
+	}
+
+	fn reset_gamepad_input(&mut self) {
+		self.play_gamepad.reset();
+		#[cfg(windows)]
+		self.player_controls.reset_controller_menu_input();
 	}
 
 	fn handle_scene_commands(&mut self) -> bool {
@@ -476,8 +516,8 @@ impl GameApp {
 		window: Arc<Window>,
 		asset_root: PathBuf,
 	) -> Result<(), String> {
+		let audio_catalog = bridge::feedback_audio::load(&asset_root)?;
 		let size = window.inner_size();
-		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let startup_scene = match self.project.as_ref() {
 			Some(project) => project.startup_scene_path()?,
 			None => "scenes/robots.json",
@@ -488,6 +528,11 @@ impl GameApp {
 			asset_root.join(startup_scene)
 		};
 		let parsed = scene_io::load_data(&scene_path)?;
+		if let Some(timing) = &mut self.scene_load_timing {
+			timing.cpu_ready();
+			timing.gpu_started();
+		}
+		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let mut loaded = scene_io::load_parsed(&parsed, &asset_root, &renderer)?;
 		let mut editor = Self::prepare_editor(&mut loaded)?;
 		let project = match self.project.clone() {
@@ -531,11 +576,17 @@ impl GameApp {
 			tools.models = runtime::assets::catalog::scan_models(&asset_root)?;
 		}
 
+		let prefetch = if self.scene_prefetch_enabled {
+			scene_prefetch::PlayerPrefetch::new(&project, &asset_root)?
+		} else {
+			None
+		};
 		// Install only after every fallible initialization step has succeeded.
 		if self.standalone_runtime {
 			editor.start_play(&mut loaded.scene)?;
 		}
 		self.scene = loaded.scene;
+		self.scene_prefetch = prefetch;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
 		if let Some(profile) = &self.input_profile_override {
@@ -546,10 +597,14 @@ impl GameApp {
 		self.selection_overlay = overlay;
 		self.project = Some(project);
 		self.asset_root = Some(asset_root);
+		self.feedback_audio = feedback_audio::FeedbackAudio::new(audio_catalog, !self.smoke_test);
 		self.scene_path = Some(scene_path);
 		self.checkpoint_base = self.checkpoints.is_some().then(|| Arc::new(parsed.data));
 		self.renderer = Some(renderer);
 		self.window = Some(window);
+		if let Some(timing) = &mut self.scene_load_timing {
+			timing.installed();
+		}
 		self.clock.reset();
 		self.update_selection_title();
 		engine_logger::component_health(
@@ -725,11 +780,19 @@ impl ApplicationHandler for GameApp {
 		if self.window.is_some() {
 			return;
 		}
+		self.scene_load_timing = Some(SceneLoadTiming::new(
+			"player",
+			SceneLoadScope::Startup,
+			Instant::now(),
+		));
 		if let Err(error) = self
 			.initialize(event_loop)
 			.map_err(std::io::Error::other)
 			.log_error_for("game::renderer", "initialize game")
 		{
+			if let Some(timing) = self.scene_load_timing.take() {
+				timing.finish(SceneLoadOutcome::Failed);
+			}
 			self.fatal_error = Some(error.to_string());
 			event_loop.exit();
 			return;
@@ -742,7 +805,7 @@ impl ApplicationHandler for GameApp {
 				for _ in 0..8 {
 					if self.render()? == renderer::DrawStatus::Rendered {
 						self.wait_for_gpu()?;
-						return Ok(());
+						return self.exercise_scene_loads(self.smoke_scene_cycles);
 					}
 				}
 				Err("Startup smoke test did not render a frame".to_owned())
@@ -1107,7 +1170,26 @@ impl ApplicationHandler for GameApp {
 					}
 				}
 			};
-		let deadline = frame_deadline.into_iter().chain(controller_deadline).min();
+		let caption_expired = self.feedback_captions.expire(now);
+		let caption_deadline = if self.standalone_runtime
+			&& self.player_controls.display().cue_captions
+			&& !self.player_controls.is_open()
+			&& !self.window_occluded
+			&& size.width > 0
+			&& size.height > 0
+		{
+			if caption_expired {
+				window.request_redraw();
+			}
+			self.feedback_captions.next_expiry()
+		} else {
+			None
+		};
+		let deadline = frame_deadline
+			.into_iter()
+			.chain(controller_deadline)
+			.chain(caption_deadline)
+			.min();
 		event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 	}
 
@@ -1200,6 +1282,9 @@ fn run() -> Result<(), String> {
 		std::env::var("GAME_ENGINE_NATIVE_EDITOR_DEMO").as_deref() == Ok("1"),
 	)?;
 
+	if let Some(transfer) = options.transfer {
+		return checkpoint_transfer::execute(transfer, app.project.as_ref(), executable_root);
+	}
 	app.input_profile_override = options
 		.input_profile
 		.as_deref()
@@ -1207,6 +1292,9 @@ fn run() -> Result<(), String> {
 		.transpose()?;
 
 	app.smoke_test = options.smoke_test;
+	app.smoke_scene_cycles = options.smoke_scene_cycles;
+	app.smoke_prefetch_probe = options.smoke_prefetch_probe;
+	app.scene_prefetch_enabled = options.scene_prefetch;
 	if app.smoke_test {
 		suppress_smoke_error_dialogs();
 	}
@@ -1389,6 +1477,10 @@ mod camera_native_tests;
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_checkpoint_native.rs"]
 mod checkpoint_native_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/tests_controller_menu_native.rs"]
+mod controller_menu_native_tests;
 
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_playtrace_native.rs"]

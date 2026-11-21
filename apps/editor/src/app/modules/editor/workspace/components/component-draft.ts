@@ -1,4 +1,9 @@
-import type { ComponentData, ComponentRecord } from '../../../../core/editor/editor-components';
+import {
+    validInteractionReach,
+    type ComponentData,
+    type ComponentRecord
+} from '../../../../core/editor/editor-components';
+import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
 import {
@@ -36,6 +41,7 @@ export interface ComponentDraft {
 	machine: MachineDefinition;
 	controller: Record<ControllerNumberKey, string> & { jump_action: string };
 	animation: AnimationSettings | null;
+    interactable: { action: string; reach: string };
 	actor: string;
 	key_trigger: string;
 	door: string;
@@ -74,6 +80,7 @@ export function componentDraft(
 			jump_action: 'jump',
 		},
 		animation: null,
+        interactable: {action: 'interact', reach: '1'},
 		actor: '',
 		key_trigger: '',
 		door: owner,
@@ -116,6 +123,8 @@ export function componentDraft(
 		};
 	} else if (value.data.kind === 'animation') {
 		draft.animation = structuredClone(value.data.settings);
+    } else if (value.data.kind === 'interactable') {
+        draft.interactable = {action: value.data.settings.action, reach: String(value.data.settings.reach)};
 	} else if (value.data.kind === 'native_behavior') {
 		const behavior = value.data.behavior;
 		draft.behavior_kind = behavior.kind;
@@ -244,6 +253,12 @@ export function componentFromDraft(
 				'Review an animation asset, choose its clips, and enter a valid speed ratio.',
 			);
 		data = { kind: 'animation', settings: structuredClone(draft.animation) };
+    } else if (draft.kind === 'interactable') {
+        const {action, reach: reachText} = draft.interactable;
+        const reach = parseF32(reachText);
+        if (!validGameActionId(action)) throw new Error('Choose a valid game input action ID.');
+        if (!validInteractionReach(reach)) throw new Error('Reach must be positive and at most 3 metres.');
+        data = {kind: 'interactable', settings: {action, reach}};
 	} else if (draft.behavior_kind === 'state_machine') {
 		const problem = machineError(draft.machine);
 		if (problem) throw new Error(problem);

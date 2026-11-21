@@ -42,6 +42,7 @@ async fn open_workspace(
 		let notify_editor = Arc::clone(&shared);
 		let notify_viewport = Arc::clone(&viewport);
 		let notify_window = window.clone();
+		let requested = std::time::Instant::now();
 		let mut candidate = prepare(Box::new(move || {
 			let editor = Arc::clone(&notify_editor);
 			let viewport = Arc::clone(&notify_viewport);
@@ -69,6 +70,7 @@ async fn open_workspace(
 			let ready = candidate.drain_asset_jobs();
 			if !ready.is_empty() { let _ = window.emit("editor://asset-completions", ready); }
 			let snapshot = candidate.backend.snapshot().map_err(|e| e.to_string())?;
+			candidate.scene_switch = Some((snapshot.scene_revision, requested, std::time::Instant::now()));
 			*current = Some(candidate);
 			snapshot
 		};
@@ -196,4 +198,39 @@ pub async fn editor_save_scene_as(
 		w.save_scene_as(&path, expected_revision)
 	})
 	.await
+}
+
+#[tauri::command]
+pub async fn editor_campaign_generation(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: u64,
+) -> Result<u64, crate::editor::campaign_authoring::CampaignAuthoringError> {
+	trusted_window(&window)?;
+	workspace_with_error(state, false, None, move |w| {
+		w.campaign_generation(expected_revision)
+	})
+		.await
+}
+
+#[tauri::command]
+pub async fn editor_apply_campaign(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	campaign: courtyard_gameplay::settings::CampaignDefinition,
+) -> Result<EditorSnapshotDto, crate::editor::campaign_authoring::CampaignAuthoringError> {
+	trusted_window(&window)?;
+	let edit = workspace_with_error(state.clone(), false, Some("capture_campaign"), move |w| {
+		w.capture_campaign(expected_generation, expected_revision, campaign)
+	})
+		.await?;
+	let reviewed = tauri::async_runtime::spawn_blocking(move || edit.review())
+		.await
+		.map_err(|error| format!("Campaign validation worker failed: {error}"))??;
+	workspace_with_error(state, true, Some("commit_campaign"), move |w| {
+		w.commit_campaign(reviewed)
+	})
+		.await
 }

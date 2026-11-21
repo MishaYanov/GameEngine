@@ -119,6 +119,7 @@ fn a_new_frame_for_the_same_scene_advances_readiness() {
 	let other = runtime::scene_catalog::SceneId::new("level-two").unwrap();
 	let mut status = ViewportStatusDto {
 		scene_load: Some(ViewportSceneLoadDto {
+			request_id: "test".into(),
 			workspace_generation: 41,
 			scene_id: scene_id.clone(),
 			scene_revision: 7,
@@ -157,10 +158,54 @@ fn a_new_frame_for_the_same_scene_advances_readiness() {
 	assert_eq!(
 		serde_json::to_value(status.scene_load).unwrap(),
 		serde_json::json!({
+			"request_id": "test",
 			"workspace_generation": 41,
 			"scene_id": "level-one",
 			"scene_revision": 9,
 			"stage": "presented",
 		})
 	);
+}
+
+#[test]
+fn delayed_authored_packet_cannot_install_after_switch_away_and_back() {
+	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
+	let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
+	let mut workspace =
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+	let alternate = SceneId::new("alternate").unwrap();
+	let document = (*workspace.backend.session().authored_document()).clone();
+	workspace
+		.execute_receipt(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command: EditorCommandDto::AddScene {
+				id: alternate.clone(),
+				asset_path: "scenes/alternate.json".into(),
+				document,
+			},
+		})
+		.unwrap();
+	let session = workspace.backend.session();
+	let first = AuthoredLoadKey {
+		generation: workspace.generation,
+		revision: session.scene_revision(),
+		scene_id: session.active_scene_id().clone(),
+	};
+	assert!(first.matches(&workspace));
+	for scene_id in [alternate, first.scene_id.clone()] {
+		workspace
+			.execute_receipt(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command: EditorCommandDto::SwitchScene { scene_id },
+			})
+			.unwrap();
+		assert!(!first.matches(&workspace));
+	}
+	let current = AuthoredLoadKey {
+		revision: workspace.backend.session().scene_revision(),
+		..first
+	};
+	assert!(current.matches(&workspace));
+	workspace.generation += 1;
+	assert!(!current.matches(&workspace));
 }

@@ -119,11 +119,11 @@ impl PrefabData {
 			|| (self.schema_version == 1 && self.gameplay.is_some())
 			|| (self.schema_version < 3 && !self.reference_slots.is_empty())
 			|| (self.schema_version < 3
-				&& self
-					.entities
-					.iter()
-					.any(|e| e.character_controller.is_some() || e.animation.is_some()))
-		{
+			&& self.entities.iter().any(|e| {
+			e.character_controller.is_some()
+				|| e.animation.is_some()
+				|| e.interactable.is_some()
+		})) {
 			return Err(
 				"A version-1/2/3 prefab requires 1–4096 entities; gameplay requires version 2 and reference slots version 3".into(),
 			);

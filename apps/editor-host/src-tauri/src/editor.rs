@@ -1,6 +1,8 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
 #[path = "editor/assets.rs"]
 mod assets;
+#[path = "editor/campaign_authoring.rs"]
+pub(crate) mod campaign_authoring;
 #[path = "editor/documents.rs"]
 mod documents;
 #[path = "prefab_sources.rs"]
@@ -50,6 +52,7 @@ pub struct EditorWorkspace {
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
+	pub(crate) scene_switch: Option<(u64, std::time::Instant, std::time::Instant)>,
 	pub backend: runtime::Engine,
 	pub asset_root: PathBuf,
 	pub scene_path: PathBuf,
@@ -382,6 +385,7 @@ impl EditorWorkspace {
 			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			camera_capture_epoch: 0,
+			scene_switch: None,
 			backend,
 			asset_root,
 			scene_path,

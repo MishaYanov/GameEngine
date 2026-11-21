@@ -295,6 +295,48 @@ mod staging {
 	}
 
 	#[test]
+	fn staged_audio_snapshot_installs_only_validated_declared_wave_files() {
+		const CLIP: &[u8] =
+			include_bytes!("../../../apps/game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+		let fixture = AssetFixture::new();
+		let source = fixture.0.join("source");
+		let (project, _) = authored_scene_fixture(&source);
+		let audio = source.join("audio");
+		fs::create_dir(&audio).unwrap();
+		fs::write(
+			audio.join("cues.json"),
+			br#"{"schema_version":1,"cues":[{"event":"key_collected","path":"audio/cue-key.wav"}]}"#,
+		).unwrap();
+		fs::write(audio.join("cue-key.wav"), CLIP).unwrap();
+		let prepared = prepare_project(&project, &source).unwrap();
+		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+		validate_export_snapshot(&staged, None).unwrap();
+
+		let staged_audio = staged.path().join("assets/audio");
+		let extra = staged_audio.join("cue-unreferenced.wav");
+		fs::write(&extra, CLIP).unwrap();
+		assert!(validate_export_snapshot(&staged, None).is_err());
+		fs::remove_file(extra).unwrap();
+
+		let clip = staged_audio.join("cue-key.wav");
+		let mut edited = CLIP.to_vec();
+		*edited.last_mut().unwrap() ^= 1;
+		fs::write(&clip, edited).unwrap();
+		assert!(
+			validate_export_snapshot(&staged, None)
+				.unwrap_err()
+				.contains("Staged assets changed")
+		);
+		fs::write(&clip, CLIP).unwrap();
+
+		let player = fixture.0.join("compiled-audio-player.bin");
+		fs::write(&player, b"frozen binary fixture").unwrap();
+		let installed = install_staged_player(staged, &player).unwrap();
+		assert!(installed.verified_executable().unwrap().is_file());
+		assert_eq!(fs::read(clip).unwrap(), CLIP);
+	}
+
+	#[test]
 	fn changed_stage_and_occupied_player_are_rejected_without_losing_the_original_files() {
 		let fixture = AssetFixture::new();
 		let source = fixture.0.join("source");

@@ -5,6 +5,7 @@
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
         <editor-gameplay-settings [opening]="workspaceActionBlocked()"/>
+        <editor-audio-cue-settings [opening]="workspaceActionBlocked()"/>
         <editor-camera-settings [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
         @if (editorService.snapshot()) {

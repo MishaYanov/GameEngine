@@ -1,7 +1,8 @@
 """Verify a downloaded Windows release ZIP against its trusted receipt."""
 
 import argparse
-from hashlib import file_digest
+from contextlib import contextmanager
+from hashlib import file_digest, sha256
 import json
 import os
 from pathlib import Path
@@ -95,14 +96,30 @@ def _package_files(receipt):
     return expected
 
 
-def verify_candidate(archive, receipt):
-    """Check receipt metadata, archive digest, and every regular file in the ZIP."""
+def digest_exact(stream, size):
+    """Hash exactly the prior bounded file size and reject a shrinking or growing input."""
+    digest = sha256()
+    remaining = size
+    while remaining:
+        block = stream.read(min(remaining, 64 * 1024))
+        if not block:
+            raise ValueError("Verified input shrank while reading")
+        digest.update(block)
+        remaining -= len(block)
+    if stream.read(1):
+        raise ValueError("Verified input grew while reading")
+    return digest.hexdigest()
+
+
+@contextmanager
+def verified_package(archive, receipt):
+    """Yield the same open ZIP whose receipt, archive and member hashes matched."""
     expected = _package_files(receipt)
     with archive.open("rb") as stream:
         metadata = os.fstat(stream.fileno())
         if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= MAX_PACKAGE_BYTES:
             raise ValueError("Candidate ZIP is missing or outside the size limit")
-        if file_digest(stream, "sha256").hexdigest() != receipt["archive_sha256"]:
+        if digest_exact(stream, metadata.st_size) != receipt["archive_sha256"]:
             raise ValueError("Unexpected archive hash")
         stream.seek(0)
         with ZipFile(stream) as package:
@@ -129,6 +146,14 @@ def verify_candidate(archive, receipt):
                     actual = file_digest(payload, "sha256").hexdigest()
                 if actual != expected[member.filename]:
                     raise ValueError(f"Unexpected member hash for {member.filename!r}")
+
+            yield package
+
+
+def verify_candidate(archive, receipt):
+    """Check receipt metadata, archive digest, and every regular file in the ZIP."""
+    with verified_package(archive, receipt):
+        pass
 
 
 def main(argv=None):

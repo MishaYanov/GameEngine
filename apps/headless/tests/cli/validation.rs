@@ -92,3 +92,70 @@ fn replay_action_and_combined_tick_limits_fail_before_running_commands() {
 			.contains("10000")
 	);
 }
+
+#[test]
+fn audio_catalog_is_validated_before_headless_reports_are_published() {
+	const KEY_CLIP: &[u8] =
+		include_bytes!("../../../game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+	let fixture = Fixture::new();
+	let initial = success(fixture.command().arg("--steps").arg("0").output().unwrap());
+	let audio = fixture.root.join("assets/audio");
+	fs::create_dir(&audio).unwrap();
+	fs::write(
+		audio.join("cues.json"),
+		br#"{"schema_version":1,"cues":[{"event":"key_collected","path":"audio/cue-key.wav"}]}"#,
+	)
+		.unwrap();
+	fs::write(audio.join("cue-key.wav"), KEY_CLIP).unwrap();
+	let valid = success(fixture.command().arg("--steps").arg("0").output().unwrap());
+	assert_eq!(valid["state_hash"], initial["state_hash"]);
+	assert_eq!(valid["fixed_steps"], initial["fixed_steps"]);
+
+	fs::write(audio.join("cue-key.wav"), &KEY_CLIP[..KEY_CLIP.len() - 1]).unwrap();
+	let output = fixture.root.join("report.json");
+	let rejected = failure(
+		fixture
+			.command()
+			.arg("--output")
+			.arg(&output)
+			.output()
+			.unwrap(),
+	);
+	assert!(
+		rejected["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("canonical 16 kHz"),
+		"{rejected}"
+	);
+	assert!(!output.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn audio_rejects_a_linked_default_project_asset_root() {
+	use std::os::unix::fs::symlink;
+
+	let fixture = Fixture::new();
+	let assets = fixture.root.join("assets");
+	let real_assets = fixture.root.join("ordinary-assets");
+	fs::rename(&assets, &real_assets).unwrap();
+	symlink(real_assets, &assets).unwrap();
+	let report = fixture.root.join("report.json");
+	let rejected = failure(
+		fixture
+			.command()
+			.arg("--output")
+			.arg(&report)
+			.output()
+			.unwrap(),
+	);
+	assert!(
+		rejected["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("Feedback audio asset root must be an ordinary directory"),
+		"{rejected}"
+	);
+	assert!(!report.exists());
+}

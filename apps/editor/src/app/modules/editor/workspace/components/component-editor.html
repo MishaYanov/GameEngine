@@ -6,6 +6,12 @@
 			<h4>{{ label(component) }}</h4>
 			<span>{{ component.enabled ? 'Enabled' : 'Disabled' }}</span>
 			<small class="reference">{{ component.id }}</small>
+            @if (component.data.kind === 'interactable') {
+                <p>{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
+            }
+            @if (pinned(component.data.kind)) {
+                <p>Edit the prefab source or unpack this instance to change its Interactable.</p>
+            } @else {
 			<div class="actions">
 				<button
 					type="button"
@@ -32,6 +38,7 @@
 					Remove
 				</button>
 			</div>
+            }
 		</article>
 	} @empty {
 		<p>No components attached.</p>
@@ -231,6 +238,20 @@
 						ground plane.
 					</p>
 				}
+                @case ('interactable') {
+                    <label>Game action ID
+                        <input [attr.list]="actionListId" [formField]="fields.interactable.action" autocomplete="off"/>
+                    </label>
+                    <datalist [id]="actionListId">
+                        @for (action of gameActions(); track action) {
+                            <option [value]="action"></option>
+                        }
+                    </datalist>
+                    <label>Reach (metres)
+                        <input [formField]="fields.interactable.reach" inputmode="decimal"/>
+                    </label>
+                    <p>Enter a positive reach of up to 3 metres.</p>
+                }
 				@case ('animation') {
 					<editor-animation-editor
 						[value]="draft().animation"

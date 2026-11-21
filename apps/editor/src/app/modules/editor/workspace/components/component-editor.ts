@@ -54,6 +54,8 @@ export class ComponentEditor {
 	readonly types = input<readonly ComponentTypeDescriptor[]>([]);
 	readonly entities = input<readonly ComponentTarget[]>([]);
 	readonly models = input<readonly ModelAsset[]>([]);
+    readonly gameActions = input<readonly string[]>([]);
+    readonly interactablePinned = input(false);
 	readonly ownerKey = input('');
 	readonly contextKey = input('');
 	readonly editable = input(false);
@@ -91,6 +93,7 @@ export class ComponentEditor {
 			? []
 			: this.types().filter(
 					(type) =>
+                        !this.pinned(type.kind) &&
 						this.components().filter((component) => component.data.kind === type.kind).length <
 						type.max_per_object,
 				),
@@ -145,6 +148,7 @@ export class ComponentEditor {
 		];
 	});
 	protected readonly modelListId = `component-models-${crypto.randomUUID()}`;
+    protected readonly actionListId = 'component-actions-' + crypto.randomUUID();
 	protected readonly prefabListId = `component-prefabs-${crypto.randomUUID()}`;
 
 	constructor() {
@@ -183,10 +187,14 @@ export class ComponentEditor {
 		);
 	}
 
+    protected pinned(kind: ComponentData['kind']): boolean {
+        return kind === 'interactable' && this.interactablePinned();
+    }
+
 	protected start(component?: ComponentRecord): void {
 		if (!this.available() || this.open()) return;
 		const kind = component?.data.kind ?? this.selectedKind();
-		if (!component && !this.addTypes().some((type) => type.kind === kind)) return;
+        if (this.pinned(kind) || (!component && !this.addTypes().some((type) => type.kind === kind))) return;
 		this.original.set(component);
 		this.draft.set(
 			componentDraft(kind, component?.id ?? crypto.randomUUID(), this.ownerKey(), component),
@@ -222,7 +230,7 @@ export class ComponentEditor {
 
 	protected submit(): void {
 		const component = this.candidate().value;
-		if (!component || !this.available() || !this.open()) return;
+        if (!component || this.pinned(component.data.kind) || !this.available() || !this.open()) return;
 		this.actionRequested.emit({
 			kind: this.original() ? 'replace' : 'add',
 			component,
@@ -231,7 +239,7 @@ export class ComponentEditor {
 	}
 
 	protected toggle(component: ComponentRecord): void {
-		if (this.available() && !this.open())
+        if (this.available() && !this.open() && !this.pinned(component.data.kind))
 			this.actionRequested.emit({
 				kind: 'enabled',
 				component_id: component.id,
@@ -240,7 +248,7 @@ export class ComponentEditor {
 	}
 
 	protected remove(component: ComponentRecord): void {
-		if (this.available() && !this.open())
+        if (this.available() && !this.open() && !this.pinned(component.data.kind))
 			this.actionRequested.emit({
 				kind: 'remove',
 				component_id: component.id,

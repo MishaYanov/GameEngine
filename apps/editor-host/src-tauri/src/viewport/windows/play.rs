@@ -79,29 +79,33 @@ impl Worker {
 				.sync_game_status_after_tick(workspace, &outcome);
 			let outcome = outcome.map_err(|error| error.to_string())?;
 			self.dirty |= !outcome.changes.is_empty();
-			let transition = outcome.requested_scene.map(|target| {
-				(
+			let transition = outcome.requested_scene.and_then(|target| {
+				let status = workspace.backend.play_status()?;
+				let timing = SceneLoadTiming::new("editor", LoadScope::Play, Instant::now());
+				Some((
 					workspace.generation,
 					target,
+					status.run_id,
+					status.scene_generation,
 					workspace.backend.prepare_pending_play_scene(),
-				)
+					timing,
+				))
 			});
 			(transition, outcome.pending_steps)
 		};
 
-		if let Some((generation, target, prepared)) = transition {
+		if let Some((generation, target, run_id, scene_generation, prepared, timing)) = transition {
 			self.last_tick = None;
-			let result = prepared
-				.map_err(|error| error.to_string())
-				.and_then(|prepared| {
-					self.install_play_scene(
-						PlayInstall::Transition {
-							generation,
-							target: &target,
-						},
-						prepared,
-					)
-				});
+			let result = self.install_timed_play_scene(
+				PlayInstall::Transition {
+					generation,
+					target: &target,
+					run_id: &run_id,
+					scene_generation,
+				},
+				prepared.map_err(|error| error.to_string()),
+				timing,
+			);
 			if let Err(error) = result {
 				let current = self.shared.lock().ok().is_some_and(|workspace| {
 					workspace.as_ref().is_some_and(|workspace| {
@@ -251,32 +255,76 @@ impl Worker {
 		})
 	}
 
+	fn install_timed_play_scene(
+		&mut self,
+		guard: PlayInstall<'_>,
+		prepared: Result<(PreparedScene, Arc<runtime::SceneData>), String>,
+		mut timing: SceneLoadTiming,
+	) -> Result<(), String> {
+		self.play_load = None;
+		let result = prepared.and_then(|data| self.install_play_scene(guard, data, &mut timing));
+		match result {
+			Ok(Some((generation, run_id, scene_generation))) => {
+				self.play_load = Some((generation, run_id, scene_generation, timing));
+				Ok(())
+			}
+			Ok(None) => Ok(()),
+			Err(error) => {
+				timing.finish(LoadOutcome::Failed);
+				Err(error)
+			}
+		}
+	}
+
 	fn install_play_scene(
 		&mut self,
 		guard: PlayInstall<'_>,
 		(prepared, document): (PreparedScene, Arc<runtime::SceneData>),
-	) -> Result<(), String> {
+		timing: &mut SceneLoadTiming,
+	) -> Result<Option<(u64, String, u64)>, String> {
 		let gpu = self
 			.gpu
 			.as_mut()
 			.ok_or("Native viewport renderer is not initialized")?;
-		let candidate = scene_io::instantiate(&document, &mut gpu.assets, &gpu.renderer);
+		timing.cpu_ready();
+		timing.gpu_started();
+		let candidate = scene_io::instantiate_cancellable(
+			&document,
+			&mut gpu.assets,
+			&gpu.renderer,
+			|_, _| {},
+			|| {
+				!self.shared.lock().ok().is_some_and(|slot| {
+					slot.as_ref().is_some_and(|workspace| {
+						guard.validate(workspace, Instant::now()) == Ok(true)
+					})
+				})
+			},
+		);
 		drop(document);
 		gpu.renderer.wait_idle()?;
-		let installed = candidate.and_then(|(scene, _)| {
+		let installed = candidate.and_then(|candidate| {
 			let mut shared = self
 				.shared
 				.lock()
 				.map_err(|_| "Editor document lock is poisoned")?;
 			let Some(workspace) = shared.as_mut() else {
 				return match guard {
-					PlayInstall::Transition { .. } => Ok(()),
+					PlayInstall::Transition { .. } => Ok(None),
 					PlayInstall::Restart(_) => Err("The project was closed during restart".into()),
 				};
 			};
 			if !guard.validate(workspace, Instant::now())? {
-				return Ok(());
+				return Ok(None);
 			}
+			let Some((scene, _)) = candidate else {
+				return match guard {
+					PlayInstall::Transition { .. } => Ok(None),
+					PlayInstall::Restart(_) => {
+						Err("Restart was cancelled during preparation".into())
+					}
+				};
+			};
 
 			// Lights are validated CPU data. Keep renderer uploads and waits
 			// outside the workspace lock and restore the old lights on rejection.
@@ -293,9 +341,14 @@ impl Worker {
 			self.interaction.sync_game_status(workspace);
 			self.last_tick = None;
 			self.dirty = true;
+			let presented_key = workspace
+				.backend
+				.play_status()
+				.map(|status| (workspace.generation, status.run_id, status.scene_generation));
+			timing.installed();
 			drop(shared);
 			drop(retired_scene);
-			Ok(())
+			Ok(presented_key)
 		});
 		// Candidate-only resources are also pruned after a stale or failed commit.
 		gpu.assets.prune_unused();
@@ -303,7 +356,8 @@ impl Worker {
 	}
 
 	pub(super) fn restart_run(&mut self, request: &ActionRequest) -> Result<(), String> {
-		let prepared = {
+		let timing = SceneLoadTiming::new("editor", LoadScope::Play, Instant::now());
+		let prepared = (|| {
 			let shared = self
 				.shared
 				.lock()
@@ -327,8 +381,8 @@ impl Worker {
 			workspace
 				.backend
 				.prepare_restart_play(run_id, *expected_revision)
-				.map_err(|error| error.to_string())?
-		};
-		self.install_play_scene(PlayInstall::Restart(request), prepared)
+				.map_err(|error| error.to_string())
+		})();
+		self.install_timed_play_scene(PlayInstall::Restart(request), prepared, timing)
 	}
 }

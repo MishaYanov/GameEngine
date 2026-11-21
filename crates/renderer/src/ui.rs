@@ -5,19 +5,156 @@ use crate::{
 };
 use std::sync::Arc;
 
+const COLUMN_WIDTH: f32 = 12.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenOverlayStyle {
+	pub text_scale: f32,
+	pub high_contrast: bool,
+}
+
+impl ScreenOverlayStyle {
+	fn colors(self) -> ([f32; 3], [f32; 3]) {
+		if self.high_contrast {
+			([0.0; 3], [1.0; 3])
+		} else {
+			([0.055, 0.075, 0.11], [0.92, 0.95, 1.0])
+		}
+	}
+}
+
+impl Default for ScreenOverlayStyle {
+	fn default() -> Self {
+		Self {
+			text_scale: 1.0,
+			high_contrast: false,
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScreenOverlayCapacity {
+	pub rows: usize,
+	pub columns: usize,
+}
+
+struct OverlayLayout {
+	size: [f32; 2],
+	width: f32,
+	row_height: f32,
+	capacity: ScreenOverlayCapacity,
+}
+
+impl OverlayLayout {
+	const MARGIN: f32 = 16.0;
+	const SIDE_PADDING: f32 = 12.0;
+	const TOP_PADDING: f32 = 10.0;
+	const VERTICAL_PADDING: f32 = 12.0;
+	const BOTTOM_MARGIN: f32 = 4.0;
+
+	fn new(extent: [u32; 2], dpi: f64, style: ScreenOverlayStyle) -> Option<Self> {
+		if !dpi.is_finite() || dpi <= 0.0 || !(1.0..=1.5).contains(&style.text_scale) {
+			return None;
+		}
+
+		let size = extent.map(|dimension| (f64::from(dimension) / dpi) as f32);
+		if size.iter().any(|dimension| !dimension.is_finite()) {
+			return None;
+		}
+		let width = (size[0] - 2.0 * Self::MARGIN).clamp(0.0, 760.0);
+		let row_height = 22.0 * style.text_scale;
+		let columns = ((width - 2.0 * Self::SIDE_PADDING).max(0.0)
+			/ (COLUMN_WIDTH * style.text_scale)) as usize;
+		let usable_height =
+			(size[1] - Self::MARGIN - Self::VERTICAL_PADDING - Self::BOTTOM_MARGIN).max(0.0);
+		let rows = if columns == 0 {
+			0
+		} else {
+			((usable_height / row_height) as usize).min(8)
+		};
+
+		Some(Self {
+			size,
+			width,
+			row_height,
+			capacity: ScreenOverlayCapacity {
+				rows,
+				columns: columns.min(128),
+			},
+		})
+	}
+
+	fn draw(&self, rows: &[String], style: ScreenOverlayStyle) -> ScreenCanvas {
+		let mut canvas = ScreenCanvas::new(self.size);
+		if !rows.is_empty() {
+			let (background, text) = style.colors();
+			canvas.rect(
+				[
+					Self::MARGIN,
+					Self::MARGIN,
+					self.width,
+					rows.len() as f32 * self.row_height + Self::VERTICAL_PADDING,
+				],
+				background,
+			);
+			for (index, row) in rows.iter().enumerate() {
+				canvas.text_scaled(
+					Self::MARGIN + Self::SIDE_PADDING,
+					Self::MARGIN + Self::TOP_PADDING + index as f32 * self.row_height,
+					row,
+					text,
+					style.text_scale,
+				);
+			}
+		}
+		canvas
+	}
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct OverlayKey {
+	extent: [u32; 2],
+	dpi_bits: u64,
+	style: ScreenOverlayStyle,
+}
+
+struct PreparedOverlay {
+	key: OverlayKey,
+	rows: Vec<String>,
+}
+
+impl PreparedOverlay {
+	fn matches(&self, key: OverlayKey, rows: &[String], columns: usize) -> bool {
+		self.key == key
+			&& self.rows.len() == rows.len()
+			&& self
+			.rows
+			.iter()
+			.zip(rows)
+			.all(|(before, now)| before == now || before.chars().eq(now.chars().take(columns)))
+	}
+}
+
 pub struct ScreenOverlay {
 	mesh: VulkanMesh,
 	material: VulkanMaterial,
-	prepared: Option<(Vec<String>, [u32; 2], u64)>,
-	visible: bool,
+	prepared: Option<PreparedOverlay>,
 }
+
 impl ScreenOverlay {
-	/// Number of text rows available at this physical extent and DPI scale.
-	pub fn row_capacity(extent: [u32; 2], scale: f64) -> usize {
-		if !scale.is_finite() || scale <= 0.0 {
-			return 0;
-		}
-		((((extent[1] as f32 / scale as f32) - 32.0).max(0.0) / 22.0) as usize).min(8)
+	/// Number of text rows available with the default style.
+	pub fn row_capacity(extent: [u32; 2], dpi: f64) -> usize {
+		Self::capacity_with_style(extent, dpi, ScreenOverlayStyle::default()).rows
+	}
+
+	/// Text capacity uses the same logical geometry as overlay preparation.
+	pub fn capacity_with_style(
+		extent: [u32; 2],
+		dpi: f64,
+		style: ScreenOverlayStyle,
+	) -> ScreenOverlayCapacity {
+		OverlayLayout::new(extent, dpi, style)
+			.map_or_else(ScreenOverlayCapacity::default, |layout| layout.capacity)
 	}
 
 	pub fn new(renderer: &WindowRenderer) -> Result<Self, String> {
@@ -28,56 +165,57 @@ impl ScreenOverlay {
 			mesh: renderer.create_dynamic_mesh(8192, 12288)?,
 			material: VulkanMaterial::new(Arc::new(texture), true, [1.0; 4]),
 			prepared: None,
-			visible: false,
 		})
 	}
+
 	pub fn prepare(
 		&mut self,
 		renderer: &WindowRenderer,
 		extent: [u32; 2],
-		scale: f64,
+		dpi: f64,
 		rows: &[String],
 	) -> Result<(), String> {
-		if !scale.is_finite() || scale <= 0.0 {
-			return Err("UI scale must be finite and positive".into());
-		}
-		let size = [
-			extent[0] as f32 / scale as f32,
-			extent[1] as f32 / scale as f32,
-		];
-		let width = (size[0] - 32.0).clamp(0.0, 760.0);
-		let columns = ((width - 24.0).max(0.0) / 12.0) as usize;
-		let available_rows = Self::row_capacity(extent, scale);
-		let rows = rows
-			.iter()
-			.take(available_rows)
-			.map(|row| row.chars().take(columns.min(128)).collect::<String>())
-			.collect::<Vec<_>>();
+		self.prepare_with_style(renderer, extent, dpi, rows, ScreenOverlayStyle::default())
+	}
+
+	pub fn prepare_with_style(
+		&mut self,
+		renderer: &WindowRenderer,
+		extent: [u32; 2],
+		dpi: f64,
+		rows: &[String],
+		style: ScreenOverlayStyle,
+	) -> Result<(), String> {
+		let layout = OverlayLayout::new(extent, dpi, style)
+			.ok_or("Overlay requires finite DPI geometry and a text scale from 1 to 1.5")?;
+		let key = OverlayKey {
+			extent,
+			dpi_bits: dpi.to_bits(),
+			style,
+		};
+		let rows = &rows[..layout.capacity.rows.min(rows.len())];
+		let columns = layout.capacity.columns;
 		if self
 			.prepared
 			.as_ref()
-			.is_some_and(|(last, last_extent, last_scale)| {
-				*last_extent == extent && *last_scale == scale.to_bits() && last == &rows
-			}) {
+			.is_some_and(|last| last.matches(key, rows, columns))
+		{
 			return Ok(());
 		}
-		self.visible = !rows.is_empty() && columns > 0;
-		let mut draw = ScreenCanvas::new(size);
-		if self.visible {
-			draw.rect(
-				[16.0, 16.0, width, rows.len() as f32 * 22.0 + 12.0],
-				[0.055, 0.075, 0.11],
-			);
-			for (index, row) in rows.iter().enumerate() {
-				draw.text(28.0, 26.0 + index as f32 * 22.0, row, [0.92, 0.95, 1.0]);
-			}
-		}
+
+		let rows = rows
+			.iter()
+			.map(|row| row.chars().take(columns).collect::<String>())
+			.collect::<Vec<_>>();
+		let draw = layout.draw(&rows, style);
 		renderer.write_dynamic_mesh(&mut self.mesh, draw.vertices(), draw.indices())?;
-		self.prepared = Some((rows, extent, scale.to_bits()));
+		self.prepared = Some(PreparedOverlay { key, rows });
 		Ok(())
 	}
+
 	pub fn object(&self) -> Option<RenderObject<'_>> {
-		self.visible.then(|| {
+		let prepared = self.prepared.as_ref()?;
+		(!prepared.rows.is_empty()).then(|| {
 			RenderObject::new(&self.mesh, &self.material, ModelPushConstants::identity())
 				.screen_space()
 		})
@@ -147,6 +285,10 @@ impl ScreenCanvas {
 		self.quad(r, [0.5 / 128.0, 0.5 / 64.0, 0.5 / 128.0, 0.5 / 64.0], color);
 	}
 	pub fn text(&mut self, x: f32, y: f32, text: &str, color: [f32; 3]) {
+		self.text_scaled(x, y, text, color, 1.0);
+	}
+
+	fn text_scaled(&mut self, x: f32, y: f32, text: &str, color: [f32; 3], scale: f32) {
 		for (i, c) in text.chars().enumerate() {
 			let code = if c.is_ascii() {
 				c as usize
@@ -155,7 +297,12 @@ impl ScreenCanvas {
 			};
 			let [u, v] = [(code % 16 * 8) as f32, (code / 16 * 8) as f32];
 			self.quad(
-				[x + i as f32 * 12.0, y, 10.0, 14.0],
+				[
+					x + i as f32 * COLUMN_WIDTH * scale,
+					y,
+					10.0 * scale,
+					14.0 * scale,
+				],
 				[u / 128.0, v / 64.0, (u + 5.0) / 128.0, (v + 7.0) / 64.0],
 				color,
 			);
@@ -222,3 +369,7 @@ fn glyph(c: char) -> [u8; 7] {
 		_ => [14, 17, 1, 2, 4, 0, 4],
 	}
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/screen_overlay_layout.rs"]
+mod screen_overlay_layout;

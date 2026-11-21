@@ -1,0 +1,517 @@
+{
+  "schema_version": 5,
+  "bindings": {
+    "player": "courtyard-player",
+    "key": "courtyard-key",
+    "exit": "courtyard-exit"
+  },
+  "entities": [
+    {
+      "key": "courtyard-player",
+      "name": "Courtyard Player",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/capsule.glb"
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.25,
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-key",
+      "name": "Courtyard Key",
+      "transform": {
+        "position": [
+          1.5,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.8,
+                0.1,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-exit",
+      "name": "Courtyard Exit",
+      "transform": {
+        "position": [
+          -1.5,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.3,
+          0.0
+        ],
+        "scale": [
+          0.35,
+          1.2,
+          0.35
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.9,
+                0.15,
+                0.1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-route-lever",
+      "name": "Blue lever",
+      "transform": {
+        "position": [
+          0.15,
+          0,
+          0.22
+        ],
+        "rotation": [
+          0,
+          0,
+          -0.25
+        ],
+        "scale": [
+          0.12,
+          0.35,
+          0.12
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/capsule.glb",
+            "material": {
+              "base_color_factor": [
+                0.12,
+                0.55,
+                1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "route-interaction",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "interactable",
+            "settings": {
+              "action": "interact",
+              "reach": 1.25
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-route-gate",
+      "name": "Purple route gate",
+      "transform": {
+        "position": [
+          -0.7,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.16,
+          1.15,
+          2.8
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.67,
+                0.23,
+                0.8,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-cp-entry",
+      "name": "Entry checkpoint floor marker",
+      "transform": {
+        "position": [
+          0,
+          -0.27,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.33,
+          0.06,
+          0.33
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                0.16,
+                0.8,
+                0.52,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-cp-after-gate",
+      "name": "After gate checkpoint marker",
+      "transform": {
+        "position": [
+          -0.97,
+          -0.27,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.33,
+          0.06,
+          0.33
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                0.16,
+                0.8,
+                0.52,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-key-trigger",
+      "name": "Courtyard Key Trigger",
+      "transform": {
+        "position": [
+          1.5,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": false,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb"
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.25,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 2,
+                "mask": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "courtyard-exit-trigger",
+      "name": "Courtyard Exit Trigger",
+      "transform": {
+        "position": [
+          -1.5,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": false,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb"
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.25,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 2,
+                "mask": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "key": "courtyard-sun",
+      "name": "Courtyard Sun",
+      "kind": "directional",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1.0,
+        0.95,
+        0.85
+      ],
+      "intensity": 0.75,
+      "range": 10.0
+    }
+  ],
+  "camera": {
+    "position": [
+      0.0,
+      2.64,
+      3.4
+    ],
+    "yaw": 0.0,
+    "pitch": -0.46,
+    "vertical_fov": 1.0471976,
+    "near": 0.1,
+    "far": 100.0,
+    "orbit": {
+      "target": "courtyard-player",
+      "pivot_offset": [
+        0,
+        0.95,
+        0
+      ],
+      "initial_yaw": 0,
+      "initial_pitch": -0.46,
+      "initial_distance": 3.8,
+      "min_distance": 0.8,
+      "max_distance": 7,
+      "min_pitch": -1.2,
+      "max_pitch": 0.6,
+      "follow_seconds": 0.1,
+      "recovery_seconds": 0.2,
+      "teleport_distance": 8,
+      "probe_radius": 0.24,
+      "obstruction_mask": 1
+    }
+  }
+}

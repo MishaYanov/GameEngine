@@ -6,6 +6,8 @@ use engine_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub use crate::chapters::{CampaignDefinition, ChapterDefinition};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionSettings {
@@ -17,6 +19,8 @@ pub struct InteractionSettings {
 	pub project_save_id: Option<String>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub checkpoints: Vec<crate::checkpoint::CheckpointDef>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub campaign: Option<CampaignDefinition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,8 +60,12 @@ impl InteractionSettings {
 		project.validate()?;
 		let settings: Self = serde_json::from_value(value.clone())
 			.map_err(|error| format!("Courtyard interaction settings: {error}"))?;
-		if settings.schema_version != 1 {
-			return Err("Unsupported Courtyard interaction settings version".into());
+		match (settings.schema_version, &settings.campaign) {
+			(1, None) | (2, Some(_)) => {}
+			(1 | 2, _) => {
+				return Err("Courtyard campaigns require schema 2 and an ordered route".into());
+			}
+			_ => return Err("Unsupported Courtyard interaction settings version".into()),
 		}
 		for (id, scene) in &settings.scenes {
 			let id = SceneId::new(id)?;
@@ -91,10 +99,11 @@ impl InteractionSettings {
 							destination_scene.as_str()
 						)
 					})?;
-					if !matches!(
-						settings.scenes.get(destination_scene.as_str()),
-						Some(SceneInteractions::Finish { .. })
-					) && !(destination_scene.as_str() == super::FINISH_SCENE_ID
+					if settings.campaign.is_none()
+						&& !matches!(
+							settings.scenes.get(destination_scene.as_str()),
+							Some(SceneInteractions::Finish { .. })
+						) && !(destination_scene.as_str() == super::FINISH_SCENE_ID
 						&& !settings.scenes.contains_key(destination_scene.as_str()))
 					{
 						return Err("Exit destination needs Finish interaction settings".into());
@@ -105,6 +114,9 @@ impl InteractionSettings {
 		}
 		if let Some(gate) = &settings.route_gate {
 			gate.validate(project, &settings.scenes)?;
+		}
+		if let Some(campaign) = &settings.campaign {
+			campaign.validate(project, &settings)?;
 		}
 		Ok(Some(settings))
 	}

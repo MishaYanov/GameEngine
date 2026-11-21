@@ -97,6 +97,10 @@ fn deliberate_route(lever_x: f32, occluded: bool) -> (ProjectData, Arc<SceneData
 
 fn start_deliberate_route(lever_x: f32, occluded: bool) -> engine_core::Engine {
 	let (project, course) = deliberate_route(lever_x, occluded);
+	start_deliberate_course(project, course)
+}
+
+fn start_deliberate_course(project: ProjectData, course: Arc<SceneData>) -> engine_core::Engine {
 	let mut engine = EngineBuilder::new((*course).clone(), project)
 		.module_resolver(Arc::new(resolve))
 		.build()
@@ -598,4 +602,96 @@ fn module_prefab_reference_schema_never_treats_kind_text_as_an_entity_identity()
 	);
 	assert!(!references.entities.contains_key("/kind"));
 	assert_eq!(references.scenes["/destination_scene"].as_str(), "finish");
+}
+
+#[test]
+fn authored_reach_and_disabled_state_gate_the_prompt_and_the_same_logical_edge() {
+	use engine_core::{
+		components::{ComponentId, InteractableComponent, InteractableSettings},
+		input::GamepadSample,
+	};
+	for (lever_x, reach, enabled, occluded, ready) in [
+		(1.24, 1.25, true, false, true),
+		(1.26, 1.25, true, false, false),
+		(0.75, 0.5, true, false, false),
+		(0.75, 1.25, false, false, false),
+		(0.75, 1.25, true, true, false),
+	] {
+		let (project, mut course) = deliberate_route(lever_x, occluded);
+		Arc::make_mut(&mut course)
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key.as_str() == "route-lever")
+			.unwrap()
+			.interactable = Some(InteractableComponent {
+			id: ComponentId::new("authored-lever").unwrap(),
+			enabled,
+			settings: InteractableSettings {
+				action: "interact".into(),
+				reach,
+			},
+		});
+		let mut engine = start_deliberate_course(project, course);
+		let status = engine.play_status().unwrap().gameplay.unwrap();
+		assert_eq!(status.detail.is_some(), ready, "{lever_x} m");
+		engine
+			.set_game_controls_from_codes(
+				&HashSet::new(),
+				GamepadSample {
+					interact: true,
+					..GamepadSample::default()
+				},
+			)
+			.unwrap();
+		engine.tick(1.0 / 60.0).unwrap();
+		assert_eq!(
+			engine
+				.session()
+				.play_progress::<CampaignProgress>()
+				.unwrap()
+				.route_gate_open,
+			ready
+		);
+	}
+}
+
+#[test]
+fn prepared_module_rejects_an_enabled_lever_with_a_conflicting_action() {
+	use engine_core::components::{ComponentId, InteractableComponent, InteractableSettings};
+	let (mut project, mut course) = deliberate_route(0.75, false);
+	project
+		.input_profile
+		.as_mut()
+		.unwrap()
+		.actions
+		.push(GameInputBinding {
+			id: "inspect".into(),
+			key: Key::F,
+			animation_parameter: None,
+		});
+	Arc::make_mut(&mut course)
+		.entities
+		.iter_mut()
+		.find(|entity| entity.key.as_str() == "route-lever")
+		.unwrap()
+		.interactable = Some(InteractableComponent {
+		id: ComponentId::new("authored-lever").unwrap(),
+		enabled: true,
+		settings: InteractableSettings {
+			action: "inspect".into(),
+			reach: 1.25,
+		},
+	});
+	let result = GameSession::with_factory_for_scene(
+		Arc::new(project.clone()),
+		project.startup_scene_id.clone(),
+		course,
+		resolve(&project).unwrap(),
+	);
+	assert!(
+		result
+			.err()
+			.expect("a conflicting route action must fail")
+			.contains("must match")
+	);
 }

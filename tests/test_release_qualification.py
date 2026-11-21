@@ -15,6 +15,7 @@ from zipfile import ZipFile, ZipInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import qualify_release
+from player_smoke import FRAME_MARKER
 from rehearse_release import digest, inventory
 from verify_candidate import read_receipt, verify_candidate
 
@@ -70,7 +71,7 @@ class ReleaseQualificationTests(unittest.TestCase):
                 Path(options["env"]["ENGINE_LOG_DIR"]), self.run_dir / "native-logs"
             )
             self.assertEqual(Path(command[0]), self.process_root / "copied-player/game.exe")
-            output.write(qualify_release.FRAME_MARKER + b"\n")
+            output.write(FRAME_MARKER + b"\n")
         return subprocess.CompletedProcess(command, 0)
 
     def run_candidate(self, fake_process, *, require_clean=False, dirty_before=b"", dirty_after=b""):

@@ -69,6 +69,36 @@ impl SlotGeneration {
 	pub fn can_save(self) -> bool {
 		!self.previous_unavailable
 	}
+
+	pub(super) fn transfer_token(self, profile: &Path, project_save_id: &str) -> [u8; 32] {
+		let mut hasher = Sha256::new();
+		hasher.update(b"courtyard-portable-slot-generation-v1");
+		for identity in [
+			profile.as_os_str().as_encoded_bytes(),
+			project_save_id.as_bytes(),
+		] {
+			hasher.update((identity.len() as u64).to_le_bytes());
+			hasher.update(identity);
+		}
+		hasher.update([match self.slot {
+			SaveSlot::One => 1,
+			SaveSlot::Two => 2,
+			SaveSlot::Three => 3,
+		}]);
+		for (generation, unavailable) in [
+			(self.primary, false),
+			(self.previous, self.previous_unavailable),
+		] {
+			match generation {
+				Some(hash) => {
+					hasher.update([1]);
+					hasher.update(hash);
+				}
+				None => hasher.update([if unavailable { 2 } else { 0 }]),
+			}
+		}
+		hasher.finalize().into()
+	}
 }
 
 /// Read-only save and recovery status for a slot picker.
@@ -77,6 +107,8 @@ pub struct SlotInspection {
 	pub primary: ContinueAvailability,
 	pub checkpoint_id: Option<String>,
 	pub recovery_checkpoint_id: Option<String>,
+	pub chapter_label: Option<String>,
+	pub recovery_chapter_label: Option<String>,
 	pub generation: Option<SlotGeneration>,
 }
 
@@ -86,6 +118,8 @@ impl Default for SlotInspection {
 			primary: ContinueAvailability::Unreadable,
 			checkpoint_id: None,
 			recovery_checkpoint_id: None,
+			chapter_label: None,
+			recovery_chapter_label: None,
 			generation: None,
 		}
 	}
@@ -162,6 +196,10 @@ fn ordinary_file_if_present(path: &Path) -> Result<bool, String> {
 }
 
 pub(super) fn read_record(path: &Path) -> Result<Option<Vec<u8>>, String> {
+	read_bounded_record(path, MAX_SAVE_BYTES)
+}
+
+pub(super) fn read_bounded_record(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, String> {
 	if !ordinary_file_if_present(path)? {
 		return Ok(None);
 	}
@@ -169,10 +207,10 @@ pub(super) fn read_record(path: &Path) -> Result<Option<Vec<u8>>, String> {
 	options.read(true);
 	let file = open_ordinary(&mut options, path)?;
 	let mut bytes = Vec::new();
-	file.take((MAX_SAVE_BYTES + 1) as u64)
+	file.take((limit + 1) as u64)
 		.read_to_end(&mut bytes)
 		.map_err(storage_error)?;
-	if bytes.len() > MAX_SAVE_BYTES {
+	if bytes.len() > limit {
 		return Err("Courtyard save exceeds its size limit".into());
 	}
 	Ok(Some(bytes))

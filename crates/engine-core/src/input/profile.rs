@@ -199,12 +199,7 @@ impl InputProfile {
 		}
 		let mut ids = HashSet::with_capacity(self.actions.len());
 		for binding in &self.actions {
-			let mut id = binding.id.bytes();
-			if binding.id.len() > 32
-				|| !id.next().is_some_and(|byte| byte.is_ascii_lowercase())
-				|| !id
-					.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-			{
+			if !valid_game_action_id(&binding.id) {
 				return Err("Action IDs must use 1–32 lowercase letters, digits, or underscores and begin with a letter".into());
 			}
 			if !ids.insert(&binding.id) {
@@ -257,4 +252,11 @@ impl InputProfile {
 
 		Ok(json)
 	}
+}
+
+pub(crate) fn valid_game_action_id(value: &str) -> bool {
+	let mut bytes = value.bytes();
+	value.len() <= 32
+		&& bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+		&& bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }

@@ -331,3 +331,87 @@ fn game_content_rect_native_images() {
 		captures.display()
 	);
 }
+
+#[test]
+#[ignore = "requires native Vulkan and the Vulkan SDK screenshot layer"]
+fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
+	const CHILD: &str = "GAME_ENGINE_QA_ACCESSIBLE_CAPTURE";
+	if std::env::var_os(CHILD).is_some() {
+		with_native_window(|events| {
+			let manifest =
+				Path::new(env!("CARGO_MANIFEST_DIR")).join("project.release-learning.json");
+			let mut app = hidden_player(events, &manifest, [768, 256]);
+			app.feedback_audio = feedback_audio::FeedbackAudio::default();
+			app.player_controls
+				.configure(Some(&manifest), None, None, false);
+			for key in [
+				Key::Escape,
+				Key::ArrowUp,
+				Key::ArrowUp,
+				Key::Enter,
+				Key::ArrowLeft,
+				Key::ArrowDown,
+				Key::ArrowRight,
+				Key::ArrowDown,
+				Key::ArrowDown,
+				Key::Enter,
+				Key::Escape,
+			] {
+				assert!(app.player_controls_key(key));
+			}
+			assert!(!app.player_controls.is_open());
+			let expected = app.player_controls.display().overlay_style();
+			assert_eq!(expected.text_scale, 1.5);
+			assert!(expected.high_contrast);
+			let mut relaunched = player_controls::PlayerControls::default();
+			relaunched.configure(Some(&manifest), None, None, false);
+			assert_eq!(relaunched.display().overlay_style(), expected);
+
+			app.input.press(Key::D);
+			for _ in 0..90 {
+				app.tick_play(1.0 / 60.0).unwrap();
+			}
+			assert!(
+				app.feedback_captions
+					.rows(Instant::now())
+					.any(|caption| caption == "Key collected")
+			);
+			assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+			assert!(app.game_hud.as_ref().and_then(|hud| hud.object()).is_some());
+			app.wait_for_gpu().unwrap();
+		});
+		return;
+	}
+
+	let directory = evidence_directory("accessibility");
+	let output = Command::new(std::env::current_exe().unwrap())
+		.args([
+			"--ignored",
+			"--exact",
+			"camera_native_tests::accessible_player_overlay_renders_with_a_persisted_high_contrast_profile",
+			"--nocapture",
+		])
+		.env(CHILD, "1")
+		.env("LOCALAPPDATA", &directory)
+		.env("VK_INSTANCE_LAYERS", "VK_LAYER_LUNARG_screenshot")
+		.env("VK_SCREENSHOT_DIR", &directory)
+		.env("VK_SCREENSHOT_FRAMES", "0")
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}\n{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr),
+	);
+	let image = fs::read_dir(&directory)
+		.unwrap()
+		.map(|entry| entry.unwrap().path())
+		.find(|path| path.extension().is_some_and(|ext| ext == "ppm"))
+		.expect("Vulkan screenshot");
+	let pixels = image::open(&image).unwrap().to_rgb8();
+	let panel = pixels.pixels().any(|p| p.0 == [0; 3]);
+	let glyphs = pixels.pixels().any(|p| p.0 == [255; 3]);
+	assert!(panel && glyphs, "expected black panel and white glyphs");
+	println!("Large high-contrast Player screenshot: {}", image.display());
+}

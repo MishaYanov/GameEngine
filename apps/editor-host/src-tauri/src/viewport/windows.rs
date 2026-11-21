@@ -16,6 +16,7 @@ use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
 use runtime::camera_input::{
 	normalize_mouse, normalize_wheel, CameraInputPreferences, CameraIntent, WheelSample,
 };
+use runtime::scene_load_timing::{Outcome as LoadOutcome, SceneLoadTiming, Scope as LoadScope};
 use runtime::{
 	assets::AssetManager, scene::Scene, scene_catalog::SceneId, scene_editor::PreparedScene,
 	scene_io, Camera, GameContentRect,
@@ -87,14 +88,25 @@ enum PlayInstall<'a> {
 	Transition {
 		generation: u64,
 		target: &'a SceneId,
+		run_id: &'a str,
+		scene_generation: u64,
 	},
 	Restart(&'a ActionRequest),
 }
 impl PlayInstall<'_> {
 	fn validate(&self, workspace: &EditorWorkspace, now: Instant) -> Result<bool, String> {
 		match self {
-			Self::Transition { generation, target } => Ok(workspace.generation == *generation
-				&& workspace.backend.pending_play_scene() == Some(*target)),
+			Self::Transition {
+				generation,
+				target,
+				run_id,
+				scene_generation,
+			} => Ok(workspace.generation == *generation
+				&& workspace.backend.pending_play_scene() == Some(*target)
+				&& workspace
+				.backend
+				.session()
+				.owns_play_scene(run_id, *scene_generation)),
 			Self::Restart(request) => {
 				request.validate_context(workspace.generation, now)?;
 				let ViewportActionDto::RestartRun {
@@ -213,6 +225,7 @@ struct RenderPacket {
 	revision: u64,
 	generation: u64,
 	scene_id: Option<runtime::scene_catalog::SceneId>,
+	switch_clock: Option<(u64, Instant, Instant)>,
 	change_cursor: u64,
 	asset_root: PathBuf,
 	lights_changed: bool,
@@ -272,7 +285,26 @@ impl Drop for GpuState {
 	}
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AuthoredLoadKey {
+	generation: u64,
+	revision: u64,
+	scene_id: SceneId,
+}
+
+impl AuthoredLoadKey {
+	fn matches(&self, workspace: &EditorWorkspace) -> bool {
+		let session = workspace.backend.session();
+		workspace.generation == self.generation
+			&& session.scene_revision() == self.revision
+			&& session.active_scene_id() == &self.scene_id
+			&& !session.is_playing()
+	}
+}
+
 struct Worker {
+	authored_load: Option<(AuthoredLoadKey, SceneLoadTiming)>,
+	play_load: Option<(u64, String, u64, SceneLoadTiming)>,
 	gpu: Option<GpuState>,
 	focus_hook: Option<KeyboardFocusHook>,
 	window: Option<Arc<Window>>,
@@ -320,6 +352,8 @@ impl Worker {
 	) -> Self {
 		let now = Instant::now();
 		Self {
+			authored_load: None,
+			play_load: None,
 			gpu: None,
 			focus_hook: None,
 			window: None,

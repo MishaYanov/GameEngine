@@ -135,6 +135,13 @@ impl EditorSession {
 			.submit_camera_input(run_id, scene_generation, intent)
 	}
 
+	/// Checks the owning run and scene generation without building a status DTO.
+	pub fn owns_play_scene(&self, run_id: &str, scene_generation: u64) -> bool {
+		self.play.as_ref().is_some_and(|play| {
+			play.run_id() == run_id && play.scene_generation() == scene_generation
+		})
+	}
+
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
 		self.play.as_ref().map(GameSession::status)
 	}

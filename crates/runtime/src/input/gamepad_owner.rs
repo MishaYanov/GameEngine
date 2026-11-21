@@ -43,7 +43,7 @@ impl GamepadOwner {
 		self.waiting_for_neutral = true;
 	}
 
-	/// Returns true only when a new gameplay sample needs publication.
+	/// Returns true if the admitted physical sample changed.
 	pub fn poll(
 		&mut self,
 		now: Instant,

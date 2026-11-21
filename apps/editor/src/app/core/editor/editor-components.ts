@@ -6,6 +6,19 @@ import {
 } from './character-controller.models';
 import { validAnimationSettings, type AnimationSettings } from './animation.models';
 
+import {validGameActionId} from '../game-input/game-input.models';
+
+export interface InteractableSettings {
+    readonly action: string;
+    readonly reach: number;
+}
+
+export const MAX_INTERACTION_REACH = 3;
+
+export function validInteractionReach(value: unknown): value is number {
+    return typeof value === 'number' && Math.fround(value) > 0 && Math.fround(value) <= MAX_INTERACTION_REACH;
+}
+
 export type NativeBehaviorSpec =
 	| { readonly kind: 'state_machine'; readonly definition: MachineDefinition }
 	| {
@@ -43,6 +56,7 @@ export type ComponentData =
 	| { readonly kind: 'collider'; readonly collider: Collider }
 	| { readonly kind: 'character_controller'; readonly settings: CharacterControllerSettings }
 	| { readonly kind: 'animation'; readonly settings: AnimationSettings }
+    | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
 
 export interface ComponentRecord {
@@ -134,6 +148,11 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
 	if (data['kind'] === 'animation') return validAnimationSettings(data['settings']);
+    if (data['kind'] === 'interactable') {
+        const settings = data['settings'];
+        return Object.keys(data).length === 2 && record(settings) && Object.keys(settings).length === 2 &&
+            validGameActionId(settings['action']) && validInteractionReach(settings['reach']);
+    }
 	if (data['kind'] !== 'native_behavior' || !record(data['behavior'])) return false;
 	const behavior = data['behavior'];
 	switch (behavior['kind']) {
@@ -182,6 +201,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'collider').length <= 1 &&
 		value.filter((component) => component.data.kind === 'character_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
+        value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
 	);
 }
@@ -199,6 +219,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'native_behavior',
 					'character_controller',
 					'animation',
+                    'interactable',
 				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&
 				nonempty(item['description']) &&

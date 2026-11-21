@@ -14,6 +14,8 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[contextKey]="context()"
 		[entities]="targets()"
 		[models]="models()"
+		[gameActions]="gameActions()"
+		[interactablePinned]="interactablePinned()"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[pending]="pending()"
@@ -31,6 +33,25 @@ export class SceneComponentInspector {
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types ?? []);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
+    protected readonly gameActions = computed(() =>
+        this.editor.snapshot()?.project.input_profile?.actions?.map(action => action.id) ?? [],
+    );
+    protected readonly interactablePinned = computed(() => {
+        const entity = this.entity();
+        if (!entity) return false;
+        if (entity.linked_prefab) return true;
+        if (!entity.parent) return false;
+        const byKey = new Map(this.targets().map(candidate => [candidate.key, candidate]));
+        const visited = new Set([entity.key]);
+        let parentKey: string | null | undefined = entity.parent;
+        while (parentKey && !visited.has(parentKey)) {
+            visited.add(parentKey);
+            const ancestor = byKey.get(parentKey);
+            if (ancestor?.linked_prefab) return true;
+            parentKey = ancestor?.parent;
+        }
+        return false;
+    });
 	protected readonly pending = signal(false);
 	protected readonly error = signal<string | null>(null);
 	protected readonly acknowledged = signal(0);

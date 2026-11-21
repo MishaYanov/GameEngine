@@ -2,8 +2,8 @@ import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import {vi} from 'vitest';
-import type {EditorCommand, EditorSnapshot} from '../../../../core/editor/editor.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import type {CampaignDefinition, EditorCommand, EditorSnapshot} from '../../../../core/editor/editor.models';
+import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import {
     CameraPreviewController,
     type PreviewDefinition,
@@ -57,9 +57,52 @@ describe('game settings dialogs', () => {
         else Reflect.deleteProperty(prototype, 'close');
     });
 
-    async function setup(kind: 'camera' | 'interactions') {
-        const current = signal(snapshot());
+    async function setup(kind: 'camera' | 'interactions' | 'campaign', openDialog = true) {
+        const original = snapshot();
+        const current = signal(original);
+        if (kind === 'campaign') {
+            const scene = {id: 'garden', asset_path: 'scenes/garden.json'};
+            current.set({
+                ...original,
+                scenes: [...original.scenes, {...scene, loaded: true, dirty: false}],
+                project: {
+                    ...original.project, scenes: [...original.project.scenes, scene],
+                    gameplay_settings: {
+                        schema_version: 2, scenes: {
+                            main: {
+                                kind: 'course',
+                                key_trigger: 'key-sensor',
+                                exit_trigger: 'exit-sensor',
+                                destination_scene: 'garden'
+                            },
+                            garden: {
+                                kind: 'course',
+                                key_trigger: 'garden-key',
+                                exit_trigger: 'garden-exit',
+                                destination_scene: 'ending'
+                            },
+                            ending: {kind: 'finish', finish_trigger: 'goal'},
+                        }, campaign: {
+                            chapters: [
+                                {id: 'main', label: 'Main', course_scene: 'main'},
+                                {id: 'garden', label: 'Garden', course_scene: 'garden'},
+                            ], finish_scene: 'ending'
+                        }
+                    },
+                },
+            });
+        }
         const generation = signal(1);
+        const campaignGeneration = vi.fn(async (_generation: number, _revision: number) => 42);
+        const applyCampaign = vi.fn(async (
+            definition: CampaignDefinition, _generation: number, _nativeGeneration: number, _revision: number,
+        ) => {
+            current.update(value => ({
+                ...value, revision: value.revision + 1, project_dirty: true,
+                project: {...value.project, startup_scene_id: definition.chapters[0].course_scene},
+            }));
+            return current();
+        });
         const execute = vi.fn(async (command: EditorCommand, _generation?: number, _revision?: number) => {
             current.update(value => command.type === 'set_project' ? {...value, project: command.project}
                 : command.type === 'set_camera' ? {...value, document: {...value.document, camera: command.camera}} : value);
@@ -81,6 +124,8 @@ describe('game settings dialogs', () => {
                 nativeAvailable: true, snapshot: current, workspaceGeneration: generation, busy: signal(false),
                     playing: computed(() => current().mode === 'play'),
                     execute,
+                    campaignGeneration,
+                    applyCampaign,
                     cameraPreview: new CameraPreviewController(previewApi),
             }},
                 {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 42})}},
@@ -89,9 +134,12 @@ describe('game settings dialogs', () => {
         const fixture = kind === 'camera' ? TestBed.createComponent(CameraSettings) : TestBed.createComponent(GameplaySettings);
         await fixture.whenStable();
         const root: HTMLElement = fixture.nativeElement;
-        root.querySelector<HTMLButtonElement>('button')!.click();
-        await fixture.whenStable();
         const button = (text: string) => [...root.querySelectorAll('button')].find(button => button.textContent.trim() === text)!;
+        if (openDialog) {
+            if (kind === 'campaign') button('Campaign Settings…').click();
+            else root.querySelector<HTMLButtonElement>('button')!.click();
+        }
+        await fixture.whenStable();
         const field = (text: string) => {
             const label = [...root.querySelectorAll('label')].find(label => label.textContent?.trim().startsWith(text))!;
             return label.htmlFor ? root.querySelector<HTMLInputElement>(`#${label.htmlFor}`)!
@@ -105,7 +153,20 @@ describe('game settings dialogs', () => {
                 await fixture.whenStable();
             }
         };
-        return {fixture, root, current, generation, execute, committed, button, field, change, previewApi};
+        return {
+            fixture,
+            root,
+            current,
+            generation,
+            execute,
+            committed,
+            button,
+            field,
+            change,
+            previewApi,
+            campaignGeneration,
+            applyCampaign
+        };
     }
 
     it('authors a scene sensor override while preserving other scenes and latest project edits', async () => {
@@ -134,6 +195,122 @@ describe('game settings dialogs', () => {
         panel.button('Apply Interaction Settings').click();
         await panel.fixture.whenStable();
         expect(panel.current().project.gameplay_settings).toEqual({schema_version: 1, scenes: {ending: {kind: 'finish', finish_trigger: 'goal'}}});
+    });
+
+    it('binds a Route Gate from a disabled authored lever and preserves prior settings on native failure', async () => {
+        const panel = await setup('interactions');
+        const before = panel.current().project.gameplay_settings;
+        panel.current.update(value => ({
+            ...value,
+            project: {
+                ...value.project, input_profile: {
+                    schema_version: 1, movement: {negative_x: 'a', positive_x: 'd', negative_y: 's', positive_y: 'w'},
+                    actions: [{id: 'interact', key: 'e'}],
+                }
+            },
+            document: {
+                ...value.document, entities: [
+                    ...value.document.entities,
+                    {
+                        ...value.document.entities[0], key: 'lever', name: 'Lever', component_views: [{
+                            id: 'use', schema_version: 1, enabled: false,
+                            data: {kind: 'interactable', settings: {action: 'interact', reach: 1.25}},
+                        }]
+                    },
+                ]
+            },
+        }));
+        await panel.change('Interaction mode', 'course');
+        await panel.change('Key trigger', 'key-sensor');
+        await panel.change('Exit trigger', 'exit-sensor');
+        await panel.change('Destination scene', 'ending');
+        panel.field('Use a route lever').click();
+        await panel.fixture.whenStable();
+        expect(panel.button('Apply Interaction Settings').disabled).toBe(true);
+        await panel.change('Route lever', 'lever');
+        await panel.change('Route gate collider', 'blocker');
+        expect(panel.root.textContent).toContain('Inactive Interactable');
+        expect(panel.button('Apply Interaction Settings').disabled).toBe(false);
+        panel.execute.mockRejectedValueOnce(new Error('Scene was changed'));
+        panel.button('Apply Interaction Settings').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).toContain('Scene was changed');
+        expect(panel.current().project.gameplay_settings).toEqual(before);
+        panel.button('Apply Interaction Settings').click();
+        await panel.fixture.whenStable();
+        expect(panel.current().project.gameplay_settings).toMatchObject({
+            route_gate: {scene_id: 'main', lever: 'lever', gate: 'blocker', action: 'interact', radius: 1.25},
+        });
+    });
+
+    it('reorders chapters with focus, previews the startup change, and sends one reviewed draft', async () => {
+        const panel = await setup('campaign');
+        const ids = () => [...panel.root.querySelectorAll<HTMLInputElement>('ol li input')].filter((_, index) => index % 2 === 0);
+        expect(panel.campaignGeneration).toHaveBeenCalledExactlyOnceWith(1, 7);
+        expect(panel.button('Apply Campaign').disabled).toBe(true);
+        expect(panel.root.textContent).toContain('Exit leads to scenes/ending.json (ending).');
+        panel.root.querySelector<HTMLButtonElement>('[aria-label="Move chapter 2 up"]')!.click();
+        await panel.fixture.whenStable();
+        expect(ids().map(input => input.value)).toEqual(['garden', 'main']);
+        expect(document.activeElement).toBe(ids()[0]);
+        expect(panel.root.textContent).toContain("Applying will change the project's startup scene.");
+        panel.button('Close').click();
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaign).not.toHaveBeenCalled();
+
+        panel.button('Campaign Settings…').click();
+        await panel.fixture.whenStable();
+        expect(ids().map(input => input.value)).toEqual(['main', 'garden']);
+        panel.root.querySelector<HTMLButtonElement>('[aria-label="Move chapter 2 up"]')!.click();
+        await panel.fixture.whenStable();
+        panel.button('Apply Campaign').click();
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaign).toHaveBeenCalledExactlyOnceWith({
+            chapters: [
+                {id: 'garden', label: 'Garden', course_scene: 'garden'},
+                {id: 'main', label: 'Main', course_scene: 'main'},
+            ], finish_scene: 'ending'
+        }, 1, 42, 7);
+        expect(panel.root.textContent).toContain('Campaign settings applied. Save All');
+    });
+
+    it('ignores a campaign response that arrives during workspace navigation', async () => {
+        const panel = await setup('campaign', false);
+        let respond!: (generation: number) => void;
+        panel.campaignGeneration.mockReturnValueOnce(new Promise(resolve => {
+            respond = resolve;
+        }));
+        panel.button('Campaign Settings…').click();
+        await vi.waitFor(() => expect(panel.campaignGeneration).toHaveBeenCalledOnce());
+        panel.fixture.componentRef.setInput('opening', true);
+        await panel.fixture.whenStable();
+        respond(42);
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('dialog[open]')).toBeNull();
+
+        panel.fixture.componentRef.setInput('opening', false);
+        await panel.fixture.whenStable();
+        panel.button('Campaign Settings…').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('dialog[open]')).not.toBeNull();
+    });
+
+    it('keeps a rejected campaign draft and focuses the diagnosed chapter', async () => {
+        const panel = await setup('campaign');
+        await panel.change('Chapter label', 'New title');
+        const before = panel.current().project.gameplay_settings;
+        panel.applyCampaign.mockRejectedValueOnce(new EditorClientError(
+            'backend', 'editor_apply_campaign', 'Scene "garden": Exit trigger needs an enabled sensor collider',
+            {code: 'campaign_validation', scene_id: 'garden'},
+        ));
+        panel.button('Apply Campaign').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[role="alert"]')?.textContent).toContain('Exit trigger');
+        expect(panel.field('Chapter label').value).toBe('New title');
+        expect((document.activeElement as HTMLInputElement).value).toBe('garden');
+        expect(panel.current().project.gameplay_settings).toEqual(before);
+        const dialog = [...panel.root.querySelectorAll('dialog')].find(element => element.open)!;
+        expect((await axe.run(dialog, {rules: {'color-contrast': {enabled: false}}})).violations).toEqual([]);
     });
 
     it('applies Follow once using the latest unrelated revision and preserves the pose', async () => {

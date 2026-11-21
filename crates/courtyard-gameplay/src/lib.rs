@@ -8,12 +8,14 @@ use engine_core::{
 };
 use settings::InteractionSettings;
 
+mod chapters;
 pub mod checkpoint;
 mod preparation;
 mod progress;
 mod runtime;
 pub mod settings;
 
+pub use chapters::{CampaignDefinition, ChapterRun, CourseFacts};
 pub use preparation::CampaignFactory;
 pub use progress::{CampaignProgress, ProgressAction};
 
@@ -64,7 +66,13 @@ pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, Stri
 	if project.gameplay_module.as_deref() == Some(COURTYARD_RUN_ID) {
 		let settings = InteractionSettings::from_project(project)?;
 		checkpoint::CheckpointRegistry::from_settings(project, settings.as_ref())?;
-		return Ok(Arc::new(CampaignFactory));
+		let chaptered = settings
+			.as_ref()
+			.and_then(preparation::ChapteredFactory::new);
+		return Ok(match chaptered {
+			Some(factory) => Arc::new(factory),
+			None => Arc::new(CampaignFactory),
+		});
 	}
 	resolve_default_gameplay(project)
 }

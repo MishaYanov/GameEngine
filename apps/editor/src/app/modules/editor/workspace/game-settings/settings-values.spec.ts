@@ -39,6 +39,35 @@ describe('game settings values', () => {
         expect(readCourtyardSettings({...payload, checkpoints: [{...checkpoint, spawn: [0, 0]}]})).toBeNull();
     });
 
+    it('round-trips V2 route data and rejects duplicate or mismatched chapter entries', () => {
+        const first = {id: 'first', label: 'First', course_scene: 'main'};
+        const second = {id: 'second', label: 'Second', course_scene: 'garden'};
+        const campaign = {chapters: [first, second], finish_scene: 'finish'};
+        const scenes = {
+            main: {kind: 'course', key_trigger: 'a', exit_trigger: 'b', destination_scene: 'garden'},
+            garden: {kind: 'course', key_trigger: 'a', exit_trigger: 'b', destination_scene: 'finish'},
+            finish: {kind: 'finish', finish_trigger: 'c'},
+        };
+        const payload = {
+            schema_version: 2, scenes, campaign, project_save_id: '3ef795f1-4bb8-41ff-bebb-66a170e68878',
+        };
+        const decoded = readCourtyardSettings(payload)!;
+        expect(decoded).toBe(payload);
+        expect(updateCourtyardScene(decoded, 'finish', {kind: 'finish', finish_trigger: 'end'}))
+            .toEqual({...payload, scenes: {...scenes, finish: {kind: 'finish', finish_trigger: 'end'}}});
+        for (const chapter of [
+            {...second, id: first.id},
+            {...second, id: 'invalid\n'},
+            {...second, label: ' '},
+            {...second, label: 'Title\n'},
+            {...second, course_scene: first.course_scene},
+        ]) {
+            expect(readCourtyardSettings({...payload, campaign: {...campaign, chapters: [first, chapter]}})).toBeNull();
+        }
+        expect(readCourtyardSettings({...payload, campaign: {...campaign, chapters: [second, first]}})).toBeNull();
+        expect(readCourtyardSettings({...payload, schema_version: 1})).toBeNull();
+    });
+
     it('uses shared follow defaults and rejects incomplete, overflowing or vertical views', () => {
         const draft = {...cameraDraft(null, 'player'), mode: 'follow' as const};
         expect(followFromDraft(draft, ['player'])).toEqual({

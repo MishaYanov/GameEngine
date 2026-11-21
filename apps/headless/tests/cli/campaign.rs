@@ -1,6 +1,138 @@
 use super::*;
 
 #[test]
+fn authored_chapters_advance_independently_and_restart_from_the_first_course() {
+	let fixture = Fixture::new();
+	let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
+	let summary = success(
+		Command::new(env!("CARGO_BIN_EXE_engine-headless"))
+			.current_dir(&fixture.root)
+			.arg("--project")
+			.arg(game.join("project.courtyard-chapters.json"))
+			.arg("--replay")
+			.arg(game.join("fixtures/courtyard-chapters/route.replay.json"))
+			.output()
+			.unwrap(),
+	);
+	let markers = summary["markers"].as_array().unwrap();
+	for (label, scene, chapter, score, key, gate, complete) in [
+		(
+			"courtyard_entry",
+			"courtyard",
+			Some("courtyard"),
+			0,
+			false,
+			false,
+			false,
+		),
+		(
+			"courtyard_gate",
+			"courtyard",
+			Some("courtyard"),
+			1,
+			true,
+			true,
+			false,
+		),
+		(
+			"garden_entry",
+			"garden",
+			Some("garden"),
+			1,
+			false,
+			false,
+			false,
+		),
+		(
+			"garden_key",
+			"garden",
+			Some("garden"),
+			2,
+			true,
+			false,
+			false,
+		),
+		("finish_entry", "finish", None, 2, false, false, false),
+		("finished", "finish", None, 2, false, false, true),
+		(
+			"restarted",
+			"courtyard",
+			Some("courtyard"),
+			0,
+			false,
+			false,
+			false,
+		),
+	] {
+		let row = markers
+			.iter()
+			.find(|marker| marker["label"] == label)
+			.unwrap();
+		assert_eq!(row["scene_id"], scene, "{row}");
+		assert_eq!(
+			row.get("chapter_id").and_then(Value::as_str),
+			chapter,
+			"{row}"
+		);
+		assert_eq!(row["score"], score, "{row}");
+		assert_eq!(row["has_courtyard_key"], key, "{row}");
+		assert_eq!(row["route_gate_open"], gate, "{row}");
+		assert_eq!(row["completed"], complete, "{row}");
+	}
+	assert_eq!(markers.len(), 7);
+}
+
+#[test]
+fn renamed_authored_campaign_replays_identically_after_compiler_staging() {
+	let fixture = Fixture::new();
+	let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
+	let mut authored = ProjectData::load(&game.join("project.courtyard-chapters.json")).unwrap();
+	authored.gameplay_settings.as_mut().unwrap()["campaign"]["chapters"][1]["label"] =
+		"Garden Walk".into();
+	fs::write(&fixture.project, authored.to_json().unwrap()).unwrap();
+	let assets = fixture.root.join("assets");
+	for scene in authored.scenes.iter() {
+		fs::copy(
+			game.join("assets").join(scene.asset_path()),
+			assets.join(scene.asset_path()),
+		)
+			.unwrap();
+	}
+	fs::create_dir(assets.join("props")).unwrap();
+	for file in ["capsule.glb", "cube.glb", "sphere.glb"] {
+		fs::copy(
+			game.join("assets/props").join(file),
+			assets.join("props").join(file),
+		)
+			.unwrap();
+	}
+	let prepared = compiler::prepare_project(&authored, &assets).unwrap();
+	let staged =
+		compiler::stage_prepared_project(&prepared, fixture.root.to_str().unwrap()).unwrap();
+	let packaged_manifest = staged.path().join("project.json");
+	assert_eq!(ProjectData::load(&packaged_manifest).unwrap(), authored);
+	let replay = game.join("fixtures/courtyard-chapters/route.replay.json");
+	let run = |project: &std::path::Path| {
+		success(
+			Command::new(env!("CARGO_BIN_EXE_engine-headless"))
+				.current_dir(&fixture.root)
+				.arg("--project")
+				.arg(project)
+				.arg("--replay")
+				.arg(&replay)
+				.output()
+				.unwrap(),
+		)
+	};
+	let source = run(&fixture.project);
+	let packaged = run(&packaged_manifest);
+	assert_eq!(source["markers"], packaged["markers"]);
+	assert_eq!(packaged["markers"][5]["label"], "finished");
+	assert_eq!(packaged["markers"][5]["score"], 2);
+	assert_eq!(packaged["markers"][5]["completed"], true);
+}
+
+#[test]
 fn release_learning_route_reaches_finish_after_one_deliberate_press() {
 	let fixture = Fixture::new();
 	let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");

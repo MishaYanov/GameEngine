@@ -14,10 +14,12 @@ import unicodedata
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_MARKERS = 128
 MARKER_LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}")
+CHAPTER_ID = re.compile(r"[a-z0-9_-]{1,32}")
 MARKER_FIELDS = (
     "scene_id", "simulation_tick", "completed", "score",
     "has_courtyard_key", "route_gate_open",
 )
+REQUIRED_MARKER_FIELDS = {"label", *MARKER_FIELDS}
 
 
 def _unique_object(pairs):
@@ -91,12 +93,18 @@ def marker_rows(report):
         raise ValueError("Expected at most 128 replay markers")
     seen = set()
     for row in markers:
-        if not isinstance(row, dict) or set(row) != {"label", *MARKER_FIELDS}:
+        if not isinstance(row, dict) or set(row) not in (
+            REQUIRED_MARKER_FIELDS, REQUIRED_MARKER_FIELDS | {"chapter_id"},
+        ):
             raise ValueError("Invalid marker fields")
         label = row["label"]
         if not isinstance(label, str) or not MARKER_LABEL.fullmatch(label) or label in seen:
             raise ValueError("Expected distinct replay marker labels")
         seen.add(label)
+        if "chapter_id" in row and (
+            not isinstance(row["chapter_id"], str) or not CHAPTER_ID.fullmatch(row["chapter_id"])
+        ):
+            raise ValueError(f"Invalid chapter ID for marker {label!r}")
         if (
             not valid_scene(row["scene_id"])
             or not valid_tick(row["simulation_tick"])
@@ -123,8 +131,9 @@ def first_difference(expected, observed):
         return {
             "index": index, "kind": "facts", "label": left["label"],
             "fields": {
-                field: {"expected": left[field], "observed": right[field]}
-                for field in MARKER_FIELDS if left[field] != right[field]
+                field: {"expected": left.get(field), "observed": right.get(field)}
+                for field in (*MARKER_FIELDS, "chapter_id")
+                if left.get(field) != right.get(field)
             },
         }
     return None

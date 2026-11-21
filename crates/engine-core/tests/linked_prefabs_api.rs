@@ -429,3 +429,69 @@ fn declared_reference_slots_cannot_be_used_as_external_prefab_parents() {
 			.contains("parents must be owned")
 	);
 }
+
+#[test]
+fn linked_interactable_roundtrips_and_requires_source_or_unpack_to_change() {
+	use engine_core::components::{
+		ComponentData, ComponentId, ComponentRecord, InteractableSettings,
+	};
+	let id = ComponentId::new("use").unwrap();
+	let authored = ComponentRecord {
+		id: id.clone(),
+		schema_version: 1,
+		enabled: true,
+		data: ComponentData::Interactable {
+			settings: InteractableSettings {
+				action: "interact".into(),
+				reach: 1.25,
+			},
+		},
+	};
+	let mut source = source();
+	source.prefab.entities[0]
+		.put_component(authored, false)
+		.unwrap();
+	let encoded = source.prefab.to_json().unwrap();
+	source.prefab = PrefabData::from_json(&encoded).unwrap();
+	let mut session = session();
+	let (root, body) = instantiate(&mut session, source);
+	let before = session.authored_document();
+	let reopened = engine_core::SceneData::from_json(&before.to_json().unwrap()).unwrap();
+	let member = reopened
+		.entities
+		.iter()
+		.find(|entity| entity.key == body)
+		.unwrap();
+	assert_eq!(member.interactable.as_ref().unwrap().settings.reach, 1.25);
+	let disable = || Command::SetComponentEnabled {
+		key: body.as_str().into(),
+		component_id: id.clone(),
+		enabled: false,
+	};
+	assert!(
+		execute(&mut session, disable())
+			.unwrap_err()
+			.contains("prefab source")
+	);
+	assert_eq!(session.authored_document(), before);
+	execute(
+		&mut session,
+		Command::UnpackLinkedPrefab {
+			root_key: root.as_str().into(),
+		},
+	)
+		.unwrap();
+	execute(&mut session, disable()).unwrap();
+	let document = session.authored_document();
+	assert!(
+		!document
+			.entities
+			.iter()
+			.find(|entity| entity.key == body)
+			.unwrap()
+			.interactable
+			.as_ref()
+			.unwrap()
+			.enabled
+	);
+}

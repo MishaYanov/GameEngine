@@ -1,4 +1,4 @@
-use super::{ControlsSettings, Preset};
+use super::{ControlsSettings, Preset, display::DisplaySettings};
 use runtime::input::ControllerBindings;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -10,7 +10,7 @@ use std::{
 };
 
 const MAX_BYTES: usize = 256;
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,7 +19,7 @@ struct RecordV1 {
 	movement: Preset,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordV2 {
 	schema_version: u32,
@@ -27,9 +27,19 @@ struct RecordV2 {
 	controller: ControllerBindings,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecordV3 {
+	schema_version: u32,
+	movement: Preset,
+	controller: ControllerBindings,
+	display: DisplaySettings,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Record {
+	Third(RecordV3),
 	Second(RecordV2),
 	First(RecordV1),
 }
@@ -48,10 +58,16 @@ impl Record {
 				movement: record.movement,
 				..ControlsSettings::default()
 			}),
-			Self::Second(record) if record.schema_version == SCHEMA_VERSION => {
+			Self::Second(record) if record.schema_version == 2 => Ok(ControlsSettings {
+				movement: record.movement,
+				controller: record.controller.validate()?,
+				..ControlsSettings::default()
+			}),
+			Self::Third(record) if record.schema_version == SCHEMA_VERSION => {
 				Ok(ControlsSettings {
 					movement: record.movement,
 					controller: record.controller.validate()?,
+					display: record.display,
 				})
 			}
 			_ => Err("Saved controls version is unsupported".into()),
@@ -122,10 +138,11 @@ impl Preferences {
 	}
 
 	pub(super) fn save(&self, controls: ControlsSettings) -> Result<(), String> {
-		let bytes = serde_json::to_vec(&RecordV2 {
+		let bytes = serde_json::to_vec(&RecordV3 {
 			schema_version: SCHEMA_VERSION,
 			movement: controls.movement,
 			controller: controls.controller.validate()?,
+			display: controls.display,
 		})
 		.map_err(|error| format!("Cannot encode controls: {error}"))?;
 		if bytes.len() > MAX_BYTES {

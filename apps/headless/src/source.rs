@@ -29,15 +29,15 @@ pub(super) fn source(options: &Options) -> Result<Source, String> {
 		// Custom asset roots are useful for diagnostics but cannot claim a package manifest identity.
 		let project_manifest_sha256 = (options.replay.is_some() && options.asset_root.is_none())
 			.then(|| format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
-		let root = options
+		let asset_root = options
 			.asset_root
 			.clone()
-			.unwrap_or_else(|| manifest.parent().unwrap_or(Path::new(".")).join("assets"))
+			.unwrap_or_else(|| manifest.parent().unwrap_or(Path::new(".")).join("assets"));
+		// Check the named directory before canonicalization erases its link metadata.
+		bridge::feedback_audio::load(&asset_root)?;
+		let root = asset_root
 			.canonicalize()
 			.map_err(|e| format!("Cannot open asset root: {e}"))?;
-		if !root.is_dir() {
-			return Err("Asset root must be a directory".into());
-		}
 		let mut parsed = None;
 		let mut documents = Vec::new();
 		let mut paths = HashSet::new();

@@ -4,6 +4,48 @@
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_28_39": {
+    "date": "2026-11-21",
+    "inspected_head": "da621adec6b76c09be8b445bc3db7b37b776c365",
+    "scope": "Milestones 28 through 33 implement accessible Player feedback, authoring for audio and campaigns, checkpoint transfer, opt-in CPU scene prefetch, and local verified release review. Milestones 34 through 39 are planned file-by-file learning exercises.",
+    "verification": [
+      "1,066 affected Rust tests passed in the aggregate after the security fixes. The scoped final Rust best-practices checks passed for the current checkpoint request API, native catalog locking and Player binary compilation.",
+      "106 Python tests, all 534 Angular tests, production AOT and route and bundle verification, and eight documentation-site tests passed. The documentation site rebuilt and link-checked 65 pages.",
+      "The hidden Windows Vulkan Player drew a 150% high-contrast HUD and produced the key caption with audio disabled. Campaign authoring validated retained documents, used one undoable authored update, persisted it through Save All and reached Finish at score 2 in compiler and headless tests.",
+      "The earlier copied candidate passed two-profile checkpoint CLI export, preview and import, native Continue to Finish, stale approval rejection and guarded replacement. The final-source test additionally rejects the same empty slot in the wrong canonical profile.",
+      "The Windows Vulkan test harness measured 32 Garden transfers per mode and 32 warm hits. CPU preparation p95 went from 1.253 ms to 1.052 ms. Active-frame p95 went from 265.315 ms to 265.686 ms and exceeded the local ceiling by 54 microseconds.",
+      "The rebuilt candidate passed both builder smoke checks and archive integrity validation. A replay used its packaged authored data. The local held decision was verified against that receipt, ZIP, actual host gate and attached playtest evidence.",
+      "DOC, TEST, OPTIMIZATION and defensive SECURITY reviews were followed by separate Rust and Angular best-practices reviews. The index and 44 Markdown files cover Milestones 28 through 39."
+    ],
+    "verification_limits": [
+      "Windows blocked the newly extracted Player with WinError 225 during the independent package probe. The earlier transfer rehearsal and Vulkan performance harness are separate evidence. The disposition of the blocked executable was not determined.",
+      "Scene prefetch is opt-in. The final native samples describe this local Vulkan test harness and fail its active-frame headroom check by 54 microseconds. Packaged and independent-worker acceptance remain open.",
+      "Audible playback, physical controller operation, the OS DPI matrix and the visible embedded Editor Game acceptance remain manual. The host Rust 1.89 minimum toolchain was not exercised.",
+      "The trusted local release receipt records a dirty checkout and the held decision is integrity-checked. Review operator identity remains unauthenticated."
+    ],
+    "candidate_archive_sha256": "44fda79c47b78dc7e9c5eb9422809749a6ae80427d9f263fc0f6928db3e65246",
+    "pending_documentation_changes": []
+  },
+  "courtyard_release_milestones_22_33": {
+    "date": "2026-11-21",
+    "inspected_head": "5fb1ac57253f5b6bf643b986118c845f7252a239",
+    "scope": "Milestones 22 through 27 add Player controller menu input, the authored Interactable component, packaged feedback audio, a two-course campaign with V2 checkpoints, native scene-load timing and supersession checks, and independent Windows qualification tooling. The local guides document the implemented behavior and define Milestones 28 through 33 as future exercises.",
+    "verification": [
+      "1,004 Rust, 97 Python, 50 focused Angular and eight documentation-site tests passed. Two opt-in standalone Windows Vulkan harnesses passed against the staged Interactable and the verified chapter and audio packages.",
+      "The chapter fixture replay reaches Finish at score 2 and restarts at Courtyard at score 0. Native tests exercise controller menu persistence, slot isolation, Garden restore and explicit recovery. The built Player also drew the separately staged authored Interactable fixture.",
+      "The verified Windows candidate passed both packaged input-profile smoke tests, an independent working-directory probe on the local machine, and package rehashing after shutdown.",
+      "For Windows build 26200 with the recorded local GPU and driver profile, an independent set of 20 cold starts and 20 warm transfers passed the provisional local scene-load budget. First-present p95 was 300.208 ms cold and 16.704 ms warm.",
+      "Guide, test, defensive security and optimization reviews verified 46 Markdown files, including 33 feature pages with code and resource footers. The documentation site rebuilt and link-checked 65 pages."
+    ],
+    "verification_limits": [
+      "Visible Editor Game, audible feedback, and physical controller checks remain manual. All four local XInput slots were disconnected.",
+      "The release candidate is local and records a dirty checkout. The independent clean Windows worker, matching editor gate, physical controller and externally hosted Jenkins acceptance remain pending.",
+      "The timing budget is scoped to this fixture and local machine. Standalone Player loading remains synchronous. Native Editor prepares a replacement with ownership checks at work and publication boundaries.",
+      "Candidate file hashes use the trusted local receipt and describe integrity of the archived files."
+    ],
+    "candidate_archive_sha256": "16b3e13667f79355a7dd86a9121c4ba6e70ff06b4f84446d28e4bbe1432faa3b",
+    "pending_documentation_changes": []
+  },
   "courtyard_release_milestones_19_27": {
     "date": "2026-11-21",
     "inspected_head": "4f98841a1c327c45c872c68eaeb6ab0606a8a30b",

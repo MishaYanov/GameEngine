@@ -319,6 +319,7 @@ impl Scene {
 					native_behaviors: entity.native_behaviors.clone(),
 					linked_prefab: entity.linked_prefab.clone(),
 					animation: entity.animation.clone(),
+					interactable: entity.interactable.clone(),
 					character_controller: entity.character_controller.clone(),
 				}
 			};

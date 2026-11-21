@@ -34,6 +34,17 @@ export type SceneBindingTarget =
     | { readonly kind: 'assign'; readonly key: EntityKey }
     | { readonly kind: 'clear' };
 
+export interface CampaignChapter {
+    readonly id: string;
+    readonly label: string;
+    readonly course_scene: SceneId;
+}
+
+export interface CampaignDefinition {
+    readonly chapters: readonly CampaignChapter[];
+    readonly finish_scene: SceneId;
+}
+
 export interface ProjectData {
     readonly schema_version: 3;
     readonly name: string;
@@ -440,6 +451,7 @@ export interface ViewportBounds {
 }
 
 export interface ViewportSceneLoad {
+    readonly request_id?: string;
     readonly workspace_generation: number;
     readonly scene_id: SceneId;
     readonly scene_revision: number;

@@ -5,14 +5,16 @@ mod mouse;
 mod profile;
 
 pub use button::InputButton;
-pub use gamepad::{ControllerBindings, FaceButton, GamepadSample, PhysicalGamepadSample};
+pub use gamepad::{
+	ControllerBindings, FaceButton, GamepadSample, MenuButtons, PhysicalGamepadSample,
+};
 pub use key::{Key, NativeKeyCode};
 pub use mouse::MouseButton;
-pub(crate) use profile::HeldGameActions;
 pub use profile::{
 	GameInputBinding, GameKeyboardInput, INPUT_PROFILE_SCHEMA_VERSION, InputProfile,
 	MAX_GAME_INPUT_ACTIONS, MAX_INPUT_PROFILE_BYTES, MovementBindings,
 };
+pub(crate) use profile::{HeldGameActions, valid_game_action_id};
 
 use std::collections::HashSet;
 

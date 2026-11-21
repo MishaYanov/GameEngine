@@ -24,6 +24,8 @@ use std::{
 use tauri::{Emitter, State, WebviewWindow};
 mod asset_authoring;
 pub use asset_authoring::*;
+mod feedback_audio;
+pub use feedback_audio::*;
 mod linked_prefabs;
 pub use linked_prefabs::*;
 mod animation;
@@ -75,7 +77,14 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 		let (result, preview_closed) = {
 			let mut slot = shared.lock().map_err(|_| "Editor state lock failed".to_owned())?;
 			let workspace = slot.as_mut().ok_or_else(|| "Open a scene before using the editor".to_owned())?;
-			workspace.with_camera_preview_cleanup(operation)
+			let scene = workspace.backend.session().active_scene_id().clone();
+			let requested = Instant::now();
+			let result = workspace.with_camera_preview_cleanup(operation);
+			let current = workspace.backend.session();
+			if current.active_scene_id() != &scene {
+				workspace.scene_switch = Some((current.scene_revision(), requested, Instant::now()));
+			}
+			result
 		};
 		// Never hold the workspace mutex while taking the viewport mutex.
 		if preview_closed || (invalidate && result.is_ok()) {

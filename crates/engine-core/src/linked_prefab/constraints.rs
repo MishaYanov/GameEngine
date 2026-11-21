@@ -30,6 +30,7 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 			|| !anchor.native_behaviors.is_empty()
 			|| anchor.character_controller.is_some()
 			|| anchor.animation.is_some()
+			|| anchor.interactable.is_some()
 		{
 			return Err(
 				"Linked instance anchors are transform-only objects; edit a member or Unpack first"
@@ -96,6 +97,9 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 		let base = materialized(link, &anchor.key)?;
 		for (source, expected) in &base {
 			let actual = entities[&link.entity_map[source]];
+			if actual.interactable != expected.interactable {
+				return Err("Linked Interactable is owned by the prefab source; edit the source or Unpack first".into());
+			}
 			for property in properties(&[expected, actual]) {
 				let target = LinkedPrefabOverrideTarget {
 					source_entity: source.clone(),

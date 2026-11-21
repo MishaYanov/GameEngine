@@ -9,6 +9,12 @@ import {validComponentTypes} from './editor-components';
 import {CameraPreviewController, readCameraPreview} from './camera-preview';
 import {validMachineDescriptor} from './state-machine.models';
 import {
+    readFeedbackCueDraft,
+    validCuePath,
+    type FeedbackCueAssignment,
+    type FeedbackCueDraft
+} from './feedback-audio.models';
+import {
     type AnimationPreview,
     type AnimationReview,
     readAnimationPreview,
@@ -25,6 +31,7 @@ import type {
 import type {
     AssetOperation,
     BuildLaunchResult,
+    CampaignDefinition,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -297,6 +304,24 @@ export class EditorService {
         );
     }
 
+    campaignGeneration(expectedGeneration: number, expectedRevision: number): Promise<number> {
+        return this.enqueue('editor_campaign_generation', () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<number>('editor_campaign_generation', {expectedRevision});
+        }, false, expectedGeneration);
+    }
+
+    applyCampaign(
+        campaign: CampaignDefinition,
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_apply_campaign', {
+            campaign, expectedGeneration: expectedNativeGeneration,
+        }, false, {expectedGeneration, expectedRevision});
+    }
+
     save(): Promise<EditorSnapshot> {
         return this.snapshotOperation('editor_save');
     }
@@ -347,6 +372,48 @@ export class EditorService {
         }
     }
 
+    feedbackCues(expectedGeneration: number): Promise<FeedbackCueDraft> {
+        return this.enqueue('editor_feedback_cues_read', async () => {
+            this.requireGeneration(expectedGeneration);
+            const draft = await this.native<unknown>('editor_feedback_cues_read');
+            this.requireGeneration(expectedGeneration);
+            return readFeedbackCueDraft(draft);
+        }, false, expectedGeneration);
+    }
+
+    async importFeedbackCue(
+        workspaceGeneration: number, slug: string, expectedGeneration: number,
+    ): Promise<string | null> {
+        this.requireGeneration(expectedGeneration);
+        const result = await this.native<unknown>('editor_feedback_cue_import', {workspaceGeneration, slug});
+        this.requireGeneration(expectedGeneration);
+        if (result !== null && !validCuePath(result)) {
+            throw new Error('The editor returned an invalid imported feedback cue path.');
+        }
+        return result;
+    }
+
+    applyFeedbackCues(
+        workspaceGeneration: number, expectedDigest: string | null, cues: readonly FeedbackCueAssignment[],
+        expectedGeneration: number,
+    ): Promise<FeedbackCueDraft> {
+        const operation = 'editor_feedback_cues_apply';
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<unknown>(operation, {workspaceGeneration, expectedDigest, cues});
+            this.requireGeneration(expectedGeneration);
+            return readFeedbackCueDraft(result);
+        }, false, expectedGeneration);
+    }
+
+    async previewFeedbackCue(
+        workspaceGeneration: number, relativePath: string, expectedGeneration: number,
+    ): Promise<unknown> {
+        this.requireGeneration(expectedGeneration);
+        const bytes = await this.native<unknown>('editor_feedback_cue_preview', {workspaceGeneration, relativePath});
+        this.requireGeneration(expectedGeneration);
+        return bytes;
+    }
     importExternalGlb(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
         return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
     }

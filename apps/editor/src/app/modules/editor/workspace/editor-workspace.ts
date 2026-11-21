@@ -25,6 +25,7 @@ import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
 import {GameplaySettings} from './game-settings/gameplay-settings';
 import {CameraSettings} from './game-settings/camera-settings';
+import {AudioCueSettings} from './game-settings/audio-cue-settings';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
 import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
 import {CommandPalette} from './command-palette/command-palette';
@@ -39,7 +40,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        GameplaySettings, CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
+        GameplaySettings, CameraSettings, AudioCueSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',

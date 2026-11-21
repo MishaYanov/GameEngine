@@ -6,7 +6,7 @@ use courtyard_gameplay::checkpoint::{
 
 use super::*;
 
-fn storage_root() -> Result<PathBuf, String> {
+pub(super) fn storage_root() -> Result<PathBuf, String> {
 	let directory = std::env::var_os("LOCALAPPDATA")
 		.map(PathBuf::from)
 		.filter(|path| path.is_absolute())
@@ -120,13 +120,42 @@ impl GameApp {
 		expected: &SlotGeneration,
 		source: RestoreSource,
 	) -> Result<String, String> {
+		self.scene_load_timing = None;
+		self.invalidate_scene_prefetch();
+		let mut timing = SceneLoadTiming::new("player", SceneLoadScope::Play, Instant::now());
+		let result = self.prepare_checkpoint_restore(slot, expected, source, &mut timing);
+		if result.is_ok() {
+			self.scene_load_timing = Some(timing);
+		} else {
+			timing.finish(SceneLoadOutcome::Failed);
+		}
+		result
+	}
+
+	fn prepare_checkpoint_restore(
+		&mut self,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		source: RestoreSource,
+		timing: &mut SceneLoadTiming,
+	) -> Result<String, String> {
 		let registry = self
 			.checkpoints
 			.as_ref()
 			.ok_or("This project has no checkpoints")?;
 		let profile = storage_root()?;
-		let saved = registry.load_slot_for_restore(&profile, slot, expected, source)?;
 		let project = self.project.as_ref().ok_or("Project is unavailable")?;
+		let saved = registry.load_slot_for_restore_with_authored(
+			&profile,
+			slot,
+			expected,
+			source,
+			project,
+			|scene_id| {
+				self.authored_checkpoint_scene(scene_id)
+					.map(|(_, document)| document)
+			},
+		)?;
 		let scene_id = saved.scene_id().clone();
 		let (path, authored) = self.authored_checkpoint_scene(&scene_id)?;
 		let (document, progress, status) =
@@ -135,11 +164,13 @@ impl GameApp {
 		let prepared =
 			self.editor
 				.prepare_restored_game(scene_id, Arc::clone(&document), progress)?;
-		self.adopt_prepared_scene_checked(&document, prepared, path, |registry| {
+		self.adopt_prepared_scene_checked(&document, prepared, path, timing, |registry| {
 			registry
 				.ok_or("Checkpoint registry changed")?
 				.verify_slot_generation(&profile, slot, expected)
 		})?;
+		self.feedback_audio.invalidate();
+		self.feedback_captions.clear();
 		self.checkpoint_base = Some(Arc::new(authored));
 		Ok(if source == RestoreSource::Previous {
 			format!("Recovered prior save ({})", saved.checkpoint_id())

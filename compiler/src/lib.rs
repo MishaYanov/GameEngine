@@ -152,7 +152,19 @@ pub fn copy_assets(source: &Path, destination: &Path) -> std::io::Result<()> {
 fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
 	let mut files = Vec::new();
 	let mut total = 0;
-	collect_assets(root, root, 0, &mut files, &mut total, &mut 0)?;
+	let audio = bridge::feedback_audio::load(root).map_err(io::Error::other)?;
+	let mut cue_files = std::collections::BTreeSet::new();
+	if let Some(audio) = audio {
+		for (name, _) in audio.files().filter(|(name, _)| name.ends_with(".wav")) {
+			let path = checked_asset_path(root, Path::new(name))?;
+			cue_files.insert(
+				path.strip_prefix(root)
+					.map_err(io::Error::other)?
+					.to_path_buf(),
+			);
+		}
+	}
+	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, &cue_files)?;
 	files.sort_by(|a, b| a.0.cmp(&b.0));
 	files
 		.into_iter()
@@ -271,6 +283,7 @@ fn collect_assets(
 	files: &mut Vec<(PathBuf, u64)>,
 	total: &mut u64,
 	visited: &mut usize,
+	cue_files: &std::collections::BTreeSet<PathBuf>,
 ) -> io::Result<()> {
 	*visited += 1;
 	if depth > 32 || *visited > 10_000 {
@@ -286,7 +299,15 @@ fn collect_assets(
 	}
 	if metadata.is_dir() {
 		for entry in fs::read_dir(path)? {
-			collect_assets(root, &entry?.path(), depth + 1, files, total, visited)?;
+			collect_assets(
+				root,
+				&entry?.path(),
+				depth + 1,
+				files,
+				total,
+				visited,
+				cue_files,
+			)?;
 		}
 		return Ok(());
 	}
@@ -300,7 +321,10 @@ fn collect_assets(
 		.and_then(|value| value.to_str())
 		.unwrap_or("")
 		.to_ascii_lowercase();
-	if !["png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json"].contains(&extension.as_str()) {
+	let relative = path.strip_prefix(root).map_err(io::Error::other)?;
+	if !["png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json"].contains(&extension.as_str())
+		&& !(extension == "wav" && cue_files.contains(relative))
+	{
 		return Err(io::Error::other("Unsupported packaged asset format"));
 	}
 	if extension == "json" && metadata.len() > 16 * 1024 * 1024 {
@@ -312,7 +336,6 @@ fn collect_assets(
 	if *total > 512 * 1024 * 1024 {
 		return Err(io::Error::other("Assets exceed 512 MiB"));
 	}
-	let relative = path.strip_prefix(root).map_err(io::Error::other)?;
 	if relative.as_os_str().len() > 1024 {
 		return Err(io::Error::other("Asset path exceeds 1024 characters"));
 	}

@@ -13,6 +13,11 @@ impl EntityData {
 				.saturating_add(component.id.as_str().len())
 				.saturating_add(component.settings.retained_bytes());
 		}
+		if let Some(component) = &self.interactable {
+			bytes = bytes
+				.saturating_add(component.id.as_str().len())
+				.saturating_add(component.settings.action.capacity());
+		}
 		for (kind, id) in &self.component_ids {
 			bytes = bytes
 				.saturating_add(kind.capacity())
@@ -78,6 +83,16 @@ impl EntityData {
 				schema_version: 1,
 				enabled: component.enabled,
 				data: ComponentData::Animation {
+					settings: component.settings.clone(),
+				},
+			});
+		}
+		if let Some(component) = &self.interactable {
+			records.push(ComponentRecord {
+				id: component.id.clone(),
+				schema_version: 1,
+				enabled: component.enabled,
+				data: ComponentData::Interactable {
 					settings: component.settings.clone(),
 				},
 			});
@@ -168,6 +183,9 @@ impl EntityData {
 		{
 			return Err("This component type permits one attachment per object".into());
 		}
+		if !replace && records.len() >= MAX_COMPONENTS_PER_OBJECT {
+			return Err("Object component count exceeds its limit".into());
+		}
 		match component.data {
 			ComponentData::CharacterController { settings } => {
 				self.character_controller =
@@ -183,6 +201,13 @@ impl EntityData {
 					enabled: component.enabled,
 					settings,
 				})
+			}
+			ComponentData::Interactable { settings } => {
+				self.interactable = Some(InteractableComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				});
 			}
 			ComponentData::MeshRenderer {
 				model_path,
@@ -231,6 +256,7 @@ impl EntityData {
 		match record.data {
 			ComponentData::CharacterController { .. } => self.character_controller = None,
 			ComponentData::Animation { .. } => self.animation = None,
+			ComponentData::Interactable { .. } => self.interactable = None,
 			ComponentData::MeshRenderer { .. } => {
 				self.model_path = NO_MESH_PATH.into();
 				self.asset_id = None;

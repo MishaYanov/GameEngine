@@ -1,0 +1,88 @@
+pipeline {
+    agent { label 'engine-windows-release-coordinator' }
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 15, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '5'))
+    }
+    parameters {
+        string(name: 'BUNDLE_ID', description: 'Folder staged by the trusted release operator under the coordinator inbox.')
+    }
+    environment {
+        PYTHONUTF8 = '1'
+    }
+    stages {
+        stage('Verify trusted host evidence') {
+            steps {
+                script {
+                    def status = powershell returnStatus: true, encoding: 'UTF-8', script: '''
+                        $ErrorActionPreference = 'Stop'
+                        $encoding = [System.Text.UTF8Encoding]::new($false)
+                        [Console]::OutputEncoding = $encoding
+                        $run = Join-Path (Get-Location).Path "target/windows-host-gates/build-$env:BUILD_NUMBER"
+                        if (Test-Path -LiteralPath $run) { throw 'Choose a fresh coordinator build directory' }
+                        New-Item -ItemType Directory -Path $run | Out-Null
+
+                        if ($env:BUNDLE_ID -cnotmatch '^[a-z0-9][a-z0-9_-]{0,63}$') { throw 'Invalid bundle ID' }
+                        if (![IO.Path]::IsPathRooted($env:ENGINE_WINDOWS_GATE_INBOX) -or
+                            ![IO.Path]::IsPathRooted($env:ENGINE_WINDOWS_GATE_PROFILES)) {
+                            throw 'Configure the trusted inbox and host profiles on this worker'
+                        }
+                        $bundle = Join-Path $env:ENGINE_WINDOWS_GATE_INBOX $env:BUNDLE_ID
+                        $bundleItem = Get-Item -LiteralPath $bundle
+                        if (!$bundleItem.PSIsContainer -or ($bundleItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                            throw 'The trusted bundle must be an ordinary directory'
+                        }
+                        $receipt = Join-Path $bundle 'qualification.json'
+                        $archive = Join-Path $bundle 'candidate.zip'
+                        $evidence = Join-Path $bundle 'evidence'
+                        $verifyLog = Join-Path $run 'verification.log'
+                        $profiles = $env:ENGINE_WINDOWS_GATE_PROFILES
+                        $ErrorActionPreference = 'Continue'
+                        $response = & python -B scripts/verify_host_gates.py verify $receipt $archive $evidence --profiles $profiles 2> $verifyLog
+                        $status = $LASTEXITCODE
+                        $ErrorActionPreference = 'Stop'
+                        if ($status -notin 0, 1, 2) {
+                            if (Test-Path -LiteralPath $verifyLog) { Get-Content -LiteralPath $verifyLog }
+                            exit 3
+                        }
+                        $decisionJson = $response -join [Environment]::NewLine
+                        $decision = $decisionJson | ConvertFrom-Json
+                        $expected = @('accepted', 'rejected', 'pending')[$status]
+                        if ($decision.verdict -ne $expected) { throw 'Unexpected coordinator verdict' }
+                        foreach ($gate in $decision.gates.PSObject.Properties) {
+                            foreach ($file in $gate.Value.evidence.PSObject.Properties) {
+                                $source = Join-Path $evidence $file.Name
+                                $copies = Join-Path $run "verified-evidence/$($gate.Name)"
+                                $destination = Join-Path $copies $file.Name
+                                [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+                                Copy-Item -LiteralPath $source -Destination $destination
+                                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.Value) {
+                                    throw 'Selected host evidence changed after verification'
+                                }
+                            }
+                        }
+                        [IO.File]::WriteAllText((Join-Path $run 'release-decision.json'), $decisionJson, $encoding)
+                        Write-Output "Release decision for $($env:BUNDLE_ID): $($decision.verdict)"
+                        exit $status
+                    '''
+                    if (status == 2) {
+                        unstable('Host gates or clean source evidence are pending')
+                    } else if (status != 0) {
+                        error('Host gates rejected the release or the evidence could not be verified')
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                def root = "target/windows-host-gates/build-${env.BUILD_NUMBER}"
+                archiveArtifacts artifacts: "$root/release-decision.json,$root/verification.log,$root/verified-evidence/**",
+                                 fingerprint: true, allowEmptyArchive: true, followSymlinks: false
+            }
+        }
+    }
+}

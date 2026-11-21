@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "cues": [
+    {
+      "event": "key_collected",
+      "path": "audio/cue-key.wav"
+    },
+    {
+      "event": "gate_opened",
+      "path": "audio/cue-gate.wav"
+    },
+    {
+      "event": "run_completed",
+      "path": "audio/cue-finish.wav"
+    }
+  ]
+}

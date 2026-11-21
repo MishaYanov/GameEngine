@@ -12,25 +12,7 @@ pub(super) fn is_linked_package_entry(metadata: &std::fs::Metadata) -> bool {
 }
 
 pub(super) fn resolve_scene_path(asset_root: &Path, relative: &str) -> Result<PathBuf, String> {
-	let root = asset_root
-		.canonicalize()
-		.map_err(|error| error.to_string())?;
-	let mut path = root.clone();
-	for component in Path::new(relative).components() {
-		let std::path::Component::Normal(name) = component else {
-			return Err("Scene path must be a relative asset path".into());
-		};
-		path.push(name);
-		let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-		if is_linked_package_entry(&metadata) {
-			return Err("Scene path includes a linked package entry".into());
-		}
-	}
-	let scene = path.canonicalize().map_err(|error| error.to_string())?;
-	if !scene.starts_with(root) || !scene.is_file() {
-		return Err("Scene must resolve to a regular file inside the asset root".into());
-	}
-	Ok(scene)
+	scene_io::resolve_confined_scene_path(asset_root, Path::new(relative))
 }
 
 impl GameApp {
@@ -88,16 +70,7 @@ impl GameApp {
 			return;
 		}
 		self.update_keyboard_camera(delta_seconds);
-		let gate_is_open = |editor: &SceneEditor| {
-			editor
-				.play_progress::<progress::CampaignProgress>()
-				.is_some_and(|progress| progress.route_gate_open)
-		};
-		let previously_open = gate_is_open(&self.editor);
 		let result = self.tick_play(delta_seconds);
-		if result.is_ok() && !previously_open && gate_is_open(&self.editor) {
-			feedback_audio::play_gate_cue();
-		}
 		report_update_result(
 			"player_simulation",
 			result,
@@ -136,6 +109,7 @@ impl GameApp {
 		}
 		let pad = self.logical_gamepad();
 		let was_paused = self.editor.simulation_paused();
+		let mut before = self.feedback_facts();
 		let mut outcome = self.editor.update_play_with_gamepad(
 			&mut self.scene,
 			&self.input,
@@ -143,6 +117,9 @@ impl GameApp {
 			delta_seconds,
 		)?;
 		let paused = self.editor.simulation_paused();
+		if paused != was_paused {
+			self.reset_gamepad_input();
+		}
 		if let Some(trace) = self.play_trace.as_mut() {
 			trace.record_paused(paused);
 			trace.record_controls(
@@ -155,6 +132,16 @@ impl GameApp {
 			);
 		}
 		loop {
+			if outcome.steps > 0
+				&& let (Some(prior), Some(after)) = (before, self.feedback_facts())
+			{
+				for cue in prior.rising(after) {
+					if self.standalone_runtime && self.player_controls.display().cue_captions {
+						self.feedback_captions.push(cue, Instant::now());
+					}
+					self.feedback_audio.emit(cue);
+				}
+			}
 			if let Some(trace) = self.play_trace.as_mut() {
 				trace.record_steps(outcome.steps);
 			}
@@ -185,9 +172,20 @@ impl GameApp {
 					.ok_or("Renderer is unavailable")?
 					.wait_idle()?;
 			}
+			before = self.feedback_facts();
 			outcome = self.editor.drain_play(&mut self.scene)?;
 		}
 		Ok(())
+	}
+
+	fn feedback_facts(&self) -> Option<feedback_audio::Facts> {
+		let progress = self.editor.play_progress::<progress::CampaignProgress>()?;
+		let course = progress.scene_facts(self.editor.play_scene_id()?);
+		Some(feedback_audio::Facts {
+			key: course.has_key,
+			gate: course.gate_open,
+			complete: progress.completed,
+		})
 	}
 
 	pub(super) fn fulfill_runtime_spawns(&mut self) -> Result<(), String> {
@@ -297,6 +295,9 @@ impl GameApp {
 	}
 
 	pub(super) fn finish_mode_change(&mut self) {
+		self.invalidate_scene_prefetch();
+		self.feedback_audio.invalidate();
+		self.feedback_captions.clear();
 		self.tools.panel.edit = None;
 		self.set_mouse_capture(false);
 		self.input.suppress_held();
@@ -343,13 +344,25 @@ impl GameApp {
 			.ok_or("Project configuration is not initialized")?
 			.startup_scene_id
 			.clone();
-		self.install_play_scene(startup, true)
+		self.install_play_scene(startup, true)?;
+		self.feedback_audio.invalidate();
+		self.feedback_captions.clear();
+		Ok(())
 	}
 
 	pub(super) fn install_play_scene(
 		&mut self,
 		scene_id: SceneId,
 		new_game: bool,
+	) -> Result<(), String> {
+		self.install_timed_player_scene(scene_id, new_game, SceneLoadScope::Play)
+	}
+
+	fn install_timed_player_scene(
+		&mut self,
+		scene_id: SceneId,
+		new_game: bool,
+		scope: SceneLoadScope,
 	) -> Result<(), String> {
 		let current = self
 			.editor
@@ -358,6 +371,103 @@ impl GameApp {
 		if !new_game && current == &scene_id {
 			return Ok(());
 		}
+		self.scene_load_timing = None;
+		if new_game {
+			self.invalidate_scene_prefetch();
+		}
+		let mut timing = SceneLoadTiming::new("player", scope, Instant::now());
+		let result = self.prepare_player_scene(scene_id, new_game, &mut timing);
+		if result.is_ok() {
+			self.scene_load_timing = Some(timing);
+		} else {
+			timing.finish(SceneLoadOutcome::Failed);
+		}
+		result
+	}
+
+	pub(super) fn exercise_scene_loads(&mut self, samples: u32) -> Result<(), String> {
+		if samples == 0 {
+			return Ok(());
+		}
+		let project = self
+			.project
+			.as_ref()
+			.ok_or("Project configuration is unavailable")?;
+		let startup = project.startup_scene_id.clone();
+		let route = if self.smoke_prefetch_probe {
+			progress::settings::InteractionSettings::from_project(project)?
+				.and_then(|settings| settings.campaign)
+		} else {
+			None
+		};
+		let alternate = route
+			.as_ref()
+			.and_then(|route| route.successor(&startup))
+			.cloned()
+			.or_else(|| {
+				project
+					.scenes
+					.iter()
+					.find(|scene| scene.id() != &startup)
+					.map(|scene| scene.id().clone())
+			})
+			.ok_or("Scene load smoke requires two authored scenes")?;
+		for index in 0..samples + 2 {
+			let scene = if index % 2 == 0 { &alternate } else { &startup };
+			let scope = if index < 2 {
+				SceneLoadScope::Warmup
+			} else {
+				SceneLoadScope::Play
+			};
+			if self.smoke_prefetch_probe && index >= 2 && index % 2 == 0 {
+				self.measure_active_frames(index)?;
+			}
+			self.install_timed_player_scene(scene.clone(), false, scope)?;
+			let mut rendered = false;
+			for _ in 0..8 {
+				if self.render()? == renderer::DrawStatus::Rendered {
+					rendered = true;
+					break;
+				}
+			}
+			if !rendered {
+				if let Some(timing) = self.scene_load_timing.take() {
+					timing.finish(SceneLoadOutcome::Failed);
+				}
+				return Err("Scene load smoke did not render a frame after installation".into());
+			}
+		}
+		self.wait_for_gpu()
+	}
+
+	pub(super) fn invalidate_scene_prefetch(&mut self) {
+		if let Some(prefetch) = self.scene_prefetch.as_mut() {
+			prefetch.invalidate();
+		}
+	}
+
+	fn measure_active_frames(&mut self, sample: u32) -> Result<(), String> {
+		for frame in 0..3 {
+			let started = Instant::now();
+			if self.render()? != renderer::DrawStatus::Rendered {
+				return Err("Prefetch probe could not draw an active-scene frame".into());
+			}
+			scene_prefetch::record_active_frame(
+				sample,
+				frame,
+				self.scene_prefetch.is_some(),
+				started.elapsed(),
+			);
+		}
+		Ok(())
+	}
+
+	fn prepare_player_scene(
+		&mut self,
+		scene_id: SceneId,
+		new_game: bool,
+		timing: &mut SceneLoadTiming,
+	) -> Result<(), String> {
 		let project = self
 			.editor
 			.project()
@@ -368,7 +478,21 @@ impl GameApp {
 			.as_ref()
 			.ok_or("Asset root is not initialized")?;
 		let scene_path = resolve_scene_path(asset_root, relative_path)?;
-		let parsed = scene_io::load_data(&scene_path)?;
+		let (parsed, outcome, estimated_bytes) = if let Some(prefetch) =
+			self.scene_prefetch.as_mut()
+			&& !new_game
+		{
+			prefetch.load(&scene_id, &scene_path)?
+		} else {
+			(
+				scene_io::load_data(&scene_path)?,
+				runtime::scene_prefetch::PrefetchOutcome::Disabled,
+				0,
+			)
+		};
+		if self.scene_prefetch_enabled || self.smoke_prefetch_probe {
+			scene_prefetch::record_load(timing, &scene_id, outcome, estimated_bytes);
+		}
 		let document = Arc::new(parsed.data);
 		let prepared = if new_game {
 			self.editor
@@ -377,20 +501,11 @@ impl GameApp {
 			self.editor
 				.prepare_play_scene(scene_id, Arc::clone(&document))?
 		};
-		self.adopt_prepared_scene(&document, prepared, scene_path)?;
+		self.adopt_prepared_scene_checked(&document, prepared, scene_path, timing, |_| Ok(()))?;
 		if self.checkpoints.is_some() {
 			self.checkpoint_base = Some(document);
 		}
 		Ok(())
-	}
-
-	pub(super) fn adopt_prepared_scene(
-		&mut self,
-		document: &runtime::scene_data::SceneData,
-		prepared: runtime::scene_editor::PreparedScene,
-		scene_path: PathBuf,
-	) -> Result<(), String> {
-		self.adopt_prepared_scene_checked(document, prepared, scene_path, |_| Ok(()))
 	}
 
 	pub(super) fn adopt_prepared_scene_checked(
@@ -398,6 +513,7 @@ impl GameApp {
 		document: &runtime::scene_data::SceneData,
 		prepared: runtime::scene_editor::PreparedScene,
 		scene_path: PathBuf,
+		timing: &mut SceneLoadTiming,
 		before_commit: impl FnOnce(
 			Option<&courtyard_gameplay::checkpoint::CheckpointRegistry>,
 		) -> Result<(), String>,
@@ -410,6 +526,8 @@ impl GameApp {
 			.asset_manager
 			.as_mut()
 			.ok_or("Assets are not initialized")?;
+		timing.cpu_ready();
+		timing.gpu_started();
 		let candidate = scene_io::instantiate(document, assets, renderer);
 
 		// Both scenes share one cache and budget until the candidate commits.
@@ -426,6 +544,8 @@ impl GameApp {
 		});
 		assets.prune_unused();
 		installed?;
+		self.invalidate_scene_prefetch();
+		timing.installed();
 		self.clear_game_controls();
 		self.set_mouse_capture(false);
 		if self.standalone_runtime {

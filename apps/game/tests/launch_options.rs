@@ -123,3 +123,76 @@ fn playtrace_is_opt_in_and_requires_a_regular_player_run() {
 		assert!(LaunchOptions::parse(arguments, true, false).is_err());
 	}
 }
+
+#[test]
+fn scene_cycles_require_bounded_player_smoke() {
+	for options in [
+		vec!["--smoke-scene-cycles", "2"],
+		vec!["--development", "--smoke-test", "--smoke-scene-cycles", "2"],
+		vec!["--smoke-test", "--smoke-scene-cycles", "0"],
+		vec!["--smoke-test", "--smoke-scene-cycles", "101"],
+		vec![
+			"--smoke-test",
+			"--smoke-scene-cycles",
+			"2",
+			"--smoke-scene-cycles",
+			"3",
+		],
+	] {
+		assert!(LaunchOptions::parse(options, true, false).is_err());
+	}
+	assert_eq!(
+		LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "20"], true, false)
+			.unwrap()
+			.smoke_scene_cycles,
+		20
+	);
+}
+
+#[test]
+fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
+	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-prefetch-probe"], true, false).is_err());
+	assert!(
+		!LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "32"], true, false)
+			.unwrap()
+			.smoke_prefetch_probe
+	);
+	assert!(
+		LaunchOptions::parse(
+			[
+				"--smoke-test",
+				"--smoke-scene-cycles",
+				"32",
+				"--smoke-prefetch-probe",
+			],
+			true,
+			false
+		)
+			.unwrap()
+			.smoke_prefetch_probe
+	);
+	assert!(LaunchOptions::parse(["--export-slot", "1", "p.json"], false, false).is_err());
+	assert!(LaunchOptions::parse(["--export-slot", "4", "p.json"], true, false).is_err());
+	assert!(
+		LaunchOptions::parse(
+			["--export-slot", "1", "p.json", "--smoke-test"],
+			true,
+			false
+		)
+			.is_err()
+	);
+	assert!(
+		LaunchOptions::parse(["--preview-slot-import", "2", "p.json"], true, false)
+			.unwrap()
+			.transfer
+			.is_some()
+	);
+	assert!(LaunchOptions::parse(["--commit-slot-import", "2", "p.json"], true, false).is_err());
+	assert!(LaunchOptions::parse(["--scene-prefetch", "--development"], true, false).is_err());
+	assert!(LaunchOptions::parse(["--scene-prefetch"], false, false).is_err());
+	assert!(
+		LaunchOptions::parse(["--smoke-test", "--scene-prefetch"], true, false)
+			.unwrap()
+			.scene_prefetch
+	);
+}

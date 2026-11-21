@@ -534,3 +534,185 @@ mod documents;
 mod incremental;
 #[path = "editor_workspace/play.rs"]
 mod play;
+
+fn campaign_workspace() -> (
+	Fixture,
+	PathBuf,
+	EditorWorkspace,
+	courtyard_gameplay::settings::CampaignDefinition,
+) {
+	let fixture = Fixture::new();
+	let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game");
+	let manifest = fixture.0.parent().unwrap().join("project.json");
+	fs::copy(source.join("project.courtyard-chapters.json"), &manifest).unwrap();
+	let project = runtime::project::ProjectData::load(&manifest).unwrap();
+	for scene in project.scenes.iter() {
+		fs::copy(
+			source.join("assets").join(scene.asset_path()),
+			fixture.0.join(scene.asset_path()),
+		)
+			.unwrap();
+	}
+	fs::create_dir(fixture.0.join("props")).unwrap();
+	for model in ["capsule.glb", "cube.glb", "sphere.glb"] {
+		fs::copy(
+			source.join("assets/props").join(model),
+			fixture.0.join("props").join(model),
+		)
+			.unwrap();
+	}
+	let campaign = courtyard_gameplay::settings::InteractionSettings::from_project(&project)
+		.unwrap()
+		.unwrap()
+		.campaign
+		.unwrap();
+	let workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+		.unwrap();
+	(fixture, manifest, workspace, campaign)
+}
+
+#[test]
+fn campaign_authoring_rechecks_owner_and_validates_unsaved_inactive_scene_roles() {
+	let (_fixture, manifest, mut workspace, mut route) = campaign_workspace();
+	let original_project = workspace.backend.session().project().clone();
+	route.chapters[1].label = "Garden Walk".into();
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.campaign_generation(revision).unwrap();
+	let reviewed = workspace
+		.capture_campaign(generation, revision, route.clone())
+		.unwrap()
+		.review()
+		.unwrap();
+	let generation_error = workspace
+		.capture_campaign(generation + 1, revision, route.clone())
+		.unwrap_err();
+	assert_eq!(generation_error.code, "conflict");
+
+	let garden = SceneId::new("garden").unwrap();
+	let courtyard = SceneId::new("courtyard").unwrap();
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: garden.clone(),
+		},
+	);
+	run(
+		&mut workspace,
+		Command::SetCollider {
+			key: "garden-exit-trigger".into(),
+			collider: None,
+		},
+	);
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: courtyard,
+		},
+	);
+	let current_revision = workspace.backend.session().revision();
+	assert!(workspace
+		.backend
+		.session()
+		.scene_states()
+		.iter()
+		.any(|scene| scene.id == garden && scene.dirty));
+	let stale_error = workspace.commit_campaign(reviewed).unwrap_err();
+	assert_eq!(stale_error.code, "conflict");
+	let error = workspace
+		.capture_campaign(generation, current_revision, route)
+		.unwrap()
+		.review()
+		.err()
+		.expect("An unsaved inactive Garden must fail review");
+	assert_eq!(error.scene_id.as_ref(), Some(&garden));
+	assert!(error.message.contains("Exit trigger"), "{}", error.message);
+	let session = workspace.backend.session();
+	assert_eq!(session.revision(), current_revision);
+	assert_eq!(session.project(), &original_project);
+	assert_eq!(
+		runtime::project::ProjectData::load(&manifest).unwrap(),
+		original_project
+	);
+}
+
+#[test]
+fn campaign_authoring_applies_one_undoable_route_and_roundtrips_through_staging() {
+	let (fixture, manifest, mut workspace, mut route) = campaign_workspace();
+	let mut legacy = workspace.backend.session().project().clone();
+	let payload = legacy
+		.gameplay_settings
+		.as_mut()
+		.unwrap()
+		.as_object_mut()
+		.unwrap();
+	payload.remove("campaign");
+	payload.insert("schema_version".into(), 1.into());
+	payload.get_mut("scenes").unwrap()["courtyard"]["destination_scene"] = "finish".into();
+	run(
+		&mut workspace,
+		Command::SetProject {
+			project: legacy.clone(),
+		},
+	);
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.campaign_generation(revision).unwrap();
+	route.chapters[1].label = "Garden Walk".into();
+	route.chapters.swap(0, 1);
+	let reviewed = workspace
+		.capture_campaign(generation, revision, route.clone())
+		.unwrap()
+		.review()
+		.unwrap();
+	let accepted = workspace.commit_campaign(reviewed).unwrap();
+	assert_eq!(accepted.revision, revision + 1);
+	assert!(accepted.project_dirty);
+	assert_eq!(
+		accepted.project.startup_scene_id,
+		route.chapters[0].course_scene
+	);
+	let before = legacy.gameplay_settings.unwrap();
+	let after = accepted.project.gameplay_settings.as_ref().unwrap();
+	for key in ["project_save_id", "checkpoints", "route_gate"] {
+		assert_eq!(before[key], after[key], "{key}");
+	}
+	assert_eq!(after["scenes"]["garden"]["destination_scene"], "courtyard");
+	assert_eq!(after["scenes"]["courtyard"]["destination_scene"], "finish");
+
+	run(&mut workspace, Command::Undo);
+	assert_eq!(
+		workspace
+			.backend
+			.session()
+			.project()
+			.gameplay_settings
+			.as_ref(),
+		Some(&before)
+	);
+	run(&mut workspace, Command::Redo);
+	let revision = workspace.backend.session().revision();
+	workspace.save_all(revision).unwrap();
+	let mut reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+		.unwrap();
+	let disk = runtime::project::ProjectData::load(&manifest).unwrap();
+	assert_eq!(reopened.backend.session().project(), &disk);
+	assert_eq!(&disk, &accepted.project);
+	let parent = fixture.0.parent().unwrap().join("stage");
+	fs::create_dir(&parent).unwrap();
+	let prepared = compiler::prepare_project(&disk, &fixture.0).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, parent.to_str().unwrap()).unwrap();
+	assert_eq!(
+		runtime::project::ProjectData::load(staged.path().join("project.json")).unwrap(),
+		disk
+	);
+	run(&mut reopened, Command::StartPlay);
+	assert_eq!(
+		reopened.backend.play_status().unwrap().scene_id,
+		route.chapters[0].course_scene
+	);
+}
