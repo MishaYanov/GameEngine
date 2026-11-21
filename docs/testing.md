@@ -3,6 +3,18 @@
 Run from the repository root after [setup](usage.md). Cache locked Rust dependencies and install frontend/docs
 dependencies first.
 
+## Milestones 7–9 verification scope
+
+The [M7–M9 review](milestones-7-9-review.md#run-and-verify) documents the current event, character and animation
+contracts and focused commands. Its [verification ledger](verification/milestones-7-9-tests-2026-11-21.json)
+records integration results; older totals below remain evidence for their original snapshots.
+
+Headless now decodes animation assets on the CPU while creating no GPU/window. Its existing `state_hash` retains
+the `project_and_render_scene` scope. `native_components_hash` separately covers full lifecycle/event/controller/
+animation diagnostics under `native_components_v1`; opaque game-module state, game progress, scheduler and trigger
+history are excluded. Native inspection paging does not truncate this projection. Compare each hash only within
+its declared scope. CPU replay, hidden Vulkan tests, native packaged execution and visible controls are separate checks.
+
 ## Current editor workspace documentation scope
 
 The 2026-11-20 reconciliation inspects `e0f2148`, history since `85269c8`, and staged/unstaged/new source including

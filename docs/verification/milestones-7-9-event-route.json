@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_play_input",
+        "movement": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    {
+      "type": "tick",
+      "count": 180
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_play_input",
+        "movement": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "type": "tick",
+      "count": 60
+    }
+  ]
+}

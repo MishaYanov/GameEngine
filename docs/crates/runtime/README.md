@@ -183,7 +183,8 @@ frame-time claim. See the [runtime lifecycle review](../../milestones-4-6-review
 | bounds / picking / visibility   | World-aware bounds, nearest-box picking, conservative frustum selection                 |
 
 Schema 4 stores transform-only nodes, parents, typed mesh/material, collider and native behavior components, plus up to 16 scene lights.
-Full static scene import is not skinning, morph playback or animation. Collision is not full physics. Model resources
+Full static scene import remains separate from the bounded skinned-animation path added in M9. Morph playback remains
+unsupported. Collision is not full physics. Model resources
 still contain Vulkan types, so the asset/GPU-scene side is not backend-independent.
 
 ## Legacy and compatibility APIs

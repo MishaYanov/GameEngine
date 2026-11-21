@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          1,
+          0
+        ],
+        "jump_held": true
+      }
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          1,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 30
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 90
+    }
+  ]
+}

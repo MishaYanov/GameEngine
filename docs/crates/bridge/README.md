@@ -4,6 +4,11 @@ Source: `crates/bridge`. The serializable engine/editor DTOs own no UI layout, n
 or GPU lifecycle. The shared `runtime_prefab::load` adapter additionally performs bounded CPU filesystem/catalog
 reads and fingerprint validation for the three hosts; it prepares prefab data without owning GPU resources.
 
+`animation_asset` also provides bounded CPU GLB decoding, catalog/source-pin validation, clip metadata and shared
+per-scene immutable bindings. Editor, player, headless and compiler consume the same supported subset. Images are
+decoded for the animated material subset; uploading them remains a runtime/renderer responsibility. See the
+[animation asset contract](../../milestones-7-9-review.md#supported-asset-and-material-subset).
+
 ## Editor protocol
 
 `bridge::editor` adds typed command requests, snapshots, capabilities, transforms, snapping, prefab/collision and

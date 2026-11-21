@@ -24,6 +24,12 @@ for opening the shell.
 
 ## Editor IPC
 
+M7–M9 add native machine descriptors, Character Controller and Animation component authoring, and animation
+metadata/preview IPC. Preview open captures the applied component's source pin, workspace generation and revision;
+scrub samples a separate immutable pose. It neither advances Play nor edits the document. Stale tokens and invalid
+times reject without replacing the last accepted pose. The renderer consumes the active native preview in Scene
+view; Angular owns clip/time controls. See the [M7–M9 review](../../milestones-7-9-review.md) for the exact boundaries.
+
 `editor_capabilities` includes the native gameplay-module catalog and module-owned role hints. The Angular selector
 uses this data rather than a hardcoded Courtyard list. `set_collider` continues through the ordinary core command path;
 collider presence changes use full snapshots and interaction/dimension changes use authoritative entity deltas.

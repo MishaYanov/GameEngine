@@ -39,10 +39,19 @@ changes do not implement two frames in flight.
 | Camera             | Descriptor set0/binding0                                                               |
 | Lighting           | Descriptor set0/binding1, up to16 validated directional/point lights                   |
 | Texture            | Descriptor set1/binding0                                                               |
+| Skin influences    | Separate 24-byte stream: four u16 joints then four f32 weights                         |
+| Skin palettes      | Descriptor set2/binding0 storage, at most 64 × 128 matrices                             |
 
 Flags retain unlit/font/vertex-color/depth-free behavior and add the frame-batcher instanced-input bit. Per-instance
 tint combines entity/material values; normals use inverse transpose with finite fallback for collapsed transforms. Basic
 directional/point lighting is not PBR, shadows, or every glTF material feature.
+
+The separate skinned vertex shader preserves this static vertex contract and the 96-byte push layout. `flags.x`
+continues to carry material/draw bits; `flags.y/z` select palette base/count. Per-frame palette storage is written
+after frame completion. Skinned draws use their own palettes/material primitives and are excluded from ordinary
+opaque static instancing. Conservative joint-envelope bounds follow the accepted CPU pose. These source contracts
+and layout tests are separate from native image/resource acceptance; see
+[Milestone 9](../../milestones-7-9-review.md#milestone-9-bounded-skinned-animation).
 
 ## Batching and resource reuse
 

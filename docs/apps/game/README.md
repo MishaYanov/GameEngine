@@ -24,6 +24,19 @@ Steps 21–35 add hierarchy/world transforms, scene schema3, static glTF node/me
 directional/point lights, bounded fixed steps and conservative collision movement. Renderer submission adds asynchronous
 GPU timestamps and compatible opaque instancing. Actual model/material/scene inputs remain validated and bounded.
 
+### Event, controller and animation samples
+
+Additional authored manifests are `apps/game/event-demo.json`, `controller-demo.json` and `animation-demo.json`.
+Open the selected manifest in the editor, use the CPU runner with `--project`, or export that manifest with the
+compiler's `--export` form and run the resulting package. The source Player launch above still selects the bundled
+default project; it does not accept these manifests as a `--project` argument.
+
+The event lab demonstrates independent timed doors and one-shot pickup/completion; Controller Room uses WASD and
+Space for upright box movement; Animated Character Room adds Idle/Walk/Air plus an independent looping companion.
+Gameplay, event queues, movement and animation share the accepted fixed-step transaction. See the
+[M7–M9 walkthrough and commands](../../milestones-7-9-review.md#run-and-verify) for asset restrictions, native
+preview, source pins, replay diagnostics and acceptance boundaries.
+
 ## Modes and authored gameplay
 
 Use `cargo run -p game -- --development` or `cargo run -p game -- --player` to choose explicitly. Installed project

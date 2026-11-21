@@ -5,6 +5,10 @@ Start with [setup and usage](usage.md), then read [architecture](architecture.md
 Read the [five building-blocks review](building-blocks-review.md) for the current playable proof of concept,
 module/role authoring, Collider Inspector, sensors/filtering, optimization boundaries and attributed verification.
 
+The [Milestones 7–9 implementation review](milestones-7-9-review.md) records typed state-machine gameplay,
+character controllers, skinned animation, native preview and the separate native-component replay hash.
+Its verification scope is distinct from the earlier [Milestones 4–6](milestones-4-6-review.md) baseline.
+
 ## Workspace and development
 
 - [Vulkan scene editor design](../designs/editor-viewport/README.md): Researched navigation, grid, selection, transform tools, native asset placement, rendering architecture, and a game-creation support profile. Proposed viewport work is distinguished from current implementation.

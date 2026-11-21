@@ -93,7 +93,11 @@ glTF default scene or first available scene, visits nodes/parent links, preserve
 and represents transform-only nodes as nonrenderable scene entities. Shared meshes/materials are reused. SceneData
 mesh_index distinguishes source meshes.
 
-Static import rejects unsupported skins/morph behavior and does not provide animation playback. Geometry/image/resource
+Static import rejects unsupported skins/morph behavior and does not provide animation playback. Validation for that
+path remains unchanged. A separate `bridge::animation_asset` decoder and `engine_core::animation`
+runtime now support the bounded embedded-GLB skinning subset described in
+[Milestone 9](milestones-7-9-review.md#milestone-9-bounded-skinned-animation). Static import should not be used to
+flatten an animated asset into a substitute for its authored Animation component. Geometry/image/resource
 budgets, containment checks and graph validation apply. Selected unique meshes have a 256 MiB decoded-geometry preflight
 limit including expanded indices. AssetManager caps logical GPU resources at 512 MiB and 8,192 resources, accounting for
 externally retained references through a weak-reference ledger. Scene draw expansion is capped at 65,536 render objects

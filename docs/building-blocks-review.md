@@ -135,6 +135,10 @@ Restart requires Play, returns to the retained startup document with fresh progr
 The summary's generic `play_status` reports the current module's objective/detail/score/completion and run/pending
 identity; it is omitted in Edit. This avoids Courtyard-only summary fields. Compare `state_hash` for project/rendered
 scene content, not whole summaries: timing and UUID run identities can differ between otherwise equivalent replays.
+The later M7–M9 runner additionally emits `native_components` and `native_components_hash` with scope
+`native_components_v1`, covering full normalized lifecycle/controller/animation state independently of the historical
+visible-scene hash. It also decodes required animation assets on the CPU. See the
+[native replay scope](milestones-7-9-review.md#what-the-replay-hashes-mean) for exclusions and examples.
 The replay remains bounded to 8 MiB, 10,000 actions, 100,000 tick calls and its between-action wall-time budget.
 
 Create and exercise a frozen authored-input snapshot without compiling:
