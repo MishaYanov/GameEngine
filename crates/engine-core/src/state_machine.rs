@@ -399,17 +399,15 @@ impl MachineDef {
 			for action in &state.on_enter {
 				match action {
 					MachineAction::Emit { target, .. } => endpoint(target)?,
-					MachineAction::SetVisible { entity: key, .. } if !slots.contains(key) => {
-						if !entity(key)?.has_mesh_component() {
-							return Err("Machine visibility action requires a mesh renderer".into());
-						}
+					MachineAction::SetVisible { entity: key, .. }
+						if !slots.contains(key) && !entity(key)?.has_mesh_component() =>
+					{
+						return Err("Machine visibility action requires a mesh renderer".into());
 					}
 					MachineAction::SetCollisionEnabled { entity: key, .. }
-						if !slots.contains(key) =>
+						if !slots.contains(key) && entity(key)?.collider.is_none() =>
 					{
-						if entity(key)?.collider.is_none() {
-							return Err("Machine collision action requires a collider".into());
-						}
+						return Err("Machine collision action requires a collider".into());
 					}
 					_ => {}
 				}

@@ -9,10 +9,10 @@ fn edit_glb(edit: impl FnOnce(&mut Value, &mut Vec<u8>)) -> Vec<u8> {
 	let mut bin = GLB[28 + length..].to_vec();
 	edit(&mut doc, &mut bin);
 	let mut json = serde_json::to_vec(&doc).unwrap();
-	while json.len() % 4 != 0 {
+	while !json.len().is_multiple_of(4) {
 		json.push(b' ');
 	}
-	while bin.len() % 4 != 0 {
+	while !bin.len().is_multiple_of(4) {
 		bin.push(0);
 	}
 	let total = 12 + 8 + json.len() + 8 + bin.len();
@@ -172,27 +172,26 @@ fn finite_world_bounds_cannot_hide_overflow_in_mesh_local_skinning() {
 	});
 	let decoded = std::panic::catch_unwind(|| animation_asset::decode(&bytes));
 	assert!(decoded.is_ok());
-	if let Ok(asset) = decoded.unwrap() {
-		if let Ok(pose) = engine_core::animation::sample_pose(
+	if let Ok(asset) = decoded.unwrap()
+		&& let Ok(pose) = engine_core::animation::sample_pose(
 			std::sync::Arc::new(asset),
 			0,
 			0.,
 			glam::Mat4::IDENTITY,
 			0,
 		) {
-			for vertex in pose.asset.primitives.iter().flat_map(|p| &p.vertices) {
-				let input = glam::Vec3::from_array(vertex.position).extend(1.);
-				let mut skinned = glam::Vec4::ZERO;
-				for i in 0..4 {
-					// Preserve the shader's actual operation order, including zero-weight lanes.
-					skinned +=
-						vertex.weights[i] * (pose.palette[usize::from(vertex.joints[i])] * input);
-				}
-				assert!(
-					(pose.mesh_matrix * skinned).is_finite(),
-					"accepted world bounds concealed mesh-local overflow"
-				);
+		for vertex in pose.asset.primitives.iter().flat_map(|p| &p.vertices) {
+			let input = glam::Vec3::from_array(vertex.position).extend(1.);
+			let mut skinned = glam::Vec4::ZERO;
+			for i in 0..4 {
+				// Preserve the shader's actual operation order, including zero-weight lanes.
+				skinned +=
+					vertex.weights[i] * (pose.palette[usize::from(vertex.joints[i])] * input);
 			}
+			assert!(
+				(pose.mesh_matrix * skinned).is_finite(),
+				"accepted world bounds concealed mesh-local overflow"
+			);
 		}
 	}
 }

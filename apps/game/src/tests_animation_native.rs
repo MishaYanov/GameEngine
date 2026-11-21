@@ -22,7 +22,7 @@ fn animated_characters_draw_independent_palettes_preview_and_restart() {
 			[0., 4., 8.],
 			[0., 1., 0.],
 			[0., 1., 0.],
-			1.0472,
+			std::f32::consts::FRAC_PI_3,
 			width as f32 / height as f32,
 			0.1,
 			200.,
