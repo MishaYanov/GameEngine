@@ -25,3 +25,5 @@ __pycache__/
 
 # Local implementation walkthroughs requested for the next learning milestones.
 /.learning-guides/
+
+/temp/

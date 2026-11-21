@@ -3,6 +3,43 @@
 Run from the repository root after [setup](usage.md). Cache locked Rust dependencies and install frontend/docs
 dependencies first.
 
+## Camera authoring and host parity
+
+```powershell
+cargo test --locked --offline -p app --lib camera_preview
+cargo test --locked --offline -p app --lib camera_room_preview
+cargo test --locked --offline -p runtime --test game_content_rect
+cargo test --locked --offline -p engine-headless --test camera_replay --test animation_replay
+npm.cmd --prefix apps/editor test -- --watch=false
+```
+
+The camera-room subprocess checks intermediate poses, blockers, queued inputs, restart and tick partitioning across
+source and staged projects. The editor-host test exercises a saved camera through the native undo stack, reopen and
+Play. Release export, pixel comparisons and timings have their own reproduction
+commands. [Camera verification](milestone-10-camera-review.md)
+
+## Orbit camera obstruction checks
+
+Run the geometry, session and preview checks from the workspace root.
+
+```powershell
+cargo test --locked --offline -p engine-core --lib camera_probe_math_tests
+cargo test --locked --offline -p engine-core --test orbit_camera_schema_api --test orbit_camera_runtime_api
+cargo test --locked --offline -p engine-core --test orbit_camera_obstruction_api --test camera_preview_api
+cargo test --locked --offline -p engine-headless --test cli orbit_obstruction_replay
+```
+
+The unit tests exercise contact math and candidate accounting. The schema and runtime suites cover the
+projection-dependent minimum radius, fixed-step input and target lifetime. The obstruction suite checks
+all four near-plane corners at 3:1, target and wall motion in the same step, and recovery when a timed wall despawns.
+It also checks subtree and layer filtering, restart, scene replacement and rollback when sensors and the camera
+exhaust their shared budget on the second fixed step. The preview suite compares accepted poses with Play
+and checks that a rejected preview sample preserves the previous pose. The CLI test launches the headless executable
+with a thin wall beside the center ray. It checks the eye at admission, one fixed step after a 90° turn, and after
+recovery to the requested distance. These are CPU-level checks.
+Interactive framing at different window sizes and exported-player presentation belong to native acceptance.
+[Orbit camera settings and collision behavior](timing-input-camera.md#orbit-camera-obstruction).
+
 ## Milestones 7–9 verification scope
 
 The [M7–M9 review](milestones-7-9-review.md#run-and-verify) documents the current event, character and animation

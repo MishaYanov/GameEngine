@@ -8,16 +8,6 @@ struct PipelineOptions {
 	skinned: bool,
 }
 
-pub struct VulkanGraphicsPipeline {
-	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
-	device: Device,
-	pipeline: vk::Pipeline,
-	layout: vk::PipelineLayout,
-	_palette_layout: Option<super::skinning::PaletteLayout>,
-}
-
-/// Opaque-material pipeline variants with identical descriptor/push layouts.
-/// Recreate the whole set when attachment formats change with the swapchain.
 pub struct VulkanMaterialPipelines {
 	color_format: vk::Format,
 	depth_format: vk::Format,
@@ -144,6 +134,16 @@ impl VulkanMaterialPipelines {
 	}
 }
 
+pub struct VulkanGraphicsPipeline {
+	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
+	device: Device,
+	pipeline: vk::Pipeline,
+	layout: vk::PipelineLayout,
+	_palette_layout: Option<super::skinning::PaletteLayout>,
+}
+
+/// Opaque-material pipeline variants with identical descriptor/push layouts.
+/// Recreate the whole set when attachment formats change with the swapchain.
 impl VulkanGraphicsPipeline {
 	pub fn new(
 		device: &Device,

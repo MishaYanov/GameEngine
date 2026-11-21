@@ -2,5 +2,5 @@
 pub use engine_core::camera_controller::*;
 
 #[cfg(test)]
-#[path = "tests_camera_controller.rs"]
+#[path = "../tests/unit/camera_controller.rs"]
 mod tests;

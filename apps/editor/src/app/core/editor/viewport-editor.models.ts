@@ -37,6 +37,11 @@ export interface ViewportEditorState {
     readonly collider_error?: string | null;
     readonly transform_preview?: ViewportTransformPreview | null;
     readonly game_status?: PlayStatus | null;
+    readonly orbit_status?: {
+        readonly blocker: string | null;
+        readonly recovering: boolean;
+        readonly target_lost: boolean
+    } | null;
 }
 
 export interface PlayStatus {

@@ -1,0 +1,193 @@
+use super::SimulationSession;
+use crate::{
+	EntityKey,
+	camera_input::CameraIntent,
+	input::{GameKeyboardInput, HeldGameActions},
+	simulation::FixedStepper,
+};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MovementTarget {
+	#[default]
+	AllControlled,
+	Entity(EntityKey),
+}
+
+#[derive(Default)]
+pub struct InputFrame {
+	pub(super) movement: HashMap<EntityKey, [f32; 3]>,
+	pub(super) game_actions: HeldGameActions,
+}
+impl InputFrame {
+	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
+		self.movement.get(entity).copied().unwrap_or([0.0; 3])
+	}
+	pub fn is_idle(&self) -> bool {
+		self.movement.is_empty() && self.game_actions.ids.is_empty()
+	}
+	pub fn action_held(&self, id: &str) -> bool {
+		self.game_actions.ids.contains(id)
+	}
+	/// Multiple held actions may feed the same parameter. Any held source sets it.
+	pub fn animation_bool(&self, parameter: &str) -> bool {
+		self.game_actions.animation_parameters.contains(parameter)
+	}
+}
+
+impl SimulationSession {
+	pub fn clear_input(&mut self) {
+		self.characters.clear_input();
+		self.camera_input.clear();
+		self.inputs.movement.clear();
+		self.inputs.game_actions = HeldGameActions::default();
+		self.clock.reset();
+	}
+	pub fn set_paused(&mut self, paused: bool) {
+		if self.paused != paused {
+			self.paused = paused;
+			self.clear_input();
+		}
+	}
+	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
+		let movement = normalized_input(movement)?;
+		if self.characters.contains(entity) {
+			self.characters
+				.set_movement(entity, [movement[0], movement[2]])?;
+			return Ok(true);
+		}
+		if !self.controlled_target_set.contains(entity) {
+			return Err("Input target has no configured controlled movement behavior".into());
+		}
+
+		Ok(Self::apply_input(
+			&mut self.inputs,
+			&mut self.clock,
+			entity,
+			movement,
+		))
+	}
+
+	pub fn set_targeted_input(
+		&mut self,
+		target: &MovementTarget,
+		movement: [f32; 3],
+	) -> Result<bool, String> {
+		match target {
+			MovementTarget::AllControlled => self.set_controlled_input(movement),
+			MovementTarget::Entity(entity) => self.set_input(entity, movement),
+		}
+	}
+
+	pub(crate) fn set_game_keyboard_input(
+		&mut self,
+		target: &MovementTarget,
+		input: GameKeyboardInput,
+	) -> Result<(), String> {
+		if self.paused {
+			return Ok(());
+		}
+		let [x, y] = input.movement;
+		// The legacy controlled mover uses XY; upright characters use XZ.
+		// Route each target once so the legacy path cannot overwrite character Z.
+		match target {
+			MovementTarget::AllControlled => {
+				self.characters.sample_keyboard(
+					&self.world,
+					None,
+					input.movement,
+					&input.actions,
+				)?;
+				for entity in &self.controlled_targets {
+					Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
+				}
+			}
+			MovementTarget::Entity(entity) if self.characters.contains(entity) => {
+				self.characters.sample_keyboard(
+					&self.world,
+					Some(entity),
+					input.movement,
+					&input.actions,
+				)?;
+			}
+			MovementTarget::Entity(entity) => {
+				self.set_input(entity, [x, y, 0.0])?;
+			}
+		}
+		self.inputs.game_actions = input.actions;
+		Ok(())
+	}
+
+	fn apply_input(
+		inputs: &mut InputFrame,
+		clock: &mut FixedStepper,
+		entity: &EntityKey,
+		movement: [f32; 3],
+	) -> bool {
+		match inputs.movement.get_mut(entity) {
+			Some(old) if *old == movement => return false,
+			Some(old) if movement != [0.0; 3] => {
+				*old = movement;
+				return true;
+			}
+			Some(_) => {
+				inputs.movement.remove(entity);
+			}
+			None if movement == [0.0; 3] => return false,
+			None => {
+				inputs.movement.insert(entity.clone(), movement);
+			}
+		}
+		clock.reset();
+		true
+	}
+
+	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
+		let movement = normalized_input(movement)?;
+		let character_keys = self.characters.keys().cloned().collect::<Vec<_>>();
+		for key in &character_keys {
+			self.characters
+				.set_movement(key, [movement[0], movement[2]])?;
+		}
+
+		if self.controlled_targets.is_empty() && character_keys.is_empty() && movement != [0.0; 3] {
+			return Err(
+				"Configure a controlled movement behavior before supplying movement".into(),
+			);
+		}
+
+		let mut changed = false;
+		for entity in &self.controlled_targets {
+			changed |= Self::apply_input(&mut self.inputs, &mut self.clock, entity, movement);
+		}
+
+		Ok(changed)
+	}
+
+	pub fn pending_camera_input(&self) -> CameraIntent {
+		self.camera_input.snapshot()
+	}
+
+	pub(crate) fn submit_camera_input(&mut self, intent: CameraIntent) -> Result<(), String> {
+		if self.paused {
+			return Err("Resume Play before submitting camera input".into());
+		}
+		if !self.orbit_state().is_some_and(|rig| !rig.target_lost) {
+			return Err("Camera input requires an orbit camera with a live target".into());
+		}
+		self.camera_input.submit(intent)
+	}
+}
+
+fn normalized_input(movement: [f32; 3]) -> Result<[f32; 3], String> {
+	if !movement.iter().all(|v| v.is_finite()) {
+		return Err("Movement input must be finite".into());
+	}
+	let length = movement
+		.iter()
+		.map(|v| (*v as f64).powi(2))
+		.sum::<f64>()
+		.sqrt()
+		.max(1.0);
+	Ok(movement.map(|v| (v as f64 / length) as f32))
+}

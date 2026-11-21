@@ -1,0 +1,88 @@
+{
+  "schema_version": 2,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          1
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 60
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 180
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          1,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 60
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 240
+    },
+    {
+      "type": "camera_input",
+      "yaw_delta": 0.25,
+      "pitch_delta": -0.05,
+      "log_distance_delta": -0.1
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "restart_run"
+    }
+  ]
+}

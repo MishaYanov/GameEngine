@@ -6,6 +6,53 @@ retain their milestone context; the [building-blocks review](building-blocks-rev
 course/restart and verification scope. Automated and hidden native focus tests remain distinct from visible desktop
 interaction.
 
+## Orbit camera obstruction
+
+An authored `camera.orbit` follows an entity by key. The **camera arm** is the segment from its filtered pivot
+to the requested eye position. On admission and on each resolved fixed step, the rig probes the full requested arm
+against the current world colliders. A wall moving into the arm pulls the eye in on that same step, even below the
+authored minimum zoom distance. The rig keeps the requested zoom so the eye can return when the wall clears.
+`recovery_seconds` controls that outward movement. Set it to zero for immediate recovery.
+
+For example, place the pivot at the origin looking along −Z, request a 5-unit arm, and put a box wall at
+Z = 3 with a half-depth of 0.25. Its near face is at 2.75. A `probe_radius` of 0.25 limits the eye to just
+under Z = 2.5 after clearance and rounding. A solid collider on a matching layer still blocks when its own
+detection mask is zero. A trigger in exactly the same position leaves the arm clear.
+
+| Setting or scene property           | Effect on the probe                                                                                                                                                                                                                                                   |
+|-------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `probe_radius`                      | Covers all four near-plane corners for a Game aspect ratio up to 3:1. For a near plane of 0.1 and a vertical FOV of 60°, the minimum is about 0.20917 units including the 0.001 margin. A radius of 0.25 passes. Widening the projection can require a larger radius. |
+| `obstruction_mask`                  | A wall blocks if any of its layer bits overlap this authored nonzero mask. Enable its collider and clear its sensor flag. Mesh visibility has no effect.                                                                                                              |
+| Target and descendants              | The probe skips the target's whole subtree, including attached colliders. A topology change invalidates the cached exclusion indices.                                                                                                                                 |
+| `pivot_offset` and `follow_seconds` | Place the pivot sphere in clear space and allow room for follow lag. A pivot strictly inside an expanded obstacle produces an error naming its entity key.                                                                                                            |
+
+### Runtime behavior and limits
+
+The query sweeps the eye sphere conservatively against each collider's enclosing world-axis-aligned box.
+Rounded shapes and rotated walls can therefore shorten the arm early. Contact may shorten it to zero.
+The guarantee applies along the pivot-to-eye segment of each accepted pose. A large yaw change can move between
+two accepted poses around a corner without checking the arc between those poses.
+
+The probe measures collider faces relative to the pivot before expanding them by the radius. This preserves a
+small overlap even when the absolute coordinates are large enough to round away the radius. It also checks the
+eye after rounding to the position the camera can store. A projection that exceeds camera precision can still fail.
+
+The query reads synchronized collision geometry without moving bodies or generating trigger events. Equal hit
+fractions select the lexicographically lowest blocker key. Each cast permits 8,192 work visits, including skipped
+candidates and endpoint checks, and draws from the 1,000,000 collision candidates shared across the tick's fixed
+steps. Rebuilding exclusions also consumes that shared budget. If a cast rejects the second step of a multi-step
+tick, the session restores the world and camera from before the tick, clears live input and pauses.
+
+Entering Play, restarting and preparing a destination scene resolve the first camera before publication.
+A failed preparation preserves the current run. Runtime prefab insertion checks the new layout before committing
+the spawn. The CPU-only `FrozenOrbitPreview` uses the same query against a frozen scene and exposes the accepted
+pose and orbit state. Use `user_distance`, `last_allowed_distance`, `effective_distance` and
+`obstruction.blocker` to distinguish a zoom request, the current safe limit, the displayed arm, and the wall
+that set the limit. The editor's **Preview Orbit** action opens this frozen rig and samples it from a toolbar above the
+native viewport.
+[Author, preview and play the camera room](milestone-10-camera-review.md).
+[Run the camera regression tests](testing.md#orbit-camera-obstruction-checks).
+
 ## time.rs: FrameClock
 
 `runtime::FrameClock` (also `runtime::time::FrameClock`) stores the previous `Instant`. `tick(now) -> Duration` sets the current baseline and returns the elapsed interval, capped at **100 ms**. The first tick returns zero. Equal/backwards timestamps return zero through saturating subtraction, and the next tick uses the newly supplied baseline. Time beyond the cap is discarded, not accumulated for later catch-up.

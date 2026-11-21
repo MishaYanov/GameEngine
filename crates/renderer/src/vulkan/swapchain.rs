@@ -434,5 +434,5 @@ fn choose_composite_alpha(
 }
 
 #[cfg(test)]
-#[path = "tests_swapchain.rs"]
+#[path = "../../tests/unit/vulkan/swapchain.rs"]
 mod tests;

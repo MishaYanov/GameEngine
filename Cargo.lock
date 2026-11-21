@@ -1161,6 +1161,7 @@ name = "engine-headless"
 version = "0.1.0"
 dependencies = [
  "bridge",
+ "compiler",
  "courtyard-gameplay",
  "engine-core",
  "engine-logger",
@@ -1445,8 +1446,10 @@ dependencies = [
  "courtyard-gameplay",
  "engine-logger",
  "glam",
+ "image",
  "renderer",
  "runtime",
+ "serde_json",
  "tracing",
  "winit",
 ]

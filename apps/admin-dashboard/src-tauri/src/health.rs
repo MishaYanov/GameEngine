@@ -191,5 +191,5 @@ impl Default for Registry {
 }
 
 #[cfg(test)]
-#[path = "tests_health.rs"]
+#[path = "../tests/unit/tests_health.rs"]
 mod tests;

@@ -3,11 +3,22 @@
 //! advances to contact and projects remaining motion along at most three contact planes;
 //! it is not a rigid-body solver or triangle-accurate collision system.
 
-use std::collections::HashMap;
+mod geometry;
+mod movement;
 
-use glam::{Mat4, Vec3};
+use geometry::{
+	Shape, WorldCollider, bounds_overlap, collider_geometry, contact_geometry, world_colliders,
+};
+pub(crate) use movement::BodyCast;
+pub use movement::{MovementContact, MovementResult, move_entity};
+
+use glam::{DVec3, Mat4, Vec3};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::runtime_lifecycle::{RuntimeEntityHandle, RuntimeLifecycle};
+use crate::world::RuntimeWorld;
 use crate::{
 	Bounds3, EntityKey,
 	collider::ColliderInteraction,
@@ -16,7 +27,8 @@ use crate::{
 
 const MAX_CANDIDATES: usize = 1_000_000;
 const MAX_CONTACTS: usize = 4096;
-const EPSILON: f32 = 1.0e-6;
+const CAMERA_MAX_VISITS: usize = 8192;
+const CAMERA_CLEARANCE: f64 = 0.001;
 
 /// Persistent broad-phase ordering and cached world geometry. The stateless
 /// helpers below remain available for authored-data queries.
@@ -34,11 +46,75 @@ struct CachedCollider {
 	interaction: ColliderInteraction,
 }
 
-/// First blocker on the requested orbit arm, with a segment fraction in 0..=1.
+#[derive(Clone)]
+pub(crate) struct CameraExclusions {
+	target: RuntimeEntityHandle,
+	topology_revision: u64,
+	by_entity_index: Arc<[bool]>,
+}
+
+impl CameraExclusions {
+	pub(crate) fn build(
+		world: &RuntimeWorld,
+		lifecycle: &RuntimeLifecycle,
+		target: &RuntimeEntityHandle,
+		remaining: &mut usize,
+	) -> Result<Self, String> {
+		lifecycle.validate_handle(target)?;
+		let count = world.data().entities.len();
+		if count > crate::scene_data::MAX_SCENE_ENTITIES {
+			return Err("Camera exclusion world exceeds the scene entity limit".into());
+		}
+
+		consume_camera_budget(remaining, count)?;
+		let root = world
+			.entity_index(&target.key)
+			.ok_or_else(|| "Camera target is missing from the candidate world".to_owned())?;
+		let mut excluded = vec![false; count];
+		for index in world.subtree_indices(root)? {
+			let slot = excluded
+				.get_mut(index)
+				.ok_or_else(|| "Camera exclusion index is invalid".to_owned())?;
+			*slot = true;
+		}
+		Ok(Self {
+			target: target.clone(),
+			topology_revision: lifecycle.topology_revision,
+			by_entity_index: excluded.into(),
+		})
+	}
+
+	pub(crate) fn matches(
+		&self,
+		world: &RuntimeWorld,
+		target: &RuntimeEntityHandle,
+		topology_revision: u64,
+	) -> bool {
+		self.target == *target
+			&& self.topology_revision == topology_revision
+			&& self.by_entity_index.len() == world.data().entities.len()
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CameraProbeHit {
 	pub blocker: crate::EntityKey,
 	pub fraction: f64,
+}
+
+pub(crate) struct CameraProbeLimit {
+	pub distance: f32,
+	pub hit: Option<CameraProbeHit>,
+}
+
+pub(crate) struct CameraProbe<'a> {
+	pub pivot: [f32; 3],
+	pub forward: [f32; 3],
+	pub distance: f32,
+	pub radius: f32,
+	pub obstruction_mask: u32,
+	pub target: &'a RuntimeEntityHandle,
+	pub topology_revision: u64,
 }
 
 impl CachedCollider {
@@ -83,160 +159,7 @@ pub struct CollisionStats {
 	pub updated_colliders: u64,
 	pub queries: u64,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MovementResult {
-	pub requested_delta: [f32; 3],
-	pub applied_delta: [f32; 3],
-	pub blocked_by: Option<EntityKey>,
-	/// At most three swept contacts, in resolution order.
-	#[serde(default, skip_serializing_if = "Vec::is_empty")]
-	pub contacts: Vec<MovementContact>,
-	pub changes: crate::world::WorldChange,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MovementContact {
-	pub entity: EntityKey,
-	/// Unit normal toward the obstacle. The positive normal component is removed.
-	pub normal: [f32; 3],
-	/// Time of impact in 0..=1 for this iteration's remaining motion, before skin.
-	pub fraction: f64,
-}
-
-/// A speculative translation against the existing collision snapshot. No world
-/// or collider records are mutated, and all casts share the caller's budget.
-pub(crate) struct BodyCast {
-	pub applied: Vec3,
-	pub contact: Option<MovementContact>,
-	pub flat_support: bool,
-	pub obstacle_bounds: Option<Bounds3>,
-}
-
 impl CollisionWorld {
-	pub(crate) fn body_bounds(&self, key: &EntityKey) -> Result<Bounds3, String> {
-		self.indices
-			.get(key)
-			.map(|index| self.records[*index].bounds)
-			.ok_or_else(|| "Character body has no enabled collider".into())
-	}
-	pub(crate) fn cast_body(
-		&self,
-		world: &crate::world::RuntimeWorld,
-		key: &EntityKey,
-		offset: Vec3,
-		delta: Vec3,
-		remaining: &mut usize,
-	) -> Result<BodyCast, String> {
-		if !offset.is_finite() || !delta.is_finite() {
-			return Err("Character cast must be finite".into());
-		}
-		consume_candidates(remaining, 1)?;
-		let index = *self
-			.indices
-			.get(key)
-			.ok_or("Character collider is unavailable")?;
-		let start = translated(&self.records[index].borrowed(), offset)?;
-		let end = translated(&start, delta)?;
-		let swept = start.bounds.union(end.bounds);
-		let mut earliest: Option<(f64, Vec3, &CachedCollider)> = None;
-		for entry in &self.ordered {
-			let obstacle = &self.records[entry.index];
-			if obstacle.bounds.min()[0] > swept.max()[0] {
-				break;
-			}
-			consume_candidates(remaining, 1)?;
-			if entry.index == index
-				|| obstacle.interaction.sensor
-				|| !start.interaction.detects(obstacle.interaction)
-				|| !bounds_overlap(swept, obstacle.bounds)
-			{
-				continue;
-			}
-			if contact_geometry(&start, &obstacle.borrowed())
-				.is_some_and(|(_, depth)| depth > 0.0001)
-			{
-				return Err("Character body starts penetrating a blocking collider".into());
-			}
-			if let Some((fraction, normal)) = sweep_hit(&start, &obstacle.borrowed(), delta)?
-				&& earliest.as_ref().is_none_or(|(time, _, old)| {
-					fraction < *time || fraction == *time && obstacle.key < old.key
-				}) {
-				earliest = Some((fraction, normal, obstacle));
-			}
-		}
-		let Some((fraction, normal, obstacle)) = earliest else {
-			return Ok(BodyCast {
-				applied: delta,
-				contact: None,
-				flat_support: false,
-				obstacle_bounds: None,
-			});
-		};
-		let length = delta.as_dvec3().length();
-		let travel = if length > 0.0 {
-			(fraction - 0.0001 / length).max(0.0) as f32
-		} else {
-			0.0
-		};
-		let matrix = world.world_matrices()[obstacle.entity_index];
-		let mut used = [false; 3];
-		let aligned = [matrix.x_axis, matrix.y_axis, matrix.z_axis]
-			.iter()
-			.all(|column| {
-				let Some(axis) = column.truncate().try_normalize() else {
-					return false;
-				};
-				let values = axis.abs().to_array();
-				let largest = (0..3)
-					.max_by(|a, b| values[*a].total_cmp(&values[*b]))
-					.unwrap();
-				let valid = !used[largest]
-					&& values[largest] >= 1.0 - 1e-5
-					&& (0..3).all(|other| other == largest || values[other] <= 1e-5);
-				used[largest] = true;
-				valid
-			});
-		Ok(BodyCast {
-			applied: delta * travel,
-			contact: Some(MovementContact {
-				entity: obstacle.key.clone(),
-				normal: normal.to_array(),
-				fraction,
-			}),
-			flat_support: matches!(obstacle.shape, Shape::Box) && aligned && normal.y < -0.999,
-			obstacle_bounds: Some(obstacle.bounds),
-		})
-	}
-	pub(crate) fn slide_body(
-		&self,
-		world: &crate::world::RuntimeWorld,
-		key: &EntityKey,
-		delta: Vec3,
-		remaining: &mut usize,
-	) -> Result<(Vec3, Vec<MovementContact>), String> {
-		let mut applied = Vec3::ZERO;
-		let mut rest = delta;
-		let mut contacts = Vec::new();
-		for _ in 0..3 {
-			if rest.length_squared() <= EPSILON * EPSILON {
-				break;
-			}
-			let cast = self.cast_body(world, key, applied, rest, remaining)?;
-			applied += cast.applied;
-			let Some(contact) = cast.contact else {
-				break;
-			};
-			rest -= cast.applied;
-			let normal = Vec3::from_array(contact.normal);
-			let approach = rest.dot(normal);
-			contacts.push(contact);
-			if approach <= 0.0 {
-				break;
-			}
-			rest -= normal * approach;
-		}
-		Ok((applied, contacts))
-	}
 	pub fn new(world: &crate::world::RuntimeWorld) -> Result<Self, String> {
 		let records = world_colliders(world.data(), world.world_matrices())?
 			.into_iter()
@@ -383,8 +306,7 @@ impl CollisionWorld {
 				if sensors_only && !a.interaction.sensor && !b.interaction.sensor {
 					continue;
 				}
-				if let Some((mut normal, penetration)) =
-					contact_geometry(&a.borrowed(), &b.borrowed())
+				if let Some((normal, penetration)) = contact_geometry(&a.borrowed(), &b.borrowed())
 				{
 					if !normal.is_finite() || !penetration.is_finite() {
 						return Err("Collision contact exceeds finite limits".into());
@@ -392,168 +314,130 @@ impl CollisionWorld {
 					if contacts.len() >= MAX_CONTACTS {
 						return Err("Collision contact budget exhausted".into());
 					}
-					let (first, second) = if a.key.as_str() <= b.key.as_str() {
-						(&a.key, &b.key)
-					} else {
-						normal = -normal;
-						(&b.key, &a.key)
-					};
-					contacts.push(Contact {
-						a: first.clone(),
-						b: second.clone(),
-						normal: normal.to_array(),
+					contacts.push(Contact::ordered(
+						&a.key,
+						&b.key,
+						normal,
 						penetration,
-						sensor: a.interaction.sensor || b.interaction.sensor,
-					});
+						a.interaction.sensor || b.interaction.sensor,
+					));
 				}
 			}
 		}
-		contacts.sort_by(|a, b| {
-			a.a.as_str()
-				.cmp(b.a.as_str())
-				.then_with(|| a.b.as_str().cmp(b.b.as_str()))
-		});
+		sort_contacts(&mut contacts);
 		Ok(contacts)
 	}
-	pub fn move_entity(
-		&mut self,
-		world: &mut crate::world::RuntimeWorld,
-		key: &EntityKey,
-		world_delta: [f32; 3],
-	) -> Result<MovementResult, String> {
-		let mut remaining = MAX_CANDIDATES;
-		self.move_entity_with_budget(world, key, world_delta, &mut remaining)
-	}
-	/// Uses a caller-owned budget so several moves cannot each spend a fresh
-	/// broad-phase allowance. Subtree lookups and skipped moving colliders also
-	/// consume work: blocked movement must not bypass the aggregate limit.
-	pub fn move_entity_with_budget(
-		&mut self,
-		world: &mut crate::world::RuntimeWorld,
-		key: &EntityKey,
-		world_delta: [f32; 3],
-		remaining: &mut usize,
-	) -> Result<MovementResult, String> {
-		let mut result = MovementResult {
-			requested_delta: world_delta,
-			applied_delta: [0.0; 3],
-			blocked_by: None,
-			contacts: Vec::new(),
-			changes: Default::default(),
-		};
-		let delta = Vec3::from_array(world_delta);
-		if !delta.is_finite() {
-			return Err("Movement must contain finite values".into());
-		}
-		let index = world
-			.entity_index(key)
-			.ok_or("Movement target does not exist")?;
-		if delta == Vec3::ZERO {
-			return Ok(result);
-		}
-		let parent = world.parent_matrix(index)?;
-		if parent.determinant() == 0.0 {
-			return Err("Cannot move beneath a singular parent transform".into());
-		}
-		let original = world.data().entities[index].transform.clone();
-		let inverse = parent.inverse();
-		if !(Vec3::from_array(original.position) + inverse.transform_vector3(delta)).is_finite() {
-			return Err("Movement produces a nonfinite local position".into());
-		}
-		let (applied, contacts) = self.slide_delta(world, index, delta, remaining)?;
-		result.blocked_by = contacts.first().map(|contact| contact.entity.clone());
-		result.contacts = contacts;
-		if applied == Vec3::ZERO {
-			return Ok(result);
-		}
-		let mut transform = original.clone();
-		transform.position =
-			(Vec3::from_array(original.position) + inverse.transform_vector3(applied)).to_array();
-		let before_world = world.world_matrices()[index].w_axis.truncate();
-		result.changes = world.set_transform(key, transform)?;
-		if let Err(error) = self.synchronize(world, &result.changes) {
-			let _ = world.set_transform(key, original);
-			return Err(error);
-		}
-		result.applied_delta =
-			(world.world_matrices()[index].w_axis.truncate() - before_world).to_array();
-		Ok(result)
-	}
-
-	fn slide_delta(
+	pub(crate) fn cast_camera_probe(
 		&self,
-		world: &crate::world::RuntimeWorld,
-		root: usize,
-		delta: Vec3,
-		budget: &mut usize,
-	) -> Result<(Vec3, Vec<MovementContact>), String> {
-		if self.records.is_empty() {
-			return Ok((delta, Vec::new()));
+		world: &RuntimeWorld,
+		probe: CameraProbe<'_>,
+		exclusions: &CameraExclusions,
+		remaining: &mut usize,
+	) -> Result<CameraProbeLimit, String> {
+		if !exclusions.matches(world, probe.target, probe.topology_revision) {
+			return Err("Camera exclusions do not match the candidate world topology".into());
 		}
-		let indices = world.subtree_indices(root)?;
-		consume_candidates(budget, indices.len())?;
-		let moving = indices
-			.iter()
-			.copied()
-			.collect::<std::collections::HashSet<_>>();
-		let colliders = indices
-			.iter()
-			.filter_map(|&index| self.indices.get(&world.data().entities[index].key).copied())
-			.collect::<Vec<_>>();
-		let mut applied = Vec3::ZERO;
-		let mut remainder = delta;
-		let mut contacts = Vec::new();
-		for _ in 0..3 {
-			if remainder.length_squared() <= EPSILON * EPSILON {
+		let ray = prepare_camera_probe(&probe)?;
+		consume_camera_budget(remaining, 1)?; // Account for the query itself.
+		let mut visits = 0;
+		let mut earliest: Option<(f64, &EntityKey)> = None;
+		let mut endpoint_boxes: Vec<(&EntityKey, DVec3, DVec3)> = Vec::new();
+		for entry in &self.ordered {
+			// Charge before every filter, including the broad-phase stop test.
+			charge_camera_visit(&mut visits, remaining)?;
+			let obstacle = &self.records[entry.index];
+			let min = DVec3::from_array(obstacle.bounds.min().map(f64::from));
+			let max = DVec3::from_array(obstacle.bounds.max().map(f64::from));
+			if min.x > ray.swept_max.x {
 				break;
 			}
-			let mut earliest: Option<(f64, Vec3, &EntityKey)> = None;
-			for &index in &colliders {
-				let initial = self.records[index].borrowed();
-				let start = translated(&initial, applied)?;
-				let end = translated(&start, remainder)?;
-				let swept = start.bounds.union(end.bounds);
-				for entry in &self.ordered {
-					let obstacle = &self.records[entry.index];
-					if obstacle.bounds.min()[0] > swept.max()[0] {
-						break;
-					}
-					consume_candidates(budget, 1)?;
-					if moving.contains(&obstacle.entity_index)
-						|| !bounds_overlap(swept, obstacle.bounds)
-					{
-						continue;
-					}
-					if let Some((fraction, normal)) =
-						sweep_hit(&start, &obstacle.borrowed(), remainder)?
-						&& earliest.as_ref().is_none_or(|(time, _, key)| {
-							fraction < *time
-								|| fraction == *time && obstacle.key.as_str() < key.as_str()
-						}) {
-						earliest = Some((fraction, normal, &obstacle.key));
-					}
+			let excluded = *exclusions
+				.by_entity_index
+				.get(obstacle.entity_index)
+				.ok_or_else(|| "Camera collider has a stale entity index".to_owned())?;
+			if excluded
+				|| obstacle.interaction.sensor
+				|| obstacle.interaction.layers & probe.obstruction_mask == 0
+				|| (0..3)
+					.any(|axis| max[axis] < ray.swept_min[axis] || min[axis] > ray.swept_max[axis])
+			{
+				continue;
+			}
+			// Expand in the pivot's frame. At huge world coordinates adding a small
+			// physical radius to an absolute face can round it away even in f64.
+			let relative_min = min - ray.start;
+			let relative_max = max - ray.start;
+			let actual_radius = DVec3::splat(f64::from(probe.radius));
+			let actual_min = relative_min - actual_radius;
+			let actual_max = relative_max + actual_radius;
+			if strictly_inside(DVec3::ZERO, actual_min, actual_max) {
+				return Err(format!(
+					"Camera pivot starts penetrating collider {}. Adjust the orbit pivot offset or follow lag, or move the collider.",
+					obstacle.key.as_str()
+				));
+			}
+			// This separating axis stays outside for the entire segment.
+			// f32 rounding is monotonic away from the already-representable pivot.
+			let moving_away = (0..3).any(|axis| {
+				0.0 <= actual_min[axis] && ray.delta[axis] <= 0.0
+					|| 0.0 >= actual_max[axis] && ray.delta[axis] >= 0.0
+			});
+			if moving_away {
+				continue;
+			}
+			let padded_min = relative_min - DVec3::splat(ray.padding);
+			let padded_max = relative_max + DVec3::splat(ray.padding);
+			let fraction = if strictly_inside(DVec3::ZERO, padded_min, padded_max) {
+				Some(0.0) // Safe physical origin, but no guard clearance to move inward.
+			} else {
+				segment_box_entry(DVec3::ZERO, ray.delta, padded_min, padded_max)?
+			};
+			if let Some(fraction) = fraction {
+				let replace = earliest.as_ref().is_none_or(|(time, old_key)| {
+					fraction < *time
+						|| (fraction == *time && obstacle.key.as_str() < old_key.as_str())
+				});
+				if replace {
+					earliest = Some((fraction, &obstacle.key));
 				}
 			}
-			let Some((fraction, normal, entity)) = earliest else {
-				applied += remainder;
-				break;
-			};
-			contacts.push(MovementContact {
-				entity: entity.clone(),
-				normal: normal.to_array(),
-				fraction,
-			});
-			let length = remainder.as_dvec3().length();
-			let travel = (fraction - 0.0001 / length).max(0.0) as f32;
-			applied += remainder * travel;
-			remainder *= 1.0 - travel;
-			let approach = remainder.dot(normal);
-			if approach <= 0.0 {
-				break;
-			}
-			remainder -= normal * approach;
+			endpoint_boxes.push((&obstacle.key, actual_min, actual_max));
 		}
-		Ok((applied, contacts))
+		let requested = f64::from(probe.distance);
+		let allowed = match earliest {
+			Some((fraction, _)) => {
+				let physical_length = ray.delta.length();
+				let clearance_fraction = if physical_length > 0.0 {
+					CAMERA_CLEARANCE / physical_length
+				} else {
+					0.0
+				};
+				requested * (fraction - clearance_fraction).max(0.0)
+			}
+			None => requested,
+		};
+		let distance = distance_round_down(allowed)?;
+		let forward = DVec3::from_array(probe.forward.map(f64::from));
+		let ideal_eye = ray.start - forward * f64::from(distance);
+		let rounded_eye = ideal_eye.as_vec3();
+		if !rounded_eye.is_finite() {
+			return Err("Accepted camera endpoint is not finite".into());
+		}
+		let checked_eye = rounded_eye.as_dvec3() - ray.start;
+		for (key, min, max) in endpoint_boxes {
+			charge_camera_visit(&mut visits, remaining)?;
+			if strictly_inside(checked_eye, min, max) {
+				return Err(format!(
+					"Rounded camera endpoint penetrates collider {}",
+					key.as_str()
+				));
+			}
+		}
+		let hit = earliest.map(|(fraction, key)| CameraProbeHit {
+			blocker: key.clone(),
+			fraction,
+		});
+		Ok(CameraProbeLimit { distance, hit })
 	}
 }
 
@@ -568,6 +452,37 @@ pub struct Contact {
 	/// never block kinematic movement.
 	#[serde(default)]
 	pub sensor: bool,
+}
+
+impl Contact {
+	fn ordered(
+		first: &EntityKey,
+		second: &EntityKey,
+		normal: Vec3,
+		penetration: f32,
+		sensor: bool,
+	) -> Self {
+		let (a, b, normal) = if first.as_str() <= second.as_str() {
+			(first, second, normal)
+		} else {
+			(second, first, -normal)
+		};
+		Self {
+			a: a.clone(),
+			b: b.clone(),
+			normal: normal.to_array(),
+			penetration,
+			sensor,
+		}
+	}
+}
+
+fn sort_contacts(contacts: &mut [Contact]) {
+	contacts.sort_by(|a, b| {
+		a.a.as_str()
+			.cmp(b.a.as_str())
+			.then_with(|| a.b.as_str().cmp(b.b.as_str()))
+	});
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -585,20 +500,6 @@ pub enum DebugShape {
 		min: [f32; 3],
 		max: [f32; 3],
 	},
-}
-
-#[derive(Clone, Copy)]
-enum Shape {
-	Box,
-	Sphere { center: Vec3, radius: f32 },
-}
-
-struct WorldCollider<'a> {
-	entity: &'a EntityKey,
-	entity_index: usize,
-	bounds: Bounds3,
-	shape: Shape,
-	interaction: ColliderInteraction,
 }
 
 /// Deterministic sweep-and-prune on minimum X, followed by box/sphere tests.
@@ -622,34 +523,24 @@ pub fn query_overlaps(data: &SceneData) -> Result<Vec<Contact>, String> {
 			if !bounds_overlap(a.bounds, b.bounds) {
 				continue;
 			}
-			if let Some((mut normal, penetration)) = contact_geometry(a, b) {
+			if let Some((normal, penetration)) = contact_geometry(a, b) {
 				if !normal.is_finite() || !penetration.is_finite() {
 					return Err("Collision contact exceeds finite numeric limits".into());
 				}
 				if contacts.len() >= MAX_CONTACTS {
 					return Err(format!("Collision query exceeds {MAX_CONTACTS} contacts"));
 				}
-				let (first, second) = if a.entity.as_str() <= b.entity.as_str() {
-					(a.entity, b.entity)
-				} else {
-					normal = -normal;
-					(b.entity, a.entity)
-				};
-				contacts.push(Contact {
-					a: first.clone(),
-					b: second.clone(),
-					normal: normal.to_array(),
+				contacts.push(Contact::ordered(
+					a.entity,
+					b.entity,
+					normal,
 					penetration,
-					sensor: a.interaction.sensor || b.interaction.sensor,
-				});
+					a.interaction.sensor || b.interaction.sensor,
+				));
 			}
 		}
 	}
-	contacts.sort_by(|a, b| {
-		a.a.as_str()
-			.cmp(b.a.as_str())
-			.then_with(|| a.b.as_str().cmp(b.b.as_str()))
-	});
+	sort_contacts(&mut contacts);
 	Ok(contacts)
 }
 
@@ -693,26 +584,6 @@ pub fn debug_shape(
 	})
 }
 
-/// Translate an entity subtree in world space, preserving its local rotation
-/// and scale. Motion advances to contact and slides along contact planes.
-/// Invalid data or an exhausted work budget fails before any transform is modified.
-pub fn move_entity(
-	data: &mut SceneData,
-	key: &EntityKey,
-	world_delta: [f32; 3],
-) -> Result<(), String> {
-	let mut world = crate::world::RuntimeWorld::new(std::sync::Arc::new(data.clone()))?;
-	let mut collisions = CollisionWorld::new(&world)?;
-	let result = collisions.move_entity(&mut world, key, world_delta)?;
-	if !result.changes.is_empty() {
-		let index = world
-			.entity_index(key)
-			.ok_or("Movement target disappeared")?;
-		data.entities[index].transform = world.data().entities[index].transform.clone();
-	}
-	Ok(())
-}
-
 fn checked_matrices(data: &SceneData) -> Result<Vec<Mat4>, String> {
 	if data.entities.len() > MAX_SCENE_ENTITIES {
 		return Err(format!(
@@ -720,285 +591,6 @@ fn checked_matrices(data: &SceneData) -> Result<Vec<Mat4>, String> {
 		));
 	}
 	data.world_matrices()
-}
-
-fn world_colliders<'a>(
-	data: &'a SceneData,
-	matrices: &[Mat4],
-) -> Result<Vec<WorldCollider<'a>>, String> {
-	let mut colliders = Vec::new();
-	for (index, (entity, matrix)) in data.entities.iter().zip(matrices).enumerate() {
-		if !entity.collision_enabled {
-			continue;
-		}
-		let Some(collider) = &entity.collider else {
-			continue;
-		};
-		let (bounds, shape) = collider_geometry(collider, *matrix)?;
-		colliders.push(WorldCollider {
-			entity: &entity.key,
-			entity_index: index,
-			bounds,
-			shape,
-			interaction: collider.interaction(),
-		});
-	}
-	Ok(colliders)
-}
-
-fn collider_geometry(collider: &ColliderData, matrix: Mat4) -> Result<(Bounds3, Shape), String> {
-	collider.validate()?;
-	let geometry = match collider {
-		ColliderData::Box {
-			half_extents,
-			offset,
-			..
-		} => {
-			let offset = Vec3::from_array(*offset);
-			let half = Vec3::from_array(*half_extents);
-			let bounds = Bounds3::new((offset - half).to_array(), (offset + half).to_array())?
-				.transformed(matrix)?;
-			(bounds, Shape::Box)
-		}
-		ColliderData::Sphere { radius, offset, .. } => {
-			let center = matrix.transform_point3(Vec3::from_array(*offset));
-			let radius = (*radius as f64 * conservative_scale(matrix)) as f32;
-			if !radius.is_finite() || !center.is_finite() {
-				return Err("Sphere collider produces nonfinite world geometry".into());
-			}
-			let half = Vec3::splat(radius);
-			(
-				Bounds3::new((center - half).to_array(), (center + half).to_array())?,
-				Shape::Sphere { center, radius },
-			)
-		}
-	};
-	Ok(geometry)
-}
-
-fn conservative_scale(matrix: Mat4) -> f64 {
-	let axes = [
-		matrix.x_axis.truncate(),
-		matrix.y_axis.truncate(),
-		matrix.z_axis.truncate(),
-	];
-	// The largest absolute row sum of A^T A bounds its largest eigenvalue.
-	// Orthogonal TRS columns reduce to the exact maximum axis scale; hierarchy
-	// shear remains safely enclosed instead of underestimating the sphere.
-	(0..3)
-		.map(|row| {
-			(0..3)
-				.map(|column| {
-					(0..3)
-						.map(|axis| axes[row][axis] as f64 * axes[column][axis] as f64)
-						.sum::<f64>()
-						.abs()
-				})
-				.sum::<f64>()
-		})
-		.fold(0.0, f64::max)
-		.sqrt()
-}
-
-fn bounds_overlap(a: Bounds3, b: Bounds3) -> bool {
-	(0..3).all(|axis| a.min()[axis] <= b.max()[axis] && a.max()[axis] >= b.min()[axis])
-}
-
-fn contact_geometry(a: &WorldCollider<'_>, b: &WorldCollider<'_>) -> Option<(Vec3, f32)> {
-	if !a.interaction.detects(b.interaction) {
-		return None;
-	}
-	match (a.shape, b.shape) {
-		(Shape::Box, Shape::Box) => box_box(a.bounds, b.bounds),
-		(
-			Shape::Sphere {
-				center: a,
-				radius: ar,
-			},
-			Shape::Sphere {
-				center: b,
-				radius: br,
-			},
-		) => {
-			let (normal, distance) = direction_and_distance(a, b);
-			let penetration = ar as f64 + br as f64 - distance;
-			(penetration >= 0.0).then_some((normal, penetration as f32))
-		}
-		(Shape::Sphere { center, radius }, Shape::Box) => sphere_box(center, radius, b.bounds),
-		(Shape::Box, Shape::Sphere { center, radius }) => {
-			sphere_box(center, radius, a.bounds).map(|(normal, penetration)| (-normal, penetration))
-		}
-	}
-}
-
-fn box_box(a: Bounds3, b: Bounds3) -> Option<(Vec3, f32)> {
-	if !bounds_overlap(a, b) {
-		return None;
-	}
-	let mut penetration = f32::INFINITY;
-	let mut normal = Vec3::X;
-	for axis in 0..3 {
-		let negative = a.max()[axis] - b.min()[axis];
-		let positive = b.max()[axis] - a.min()[axis];
-		let depth = negative.min(positive);
-		if depth < penetration {
-			penetration = depth;
-			normal = Vec3::ZERO;
-			normal[axis] = if negative <= positive { 1.0 } else { -1.0 };
-		}
-	}
-	Some((normal, penetration))
-}
-
-fn sphere_box(center: Vec3, radius: f32, bounds: Bounds3) -> Option<(Vec3, f32)> {
-	let closest = center.clamp(
-		Vec3::from_array(bounds.min()),
-		Vec3::from_array(bounds.max()),
-	);
-	let (normal, distance) = direction_and_distance(center, closest);
-	if distance > 0.0 {
-		let penetration = radius as f64 - distance;
-		return (penetration >= 0.0).then_some((normal, penetration as f32));
-	}
-	// Containment needs distance to an escape face, not zero penetration.
-	let mut depth = f32::INFINITY;
-	let mut normal = Vec3::X;
-	for axis in 0..3 {
-		let negative = center[axis] - bounds.min()[axis];
-		let positive = bounds.max()[axis] - center[axis];
-		if negative.min(positive) < depth {
-			depth = negative.min(positive);
-			normal = Vec3::ZERO;
-			normal[axis] = if negative <= positive { 1.0 } else { -1.0 };
-		}
-	}
-	Some((normal, radius + depth))
-}
-
-fn direction_and_distance(from: Vec3, to: Vec3) -> (Vec3, f64) {
-	let delta = [
-		to.x as f64 - from.x as f64,
-		to.y as f64 - from.y as f64,
-		to.z as f64 - from.z as f64,
-	];
-	let distance = delta
-		.into_iter()
-		.map(|value| value * value)
-		.sum::<f64>()
-		.sqrt();
-	let normal = if distance > 0.0 {
-		Vec3::from_array(delta.map(|value| (value / distance) as f32))
-	} else {
-		Vec3::X
-	};
-	(normal, distance)
-}
-
-fn translated<'a>(collider: &WorldCollider<'a>, delta: Vec3) -> Result<WorldCollider<'a>, String> {
-	let bounds = Bounds3::new(
-		(Vec3::from_array(collider.bounds.min()) + delta).to_array(),
-		(Vec3::from_array(collider.bounds.max()) + delta).to_array(),
-	)?;
-	let shape = match collider.shape {
-		Shape::Box => Shape::Box,
-		Shape::Sphere { center, radius } => Shape::Sphere {
-			center: center + delta,
-			radius,
-		},
-	};
-	Ok(WorldCollider {
-		entity: collider.entity,
-		entity_index: collider.entity_index,
-		bounds,
-		shape,
-		interaction: collider.interaction,
-	})
-}
-
-fn sweep_hit(
-	start: &WorldCollider<'_>,
-	obstacle: &WorldCollider<'_>,
-	delta: Vec3,
-) -> Result<Option<(f64, Vec3)>, String> {
-	if start.interaction.sensor
-		|| obstacle.interaction.sensor
-		|| !start.interaction.detects(obstacle.interaction)
-	{
-		return Ok(None);
-	}
-	if let Some((normal, penetration)) = contact_geometry(start, obstacle) {
-		if !normal.is_finite() || !penetration.is_finite() {
-			return Err("Collision contact exceeds finite limits".into());
-		}
-		return Ok((motion_dot(delta, normal) > 0.0).then_some((0.0, normal)));
-	}
-	if bounds_overlap(start.bounds, obstacle.bounds) {
-		let normal = match (start.shape, obstacle.shape) {
-			(Shape::Sphere { center: a, .. }, Shape::Sphere { center: b, .. }) => {
-				direction_and_distance(a, b).0
-			}
-			(Shape::Sphere { center, .. }, Shape::Box) => {
-				direction_and_distance(
-					center,
-					center.clamp(
-						Vec3::from_array(obstacle.bounds.min()),
-						Vec3::from_array(obstacle.bounds.max()),
-					),
-				)
-				.0
-			}
-			(Shape::Box, Shape::Sphere { center, .. }) => {
-				direction_and_distance(
-					center.clamp(
-						Vec3::from_array(start.bounds.min()),
-						Vec3::from_array(start.bounds.max()),
-					),
-					center,
-				)
-				.0
-			}
-			_ => Vec3::ZERO,
-		};
-		return Ok((motion_dot(delta, normal) > 0.0).then_some((0.0, normal)));
-	}
-	// Sweep the enclosing world bounds. Curved contacts remain conservative.
-	let min = Vec3::from_array(start.bounds.min()).as_dvec3();
-	let max = Vec3::from_array(start.bounds.max()).as_dvec3();
-	let center = (min + max) * 0.5;
-	let half = (max - min) * 0.5;
-	let low = Vec3::from_array(obstacle.bounds.min()).as_dvec3() - half;
-	let high = Vec3::from_array(obstacle.bounds.max()).as_dvec3() + half;
-	let mut entry = f64::NEG_INFINITY;
-	let mut exit = 1.0_f64;
-	let mut normal = Vec3::ZERO;
-	for axis in 0..3 {
-		let speed = f64::from(delta[axis]);
-		if speed == 0.0 {
-			if center[axis] < low[axis] || center[axis] > high[axis] {
-				return Ok(None);
-			}
-			continue;
-		}
-		let first = (low[axis] - center[axis]) / speed;
-		let second = (high[axis] - center[axis]) / speed;
-		let near = first.min(second);
-		if near > entry {
-			entry = near;
-			normal = Vec3::ZERO;
-			normal[axis] = delta[axis].signum();
-		}
-		exit = exit.min(first.max(second));
-		if entry > exit {
-			return Ok(None);
-		}
-	}
-	Ok((entry <= 1.0 && exit >= 0.0).then_some((entry.max(0.0), normal)))
-}
-
-fn motion_dot(delta: Vec3, direction: Vec3) -> f64 {
-	(0..3)
-		.map(|axis| delta[axis] as f64 * direction[axis] as f64)
-		.sum()
 }
 
 fn charge_candidate(candidates: &mut usize) -> Result<(), String> {
@@ -1020,37 +612,124 @@ fn consume_candidates(remaining: &mut usize, count: usize) -> Result<(), String>
 	Ok(())
 }
 
-#[cfg(test)]
-mod character_query_tests {
-	use super::*;
-	#[test]
-	fn speculative_casts_share_budget_and_never_mutate_the_world() {
-		let mut data = crate::SceneData::from_json(include_str!(
-			"../../../apps/game/assets/scenes/controller-room.json"
-		))
-		.unwrap();
-		// Keep the actual authored controller fixture, including its visual child.
-		data.camera.follow = None;
-		let world = crate::world::RuntimeWorld::new(std::sync::Arc::new(data)).unwrap();
-		let collisions = CollisionWorld::new(&world).unwrap();
-		let original = world.data().clone();
-		let matrices = world.world_matrices().to_vec();
-		let key = EntityKey::new("player").unwrap();
-		let mut budget = 1000;
-		let floor = collisions
-			.cast_body(&world, &key, Vec3::ZERO, -Vec3::Y * 0.02, &mut budget)
-			.unwrap();
-		assert!(floor.flat_support);
-		assert!(floor.contact.unwrap().normal[1] < -0.999);
-		assert!(budget < 1000);
-		let mut exhausted = 1;
-		assert!(
-			collisions
-				.cast_body(&world, &key, Vec3::ZERO, Vec3::X, &mut exhausted)
-				.is_err()
-		);
-		assert_eq!(exhausted, 0);
-		assert_eq!(world.data(), &original);
-		assert_eq!(world.world_matrices(), matrices);
-	}
+fn strictly_inside(point: DVec3, min: DVec3, max: DVec3) -> bool {
+	(0..3).all(|axis| point[axis] > min[axis] && point[axis] < max[axis])
 }
+
+fn segment_box_entry(
+	start: DVec3,
+	delta: DVec3,
+	min: DVec3,
+	max: DVec3,
+) -> Result<Option<f64>, String> {
+	if !start.is_finite()
+		|| !delta.is_finite()
+		|| !min.is_finite()
+		|| !max.is_finite()
+		|| (0..3).any(|axis| min[axis] > max[axis])
+	{
+		return Err("Camera segment and box must be finite and ordered".into());
+	}
+	if strictly_inside(start, min, max) {
+		return Err("Camera pivot starts penetrating a blocking collider".into());
+	}
+	if delta == DVec3::ZERO {
+		return Ok(None);
+	}
+	let mut enter = f64::NEG_INFINITY;
+	let mut exit = f64::INFINITY;
+	for axis in 0..3 {
+		let origin = start[axis];
+		let direction = delta[axis];
+		if direction == 0.0 {
+			if origin < min[axis] || origin > max[axis] {
+				return Ok(None);
+			}
+			continue;
+		}
+		let first = (min[axis] - origin) / direction;
+		let second = (max[axis] - origin) / direction;
+		enter = enter.max(first.min(second));
+		exit = exit.min(first.max(second));
+		if enter > exit {
+			return Ok(None);
+		}
+	}
+	// A boundary point moving away has exit == 0: allow it to leave.
+	if exit <= 0.0 || enter > 1.0 || exit < enter.max(0.0) {
+		return Ok(None);
+	}
+	Ok(Some(enter.max(0.0)))
+}
+
+struct PreparedCameraProbe {
+	start: DVec3,
+	delta: DVec3,
+	padding: f64,
+	swept_min: DVec3,
+	swept_max: DVec3,
+}
+
+fn prepare_camera_probe(probe: &CameraProbe<'_>) -> Result<PreparedCameraProbe, String> {
+	let start = DVec3::from_array(probe.pivot.map(f64::from));
+	let forward = DVec3::from_array(probe.forward.map(f64::from));
+	if !start.is_finite()
+		|| !forward.is_finite()
+		|| !probe.distance.is_finite()
+		|| probe.distance < 0.0
+		|| !probe.radius.is_finite()
+		|| probe.radius <= 0.0
+		|| (forward.length() - 1.0).abs() > 1.0e-5
+	{
+		return Err("Camera probe requires finite input and a unit viewing direction".into());
+	}
+	// Same multiply/add order as 10.3 orbit_pose, avoiding a different f32 ray.
+	let delta = -forward * f64::from(probe.distance);
+	let end = start + delta;
+	if !end.is_finite() || end.abs().max_element() > f64::from(f32::MAX) {
+		return Err("Requested camera endpoint is not representable as f32".into());
+	}
+	let coordinate_scale = start.abs().max(end.abs()).max_element().max(1.0);
+	let rounding_guard = 4.0 * f64::from(f32::EPSILON) * coordinate_scale;
+	let padding = f64::from(probe.radius) + rounding_guard;
+	Ok(PreparedCameraProbe {
+		start,
+		delta,
+		padding,
+		swept_min: start.min(end) - DVec3::splat(padding),
+		swept_max: start.max(end) + DVec3::splat(padding),
+	})
+}
+
+fn distance_round_down(distance: f64) -> Result<f32, String> {
+	if !distance.is_finite() || distance < 0.0 || distance > f64::from(f32::MAX) {
+		return Err("Allowed camera distance is not representable".into());
+	}
+	let rounded = distance as f32;
+	if f64::from(rounded) <= distance {
+		return Ok(rounded);
+	}
+	Ok(f32::from_bits(rounded.to_bits() - 1))
+}
+
+fn charge_camera_visit(local: &mut usize, remaining: &mut usize) -> Result<(), String> {
+	if *local == CAMERA_MAX_VISITS {
+		return Err("Camera obstruction query exceeded 8192 work visits".into());
+	}
+	consume_camera_budget(remaining, 1)?;
+	*local += 1;
+	Ok(())
+}
+
+fn consume_camera_budget(remaining: &mut usize, count: usize) -> Result<(), String> {
+	consume_candidates(remaining, count)
+		.map_err(|_| "Camera obstruction exhausted the shared collision work budget".to_owned())
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/collision/camera_probe_math_tests.rs"]
+mod camera_probe_math_tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/collision/character_query_tests.rs"]
+mod character_query_tests;

@@ -1,0 +1,161 @@
+use super::*;
+use crate::assets::gltf_loader::tests::{MODEL, geometry};
+
+fn normal_fixture(normal: [f32; 3], count: usize) -> (gltf::Document, Vec<gltf::buffer::Data>) {
+	let mut value: serde_json::Value = serde_json::from_str(MODEL).unwrap();
+	value["buffers"][0]["byteLength"] = serde_json::json!(80);
+	value["bufferViews"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"buffer":0,"byteOffset":44,"byteLength":36}));
+	value["accessors"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"bufferView":2,"componentType":5126,"count":count,"type":"VEC3"}));
+	for primitive in value["meshes"][0]["primitives"].as_array_mut().unwrap() {
+		primitive["attributes"]["NORMAL"] = serde_json::json!(2);
+	}
+	let mut buffers = geometry();
+	buffers[0].0.extend_from_slice(&[0, 0]);
+	for _ in 0..3 {
+		for value in normal {
+			buffers[0].0.extend_from_slice(&value.to_le_bytes());
+		}
+	}
+	(
+		gltf::Gltf::from_slice(value.to_string().as_bytes())
+			.unwrap()
+			.document,
+		buffers,
+	)
+}
+
+#[test]
+fn gltf_import_preserves_provided_normal_direction_and_normalizes_it() {
+	let (document, buffers) = normal_fixture([2.0, 0.0, 0.0], 3);
+	let parts = import_first_mesh(&document, &buffers, &[]).unwrap();
+	for part in parts {
+		for vertex in part.mesh.vertices() {
+			assert_eq!(vertex.normal, [1.0, 0.0, 0.0]);
+		}
+	}
+}
+
+#[test]
+fn gltf_import_rejects_zero_nonfinite_or_mismatched_normals() {
+	for (normal, count) in [
+		([0.0; 3], 3),
+		([f32::NAN, 0.0, 1.0], 3),
+		([0.0, 0.0, 1.0], 2),
+	] {
+		let (document, buffers) = normal_fixture(normal, count);
+		assert!(import_first_mesh(&document, &buffers, &[]).is_err());
+	}
+}
+
+#[test]
+fn mesh_preflight_counts_unique_meshes_and_rejects_aggregate_decoded_storage_without_allocating_it()
+{
+	let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+	let one = preflight_meshes(&document, [0]).unwrap();
+	assert!(one > 0);
+	assert_eq!(preflight_meshes(&document, [0, 0, 0]).unwrap(), one);
+	assert!(preflight_meshes(&document, [1]).is_err());
+
+	// Accessor metadata describes the oversized work; no decoded arrays are allocated.
+	let mut value: serde_json::Value = serde_json::from_str(MODEL).unwrap();
+	value["accessors"][0]["count"] = serde_json::json!(1_000_000);
+	let mesh = value["meshes"][0].clone();
+	value["meshes"] = serde_json::json!([mesh.clone(), mesh]);
+	let document = gltf::Gltf::from_slice(value.to_string().as_bytes())
+		.unwrap()
+		.document;
+	assert!(preflight_meshes(&document, [0]).is_ok());
+	assert!(
+		preflight_meshes(&document, [0, 1])
+			.unwrap_err()
+			.to_string()
+			.contains("256 MiB")
+	);
+}
+
+#[test]
+fn mesh_preflight_validates_normal_and_uv_counts_before_decoding() {
+	let (document, _) = normal_fixture([0.0, 0.0, 1.0], 2);
+	assert!(
+		preflight_meshes(&document, [0])
+			.unwrap_err()
+			.to_string()
+			.contains("NORMAL")
+	);
+	let mut value: serde_json::Value = serde_json::from_str(MODEL).unwrap();
+	value["accessors"]
+		.as_array_mut()
+		.unwrap()
+		.push(serde_json::json!({"bufferView":0,"componentType":5126,"count":2,"type":"VEC2"}));
+	value["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"] = serde_json::json!(2);
+	let document = gltf::Gltf::from_slice(value.to_string().as_bytes())
+		.unwrap()
+		.document;
+	assert!(matches!(
+		preflight_meshes(&document, [0]),
+		Err(GltfLoaderError::TexCoordCountMismatch {
+			positions: 3,
+			tex_coords: 2
+		})
+	));
+}
+
+#[test]
+fn imports_all_parts_with_their_own_materials() {
+	let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+	let parts = import_first_mesh(&document, &geometry(), &[]).unwrap();
+	assert_eq!(parts.len(), 2);
+	for (index, part) in parts.iter().enumerate() {
+		assert_eq!(part.mesh_index, 0);
+		assert_eq!(part.primitive_index, index);
+		assert_eq!(part.mesh.vertices().len(), 3);
+		assert_eq!(part.mesh.indices(), &[0, 1, 2]);
+		assert_eq!(part.base_color_image_index, None);
+		assert!(part.material.base_color_image.is_none());
+	}
+	assert!(parts[0].material.double_sided);
+	assert!(!parts[1].material.double_sided);
+	assert_eq!(parts[0].material.base_color_factor, [1.0, 0.0, 0.0, 1.0]);
+	assert_eq!(parts[1].material.base_color_factor, [0.0, 1.0, 0.0, 1.0]);
+}
+
+#[test]
+fn rejects_unsupported_parts_instead_of_silently_skipping_them() {
+	let model = MODEL.replacen("\"mode\":4", "\"mode\":1", 1);
+	let document = gltf::Gltf::from_slice(model.as_bytes()).unwrap().document;
+	assert!(matches!(
+		import_first_mesh(&document, &geometry(), &[]),
+		Err(GltfLoaderError::UnsupportedMode(Mode::Lines))
+	));
+}
+
+#[test]
+fn rejects_indices_outside_the_vertex_buffer() {
+	let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+	let mut buffers = geometry();
+	buffers[0].0[40..42].copy_from_slice(&3_u16.to_le_bytes());
+	assert!(matches!(
+		import_first_mesh(&document, &buffers, &[]),
+		Err(GltfLoaderError::IndexOutOfBounds {
+			index: 3,
+			vertex_count: 3
+		})
+	));
+}
+
+#[test]
+fn factor_only_materials_get_safe_default_uvs() {
+	let document = gltf::Gltf::from_slice(MODEL.as_bytes()).unwrap().document;
+	let parts = import_first_mesh(&document, &geometry(), &[]).unwrap();
+	for part in parts {
+		for vertex in part.mesh.vertices() {
+			assert_eq!(vertex.uv, [0.0, 0.0]);
+		}
+	}
+}

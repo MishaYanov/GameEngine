@@ -3,10 +3,31 @@ use crate::model_instance::ModelInstance;
 use crate::scene::EntitySnapshot;
 use crate::scene::{EntityId, Scene};
 
+const MAX_UNDO_ENTRIES: usize = 256;
+
 #[derive(Debug, Clone, Copy)]
 pub struct SetTransform {
 	pub entity: EntityId,
 	pub transform: Transform,
+}
+
+impl SetTransform {
+	pub fn apply(self, scene: &mut Scene) -> Result<TransformChange, String> {
+		self.transform.validate()?;
+
+		let instance = scene
+			.get_mut(self.entity)
+			.ok_or_else(|| format!("Entity {:?} was not found", self.entity))?;
+
+		let before = *instance.transform();
+		*instance.transform_mut() = self.transform;
+
+		Ok(TransformChange {
+			entity: self.entity,
+			before,
+			after: self.transform,
+		})
+	}
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -15,8 +36,6 @@ pub struct TransformChange {
 	pub before: Transform,
 	pub after: Transform,
 }
-
-const MAX_UNDO_ENTRIES: usize = 256;
 
 #[derive(Clone)]
 enum SceneChange {
@@ -265,25 +284,6 @@ impl CommandHistory {
 	}
 }
 
-impl SetTransform {
-	pub fn apply(self, scene: &mut Scene) -> Result<TransformChange, String> {
-		self.transform.validate()?;
-
-		let instance = scene
-			.get_mut(self.entity)
-			.ok_or_else(|| format!("Entity {:?} was not found", self.entity))?;
-
-		let before = *instance.transform();
-		*instance.transform_mut() = self.transform;
-
-		Ok(TransformChange {
-			entity: self.entity,
-			before,
-			after: self.transform,
-		})
-	}
-}
-
 #[cfg(test)]
-#[path = "tests_commands.rs"]
+#[path = "../tests/unit/commands.rs"]
 mod tests;

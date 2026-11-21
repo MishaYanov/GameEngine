@@ -5,11 +5,13 @@ use std::{
 	io::{self, Write},
 };
 
-use super::CommandFactory;
 use crate::camera_input::CameraIntent;
 use crate::{
 	EntityKey,
-	command::{EditorCommandDto, EditorCommandRequest, SceneBindingTarget, TransformDto},
+	command::{
+		CommandDescriptorDto, EditorCommandDto, EditorCommandRequest, SceneBindingTarget,
+		TransformDto,
+	},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, SceneData, validate_model_path},
 };
 
@@ -33,6 +35,8 @@ impl CommandRequestBuilder {
 	}
 }
 
+/// Factory builds validated command intent; widgets and shortcuts use the same path.
+pub struct CommandFactory;
 impl CommandFactory {
 	pub const MAX_PAYLOAD_BYTES: usize = MAX_COMMAND_BYTES;
 	pub const MAX_ENTITY_TARGETS: usize = MAX_TARGETS;
@@ -275,7 +279,7 @@ impl CommandFactory {
 					pitch_delta: *pitch_delta,
 					log_distance_delta: *log_distance_delta,
 				}
-					.validate()?;
+				.validate()?;
 			}
 			EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
@@ -288,6 +292,202 @@ impl CommandFactory {
 			| EditorCommandDto::SetPaused { .. } => {}
 		}
 		Ok(())
+	}
+
+	pub fn capabilities() -> Vec<CommandDescriptorDto> {
+		[
+			("add_scene", "Add scene", "scene", true, false),
+			("switch_scene", "Switch scene", "scene", false, false),
+			("remove_scene", "Remove scene", "scene", true, false),
+			(
+				"set_startup_scene",
+				"Set startup scene",
+				"scene",
+				true,
+				false,
+			),
+			(
+				"change_scene_path",
+				"Change scene path",
+				"scene",
+				true,
+				false,
+			),
+			("set_project", "Configure project", "project", true, false),
+			("add_component", "Add component", "component", true, false),
+			(
+				"replace_component",
+				"Edit component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"remove_component",
+				"Remove component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"set_component_enabled",
+				"Enable component",
+				"component",
+				true,
+				false,
+			),
+			(
+				"instantiate_linked_prefab",
+				"Instantiate linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"update_linked_prefab",
+				"Update linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"revert_linked_prefab",
+				"Revert linked overrides",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"unpack_linked_prefab",
+				"Unpack linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"set_entity_input",
+				"Set controlled entity input",
+				"simulation",
+				false,
+				true,
+			),
+			("select", "Select entities", "selection", false, true),
+			("pick_selection", "Pick entity", "selection", false, false),
+			("rename", "Rename", "entity", true, false),
+			("spawn", "Create entity", "entity", true, false),
+			("set_transforms", "Set transforms", "transform", true, false),
+			(
+				"translate_selection",
+				"Move selection",
+				"transform",
+				true,
+				false,
+			),
+			(
+				"rotate_selection",
+				"Rotate selection",
+				"transform",
+				true,
+				false,
+			),
+			(
+				"scale_selection",
+				"Scale selection",
+				"transform",
+				true,
+				false,
+			),
+			(
+				"duplicate_selection",
+				"Duplicate group",
+				"entity",
+				true,
+				false,
+			),
+			("delete_selection", "Delete group", "entity", true, false),
+			("reparent", "Change parent", "hierarchy", true, false),
+			(
+				"set_material",
+				"Set material override",
+				"material",
+				true,
+				false,
+			),
+			("set_collider", "Set collider", "collision", true, false),
+			(
+				"set_scene_binding",
+				"Set scene binding",
+				"scene",
+				true,
+				false,
+			),
+			("upsert_light", "Set light", "lighting", true, false),
+			("remove_light", "Remove light", "lighting", true, false),
+			("set_camera", "Set camera", "camera", true, false),
+			("frame_selection", "Frame selection", "camera", true, false),
+			("orbit_camera", "Orbit", "camera", true, false),
+			("pan_camera", "Pan", "camera", true, false),
+			("dolly_camera", "Dolly", "camera", true, false),
+			("set_snap", "Configure snapping", "settings", false, false),
+			(
+				"begin_transaction",
+				"Begin grouped edit",
+				"history",
+				false,
+				false,
+			),
+			(
+				"commit_transaction",
+				"Commit grouped edit",
+				"history",
+				true,
+				false,
+			),
+			(
+				"cancel_transaction",
+				"Cancel grouped edit",
+				"history",
+				false,
+				false,
+			),
+			("undo", "Undo", "history", false, false),
+			("redo", "Redo", "history", false, false),
+			("start_play", "Play", "simulation", false, false),
+			("stop_play", "Stop", "simulation", false, true),
+			("set_paused", "Pause simulation", "simulation", false, true),
+			(
+				"set_play_camera_input",
+				"Set orbit camera input",
+				"simulation",
+				false,
+				true,
+			),
+			(
+				"set_character_input",
+				"Set character movement and jump intent",
+				"simulation",
+				false,
+				true,
+			),
+			(
+				"set_play_input",
+				"Set movement intent",
+				"simulation",
+				false,
+				true,
+			),
+		]
+		.into_iter()
+		.map(
+			|(name, label, category, undoable, available_in_play)| CommandDescriptorDto {
+				name: name.into(),
+				label: label.into(),
+				category: category.into(),
+				undoable,
+				available_in_play,
+			},
+		)
+		.collect()
 	}
 }
 

@@ -2,5 +2,5 @@
 pub use engine_core::time::*;
 
 #[cfg(test)]
-#[path = "tests_time.rs"]
+#[path = "../tests/unit/time.rs"]
 mod tests;

@@ -2,5 +2,5 @@
 pub use engine_core::transform::*;
 
 #[cfg(test)]
-#[path = "tests_transform.rs"]
+#[path = "../tests/unit/transform.rs"]
 mod tests;

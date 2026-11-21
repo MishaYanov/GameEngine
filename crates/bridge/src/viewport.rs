@@ -125,6 +125,15 @@ pub struct ViewportEditorStateDto {
 	pub transform_preview: Option<ViewportTransformPreviewDto>,
 	#[serde(default)]
 	pub game_status: Option<crate::editor::PlayStatusDto>,
+	#[serde(default)]
+	pub orbit_status: Option<OrbitStatusDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrbitStatusDto {
+	pub blocker: Option<String>,
+	pub recovering: bool,
+	pub target_lost: bool,
 }
 impl Default for ViewportEditorStateDto {
 	fn default() -> Self {
@@ -142,6 +151,7 @@ impl Default for ViewportEditorStateDto {
 			collider_error: None,
 			transform_preview: None,
 			game_status: None,
+			orbit_status: None,
 		}
 	}
 }

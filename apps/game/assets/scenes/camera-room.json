@@ -1,0 +1,671 @@
+{
+  "schema_version": 5,
+  "bindings": {},
+  "entities": [
+    {
+      "key": "player",
+      "name": "Animated controller: WASD + Space",
+      "transform": {
+        "position": [
+          0,
+          0.901,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.3,
+                0.9,
+                0.3
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        },
+        {
+          "id": "character",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "character_controller",
+            "settings": {
+              "walk_speed": 4,
+              "ground_acceleration": 30,
+              "air_acceleration": 8,
+              "gravity": 20,
+              "max_fall_speed": 30,
+              "jump_speed": 7,
+              "ground_probe": 0.02,
+              "step_height": 0.25,
+              "coyote_ticks": 5,
+              "jump_buffer_ticks": 5,
+              "jump_action": "jump"
+            }
+          }
+        },
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "characters/two-joint.glb",
+            "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+            "mesh_index": 0
+          }
+        },
+        {
+          "id": "animation",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animation",
+            "settings": {
+              "source": {
+                "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+                "expected_sha256": "fc1848e4b5788aed342a497b341b15d5787f9817fc776562951e52ce4fc9cfbf",
+                "scene_index": 0,
+                "mesh_node": 3,
+                "skin_index": 0
+              },
+              "playback": {
+                "kind": "locomotion3",
+                "idle": 0,
+                "walk": 1,
+                "air": 2
+              },
+              "speed_numerator": 1,
+              "speed_denominator": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "player-visual",
+      "name": "Player Visual",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.9,
+          0.3
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/capsule.glb",
+            "material": {
+              "base_color_factor": [
+                0.2,
+                0.65,
+                1,
+                1
+              ]
+            }
+          }
+        }
+      ],
+      "parent": "player"
+    },
+    {
+      "key": "floor",
+      "name": "Floor",
+      "transform": {
+        "position": [
+          0,
+          -0.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          24,
+          1,
+          24
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.4,
+                0.45,
+                0.5,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "camera-wall",
+      "name": "Camera wall",
+      "transform": {
+        "position": [
+          0,
+          2,
+          8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2.4,
+          4,
+          0.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.56,
+                0.21,
+                0.12,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "camera-sensor",
+      "name": "Camera sensor",
+      "transform": {
+        "position": [
+          0,
+          2,
+          3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.6,
+          2,
+          0.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": false,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.65,
+                0.7,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "doorway-left",
+      "name": "Doorway left",
+      "transform": {
+        "position": [
+          5,
+          1.5,
+          -4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.5,
+          3,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.22,
+                0.41,
+                0.42,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "doorway-right",
+      "name": "Doorway right",
+      "transform": {
+        "position": [
+          7,
+          1.5,
+          -4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.5,
+          3,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.22,
+                0.41,
+                0.42,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "doorway-top",
+      "name": "Doorway lintel",
+      "transform": {
+        "position": [
+          6,
+          3,
+          -4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2.5,
+          0.5,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.22,
+                0.41,
+                0.42,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "rotated-proxy",
+      "name": "Rotated wall (conservative bounds)",
+      "transform": {
+        "position": [
+          -5,
+          1,
+          -4
+        ],
+        "rotation": [
+          0,
+          0.7,
+          0
+        ],
+        "scale": [
+          2,
+          2,
+          0.8
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.44,
+                0.3,
+                0.19,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "position": [
+      0,
+      4,
+      8
+    ],
+    "yaw": 0,
+    "pitch": -0.35,
+    "vertical_fov": 1.0471976,
+    "near": 0.1,
+    "far": 200,
+    "orbit": {
+      "target": "player",
+      "pivot_offset": [
+        0,
+        0.7,
+        0
+      ],
+      "initial_yaw": 0,
+      "initial_pitch": -0.34906585,
+      "initial_distance": 5,
+      "min_distance": 1,
+      "max_distance": 8,
+      "min_pitch": -1.2,
+      "max_pitch": 0.6,
+      "follow_seconds": 0.1,
+      "recovery_seconds": 0.2,
+      "teleport_distance": 8,
+      "probe_radius": 0.25,
+      "obstruction_mask": 1
+    }
+  },
+  "lights": [
+    {
+      "key": "sun",
+      "name": "Sun",
+      "kind": "directional",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1,
+        0.95,
+        0.85
+      ],
+      "intensity": 0.9,
+      "range": 10
+    }
+  ]
+}

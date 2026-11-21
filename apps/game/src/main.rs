@@ -1,16 +1,23 @@
 mod editor_panel;
 mod editor_tools;
+mod frame_metrics;
 mod game;
 mod gizmo_overlay;
 mod native_input;
+mod play;
+mod scene_documents;
+mod scene_rendering;
 mod selection_overlay;
+
+#[cfg(test)]
+use scene_rendering::gameplay_hud_rows;
 
 use courtyard_gameplay as progress;
 use editor_panel::PanelView;
 use editor_tools::EditorTools;
-use runtime::FrameClock;
 use runtime::scene::Scene;
 use runtime::{Camera, CameraController};
+use runtime::{FrameClock, GameContentRect};
 use runtime::{InputState, Key};
 use runtime::{SceneEditor, Transform, model_instance::ModelInstance};
 use selection_overlay::SelectionOverlay;
@@ -150,194 +157,6 @@ impl GameApp {
 		}
 	}
 
-	fn update_player(&mut self, delta_seconds: f32) {
-		let completed = self.game_completed();
-		// The completion message promises F10 even when gameplay normally owns it.
-		if (completed && self.input.just_pressed(Key::F10))
-			|| self.player_shortcut_pressed(Key::F10)
-		{
-			let result = self.restart_player_game();
-			report_update_result(
-				"player_new_game",
-				result,
-				&mut self.play_update_error_reported,
-			);
-			self.clock.reset();
-			return;
-		}
-		if completed {
-			return;
-		}
-		if self.player_shortcut_pressed(Key::F8) && self.editor.pending_play_scene().is_none() {
-			let result = self.cycle_player_scene();
-			report_update_result(
-				"player_scene_switch",
-				result,
-				&mut self.play_update_error_reported,
-			);
-			self.clock.reset();
-			return;
-		}
-		if self.player_shortcut_pressed(Key::F7)
-			&& self
-				.editor
-				.play_progress::<progress::CampaignProgress>()
-				.is_some()
-		{
-			let result = runtime::game_progress::ProgressAction::new::<progress::CampaignProgress>(
-				progress::ProgressAction::AwardScore { amount: 1 },
-			)
-			.and_then(|action| self.editor.apply_play_progress(&[action]));
-			report_update_result(
-				"player_progress",
-				result,
-				&mut self.play_update_error_reported,
-			);
-			self.clock.reset();
-			return;
-		}
-		self.update_keyboard_camera(delta_seconds);
-		let result = self.tick_play(delta_seconds);
-		report_update_result(
-			"player_simulation",
-			result,
-			&mut self.play_update_error_reported,
-		);
-	}
-
-	fn tick_play(&mut self, delta_seconds: f32) -> Result<(), String> {
-		let result = self.advance_play(delta_seconds);
-		if self
-			.orbit_capture
-			.as_ref()
-			.is_some_and(|owner| !self.editor.owns_camera_input(owner) || self.game_completed())
-		{
-			self.set_mouse_capture(false);
-		}
-		result
-	}
-
-	fn advance_play(&mut self, delta_seconds: f32) -> Result<(), String> {
-		if self.input.just_pressed(Key::F8)
-			&& let Some(scene_id) = self.editor.pending_play_scene().cloned()
-		{
-			let result = self.install_play_scene(scene_id, false);
-			if result.is_err() {
-				self.update_selection_title();
-			}
-			return result;
-		}
-		if self.editor.has_runtime_instances() {
-			self.renderer
-				.as_ref()
-				.ok_or("Renderer is unavailable")?
-				.wait_idle()?;
-		}
-		let mut outcome = self
-			.editor
-			.update_play(&mut self.scene, &self.input, delta_seconds)?;
-		loop {
-			if let Some(camera) = self.editor.play_rig_camera() {
-				self.camera = camera;
-			}
-			if let Some(scene_id) = outcome.requested_scene {
-				let result = self.install_play_scene(scene_id, false);
-				if result.is_err() {
-					self.update_selection_title();
-				}
-				return result;
-			}
-			self.fulfill_runtime_spawns()?;
-			// synchronize_world can retire runtime models; submitted frames have
-			// completed before each mutating tick above/below.
-			if outcome.changes.topology_changed
-				&& let Some(assets) = &mut self.asset_manager
-			{
-				assets.prune_unused();
-			}
-			if outcome.pending_steps == 0 {
-				break;
-			}
-			if self.editor.has_runtime_instances() {
-				self.renderer
-					.as_ref()
-					.ok_or("Renderer is unavailable")?
-					.wait_idle()?;
-			}
-			outcome = self.editor.drain_play(&mut self.scene)?;
-		}
-		Ok(())
-	}
-
-	fn fulfill_runtime_spawns(&mut self) -> Result<(), String> {
-		if self.editor.simulation_paused() {
-			return Ok(());
-		}
-		for request in self.editor.pending_runtime_spawns() {
-			let result = (|| {
-				let root = self
-					.asset_root
-					.as_ref()
-					.ok_or("Asset root is unavailable")?;
-				let (prefab, fingerprint) =
-					bridge::runtime_prefab::load(root, &request.prefab_path)?;
-				let mut prepared = self.editor.prepare_runtime_spawn(
-					&prefab,
-					&fingerprint,
-					request.position,
-					Some(request.id),
-				)?;
-				let data = self.editor.runtime_spawn_document(&prepared)?;
-				let renderer = self.renderer.as_ref().ok_or("Renderer is unavailable")?;
-				let assets = self
-					.asset_manager
-					.as_mut()
-					.ok_or("Assets are unavailable")?;
-				let candidate = scene_io::instantiate(&data, assets, renderer);
-				renderer.wait_idle()?;
-				let (scene, _) = candidate?;
-				let keys: std::collections::HashSet<_> = prepared
-					.entities()
-					.iter()
-					.map(|entity| entity.key.clone())
-					.collect();
-				prepared.set_visibility_capabilities(
-					scene
-						.visibility_capabilities()
-						.into_iter()
-						.filter(|key| keys.contains(key))
-						.collect(),
-				)?;
-				self.editor.commit_runtime_spawn(prepared)?;
-				let mut scene = scene;
-				if let Some(bank) = self.editor.animations() {
-					scene.synchronize_animation(bank)?;
-				}
-				self.scene = scene;
-				Ok::<(), String>(())
-			})();
-			if let Err(error) = result {
-				self.editor.reject_runtime_spawn(request.id, &error)?;
-				engine_logger::error!(target:"game", "Runtime spawn rejected: operation=prepare_and_admit_runtime_spawn");
-			}
-			if let Some(assets) = &mut self.asset_manager {
-				assets.prune_unused();
-			}
-		}
-		Ok(())
-	}
-
-	fn player_shortcut_pressed(&self, key: Key) -> bool {
-		self.input.just_pressed(key) && !self.editor.play_input_binds_key(key)
-	}
-
-	fn game_completed(&self) -> bool {
-		self.editor
-			.play_status()
-			.and_then(|status| status.gameplay)
-			.is_some_and(|status| status.completed)
-	}
-
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
 		if self.editor.play_rig_camera().is_some() {
 			return;
@@ -376,7 +195,7 @@ impl GameApp {
 				&& self.authored.is_none()
 				&& MovementBindings::WASD.any_held(&self.input))
 			|| (MovementBindings::ARROWS.any_held(&self.input)
-			&& self.editor.play_rig_camera().is_none())
+				&& self.editor.play_rig_camera().is_none())
 	}
 
 	fn request_input_frame(&mut self) {
@@ -524,8 +343,6 @@ impl GameApp {
 				.map_err(|e| e.to_string())?,
 		);
 
-		let size = window.inner_size();
-		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let asset_root = if self.installed_project {
 			std::env::current_exe()
 				.map_err(|e| e.to_string())?
@@ -535,7 +352,16 @@ impl GameApp {
 		} else {
 			PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
 		};
+		self.initialize_window(window, asset_root)
+	}
 
+	fn initialize_window(
+		&mut self,
+		window: Arc<Window>,
+		asset_root: PathBuf,
+	) -> Result<(), String> {
+		let size = window.inner_size();
+		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let startup_scene = match self.project.as_ref() {
 			Some(project) => project.startup_scene_path()?,
 			None => "scenes/robots.json",
@@ -613,64 +439,11 @@ impl GameApp {
 		Ok(())
 	}
 
-	fn save_scene(&mut self) -> Result<(), String> {
-		let path = self
-			.scene_path
-			.as_deref()
-			.ok_or("Scene path is not initialized")?;
-		let (scene, camera) = match self.authored.as_ref() {
-			Some(authored) => (&authored.scene, &authored.camera),
-			None => (&self.scene, &self.camera),
-		};
-		let data = scene.to_data(camera)?;
-		let project = self
-			.editor
-			.project()
-			.cloned()
-			.ok_or("Project configuration is not initialized")?;
-		project.validate_scene(&data)?;
-		let project_path = self
-			.project_path
-			.clone()
-			.or_else(|| {
-				self.asset_root
-					.as_ref()
-					.and_then(|root| root.parent())
-					.map(|root| root.join("project.json"))
-			})
-			.ok_or("Project path is not initialized")?;
-		scene_io::save_data(path, &data)?;
-		scene_io::save_project_data(&project_path, &project).map_err(|error| {
-			format!(
-				"Scene was saved, but project settings were not saved: {error}. The document remains dirty."
-			)
-		})?;
-		self.project_path = Some(project_path);
-		self.project = Some(project);
-		self.tools.saved = Some(data);
-		self.editor.mark_saved()?;
-		engine_logger::info!("Saved scene: {}", path.display());
-		self.update_selection_title();
-		Ok(())
-	}
-
 	fn wait_for_gpu(&self) -> Result<(), String> {
 		if let Some(renderer) = self.renderer.as_ref() {
 			renderer.wait_idle()?;
 		}
 		Ok(())
-	}
-
-	fn prepare_editor(loaded: &mut scene_io::LoadedScene) -> Result<SceneEditor, String> {
-		if loaded.source_schema_version == 1
-			&& let [left_robot, right_robot, ..] = loaded.entity_ids.as_slice()
-		{
-			loaded.scene.set_binding("robot_a", *left_robot)?;
-			loaded.scene.set_binding("robot_b", *right_robot)?;
-		}
-		let data = loaded.scene.to_data(&loaded.camera)?;
-		let project = ProjectData::for_scene("Game Engine", "scenes/robots.json", &data)?;
-		SceneEditor::for_project(&loaded.scene, &loaded.camera, project)
 	}
 
 	fn apply_entity_command(&mut self, command: SceneCommand) -> Result<(), String> {
@@ -731,364 +504,13 @@ impl GameApp {
 		Ok(())
 	}
 
-	fn toggle_play(&mut self) -> Result<(), String> {
-		if self.authored.is_some() {
-			self.stop_play()
-		} else {
-			self.start_play()
-		}
-	}
-
-	fn start_play(&mut self) -> Result<(), String> {
-		if self.authored.is_some() {
-			return Ok(());
-		}
-		self.cancel_drag();
-		let mut play_scene = self.scene.clone();
-		self.editor.start_play(&mut play_scene)?;
-		let authored_scene = std::mem::replace(&mut self.scene, play_scene);
-		self.authored = Some(AuthoredScene {
-			scene: authored_scene,
-			camera: self.camera.clone(),
-		});
-		self.finish_mode_change();
-		Ok(())
-	}
-
-	fn stop_play(&mut self) -> Result<(), String> {
-		self.wait_for_gpu()?;
-		let Some(authored) = self.authored.as_mut() else {
-			return Ok(());
-		};
-		self.editor.stop_play(&mut authored.scene)?;
-		let authored = self.authored.take().expect("authored scene was present");
-		self.scene = authored.scene;
-		self.camera = authored.camera;
-		self.finish_mode_change();
-		Ok(())
-	}
-
-	fn finish_mode_change(&mut self) {
-		self.tools.panel.edit = None;
-		self.set_mouse_capture(false);
-		self.input.suppress_held();
-		self.editor.end_gesture();
-		self.clock.reset();
-		self.update_selection_title();
-	}
-
-	fn cycle_player_scene(&mut self) -> Result<(), String> {
-		let current = self
-			.editor
-			.play_scene_id()
-			.cloned()
-			.ok_or("Play mode is not active")?;
-		let project = self
-			.editor
-			.project()
-			.ok_or("Project configuration is not initialized")?;
-		let mut scene_ids: Vec<_> = project
-			.scenes
-			.iter()
-			.map(|scene| scene.id().clone())
-			.collect();
-		scene_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-		if scene_ids.len() < 2 {
-			return Ok(());
-		}
-		let current_index = scene_ids
-			.iter()
-			.position(|id| id == &current)
-			.ok_or("Running scene is absent from the project catalog")?;
-		let next = scene_ids[(current_index + 1) % scene_ids.len()].clone();
-		self.switch_player_scene(next)
-	}
-
-	fn switch_player_scene(&mut self, scene_id: SceneId) -> Result<(), String> {
-		self.install_play_scene(scene_id, false)
-	}
-
-	fn restart_player_game(&mut self) -> Result<(), String> {
-		let startup = self
-			.editor
-			.project()
-			.ok_or("Project configuration is not initialized")?
-			.startup_scene_id
-			.clone();
-		self.install_play_scene(startup, true)
-	}
-
-	fn install_play_scene(&mut self, scene_id: SceneId, new_game: bool) -> Result<(), String> {
-		let current = self
-			.editor
-			.play_scene_id()
-			.ok_or("Play mode is not active")?;
-		if !new_game && current == &scene_id {
-			return Ok(());
-		}
-		let project = self
-			.editor
-			.project()
-			.ok_or("Project configuration is not initialized")?;
-		let relative_path = project.scene_path(&scene_id)?;
-		let asset_root = self
-			.asset_root
-			.as_ref()
-			.ok_or("Asset root is not initialized")?
-			.canonicalize()
-			.map_err(|error| error.to_string())?;
-		let scene_path = asset_root
-			.join(relative_path)
-			.canonicalize()
-			.map_err(|error| error.to_string())?;
-		if !scene_path.starts_with(&asset_root) {
-			return Err("Scene path is outside the project asset root".into());
-		}
-		let parsed = scene_io::load_data(&scene_path)?;
-		let document = Arc::new(parsed.data);
-		let prepared = if new_game {
-			self.editor
-				.prepare_new_game(scene_id, Arc::clone(&document))?
-		} else {
-			self.editor
-				.prepare_play_scene(scene_id, Arc::clone(&document))?
-		};
-		let renderer = self
-			.renderer
-			.as_ref()
-			.ok_or("Renderer is not initialized")?;
-		let assets = self
-			.asset_manager
-			.as_mut()
-			.ok_or("Assets are not initialized")?;
-		let candidate = scene_io::instantiate(&document, assets, renderer);
-
-		// Both scenes share one cache and budget until the candidate commits.
-		// Completion also makes cache-only allocations from rejected loads safe to prune.
-		renderer.wait_idle()?;
-		let installed = candidate.and_then(|(scene, camera)| {
-			self.editor
-				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
-			// No fallible operations between committing the CPU world and its view.
-			self.scene = scene;
-			self.camera = self.editor.play_rig_camera().unwrap_or(camera);
-			Ok(())
-		});
-		assets.prune_unused();
-		installed?;
-		self.set_mouse_capture(false);
-		if self.standalone_runtime {
-			self.scene_path = Some(scene_path);
-		}
-		self.clock.reset();
-		self.next_frame_deadline = None;
-		self.play_update_error_reported = false;
-		self.update_selection_title();
-		if let Some(window) = self.window.as_ref() {
-			window.request_redraw();
-		}
-		Ok(())
-	}
-
-	fn reload_scene(&mut self) -> Result<(), String> {
-		let old_path = self
-			.scene_path
-			.clone()
-			.ok_or("Scene path is not initialized")?;
-		let asset_root = self
-			.asset_root
-			.as_deref()
-			.ok_or("Asset root is not initialized")?;
-		let project = self
-			.project_path
-			.as_ref()
-			.map(ProjectData::load)
-			.transpose()?
-			.or_else(|| self.project.clone());
-		let path = match project.as_ref() {
-			Some(project) => asset_root.join(project.startup_scene_path()?),
-			None => old_path,
-		};
-		let renderer = self
-			.renderer
-			.as_ref()
-			.ok_or("Renderer is not initialized")?;
-
-		let mut loaded = scene_io::load(&path, asset_root, renderer)?;
-		let mut editor = Self::prepare_editor(&mut loaded)?;
-		if let Some(project) = project.as_ref() {
-			editor.set_initial_project(project.clone())?;
-		}
-		editor.set_module_resolver(Arc::new(progress::resolve))?;
-		if self.standalone_runtime {
-			editor.start_play(&mut loaded.scene)?;
-		}
-		let saved = loaded.scene.to_data(&loaded.camera)?;
-
-		// Drawing can still reference the old meshes and textures. Finish all
-		// GPU work before assignments release the old scene, then its cache.
-		renderer.wait_idle()?;
-		self.scene = loaded.scene;
-		self.authored = None;
-		self.spawn_template = None;
-		self.tools.templates.clear();
-		self.tools.drag = None;
-		self.tools.saved = Some(saved);
-		if let Some(profile) = &self.input_profile_override {
-			editor.set_play_input_profile(profile.clone(), &mut self.input);
-		}
-		self.editor = editor;
-		self.asset_manager = Some(loaded.assets);
-		self.camera = loaded.camera;
-		self.project = project;
-		self.scene_path = Some(path.clone());
-		self.finish_mode_change();
-		engine_logger::info!("Reloaded scene: {}", path.display());
-		Ok(())
-	}
-
-	fn render(&mut self) -> Result<renderer::DrawStatus, String> {
-		let hud_rows = if self.standalone_runtime {
-			gameplay_hud_rows(self.editor.play_status().as_ref())
-		} else {
-			Vec::new()
-		};
-		if let Some(camera) = self.editor.play_rig_camera() {
-			self.camera = camera;
-		}
-		let dirty = !self.standalone_runtime && self.is_dirty();
-		let Some(renderer) = self.renderer.as_mut() else {
-			return Ok(renderer::DrawStatus::Suspended);
-		};
-		let Some([width, height]) = renderer.prepare()? else {
-			return Ok(renderer::DrawStatus::Suspended);
-		};
-		let camera_uniform = CameraUniform::perspective(
-			self.camera.position,
-			self.camera.target(),
-			[0.0, 1.0, 0.0],
-			self.camera.vertical_fov,
-			width as f32 / height as f32,
-			self.camera.near,
-			self.camera.far,
-		);
-
-		let frustum = if self.tools.culling {
-			Some(runtime::visibility::Frustum::from_view_projection(
-				glam::Mat4::from_cols_array(&camera_uniform.view_projection),
-			)?)
-		} else {
-			None
-		};
-		let (mut objects, mut stats) = self.scene.try_render_visible(frustum.as_ref())?;
-		if !self.standalone_runtime
-			&& self.authored.is_none()
-			&& let Some(object) = self
-				.selection_overlay
-				.as_ref()
-				.and_then(|overlay| overlay.object(&self.scene, &self.editor))
-		{
-			stats.draw_calls += 1;
-			stats.triangles += object.mesh().index_count() as usize / 3;
-			objects.push(object);
-		}
-
-		if !self.standalone_runtime {
-			if self.authored.is_none()
-				&& let Some(transform) = self
-					.editor
-					.selected_entity()
-					.map(|id| runtime::gizmo::GizmoPose::from_scene(&self.scene, id))
-					.transpose()?
-				&& let Some(gizmo) = self.tools.gizmo.as_mut()
-			{
-				gizmo.prepare(
-					renderer,
-					&self.camera,
-					[width, height],
-					transform,
-					self.tools.panel.mode,
-					self.tools.drag.as_ref().map(|drag| drag.axis),
-				)?;
-				let object = gizmo.object();
-				stats.draw_calls += 1;
-				stats.triangles += object.mesh().index_count() as usize / 3;
-				objects.push(object);
-			}
-			let scale = self
-				.window
-				.as_ref()
-				.map_or(1.0, |window| window.scale_factor());
-			// The panel is one batched draw. Include its previous geometry in
-			// displayed totals; the current text has the same quad count.
-			if let Some(panel) = self.tools.panel.object() {
-				stats.draw_calls += 1;
-				stats.triangles += panel.mesh().index_count() as usize / 3;
-			}
-			self.tools.panel.prepare(
-				renderer,
-				[width, height],
-				scale,
-				PanelView {
-					scene: &self.scene,
-					editor: &self.editor,
-					models: &self.tools.models,
-					playing: self.authored.is_some(),
-					dirty,
-					stats,
-					frame_ms: self.tools.metrics.frame_ms,
-					cpu_ms: self.tools.metrics.cpu_ms,
-					culling: self.tools.culling,
-				},
-			)?;
-			if let Some(panel) = self.tools.panel.object() {
-				objects.push(panel);
-			}
-		}
-		if self.standalone_runtime && !hud_rows.is_empty() {
-			if self.game_hud.is_none() {
-				self.game_hud = Some(renderer::ui::ScreenOverlay::new(renderer)?);
-			}
-			let hud = self.game_hud.as_mut().expect("initialized HUD");
-			let scale = self
-				.window
-				.as_ref()
-				.map_or(1.0, |window| window.scale_factor());
-			hud.prepare(renderer, [width, height], scale, &hud_rows)?;
-			if let Some(object) = hud.object() {
-				objects.push(object);
-			}
-		}
-		self.tools.stats = stats;
-
-		renderer.set_lights(&self.scene.renderer_lights())?;
-		renderer.draw(&camera_uniform, &objects)
-	}
-
 	fn pick_entity(&mut self) -> Result<(), String> {
 		if self.standalone_runtime || self.authored.is_some() || self.mouse_captured {
 			return Ok(());
 		}
-		let Some(pixel) = self.cursor_position else {
+		let Some((pixel, extent)) = self.cursor_geometry()? else {
 			return Ok(());
 		};
-		let window = self.window.as_ref().ok_or("Window is not initialized")?;
-		let size = window.inner_size();
-		if size.width == 0 || size.height == 0 {
-			return Ok(());
-		}
-		let Some(extent) = self
-			.renderer
-			.as_mut()
-			.ok_or("Renderer is not initialized")?
-			.prepare()?
-		else {
-			return Ok(());
-		};
-		let pixel = [
-			pixel[0] * extent[0] as f64 / size.width as f64,
-			pixel[1] * extent[1] as f64 / size.height as f64,
-		];
 		self.editor.pick(&self.scene, &self.camera, pixel, extent)?;
 		self.update_selection_title();
 		Ok(())
@@ -1254,6 +676,19 @@ impl ApplicationHandler for GameApp {
 				self.cursor_position = None;
 			}
 			WindowEvent::MouseInput { state, button, .. } => {
+				if state == ElementState::Pressed
+					&& !self.mouse_captured
+					&& (self.standalone_runtime || self.editor.is_playing())
+				{
+					match self.cursor_geometry() {
+						Ok(Some(_)) => {}
+						Ok(None) => return,
+						Err(error) => {
+							self.report_editor_error(error);
+							return;
+						}
+					}
+				}
 				// Record first so editor mode/property changes can suppress the click.
 				let input_button = native_input::mouse_button(button);
 				match state {
@@ -1296,7 +731,7 @@ impl ApplicationHandler for GameApp {
 				}
 			}
 			WindowEvent::MouseWheel { delta, .. } if !self.standalone_runtime => {
-				if let Some(pixel) = self.cursor_position {
+				if let Ok(Some((pixel, _))) = self.cursor_geometry() {
 					let scale = self
 						.window
 						.as_ref()
@@ -1532,32 +967,6 @@ impl Drop for GameApp {
 	}
 }
 
-fn gameplay_hud_rows(status: Option<&runtime::editor::command::PlayStatusDto>) -> Vec<String> {
-	let Some(status) = status else {
-		return Vec::new();
-	};
-	let mut rows = Vec::new();
-	if let Some(gameplay) = &status.gameplay {
-		rows.push(gameplay.objective.clone());
-		if let Some(detail) = &gameplay.detail {
-			rows.push(detail.clone());
-		}
-		if let Some(score) = gameplay.score {
-			rows.push(format!("Score {score}"));
-		}
-		if gameplay.completed {
-			rows.push("F10 to restart".into());
-		}
-	}
-	if status.paused {
-		rows.push("Paused".into());
-	}
-	if let Some(scene) = &status.pending_scene_id {
-		rows.push(format!("Scene {} pending. F8 to retry", scene.as_str()));
-	}
-	rows
-}
-
 fn main() -> Result<(), String> {
 	let _logging =
 		engine_logger::init_application("game").expect("failed to initialize game logger");
@@ -1723,25 +1132,29 @@ fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
 }
 
 #[cfg(test)]
-#[path = "tests_app_scene_io.rs"]
+#[path = "../tests/unit/tests_app_scene_io.rs"]
 mod tests;
 
 #[cfg(all(test, windows))]
-#[path = "tests_exported_run.rs"]
+#[path = "../tests/unit/tests_exported_run.rs"]
 mod exported_run_tests;
 
 #[cfg(all(test, windows))]
-#[path = "tests_performance.rs"]
+#[path = "../tests/unit/tests_performance.rs"]
 mod performance_tests;
 
 #[cfg(all(test, windows))]
-#[path = "tests_asset_reimport.rs"]
+#[path = "../tests/unit/tests_asset_reimport.rs"]
 mod asset_reimport_tests;
 
 #[cfg(all(test, windows))]
-#[path = "tests_runtime_lifecycle.rs"]
+#[path = "../tests/unit/tests_runtime_lifecycle.rs"]
 mod runtime_lifecycle_tests;
 
 #[cfg(all(test, windows))]
-#[path = "tests_animation_native.rs"]
+#[path = "../tests/unit/tests_animation_native.rs"]
 mod animation_native_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/tests_camera_native.rs"]
+mod camera_native_tests;

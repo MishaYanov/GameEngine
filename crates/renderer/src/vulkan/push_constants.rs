@@ -59,5 +59,5 @@ impl ModelPushConstants {
 }
 
 #[cfg(test)]
-#[path = "tests_push_constants.rs"]
+#[path = "../../tests/unit/vulkan/push_constants.rs"]
 mod tests;

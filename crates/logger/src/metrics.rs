@@ -150,6 +150,38 @@ impl ResourceGuard {
 	}
 }
 
+impl Drop for ResourceGuard {
+	fn drop(&mut self) {
+		let Some(owner) = &self.owner else {
+			return;
+		};
+		let mut state = owner.state.lock().unwrap_or_else(|e| e.into_inner());
+		let totals = &mut state.totals;
+		totals.live_resources -= 1;
+		totals.released_resources += 1;
+		totals.payload_bytes -= self.payload;
+		totals.allocation_bytes -= self.allocation;
+		totals.live_allocations -= u64::from(self.allocation > 0);
+		if self.device_local {
+			totals.device_local_bytes -= self.allocation;
+		}
+		if self.host_visible {
+			totals.host_visible_bytes -= self.allocation;
+		}
+		if let Some(count) = totals.by_kind.get_mut(&self.kind) {
+			*count -= 1;
+		}
+		if let Some(mut record) = state.live.remove(&self.id) {
+			record.released_ms = Some(now_ms());
+			if state.released.len() == MAX_RELEASED {
+				state.released.pop_front();
+			}
+			state.released.push_back(record);
+		}
+		owner.dirty.store(true, Ordering::Release);
+	}
+}
+
 impl ResourceMetrics {
 	pub fn new(gpu_name: &str) -> Option<Self> {
 		let devices = DEVICES.get_or_init(|| Mutex::new(Vec::new()));
@@ -280,37 +312,6 @@ impl Inner {
 		}
 	}
 }
-impl Drop for ResourceGuard {
-	fn drop(&mut self) {
-		let Some(owner) = &self.owner else {
-			return;
-		};
-		let mut state = owner.state.lock().unwrap_or_else(|e| e.into_inner());
-		let totals = &mut state.totals;
-		totals.live_resources -= 1;
-		totals.released_resources += 1;
-		totals.payload_bytes -= self.payload;
-		totals.allocation_bytes -= self.allocation;
-		totals.live_allocations -= u64::from(self.allocation > 0);
-		if self.device_local {
-			totals.device_local_bytes -= self.allocation;
-		}
-		if self.host_visible {
-			totals.host_visible_bytes -= self.allocation;
-		}
-		if let Some(count) = totals.by_kind.get_mut(&self.kind) {
-			*count -= 1;
-		}
-		if let Some(mut record) = state.live.remove(&self.id) {
-			record.released_ms = Some(now_ms());
-			if state.released.len() == MAX_RELEASED {
-				state.released.pop_front();
-			}
-			state.released.push_back(record);
-		}
-		owner.dirty.store(true, Ordering::Release);
-	}
-}
 
 pub(crate) fn owned_file(name: &str) -> bool {
 	name.strip_prefix("vulkan-metrics-")
@@ -361,5 +362,5 @@ pub(crate) fn persist(directory: &Path, application: &str, session: &str) -> io:
 }
 
 #[cfg(test)]
-#[path = "tests_metrics.rs"]
+#[path = "../tests/unit/tests_metrics.rs"]
 mod tests;

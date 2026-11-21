@@ -11,24 +11,37 @@ MSRV), features, and targets before recommending version-sensitive changes. For 
 review the supplied code directly. If it is self-contained, a scratch compile or test can verify the example under a
 stated edition and relevant `cfg` settings.
 
-## Organize each file
+## Rules per crate
 
-For new files or an explicitly requested ordering pass, use this readability convention unless the crate documents a
-different layout or the code needs a different order. Rust permits forward references for ordinary items.
+- Give each module a clear owner and a reason to change. Split independent behaviors into named modules, such as
+  `game_camera/follow.rs` and `game_camera/orbit.rs`. Keep each behavior's settings, validation, state, and tests
+  with its implementation. Keep shared invariants and transactions under one owner.
+- Use `lib.rs` as the public entry point and `main.rs` for startup and wiring. Put substantial behavior in private
+  modules and preserve existing public paths with re-exports when extracting code.
+- Give each constant a home with the policy it controls. Use a module constant for a module-wide rule and an associated
+  constant for a rule intrinsic to a type. When several modules enforce the same limit, use one domain-owned definition,
+  such as `scene/limits.rs`. Use the narrowest visibility that serves those callers.
+- Name constants with their unit or scope, such as `MAX_REPLAY_BYTES` or `MAX_ACTIONS_PER_TICK`, and record why a
+  non-obvious limit exists. Use typed settings with documented defaults for values callers or game authors should tune.
 
-1. Start with module or crate documentation and inner attributes, then any required `extern crate` declarations, imports
-   and re-exports, and out-of-line module declarations. Follow the configured style for import and module groups.
-2. Introduce the module's public concepts and related helpers together. Keep each `struct` or `enum` immediately before
-   its inherent `impl` block(s), then the trait impls for that type. Group specialized impls by their bounds or
-   configuration. Put a trait near its primary types or implementations when that improves discovery.
-3. Within an inherent impl, lead with associated constants and constructors, then group public methods by use. Keep
-   private helpers close to their callers or at the end of the impl. Place module-level functions and helpers where the
-   module reads naturally. Put inline `#[cfg(test)] mod tests` last.
-4. Move complete items with their docs, comments, and attributes. Preserve textual macro scope, conditional items, and
-   the contents of declarations. For ordinary feature or bug edits, follow existing local order and keep movement
-   limited to the requested change.
+## Rules per file
 
-Read [File ordering](references/file-ordering.md) for a complete example, facade and entry-point layouts, and rules for
+For new files or an explicitly requested ordering pass, use this readability convention. Respect the crate's documented
+layout and preserve any order that affects behavior. Rust permits forward references for ordinary items.
+
+1. Start with module docs and inner attributes, then required `extern crate` declarations, imports and re-exports,
+   and out-of-line module declarations. Follow the configured style for import and module groups.
+2. Put constants and aliases shared within the file near the top. Keep a constant or helper used by one type in or near
+   that type's implementation.
+3. Group by type. The default order is `struct A` → `impl A` → trait impls for `A` → `struct B` → `impl B` → trait
+   impls for `B`. Apply the same pattern to enums. Co-locate closely related types when they form one readable concept.
+4. Inside an inherent impl, lead with associated constants and constructors, then group public methods by purpose.
+   Keep private helpers near their callers. Place shared private helpers after the main production items and put
+   inline `#[cfg(test)] mod tests` last.
+5. Move complete items with their docs, comments, and attributes. Preserve textual macro scope, conditional compilation,
+   and field and variant order. In ordinary feature or bug edits, follow local order and keep moves within scope.
+
+Read [File ordering](references/file-ordering.md) for examples, facade and entry-point layouts, and rules for
 behavior-preserving moves.
 
 ## Implement and review

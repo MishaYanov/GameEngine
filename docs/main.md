@@ -9,6 +9,9 @@ The [Milestones 7–9 implementation review](milestones-7-9-review.md) records t
 character controllers, skinned animation, native preview and the separate native-component replay hash.
 Its verification scope is distinct from the earlier [Milestones 4–6](milestones-4-6-review.md) baseline.
 
+The [Milestone 10 camera review](milestone-10-camera-review.md) includes a playable camera room, steps for authoring a
+rig, and measured results across editor, headless and player.
+
 ## Workspace and development
 
 - [Vulkan scene editor design](../designs/editor-viewport/README.md): Researched navigation, grid, selection, transform tools, native asset placement, rendering architecture, and a game-creation support profile. Proposed viewport work is distinguished from current implementation.
@@ -58,11 +61,11 @@ Its verification scope is distinct from the earlier [Milestones 4–6](milestone
 
 - [Static documentation site](static-site.md): Build, preview, update, test, and host the Markdown-based website.
 
-- [Timing, input, and camera — in progress](timing-input-camera.md): Current clock/key/camera contracts, provisional game controls, and remaining verification.
+- Learn how the Play camera responds to moving walls, which colliders block the eye, and how to diagnose a rejected
+  pose. [Timing, input, and camera](timing-input-camera.md#orbit-camera-obstruction).
 
-- [Scene data, save, and reload — in progress](scene-persistence.md): Schema3, older-version migration, persistent keys
-  and hierarchy,
-  authored persistence, prefabs, validation, and packaging limits.
+- Find the current scene format, v1–4 migration, orbit settings, persistent identity, hierarchy and prefab storage.
+  [Scene data, save, and reload](scene-persistence.md).
 
 - [Scene editing](scene-editing.md): Typed editor commands, Edit/Play, selection, transactions, hierarchy, assets, and
   legacy demo limits.

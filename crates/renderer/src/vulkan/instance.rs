@@ -349,5 +349,5 @@ pub fn format_api_version(version: u32) -> String {
 }
 
 #[cfg(test)]
-#[path = "tests_instance.rs"]
+#[path = "../../tests/unit/vulkan/instance.rs"]
 mod tests;

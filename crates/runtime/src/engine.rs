@@ -73,5 +73,5 @@ impl GraphicsProbe {
 }
 
 #[cfg(test)]
-#[path = "tests_engine.rs"]
+#[path = "../tests/unit/engine.rs"]
 mod tests;

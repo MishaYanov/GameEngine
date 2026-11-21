@@ -3,14 +3,15 @@ use crate::{
 	EntityKey,
 	components::{ComponentRecord, NO_MESH_PATH},
 	scene_data::{
-		CURRENT_SCHEMA_VERSION, CameraData, EntityData, LightData, SceneData, TransformData,
+		CURRENT_SCHEMA_VERSION, CameraData, EntityData, LightData, LightKind, MAX_SCENE_BYTES,
+		ParsedScene, SceneData, TransformData,
 	},
 };
 use serde::{
 	Deserialize, Deserializer, Serialize, Serializer,
 	ser::{SerializeMap, SerializeSeq},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -206,3 +207,208 @@ pub(crate) fn camera_schema_version(value: &serde_json::Value) -> Result<u64, St
 	}
 	Ok(version)
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SceneDataV1 {
+	schema_version: u32,
+	entities: Vec<EntityDataV1>,
+	camera: CameraData,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityDataV1 {
+	name: String,
+	model_path: String,
+	transform: TransformData,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SceneDataV2 {
+	schema_version: u32,
+	bindings: BTreeMap<String, EntityKey>,
+	entities: Vec<EntityDataV2>,
+	camera: CameraData,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityDataV2 {
+	key: EntityKey,
+	name: String,
+	model_path: String,
+	transform: TransformData,
+}
+
+pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
+	if source.len() > MAX_SCENE_BYTES {
+		return Err("Scene JSON exceeds the 32 MiB size limit".into());
+	}
+	let value: serde_json::Value =
+		serde_json::from_str(source).map_err(|error| format!("Invalid scene JSON: {error}"))?;
+
+	let source_version = crate::scene_format::camera_schema_version(&value)?;
+
+	let parsed = match source_version {
+		1 => {
+			let legacy: SceneDataV1 = serde_json::from_value(value)
+				.map_err(|error| format!("Invalid version-1 scene JSON: {error}"))?;
+
+			let entities = legacy
+				.entities
+				.into_iter()
+				.enumerate()
+				.map(|(index, entity)| {
+					Ok(EntityData::new(
+						EntityKey::new(format!("legacy-entity-{index}"))?,
+						entity.name,
+						entity.model_path,
+					)
+					.with_transform(entity.transform))
+				})
+				.collect::<Result<Vec<_>, String>>()?;
+
+			let lights = legacy_lights(&entities)?;
+
+			ParsedScene {
+				source_schema_version: legacy.schema_version,
+				data: SceneData {
+					schema_version: CURRENT_SCHEMA_VERSION,
+					bindings: BTreeMap::new(),
+					entities,
+					camera: legacy.camera,
+					lights,
+				},
+			}
+		}
+
+		2 => {
+			let legacy: SceneDataV2 = serde_json::from_value(value)
+				.map_err(|error| format!("Invalid version-2 scene JSON: {error}"))?;
+
+			let entities = legacy
+				.entities
+				.into_iter()
+				.map(|entity| {
+					EntityData::new(entity.key, entity.name, entity.model_path)
+						.with_transform(entity.transform)
+				})
+				.collect::<Vec<_>>();
+
+			let lights = legacy_lights(&entities)?;
+
+			ParsedScene {
+				source_schema_version: legacy.schema_version,
+				data: SceneData {
+					schema_version: CURRENT_SCHEMA_VERSION,
+					bindings: legacy.bindings,
+					entities,
+					camera: legacy.camera,
+					lights,
+				},
+			}
+		}
+
+		3..=5 => {
+			let data = crate::scene_format::decode_scene(value, source_version)
+				.map_err(|error| format!("Invalid scene JSON: {error}"))?;
+
+			ParsedScene {
+				// Safe here: this branch accepts only 3, 4, or 5.
+				source_schema_version: source_version as u32,
+				data,
+			}
+		}
+
+		version => {
+			return Err(format!("Unsupported schema version: {version}"));
+		}
+	};
+
+	parsed.data.validate()?;
+	if parsed.source_schema_version != CURRENT_SCHEMA_VERSION {
+		engine_logger::debug!(target: "engine_core::scene", "Scene schema migrated: from={}, to={CURRENT_SCHEMA_VERSION}", parsed.source_schema_version);
+	}
+
+	Ok(parsed)
+}
+
+fn legacy_lights(entities: &[EntityData]) -> Result<Vec<LightData>, String> {
+	let occupied: HashSet<_> = entities.iter().map(|entity| entity.key.as_str()).collect();
+	for index in 0..=entities.len() {
+		let candidate = if index == 0 {
+			"legacy-default-directional-light".to_string()
+		} else {
+			format!("legacy-default-directional-light-{index}")
+		};
+		if !occupied.contains(candidate.as_str()) {
+			return Ok(vec![LightData::new(
+				EntityKey::new(candidate)?,
+				"Default directional light",
+				LightKind::Directional,
+			)]);
+		}
+	}
+	Err("Cannot allocate a migrated default light identity".into())
+}
+
+impl SceneData {
+	pub fn from_json(source: &str) -> Result<Self, String> {
+		parse_json(source).map(|parsed| parsed.data)
+	}
+
+	pub fn to_json(&self) -> Result<String, String> {
+		self.validate()?;
+		let mut writer = SceneJsonWriter::new(Vec::new());
+		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
+			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
+		String::from_utf8(writer.output).map_err(|error| format!("Failed to encode scene: {error}"))
+	}
+
+	/// Exact pretty-JSON length, with the same validation and size limit as `to_json`.
+	pub fn serialized_size(&self) -> Result<usize, String> {
+		self.validate()?;
+		let mut writer = SceneJsonWriter::new(std::io::sink());
+		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
+			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
+		Ok(writer.bytes)
+	}
+}
+
+pub(crate) fn validate_authored_size(scene: &SceneData) -> Result<(), String> {
+	let mut count = SceneJsonWriter::new(std::io::sink());
+	serde_json::to_writer(&mut count, &crate::scene_format::StoredSceneRef(scene))
+		.map_err(|error| format!("Scene authored byte validation failed: {error}"))?;
+	Ok(())
+}
+
+// Stop serialization at the same limit accepted by the loader, instead of
+// constructing a potentially huge String and rejecting it after allocation.
+struct SceneJsonWriter<W> {
+	output: W,
+	bytes: usize,
+}
+impl<W> SceneJsonWriter<W> {
+	fn new(output: W) -> Self {
+		Self { output, bytes: 0 }
+	}
+}
+impl<W: std::io::Write> std::io::Write for SceneJsonWriter<W> {
+	fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+		// Atomic scene saves append one conventional trailing newline.
+		if bytes.len() > (MAX_SCENE_BYTES - 1).saturating_sub(self.bytes) {
+			return Err(std::io::Error::other(
+				"Scene JSON exceeds the 32 MiB size limit",
+			));
+		}
+		let written = self.output.write(bytes)?;
+		self.bytes += written;
+		Ok(written)
+	}
+	fn flush(&mut self) -> std::io::Result<()> {
+		self.output.flush()
+	}
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/scene_format/serialization_tests.rs"]
+mod serialization_tests;

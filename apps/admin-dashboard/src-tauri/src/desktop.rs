@@ -1,45 +1,20 @@
-use crate::{
-	AdminService, DashboardSnapshot,
-	collector::{LogFilter, LogPage},
-	processes::ProcessRun,
-};
+use crate::{AdminService, DashboardSnapshot, processes::ProcessRun};
 use std::{
 	path::PathBuf,
 	sync::{Arc, Mutex},
 };
 use tauri::State;
 type Service = Arc<Mutex<AdminService>>;
-#[tauri::command]
-async fn resource_metrics(
-	service: State<'_, Service>,
-	selected_id: Option<String>,
-) -> Result<crate::metrics::MetricsPage, String> {
-	let directory = service
-		.lock()
-		.map_err(|_| "Admin state lock is unavailable")?
-		.collector
-		.directory
-		.clone();
-	tauri::async_runtime::spawn_blocking(move || {
-		crate::metrics::read(&directory, selected_id.as_deref())
-	})
-	.await
-	.map_err(|_| "Resource metrics reader failed".into())
-}
+
+mod logs;
+mod projects;
+
 fn error(error: impl ToString) -> String {
 	error.to_string()
 }
 #[tauri::command]
 fn dashboard_snapshot(service: State<Service>) -> DashboardSnapshot {
 	service.lock().unwrap_or_else(|e| e.into_inner()).snapshot()
-}
-#[tauri::command]
-fn log_page(service: State<Service>, after: u64, limit: usize, filter: LogFilter) -> LogPage {
-	service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.collector
-		.page(after, limit, &filter)
 }
 #[tauri::command]
 fn configure_workspace(
@@ -182,98 +157,6 @@ fn queue_card_job(
 	}
 	Ok(job)
 }
-#[tauri::command]
-async fn preview_project(
-	service: State<'_, Service>,
-	input: crate::builder::Input,
-) -> Result<crate::builder::Preview, String> {
-	let request = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.builder
-		.begin_preview(input)
-		.map_err(error)?;
-	let prepared = tauri::async_runtime::spawn_blocking(move || {
-		crate::builder::Builder::prepare_preview(request)
-	})
-	.await
-	.map_err(|_| "Project preview worker failed".to_owned())?
-	.map_err(error)?;
-	service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.builder
-		.finish_preview(prepared)
-		.map_err(error)
-}
-#[tauri::command]
-async fn generate_project(
-	service: State<'_, Service>,
-	id: String,
-) -> Result<crate::builder::Generation, String> {
-	let request = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.builder
-		.begin_generation(&id)
-		.map_err(error)?;
-	let prepared = tauri::async_runtime::spawn_blocking(move || {
-		crate::builder::Builder::prepare_generation(request)
-	})
-	.await
-	.map_err(|_| "Project generation worker failed; staging retained".to_owned())?
-	.map_err(error)?;
-	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let AdminService { builder, jobs, .. } = &mut *service;
-	builder.finish_generation(prepared, jobs).map_err(error)
-}
-#[derive(serde::Serialize)]
-struct ExportResult {
-	path: String,
-	count: usize,
-}
-#[tauri::command]
-fn export_logs(service: State<Service>, filter: LogFilter) -> Result<ExportResult, String> {
-	let (path, count) = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.export(&filter)
-		.map_err(error)?;
-	Ok(ExportResult {
-		path: path.to_string_lossy().into_owned(),
-		count,
-	})
-}
-#[tauri::command]
-fn open_source(service: State<Service>, cursor: u64) -> Result<(), String> {
-	let (source, line) = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.source(cursor)
-		.map_err(error)?;
-	#[cfg(windows)]
-	let candidates = [
-		std::env::var_os("LOCALAPPDATA")
-			.map(PathBuf::from)
-			.unwrap_or_default()
-			.join("Programs/Microsoft VS Code/Code.exe"),
-		PathBuf::from("C:/Program Files/Microsoft VS Code/Code.exe"),
-	];
-	#[cfg(not(windows))]
-	let candidates = [
-		PathBuf::from("/usr/bin/code"),
-		PathBuf::from("/usr/local/bin/code"),
-	];
-	let executable = candidates
-		.into_iter()
-		.find(|p| p.is_file())
-		.ok_or("VS Code is unavailable; copy the source location instead")?;
-	let mut command = std::process::Command::new(executable);
-	command.args(["--goto", &format!("{}:{line}", source.display())]);
-	crate::processes::hidden(&mut command);
-	command.spawn().map_err(error)?;
-	Ok(())
-}
 pub fn run() {
 	let _logging =
 		engine_logger::init_application("admin-dashboard").expect("initialize admin diagnostics");
@@ -306,7 +189,7 @@ pub fn run() {
 	let app = tauri::Builder::default()
 		.manage(service)
 		.invoke_handler(tauri::generate_handler![
-			resource_metrics,
+			logs::resource_metrics,
 			dashboard_snapshot,
 			queue_job,
 			save_card,
@@ -314,16 +197,16 @@ pub fn run() {
 			move_card,
 			link_card_job,
 			queue_card_job,
-			preview_project,
-			generate_project,
+			projects::preview_project,
+			projects::generate_project,
 			cancel_job,
-			log_page,
+			logs::log_page,
 			configure_workspace,
 			start_application,
 			stop_application,
 			restart_application,
-			export_logs,
-			open_source
+			logs::export_logs,
+			logs::open_source
 		])
 		.build(tauri::generate_context!())
 		.expect("build admin dashboard");

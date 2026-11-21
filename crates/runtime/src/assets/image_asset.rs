@@ -139,5 +139,5 @@ impl ImageAsset {
 }
 
 #[cfg(test)]
-#[path = "tests_image_asset.rs"]
+#[path = "../../tests/unit/assets/image_asset.rs"]
 mod tests;

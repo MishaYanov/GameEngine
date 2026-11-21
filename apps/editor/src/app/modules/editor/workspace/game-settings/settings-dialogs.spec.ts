@@ -4,6 +4,12 @@ import axe from 'axe-core';
 import {vi} from 'vitest';
 import type {EditorCommand, EditorSnapshot} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {
+    CameraPreviewController,
+    type PreviewDefinition,
+    type PreviewIntent
+} from '../../../../core/editor/camera-preview';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {CameraSettings} from './camera-settings';
@@ -60,12 +66,24 @@ describe('game settings dialogs', () => {
             return current();
         });
         const committed = vi.fn(async (action: () => Promise<void>) => { await action(); return true; });
+        const reply = {
+            token: 'test-token', workspace_generation: 42, scene_id: 'main', revision: 7,
+            sample: 0, effective_distance: 3.5, required_probe_radius: 0.2, target_lost: false, blocker: 'wall'
+        };
+        const previewApi = {
+            open: vi.fn(async (_: PreviewDefinition) => reply),
+            sample: vi.fn(async (_: string, sample: number, _intent: PreviewIntent) => ({...reply, sample})),
+            close: vi.fn(async (_: string) => undefined),
+        };
         TestBed.configureTestingModule({providers: [
             {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
             {provide: EditorService, useValue: {
                 nativeAvailable: true, snapshot: current, workspaceGeneration: generation, busy: signal(false),
-                playing: computed(() => current().mode === 'play'), execute,
+                    playing: computed(() => current().mode === 'play'),
+                    execute,
+                    cameraPreview: new CameraPreviewController(previewApi),
             }},
+                {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 42})}},
             {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
         ]});
         const fixture = kind === 'camera' ? TestBed.createComponent(CameraSettings) : TestBed.createComponent(GameplaySettings);
@@ -87,7 +105,7 @@ describe('game settings dialogs', () => {
                 await fixture.whenStable();
             }
         };
-        return {fixture, root, current, generation, execute, committed, button, field, change};
+        return {fixture, root, current, generation, execute, committed, button, field, change, previewApi};
     }
 
     it('authors a scene sensor override while preserving other scenes and latest project edits', async () => {
@@ -118,19 +136,19 @@ describe('game settings dialogs', () => {
         expect(panel.current().project.gameplay_settings).toEqual({schema_version: 1, scenes: {ending: {kind: 'finish', finish_trigger: 'goal'}}});
     });
 
-    it('applies Follow to the latest fixed camera without replacing its pose', async () => {
+    it('applies Follow once using the latest unrelated revision and preserves the pose', async () => {
         const panel = await setup('camera');
         await panel.change('Mode', 'follow');
         await panel.change('Target', 'blocker');
         panel.committed.mockImplementationOnce(async action => {
-            panel.current.update(value => ({...value, revision: 12, document: {...value.document,
-                camera: {...value.document.camera, position: [2, 3, 4]}}}));
+            panel.current.update(value => ({...value, revision: 12}));
             await action(); return true;
         });
         panel.button('Apply Game Camera').click();
         await panel.fixture.whenStable();
         expect(panel.execute).toHaveBeenCalledExactlyOnceWith({
-            type: 'set_camera', camera: {...snapshot().document.camera, position: [2, 3, 4],
+            type: 'set_camera', camera: {
+                ...snapshot().document.camera, orbit: null,
                 follow: {target: 'blocker', offset: [0, 2, 5], look_offset: [0, 0, 0], smoothing_seconds: 0.15}
             },
         }, 1, 12);
@@ -138,7 +156,7 @@ describe('game settings dialogs', () => {
         expect(panel.button('Apply Game Camera').disabled).toBe(true);
     });
 
-    it('reveals an existing orbit target without offering a conflicting follow edit', async () => {
+    it('focuses an invalid orbit target for repair and keeps Apply disabled until the draft is valid', async () => {
         const panel = await setup('camera');
         panel.current.update(value => ({
             ...value, document: {
@@ -157,11 +175,120 @@ describe('game settings dialogs', () => {
         if (!(camera instanceof CameraSettings)) throw new Error('Expected camera settings');
         expect(camera.show(true, 'orbit')).toBe(true);
         await panel.fixture.whenStable();
-        const target = panel.root.querySelector<HTMLElement>('[aria-label="Orbit camera"] p');
-        expect(target?.textContent).toContain('Missing target: missing-player');
-        expect(panel.button('Apply Game Camera')).toBeUndefined();
-        expect(document.activeElement).toBe(target);
+        expect(panel.root.textContent).toContain('Missing target: missing-player');
+        expect(panel.button('Apply Game Camera').disabled).toBe(true);
+        expect(document.activeElement).toBe(panel.field('Target'));
         expect(panel.execute).not.toHaveBeenCalled();
+    });
+
+    it('cancels without changing the scene and rejects a concurrent camera projection edit', async () => {
+        const panel = await setup('camera');
+        await panel.change('Mode', 'orbit');
+        panel.button('Close').click();
+        await panel.fixture.whenStable();
+        expect(panel.execute).not.toHaveBeenCalled();
+        panel.button('Game Camera…').click();
+        await panel.fixture.whenStable();
+        expect(panel.field('Mode').value).toBe('fixed');
+        await panel.change('Mode', 'orbit');
+        panel.committed.mockImplementationOnce(async action => {
+            panel.current.update(s => ({
+                ...s, revision: 8, document: {
+                    ...s.document,
+                    camera: {...s.document.camera, far: 300}
+                }
+            }));
+            await action();
+            return true;
+        });
+        panel.button('Apply Game Camera').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[role="alert"]')?.textContent).toContain('Camera settings changed');
+        expect(panel.execute).not.toHaveBeenCalled();
+    });
+
+    it('checks the target again after committing an ongoing edit', async () => {
+        const panel = await setup('camera');
+        await panel.change('Mode', 'orbit');
+        panel.committed.mockImplementationOnce(async action => {
+            panel.current.update(s => ({
+                ...s, revision: 8, document: {
+                    ...s.document,
+                    entities: s.document.entities.filter(e => e.key !== 'player')
+                }
+            }));
+            await action();
+            return true;
+        });
+        panel.button('Apply Game Camera').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[role="alert"]')?.textContent).toContain('target');
+        expect(panel.execute).not.toHaveBeenCalled();
+    });
+
+    it('moves preview controls out of the modal, samples the frozen camera and returns to the same draft', async () => {
+        const panel = await setup('camera');
+        await panel.change('Mode', 'orbit');
+        await panel.change('Initial distance', '7');
+        panel.button('Preview Orbit').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('dialog[open]')).toBeNull();
+        expect(panel.previewApi.open).toHaveBeenCalledWith(expect.objectContaining({
+            expectedGeneration: 42, expectedRevision: 7, sceneId: 'main',
+        }));
+        expect(panel.root.textContent).toContain('Blocked by wall');
+        panel.button('Turn right').click();
+        await panel.fixture.whenStable();
+        expect(panel.previewApi.sample).toHaveBeenCalledWith('test-token', 1, {
+            yaw_delta: 15 * Math.PI / 180, pitch_delta: 0, log_distance_delta: 0
+        });
+        panel.button('Back to settings').click();
+        await panel.fixture.whenStable();
+        expect(panel.previewApi.close).toHaveBeenCalledWith('test-token');
+        expect(panel.field('Initial distance').value).toBe('7');
+        expect(panel.execute).not.toHaveBeenCalled();
+        panel.button('Apply Game Camera').click();
+        panel.button('Apply Game Camera').click();
+        await panel.fixture.whenStable();
+        expect(panel.execute).toHaveBeenCalledTimes(1);
+        expect(panel.current().document.camera.orbit?.initial_distance).toBe(7);
+        expect(panel.current().document.camera.follow).toBeNull();
+    });
+
+    it('preserves a reopened draft while an earlier Apply is awaiting the edit coordinator', async () => {
+        const panel = await setup('camera');
+        await panel.change('Mode', 'orbit');
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        panel.committed.mockImplementationOnce(async action => {
+            await gate;
+            await action();
+            return true;
+        });
+        panel.button('Apply Game Camera').click();
+        panel.button('Close').click();
+        await panel.fixture.whenStable();
+        panel.button('Game Camera…').click();
+        await panel.fixture.whenStable();
+        await panel.change('Mode', 'follow');
+        release();
+        await panel.fixture.whenStable();
+        expect(panel.field('Mode').value).toBe('follow');
+        expect(panel.execute).not.toHaveBeenCalled();
+    });
+
+    it.each(['fixed', 'follow', 'orbit'])('exposes accessible %s camera controls', async mode => {
+        const panel = await setup('camera');
+        await panel.change('Mode', mode);
+        if (mode === 'orbit') {
+            await panel.change('Initial distance', '-');
+            expect(panel.field('Initial distance').value).toBe('-');
+            expect(panel.button('Preview Orbit').disabled).toBe(true);
+        }
+        const report = await axe.run(panel.root, {rules: {'color-contrast': {enabled: false}}});
+        expect(report.violations.map(v => v.id)).toEqual([]);
     });
 
     it('requires a different Finish destination and enabled mutually compatible sensors', async () => {

@@ -3,7 +3,6 @@ use crate::{
 	editor_panel::{EditorPanel, PanelAction, Property},
 	gizmo_overlay::GizmoOverlay,
 };
-type CursorGeometry = ([f64; 2], [u32; 2]);
 use runtime::{
 	SceneData, Transform,
 	assets::catalog::{self, ModelAsset},
@@ -11,7 +10,7 @@ use runtime::{
 	model_instance::ModelInstance,
 	visibility::SceneRenderStats,
 };
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
 use winit::{event::KeyEvent, keyboard::KeyCode};
 
 pub(crate) struct EditorTools {
@@ -42,40 +41,8 @@ impl Default for EditorTools {
 	}
 }
 
-#[derive(Default)]
-pub(crate) struct FrameMetrics {
-	last: Option<Instant>,
-	samples: u32,
-	elapsed: f32,
-	update: f32,
-	pub frame_ms: f32,
-	pub cpu_ms: f32,
-}
-
-impl FrameMetrics {
-	pub fn record(&mut self, now: Instant, update_seconds: f32) {
-		if let Some(last) = self.last.replace(now) {
-			let delta = now.duration_since(last).as_secs_f32();
-			// Focus/minimization stalls are not normal frame samples.
-			if delta > 0.25 {
-				self.samples = 0;
-				self.elapsed = 0.0;
-				self.update = 0.0;
-				return;
-			}
-			self.samples += 1;
-			self.elapsed += delta;
-			self.update += update_seconds;
-			if self.elapsed >= 0.5 {
-				self.frame_ms = self.elapsed * 1000.0 / self.samples as f32;
-				self.cpu_ms = self.update * 1000.0 / self.samples as f32;
-				self.samples = 0;
-				self.elapsed = 0.0;
-				self.update = 0.0;
-			}
-		}
-	}
-}
+mod gestures;
+pub(crate) use crate::frame_metrics::FrameMetrics;
 
 impl GameApp {
 	pub(crate) fn is_dirty(&self) -> bool {
@@ -190,120 +157,6 @@ impl GameApp {
 		}
 		self.update_selection_title();
 		Ok(())
-	}
-
-	pub(crate) fn left_press(&mut self) -> Result<(), String> {
-		if self.standalone_runtime || self.mouse_captured {
-			return Ok(());
-		}
-		let Some(pixel) = self.cursor_position else {
-			return Ok(());
-		};
-		let scale = self
-			.window
-			.as_ref()
-			.map_or(1.0, |window| window.scale_factor());
-		if self.tools.panel.contains(pixel, scale) {
-			if let Some(action) = self.tools.panel.hit(pixel, scale) {
-				self.panel_action(action)?;
-			}
-			return Ok(());
-		}
-		self.tools.panel.edit = None;
-		if self.authored.is_some() {
-			return Ok(());
-		}
-		let Some((pixel, extent)) = self.cursor_geometry()? else {
-			return Ok(());
-		};
-		if let Some(entity) = self.editor.selected_entity() {
-			let pose = gizmo::GizmoPose::from_scene(&self.scene, entity)?;
-			let mode = self.tools.panel.mode;
-			if let Some(axis) = gizmo::hit_test_parented(&self.camera, extent, pose, mode, pixel) {
-				self.tools.drag = Some(GizmoDrag::begin_parented(
-					entity,
-					pose,
-					&self.camera,
-					extent,
-					pixel,
-					mode,
-					axis,
-				)?);
-				self.input.suppress_held();
-				self.editor.end_gesture();
-				return Ok(());
-			}
-		}
-		self.pick_entity()
-	}
-
-	pub(crate) fn cursor_geometry(&mut self) -> Result<Option<CursorGeometry>, String> {
-		let Some(pixel) = self.cursor_position else {
-			return Ok(None);
-		};
-		let size = self
-			.window
-			.as_ref()
-			.ok_or("Window is not initialized")?
-			.inner_size();
-		if size.width == 0 || size.height == 0 {
-			return Ok(None);
-		}
-		let Some(extent) = self
-			.renderer
-			.as_mut()
-			.ok_or("Renderer is not initialized")?
-			.prepare()?
-		else {
-			return Ok(None);
-		};
-		Ok(Some((
-			[
-				pixel[0] * extent[0] as f64 / size.width as f64,
-				pixel[1] * extent[1] as f64 / size.height as f64,
-			],
-			extent,
-		)))
-	}
-
-	pub(crate) fn preview_drag(&mut self) -> Result<(), String> {
-		if self.tools.drag.is_none() {
-			return Ok(());
-		}
-		let Some((pixel, _)) = self.cursor_geometry()? else {
-			return Ok(());
-		};
-		let drag = self.tools.drag.as_ref().ok_or("Drag is missing")?;
-		let after = drag.preview(pixel)?;
-		*self
-			.scene
-			.get_mut(drag.entity)
-			.ok_or("Dragged entity is missing")?
-			.transform_mut() = after;
-		Ok(())
-	}
-
-	pub(crate) fn finish_drag(&mut self) -> Result<(), String> {
-		let Some(drag) = self.tools.drag.take() else {
-			return Ok(());
-		};
-		let after = *self
-			.scene
-			.get(drag.entity)
-			.ok_or("Dragged entity is missing")?
-			.transform();
-		self.editor
-			.commit_transform(&mut self.scene, drag.entity, drag.before, after)?;
-		self.tools.panel.status = "Transform applied. Ctrl+Z undoes the entire drag.".into();
-		Ok(())
-	}
-
-	pub(crate) fn cancel_drag(&mut self) {
-		if let Some(drag) = self.tools.drag.take()
-			&& let Some(instance) = self.scene.get_mut(drag.entity)
-		{
-			*instance.transform_mut() = drag.before;
-		}
 	}
 
 	pub(crate) fn commit_property(&mut self) -> Result<(), String> {

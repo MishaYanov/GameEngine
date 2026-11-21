@@ -220,6 +220,7 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect((root.querySelector('.virtual-space') as HTMLElement).style.height).toBe('336000px');
         tree().scrollTop = 6000 * 28; tree().dispatchEvent(new Event('scroll')); await fixture.whenStable();
         expect(row('item-6000')).toBeTruthy();
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('item-0').id);
         expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
         await keydown('End');
         expect(row('item-11999')).toBeTruthy();

@@ -81,6 +81,11 @@ impl GameSession {
 	pub fn active(&self) -> &SimulationSession {
 		&self.active
 	}
+	pub fn camera_replay_state(
+		&self,
+	) -> Result<crate::camera_replay::CameraReplayProjection, String> {
+		self.active.camera_replay_state()
+	}
 	pub fn active_mut(&mut self) -> &mut SimulationSession {
 		&mut self.active
 	}
@@ -201,9 +206,9 @@ impl GameSession {
 	fn camera_input_active(&self) -> bool {
 		!self.active.paused()
 			&& self
-			.active
-			.orbit_state()
-			.is_some_and(|rig| !rig.target_lost)
+				.active
+				.orbit_state()
+				.is_some_and(|rig| !rig.target_lost)
 	}
 
 	pub fn submit_camera_input(

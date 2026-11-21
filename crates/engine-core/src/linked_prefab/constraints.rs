@@ -1,0 +1,115 @@
+use super::*;
+
+pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
+	let entities: HashMap<_, _> = scene
+		.entities
+		.iter()
+		.map(|entity| (&entity.key, entity))
+		.collect();
+	let mut children: HashMap<&EntityKey, Vec<&EntityKey>> = HashMap::new();
+	for entity in &scene.entities {
+		if let Some(parent) = &entity.parent {
+			children.entry(parent).or_default().push(&entity.key);
+		}
+	}
+	let mut members = HashSet::new();
+	let mut count = 0usize;
+	for anchor in scene
+		.entities
+		.iter()
+		.filter(|entity| entity.linked_prefab.is_some())
+	{
+		count += 1;
+		if count > 128 {
+			return Err("Scene exceeds 128 linked prefab instances".into());
+		}
+		let link = anchor.linked_prefab.as_ref().expect("filtered link");
+		link.source.validate()?;
+		if anchor.has_mesh_component()
+			|| anchor.collider.is_some()
+			|| !anchor.native_behaviors.is_empty()
+			|| anchor.character_controller.is_some()
+			|| anchor.animation.is_some()
+		{
+			return Err(
+				"Linked instance anchors are transform-only objects; edit a member or Unpack first"
+					.into(),
+			);
+		}
+		let sources: HashMap<_, _> = link
+			.source
+			.prefab
+			.entities
+			.iter()
+			.map(|entity| (&entity.key, entity))
+			.collect();
+		let source_keys: HashSet<_> = sources.keys().copied().collect();
+		if source_keys.len() != link.entity_map.len()
+			|| link.entity_map.keys().any(|key| !source_keys.contains(key))
+		{
+			return Err("Linked instance mapping differs from its pinned source".into());
+		}
+		let owned: HashSet<_> = link.entity_map.values().collect();
+		let mut pending = children.get(&anchor.key).cloned().unwrap_or_default();
+		while let Some(key) = pending.pop() {
+			if !owned.contains(key) {
+				return Err("Linked instance structure is pinned; Unpack before adding or duplicating individual members".into());
+			}
+			if let Some(nested) = children.get(key) {
+				pending.extend(nested);
+			}
+		}
+		for (source, key) in &link.entity_map {
+			if key == &anchor.key || !members.insert(key.clone()) {
+				return Err(
+					"Linked instance members must be distinct and belong to one instance".into(),
+				);
+			}
+			let member = entities.get(key).ok_or(
+				"A linked member was removed; delete the whole instance or Unpack it first",
+			)?;
+			let base = sources.get(source).expect("source mapping checked");
+			let parent = base
+				.parent
+				.as_ref()
+				.and_then(|key| link.entity_map.get(key))
+				.unwrap_or(&anchor.key);
+			if member.parent.as_ref() != Some(parent) || member.linked_prefab.is_some() {
+				return Err(
+					"Linked member hierarchy is pinned; Unpack before reparenting or nesting it"
+						.into(),
+				);
+			}
+		}
+		for target in &link.overrides {
+			if !source_keys.contains(&target.source_entity) {
+				return Err("Override targets an entity outside its pinned source".into());
+			}
+		}
+		for target in link.bindings.values() {
+			if !entities.contains_key(target) {
+				return Err(
+					"Linked prefab reference binding targets a missing scene entity".into(),
+				);
+			}
+		}
+		let base = materialized(link, &anchor.key)?;
+		for (source, expected) in &base {
+			let actual = entities[&link.entity_map[source]];
+			for property in properties(&[expected, actual]) {
+				let target = LinkedPrefabOverrideTarget {
+					source_entity: source.clone(),
+					property: property.clone(),
+				};
+				if value(expected, &property) != value(actual, &property)
+					&& !link.overrides.contains(&target)
+				{
+					return Err(
+						"Linked property differs from its pin without an explicit override".into(),
+					);
+				}
+			}
+		}
+	}
+	Ok(())
+}

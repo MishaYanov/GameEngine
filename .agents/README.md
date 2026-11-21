@@ -28,6 +28,17 @@ Read only the skill relevant to the current task. Example requests can invoke `$
 From a Codex session opened at the repository root, invoke `$rust-best-practices` or ask the [
 `rust_best_practices` subagent](../.codex/agents/rust-best-practices.toml) to organize or review a Rust change.
 
+From Codex opened at the repository root, ask `editor_best_practices` to review or implement an Angular editor
+change. It follows the [editor best practices agent profile](agents/editor-best-practices.toml), covering file
+placement,
+member visibility and accessors, state ownership, and behavior-preserving splits.
+
+Additional project subagents
+
+- [`rust_crates`](agents/rust-crates.toml) for crate boundaries, dependency direction, and cross-crate Rust APIs.
+- [`graphics_design`](agents/graphics-design.toml) for editor visuals, design-system components, icons, and assets.
+- [`tauri`](agents/tauri.toml) for editor IPC, native state and lifecycle, and desktop configuration.
+
 ## Maintenance
 
 Keep project-wide guidance in `rules/` and task-specific workflows in `skills/`. Use `.agents/skills/` for new project

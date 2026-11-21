@@ -1,16 +1,30 @@
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
-import {listen, type UnlistenFn} from '@tauri-apps/api/event';
+import type {UnlistenFn} from '@tauri-apps/api/event';
+import {EditorClientError} from './editor-client-error';
 import {applyEditorUpdate} from './editor-updates';
+import {ViewportAttachment} from './viewport/viewport-attachment';
 import {validGameplayModules} from './gameplay-modules';
 import {validComponentTypes} from './editor-components';
+import {CameraPreviewController, readCameraPreview} from './camera-preview';
 import {validMachineDescriptor} from './state-machine.models';
-import {readAnimationReview, readAnimationPreview, type AnimationReview, type AnimationPreview} from './animation.models';
+import {
+    type AnimationPreview,
+    type AnimationReview,
+    readAnimationPreview,
+    readAnimationReview
+} from './animation.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
-import type {LinkedPrefabStatus, PrefabSourceDocument, PrefabSourceDraft, PrefabSourceSave, PrefabSourceValidation} from './linked-prefabs.models';
 import type {
-    BuildLaunchResult,
+    LinkedPrefabStatus,
+    PrefabSourceDocument,
+    PrefabSourceDraft,
+    PrefabSourceSave,
+    PrefabSourceValidation
+} from './linked-prefabs.models';
+import type {
     AssetOperation,
+    BuildLaunchResult,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -27,28 +41,11 @@ import type {
     ViewportStatus,
 } from './editor.models';
 
-export type EditorErrorKind = 'unavailable' | 'not_open' | 'conflict' | 'busy' | 'backend';
+export {EditorClientError, type EditorErrorKind} from './editor-client-error';
 
 export interface ProjectOpenOptions {
     readonly expectedRevision?: number | null;
     readonly discardUnsaved?: boolean;
-}
-
-export class EditorClientError extends Error {
-    constructor(
-        readonly kind: EditorErrorKind,
-        readonly operation: string,
-        message: string,
-        override readonly cause?: unknown,
-    ) {
-        super(message);
-        this.name = 'EditorClientError';
-    }
-}
-
-interface PendingBounds {
-    readonly update: { bounds: ViewportBounds };
-    readonly promise: Promise<ViewportStatus>;
 }
 
 /** One authoritative document queue. UI drafts and input bindings stay in their owners. */
@@ -71,35 +68,37 @@ export class EditorService {
     private assetCatalogStale = false;
     private readonly collisionsState = signal<CollisionSnapshot | null>(null);
     readonly collisions = this.collisionsState.asReadonly();
-    private readonly viewportState = signal<ViewportStatus | null>(null);
-    readonly viewport = this.viewportState.asReadonly();
+    readonly cameraPreview = new CameraPreviewController({
+        open: async definition => readCameraPreview(
+            await this.native<unknown>('editor_camera_preview_open', {...definition})),
+        sample: async (token, nextSample, intent) => readCameraPreview(
+            await this.native<unknown>('editor_camera_preview_sample', {token, nextSample, intent})),
+        // An in-flight Open can finish during service teardown; its token still needs to be closed.
+        close: token => invoke<void>('editor_camera_preview_close', {token}),
+    });
+    private readonly viewportAttachment = new ViewportAttachment({
+        nativeAvailable: this.nativeAvailable,
+        loadCapabilities: () => this.loadCapabilities(),
+        assertNative: operation => this.assertNative(operation),
+        invoke: (operation, args) => this.native(operation, args),
+        recordError: (operation, cause) => this.recordError(operation, cause),
+    });
     private readonly errorState = signal<EditorClientError | null>(null);
     readonly error = this.errorState.asReadonly();
     private readonly pendingState = signal(0);
     readonly pending = this.pendingState.asReadonly();
     readonly busy = computed(() => this.pendingState() > 0);
-    private readonly listeners = new Set<UnlistenFn>();
     private queue: Promise<void> = Promise.resolve();
-    private viewportQueue: Promise<void> = Promise.resolve();
     private capabilitiesRequest: Promise<EditorCapabilities> | null = null;
     private assetRequest: { generation: number; promise: Promise<readonly ModelAsset[]> } | null = null;
-    private viewportStatusListener: UnlistenFn | null = null;
-    private pendingBounds: PendingBounds | null = null;
-    private pendingDetach: Promise<ViewportStatus> | null = null;
-    private pendingStatus: Promise<ViewportStatus> | null = null;
-    private viewportPending = 0;
-    private viewportReserved = false;
-    private viewportRequested = false;
     private destroyed = false;
+    readonly viewport = this.viewportAttachment.status;
 
     constructor() {
         this.destroyRef.onDestroy(() => {
+            this.cameraPreview.close();
             this.destroyed = true;
-            for (const unlisten of this.listeners) unlisten();
-            this.listeners.clear();
-            if (this.nativeAvailable && this.viewportRequested) {
-                void this.viewportQueue.then(() => invoke('editor_viewport_detach')).catch(() => undefined);
-            }
+            this.viewportAttachment.destroy();
         });
     }
 
@@ -548,116 +547,28 @@ export class EditorService {
         );
     }
 
-    /** One Angular host can own the single embedded viewport at a time. */
     reserveViewport(): () => void {
-        if (this.viewportReserved) {
-            throw this.recordError(
-                'editor_viewport_attach',
-                new EditorClientError(
-                    'busy',
-                    'editor_viewport_attach',
-                    'Another Angular element already owns the embedded viewport.',
-                ),
-            );
-        }
-        this.viewportReserved = true;
-        let released = false;
-        return () => {
-            if (!released) {
-                released = true;
-                this.viewportReserved = false;
-            }
-        };
+        return this.viewportAttachment.reserve();
     }
 
     attachViewport(bounds: ViewportBounds): Promise<ViewportStatus> {
-        if (this.viewportPending >= 32) return this.viewportBusy('editor_viewport_attach');
-        // Lifecycle boundaries retain their order: bounds submitted after a new
-        // attach must never replace bounds belonging to the preceding owner.
-        this.pendingBounds = null;
-        this.pendingDetach = null;
-        this.pendingStatus = null;
-        return this.enqueueViewport('editor_viewport_attach', async () => {
-            const capabilities = await this.loadCapabilities();
-            if (!capabilities.embedded_viewport_supported) {
-                throw new EditorClientError(
-                    'unavailable',
-                    'editor_viewport_attach',
-                    'This platform does not support the embedded Vulkan viewport.',
-                );
-            }
-            if (!this.viewportStatusListener) {
-                this.viewportStatusListener = await this.listenNative<ViewportStatus>(
-                    'editor://viewport-status',
-                    (status) => this.viewportState.set(status),
-                );
-            }
-            this.viewportRequested = true;
-            const result = await this.native<ViewportStatus>('editor_viewport_attach', {bounds});
-            this.viewportState.set(result);
-            return result;
-        });
+        return this.viewportAttachment.attach(bounds);
     }
 
     updateViewportBounds(bounds: ViewportBounds): Promise<ViewportStatus> {
-        if (this.pendingBounds) {
-            this.pendingBounds.update.bounds = bounds;
-            return this.pendingBounds.promise;
-        }
-        if (this.viewportPending >= 32) return this.viewportBusy('editor_viewport_bounds');
-        this.pendingStatus = null;
-        const update = {bounds};
-        const promise = this.enqueueViewport('editor_viewport_bounds', async () => {
-            if (this.pendingBounds?.update === update) this.pendingBounds = null;
-            const result = await this.native<ViewportStatus>('editor_viewport_bounds', {
-                bounds: update.bounds,
-            });
-            this.viewportState.set(result);
-            return result;
-        });
-        this.pendingBounds = {update, promise};
-        return promise;
+        return this.viewportAttachment.updateBounds(bounds);
     }
 
     detachViewport(): Promise<ViewportStatus> {
-        if (this.pendingDetach) return this.pendingDetach;
-        this.pendingBounds = null;
-        this.pendingStatus = null;
-        // One coalesced detach may exceed the regular queue cap so releasing an
-        // Angular owner can always finish. New attaches still obey the cap.
-        const promise = this.enqueueViewport('editor_viewport_detach', async () => {
-            const result = await this.native<ViewportStatus>('editor_viewport_detach');
-            this.viewportStatusListener?.();
-            this.viewportStatusListener = null;
-            this.viewportRequested = false;
-            this.viewportState.set(result);
-            return result;
-        });
-        this.pendingDetach = promise;
-        void promise
-            .finally(() => {
-                if (this.pendingDetach === promise) this.pendingDetach = null;
-            })
-            .catch(() => undefined);
-        return promise;
+        return this.viewportAttachment.detach();
     }
 
     refreshViewportStatus(): Promise<ViewportStatus> {
-        if (this.pendingStatus) return this.pendingStatus;
-        if (this.viewportPending >= 32) return this.viewportBusy('editor_viewport_status');
-        const promise = this.enqueueViewport('editor_viewport_status', async () => {
-            if (this.pendingStatus === promise) this.pendingStatus = null;
-            const result = await this.native<ViewportStatus>('editor_viewport_status');
-            this.viewportState.set(result);
-            return result;
-        });
-        this.pendingStatus = promise;
-        return promise;
+        return this.viewportAttachment.refreshStatus();
     }
 
-    /** Subscribe explicitly; raw movement never sends document commands by itself. */
     listenViewportInput(handler: (input: ViewportInput) => void): Promise<UnlistenFn> {
-        return this.listenNative<ViewportInput>('editor://viewport-input', handler);
+        return this.viewportAttachment.listenInput(handler);
     }
 
     clearError(): void {
@@ -761,63 +672,6 @@ export class EditorService {
             () => undefined,
         );
         return result.finally(() => this.pendingState.update((pending) => pending - 1));
-    }
-
-    private enqueueViewport<T>(operation: string, action: () => Promise<T>): Promise<T> {
-        this.viewportPending += 1;
-        const result = this.viewportQueue.then(async () => {
-            try {
-                this.assertNative(operation);
-                return await action();
-            } catch (cause: unknown) {
-                throw this.recordError(operation, cause);
-            }
-        });
-        this.viewportQueue = result.then(
-            () => undefined,
-            () => undefined,
-        );
-        return result.finally(() => {
-            this.viewportPending -= 1;
-        });
-    }
-
-    private viewportBusy(operation: string): Promise<never> {
-        return Promise.reject(
-            this.recordError(
-                operation,
-                new EditorClientError(
-                    'busy',
-                    operation,
-                    'Viewport lifecycle queue is full; coalesce repeated attachment requests.',
-                ),
-            ),
-        );
-    }
-
-    private async listenNative<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
-        if (!this.nativeAvailable || this.destroyed) return () => undefined;
-        let active = true;
-        const nativeUnlisten = await listen<T>(event, (message) => {
-            if (active && !this.destroyed) handler(message.payload);
-        });
-        const unlisten = () => {
-            if (active) {
-                active = false;
-                this.listeners.delete(unlisten);
-                try {
-                    // Tauri currently returns an async cleanup despite UnlistenFn's void
-                    // signature. Window shutdown may reject that IPC; local callbacks
-                    // must still remain disabled and teardown must continue.
-                    void Promise.resolve(nativeUnlisten()).catch(() => undefined);
-                } catch {
-                    /* The owning WebView may already have closed. */
-                }
-            }
-        };
-        if (this.destroyed) unlisten();
-        else this.listeners.add(unlisten);
-        return unlisten;
     }
 
     private native<T>(operation: string, args?: Record<string, unknown>): Promise<T> {

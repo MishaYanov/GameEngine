@@ -7,4 +7,5 @@ pub(super) mod sphere;
 pub(super) mod triangle;
 
 #[cfg(test)]
+#[path = "../../../tests/unit/assets/primitives.rs"]
 mod tests;

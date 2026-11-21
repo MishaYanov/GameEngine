@@ -51,5 +51,5 @@ impl EntitySelection {
 }
 
 #[cfg(test)]
-#[path = "tests_selection.rs"]
+#[path = "../tests/unit/selection.rs"]
 mod tests;

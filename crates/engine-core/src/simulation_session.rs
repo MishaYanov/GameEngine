@@ -1,347 +1,30 @@
 //! One simulation pipeline for editor Play, the derived player and headless runs.
 use crate::camera_input::{CameraInputLatch, CameraIntent};
-use crate::game_progress::{GameProgress, ProgressAction, ProgressState, ProgressView};
+use crate::game_progress::{ProgressState, ProgressView};
 use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
-	collision::{CollisionStats, CollisionWorld},
-	game_camera::{GameCameraController, OrbitRuntimeState},
-	input::{GameKeyboardInput, HeldGameActions},
-	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
-	scene_data::{EntityData, MaterialOverrideData, SceneData, TransformData},
+	collision::{CameraExclusions, CollisionStats, CollisionWorld},
+	game_camera::{GameCameraController, OrbitRuntimeState, obstruction_query},
+	project::{BehaviorSettings, ProjectData},
+	scene_data::{EntityData, SceneData},
 	simulation::FixedStepper,
-	triggers::{TriggerEvent, TriggerTracker, TriggerView},
+	triggers::{TriggerEvent, TriggerTracker},
 	world::{ChangeAccumulator, RuntimeWorld, WorldChange},
 };
-use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::{collections::HashMap, sync::Arc};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum MovementTarget {
-	#[default]
-	AllControlled,
-	Entity(EntityKey),
-}
+mod gameplay;
+mod input;
 
-#[derive(Default)]
-pub struct InputFrame {
-	movement: HashMap<EntityKey, [f32; 3]>,
-	game_actions: HeldGameActions,
-}
-impl InputFrame {
-	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
-		self.movement.get(entity).copied().unwrap_or([0.0; 3])
-	}
-	pub fn is_idle(&self) -> bool {
-		self.movement.is_empty() && self.game_actions.ids.is_empty()
-	}
-	pub fn action_held(&self, id: &str) -> bool {
-		self.game_actions.ids.contains(id)
-	}
-	/// Multiple held actions may feed the same parameter. Any held source sets it.
-	pub fn animation_bool(&self, parameter: &str) -> bool {
-		self.game_actions.animation_parameters.contains(parameter)
-	}
-}
-pub enum SimulationAction {
-	Despawn {
-		handle: crate::runtime_lifecycle::RuntimeEntityHandle,
-	},
-	Progress(ProgressAction),
-	RequestScene {
-		scene_id: SceneId,
-	},
-	Move {
-		entity: EntityKey,
-		world_delta: [f32; 3],
-	},
-	Rotate {
-		entity: EntityKey,
-		radians: [f32; 3],
-	},
-	SetTransform {
-		entity: EntityKey,
-		transform: TransformData,
-	},
-	SetVisible {
-		entity: EntityKey,
-		visible: bool,
-	},
-	SetCollisionEnabled {
-		entity: EntityKey,
-		enabled: bool,
-	},
-	SetMaterial {
-		entity: EntityKey,
-		material: Option<MaterialOverrideData>,
-	},
-}
-pub struct ActionWriter<'a> {
-	actions: &'a mut Vec<SimulationAction>,
-}
-impl ActionWriter<'_> {
-	pub const MAX_ACTIONS: usize = 4096;
-	pub fn push_progress<P: GameProgress>(&mut self, action: P::Action) -> Result<(), String> {
-		self.push(SimulationAction::Progress(ProgressAction::new::<P>(
-			action,
-		)?))
-	}
-	pub fn push(&mut self, action: SimulationAction) -> Result<(), String> {
-		if self.actions.len() >= Self::MAX_ACTIONS {
-			return Err("Simulation action budget exceeded".into());
-		}
-		if matches!(&action, SimulationAction::Progress(_))
-			&& self
-				.actions
-				.iter()
-				.filter(|action| matches!(action, SimulationAction::Progress(_)))
-				.count() >= crate::game_progress::MAX_PROGRESS_ACTIONS
-		{
-			return Err("Game progress action budget exceeded".into());
-		}
-		self.actions.push(action);
-		Ok(())
-	}
-}
-
-/// Bounded, game-owned text for the active runtime objective.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GameplayStatus {
-	pub objective: String,
-	#[serde(default)]
-	pub detail: Option<String>,
-	#[serde(default)]
-	pub score: Option<i32>,
-	pub completed: bool,
-}
-
-impl GameplayStatus {
-	pub const MAX_TEXT_BYTES: usize = 128;
-
-	pub(crate) fn is_valid(&self) -> bool {
-		let valid_text = |text: &str| {
-			text.len() <= Self::MAX_TEXT_BYTES
-				&& !text.trim().is_empty()
-				&& !text.chars().any(char::is_control)
-		};
-		valid_text(&self.objective) && self.detail.as_deref().is_none_or(valid_text)
-	}
-}
-
-/// Modules plan bounded actions from a read-only world. Mutation and collision
-/// policy remain in the engine, so a game module cannot bypass world validation.
-pub struct GameplayContext<'a> {
-	pub world: &'a RuntimeWorld,
-	pub input: &'a InputFrame,
-	pub step_seconds: f32,
-	pub progress: ProgressView<'a>,
-	/// Edges sampled before this fixed step's actions. Exit precedes Enter.
-	pub triggers: &'a [TriggerEvent],
-	pub trigger_overlaps: TriggerView<'a>,
-}
-
-pub trait GameModule: Send {
-	fn needs_tick_with_progress(
-		&self,
-		_world: &RuntimeWorld,
-		input: &InputFrame,
-		_progress: ProgressView<'_>,
-	) -> bool {
-		self.needs_tick(input)
-	}
-	fn plan_with_progress(
-		&self,
-		context: GameplayContext<'_>,
-		output: &mut ActionWriter<'_>,
-	) -> Result<(), String> {
-		self.plan(context.world, context.input, context.step_seconds, output)
-	}
-	fn needs_tick(&self, input: &InputFrame) -> bool;
-	fn plan(
-		&self,
-		world: &RuntimeWorld,
-		input: &InputFrame,
-		step: f32,
-		output: &mut ActionWriter<'_>,
-	) -> Result<(), String>;
-
-	/// Projects optional status from committed run progress for a host to display.
-	fn status(&self, _progress: ProgressView<'_>) -> Option<GameplayStatus> {
-		None
-	}
-}
-
-pub trait GameModuleFactory: Send + Sync {
-	/// Explicit references for portable authored assemblies. Modules define these
-	/// paths; core must never infer identities from arbitrary matching strings.
-	fn prefab_references(
-		&self,
-		_scene_settings: &serde_json::Value,
-	) -> Result<ModuleSettingReferences, String> {
-		Err("This gameplay module does not declare portable prefab setting references".into())
-	}
-	/// Called once per game run, never while preparing an ordinary scene change.
-	fn create_progress(&self) -> Result<ProgressState, String> {
-		Ok(ProgressState::empty())
-	}
-	fn create(
-		&self,
-		project: &ProjectData,
-		scene_id: &SceneId,
-	) -> Result<Box<dyn GameModule>, String>;
-
-	/// Called after the engine validates the project, scene and behavior targets.
-	/// Existing factories retain their original checked creation path by default.
-	fn create_prepared(
-		&self,
-		config: PreparedModuleConfig<'_>,
-	) -> Result<Box<dyn GameModule>, String> {
-		self.create(config.project, config.scene_id)
-	}
-}
-
-#[derive(Default)]
-pub struct ModuleSettingReferences {
-	pub entities: std::collections::BTreeMap<String, EntityKey>,
-	pub scenes: std::collections::BTreeMap<String, SceneId>,
-}
-
-/// Resolves the project configuration once, before a new game run is created.
-pub type GameModuleResolver =
-	Arc<dyn Fn(&ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> + Send + Sync>;
-
-/// The engine's built-in fallback. Applications can resolve additional native modules.
-pub fn resolve_default_gameplay(
-	project: &ProjectData,
-) -> Result<Arc<dyn GameModuleFactory>, String> {
-	match project.gameplay_module.as_deref() {
-		None => Ok(Arc::new(ConfiguredBehaviorFactory)),
-		Some(id) => Err(format!("Unsupported gameplay module {id:?}")),
-	}
-}
-
-/// Engine-prepared module input. Only the engine can construct this validated
-/// context; custom factories can inspect it or keep implementing `create` only.
-pub struct PreparedModuleConfig<'a> {
-	project: &'a ProjectData,
-	scene_id: &'a SceneId,
-	document: &'a SceneData,
-	behaviors: Vec<ResolvedBehavior>,
-}
-impl PreparedModuleConfig<'_> {
-	pub fn project(&self) -> &ProjectData {
-		self.project
-	}
-	pub fn scene_id(&self) -> &SceneId {
-		self.scene_id
-	}
-	pub fn behaviors(&self) -> &[ResolvedBehavior] {
-		&self.behaviors
-	}
-	pub fn document(&self) -> &SceneData {
-		self.document
-	}
-}
-
-#[derive(Default)]
-pub struct ConfiguredBehaviorFactory;
-impl GameModuleFactory for ConfiguredBehaviorFactory {
-	fn create(
-		&self,
-		project: &ProjectData,
-		scene_id: &SceneId,
-	) -> Result<Box<dyn GameModule>, String> {
-		Ok(Box::new(ProjectModule::new(
-			project.resolved_behaviors_for(scene_id)?,
-		)))
-	}
-
-	fn create_prepared(
-		&self,
-		config: PreparedModuleConfig<'_>,
-	) -> Result<Box<dyn GameModule>, String> {
-		Ok(Box::new(ProjectModule::new(config.behaviors)))
-	}
-}
-struct ProjectModule {
-	behaviors: Vec<ResolvedBehavior>,
-	has_nonzero_spin: bool,
-}
-impl ProjectModule {
-	fn new(behaviors: Vec<ResolvedBehavior>) -> Self {
-		let has_nonzero_spin = behaviors.iter().any(|behavior| {
-			matches!(&behavior.settings, BehaviorSettings::Spin { angular_velocity } if *angular_velocity != [0.0; 3])
-		});
-		Self {
-			behaviors,
-			has_nonzero_spin,
-		}
-	}
-}
-impl GameModule for ProjectModule {
-	fn needs_tick(&self, input: &InputFrame) -> bool {
-		if self.has_nonzero_spin {
-			return true;
-		}
-		if input.is_idle() {
-			return false;
-		}
-		self.behaviors
-			.iter()
-			.any(|behavior| match &behavior.settings {
-				BehaviorSettings::Spin { .. } => false,
-				BehaviorSettings::ControlledMove { speed, .. } => {
-					*speed > 0.0 && input.movement(&behavior.entity) != [0.0; 3]
-				}
-			})
-	}
-	fn plan(
-		&self,
-		world: &RuntimeWorld,
-		input: &InputFrame,
-		step: f32,
-		output: &mut ActionWriter<'_>,
-	) -> Result<(), String> {
-		for behavior in &self.behaviors {
-			let entity = &behavior.entity;
-			let index = world
-				.entity_index(entity)
-				.ok_or("Configured behavior target is missing")?;
-			match &behavior.settings {
-				BehaviorSettings::ControlledMove { speed, space } => {
-					let mut direction = Vec3::from_array(input.movement(entity));
-					if direction == Vec3::ZERO || *speed == 0.0 {
-						continue;
-					}
-					if *space == BehaviorSpace::Local {
-						let length = direction.length();
-						direction = world.world_matrices()[index]
-							.transform_vector3(direction)
-							.try_normalize()
-							.ok_or("Local movement orientation is singular")?
-							* length;
-					}
-					output.push(SimulationAction::Move {
-						entity: entity.clone(),
-						world_delta: (direction * *speed * step).to_array(),
-					})?;
-				}
-				BehaviorSettings::Spin { angular_velocity } => {
-					if *angular_velocity == [0.0; 3] {
-						continue;
-					}
-					output.push(SimulationAction::Rotate {
-						entity: entity.clone(),
-						radians: angular_velocity.map(|velocity| velocity * step),
-					})?;
-				}
-			}
-		}
-		Ok(())
-	}
-}
+pub use gameplay::{
+	ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameModuleResolver,
+	GameplayContext, GameplayStatus, ModuleSettingReferences, PreparedModuleConfig,
+	SimulationAction, resolve_default_gameplay,
+};
+pub use input::{InputFrame, MovementTarget};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TickOutcome {
@@ -387,6 +70,7 @@ pub struct SimulationSession {
 	camera: GameCameraController,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
 	camera_input: CameraInputLatch,
+	camera_exclusions: Option<CameraExclusions>,
 }
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
@@ -471,7 +155,19 @@ impl SimulationSession {
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
-		let camera = GameCameraController::new_with_lifecycle(&world, &lifecycle)?;
+		let mut camera_exclusions = None;
+		let mut preparation_budget = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
+		let camera = GameCameraController::new_with_lifecycle(
+			&world,
+			&lifecycle,
+			obstruction_query(
+				&world,
+				&lifecycle,
+				&collisions,
+				&mut camera_exclusions,
+				&mut preparation_budget,
+			),
+		)?;
 		let camera_input = CameraInputLatch::default();
 
 		Ok(Self {
@@ -496,6 +192,7 @@ impl SimulationSession {
 			camera,
 			visibility_capabilities: None,
 			camera_input,
+			camera_exclusions,
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
@@ -515,6 +212,18 @@ impl SimulationSession {
 	}
 	pub fn orbit_state(&self) -> Option<&OrbitRuntimeState> {
 		self.camera.orbit_state()
+	}
+
+	pub fn camera_replay_state(
+		&self,
+	) -> Result<crate::camera_replay::CameraReplayProjection, String> {
+		crate::camera_replay::CameraReplayProjection::from_committed(
+			self.camera(),
+			self.orbit_state(),
+			self.world.data().camera.follow.is_some(),
+			self.pending_camera_input(),
+			self.lifecycle.world_id(),
+		)
 	}
 
 	pub fn set_visibility_capabilities(
@@ -554,7 +263,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
-			|| self.camera_input.has_pending()
+				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
 	}
@@ -571,7 +280,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
-			|| self.camera_input.has_pending()
+				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
 					.module
@@ -698,6 +407,27 @@ impl SimulationSession {
 		characters.reconcile(&world, &self.project)?;
 		let mut lifecycle = self.lifecycle.clone();
 		lifecycle.admit(&prepared, self.tick)?;
+		// A new collider can occupy the existing arm even while the target rests.
+		// Prepare the pose with the spawn. Keep elapsed time and pending input untouched.
+		let mut camera = self.camera.clone();
+		let mut camera_exclusions = None;
+		if camera.orbit_state().is_some() {
+			let mut preparation_budget = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
+			camera.step(
+				&world,
+				&lifecycle,
+				0.0,
+				CameraIntent::default(),
+				self.tick,
+				obstruction_query(
+					&world,
+					&lifecycle,
+					&collisions,
+					&mut camera_exclusions,
+					&mut preparation_budget,
+				),
+			)?;
+		}
 		let mut animation_bindings = self.animation_bindings.clone();
 		let mut missing = world.data().clone();
 		missing
@@ -728,6 +458,9 @@ impl SimulationSession {
 		if let Some(available) = &mut self.visibility_capabilities {
 			available.extend(prepared.visible.into_iter().flatten());
 		}
+		let camera_changed = camera_pose_changed(self.camera.camera(), camera.camera());
+		self.camera = camera;
+		self.camera_exclusions = camera_exclusions;
 		self.world = world;
 		self.animations = animations;
 		self.animation_bindings = animation_bindings;
@@ -737,6 +470,7 @@ impl SimulationSession {
 		self.triggers.structural_change(&self.world);
 		Ok(WorldChange {
 			changed_entities: keys,
+			camera_changed,
 			topology_changed: true,
 			full_resync: true,
 			..WorldChange::default()
@@ -771,148 +505,6 @@ impl SimulationSession {
 			last_error: self.lifecycle.last_error.clone(),
 		})
 	}
-	pub fn clear_input(&mut self) {
-		self.characters.clear_input();
-		self.camera_input.clear();
-		self.inputs.movement.clear();
-		self.inputs.game_actions = HeldGameActions::default();
-		self.clock.reset();
-	}
-	pub fn set_paused(&mut self, paused: bool) {
-		if self.paused != paused {
-			self.paused = paused;
-			self.clear_input();
-		}
-	}
-	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
-		let movement = normalized_input(movement)?;
-		if self.characters.contains(entity) {
-			self.characters
-				.set_movement(entity, [movement[0], movement[2]])?;
-			return Ok(true);
-		}
-		if !self.controlled_target_set.contains(entity) {
-			return Err("Input target has no configured controlled movement behavior".into());
-		}
-
-		Ok(Self::apply_input(
-			&mut self.inputs,
-			&mut self.clock,
-			entity,
-			movement,
-		))
-	}
-
-	pub fn set_targeted_input(
-		&mut self,
-		target: &MovementTarget,
-		movement: [f32; 3],
-	) -> Result<bool, String> {
-		match target {
-			MovementTarget::AllControlled => self.set_controlled_input(movement),
-			MovementTarget::Entity(entity) => self.set_input(entity, movement),
-		}
-	}
-
-	pub(crate) fn set_game_keyboard_input(
-		&mut self,
-		target: &MovementTarget,
-		input: GameKeyboardInput,
-	) -> Result<(), String> {
-		if self.paused {
-			return Ok(());
-		}
-		let [x, y] = input.movement;
-		// The legacy controlled mover uses XY; upright characters use XZ.
-		// Route each target once so the legacy path cannot overwrite character Z.
-		match target {
-			MovementTarget::AllControlled => {
-				self.characters.sample_keyboard(
-					&self.world,
-					None,
-					input.movement,
-					&input.actions,
-				)?;
-				for entity in &self.controlled_targets {
-					Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
-				}
-			}
-			MovementTarget::Entity(entity) if self.characters.contains(entity) => {
-				self.characters.sample_keyboard(
-					&self.world,
-					Some(entity),
-					input.movement,
-					&input.actions,
-				)?;
-			}
-			MovementTarget::Entity(entity) => {
-				self.set_input(entity, [x, y, 0.0])?;
-			}
-		}
-		self.inputs.game_actions = input.actions;
-		Ok(())
-	}
-
-	fn apply_input(
-		inputs: &mut InputFrame,
-		clock: &mut FixedStepper,
-		entity: &EntityKey,
-		movement: [f32; 3],
-	) -> bool {
-		match inputs.movement.get_mut(entity) {
-			Some(old) if *old == movement => return false,
-			Some(old) if movement != [0.0; 3] => {
-				*old = movement;
-				return true;
-			}
-			Some(_) => {
-				inputs.movement.remove(entity);
-			}
-			None if movement == [0.0; 3] => return false,
-			None => {
-				inputs.movement.insert(entity.clone(), movement);
-			}
-		}
-		clock.reset();
-		true
-	}
-
-	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
-		let movement = normalized_input(movement)?;
-		let character_keys = self.characters.keys().cloned().collect::<Vec<_>>();
-		for key in &character_keys {
-			self.characters
-				.set_movement(key, [movement[0], movement[2]])?;
-		}
-
-		if self.controlled_targets.is_empty() && character_keys.is_empty() && movement != [0.0; 3] {
-			return Err(
-				"Configure a controlled movement behavior before supplying movement".into(),
-			);
-		}
-
-		let mut changed = false;
-		for entity in &self.controlled_targets {
-			changed |= Self::apply_input(&mut self.inputs, &mut self.clock, entity, movement);
-		}
-
-		Ok(changed)
-	}
-
-	pub fn pending_camera_input(&self) -> CameraIntent {
-		self.camera_input.snapshot()
-	}
-
-	pub(crate) fn submit_camera_input(&mut self, intent: CameraIntent) -> Result<(), String> {
-		if self.paused {
-			return Err("Resume Play before submitting camera input".into());
-		}
-		if !self.orbit_state().is_some_and(|rig| !rig.target_lost) {
-			return Err("Camera input requires an orbit camera with a live target".into());
-		}
-		self.camera_input.submit(intent)
-	}
-
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
 		self.tick_with_progress(elapsed, &mut ProgressState::empty(), false)
 	}
@@ -950,6 +542,7 @@ impl SimulationSession {
 		let mut triggers = self.triggers.clone();
 		let mut camera = self.camera.clone();
 		let mut camera_input = self.camera_input.clone();
+		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
 		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
@@ -1266,14 +859,19 @@ impl SimulationSession {
 					report.step_seconds,
 					camera_input.take_for_step(),
 					self.tick + u64::from(steps) + 1,
+					obstruction_query(
+						&self.world,
+						&lifecycle,
+						&self.collisions,
+						&mut camera_exclusions,
+						&mut collision_candidates_remaining,
+					),
 				)?;
 				if clear_camera_input {
 					camera_input.clear();
+					camera_exclusions = None;
 				}
-				if before_camera.position != camera.camera().position
-					|| before_camera.yaw != camera.camera().yaw
-					|| before_camera.pitch != camera.camera().pitch
-				{
+				if camera_pose_changed(&before_camera, camera.camera()) {
 					changes.merge(WorldChange {
 						camera_changed: true,
 						..WorldChange::default()
@@ -1341,25 +939,17 @@ impl SimulationSession {
 			.retain(|key, _| self.world.entity_index(key).is_some());
 		outcome.camera_status_changed = self.camera_input != camera_input
 			|| self
-			.camera
-			.orbit_state()
-			.zip(camera.orbit_state())
-			.is_some_and(|(previous, next)| !previous.same_status(next));
+				.camera
+				.orbit_state()
+				.zip(camera.orbit_state())
+				.is_some_and(|(previous, next)| !previous.same_status(next));
 		self.camera = camera;
 		self.camera_input = camera_input;
+		self.camera_exclusions = camera_exclusions;
 		outcome.trigger_events = trigger_events;
 		Ok(outcome)
 	}
 }
-fn normalized_input(movement: [f32; 3]) -> Result<[f32; 3], String> {
-	if !movement.iter().all(|v| v.is_finite()) {
-		return Err("Movement input must be finite".into());
-	}
-	let length = movement
-		.iter()
-		.map(|v| (*v as f64).powi(2))
-		.sum::<f64>()
-		.sqrt()
-		.max(1.0);
-	Ok(movement.map(|v| (v as f64 / length) as f32))
+fn camera_pose_changed(before: &crate::Camera, after: &crate::Camera) -> bool {
+	before.position != after.position || before.yaw != after.yaw || before.pitch != after.pitch
 }

@@ -18,6 +18,7 @@ mod skinning;
 mod surface;
 mod swapchain;
 #[cfg(test)]
+#[path = "../../tests/unit/vulkan/test_driver.rs"]
 mod test_driver;
 pub mod texture;
 mod upload;

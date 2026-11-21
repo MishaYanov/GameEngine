@@ -1,0 +1,250 @@
+use super::{
+	CampaignProgress, FINISH_SCENE_ID,
+	runtime::CampaignModule,
+	settings::{InteractionSettings, SceneInteractions, validate_trigger},
+};
+use engine_core::{
+	EntityKey,
+	game_progress::ProgressState,
+	project::{BehaviorSettings, ProjectData},
+	scene_catalog::SceneId,
+	simulation_session::{
+		ConfiguredBehaviorFactory, GameModule, GameModuleFactory, PreparedModuleConfig,
+	},
+};
+
+pub struct CampaignFactory;
+impl GameModuleFactory for CampaignFactory {
+	fn prefab_references(
+		&self,
+		scene_settings: &serde_json::Value,
+	) -> Result<engine_core::simulation_session::ModuleSettingReferences, String> {
+		let settings: SceneInteractions = serde_json::from_value(scene_settings.clone())
+			.map_err(|error| format!("Courtyard prefab settings: {error}"))?;
+		let mut references = engine_core::simulation_session::ModuleSettingReferences::default();
+		match settings {
+			SceneInteractions::Course {
+				key_trigger,
+				exit_trigger,
+				destination_scene,
+				exit_blocker,
+			} => {
+				references
+					.entities
+					.insert("/key_trigger".into(), key_trigger);
+				references
+					.entities
+					.insert("/exit_trigger".into(), exit_trigger);
+				if let Some(blocker) = exit_blocker {
+					references.entities.insert("/exit_blocker".into(), blocker);
+				}
+				references
+					.scenes
+					.insert("/destination_scene".into(), destination_scene);
+			}
+			SceneInteractions::Finish { finish_trigger } => {
+				references
+					.entities
+					.insert("/finish_trigger".into(), finish_trigger);
+			}
+		}
+		Ok(references)
+	}
+	fn create_progress(&self) -> Result<ProgressState, String> {
+		ProgressState::new(CampaignProgress::default())
+	}
+
+	fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+		Err("Courtyard Run requires prepared scene data".into())
+	}
+
+	fn create_prepared(
+		&self,
+		config: PreparedModuleConfig<'_>,
+	) -> Result<Box<dyn GameModule>, String> {
+		let settings = InteractionSettings::from_project(config.project())?;
+		let interactions = settings
+			.as_ref()
+			.and_then(|settings| settings.scenes.get(config.scene_id().as_str()))
+			.cloned();
+		let is_finish = matches!(&interactions, Some(SceneInteractions::Finish { .. }))
+			|| (interactions.is_none() && config.scene_id().as_str() == FINISH_SCENE_ID);
+		let (roles, finish) = if is_finish {
+			// Finish scene: validate its player and finish marker.
+			(None, Some(FinishRoles::from_config(&config)?))
+		} else {
+			// Other scenes: keep the existing course rules.
+			let destination = match &interactions {
+				Some(SceneInteractions::Course {
+					destination_scene, ..
+				}) => Some(destination_scene),
+				_ => None,
+			};
+			(CourseRoles::from_config(&config, destination)?, None)
+		};
+		match &interactions {
+			Some(SceneInteractions::Course {
+				key_trigger,
+				exit_trigger,
+				exit_blocker,
+				..
+			}) => {
+				let roles = roles
+					.as_ref()
+					.ok_or("Course interactions require Player, Key, and Exit bindings")?;
+				validate_trigger(&config, key_trigger, &roles.player, "Key trigger")?;
+				validate_trigger(&config, exit_trigger, &roles.player, "Exit trigger")?;
+				if let Some(blocker) = exit_blocker {
+					if blocker == &roles.player
+						|| blocker == key_trigger
+						|| blocker == exit_trigger
+						|| blocker == &roles.key
+					{
+						return Err("Exit blocker must be separate from Player, Key, and interaction sensors".into());
+					}
+					let entity = config
+						.document()
+						.entities
+						.iter()
+						.find(|entity| &entity.key == blocker)
+						.ok_or("Exit blocker references a missing entity")?;
+					if entity
+						.collider
+						.as_ref()
+						.is_none_or(|collider| collider.interaction().sensor)
+					{
+						return Err("Exit blocker needs a blocking collider".into());
+					}
+				}
+			}
+			Some(SceneInteractions::Finish { finish_trigger }) => validate_trigger(
+				&config,
+				finish_trigger,
+				&finish.as_ref().ok_or("Finish roles missing")?.player,
+				"Finish trigger",
+			)?,
+			None => {}
+		}
+
+		let base = ConfiguredBehaviorFactory.create_prepared(config)?;
+
+		engine_logger::debug!(target: "courtyard_gameplay", "Campaign scene prepared: finish={is_finish}, has_course_roles={}, has_interactions={}", roles.is_some(), interactions.is_some());
+		Ok(Box::new(CampaignModule::new(
+			base,
+			roles,
+			finish,
+			interactions,
+		)))
+	}
+}
+
+pub(super) struct FinishRoles {
+	pub(super) player: EntityKey,
+	pub(super) marker: EntityKey,
+}
+
+impl FinishRoles {
+	fn from_config(config: &PreparedModuleConfig<'_>) -> Result<Self, String> {
+		let bindings = &config.document().bindings;
+
+		let required = |name: &str| {
+			bindings.get(name).cloned().ok_or_else(|| {
+				format!(
+					"Scene {:?} requires a {name:?} binding",
+					config.scene_id().as_str(),
+				)
+			})
+		};
+
+		let player = required("player")?;
+		let marker = required("finish")?;
+
+		if player == marker {
+			return Err("Player and Finish must reference different entities".into());
+		}
+
+		let player_can_move = can_move(config, &player);
+
+		if !player_can_move {
+			return Err("The finish scene's Player needs a controlled movement \
+                 behavior with positive speed"
+				.into());
+		}
+
+		Ok(Self { player, marker })
+	}
+}
+
+pub(super) struct CourseRoles {
+	pub(super) player: EntityKey,
+	pub(super) key: EntityKey,
+	pub(super) exit: EntityKey,
+	pub(super) destination: SceneId,
+}
+
+impl CourseRoles {
+	fn from_config(
+		config: &PreparedModuleConfig<'_>,
+		destination: Option<&SceneId>,
+	) -> Result<Option<Self>, String> {
+		let bindings = &config.document().bindings;
+
+		if !bindings.contains_key("key") && !bindings.contains_key("exit") {
+			return Ok(None);
+		}
+
+		let required = |name: &str| {
+			bindings.get(name).cloned().ok_or_else(|| {
+				format!(
+					"Scene {:?} requires a {name:?} binding for Courtyard Run",
+					config.scene_id().as_str(),
+				)
+			})
+		};
+
+		let player = required("player")?;
+		let key = required("key")?;
+		let exit = required("exit")?;
+
+		if player == key || player == exit || key == exit {
+			return Err("Player, Key, and Exit must reference different entities".into());
+		}
+
+		let player_can_move = can_move(config, &player);
+
+		if !player_can_move {
+			return Err("The Player role needs a controlled movement behavior \
+                 with positive speed"
+				.into());
+		}
+
+		let destination = destination
+			.cloned()
+			.unwrap_or(SceneId::new(FINISH_SCENE_ID)?);
+		config.project().scenes.get(&destination).map_err(|_| {
+			format!(
+				"Scene {:?} requires the Courtyard Run destination scene {:?} in the project catalog",
+				config.scene_id().as_str(),
+				destination.as_str(),
+			)
+		})?;
+
+		Ok(Some(Self {
+			player,
+			key,
+			exit,
+			destination,
+		}))
+	}
+}
+
+fn can_move(config: &PreparedModuleConfig<'_>, player: &EntityKey) -> bool {
+	config.behaviors().iter().any(|behavior| {
+		behavior.entity == *player
+			&& matches!(
+				&behavior.settings,
+				BehaviorSettings::ControlledMove { speed, .. }
+					if *speed > 0.0
+			)
+	})
+}

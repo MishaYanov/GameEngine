@@ -205,5 +205,5 @@ impl<'de> Deserialize<'de> for SceneCatalog {
 }
 
 #[cfg(test)]
-#[path = "tests_scene_catalog.rs"]
+#[path = "../tests/unit/tests_scene_catalog.rs"]
 mod tests;

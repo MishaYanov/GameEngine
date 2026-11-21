@@ -5,8 +5,8 @@ import {EditorPane} from '../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../shared/icons/editor-icon';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 import {EditorService} from "../../../core/editor/editor.service";
-import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {SceneViewport} from "./scene-viewport/scene-viewport";
+import {WorkspaceViewService} from './scene-viewport/workspace-view.service';
 import {WorkspaceTabs} from "./workspace-tabs/workspace-tabs";
 import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
@@ -17,6 +17,7 @@ import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.mod
 import {SceneEditingService} from './scene-editing.service';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
+import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
 import {ProjectBuild} from './project-build/project-build';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
 import {ViewportAssetDragService} from './viewport-asset-drag.service';
@@ -30,11 +31,11 @@ import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
 import {collectSceneReferences, type SceneReference} from './find-usages/scene-references';
 import {editorProblems} from './problems-panel/editor-problems';
-import {ProblemsPanel, type EditorProblem, type ProblemLocation} from './problems-panel/problems-panel';
+import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problems-panel/problems-panel';
 
 @Component({
     selector: 'editor-workspace',
-    providers: [SceneEditingService, ViewportEditorService, ViewportAssetDragService, SceneSwitchService],
+    providers: [SceneEditingService, ViewportEditorService, ViewportAssetDragService, SceneSwitchService, WorkspaceViewService],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
@@ -53,7 +54,8 @@ export class EditorWorkspace {
     protected readonly sceneEditing = inject(SceneEditingService);
     protected readonly viewportEditor = inject(ViewportEditorService);
     protected readonly assetDrag = inject(ViewportAssetDragService);
-    protected readonly sceneSwitch = inject(SceneSwitchService);
+    protected readonly workspaceView = inject(WorkspaceViewService);
+    protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
     private readonly document = inject(DOCUMENT);
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
@@ -63,52 +65,25 @@ export class EditorWorkspace {
         const snapshot = this.editorService.snapshot();
         return snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path.split('/').at(-1) ?? 'Scene';
     });
-    protected readonly activeViewKind = signal<WorkspaceViewKind>('scene-viewport');
-    protected readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
-    protected readonly showingViewport = computed(() => !this.gameView() || this.editorService.playing());
-    protected readonly gameStatus = this.viewportEditor.gameStatus;
-    protected readonly canRestartRun = computed(() =>
-        this.gameView() && this.gameStatus() !== null && !this.workspaceActionBlocked() &&
-        this.editorService.viewport()?.attached === true && !this.editorService.busy() &&
-        this.viewportEditor.pending() === 0
+    protected readonly showingViewport = computed(() =>
+        this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing()
     );
-    private readonly restartFailure = signal<{ runId: string; generation: number; message: string } | null>(null);
-    protected readonly gameError = computed(() => {
-        const status = this.gameStatus();
-        if (!status) return null;
-        const failure = this.restartFailure();
-        return failure?.runId === status.run_id && failure.generation === this.editorService.workspaceGeneration()
-            ? failure.message : this.viewportEditor.state()?.error ?? null;
-    });
-    protected readonly gameKeyboardCaptured = computed(() => {
-        const state = this.viewportEditor.state();
-        return state?.settings.view === 'game' && state.focused;
-    });
+    private readonly sceneSwitch = inject(SceneSwitchService);
     protected readonly sceneProgress = computed(() => {
         const switching = this.sceneSwitch.loading();
         const accepted = this.sceneSwitch.lastSwitch();
-        const target = switching ?? accepted;
-        if (!target) return null;
-        const name = target.path.split('/').at(-1) ?? target.path;
-        const viewport = this.editorService.viewport();
-        const snapshot = this.editorService.snapshot();
-        if (!switching && (!accepted || accepted.generation !== this.editorService.workspaceGeneration() ||
-            snapshot?.active_scene_id !== accepted.sceneId || this.gameView() || this.opening() ||
-            !viewport?.attached || viewport.error)) return null;
+        if (!switching && !accepted) return null;
 
-        const nativeGeneration = this.viewportEditor.state()?.workspace_generation;
-        const load = viewport?.scene_load;
-        const revision = switching ? snapshot?.scene_revision : accepted?.sceneRevision;
-        const matching = load && load.scene_id === target.sceneId && snapshot?.active_scene_id === target.sceneId &&
-            revision !== undefined && load.scene_revision >= revision &&
-            (nativeGeneration == null || load.workspace_generation === nativeGeneration);
-        if (matching && load.stage === 'presented' && !switching) return null;
-        if (matching && load.stage === 'preparing' && load.total != null && load.total > 0 && load.completed != null) {
-            return {name, label: 'Preparing scene objects…', completed: load.completed, total: load.total};
-        }
-        const label = matching && load.stage === 'rendering' ? 'Presenting the scene…'
-            : switching ? 'Switching scene…' : 'Preparing the scene…';
-        return {name, label, completed: null, total: null};
+        return sceneSwitchProgress({
+            switching,
+            accepted,
+            snapshot: this.editorService.snapshot(),
+            viewport: this.editorService.viewport(),
+            generation: this.editorService.workspaceGeneration(),
+            nativeGeneration: this.viewportEditor.state()?.workspace_generation,
+            gameView: this.workspaceView.gameView(),
+            opening: this.opening(),
+        });
     });
     private readonly sceneToolbar = viewChild(ViewportToolbar);
     private readonly workspaceToolbar = viewChild(WorkspaceToolbar);
@@ -150,7 +125,6 @@ export class EditorWorkspace {
                     ? action.command(this.viewportEditor.settings()) : action.command) === true;
         }
     };
-    private requestedView: 'scene' | 'game' | null = null;
     protected readonly sceneEntities = computed<SceneEntitiesModel>(() => {
         const snapshot = this.editorService.snapshot();
 
@@ -161,7 +135,6 @@ export class EditorWorkspace {
     });
 
     constructor() {
-        effect(() => this.activeViewKind.set(this.editorService.playing() ? 'game-preview' : 'scene-viewport'));
         effect(() => {
             this.sceneContext();
             this.hierarchyError.set(null);
@@ -171,54 +144,19 @@ export class EditorWorkspace {
             this.problemsActive.set(false);
         });
         effect(() => this.sceneEditing.blocked.set(this.opening() || this.viewportEditor.authoringGesture()));
-        effect(() => {
-            const state = this.viewportEditor.state();
-            const view = this.gameView() ? 'game' : 'scene';
-            if (!state || state.settings.view === view || this.requestedView === view) return;
-            this.requestedView = view;
-            void this.viewportEditor.action({type: 'set_view', view}).catch(() => undefined).finally(() => {
-                if (this.requestedView === view) this.requestedView = null;
-            });
-        });
-    }
-
-    protected selectView(kind: WorkspaceViewKind): void {
-        this.activeViewKind.set(kind);
-    }
-
-    protected async restartRun(): Promise<void> {
-        const snapshot = this.editorService.snapshot();
-        const status = this.gameStatus();
-        if (!snapshot || !status || !this.canRestartRun()) return;
-        const generation = this.editorService.workspaceGeneration();
-        this.restartFailure.set(null);
-        try {
-            await this.viewportEditor.action({
-                type: 'restart_run', run_id: status.run_id, expected_revision: snapshot.revision,
-            });
-        } catch (error) {
-            if (this.editorService.workspaceGeneration() === generation &&
-                this.gameStatus()?.run_id === status.run_id) {
-                this.restartFailure.set({
-                    runId: status.run_id,
-                    generation,
-                    message: error instanceof Error ? error.message : String(error),
-                });
-            }
-        }
     }
 
     protected handleEditorShortcut(event: KeyboardEvent): void {
         if (this.workspaceActionBlocked()) return;
         const id = resolveEditorShortcut(event);
-        if (id && (id === 'palette.open' || this.activeViewKind() === 'scene-viewport') && this.dispatchEditorAction(id)) {
+        if (id && (id === 'palette.open' || this.workspaceView.activeViewKind() === 'scene-viewport') && this.dispatchEditorAction(id)) {
             event.preventDefault();
             event.stopPropagation();
         }
     }
 
     protected handleNativeShortcut(id: EditorActionId): void {
-        if (this.workspaceActionBlocked() || this.activeViewKind() !== 'scene-viewport') return;
+        if (this.workspaceActionBlocked() || this.workspaceView.activeViewKind() !== 'scene-viewport') return;
         const state = this.viewportEditor.state();
         if (state?.settings.view === 'scene' && state.focused && state.gesture === null) this.dispatchEditorAction(id);
     }

@@ -3,7 +3,6 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import {EditorService} from './editor.service';
-import {CommandBuilder} from './editor.models';
 import type {
     Camera,
     CommandReceipt,
@@ -17,6 +16,7 @@ import type {
     ViewportBounds,
     ViewportStatus,
 } from './editor.models';
+import {CommandBuilder} from './editor.models';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -1193,6 +1193,31 @@ describe('EditorService native command and viewport queues', () => {
         expect(invoke).toHaveBeenLastCalledWith('editor_viewport_detach', undefined);
         expect(unlisten).toHaveBeenCalledTimes(1);
         expect(service.viewport()?.attached).toBe(false);
+    });
+
+    it('releases the native viewport after an in-flight attachment finishes during teardown', async () => {
+        const attachment = deferred<ViewportStatus>();
+        const unlisten = vi.fn();
+        vi.mocked(listen).mockResolvedValue(unlisten);
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(capabilities)
+            .mockReturnValueOnce(attachment.promise)
+            .mockResolvedValueOnce({...status, attached: false, visible: false});
+
+        const service = TestBed.inject(EditorService);
+        const attached = service.attachViewport(bounds);
+        await vi.waitFor(() =>
+            expect(invoke).toHaveBeenLastCalledWith('editor_viewport_attach', {bounds}),
+        );
+
+        TestBed.resetTestingModule();
+        expect(unlisten).toHaveBeenCalledTimes(1);
+        expect(invoke).toHaveBeenCalledTimes(2);
+
+        attachment.resolve(status);
+        await attached;
+        await vi.waitFor(() => expect(invoke).toHaveBeenLastCalledWith('editor_viewport_detach'));
+        expect(invoke).toHaveBeenCalledTimes(3);
     });
 
     it('keeps old and new owner bounds on their respective sides of lifecycle boundaries', async () => {

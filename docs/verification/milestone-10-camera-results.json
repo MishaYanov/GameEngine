@@ -1,0 +1,580 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-21",
+  "inspected_head": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
+  "environment": {
+    "platform": "Windows x64",
+    "cpu": "Intel Core i7-13700K",
+    "gpu": "NVIDIA GeForce RTX 4070",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "fixture_sha256": {
+    "apps/game/camera-demo.json": "7dfe376273ef5fa2e0984a4211c972c518e2f076feb4ab765cb1aa837f1a860b",
+    "apps/game/assets/scenes/camera-room.json": "c22d80dbf49d6fb17a00571a23da7f55548dd8f826ad3ce26c2ebae4a3e9c6a7",
+    "docs/verification/milestone-10-camera-route.json": "c6b4c9a32928a984fc6616c60a4529e8786a26d4eccd8c02d3b4f9465203f048",
+    "docs/verification/milestone-10-camera-wall.json": "92049ae9ba328eabad7d6a7ef3670572d2489b213f8c9ddf8fbefa4c24ce91e8"
+  },
+  "binaries_sha256": {
+    "release_headless": "df085e4e012c16f05656c1240a2792460e8c95f8caf8c4d9a5fe18cdae0c8022",
+    "exported_player": "5e0f914ffe51ab3ef49a885efb91c54140e5868d1a417f6bce4595a21276e583"
+  },
+  "parity": {
+    "build": "release",
+    "inputs": [
+      "source authoring manifest",
+      "independent staged project",
+      "independent exported project"
+    ],
+    "matched_fields": [
+      "camera_runtime",
+      "camera_runtime_hash",
+      "native_components",
+      "native_components_hash",
+      "state_hash"
+    ],
+    "checkpoints": {
+      "admission": {
+        "orbit_tick": 0,
+        "blocker": null,
+        "effective_distance": 5.0,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "e5925746ab879c37",
+        "native_components_hash": "ba9f89cfe5a05044",
+        "state_hash": "5cfbd010790c8741"
+      },
+      "wall": {
+        "orbit_tick": 240,
+        "blocker": "camera-wall",
+        "effective_distance": 3.7768276,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "b0d1fd0505f68ba5",
+        "native_components_hash": "bffc45b0ad73d0ba",
+        "state_hash": "694bfff5daa156ba"
+      },
+      "recovering": {
+        "orbit_tick": 300,
+        "blocker": null,
+        "effective_distance": 4.8995957,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "0d80fa23f2e9543a",
+        "native_components_hash": "f13107f78410c7b2",
+        "state_hash": "b72f2f38f79e9d4a"
+      },
+      "recovered": {
+        "orbit_tick": 540,
+        "blocker": null,
+        "effective_distance": 5.0,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "366c6d2c1eac0c4d",
+        "native_components_hash": "d44eb051c602de05",
+        "state_hash": "8581f6928c90a0c0"
+      },
+      "pending": {
+        "orbit_tick": 540,
+        "blocker": null,
+        "effective_distance": 5.0,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "6bc960f5b1cc0eee",
+        "native_components_hash": "d44eb051c602de05",
+        "state_hash": "8581f6928c90a0c0"
+      },
+      "turned": {
+        "orbit_tick": 541,
+        "blocker": null,
+        "effective_distance": 4.524187,
+        "user_distance": 4.524187,
+        "yaw": 0.25,
+        "camera_runtime_hash": "31a2086d9dd2797b",
+        "native_components_hash": "b48fa4c17847a350",
+        "state_hash": "8581f6928c90a0c0"
+      },
+      "restart": {
+        "orbit_tick": 0,
+        "blocker": null,
+        "effective_distance": 5.0,
+        "user_distance": 5.0,
+        "yaw": 0.0,
+        "camera_runtime_hash": "e5925746ab879c37",
+        "native_components_hash": "ba9f89cfe5a05044",
+        "state_hash": "5cfbd010790c8741"
+      }
+    }
+  },
+  "framebuffer": {
+    "fixture": "bundled player project with visible geometry and HUD",
+    "reference": [
+      768,
+      256
+    ],
+    "wide": [
+      1024,
+      256
+    ],
+    "portrait": [
+      192,
+      256
+    ],
+    "black_bar_pixels": 65536,
+    "content_pixels": 196608,
+    "changed_content_pixels": 0
+  },
+  "player_route": {
+    "method": "Hidden native GameApp with the exported manifest. Five complete camera projections compared against release headless at each resolution.",
+    "repeats": [
+      [
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1280,
+            720
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.124864,
+            "p50_ms": 0.096128,
+            "p95_ms": 0.114272,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 173920256,
+          "update": {
+            "max_ms": 0.3145,
+            "p50_ms": 0.0599,
+            "p95_ms": 0.1171,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 29.9772,
+            "p50_ms": 16.6948,
+            "p95_ms": 17.6888,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 173920256
+        },
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1920,
+            1080
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.458176,
+            "p50_ms": 0.212544,
+            "p95_ms": 0.344032,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 180961280,
+          "update": {
+            "max_ms": 0.3072,
+            "p50_ms": 0.0707,
+            "p95_ms": 0.1297,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 38.0474,
+            "p50_ms": 16.740000000000002,
+            "p95_ms": 33.4603,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 180961280
+        }
+      ],
+      [
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1280,
+            720
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.14496,
+            "p50_ms": 0.112448,
+            "p95_ms": 0.116224,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 142524416,
+          "update": {
+            "max_ms": 0.2419,
+            "p50_ms": 0.0334,
+            "p95_ms": 0.0579,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 17.145400000000002,
+            "p50_ms": 16.6722,
+            "p95_ms": 16.9115,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 142524416
+        },
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1920,
+            1080
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.31472,
+            "p50_ms": 0.236416,
+            "p95_ms": 0.253216,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 150323200,
+          "update": {
+            "max_ms": 0.1406,
+            "p50_ms": 0.0736,
+            "p95_ms": 0.09469999999999999,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 18.1909,
+            "p50_ms": 16.677,
+            "p95_ms": 16.8946,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 150323200
+        }
+      ],
+      [
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1280,
+            720
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.141472,
+            "p50_ms": 0.112512,
+            "p95_ms": 0.116128,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 173047808,
+          "update": {
+            "max_ms": 0.14400000000000002,
+            "p50_ms": 0.0414,
+            "p95_ms": 0.0688,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 18.147,
+            "p50_ms": 16.6749,
+            "p95_ms": 16.8825,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 173047808
+        },
+        {
+          "device": "NVIDIA GeForce RTX 4070",
+          "driver_version": 2559967232,
+          "extent": [
+            1920,
+            1080
+          ],
+          "gpu_prior_frame": {
+            "max_ms": 0.245088,
+            "p50_ms": 0.221984,
+            "p95_ms": 0.23552,
+            "samples": 541
+          },
+          "peak_process_working_set_bytes": 180637696,
+          "update": {
+            "max_ms": 0.1342,
+            "p50_ms": 0.032499999999999994,
+            "p95_ms": 0.058499999999999996,
+            "samples": 541
+          },
+          "update_through_present": {
+            "max_ms": 17.1578,
+            "p50_ms": 16.672900000000002,
+            "p95_ms": 16.928700000000003,
+            "samples": 541
+          },
+          "warmup_draws": 20,
+          "working_set_bytes": 180637696
+        }
+      ]
+    ],
+    "exported_binary_smoke": {
+      "arguments": [
+        "--player",
+        "--smoke-test"
+      ],
+      "exit_code": 0,
+      "stdout_marker": "GAME_STARTUP_SMOKE_OK mode=player"
+    }
+  },
+  "cpu": {
+    "profile": "release",
+    "repetitions": 3,
+    "query_warmup_casts": 64,
+    "query_batches": 31,
+    "casts_per_batch": 32,
+    "query_median_us_ranges": [
+      {
+        "eligible": 0,
+        "filtered": 0,
+        "visits": 0,
+        "range": [
+          0.019,
+          0.025
+        ]
+      },
+      {
+        "eligible": 10,
+        "filtered": 0,
+        "visits": 20,
+        "range": [
+          0.478,
+          0.506
+        ]
+      },
+      {
+        "eligible": 100,
+        "filtered": 0,
+        "visits": 200,
+        "range": [
+          3.072,
+          3.216
+        ]
+      },
+      {
+        "eligible": 1000,
+        "filtered": 0,
+        "visits": 2000,
+        "range": [
+          26.253,
+          49.225
+        ]
+      },
+      {
+        "eligible": 0,
+        "filtered": 1000,
+        "visits": 1000,
+        "range": [
+          3.541,
+          3.619
+        ]
+      },
+      {
+        "eligible": 0,
+        "filtered": 8193,
+        "visits": 8192,
+        "range": [
+          30.375,
+          30.978
+        ],
+        "outcome": "rejected on visit limit"
+      }
+    ],
+    "combined_warmup_steps": 120,
+    "combined_blocked_steps_per_run": 600,
+    "combined_fixed_step_us": [
+      {
+        "p50": 5.9,
+        "p95": 6.5,
+        "max": 11.9
+      },
+      {
+        "p50": 5.9,
+        "p95": 6.9,
+        "max": 17.0
+      },
+      {
+        "p50": 6.1,
+        "p95": 6.6,
+        "max": 28.7
+      }
+    ],
+    "idle_tick_calls": 1000,
+    "idle_steps": 0,
+    "preview_cycles": 64,
+    "extra_document_references_after_close": 0
+  },
+  "editor": {
+    "browser": "Chrome 157.0.8103.79 with production Angular and fixture bridge",
+    "axe_violations_by_mode": {
+      "fixed": 0,
+      "follow": 0,
+      "orbit": 0
+    },
+    "keyboard": [
+      "ArrowDown changed modes",
+      "Tab reached target picker"
+    ],
+    "native_host": "Tauri custom-protocol with private WebView2 profile and Vulkan child, separate Windows desktop; staged room copied before editing",
+    "live_preview": {
+      "authored_revision": 0,
+      "samples": 6,
+      "start_m": 6,
+      "blocked_m": 6.234,
+      "blocker": "camera-wall",
+      "later_clear_m": 6.505,
+      "draw_calls": 4
+    },
+    "persistence": {
+      "apply_revision": 1,
+      "redo_revision": 3,
+      "save_revision": 4,
+      "reopened_distance_m": 6,
+      "scene_schema": 5
+    },
+    "restoration": [
+      "authored document",
+      "selection",
+      "Scene navigation pose",
+      "clean state after Stop"
+    ],
+    "foreground_input": "Windows suppressed capture and movement on the undisplayed desktop. Positive foreground mouse feel was not observed in this session.",
+    "native_desktop_receipt_sha256": "3a64e6568be4d44b41aa9f2d6a34768250e94b9bc8b7459d9bb8fc77a2bcef98",
+    "game_view": {
+      "movement": "native editor runtime bridge",
+      "wall_hud": "Runtime scene: camera-room\nRunning\nCamera blocked by camera-wall\nRestart Run",
+      "recovery_hud": "Runtime scene: camera-room\nRunning\nCamera returning to zoom distance\nRestart Run",
+      "pause_resume": true,
+      "restart_from_ui": true,
+      "stop": {
+        "selection": [],
+        "dirty": false
+      },
+      "resize_presentations": [
+        {
+          "type": "ultrawide",
+          "width": 1587,
+          "height": 332,
+          "drawCalls": 4,
+          "triangles": 1088,
+          "readback": {
+            "readback": "native-viewport-ultrawide.png",
+            "width": 1587,
+            "height": 332,
+            "sha256": "76110eee35c48c5eaaece16c5cdb6a766916115fe52189d53b27d88fa3884213",
+            "colors": 9,
+            "center": [
+              44,
+              137,
+              77
+            ],
+            "left": [
+              0,
+              0,
+              0
+            ],
+            "right": [
+              0,
+              0,
+              0
+            ],
+            "blackBars": {
+              "leftWidth": 295,
+              "rightWidth": 296,
+              "contentWidth": 996,
+              "allPixelsBlack": true,
+              "firstContentPixel": [
+                56,
+                80,
+                111
+              ],
+              "lastContentPixel": [
+                56,
+                80,
+                111
+              ]
+            }
+          }
+        },
+        {
+          "type": "portrait",
+          "width": 497,
+          "height": 886,
+          "drawCalls": 4,
+          "triangles": 1040,
+          "readback": {
+            "readback": "native-viewport-portrait.png",
+            "width": 497,
+            "height": 886,
+            "sha256": "fa69b7f62397627b67402b3ad7c3d96bed150204e33ad60951c4307946bf55f5",
+            "colors": 11,
+            "center": [
+              44,
+              137,
+              77
+            ],
+            "left": [
+              89,
+              94,
+              99
+            ],
+            "right": [
+              89,
+              94,
+              99
+            ]
+          }
+        },
+        {
+          "type": "16:9",
+          "width": 1072,
+          "height": 603,
+          "drawCalls": 4,
+          "triangles": 1088,
+          "readback": {
+            "readback": "native-viewport-16x9.png",
+            "width": 1072,
+            "height": 603,
+            "sha256": "d133136ea7bd86f9839ab6f4aee98044dc2063646251000530891c9c1f62d6ec",
+            "colors": 16,
+            "center": [
+              44,
+              137,
+              77
+            ],
+            "left": [
+              133,
+              138,
+              141
+            ],
+            "right": [
+              89,
+              94,
+              99
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "coverage_limits": [
+    "Exact state checksums apply to the same build and platform.",
+    "Operating system foreground capture and physical mouse or keyboard feel require a foreground desktop.",
+    "Performance describes the specified fixture, driver and machine. Preview ownership counts refer to the frozen document.",
+    "Rotated colliders use conservative world-axis-aligned bounds."
+  ],
+  "verification": {
+    "aggregate": "python test_all.py",
+    "rust_passed": 1030,
+    "rust_failed": 0,
+    "rust_ignored": 16,
+    "admin_angular_passed": 15,
+    "editor_angular_passed": 525,
+    "python_passed": 51,
+    "rust_doc_exit": 0,
+    "editor_production": "passed with existing project-setup stylesheet size warning",
+    "docs_site": {
+      "pages_link_checked": 65,
+      "tests_passed": 8
+    }
+  }
+}

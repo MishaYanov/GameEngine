@@ -12,6 +12,10 @@ use std::{
 	path::{Path, PathBuf},
 	process::Command,
 };
+mod cargo_output;
+
+use cargo_output::CargoOutput;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Kind {
@@ -301,53 +305,32 @@ impl Jobs {
 		} else {
 			entry.correlation.test_run_id = Some(run.id.clone());
 		}
-		let Ok(value) = serde_json::from_str::<serde_json::Value>(&entry.message) else {
-			return;
-		};
-		match value["reason"].as_str() {
-			Some("compiler-message") => {
-				let message = &value["message"];
+		match CargoOutput::parse(&entry.message, &run.package) {
+			Some(CargoOutput::Diagnostic {
+				level,
+				message,
+				source,
+			}) => {
 				entry.component = "cargo-diagnostic".into();
-				entry.level = match message["level"].as_str() {
-					Some("error" | "failure-note") => Level::Error,
-					Some("warning") => Level::Warning,
-					_ => Level::Info,
-				};
-				entry.message = message["rendered"]
-					.as_str()
-					.or(message["message"].as_str())
-					.unwrap_or("Cargo diagnostic")
-					.to_owned();
-				if let Some(span) = message["spans"]
-					.as_array()
-					.and_then(|spans| spans.iter().find(|s| s["is_primary"] == true))
-				{
-					entry.file = span["file_name"].as_str().map(str::to_owned);
-					entry.line = span["line_start"]
-						.as_u64()
-						.and_then(|n| u32::try_from(n).ok());
+				entry.level = level;
+				entry.message = message;
+				if let Some(source) = source {
+					entry.file = source.file;
+					entry.line = source.line;
 				}
 			}
-			Some("compiler-artifact") => {
-				if value["target"]["name"]
-					.as_str()
-					.is_none_or(|name| name != run.package && name != run.package.replace('-', "_"))
-				{
-					return;
-				}
-				if let Some(files) = value["filenames"].as_array() {
-					for file in files.iter().filter_map(|v| v.as_str()) {
-						if run.artifacts.len() < 128 && !run.artifacts.iter().any(|v| v == file) {
-							run.artifacts.push(file.into());
-						}
+			Some(CargoOutput::Artifact { filenames }) => {
+				for filename in filenames {
+					if run.artifacts.len() < 128 && !run.artifacts.contains(&filename) {
+						run.artifacts.push(filename);
 					}
 				}
 				self.persist();
 			}
-			_ => {}
+			None => {}
 		}
 	}
 }
 #[cfg(test)]
-#[path = "tests_jobs.rs"]
+#[path = "../tests/unit/tests_jobs.rs"]
 mod tests;

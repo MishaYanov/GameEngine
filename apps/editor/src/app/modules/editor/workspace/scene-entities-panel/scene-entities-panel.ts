@@ -14,13 +14,22 @@ import {
     untracked,
     viewChild
 } from '@angular/core';
-import type {EntityKey, SceneEntity} from '../../../../core/editor/editor.models';
+import type {EntityKey} from '../../../../core/editor/editor.models';
 import {EditorPane} from '../../../../shared/components/pane/pane';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
 import type {SceneEntitiesModel} from './scene-entities.model';
+import {
+    buildHierarchy,
+    canReparentEntity,
+    hierarchyAncestors,
+    type HierarchyRow,
+    hierarchySubtreeKeys,
+    visibleHierarchyRows
+} from './hierarchy-tree';
+import {hierarchyScrollTop, renderHierarchyWindow} from './hierarchy-viewport';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -28,19 +37,6 @@ import {EditorContextMenuTrigger} from '../../../../shared/components/context-me
 export interface HierarchyReparentRequest {
     readonly key: EntityKey;
     readonly parent: EntityKey | null
-}
-
-interface HierarchyRow {
-    readonly key: EntityKey;
-    readonly entity: SceneEntity;
-    readonly parent: EntityKey | null;
-    readonly level: number;
-    readonly position: number;
-    readonly siblings: number;
-    readonly children: boolean;
-    readonly expanded: boolean;
-    readonly index: number;
-    readonly indent: number;
 }
 
 interface EntityMenuContext {
@@ -90,54 +86,12 @@ export class SceneEntitiesPanel {
     private typeahead = '';
     private typeaheadTime = 0;
 
-    private readonly forest = computed(() => {
-        const entities = this.scene().entities;
-        const byKey = new Map(entities.map(entity => [entity.key, entity]));
-        const children = new Map<EntityKey | null, SceneEntity[]>();
-        const parents = new Map<EntityKey, EntityKey | null>();
-        for (const entity of entities) {
-            const parent = entity.parent && byKey.has(entity.parent) && entity.parent !== entity.key ? entity.parent : null;
-            parents.set(entity.key, parent);
-            const siblings = children.get(parent);
-            if (siblings) siblings.push(entity); else children.set(parent, [entity]);
-        }
-        return {byKey, children, parents};
+    protected readonly renderedRows = computed(() => {
+        const active = this.activeKey();
+        const activeIndex = active ? this.rowIndices().get(active) : undefined;
+        return renderHierarchyWindow(this.rows(), this.rowHeight, this.scrollTop(), this.viewportHeight(), activeIndex);
     });
-    protected readonly rows = computed<readonly HierarchyRow[]>(() => {
-        const {children, parents} = this.forest();
-        const collapsed = this.collapsed();
-        const roots = children.get(null) ?? [];
-        const stack = roots.map((entity, index) => ({
-            entity,
-            level: 1,
-            position: index + 1,
-            siblings: roots.length
-        })).reverse();
-        const rows: HierarchyRow[] = [];
-        const visited = new Set<EntityKey>();
-        // An iterative traversal also handles deeply nested valid scenes.
-        while (stack.length) {
-            const entry = stack.pop()!;
-            const key = entry.entity.key;
-            if (visited.has(key)) continue;
-            visited.add(key);
-            const descendants = children.get(key) ?? [];
-            const expanded = descendants.length > 0 && !collapsed.has(key);
-            rows.push({
-                ...entry, key, parent: parents.get(key) ?? null, children: descendants.length > 0,
-                expanded, index: rows.length, indent: 6 + Math.min(entry.level - 1, 8) * 12
-            });
-            if (expanded) for (let index = descendants.length - 1; index >= 0; index--) {
-                stack.push({
-                    entity: descendants[index],
-                    level: entry.level + 1,
-                    position: index + 1,
-                    siblings: descendants.length
-                });
-            }
-        }
-        return rows;
-    });
+    private readonly forest = computed(() => buildHierarchy(this.scene().entities));
     private readonly rowIndices = computed(() => new Map(this.rows().map(row => [row.key, row.index])));
     protected readonly activeKey = computed(() => {
         const indices = this.rowIndices();
@@ -148,29 +102,10 @@ export class SceneEntitiesPanel {
     protected readonly activeId = computed(() => this.activeKey() ? this.rowId(this.activeKey()!) : null);
     protected readonly primary = computed(() => this.forest().byKey.get(this.selectedKeys()[0]) ?? null);
     protected readonly totalHeight = computed(() => this.rows().length * this.rowHeight);
-    protected readonly renderedRows = computed(() => {
-        const rows = this.rows();
-        const start = Math.max(0, Math.floor(this.scrollTop() / this.rowHeight) - 6);
-        const end = Math.min(rows.length, Math.ceil((this.scrollTop() + this.viewportHeight()) / this.rowHeight) + 6);
-        const window = rows.slice(start, end);
-        const active = this.activeKey();
-        const activeIndex = active ? this.rowIndices().get(active) : undefined;
-        // Preserve the active-descendant reference even when manually scrolling.
-        if (activeIndex !== undefined && (activeIndex < start || activeIndex >= end)) window.push(rows[activeIndex]);
-        return window.sort((a, b) => a.index - b.index);
-    });
+    protected readonly rows = computed(() => visibleHierarchyRows(this.forest(), this.collapsed()));
     private readonly forbiddenParents = computed(() => {
         const source = this.dragKey() ?? this.parentingChild();
-        const forbidden = new Set<EntityKey>();
-        if (!source) return forbidden;
-        const stack = [source];
-        while (stack.length) {
-            const key = stack.pop()!;
-            if (forbidden.has(key)) continue;
-            forbidden.add(key);
-            for (const child of this.forest().children.get(key) ?? []) stack.push(child.key);
-        }
-        return forbidden;
+        return source ? hierarchySubtreeKeys(this.forest(), source) : new Set<EntityKey>();
     });
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
@@ -227,14 +162,7 @@ export class SceneEntitiesPanel {
                     if (this.tree()) this.tree()!.nativeElement.scrollTop = 0;
                     this.cancelParenting();
                 }
-                const ancestors: EntityKey[] = [];
-                const seen = new Set<EntityKey>();
-                let parent = selected ? forest.parents.get(selected) : null;
-                while (parent && !seen.has(parent)) {
-                    seen.add(parent);
-                    ancestors.push(parent);
-                    parent = forest.parents.get(parent);
-                }
+                const ancestors = selected ? hierarchyAncestors(forest, selected) : [];
                 const identity = JSON.stringify([context, selected, ancestors]);
                 if (selected && forest.byKey.has(selected) && identity !== this.previousSelectionIdentity) {
                     const next = new Set(this.collapsed());
@@ -275,18 +203,12 @@ export class SceneEntitiesPanel {
     }
 
     revealEntity(key: EntityKey): void {
-        const {byKey, parents} = this.forest();
-        if (!byKey.has(key)) return;
+        const forest = this.forest();
+        if (!forest.byKey.has(key)) return;
         const context = this.contextKey();
         this.drawer()?.config.update(config => ({...config, collapsed: false, expanded: true}));
         const collapsed = new Set(this.collapsed());
-        const seen = new Set<EntityKey>();
-        let parent = parents.get(key);
-        while (parent && !seen.has(parent)) {
-            seen.add(parent);
-            collapsed.delete(parent);
-            parent = parents.get(parent);
-        }
+        for (const ancestor of hierarchyAncestors(forest, key)) collapsed.delete(ancestor);
         this.collapsed.set(collapsed);
         afterNextRender(() => {
             if (context === this.contextKey() && this.forest().byKey.has(key)) this.focus(key);
@@ -462,30 +384,19 @@ export class SceneEntitiesPanel {
     private reveal(key: EntityKey): void {
         const index = this.rowIndices().get(key);
         if (index === undefined) return;
-        const top = index * this.rowHeight;
         const current = this.scrollTop();
-        const next = top < current ? top : top + this.rowHeight > current + this.viewportHeight()
-            ? top + this.rowHeight - this.viewportHeight() : current;
+        const next = hierarchyScrollTop(index, this.rowHeight, current, this.viewportHeight());
         if (next !== current) {
-            this.scrollTop.set(Math.max(0, next));
-            if (this.tree()) this.tree()!.nativeElement.scrollTop = Math.max(0, next);
+            const scrollTop = Math.max(0, next);
+            this.scrollTop.set(scrollTop);
+            if (this.tree()) this.tree()!.nativeElement.scrollTop = scrollTop;
         }
     }
 
     private canReparent(key: EntityKey, parent: EntityKey | null): boolean {
-        const forest = this.forest();
-        if (this.disabled() || !forest.byKey.has(key) || forest.parents.get(key) === parent) return false;
-        if (parent === null) return true;
-        if (!forest.byKey.has(parent)) return false;
-        if ((this.dragKey() === key || this.parentingChild() === key) && this.forbiddenParents().has(parent)) return false;
-        const seen = new Set<EntityKey>();
-        let ancestor: EntityKey | null | undefined = parent;
-        while (ancestor && !seen.has(ancestor)) {
-            if (ancestor === key) return false;
-            seen.add(ancestor);
-            ancestor = forest.parents.get(ancestor);
-        }
-        return !ancestor;
+        if (this.disabled()) return false;
+        return canReparentEntity(this.forest(), key, parent, candidate =>
+            (this.dragKey() === key || this.parentingChild() === key) && this.forbiddenParents().has(candidate));
     }
 
     private requestReparent(key: EntityKey, parent: EntityKey | null): void {

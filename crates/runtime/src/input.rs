@@ -2,5 +2,5 @@
 pub use engine_core::input::*;
 
 #[cfg(test)]
-#[path = "tests_input.rs"]
+#[path = "../tests/unit/input.rs"]
 mod tests;

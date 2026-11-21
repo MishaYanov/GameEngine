@@ -173,5 +173,5 @@ pub async fn create_project(
 }
 
 #[cfg(test)]
-#[path = "tests_project.rs"]
+#[path = "../../tests/unit/commands/tests_project.rs"]
 mod tests;

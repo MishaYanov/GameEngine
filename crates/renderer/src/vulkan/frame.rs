@@ -4,24 +4,23 @@ use std::{
 	sync::atomic::{AtomicBool, Ordering},
 };
 
-use ash::vk::Handle;
 use ash::{Device, vk};
 
 use super::{
-	CameraUniform, DrawMetrics, LightingUniform, ModelPushConstants, RenderObject, VulkanBuffer,
-	VulkanBufferError, VulkanCamera, VulkanCameraError, VulkanDepthBuffer, VulkanDevice,
-	VulkanMaterialPipelines, VulkanSwapchain, instancing::InstanceData,
+	CameraUniform, DrawMetrics, LightingUniform, RenderObject, VulkanBuffer, VulkanBufferError,
+	VulkanCamera, VulkanCameraError, VulkanDepthBuffer, VulkanDevice, VulkanMaterialPipelines,
+	VulkanSwapchain, instancing::InstanceData,
 };
+
+use draw_plan::DrawBatch;
+use timing::GpuTimer;
+
+mod draw_plan;
+mod recording;
+mod timing;
 
 // Bounds both CPU scratch storage and the reusable GPU allocation (80 MiB).
 const MAX_FRAME_INSTANCES: usize = 1_048_576;
-
-struct DrawBatch {
-	object: usize,
-	first_instance: u32,
-	count: u32,
-	instanced: bool,
-}
 
 /// Extent-independent allocation and scratch retained between ordinary resizes.
 struct InstanceStorage {
@@ -45,78 +44,6 @@ impl InstanceStorage {
 			order: Vec::with_capacity(capacity),
 			batches: Vec::with_capacity(capacity),
 		})
-	}
-}
-
-struct GpuTimer {
-	_metrics: engine_logger::metrics::ResourceGuard,
-	device: Device,
-	pool: vk::QueryPool,
-	valid_bits: u32,
-	period_ns: f32,
-	pending: bool,
-	last_ms: Option<f64>,
-}
-
-impl GpuTimer {
-	fn new(device: &VulkanDevice) -> Result<Option<Self>, vk::Result> {
-		let Some((valid_bits, period_ns)) = device.timestamp_properties() else {
-			return Ok(None);
-		};
-		let info = vk::QueryPoolCreateInfo::default()
-			.query_type(vk::QueryType::TIMESTAMP)
-			.query_count(2);
-		let pool = unsafe { device.raw().create_query_pool(&info, None)? };
-		Ok(Some(Self {
-			_metrics: crate::metrics::object(
-				device.raw(),
-				"query_pool",
-				pool,
-				"GPU timestamp queries",
-				"count=2",
-			),
-			device: device.raw().clone(),
-			pool,
-			valid_bits,
-			period_ns,
-			pending: false,
-			last_ms: None,
-		}))
-	}
-
-	fn collect(&mut self) -> Result<(), vk::Result> {
-		if !self.pending {
-			return Ok(());
-		}
-		// [timestamp, availability] per query. Never use WAIT: profiling must
-		// not add synchronization to the renderer's existing frame fence.
-		let mut samples = [[0_u64; 2]; 2];
-		match unsafe {
-			self.device.get_query_pool_results(
-				self.pool,
-				0,
-				&mut samples,
-				vk::QueryResultFlags::TYPE_64 | vk::QueryResultFlags::WITH_AVAILABILITY,
-			)
-		} {
-			Ok(()) | Err(vk::Result::NOT_READY) => {}
-			Err(error) => return Err(error),
-		}
-		if samples.iter().all(|sample| sample[1] != 0) {
-			let mask = u64::MAX >> (64 - self.valid_bits);
-			let ticks = samples[1][0].wrapping_sub(samples[0][0]) & mask;
-			self.last_ms = Some(ticks as f64 * self.period_ns as f64 / 1_000_000.0);
-		}
-		self.pending = false;
-		Ok(())
-	}
-}
-
-impl Drop for GpuTimer {
-	fn drop(&mut self) {
-		unsafe {
-			self.device.destroy_query_pool(self.pool, None);
-		}
 	}
 }
 
@@ -153,6 +80,12 @@ pub struct FrameTargets<'a> {
 pub(crate) struct FrameEditor<'a> {
 	pub pass: &'a mut super::editor::EditorPass,
 	pub visuals: &'a crate::EditorVisuals,
+}
+
+pub(crate) struct FrameView<'a> {
+	pub uniform: &'a CameraUniform,
+	pub region: vk::Rect2D,
+	pub editor: Option<FrameEditor<'a>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,14 +363,18 @@ impl VulkanFrame {
 		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<FrameStatus, VulkanFrameError> {
+		let region = vk::Rect2D::default().extent(targets.swapchain.extent());
 		self.draw_with_editor(
 			device,
 			targets,
 			pipelines,
 			camera,
-			camera_uniform,
 			objects,
-			None,
+			FrameView {
+				uniform: camera_uniform,
+				region,
+				editor: None,
+			},
 		)
 	}
 
@@ -447,22 +384,13 @@ impl VulkanFrame {
 		targets: FrameTargets<'_>,
 		pipelines: &VulkanMaterialPipelines,
 		camera: &VulkanCamera,
-		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
-		editor: Option<FrameEditor<'_>>,
+		view: FrameView<'_>,
 	) -> Result<FrameStatus, VulkanFrameError> {
 		if self.invalidated {
 			return Ok(FrameStatus::SwapchainNeedsRebuild);
 		}
-		let result = self.draw_once(
-			device,
-			targets,
-			pipelines,
-			camera,
-			camera_uniform,
-			objects,
-			editor,
-		);
+		let result = self.draw_once(device, targets, pipelines, camera, objects, view);
 		// Acquisition can leave its semaphore signaled even when recording or
 		// submission fails. Only a fresh frame may acquire another image.
 		if !matches!(result, Ok(FrameStatus::Rendered)) {
@@ -477,23 +405,22 @@ impl VulkanFrame {
 		targets: FrameTargets<'_>,
 		pipelines: &VulkanMaterialPipelines,
 		camera: &VulkanCamera,
-		camera_uniform: &CameraUniform,
 		objects: &[RenderObject<'_>],
-		mut editor: Option<FrameEditor<'_>>,
+		mut view: FrameView<'_>,
 	) -> Result<FrameStatus, VulkanFrameError> {
 		let swapchain = targets.swapchain;
 
 		self.wait_complete()?;
 		self.acquisition_pending = false;
 		self.submission_pending = false;
-		if let Some(editor) = &mut editor {
-			let extent = targets.swapchain.extent();
+		if let Some(editor) = &mut view.editor {
+			let extent = view.region.extent;
 			editor
 				.pass
 				.prepare(
 					device,
 					editor.visuals,
-					camera_uniform,
+					view.uniform,
 					[extent.width, extent.height],
 				)
 				.map_err(VulkanFrameError::Editor)?;
@@ -513,7 +440,7 @@ impl VulkanFrame {
 			palettes.prepare(objects)?;
 		}
 
-		camera.update(camera_uniform)?;
+		camera.update(view.uniform)?;
 		camera.update_lighting(&self.lighting)?;
 		unsafe {
 			self.device
@@ -549,7 +476,7 @@ impl VulkanFrame {
 			pipelines,
 			camera.descriptor_set(),
 			objects,
-			editor.as_ref().map(|editor| &*editor.pass),
+			&view,
 		)?;
 
 		let wait_semaphores = [self.image_available];
@@ -574,9 +501,10 @@ impl VulkanFrame {
 		}
 		self.submission_pending = true;
 		if let Some(timer) = &mut self.timer {
-			timer.pending = true;
+			timer.mark_submitted();
 		}
-		let (editor_draws, editor_triangles) = editor
+		let (editor_draws, editor_triangles) = view
+			.editor
 			.as_ref()
 			.map_or((0, 0), |editor| editor.pass.draw_counts());
 		let instances = self.instances.as_ref().expect("live frame storage");
@@ -604,7 +532,7 @@ impl VulkanFrame {
 				.iter()
 				.filter(|batch| batch.count > 1)
 				.count() as u64,
-			gpu_time_ms: self.timer.as_ref().and_then(|timer| timer.last_ms),
+			gpu_time_ms: self.timer.as_ref().and_then(GpuTimer::last_ms),
 			gpu_timestamps_supported: self.timer.is_some(),
 		};
 
@@ -644,411 +572,15 @@ impl VulkanFrame {
 				VulkanBuffer::host_vertex(device, (capacity * size_of::<InstanceData>()) as u64)?;
 			instances.capacity = capacity;
 		}
-		instances.order.clear();
-		instances.order.extend(0..objects.len());
-		// Reorder only opaque runs. Every overlay/unlit/alpha object is an
-		// ordering barrier, so editor UI and debug draws retain submission order.
-		let mut start = 0;
-		while start < objects.len() {
-			if !batchable(&objects[start]) {
-				start += 1;
-				continue;
-			}
-			let end = (start..objects.len())
-				.find(|&i| !batchable(&objects[i]))
-				.unwrap_or(objects.len());
-			instances.order[start..end].sort_unstable_by_key(|&i| (batch_key(&objects[i]), i));
-			start = end;
-		}
-		instances.data.clear();
-		instances.batches.clear();
-		for &index in &instances.order {
-			let object = &objects[index];
-			let instanced = batchable(object);
-			let first_instance = instances.data.len() as u32;
-			instances.data.push(InstanceData::from_object(object));
-			if let Some(batch) = instances.batches.last_mut()
-				&& instanced && batch.instanced
-				&& batch_key(&objects[batch.object]) == batch_key(object)
-			{
-				batch.count += 1;
-			} else {
-				instances.batches.push(DrawBatch {
-					object: index,
-					first_instance,
-					count: 1,
-					instanced,
-				});
-			}
-		}
+		draw_plan::build(
+			objects,
+			&mut instances.order,
+			&mut instances.data,
+			&mut instances.batches,
+		);
 		instances.buffer.write(&instances.data)?;
 		Ok(())
 	}
-
-	fn record_draw_commands(
-		&self,
-		targets: FrameTargets<'_>,
-		image_index: u32,
-		pipelines: &VulkanMaterialPipelines,
-		camera_descriptor_set: vk::DescriptorSet,
-		objects: &[RenderObject<'_>],
-		editor: Option<&super::editor::EditorPass>,
-	) -> Result<(), VulkanFrameError> {
-		let image = targets.swapchain.images()[image_index as usize];
-		let image_view = targets.swapchain.image_views()[image_index as usize];
-		let extent = targets.swapchain.extent();
-		let depth_image = targets.depth_buffer.image();
-		let depth_view = targets.depth_buffer.view();
-
-		let begin_info = vk::CommandBufferBeginInfo::default()
-			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-		unsafe {
-			self.device
-				.begin_command_buffer(self.command_buffer, &begin_info)?;
-			if let Some(timer) = &self.timer {
-				self.device
-					.cmd_reset_query_pool(self.command_buffer, timer.pool, 0, 2);
-				self.device.cmd_write_timestamp(
-					self.command_buffer,
-					vk::PipelineStageFlags::TOP_OF_PIPE,
-					timer.pool,
-					0,
-				);
-			}
-		}
-
-		let range = vk::ImageSubresourceRange::default()
-			.aspect_mask(vk::ImageAspectFlags::COLOR)
-			.base_mip_level(0)
-			.level_count(1)
-			.base_array_layer(0)
-			.layer_count(1);
-
-		let to_color_attachment = vk::ImageMemoryBarrier::default()
-			.src_access_mask(vk::AccessFlags::empty())
-			.dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-			.old_layout(vk::ImageLayout::UNDEFINED)
-			.new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-			.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.image(image)
-			.subresource_range(range);
-
-		unsafe {
-			self.device.cmd_pipeline_barrier(
-				self.command_buffer,
-				vk::PipelineStageFlags::TOP_OF_PIPE,
-				vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-				vk::DependencyFlags::empty(),
-				&[],
-				&[],
-				&[to_color_attachment],
-			);
-		}
-
-		let depth_range = vk::ImageSubresourceRange::default()
-			.aspect_mask(vk::ImageAspectFlags::DEPTH)
-			.base_mip_level(0)
-			.level_count(1)
-			.base_array_layer(0)
-			.layer_count(1);
-
-		let to_depth_attachment = vk::ImageMemoryBarrier::default()
-			.src_access_mask(vk::AccessFlags::empty())
-			.dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-			.old_layout(vk::ImageLayout::UNDEFINED)
-			.new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-			.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.image(depth_image)
-			.subresource_range(depth_range);
-
-		unsafe {
-			self.device.cmd_pipeline_barrier(
-				self.command_buffer,
-				vk::PipelineStageFlags::TOP_OF_PIPE,
-				vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
-					| vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-				vk::DependencyFlags::empty(),
-				&[],
-				&[],
-				&[to_depth_attachment],
-			);
-		}
-
-		let clear_value = vk::ClearValue {
-			color: vk::ClearColorValue {
-				float32: if editor.is_some() {
-					[0.08, 0.095, 0.12, 1.0]
-				} else {
-					[0.04, 0.08, 0.16, 1.0]
-				},
-			},
-		};
-
-		let color_attachment = vk::RenderingAttachmentInfo::default()
-			.image_view(image_view)
-			.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-			.load_op(vk::AttachmentLoadOp::CLEAR)
-			.store_op(vk::AttachmentStoreOp::STORE)
-			.clear_value(clear_value);
-
-		let color_attachments = [color_attachment];
-
-		let depth_clear_value = vk::ClearValue {
-			depth_stencil: vk::ClearDepthStencilValue {
-				depth: 1.0,
-				stencil: 0,
-			},
-		};
-
-		let depth_attachment = vk::RenderingAttachmentInfo::default()
-			.image_view(depth_view)
-			.image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-			.load_op(vk::AttachmentLoadOp::CLEAR)
-			.store_op(vk::AttachmentStoreOp::DONT_CARE)
-			.clear_value(depth_clear_value);
-
-		let render_area = vk::Rect2D {
-			offset: vk::Offset2D { x: 0, y: 0 },
-
-			extent,
-		};
-
-		let rendering_info = vk::RenderingInfo::default()
-			.render_area(render_area)
-			.layer_count(1)
-			.color_attachments(&color_attachments)
-			.depth_attachment(&depth_attachment);
-
-		unsafe {
-			self.device
-				.cmd_begin_rendering(self.command_buffer, &rendering_info);
-		}
-
-		let viewport = vk::Viewport {
-			x: 0.0,
-			y: 0.0,
-
-			width: extent.width as f32,
-
-			height: extent.height as f32,
-
-			min_depth: 0.0,
-			max_depth: 1.0,
-		};
-
-		let scissor = vk::Rect2D {
-			offset: vk::Offset2D { x: 0, y: 0 },
-
-			extent,
-		};
-
-		unsafe {
-			self.device
-				.cmd_set_viewport(self.command_buffer, 0, &[viewport]);
-
-			self.device
-				.cmd_set_scissor(self.command_buffer, 0, &[scissor]);
-
-			/*
-			 * Each render object may reference
-			 * a completely different mesh.
-			 */
-			let mut bound_pipeline = vk::Pipeline::null();
-			let mut bound_material = vk::DescriptorSet::null();
-			let mut bound_mesh = None;
-			let mut camera_bound = false;
-			let instances = self.instances.as_ref().expect("live frame storage");
-			for batch in &instances.batches {
-				let object = &objects[batch.object];
-				let mesh = object.mesh();
-
-				let material = object.material();
-
-				let palette = object
-					.skin_palette()
-					.and(self.palettes.as_ref())
-					.and_then(|storage| storage.ranges[batch.object]);
-				let pipeline = if palette.is_some() {
-					pipelines.for_skin(material.double_sided())
-				} else {
-					pipelines.for_object(
-						material.double_sided(),
-						object.transform().flags[0] & (2 | 8) != 0,
-					)
-				};
-				let pipeline_layout = pipeline.layout();
-				if bound_pipeline != pipeline.raw() {
-					self.device.cmd_bind_pipeline(
-						self.command_buffer,
-						vk::PipelineBindPoint::GRAPHICS,
-						pipeline.raw(),
-					);
-					bound_pipeline = pipeline.raw();
-				}
-				// All material pipeline variants have compatible set layouts.
-				if !camera_bound {
-					self.device.cmd_bind_descriptor_sets(
-						self.command_buffer,
-						vk::PipelineBindPoint::GRAPHICS,
-						pipeline_layout,
-						0,
-						&[camera_descriptor_set],
-						&[],
-					);
-					camera_bound = true;
-				}
-
-				/*
-				 * Set 1 contains this object's material.
-				 */
-				let material_sets = [material.descriptor_set()];
-
-				if bound_material != material_sets[0] {
-					self.device.cmd_bind_descriptor_sets(
-						self.command_buffer,
-						vk::PipelineBindPoint::GRAPHICS,
-						pipeline_layout,
-						1,
-						&material_sets,
-						&[],
-					);
-					bound_material = material_sets[0];
-				}
-
-				let vertex_buffers = [mesh.vertex_buffer().raw(), instances.buffer.raw()];
-
-				let vertex_offsets = [0, 0];
-
-				let mesh_buffers = [mesh.vertex_buffer().raw(), mesh.index_buffer().raw()];
-				if bound_mesh != Some(mesh_buffers) {
-					self.device.cmd_bind_vertex_buffers(
-						self.command_buffer,
-						0,
-						&vertex_buffers,
-						&vertex_offsets,
-					);
-					self.device.cmd_bind_index_buffer(
-						self.command_buffer,
-						mesh.index_buffer().raw(),
-						0,
-						vk::IndexType::UINT32,
-					);
-					bound_mesh = Some(mesh_buffers);
-				}
-
-				if palette.is_some() {
-					self.device.cmd_bind_vertex_buffers(
-						self.command_buffer,
-						2,
-						&[mesh.skin_buffer().expect("validated skin buffer").raw()],
-						&[0],
-					);
-					self.device.cmd_bind_descriptor_sets(
-						self.command_buffer,
-						vk::PipelineBindPoint::GRAPHICS,
-						pipeline_layout,
-						2,
-						&[self.palettes.as_ref().unwrap().set],
-						&[],
-					);
-				}
-				let mut push_constants = *object.transform();
-				if let Some((base, count)) = palette {
-					super::skinning::apply_palette_range(&mut push_constants, base, count);
-				}
-				for (component, factor) in push_constants
-					.base_color_factor
-					.iter_mut()
-					.zip(material.base_color_factor())
-				{
-					*component *= factor;
-				}
-				if batch.instanced {
-					push_constants.flags[0] |= 16;
-				}
-
-				self.device.cmd_push_constants(
-					self.command_buffer,
-					pipeline_layout,
-					vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-					ModelPushConstants::OFFSET,
-					push_constants.as_bytes(),
-				);
-
-				self.device.cmd_draw_indexed(
-					self.command_buffer,
-					mesh.index_count(),
-					batch.count,
-					0,
-					0,
-					batch.first_instance,
-				);
-			}
-
-			if let Some(editor) = editor {
-				editor.record(&self.device, self.command_buffer);
-			}
-			self.device.cmd_end_rendering(self.command_buffer);
-		}
-
-		let to_present = vk::ImageMemoryBarrier::default()
-			.src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-			.dst_access_mask(vk::AccessFlags::empty())
-			.old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-			.new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-			.src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-			.image(image)
-			.subresource_range(range);
-
-		unsafe {
-			self.device.cmd_pipeline_barrier(
-				self.command_buffer,
-				vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-				vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-				vk::DependencyFlags::empty(),
-				&[],
-				&[],
-				&[to_present],
-			);
-			if let Some(timer) = &self.timer {
-				self.device.cmd_write_timestamp(
-					self.command_buffer,
-					vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-					timer.pool,
-					1,
-				);
-			}
-
-			self.device.end_command_buffer(self.command_buffer)?;
-		}
-
-		Ok(())
-	}
-}
-
-fn batchable(object: &RenderObject<'_>) -> bool {
-	object.skin_palette().is_none()
-		&& object.transform().flags[0] == 0
-		&& object.transform().base_color_factor[3] >= 1.0
-		&& object.material().base_color_factor()[3] >= 1.0
-}
-
-fn batch_key(object: &RenderObject<'_>) -> [u64; 8] {
-	let color = object.material().base_color_factor();
-	[
-		object.mesh().vertex_buffer().raw().as_raw(),
-		object.mesh().index_buffer().raw().as_raw(),
-		object.material().descriptor_set().as_raw(),
-		object.material().double_sided() as u64,
-		color[0].to_bits() as u64,
-		color[1].to_bits() as u64,
-		color[2].to_bits() as u64,
-		color[3].to_bits() as u64,
-	]
 }
 
 impl Drop for VulkanFrame {
@@ -1069,306 +601,5 @@ impl Drop for VulkanFrame {
 }
 
 #[cfg(test)]
-mod construction_tests {
-	use super::*;
-	use crate::vulkan::test_driver::{device, reset, state};
-
-	#[test]
-	fn resized_frames_keep_warmed_instance_storage_with_fresh_image_synchronization() {
-		reset();
-		let device = device();
-		let mut frame = VulkanFrame::with_image_count(&device, 3).unwrap();
-		let instances = frame.instances.as_mut().unwrap();
-		instances.buffer =
-			VulkanBuffer::host_vertex(&device, (512 * size_of::<InstanceData>()) as u64).unwrap();
-		instances.capacity = 512;
-		instances.data.reserve(512);
-		instances.order.reserve(512);
-		instances.batches.reserve(512);
-		let buffer = instances.buffer.raw();
-		let scratch = (
-			instances.data.as_ptr(),
-			instances.order.as_ptr(),
-			instances.batches.as_ptr(),
-		);
-		let allocations = state(|state| state.calls["allocate_memory"]);
-		for image_count in [2, 4, 3] {
-			let acquisition = frame.image_available;
-			let fence = frame.in_flight;
-			frame = VulkanFrame::with_storage(&device, image_count, Some(frame)).unwrap();
-			let instances = frame.instances.as_ref().unwrap();
-			assert_eq!(instances.buffer.raw(), buffer);
-			assert_eq!(instances.capacity, 512);
-			assert_eq!(
-				(
-					instances.data.as_ptr(),
-					instances.order.as_ptr(),
-					instances.batches.as_ptr()
-				),
-				scratch
-			);
-			assert_eq!(frame.render_finished.len(), image_count);
-			assert_ne!(frame.image_available, acquisition);
-			assert_ne!(frame.in_flight, fence);
-			frame.wait_complete().unwrap();
-			state(|state| {
-				assert_eq!(state.calls["allocate_memory"], allocations);
-				assert!(
-					!state.calls.contains_key("wait"),
-					"new synchronization has no pending work"
-				);
-			});
-		}
-		drop(frame);
-		state(|state| assert!(state.memory.is_empty()));
-	}
-
-	#[test]
-	fn failed_resize_construction_releases_transferred_storage_and_can_retry() {
-		for (call, offset) in [
-			("create_pool", 1),
-			("create_semaphore", 2),
-			("create_fence", 2),
-		] {
-			reset();
-			let device = device();
-			let frame = VulkanFrame::with_image_count(&device, 3).unwrap();
-			state(|state| state.fail = Some((call, state.calls[call] + offset)));
-			assert!(VulkanFrame::with_storage(&device, 2, Some(frame)).is_err());
-			state(|state| {
-				assert!(state.memory.is_empty(), "{call}");
-				state.fail = None;
-			});
-			let frame = VulkanFrame::with_image_count(&device, 2).unwrap();
-			assert_eq!(frame.render_finished.len(), 2);
-			drop(frame);
-			state(|state| assert!(state.memory.is_empty()));
-		}
-	}
-
-	#[test]
-	fn successful_completion_is_reused_between_updates_but_failed_waits_are_retried() {
-		fn assert_send_sync<T: Send + Sync>() {}
-		assert_send_sync::<VulkanFrame>();
-		reset();
-		let device = device();
-		let swapchain = VulkanSwapchain::for_test(device.raw());
-		let camera = VulkanCamera::for_test(&device);
-		let depth = VulkanDepthBuffer::for_test(device.raw());
-		let pipelines = VulkanMaterialPipelines::for_test(device.raw());
-		let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
-		let uniform = CameraUniform {
-			view_projection: glam::Mat4::IDENTITY.to_cols_array(),
-		};
-		for completed in 0..3 {
-			frame
-				.draw(
-					&device,
-					FrameTargets {
-						swapchain: &swapchain,
-						depth_buffer: &depth,
-					},
-					&pipelines,
-					&camera,
-					&uniform,
-					&[],
-				)
-				.unwrap();
-			state(|state| assert_eq!(state.calls.get("wait").copied().unwrap_or(0), completed * 2));
-			state(|state| state.wait_error = Some(vk::Result::ERROR_OUT_OF_HOST_MEMORY));
-			assert!(frame.wait_complete().is_err());
-			state(|state| state.wait_error = None);
-			frame.wait_complete().unwrap();
-			frame.wait_complete().unwrap();
-			state(|state| assert_eq!(state.calls["wait"], (completed + 1) * 2));
-		}
-	}
-
-	#[test]
-	fn successive_draws_wait_and_reset_acquisition_and_render_fences_together() {
-		reset();
-		let device = device();
-		let swapchain = VulkanSwapchain::for_test(device.raw());
-		let camera = VulkanCamera::for_test(&device);
-		let depth = VulkanDepthBuffer::for_test(device.raw());
-		let pipelines = VulkanMaterialPipelines::for_test(device.raw());
-		let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
-		let uniform = CameraUniform {
-			view_projection: glam::Mat4::IDENTITY.to_cols_array(),
-		};
-		for _ in 0..2 {
-			assert_eq!(
-				frame
-					.draw(
-						&device,
-						FrameTargets {
-							swapchain: &swapchain,
-							depth_buffer: &depth
-						},
-						&pipelines,
-						&camera,
-						&uniform,
-						&[]
-					)
-					.unwrap(),
-				FrameStatus::Rendered
-			);
-		}
-		state(|state| {
-			let pair = vec![frame.acquisition_fence.as_raw(), frame.in_flight.as_raw()];
-			assert_eq!(
-				state.waited_fences.as_slice(),
-				std::slice::from_ref(&pair),
-				"one combined wait before the second frame"
-			);
-			assert_eq!(
-				state.reset_fence_groups,
-				[pair.clone(), pair],
-				"one combined reset per frame"
-			);
-			assert_eq!(state.calls["acquire"], 2);
-			assert_eq!(state.calls["submit"], 2);
-			assert_eq!(state.calls["present"], 2);
-		});
-		frame.wait_complete().unwrap();
-	}
-
-	#[test]
-	fn failed_public_draw_never_reuses_an_acquired_semaphore_or_unsubmitted_fence() {
-		for call in [
-			"acquire",
-			"reset_pool",
-			"begin_commands",
-			"end_commands",
-			"reset_fences",
-			"submit",
-			"present",
-		] {
-			reset();
-			let device = device();
-			let swapchain = VulkanSwapchain::for_test(device.raw());
-			let camera = VulkanCamera::for_test(&device);
-			let depth = VulkanDepthBuffer::for_test(device.raw());
-			let pipelines = VulkanMaterialPipelines::for_test(device.raw());
-			let mut frame = VulkanFrame::new(&device, &swapchain).unwrap();
-			let uniform = CameraUniform {
-				view_projection: glam::Mat4::IDENTITY.to_cols_array(),
-			};
-			let draw = |frame: &mut VulkanFrame| {
-				frame.draw(
-					&device,
-					FrameTargets {
-						swapchain: &swapchain,
-						depth_buffer: &depth,
-					},
-					&pipelines,
-					&camera,
-					&uniform,
-					&[],
-				)
-			};
-			state(|state| state.fail = Some((call, 1)));
-			assert!(
-				matches!(
-					draw(&mut frame),
-					Err(VulkanFrameError::Vulkan(
-						vk::Result::ERROR_OUT_OF_HOST_MEMORY
-					))
-				),
-				"{call}"
-			);
-			let before_retry = state(|state| state.calls.clone());
-			assert_eq!(
-				draw(&mut frame).unwrap(),
-				FrameStatus::SwapchainNeedsRebuild
-			);
-			state(|state| {
-				assert_eq!(
-					state.calls, before_retry,
-					"invalidated frame must not issue more Vulkan calls after {call}"
-				)
-			});
-			frame.wait_complete().unwrap();
-			state(|state| {
-				let expected = match call {
-					"acquire" | "reset_fences" => vec![],
-					"present" => vec![vec![
-						frame.acquisition_fence.as_raw(),
-						frame.in_flight.as_raw(),
-					]],
-					_ => vec![vec![frame.acquisition_fence.as_raw()]],
-				};
-				assert_eq!(
-					state.waited_fences, expected,
-					"wait only for genuinely pending acquisition/submission after {call}"
-				);
-			});
-			// WindowRenderer waits device-idle before replacing failed targets.
-			unsafe {
-				device.raw().device_wait_idle().unwrap();
-			}
-			let previous_buffer = frame.instances.as_ref().unwrap().buffer.raw();
-			let mut fresh = VulkanFrame::recreate(&device, &swapchain, frame).unwrap();
-			assert_ne!(
-				fresh.instances.as_ref().unwrap().buffer.raw(),
-				previous_buffer,
-				"failed-frame recovery must keep its fresh allocation path"
-			);
-			assert_eq!(
-				draw(&mut fresh).unwrap(),
-				FrameStatus::Rendered,
-				"fresh synchronization must recover after {call}"
-			);
-			fresh.wait_complete().unwrap();
-		}
-	}
-
-	#[test]
-	fn every_partial_frame_allocation_releases_preceding_handles() {
-		for (call, nth, semaphores, pools) in [
-			("create_pool", 1, 0, 0),
-			("allocate_commands", 1, 0, 1),
-			("create_semaphore", 1, 0, 1),
-			("create_semaphore", 2, 1, 1),
-			("create_semaphore", 3, 2, 1),
-			("create_semaphore", 4, 3, 1),
-			("create_fence", 1, 4, 1),
-			("create_fence", 2, 4, 1),
-		] {
-			reset();
-			state(|state| state.fail = Some((call, nth)));
-			let device = device();
-			assert!(
-				VulkanFrame::with_image_count(&device, 3).is_err(),
-				"{call} {nth}"
-			);
-			state(|state| {
-				assert_eq!(
-					state
-						.released
-						.iter()
-						.filter(|&&name| name == "semaphore")
-						.count(),
-					semaphores
-				);
-				assert_eq!(
-					state
-						.released
-						.iter()
-						.filter(|&&name| name == "pool")
-						.count(),
-					pools
-				);
-				assert!(state.memory.is_empty());
-				assert_eq!(
-					state
-						.released
-						.iter()
-						.filter(|&&name| name == "fence")
-						.count(),
-					usize::from(call == "create_fence" && nth == 2)
-				);
-			});
-		}
-	}
-}
+#[path = "../../tests/unit/vulkan/frame.rs"]
+mod construction_tests;

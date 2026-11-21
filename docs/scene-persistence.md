@@ -1,13 +1,23 @@
 # Scene data, save, and reload
 
 Scene documents are owned by engine-core and exposed through runtime adapters. Current authoring retains multiple drafts
-under project schema 3, while scene saves use schema 4. Read [project lifecycle](project-lifecycle.md) for scene IDs,
+under project schema 3, while scene saves use schema 5. Read [project lifecycle](project-lifecycle.md) for scene IDs,
 project opening, per-scene dirty state, Save As, register, reload policies and catalog-wide build checks. Native visual
 acceptance remains separate.
 
-## Schema version 4 and persistent identity
+## Schema version 5 and persistent identity
 
-Current saves use version **4**, retaining entity keys/bindings/transforms/camera, optional parent keys and scene lights.
+Current saves use version **5**, retaining entity keys/bindings/transforms/camera, optional parent keys and scene
+lights.
+Version 5 adds the optional `camera.orbit` definition. Its target is a persistent entity key. The arm's authored
+distance limits, pivot offset, response times, probe radius and obstruction mask survive save/reopen. Play keeps
+the changing eye position, current blocker and recovery progress in runtime state. A camera can use fixed, follow
+or orbit behavior. [Orbit camera obstruction](timing-input-camera.md#orbit-camera-obstruction).
+
+**Game Camera…** edits one complete definition. Preview samples live in an edit-only native session. Apply uses the
+existing scene revision and undo history, and Save All persists the accepted
+defaults. [Camera-room walkthrough](milestone-10-camera-review.md)
+
 Objects store typed component arrays for mesh rendering, material overrides, colliders and native behaviors. Existing
 flat internal adapters and computed transport views preserve the runtime/editor boundary.
 Nonrenderable entities can preserve imported transform-only nodes. Names are labels; keys provide document identity.
@@ -19,9 +29,9 @@ default settings serialize omitted. Both filters must match for detection, and s
 These remain authored component fields, participate in ordinary undo/save/reopen and are separate from editor-only
 outline visibility. Sensor edges drive the implemented trigger lifecycle. [Collider reference](scene-editing.md#colliders-and-interaction-settings).
 
-Version-1, version-2 and version-3 input migrates in memory to v4. V1 receives deterministic legacy keys; V2 preserves
-keys/bindings. New fields receive compatible defaults and older scenes receive a migrated default light. Reading alone
-does not rewrite files. Unknown future versions fail; the current to_json writes v4.
+Versions 1–4 migrate in memory to v5. V1 receives deterministic legacy keys, V2 preserves keys and bindings, and
+V1/V2 receive legacy lighting. Older scene versions keep their supported fixed/follow behavior. Declaring
+`camera.orbit` requires version 5. Reading leaves the existing file in place. The next save writes v5.
 
 Validation rejects malformed identities/paths, duplicates, missing/cyclic parents, invalid world transforms, non-finite
 values, projection errors, and invalid materials/colliders/lights. The ceiling is 32 MiB scene JSON, 100,000 entities

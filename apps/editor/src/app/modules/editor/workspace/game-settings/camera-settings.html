@@ -1,50 +1,101 @@
-<button type="button" [disabled]="!available()" (click)="show()">Game Camera…</button>
-<editor-dialog [(open)]="open" title="Game Camera" [renderFields]="false" [config]="{width: '36rem'}">
-    @if (orbit(); as camera) {
-        <section aria-label="Orbit camera" class="fields">
-            <p #orbitField [attr.autofocus]="open() && focusTarget() ? '' : null" tabindex="-1">
-                Orbit target
-                @if (orbitTarget(); as target) {
-                    <strong>{{ target.label }}</strong> · {{ target.description }}
-                } @else {
-                    <strong class="error">Missing target: {{ camera.target }}</strong>
+@if (previewing()) {
+    <section aria-label="Camera preview controls" class="camera-preview-controls">
+        <strong>Orbit camera preview</strong>
+        @if (editor.cameraPreview.state(); as preview) {
+            <span role="status">Arm {{ preview.effective_distance | number:'1.0-3' }} m
+                @if (preview.blocker; as blocker) {
+                    · Blocked by {{ blocker }}
                 }
-            </p>
-        </section>
-    } @else {
-        <p>Follow tracks an entity's world position. Scene navigation keeps its own editor camera.</p>
-        <fieldset [disabled]="pending()" class="fields">
+            </span>
+            <button (click)="sample(-15, 0, 1)" type="button">Turn left</button>
+            <button (click)="sample(15, 0, 1)" type="button">Turn right</button>
+            <button (click)="sample(0, 10, 1)" type="button">Tilt up</button>
+            <button (click)="sample(0, -10, 1)" type="button">Tilt down</button>
+            <button (click)="sample(0, 0, 0.8)" type="button">Zoom in</button>
+            <button (click)="sample(0, 0, 1.25)" type="button">Zoom out</button>
+            <button (click)="sample(0, 0, 1)" type="button">Advance one step</button>
+        } @else if (!editor.cameraPreview.error()) {
+            <span role="status">Preparing preview…</span>
+        }
+        @if (editor.cameraPreview.error(); as failure) {
+            <span class="error" role="alert">{{ failure }}</span>
+        }
+        <button #backButton (click)="backToSettings()" type="button">Back to settings</button>
+        <button (click)="close()" type="button">Close preview</button>
+    </section>
+} @else {
+    <button (click)="show()" [disabled]="!available()" type="button">Game Camera…</button>
+}
+<editor-dialog (closed)="focusPreviewControls()" (openChange)="!$event && !previewing() && close()" [config]="{width: '36rem'}"
+               [open]="open()" [renderFields]="false" title="Game Camera">
+    <fieldset [disabled]="pending()" class="fields">
         <legend>Runtime camera</legend>
-        <label>Mode<select [formField]="fields.mode"><option value="fixed">Fixed</option><option value="follow">Follow</option></select></label>
-        @if (draft().mode === 'follow') {
-            <editor-search-picker (picked)="fields.target().value.set($event)" [autofocus]="open() && focusTarget()"
-                                  [clearable]="true" [disabled]="pending()" [options]="entityOptions()"
-                                  [value]="draft().target" label="Target"
-                                  placeholder="Search entities…"/>
-            @if (canRevealTarget()) {
-                <button (click)="revealTarget()" type="button">Show Target in Hierarchy</button>
-            }
-            @for (group of groups; track group.name) {
-                <fieldset><legend>{{ group.label }} in world units</legend><div class="vector">
+        <label>Mode
+            <select [formField]="fields.mode">
+                <option value="fixed">Fixed</option>
+                <option value="follow">Follow</option>
+                <option value="orbit">Orbit</option>
+            </select>
+        </label>
+        @if (draft().mode === 'orbit') {
+            <editor-search-picker (picked)="fields.orbit.target().value.set($event)"
+                                  [autofocus]="open() && focusTarget()" [clearable]="true"
+                                  [disabled]="pending()" [options]="entityOptions()" [value]="draft().orbit.target"
+                                  label="Target" placeholder="Search entities…"/>
+            <fieldset>
+                <legend>Pivot offset in world units</legend>
+                <div class="vector">
                     @for (axis of axes; track axis) {
-                        <label>{{ axis.toUpperCase() }}<input type="text" inputmode="decimal"
-                            [attr.aria-label]="group.label + ' ' + axis.toUpperCase()" [formField]="fields[group.name][axis]"/></label>
+                        <label>{{ axis.toUpperCase() }}
+                            <input [attr.aria-label]="'Orbit pivot ' + axis.toUpperCase()" [formField]="fields.orbit.pivot[axis]"
+                                   inputmode="decimal"
+                                   type="text"/>
+                        </label>
                     }
-                </div></fieldset>
+                </div>
+            </fieldset>
+            @for (field of orbitNumbers; track field.key) {
+                <label>{{ field.label }}
+                    <input [attr.inputmode]="field.key === 'obstructionMask' ? 'numeric' : 'decimal'" [formField]="fields.orbit[field.key]"
+                           type="text"/>
+                </label>
             }
-            <label>Smoothing in seconds<input type="text" inputmode="decimal" [formField]="fields.smoothing"/></label>
-            <p>Zero follows immediately. Higher values smooth camera movement.</p>
+            <p>Walls can shorten the arm below the minimum zoom distance.</p>
+        } @else if (draft().mode === 'follow') {
+            <editor-search-picker (picked)="fields.follow.target().value.set($event)"
+                                  [autofocus]="open() && focusTarget()" [clearable]="true"
+                                  [disabled]="pending()" [options]="entityOptions()" [value]="draft().follow.target"
+                                  label="Target" placeholder="Search entities…"/>
+            @for (group of groups; track group.name) {
+                <fieldset>
+                    <legend>{{ group.label }} in world units</legend>
+                    <div class="vector">
+                        @for (axis of axes; track axis) {
+                            <label>{{ axis.toUpperCase() }}<input [attr.aria-label]="group.label + ' ' + axis.toUpperCase()" [formField]="fields.follow[group.name][axis]"
+                                                                  inputmode="decimal"
+                                                                  type="text"/></label>
+                        }
+                    </div>
+                </fieldset>
+            }
+            <label>Smoothing in seconds<input [formField]="fields.follow.smoothing" inputmode="decimal"
+                                              type="text"/></label>
         }
-        </fieldset>
-        @if (candidate().error; as failure) {
-            <p class="error" role="status">{{ failure }}</p>
+        @if (canRevealTarget()) {
+            <button (click)="revealTarget()" type="button">Show Target in Hierarchy</button>
         }
+    </fieldset>
+    @if (candidate().error; as failure) {
+        <p class="error" role="status">{{ failure }}</p>
     }
     @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
     @if (message(); as text) { <p role="status">{{ text }}</p> }
-    @if (!orbit()) {
-        <button (click)="apply()" [disabled]="!available() || !!candidate().error" dialog-actions type="button">Apply
-            Game Camera
+    @if (draft().mode === 'orbit') {
+        <button (click)="startPreview()" [disabled]="!available() || !!candidate().error || nativeGeneration() === null"
+                dialog-actions type="button">Preview Orbit
         </button>
     }
+    <button (click)="apply()" [disabled]="!available() || !!candidate().error" dialog-actions type="button">Apply Game
+        Camera
+    </button>
 </editor-dialog>

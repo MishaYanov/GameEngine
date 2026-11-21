@@ -143,5 +143,5 @@ impl RobotGame {
 }
 
 #[cfg(test)]
-#[path = "tests_game.rs"]
+#[path = "../tests/unit/tests_game.rs"]
 mod tests;

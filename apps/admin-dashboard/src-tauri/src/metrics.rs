@@ -164,5 +164,5 @@ pub fn read(directory: &Path, selected_id: Option<&str>) -> MetricsPage {
 }
 
 #[cfg(test)]
-#[path = "tests_metrics.rs"]
+#[path = "../tests/unit/tests_metrics.rs"]
 mod tests;

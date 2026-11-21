@@ -1,24 +1,31 @@
 use std::{
-	collections::{HashMap, HashSet, VecDeque},
+	collections::{HashMap, HashSet},
 	error::Error,
 	fmt::{Display, Formatter},
 	io,
 	path::{Path, PathBuf},
-	sync::{Arc, Weak},
+	sync::Arc,
 };
 
-use renderer::vulkan::{
-	Vertex, VulkanMaterial, VulkanMesh, VulkanMeshError, VulkanTexture, VulkanTextureError,
+use renderer::{
+	WindowRenderer,
+	vulkan::{
+		Vertex, VulkanMaterial, VulkanMesh, VulkanMeshError, VulkanTexture, VulkanTextureError,
+	},
 };
 
-use renderer::WindowRenderer;
-
-use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
 use super::{
-	Model,
-	gltf_loader::{self, GltfLoaderError, ImportedPrimitive, Resources, load_resources_in_root},
+	ImageAsset, ImageAssetError, MaterialData, MeshData, Model, gltf_loader::GltfLoaderError,
 	model::ModelPart,
 };
+
+mod gpu_budget;
+mod source_cache;
+mod upload;
+
+use gpu_budget::GpuBudget;
+use source_cache::SourceCache;
+use upload::mesh_bytes;
 
 pub struct AssetManager {
 	root: PathBuf,
@@ -28,139 +35,30 @@ pub struct AssetManager {
 	models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>>,
 	animated_models: HashMap<String, Arc<Model>>,
 	source_fingerprints: HashMap<PathBuf, String>,
-	scenes: HashMap<PathBuf, Arc<super::ImportedScene>>,
-	scene_order: VecDeque<PathBuf>,
-	scene_bytes: usize,
-	resource_cache: HashMap<PathBuf, (Resources, usize)>,
-	resource_order: VecDeque<PathBuf>,
-	resource_bytes: usize,
-	gpu_allocations: Vec<GpuAllocation>,
-	gpu_bytes: usize,
-	gpu_byte_limit: usize,
-	gpu_resource_limit: usize,
-}
-
-/// Uploaded resources remain private under the temporary source key until the
-/// caller publishes the matching CPU asset. Promotion performs no I/O or GPU
-/// allocation. Discard candidates on a rejected/stale publication.
-pub struct PreparedGpuAsset {
-	candidate: PathBuf,
-	destination: PathBuf,
-	candidate_relative: String,
-	destination_relative: String,
-	reuses_source: bool,
-	animation_candidate: Option<String>,
-}
-
-enum GpuReference {
-	Mesh(Weak<VulkanMesh>),
-	Texture(Weak<VulkanTexture>),
-}
-struct GpuAllocation {
-	resource: GpuReference,
-	bytes: usize,
-}
-impl GpuAllocation {
-	fn live(&self) -> bool {
-		match &self.resource {
-			GpuReference::Mesh(resource) => resource.strong_count() > 0,
-			GpuReference::Texture(resource) => resource.strong_count() > 0,
-		}
-	}
-}
-
-#[derive(Debug)]
-pub enum AssetManagerError {
-	Io(io::Error),
-	Image(ImageAssetError),
-	Texture(VulkanTextureError),
-	Mesh(VulkanMeshError),
-	Gltf(GltfLoaderError),
-	OutsideAssetRoot { path: PathBuf, root: PathBuf },
-	ResourceBudget(String),
-	Upload(String),
-}
-
-impl Display for AssetManagerError {
-	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::Io(error) => {
-				write!(formatter, "asset I/O error: {error}",)
-			}
-
-			Self::Image(error) => {
-				write!(formatter, "image asset error: {error}",)
-			}
-
-			Self::Texture(error) => {
-				write!(formatter, "Vulkan texture asset error: {error}",)
-			}
-
-			Self::Mesh(error) => {
-				write!(formatter, "Vulkan mesh asset error: {error}",)
-			}
-
-			Self::Gltf(error) => write!(formatter, "model import error: {error}"),
-			Self::OutsideAssetRoot { path, root } => {
-				write!(
-					formatter,
-					"asset path '{}' is outside asset root '{}'",
-					path.display(),
-					root.display(),
-				)
-			}
-			Self::ResourceBudget(message) => {
-				write!(formatter, "GPU asset budget exceeded: {message}")
-			}
-			Self::Upload(message) => write!(formatter, "GPU asset upload failed: {message}"),
-		}
-	}
-}
-
-impl Error for AssetManagerError {
-	fn source(&self) -> Option<&(dyn Error + 'static)> {
-		match self {
-			Self::Io(error) => Some(error),
-			Self::Image(error) => Some(error),
-			Self::Texture(error) => Some(error),
-			Self::Mesh(error) => Some(error),
-			Self::Gltf(error) => Some(error),
-			Self::OutsideAssetRoot { .. } | Self::ResourceBudget(_) | Self::Upload(_) => None,
-		}
-	}
-}
-
-impl From<GltfLoaderError> for AssetManagerError {
-	fn from(value: GltfLoaderError) -> Self {
-		Self::Gltf(value)
-	}
-}
-
-impl From<io::Error> for AssetManagerError {
-	fn from(value: io::Error) -> Self {
-		Self::Io(value)
-	}
-}
-
-impl From<ImageAssetError> for AssetManagerError {
-	fn from(value: ImageAssetError) -> Self {
-		Self::Image(value)
-	}
-}
-
-impl From<VulkanTextureError> for AssetManagerError {
-	fn from(value: VulkanTextureError) -> Self {
-		Self::Texture(value)
-	}
-}
-
-impl From<VulkanMeshError> for AssetManagerError {
-	fn from(value: VulkanMeshError) -> Self {
-		Self::Mesh(value)
-	}
+	source_cache: SourceCache,
+	gpu_budget: GpuBudget,
 }
 
 impl AssetManager {
+	pub const GPU_LOGICAL_BYTE_LIMIT: usize = GpuBudget::MAX_BYTES;
+	pub const GPU_RESOURCE_LIMIT: usize = GpuBudget::MAX_RESOURCES;
+
+	pub fn new(root: impl AsRef<Path>) -> Result<Self, AssetManagerError> {
+		let root = root.as_ref().canonicalize()?;
+
+		Ok(Self {
+			root,
+			textures: HashMap::new(),
+			meshes: HashMap::new(),
+			image_textures: HashMap::new(),
+			models: HashMap::new(),
+			animated_models: HashMap::new(),
+			source_fingerprints: HashMap::new(),
+			source_cache: SourceCache::default(),
+			gpu_budget: GpuBudget::default(),
+		})
+	}
+
 	pub fn root(&self) -> &Path {
 		&self.root
 	}
@@ -204,7 +102,7 @@ impl AssetManager {
 					+ p.indices.len() * 4
 			})
 			.sum();
-		self.check_gpu_budget(
+		self.gpu_budget.admit(
 			bytes + asset.images.iter().map(|i| i.rgba.len()).sum::<usize>() + 4,
 			asset.primitives.len() + asset.images.len() + 1,
 		)?;
@@ -267,11 +165,7 @@ impl AssetManager {
 			let logical_bytes = vertices.len()
 				* (size_of::<Vertex>() + size_of::<renderer::vulkan::mesh::SkinInfluence>())
 				+ primitive.indices.len() * 4;
-			self.gpu_allocations.push(GpuAllocation {
-				resource: GpuReference::Mesh(Arc::downgrade(&mesh)),
-				bytes: logical_bytes,
-			});
-			self.gpu_bytes += logical_bytes;
+			self.gpu_budget.track_mesh(&mesh, logical_bytes);
 			let texture = match primitive.base_color_image {
 				Some(index) => textures[index].clone(),
 				None => white
@@ -290,8 +184,6 @@ impl AssetManager {
 	/// Logical vertex/index/RGBA storage, excluding driver alignment, staging
 	/// buffers and renderer-owned targets. Cached and external retained Arcs
 	/// both count until their allocations are actually released.
-	pub const GPU_LOGICAL_BYTE_LIMIT: usize = 512 * 1024 * 1024;
-	pub const GPU_RESOURCE_LIMIT: usize = 8192;
 	/// Import the first mesh and share already-uploaded GPU resources. Caches
 	/// represent an asset snapshot until `clear`; no filesystem polling occurs.
 	pub fn load_model(
@@ -303,7 +195,7 @@ impl AssetManager {
 			.map(|model| (*model).clone())
 	}
 
-	/// Select a mesh explicitly, retaining one Arc<Model> per asset and mesh.
+	/// Select a mesh explicitly, retaining one `Arc<Model>` per asset and mesh.
 	/// Scene nodes that reference the same mesh share all GPU allocations.
 	pub fn load_model_mesh(
 		&mut self,
@@ -333,8 +225,9 @@ impl AssetManager {
 				"model cache entry limit reached; retire unused models first".into(),
 			));
 		}
-		self.cache_resources(&full_path, mesh_index)?;
-		let (resources, _) = &self.resource_cache[&full_path];
+		let resources = self
+			.source_cache
+			.prepare_resources(&self.root, &full_path, mesh_index)?;
 		let source_fingerprint = resources.source_fingerprint.clone();
 		let imported_parts = resources.import_mesh(mesh_index)?;
 		self.preflight_model_upload(&full_path, &imported_parts)?;
@@ -510,36 +403,16 @@ impl AssetManager {
 		let to = prepared.destination.to_string_lossy();
 		remap_keys(&mut self.meshes, &from, &to);
 		remap_keys(&mut self.image_textures, &from, &to);
-		if let Some(value) = self.resource_cache.remove(&prepared.candidate) {
-			self.resource_cache
-				.insert(prepared.destination.clone(), value);
-		}
+		self.source_cache
+			.remap(&prepared.candidate, &prepared.destination);
 		if let Some(value) = self.source_fingerprints.remove(&prepared.candidate) {
 			self.source_fingerprints
 				.insert(prepared.destination.clone(), value);
 		}
-		for path in &mut self.resource_order {
-			if *path == prepared.candidate {
-				*path = prepared.destination.clone();
-			}
-		}
-		if let Some(value) = self.scenes.remove(&prepared.candidate) {
-			self.scenes.insert(prepared.destination.clone(), value);
-		}
-		for path in &mut self.scene_order {
-			if *path == prepared.candidate {
-				*path = prepared.destination.clone();
-			}
-		}
-		self.scene_bytes = self
-			.scenes
-			.iter()
-			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
-			.sum();
 		if let Some(value) = self.textures.remove(&prepared.candidate) {
 			self.textures.insert(prepared.destination, value);
 		}
-		self.reap_gpu_allocations();
+		self.gpu_budget.sweep();
 	}
 
 	pub fn discard_gpu_asset(&mut self, prepared: PreparedGpuAsset) {
@@ -552,7 +425,7 @@ impl AssetManager {
 		if !prepared.reuses_source {
 			self.forget_source(&prepared.candidate, &prepared.candidate_relative);
 		}
-		self.reap_gpu_allocations();
+		self.gpu_budget.sweep();
 	}
 
 	fn forget_source(&mut self, path: &Path, relative: &str) {
@@ -563,17 +436,7 @@ impl AssetManager {
 		self.image_textures
 			.retain(|key, _| !key.starts_with(&prefix));
 		self.textures.remove(path);
-		self.scenes.remove(path);
-		self.scene_order.retain(|key| key != path);
-		self.scene_bytes = self
-			.scenes
-			.iter()
-			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
-			.sum();
-		if let Some((_, bytes)) = self.resource_cache.remove(path) {
-			self.resource_bytes -= bytes;
-		}
-		self.resource_order.retain(|key| key != path);
+		self.source_cache.remove(path);
 	}
 
 	/// CPU-only hierarchy metadata for the selected default glTF scene. This
@@ -583,79 +446,7 @@ impl AssetManager {
 		path: impl AsRef<Path>,
 	) -> Result<Arc<super::ImportedScene>, AssetManagerError> {
 		let full_path = self.resolve(path)?;
-		if let Some(scene) = self.scenes.get(&full_path) {
-			return Ok(Arc::clone(scene));
-		}
-		let scene = Arc::new(gltf_loader::load_scene_in_root(&full_path, &self.root)?);
-		const SCENE_CACHE_LIMIT: usize = 32 * 1024 * 1024;
-		let bytes = scene.retained_bytes() + full_path.as_os_str().len() * 4 + 128;
-		if bytes > SCENE_CACHE_LIMIT {
-			return Ok(scene);
-		}
-		while self.scenes.len() >= 8 || self.scene_bytes + bytes > SCENE_CACHE_LIMIT {
-			if let Some(oldest) = self.scene_order.pop_front()
-				&& let Some(scene) = self.scenes.remove(&oldest)
-			{
-				self.scene_bytes -= scene.retained_bytes() + oldest.as_os_str().len() * 4 + 128;
-			}
-		}
-		self.scenes.insert(full_path.clone(), Arc::clone(&scene));
-		self.scene_order.push_back(full_path);
-		self.scene_bytes += bytes;
-		Ok(scene)
-	}
-
-	fn cache_resources(&mut self, path: &Path, mesh_index: usize) -> Result<(), AssetManagerError> {
-		if let Some((resources, bytes)) = self.resource_cache.get_mut(path) {
-			resources.prepare_mesh_images(mesh_index)?;
-			let next_bytes = resources.retained_bytes();
-			self.resource_bytes = self.resource_bytes - *bytes + next_bytes;
-			*bytes = next_bytes;
-			// Preparing another mesh can grow an existing entry. Keep that
-			// entry while applying the same aggregate limit to other files.
-			self.resource_order.retain(|cached| cached != path);
-			self.resource_order.push_back(path.to_path_buf());
-		} else {
-			let mut resources = load_resources_in_root(path, &self.root)?;
-			resources.prepare_mesh_images(mesh_index)?;
-			let bytes = resources.retained_bytes();
-			self.resource_order.push_back(path.to_path_buf());
-			self.resource_bytes += bytes;
-			self.resource_cache
-				.insert(path.to_path_buf(), (resources, bytes));
-		}
-		while self.resource_cache.len() > 4 || self.resource_bytes > gltf_loader::IMPORT_LIMIT {
-			if let Some(oldest) = self.resource_order.pop_front()
-				&& let Some((_, bytes)) = self.resource_cache.remove(&oldest)
-			{
-				self.resource_bytes -= bytes;
-			}
-		}
-		Ok(())
-	}
-
-	pub fn new(root: impl AsRef<Path>) -> Result<Self, AssetManagerError> {
-		let root = root.as_ref().canonicalize()?;
-
-		Ok(Self {
-			root,
-			textures: HashMap::new(),
-			meshes: HashMap::new(),
-			image_textures: HashMap::new(),
-			models: HashMap::new(),
-			animated_models: HashMap::new(),
-			source_fingerprints: HashMap::new(),
-			scenes: HashMap::new(),
-			scene_order: VecDeque::new(),
-			scene_bytes: 0,
-			resource_cache: HashMap::new(),
-			resource_order: VecDeque::new(),
-			resource_bytes: 0,
-			gpu_allocations: Vec::new(),
-			gpu_bytes: 0,
-			gpu_byte_limit: Self::GPU_LOGICAL_BYTE_LIMIT,
-			gpu_resource_limit: Self::GPU_RESOURCE_LIMIT,
-		})
+		self.source_cache.load_scene(&self.root, full_path)
 	}
 
 	/*
@@ -678,17 +469,13 @@ impl AssetManager {
 		let image = ImageAsset::load(&full_path)?;
 
 		let bytes = image.pixels().len();
-		self.check_gpu_budget(bytes, 1)?;
+		self.gpu_budget.admit(bytes, 1)?;
 
 		let texture = renderer.upload_rgba8(image.width(), image.height(), image.pixels())?;
 		texture.set_debug_label(&full_path.to_string_lossy());
 
 		let texture = Arc::new(texture);
-		self.gpu_allocations.push(GpuAllocation {
-			resource: GpuReference::Texture(Arc::downgrade(&texture)),
-			bytes,
-		});
-		self.gpu_bytes += bytes;
+		self.gpu_budget.track_texture(&texture, bytes);
 
 		self.textures.insert(full_path, Arc::clone(&texture));
 
@@ -724,17 +511,13 @@ impl AssetManager {
 		}
 
 		let bytes = mesh_bytes(data)?;
-		self.check_gpu_budget(bytes, 1)?;
+		self.gpu_budget.admit(bytes, 1)?;
 
 		let mesh = renderer.upload_mesh(data.vertices(), data.indices())?;
 		mesh.set_debug_label(&id);
 
 		let mesh = Arc::new(mesh);
-		self.gpu_allocations.push(GpuAllocation {
-			resource: GpuReference::Mesh(Arc::downgrade(&mesh)),
-			bytes,
-		});
-		self.gpu_bytes += bytes;
+		self.gpu_budget.track_mesh(&mesh, bytes);
 
 		self.meshes.insert(id, Arc::clone(&mesh));
 
@@ -758,18 +541,11 @@ impl AssetManager {
 	}
 
 	pub fn gpu_logical_bytes(&self) -> usize {
-		self.gpu_allocations
-			.iter()
-			.filter(|allocation| allocation.live())
-			.map(|allocation| allocation.bytes)
-			.sum()
+		self.gpu_budget.live_bytes()
 	}
 
 	pub fn gpu_resource_count(&self) -> usize {
-		self.gpu_allocations
-			.iter()
-			.filter(|allocation| allocation.live())
-			.count()
+		self.gpu_budget.live_resources()
 	}
 
 	/// Hosts may tighten the default upload budgets. Existing external scene Arcs
@@ -779,14 +555,7 @@ impl AssetManager {
 		bytes: usize,
 		resources: usize,
 	) -> Result<(), AssetManagerError> {
-		if bytes > Self::GPU_LOGICAL_BYTE_LIMIT || resources > Self::GPU_RESOURCE_LIMIT {
-			return Err(AssetManagerError::ResourceBudget(
-				"Configured GPU budget exceeds the engine limits".into(),
-			));
-		}
-		self.gpu_byte_limit = bytes;
-		self.gpu_resource_limit = resources;
-		Ok(())
+		self.gpu_budget.set_limits(bytes, resources)
 	}
 
 	pub fn contains_texture(&self, path: impl AsRef<Path>) -> bool {
@@ -805,17 +574,12 @@ impl AssetManager {
 		self.models.clear();
 		self.animated_models.clear();
 		self.source_fingerprints.clear();
-		self.scenes.clear();
-		self.scene_order.clear();
-		self.scene_bytes = 0;
-		self.resource_cache.clear();
-		self.resource_order.clear();
-		self.resource_bytes = 0;
+		self.source_cache.clear();
 		self.meshes.clear();
 
 		self.textures.clear();
 		self.image_textures.clear();
-		self.reap_gpu_allocations();
+		self.gpu_budget.sweep();
 	}
 
 	/// Retire cache-only GPU resources after the caller has waited for every
@@ -848,21 +612,8 @@ impl AssetManager {
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
 		self.image_textures
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
-		self.reap_gpu_allocations();
-		self.scenes
-			.retain(|path, scene| Arc::strong_count(scene) > 1 || retained_paths.contains(path));
-		self.scene_order
-			.retain(|path| self.scenes.contains_key(path));
-		self.scene_bytes = self
-			.scenes
-			.iter()
-			.map(|(path, scene)| scene.retained_bytes() + path.as_os_str().len() * 4 + 128)
-			.sum();
-		self.resource_cache
-			.retain(|path, _| retained_paths.contains(path) || self.scenes.contains_key(path));
-		self.resource_order
-			.retain(|path| self.resource_cache.contains_key(path));
-		self.resource_bytes = self.resource_cache.values().map(|(_, bytes)| bytes).sum();
+		self.gpu_budget.sweep();
+		self.source_cache.prune_unused(&retained_paths);
 	}
 
 	pub fn load_image_texture(
@@ -878,16 +629,12 @@ impl AssetManager {
 		}
 
 		let bytes = image.pixels().len();
-		self.check_gpu_budget(bytes, 1)?;
+		self.gpu_budget.admit(bytes, 1)?;
 
 		let texture =
 			Arc::new(renderer.upload_rgba8(image.width(), image.height(), image.pixels())?);
 		texture.set_debug_label(&id);
-		self.gpu_allocations.push(GpuAllocation {
-			resource: GpuReference::Texture(Arc::downgrade(&texture)),
-			bytes,
-		});
-		self.gpu_bytes += bytes;
+		self.gpu_budget.track_texture(&texture, bytes);
 
 		self.image_textures.insert(id, Arc::clone(&texture));
 		Ok(texture)
@@ -931,208 +678,109 @@ impl AssetManager {
 
 		Ok(path)
 	}
+}
 
-	fn reap_gpu_allocations(&mut self) {
-		self.gpu_allocations.retain(GpuAllocation::live);
-		self.gpu_bytes = self
-			.gpu_allocations
-			.iter()
-			.map(|allocation| allocation.bytes)
-			.sum();
-	}
+/// Uploaded resources remain private under the temporary source key until the
+/// caller publishes the matching CPU asset. Promotion performs no I/O or GPU
+/// allocation. Discard candidates on a rejected/stale publication.
+pub struct PreparedGpuAsset {
+	candidate: PathBuf,
+	destination: PathBuf,
+	candidate_relative: String,
+	destination_relative: String,
+	reuses_source: bool,
+	animation_candidate: Option<String>,
+}
 
-	fn check_gpu_budget(&mut self, bytes: usize, entries: usize) -> Result<(), AssetManagerError> {
-		// Cached totals are conservative when callers have dropped their last Arc.
-		// Most uploads fit without traversing every previously loaded resource.
-		if self.gpu_budget_fits(bytes, entries) {
-			return Ok(());
-		}
-		self.reap_gpu_allocations();
-		if !self.gpu_budget_fits(bytes, entries) {
-			return Err(AssetManagerError::ResourceBudget(format!(
-				"request needs {bytes} logical bytes and {entries} resources; {} bytes/{} resources remain live (limits: {} bytes and {}). Release unused scene resources and prune the cache before retrying",
-				self.gpu_bytes,
-				self.gpu_allocations.len(),
-				self.gpu_byte_limit,
-				self.gpu_resource_limit
-			)));
-		}
-		Ok(())
-	}
+#[derive(Debug)]
+pub enum AssetManagerError {
+	Io(io::Error),
+	Image(ImageAssetError),
+	Texture(VulkanTextureError),
+	Mesh(VulkanMeshError),
+	Gltf(GltfLoaderError),
+	OutsideAssetRoot { path: PathBuf, root: PathBuf },
+	ResourceBudget(String),
+	Upload(String),
+}
 
-	fn gpu_budget_fits(&self, bytes: usize, entries: usize) -> bool {
-		self.gpu_bytes
-			.checked_add(bytes)
-			.is_some_and(|total| total <= self.gpu_byte_limit)
-			&& self
-				.gpu_allocations
-				.len()
-				.checked_add(entries)
-				.is_some_and(|count| count <= self.gpu_resource_limit)
-	}
+impl Display for AssetManagerError {
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Io(error) => {
+				write!(formatter, "asset I/O error: {error}",)
+			}
 
-	fn preflight_model_upload(
-		&mut self,
-		path: &Path,
-		parts: &[ImportedPrimitive],
-	) -> Result<(), AssetManagerError> {
-		let mut bytes = 0usize;
-		let mut entries = 0usize;
-		let mut images = HashSet::new();
-		for part in parts {
-			let mesh_key = format!(
-				"{}#mesh:{}#primitive:{}",
-				path.display(),
-				part.mesh_index,
-				part.primitive_index
-			);
-			if !self.meshes.contains_key(&mesh_key) {
-				bytes = bytes.checked_add(mesh_bytes(&part.mesh)?).ok_or_else(|| {
-					AssetManagerError::ResourceBudget("mesh byte count overflow".into())
-				})?;
-				entries += 1;
+			Self::Image(error) => {
+				write!(formatter, "image asset error: {error}",)
 			}
-			let image_key = part.base_color_image_index.map_or_else(
-				|| "builtin:white".to_owned(),
-				|index| format!("{}#image:{index}", path.display()),
-			);
-			if !self.image_textures.contains_key(&image_key) && images.insert(image_key) {
-				bytes = bytes
-					.checked_add(
-						part.material
-							.base_color_image
-							.as_ref()
-							.map_or(4, |image| image.pixels().len()),
-					)
-					.ok_or_else(|| {
-						AssetManagerError::ResourceBudget("texture byte count overflow".into())
-					})?;
-				entries += 1;
-			}
-		}
-		self.check_gpu_budget(bytes, entries)
-	}
 
-	fn upload_model_resources(
-		&mut self,
-		renderer: &WindowRenderer,
-		path: &Path,
-		parts: &[ImportedPrimitive],
-	) -> Result<(), AssetManagerError> {
-		let white = ImageAsset::from_rgba8(1, 1, vec![255; 4])?;
-		let mut pending = Vec::new();
-		let mut images = HashSet::new();
-		for part in parts {
-			let mesh_id = format!(
-				"{}#mesh:{}#primitive:{}",
-				path.display(),
-				part.mesh_index,
-				part.primitive_index
-			);
-			if !self.meshes.contains_key(&mesh_id) {
-				pending.push(PendingUpload::Mesh {
-					id: mesh_id,
-					data: &part.mesh,
-					bytes: mesh_bytes(&part.mesh)?,
-				});
+			Self::Texture(error) => {
+				write!(formatter, "Vulkan texture asset error: {error}",)
 			}
-			let image_id = part.base_color_image_index.map_or_else(
-				|| "builtin:white".to_owned(),
-				|index| format!("{}#image:{index}", path.display()),
-			);
-			if !self.image_textures.contains_key(&image_id) && images.insert(image_id.clone()) {
-				pending.push(PendingUpload::Texture {
-					id: image_id,
-					image: part.material.base_color_image.as_ref().unwrap_or(&white),
-				});
+
+			Self::Mesh(error) => {
+				write!(formatter, "Vulkan mesh asset error: {error}",)
 			}
+
+			Self::Gltf(error) => write!(formatter, "model import error: {error}"),
+			Self::OutsideAssetRoot { path, root } => {
+				write!(
+					formatter,
+					"asset path '{}' is outside asset root '{}'",
+					path.display(),
+					root.display(),
+				)
+			}
+			Self::ResourceBudget(message) => {
+				write!(formatter, "GPU asset budget exceeded: {message}")
+			}
+			Self::Upload(message) => write!(formatter, "GPU asset upload failed: {message}"),
 		}
-		let mut remaining = pending.as_slice();
-		while !remaining.is_empty() {
-			let count = next_upload_batch_len(remaining.iter().map(PendingUpload::bytes));
-			let (batch, tail) = remaining.split_at(count);
-			if batch[0].bytes() > renderer::MAX_UPLOAD_BATCH_BYTES {
-				// A single asset retains the established larger upload allowance.
-				match &batch[0] {
-					PendingUpload::Mesh { id, data, .. } => {
-						self.load_mesh(renderer, id.clone(), data)?;
-					}
-					PendingUpload::Texture { id, image } => {
-						self.load_image_texture(renderer, id.clone(), image)?;
-					}
-				}
-			} else {
-				let meshes: Vec<_> = batch
-					.iter()
-					.filter_map(|upload| match upload {
-						PendingUpload::Mesh { data, .. } => Some(renderer::MeshUpload {
-							vertices: data.vertices(),
-							indices: data.indices(),
-						}),
-						_ => None,
-					})
-					.collect();
-				let textures: Vec<_> = batch
-					.iter()
-					.filter_map(|upload| match upload {
-						PendingUpload::Texture { image, .. } => Some(renderer::Rgba8Upload {
-							width: image.width(),
-							height: image.height(),
-							pixels: image.pixels(),
-						}),
-						_ => None,
-					})
-					.collect();
-				let uploaded = renderer
-					.upload_batch(&meshes, &textures)
-					.map_err(AssetManagerError::Upload)?;
-				let mut meshes = uploaded.meshes.into_iter();
-				let mut textures = uploaded.textures.into_iter();
-				// Upload completion owns all staging/fence handling; only completed
-				// resources become visible in caches. Earlier chunks stay reusable if
-				// a later chunk fails, matching individual-upload cache semantics.
-				for upload in batch {
-					let bytes = upload.bytes();
-					match upload {
-						PendingUpload::Mesh { id, .. } => {
-							let mesh = Arc::new(meshes.next().expect("one mesh per upload"));
-							mesh.set_debug_label(id);
-							self.gpu_allocations.push(GpuAllocation {
-								resource: GpuReference::Mesh(Arc::downgrade(&mesh)),
-								bytes,
-							});
-							self.meshes.insert(id.clone(), mesh);
-						}
-						PendingUpload::Texture { id, .. } => {
-							let texture =
-								Arc::new(textures.next().expect("one texture per upload"));
-							texture.set_debug_label(id);
-							self.gpu_allocations.push(GpuAllocation {
-								resource: GpuReference::Texture(Arc::downgrade(&texture)),
-								bytes,
-							});
-							self.image_textures.insert(id.clone(), texture);
-						}
-					}
-					self.gpu_bytes += bytes;
-				}
-			}
-			remaining = tail;
-		}
-		Ok(())
 	}
 }
 
-enum PendingUpload<'a> {
-	Mesh {
-		id: String,
-		data: &'a MeshData,
-		bytes: usize,
-	},
-	Texture {
-		id: String,
-		image: &'a ImageAsset,
-	},
+impl Error for AssetManagerError {
+	fn source(&self) -> Option<&(dyn Error + 'static)> {
+		match self {
+			Self::Io(error) => Some(error),
+			Self::Image(error) => Some(error),
+			Self::Texture(error) => Some(error),
+			Self::Mesh(error) => Some(error),
+			Self::Gltf(error) => Some(error),
+			Self::OutsideAssetRoot { .. } | Self::ResourceBudget(_) | Self::Upload(_) => None,
+		}
+	}
+}
+
+impl From<GltfLoaderError> for AssetManagerError {
+	fn from(value: GltfLoaderError) -> Self {
+		Self::Gltf(value)
+	}
+}
+
+impl From<io::Error> for AssetManagerError {
+	fn from(value: io::Error) -> Self {
+		Self::Io(value)
+	}
+}
+
+impl From<ImageAssetError> for AssetManagerError {
+	fn from(value: ImageAssetError) -> Self {
+		Self::Image(value)
+	}
+}
+
+impl From<VulkanTextureError> for AssetManagerError {
+	fn from(value: VulkanTextureError) -> Self {
+		Self::Texture(value)
+	}
+}
+
+impl From<VulkanMeshError> for AssetManagerError {
+	fn from(value: VulkanMeshError) -> Self {
+		Self::Mesh(value)
+	}
 }
 
 fn remap_keys<T>(cache: &mut HashMap<String, T>, from: &str, to: &str) {
@@ -1146,93 +794,5 @@ fn remap_keys<T>(cache: &mut HashMap<String, T>, from: &str, to: &str) {
 		if let Some(value) = cache.remove(&key) {
 			cache.insert(format!("{to}{}", &key[from.len()..]), value);
 		}
-	}
-}
-
-impl PendingUpload<'_> {
-	fn bytes(&self) -> usize {
-		match self {
-			Self::Mesh { bytes, .. } => *bytes,
-			Self::Texture { image, .. } => image.pixels().len(),
-		}
-	}
-}
-
-fn next_upload_batch_len(sizes: impl Iterator<Item = usize>) -> usize {
-	let mut bytes = 0usize;
-	let mut count = 0;
-	for size in sizes.take(renderer::MAX_UPLOAD_BATCH_RESOURCES) {
-		if size > renderer::MAX_UPLOAD_BATCH_BYTES {
-			return count.max(1);
-		}
-		if bytes > renderer::MAX_UPLOAD_BATCH_BYTES - size {
-			break;
-		}
-		bytes += size;
-		count += 1;
-	}
-	count
-}
-
-fn mesh_bytes(data: &MeshData) -> Result<usize, AssetManagerError> {
-	data.vertices()
-		.len()
-		.checked_mul(std::mem::size_of::<Vertex>())
-		.and_then(|vertices| {
-			data.indices()
-				.len()
-				.checked_mul(std::mem::size_of::<u32>())
-				.and_then(|indices| vertices.checked_add(indices))
-		})
-		.ok_or_else(|| AssetManagerError::ResourceBudget("mesh byte count overflow".into()))
-}
-
-#[cfg(test)]
-#[path = "tests_resource_cache.rs"]
-mod resource_cache_tests;
-
-#[cfg(test)]
-mod accounting_tests {
-	use super::*;
-	#[test]
-	fn upload_chunks_bound_staging_and_resource_counts_and_isolate_large_assets() {
-		let limit = renderer::MAX_UPLOAD_BATCH_BYTES;
-		assert_eq!(
-			next_upload_batch_len([limit / 2, limit / 2, 4].into_iter()),
-			2
-		);
-		assert_eq!(next_upload_batch_len([4, limit + 1].into_iter()), 1);
-		assert_eq!(next_upload_batch_len([limit + 1, 4].into_iter()), 1);
-		assert_eq!(
-			next_upload_batch_len(std::iter::repeat(4)),
-			renderer::MAX_UPLOAD_BATCH_RESOURCES
-		);
-		assert_eq!(next_upload_batch_len([].into_iter()), 0);
-	}
-	#[test]
-	fn conservative_budget_skips_sweeps_until_pressure_and_rejects_oversized_requests() {
-		let mut assets = AssetManager::new(env!("CARGO_MANIFEST_DIR")).unwrap();
-		assets.gpu_allocations.push(GpuAllocation {
-			resource: GpuReference::Mesh(Weak::new()),
-			bytes: 4,
-		});
-		assets.gpu_bytes = 4;
-		assets.check_gpu_budget(4, 1).unwrap();
-		assert_eq!(
-			assets.gpu_allocations.len(),
-			1,
-			"ordinary upload must not sweep allocations"
-		);
-		assets
-			.check_gpu_budget(AssetManager::GPU_LOGICAL_BYTE_LIMIT, 1)
-			.unwrap();
-		assert!(assets.gpu_allocations.is_empty());
-		assert_eq!(assets.gpu_bytes, 0);
-		assert!(assets.check_gpu_budget(usize::MAX, 1).is_err());
-		assert!(
-			assets
-				.check_gpu_budget(0, AssetManager::GPU_RESOURCE_LIMIT + 1)
-				.is_err()
-		);
 	}
 }

@@ -1,14 +1,18 @@
 use crate::{now_ms, save_json};
-use engine_logger::{Level, LogEntry};
+use engine_logger::LogEntry;
 use serde::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs::File,
-	io::{self, BufRead, Read},
+	io::{self, Read},
 	path::{Path, PathBuf},
 	process::{Child, Command, Stdio},
 	sync::mpsc::{self, Receiver, SyncSender},
 };
+mod output;
+
+use output::Output;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ProcessState {
@@ -43,13 +47,6 @@ struct Active {
 	child: Child,
 	run_id: String,
 	stopping: bool,
-}
-struct Output {
-	pending: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-	run_id: String,
-	application: String,
-	line: String,
-	error: bool,
 }
 pub struct Processes {
 	active: BTreeMap<String, Active>,
@@ -178,58 +175,7 @@ impl Processes {
 		self.drains
 			.retain(|id, _| self.history.iter().any(|r| &r.id == id));
 		self.drains.insert(run_id.clone(), pending.clone());
-		for (stream, error) in [
-			(
-				child
-					.stdout
-					.take()
-					.map(|s| Box::new(s) as Box<dyn Read + Send>),
-				false,
-			),
-			(
-				child
-					.stderr
-					.take()
-					.map(|s| Box::new(s) as Box<dyn Read + Send>),
-				true,
-			),
-		] {
-			if let Some(stream) = stream {
-				let pending = pending.clone();
-				pending.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-				let sender = self.sender.clone();
-				let run_id = run_id.clone();
-				let application = id.to_owned();
-				let drops = self.output_drops.clone();
-				std::thread::spawn(move || {
-					let mut reader = io::BufReader::new(stream);
-					loop {
-						let mut line = vec![];
-						match reader.by_ref().take(8192).read_until(b'\n', &mut line) {
-							Ok(0) | Err(_) => break,
-							Ok(_) => {
-								let line = String::from_utf8_lossy(&line).trim_end().to_owned();
-								pending.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-								if sender
-									.try_send(Output {
-										pending: pending.clone(),
-										run_id: run_id.clone(),
-										application: application.clone(),
-										line,
-										error,
-									})
-									.is_err()
-								{
-									pending.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-									drops.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-								}
-							}
-						}
-					}
-					pending.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-				});
-			}
-		}
+		self.start_output_readers(&mut child, id, &run_id, &pending);
 		let run = ProcessRun {
 			id: run_id.clone(),
 			application: id.into(),
@@ -321,55 +267,6 @@ impl Processes {
 			run.session_id = Some(entry.session_id.clone());
 			self.persist();
 		}
-	}
-	pub fn output(&mut self) -> Vec<LogEntry> {
-		let mut records = vec![];
-		while let Ok(output) = self.receiver.try_recv() {
-			output
-				.pending
-				.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-			self.sequence += 1;
-			records.push(LogEntry {
-				schema_version: engine_logger::SCHEMA_VERSION,
-				session_id: self.session.clone(),
-				sequence: self.sequence,
-				timestamp_ms: now_ms(),
-				application: output.application.clone(),
-				component: "process-output".into(),
-				process_id: self
-					.history
-					.iter()
-					.find(|r| r.id == output.run_id)
-					.map_or(0, |r| r.pid),
-				thread: "admin-output-reader".into(),
-				level: Level::Info,
-				message: output.line,
-				file: None,
-				line: None,
-				module: None,
-				error: None,
-				stack_trace: None,
-				correlation: engine_logger::Correlation {
-					operation_id: Some(if output.application.starts_with("job-") {
-						output.application.clone()
-					} else {
-						output.run_id
-					}),
-					..Default::default()
-				},
-				attributes: [(
-					"stream".into(),
-					if output.error { "stderr" } else { "stdout" }.into(),
-				)]
-				.into(),
-			});
-		}
-		records
-	}
-	pub fn output_complete(&self, id: &str) -> bool {
-		self.drains
-			.get(id)
-			.is_none_or(|pending| pending.load(std::sync::atomic::Ordering::SeqCst) == 0)
 	}
 	pub fn history(&self) -> Vec<ProcessRun> {
 		self.history.clone()

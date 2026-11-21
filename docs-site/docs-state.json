@@ -1,9 +1,65 @@
 {
-  "last_checked_commit": "17d1b0e0795702fba51a46132d45bfa5bef675c4",
+  "last_checked_commit": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
   "last_checked_date": "2026-11-21",
-  "last_documentation_update_commit": "fc95059a41fde5b40e5e09aac30b6379bd874131",
+  "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "The latest M7–9 entry records the inspected source commit and worktree-byte fingerprints. last_documentation_update_commit records the prior documentation commit at inspection; the current evidence update is the commit carrying this checkpoint. Older entries retain historical evidence.",
+  "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "milestone_10_5_6_camera": {
+    "date": "2026-11-21",
+    "inspected_head": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
+    "scope": "Camera authoring and preview, Game content bounds, deterministic replay, source/stage/export parity and local performance.",
+    "source_sha256": {
+      "apps/editor/src/app/modules/editor/workspace/game-settings/camera-settings.ts": "b993b4b5da877a06a119366adc76aeaaf4b5a5fbe420cf704337f7d1246007aa",
+      "apps/editor/src/app/core/editor/camera-preview.ts": "8b2598c34f27bc3c7cf31f4031d2a5d35b299cdbc014431d6192b91b06c682fe",
+      "apps/editor-host/src-tauri/src/camera_preview.rs": "104a207fa21c65266d28e9536a971bb659e0daff3b9cf4bcd2a5ee72854bd3af",
+      "apps/editor-host/src-tauri/src/viewport.rs": "c3275ae5f5671287edf6006dd52d8174bf39e887efe9b59d0a16dd17478235b9",
+      "crates/runtime/src/game_content_rect.rs": "ea9cb6125d99cfe99cbbcf18e032f3fefdb6ffe28aa670c348aa453bdb7934a0",
+      "crates/engine-core/src/camera_replay.rs": "6733965cec30230b96c2cead469d9741c40d865944b48b051297bbd1391f02c1",
+      "apps/headless/tests/camera_replay.rs": "a1ec388576e5cb70e6a8c7906f49246bfca52f0368b19d8fde0b2e0b77e25c67",
+      "apps/game/src/tests_camera_native.rs": "e70a9b1ca10de71eb5691f653c11be4acddb306ba81cf05ca35e8b024b300cfb"
+    },
+    "review": "docs/milestone-10-camera-review.md",
+    "evidence": "docs/verification/milestone-10-camera-results.json",
+    "verification": [
+      "The aggregate Rust, Rust documentation, admin and editor Angular, and Python suites passed. The client production build passed with the existing project-setup stylesheet warning.",
+      "Source, staged and exported manifests matched at seven replay checkpoints, including the partially extended arm and the settled arm. The installed executable drew a startup frame. The release native GameApp exercised five checkpoints at two resolutions. The independent framebuffer comparison found 196608 exactly matching content pixels and 65536 black bar pixels.",
+      "The private Windows editor exercised preview, undo, redo, saving, reopening and Play. The ledger identifies the input injection and foreground boundaries.",
+      "The docs site built and link-checked 65 pages and passed all 8 tests."
+    ]
+  },
+  "milestone_10_4_camera_obstruction": {
+    "date": "2026-11-21",
+    "previous_inspection_commit": "17d1b0e0795702fba51a46132d45bfa5bef675c4",
+    "inspected_head": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
+    "inspection": [
+      "Compared the previous baseline with the M7–9 documentation commit and M10.1–10.3 implementation commit. Inspected staged, unstaged and untracked files for 10.4. The working tree contains the new obstruction, preview, simulation and regression code.",
+      "Maintained sources are docs/timing-input-camera.md, docs/scene-persistence.md, docs/testing.md and docs/main.md. The local 10.4 teaching guide and its indexes were updated separately."
+    ],
+    "source_sha256": {
+      "crates/engine-core/src/collision.rs": "399c86e580366ceeb99cbb5d365540e00189c9f74cd548bbdcf18555d2fec19a",
+      "crates/engine-core/src/game_camera.rs": "40ea2701adbfa144f9dec8b72bfe87394b8a88ffbb3f98ce6abfb275eb8c7fdb",
+      "crates/engine-core/src/game_camera/obstruction.rs": "2b0783ea576ed6b1be5ea5e9d574c690dd95f1a11643a2f29492b806c63f496f",
+      "crates/engine-core/src/camera_preview.rs": "dd8148b4da67e7e8577b4ad10471df502e42461cce8cc99aeff08f1a36996e2b",
+      "crates/engine-core/src/simulation_session.rs": "9cbc65270a7bcc373a6bae3e4891c9329de906531d03b7f1e52853e1c243050c",
+      "crates/engine-core/src/collision/camera_probe_math_tests.rs": "e7d1bbd6c2ee0b5a7ae470b68c07bdb96cb8932542b9b5305d35f6078cc52bb2",
+      "crates/engine-core/tests/orbit_camera_obstruction_api.rs": "305ebbcc1ad57c225c6a5bf97ed5bca351289f0b15e22fd78c5677f552e1c2bf",
+      "crates/engine-core/tests/camera_preview_api.rs": "74ba7a0f1eebcdb051f5bea8b93fede45ad0acee85ba085a22d3f1b09d1acc4c",
+      "apps/headless/tests/cli.rs": "8071571066f7d0a024f8b89f3fef093df1a9436933e20c3e8b724de082a8cc94"
+    },
+    "verification": [
+      "cargo test --workspace --locked --offline --quiet: 1013 passed, 0 failed, 12 ignored across 97 test results.",
+      "The geometry suite reproduced an undetected penetrating origin at X = 2^58 before the fix. All 11 geometry regressions passed after expanding bounds relative to the pivot.",
+      "The 10 public obstruction cases cover 3:1 near-plane corner clearance, timed removal, same-step movement, restart, transitions, and whole-tick rollback when sensor and camera work exhaust their shared allowance.",
+      "A headless CLI replay verified a center-ray miss, a shortened first pose before any tick, the first recovery step after a 90-degree turn and the settled authored distance.",
+      "npm.cmd test --prefix docs-site rebuilt and link-checked 64 pages; all 8 site tests passed. Checked the 44 local file references in the three edited teaching guides."
+    ],
+    "verification_limits": [
+      "Geometry and projection checks ran on the CPU, including the headless executable and frozen preview. Interactive native preview, wide-window framing and exported-player parity are reserved for 10.5 and 10.6."
+    ],
+    "pending_documentation_changes": [
+      "Revisit native preview and cross-host presentation after their acceptance checks. Unrelated editor, bridge and runtime refactor work was outside this camera documentation update."
+    ]
+  },
   "courtyard_run_completion_update": {
     "date": "2026-11-15",
     "previous_inspection_commit": "ba2f766211c053b94dcfbe92b8724ad8ed8f65e3",

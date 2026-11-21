@@ -12,3 +12,7 @@ renderer = { version = "0.1.0", path = "../../crates/renderer" }
 winit = "0.30.13"
 tracing = "0.1.44"
 glam = "0.33.6"
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["pnm"] }
+serde_json = "1"

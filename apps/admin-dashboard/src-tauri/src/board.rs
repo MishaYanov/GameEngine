@@ -162,5 +162,5 @@ impl Board {
 	}
 }
 #[cfg(test)]
-#[path = "tests_board.rs"]
+#[path = "../tests/unit/tests_board.rs"]
 mod tests;

@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          1
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 60
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "set_character_input",
+        "key": "player",
+        "movement_xz": [
+          0,
+          0
+        ],
+        "jump_held": false
+      }
+    },
+    {
+      "type": "tick",
+      "count": 180
+    }
+  ]
+}

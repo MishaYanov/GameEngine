@@ -10,24 +10,16 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::vulkan::*;
 
+mod targets;
+
+use targets::finish_draw;
+
 trait WindowOwner: HasDisplayHandle + HasWindowHandle {}
 impl<T: HasDisplayHandle + HasWindowHandle> WindowOwner for T {}
 
-/// Owns a presentation renderer. Uploaded resources must be released before this owner.
-/// Field order releases GPU dependants before the device, surface, instance and window.
-pub struct WindowRenderer {
-	// Vulkan dispatch tables make this ownership tree large. Heap ownership
-	// keeps debug constructor/move temporaries off the native main stack while
-	// retaining the same ordered shutdown and uncertain-completion policy.
-	resources: ManuallyDrop<Box<RendererResources>>,
-	size: [u32; 2],
-	dirty: bool,
-	lighting: LightingUniform,
-	editor_visuals: crate::EditorVisuals,
-	external_resources_retained: AtomicBool,
-}
-
 struct RendererResources {
+	max_viewport_dimensions: [u32; 2],
+	viewport_bounds: [f32; 2],
 	targets: Option<RenderTargets>,
 	editor: Option<crate::vulkan::editor::EditorPass>,
 	pipelines: Option<VulkanMaterialPipelines>,
@@ -52,7 +44,65 @@ pub enum DrawStatus {
 	NeedsRedraw,
 }
 
+/// Owns a presentation renderer. Uploaded resources must be released before this owner.
+/// Field order releases GPU dependants before the device, surface, instance and window.
+pub struct WindowRenderer {
+	// Vulkan dispatch tables make this ownership tree large. Heap ownership
+	// keeps debug constructor/move temporaries off the native main stack while
+	// retaining the same ordered shutdown and uncertain-completion policy.
+	resources: ManuallyDrop<Box<RendererResources>>,
+	size: [u32; 2],
+	dirty: bool,
+	lighting: LightingUniform,
+	editor_visuals: crate::EditorVisuals,
+	external_resources_retained: AtomicBool,
+}
+
 impl WindowRenderer {
+	pub fn new<W: HasDisplayHandle + HasWindowHandle + 'static>(
+		window: Arc<W>,
+		width: u32,
+		height: u32,
+	) -> Result<Self, String> {
+		let display = window.display_handle().map_err(|e| e.to_string())?.as_raw();
+		let handle = window.window_handle().map_err(|e| e.to_string())?.as_raw();
+		let instance = VulkanInstance::for_display(display).map_err(|e| e.to_string())?;
+		let surface = VulkanSurface::new(&instance, display, handle).map_err(|e| e.to_string())?;
+		let device =
+			VulkanDevice::for_surface(instance.raw(), &surface).map_err(|e| e.to_string())?;
+		let camera = VulkanCamera::new(instance.raw(), &device).map_err(|e| e.to_string())?;
+		let limits = unsafe {
+			instance
+				.raw()
+				.get_physical_device_properties(device.physical_device())
+		}
+		.limits;
+		let material_layout =
+			Arc::new(VulkanMaterialLayout::new(device.raw()).map_err(|e| e.to_string())?);
+		let mut renderer = Self {
+			resources: ManuallyDrop::new(Box::new(RendererResources {
+				max_viewport_dimensions: limits.max_viewport_dimensions,
+				viewport_bounds: limits.viewport_bounds_range,
+				targets: None,
+				editor: None,
+				pipelines: None,
+				camera,
+				material_layout,
+				device,
+				surface,
+				instance,
+				_window: window,
+			})),
+			size: [width, height],
+			dirty: true,
+			lighting: LightingUniform::default(),
+			editor_visuals: crate::EditorVisuals::default(),
+			external_resources_retained: AtomicBool::new(false),
+		};
+		renderer.prepare()?;
+		Ok(renderer)
+	}
+
 	/// The physical device actually selected for this presentation surface.
 	pub fn physical_device_info(&self) -> PhysicalDeviceInfo {
 		let p = unsafe {
@@ -118,49 +168,6 @@ impl WindowRenderer {
 		mesh.write_dynamic(vertices, indices)
 			.map_err(|e| e.to_string())
 	}
-	pub fn new<W: HasDisplayHandle + HasWindowHandle + 'static>(
-		window: Arc<W>,
-		width: u32,
-		height: u32,
-	) -> Result<Self, String> {
-		let display = window.display_handle().map_err(|e| e.to_string())?.as_raw();
-		let handle = window.window_handle().map_err(|e| e.to_string())?.as_raw();
-		let instance = VulkanInstance::for_display(display).map_err(|e| e.to_string())?;
-		let surface = VulkanSurface::new(&instance, display, handle).map_err(|e| e.to_string())?;
-		let device =
-			VulkanDevice::for_surface(instance.raw(), &surface).map_err(|e| e.to_string())?;
-		let camera = VulkanCamera::new(instance.raw(), &device).map_err(|e| e.to_string())?;
-		let material_layout =
-			Arc::new(VulkanMaterialLayout::new(device.raw()).map_err(|e| e.to_string())?);
-		let mut renderer = Self {
-			resources: ManuallyDrop::new(Box::new(RendererResources {
-				targets: None,
-				editor: None,
-				pipelines: None,
-				camera,
-				material_layout,
-				device,
-				surface,
-				instance,
-				_window: window,
-			})),
-			size: [width, height],
-			dirty: true,
-			lighting: LightingUniform::default(),
-			editor_visuals: crate::EditorVisuals::default(),
-			external_resources_retained: AtomicBool::new(false),
-		};
-		renderer.prepare()?;
-		Ok(renderer)
-	}
-
-	pub fn resize(&mut self, width: u32, height: u32) {
-		if self.size != [width, height] {
-			self.size = [width, height];
-			self.dirty = true;
-		}
-	}
-
 	/// Validated CPU state; upload occurs after the previous frame completes.
 	pub fn set_lights(&mut self, lights: &[Light]) -> Result<(), String> {
 		self.lighting = LightingUniform::from_lights(lights)?;
@@ -183,89 +190,40 @@ impl WindowRenderer {
 			.unwrap_or_default()
 	}
 
-	/// Returns the actual surface extent, or None while minimized.
-	pub fn prepare(&mut self) -> Result<Option<[u32; 2]>, String> {
-		if self.size.contains(&0) {
-			return Ok(None);
-		}
-		if self.dirty {
-			self.wait_idle()?;
-			// Retire the old targets before rebuilding. If creation fails, drawing
-			// cannot accidentally reuse a swapchain retired by Vulkan.
-			let old = self.resources.targets.take();
-			let swapchain = match old.as_ref() {
-				Some(old) => VulkanSwapchain::recreate(
-					self.resources.instance.raw(),
-					&self.resources.device,
-					&self.resources.surface,
-					self.size[0],
-					self.size[1],
-					&old.swapchain,
-				),
-				None => VulkanSwapchain::new(
-					self.resources.instance.raw(),
-					&self.resources.device,
-					&self.resources.surface,
-					self.size[0],
-					self.size[1],
-				),
-			}
-			.map_err(|e| e.to_string())?;
-			let depth = VulkanDepthBuffer::new(
-				self.resources.instance.raw(),
-				&self.resources.device,
-				swapchain.extent(),
-			)
-			.map_err(|e| e.to_string())?;
-			// Extent is dynamic pipeline state. Layouts belong to this renderer
-			// for its entire lifetime; only attachment format changes invalidate it.
-			if self.resources.pipelines.as_ref().is_none_or(|pipelines| {
-				!pipelines.supports_formats(swapchain.format(), depth.format())
-			}) {
-				self.resources.pipelines = Some(VulkanMaterialPipelines::new(
-					self.resources.device.raw(),
-					swapchain.format(),
-					depth.format(),
-					self.resources.camera.descriptor_set_layout(),
-					self.resources.material_layout.raw(),
-				)?);
-			}
-			let frame = match old {
-				Some(old)
-					if old.swapchain.format() == swapchain.format()
-						&& old.depth.format() == depth.format() =>
-				{
-					VulkanFrame::recreate(&self.resources.device, &swapchain, old.frame)
-				}
-				_ => VulkanFrame::new(&self.resources.device, &swapchain),
-			}
-			.map_err(|e| e.to_string())?;
-			self.resources.targets = Some(RenderTargets {
-				frame,
-				depth,
-				swapchain,
-			});
-			self.dirty = false;
-		}
-		let extent = self
-			.resources
-			.targets
-			.as_ref()
-			.expect("prepared render targets")
-			.swapchain
-			.extent();
-		Ok(Some([extent.width, extent.height]))
-	}
-
 	pub fn draw(
 		&mut self,
 		camera: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<DrawStatus, String> {
-		if self.prepare()?.is_none() {
+		self.draw_region(camera, objects, None)
+	}
+
+	/// Render into physical [x, y, width, height]. Screen-space geometry uses content-local coordinates.
+	pub fn draw_in_rect(
+		&mut self,
+		camera: &CameraUniform,
+		objects: &[RenderObject<'_>],
+		pixels: [u32; 4],
+	) -> Result<DrawStatus, String> {
+		self.draw_region(camera, objects, Some(pixels))
+	}
+
+	fn draw_region(
+		&mut self,
+		camera: &CameraUniform,
+		objects: &[RenderObject<'_>],
+		pixels: Option<[u32; 4]>,
+	) -> Result<DrawStatus, String> {
+		let Some(extent) = self.prepare()? else {
 			return Ok(DrawStatus::Suspended);
-		}
+		};
 		let resources = &mut **self.resources;
+		let region = validated_region(
+			pixels.unwrap_or([0, 0, extent[0], extent[1]]),
+			extent,
+			resources.max_viewport_dimensions,
+			resources.viewport_bounds,
+		)?;
 		let targets = resources.targets.as_mut().expect("prepared render targets");
 		let editor = if self.editor_visuals.is_empty() {
 			None
@@ -294,9 +252,12 @@ impl WindowRenderer {
 			},
 			resources.pipelines.as_ref().expect("prepared pipelines"),
 			&resources.camera,
-			camera,
 			objects,
-			editor,
+			crate::vulkan::frame::FrameView {
+				uniform: camera,
+				region,
+				editor,
+			},
 		);
 		finish_draw(&mut self.dirty, result)
 	}
@@ -370,23 +331,36 @@ impl WindowRenderer {
 	}
 }
 
-fn finish_draw(
-	dirty: &mut bool,
-	result: Result<FrameStatus, VulkanFrameError>,
-) -> Result<DrawStatus, String> {
-	match result {
-		Ok(FrameStatus::Rendered) => Ok(DrawStatus::Rendered),
-		Ok(FrameStatus::SwapchainNeedsRebuild) => {
-			*dirty = true;
-			Ok(DrawStatus::NeedsRedraw)
-		}
-		Err(error) => {
-			// prepare() must retire the failed frame after device completion;
-			// its acquisition semaphore or reset fence cannot safely be reused.
-			*dirty = true;
-			Err(error.to_string())
+fn validated_region(
+	[x, y, width, height]: [u32; 4],
+	extent: [u32; 2],
+	max_dimensions: [u32; 2],
+	bounds: [f32; 2],
+) -> Result<ash::vk::Rect2D, String> {
+	for (origin, size, limit, max_size) in [
+		(x, width, extent[0], max_dimensions[0]),
+		(y, height, extent[1], max_dimensions[1]),
+	] {
+		if size == 0
+			|| size > max_size
+			|| origin
+				.checked_add(size)
+				.is_none_or(|end| end > limit.min(i32::MAX as u32))
+			|| (origin as f32) < bounds[0]
+			|| (origin as f32 + size as f32) > bounds[1]
+		{
+			return Err(
+				"Render rectangle exceeds the prepared attachment or device viewport limits".into(),
+			);
 		}
 	}
+	Ok(ash::vk::Rect2D {
+		offset: ash::vk::Offset2D {
+			x: x as i32,
+			y: y as i32,
+		},
+		extent: ash::vk::Extent2D { width, height },
+	})
 }
 
 impl Drop for WindowRenderer {
@@ -437,99 +411,5 @@ fn release_after_idle<T>(
 }
 
 #[cfg(test)]
-mod tests {
-	use super::{
-		DrawStatus, FrameStatus, VulkanFrameError, finish_draw, release_after_idle, retire_external,
-	};
-	use std::cell::RefCell;
-	use std::sync::atomic::{AtomicBool, Ordering};
-	struct Resource<'a>(&'a RefCell<Vec<u8>>, u8);
-	impl Drop for Resource<'_> {
-		fn drop(&mut self) {
-			self.0.borrow_mut().push(self.1);
-		}
-	}
-
-	#[test]
-	fn renderer_handle_stays_small_for_native_main_thread_startup() {
-		// Debug builds retain several constructor/move temporaries on the
-		// Windows main thread's 1 MiB stack. Keep the nested GPU ownership
-		// tree out of the handle passed through application initialization.
-		assert!(size_of::<super::WindowRenderer>() <= 4096);
-	}
-
-	#[test]
-	fn draw_errors_preserve_the_error_and_force_target_replacement_before_retry() {
-		let mut dirty = false;
-		let error = ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY;
-		assert_eq!(
-			finish_draw(&mut dirty, Err(VulkanFrameError::Vulkan(error))).unwrap_err(),
-			VulkanFrameError::Vulkan(error).to_string()
-		);
-		assert!(
-			dirty,
-			"the next public draw must enter prepare's idle/replacement path"
-		);
-		dirty = false;
-		assert_eq!(
-			finish_draw(&mut dirty, Ok(FrameStatus::SwapchainNeedsRebuild)).unwrap(),
-			DrawStatus::NeedsRedraw
-		);
-		assert!(dirty);
-		dirty = false;
-		assert_eq!(
-			finish_draw(&mut dirty, Ok(FrameStatus::Rendered)).unwrap(),
-			DrawStatus::Rendered
-		);
-		assert!(!dirty);
-	}
-
-	#[test]
-	fn retained_external_children_keep_the_parent_retained_after_later_wait_success() {
-		let retained = AtomicBool::new(false);
-		let dropped = RefCell::new(Vec::new());
-		assert!(
-			retire_external(
-				Resource(&dropped, 1),
-				Err(ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY),
-				&retained
-			)
-			.is_err()
-		);
-		assert!(retained.load(Ordering::Acquire));
-		assert!(dropped.borrow().is_empty());
-		retire_external(Resource(&dropped, 2), Ok(()), &retained).unwrap();
-		assert!(
-			retained.load(Ordering::Acquire),
-			"earlier forgotten children still own Vulkan handles"
-		);
-		assert_eq!(*dropped.borrow(), [2]);
-		let retained = AtomicBool::new(false);
-		retire_external(
-			Resource(&dropped, 3),
-			Err(ash::vk::Result::ERROR_DEVICE_LOST),
-			&retained,
-		)
-		.unwrap();
-		assert!(!retained.load(Ordering::Acquire));
-		assert_eq!(*dropped.borrow(), [2, 3]);
-	}
-
-	#[test]
-	fn shutdown_releases_dependants_before_parents_only_after_confirmed_completion() {
-		for result in [
-			Ok(()),
-			Err(ash::vk::Result::ERROR_DEVICE_LOST),
-			Err(ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY),
-		] {
-			let dropped = RefCell::new(Vec::new());
-			let outcome =
-				release_after_idle((Resource(&dropped, 1), Resource(&dropped, 2)), result);
-			if outcome.is_ok() {
-				assert_eq!(*dropped.borrow(), [1, 2]);
-			} else {
-				assert!(dropped.borrow().is_empty());
-			}
-		}
-	}
-}
+#[path = "../tests/unit/window_renderer.rs"]
+mod tests;

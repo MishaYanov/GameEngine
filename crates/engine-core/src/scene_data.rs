@@ -1,9 +1,12 @@
+mod hierarchy;
 pub use crate::collider::{ColliderData, ColliderInteraction};
 pub use crate::game_camera::{FollowCameraSettings, OrbitCameraSettings};
+pub use crate::scene_format::parse_json;
 use crate::{Transform, entity_key::EntityKey};
 use glam::{EulerRot, Mat4};
+pub use hierarchy::resolve_world_matrices;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
@@ -337,149 +340,6 @@ pub struct ParsedScene {
 	pub source_schema_version: u32,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SceneDataV1 {
-	schema_version: u32,
-	entities: Vec<EntityDataV1>,
-	camera: CameraData,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EntityDataV1 {
-	name: String,
-	model_path: String,
-	transform: TransformData,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SceneDataV2 {
-	schema_version: u32,
-	bindings: BTreeMap<String, EntityKey>,
-	entities: Vec<EntityDataV2>,
-	camera: CameraData,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EntityDataV2 {
-	key: EntityKey,
-	name: String,
-	model_path: String,
-	transform: TransformData,
-}
-
-pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
-	if source.len() > MAX_SCENE_BYTES {
-		return Err("Scene JSON exceeds the 32 MiB size limit".into());
-	}
-	let value: serde_json::Value =
-		serde_json::from_str(source).map_err(|error| format!("Invalid scene JSON: {error}"))?;
-
-	let source_version = crate::scene_format::camera_schema_version(&value)?;
-
-	let parsed = match source_version {
-		1 => {
-			let legacy: SceneDataV1 = serde_json::from_value(value)
-				.map_err(|error| format!("Invalid version-1 scene JSON: {error}"))?;
-
-			let entities = legacy
-				.entities
-				.into_iter()
-				.enumerate()
-				.map(|(index, entity)| {
-					Ok(EntityData::new(
-						EntityKey::new(format!("legacy-entity-{index}"))?,
-						entity.name,
-						entity.model_path,
-					)
-					.with_transform(entity.transform))
-				})
-				.collect::<Result<Vec<_>, String>>()?;
-
-			let lights = legacy_lights(&entities)?;
-
-			ParsedScene {
-				source_schema_version: legacy.schema_version,
-				data: SceneData {
-					schema_version: CURRENT_SCHEMA_VERSION,
-					bindings: BTreeMap::new(),
-					entities,
-					camera: legacy.camera,
-					lights,
-				},
-			}
-		}
-
-		2 => {
-			let legacy: SceneDataV2 = serde_json::from_value(value)
-				.map_err(|error| format!("Invalid version-2 scene JSON: {error}"))?;
-
-			let entities = legacy
-				.entities
-				.into_iter()
-				.map(|entity| {
-					EntityData::new(entity.key, entity.name, entity.model_path)
-						.with_transform(entity.transform)
-				})
-				.collect::<Vec<_>>();
-
-			let lights = legacy_lights(&entities)?;
-
-			ParsedScene {
-				source_schema_version: legacy.schema_version,
-				data: SceneData {
-					schema_version: CURRENT_SCHEMA_VERSION,
-					bindings: legacy.bindings,
-					entities,
-					camera: legacy.camera,
-					lights,
-				},
-			}
-		}
-
-		3..=5 => {
-			let data = crate::scene_format::decode_scene(value, source_version)
-				.map_err(|error| format!("Invalid scene JSON: {error}"))?;
-
-			ParsedScene {
-				// Safe here: this branch accepts only 3, 4, or 5.
-				source_schema_version: source_version as u32,
-				data,
-			}
-		}
-
-		version => {
-			return Err(format!("Unsupported schema version: {version}"));
-		}
-	};
-
-	parsed.data.validate()?;
-	if parsed.source_schema_version != CURRENT_SCHEMA_VERSION {
-		engine_logger::debug!(target: "engine_core::scene", "Scene schema migrated: from={}, to={CURRENT_SCHEMA_VERSION}", parsed.source_schema_version);
-	}
-
-	Ok(parsed)
-}
-
-fn legacy_lights(entities: &[EntityData]) -> Result<Vec<LightData>, String> {
-	let occupied: HashSet<_> = entities.iter().map(|entity| entity.key.as_str()).collect();
-	for index in 0..=entities.len() {
-		let candidate = if index == 0 {
-			"legacy-default-directional-light".to_string()
-		} else {
-			format!("legacy-default-directional-light-{index}")
-		};
-		if !occupied.contains(candidate.as_str()) {
-			return Ok(vec![LightData::new(
-				EntityKey::new(candidate)?,
-				"Default directional light",
-				LightKind::Directional,
-			)]);
-		}
-	}
-	Err("Cannot allocate a migrated default light identity".into())
-}
-
 impl SceneData {
 	pub fn world_matrices(&self) -> Result<Vec<Mat4>, String> {
 		let local: Vec<_> = self
@@ -662,30 +522,10 @@ impl SceneData {
 		crate::components::validate_scene_components(self)?;
 		crate::linked_prefab::validate_scene_links(self)?;
 		self.camera.validate()?;
-		let mut count = SceneJsonWriter::new(std::io::sink());
-		serde_json::to_writer(&mut count, &crate::scene_format::StoredSceneRef(self))
-			.map_err(|error| format!("Scene authored byte validation failed: {error}"))?;
+		crate::scene_format::validate_authored_size(self)?;
 		Ok(world)
 	}
 
-	pub fn from_json(source: &str) -> Result<Self, String> {
-		parse_json(source).map(|parsed| parsed.data)
-	}
-	pub fn to_json(&self) -> Result<String, String> {
-		self.validate()?;
-		let mut writer = SceneJsonWriter::new(Vec::new());
-		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
-			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
-		String::from_utf8(writer.output).map_err(|error| format!("Failed to encode scene: {error}"))
-	}
-	/// Exact pretty-JSON length, with the same validation and size limit as `to_json`.
-	pub fn serialized_size(&self) -> Result<usize, String> {
-		self.validate()?;
-		let mut writer = SceneJsonWriter::new(std::io::sink());
-		serde_json::to_writer_pretty(&mut writer, &crate::scene_format::StoredSceneRef(self))
-			.map_err(|error| format!("Failed to serialize scene: {error}"))?;
-		Ok(writer.bytes)
-	}
 	/// Validate once while an immutable borrow keeps the checked content unchanged.
 	pub fn validated(&self) -> Result<ValidatedScene<'_>, String> {
 		self.validate()?;
@@ -704,34 +544,6 @@ impl<'a> ValidatedScene<'a> {
 	}
 	pub(crate) fn from_validated(data: &'a SceneData) -> Self {
 		Self { data }
-	}
-}
-
-// Stop serialization at the same limit accepted by the loader, instead of
-// constructing a potentially huge String and rejecting it after allocation.
-struct SceneJsonWriter<W> {
-	output: W,
-	bytes: usize,
-}
-impl<W> SceneJsonWriter<W> {
-	fn new(output: W) -> Self {
-		Self { output, bytes: 0 }
-	}
-}
-impl<W: std::io::Write> std::io::Write for SceneJsonWriter<W> {
-	fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-		// Atomic scene saves append one conventional trailing newline.
-		if bytes.len() > (MAX_SCENE_BYTES - 1).saturating_sub(self.bytes) {
-			return Err(std::io::Error::other(
-				"Scene JSON exceeds the 32 MiB size limit",
-			));
-		}
-		let written = self.output.write(bytes)?;
-		self.bytes += written;
-		Ok(written)
-	}
-	fn flush(&mut self) -> std::io::Result<()> {
-		self.output.flush()
 	}
 }
 
@@ -847,91 +659,5 @@ impl CameraData {
 			format!("Camera settings cannot produce a finite view frustum: {error}")
 		})?;
 		Ok(())
-	}
-}
-
-/// Linear-time indexed parent traversal shared by CPU scene data and GPU scenes.
-pub fn resolve_world_matrices(
-	local: &[Mat4],
-	keys: &[Option<&EntityKey>],
-	parents: &[Option<&EntityKey>],
-) -> Result<Vec<Mat4>, String> {
-	if local.len() != keys.len() || local.len() != parents.len() || local.len() > MAX_SCENE_ENTITIES
-	{
-		return Err(
-			"Hierarchy arrays must have matching lengths within the scene entity limit".into(),
-		);
-	}
-	let mut indices = HashMap::with_capacity(keys.len());
-	for (index, key) in keys.iter().enumerate() {
-		if let Some(key) = key
-			&& indices.insert(key.as_str(), index).is_some()
-		{
-			return Err("Duplicate entity key in hierarchy".into());
-		}
-	}
-	let mut parent_indices = Vec::with_capacity(local.len());
-	for parent in parents {
-		parent_indices.push(match parent {
-			Some(key) => Some(
-				*indices
-					.get(key.as_str())
-					.ok_or_else(|| format!("Parent key {:?} does not exist", key.as_str()))?,
-			),
-			None => None,
-		});
-	}
-	let mut states = vec![0u8; local.len()];
-	let mut world = vec![Mat4::IDENTITY; local.len()];
-	let mut path = Vec::new();
-	for index in 0..local.len() {
-		if states[index] == 2 {
-			continue;
-		}
-		let mut current = Some(index);
-		while let Some(node) = current {
-			match states[node] {
-				2 => break,
-				1 => return Err("Scene hierarchy contains a parent cycle".into()),
-				_ => {
-					states[node] = 1;
-					path.push(node);
-					current = parent_indices[node];
-				}
-			}
-		}
-		while let Some(node) = path.pop() {
-			world[node] =
-				parent_indices[node].map_or(local[node], |parent| world[parent] * local[node]);
-			if !world[node].is_finite() {
-				return Err("Hierarchy produces a nonfinite world transform".into());
-			}
-			states[node] = 2;
-		}
-	}
-	Ok(world)
-}
-
-#[cfg(test)]
-mod serialization_tests {
-	use super::*;
-	use std::io::Write;
-
-	#[test]
-	fn counting_and_buffered_writers_reserve_the_same_newline_byte() {
-		let mut count = SceneJsonWriter::new(std::io::sink());
-		let mut buffered = SceneJsonWriter::new(Vec::new());
-		count.bytes = MAX_SCENE_BYTES - 2;
-		buffered.bytes = MAX_SCENE_BYTES - 2;
-		for writer in [&mut count as &mut dyn Write, &mut buffered] {
-			writer.write_all(b"a").unwrap();
-			assert_eq!(
-				writer.write_all(b"b").unwrap_err().to_string(),
-				"Scene JSON exceeds the 32 MiB size limit"
-			);
-		}
-		assert_eq!(count.bytes, MAX_SCENE_BYTES - 1);
-		assert_eq!(buffered.bytes, count.bytes);
-		assert_eq!(buffered.output, b"a");
 	}
 }
