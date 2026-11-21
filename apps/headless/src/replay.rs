@@ -1,6 +1,6 @@
 use super::{
 	args::{Options, validate_elapsed},
-	report::{self, Summary},
+	report::{self, ReplayIdentity, ReplayMarker, ReplayReport, Summary},
 	source::{Source, read_bounded, source},
 };
 use engine_core::{
@@ -13,6 +13,7 @@ use serde::{
 	Deserialize,
 	de::{self, SeqAccess, Visitor},
 };
+use sha2::{Digest, Sha256};
 use std::{
 	collections::HashSet,
 	path::Path,
@@ -23,6 +24,8 @@ use std::{
 const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REPLAY_ACTIONS: usize = 10_000;
 const MAX_REPLAY_KEYS: usize = 16;
+const MAX_REPLAY_MARKERS: usize = 128;
+const MAX_MARKER_LABEL_BYTES: usize = 64;
 pub(super) const MAX_TICK_CALLS: u32 = 100_000;
 
 #[derive(Deserialize)]
@@ -36,6 +39,9 @@ struct Replay {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ReplayAction {
 	RestartRun {},
+	Mark {
+		label: String,
+	},
 	CameraInput(CameraIntent),
 	KeyboardInput {
 		#[serde(deserialize_with = "deserialize_keyboard_keys")]
@@ -65,6 +71,68 @@ enum ReplayAction {
 		min: [f32; 3],
 		max: [f32; 3],
 	},
+}
+
+impl Replay {
+	fn validate(&self, extra_steps: u32) -> Result<(), String> {
+		if !matches!(self.schema_version, 1..=5) {
+			return Err("Supported replay schema versions are 1 through 5".into());
+		}
+		let mut labels = HashSet::new();
+		let mut total = extra_steps;
+		for action in &self.actions {
+			match action {
+				ReplayAction::Mark { label } => {
+					if self.schema_version < 5 {
+						return Err("mark requires replay schema version 5".into());
+					}
+					if label.is_empty()
+						|| label.len() > MAX_MARKER_LABEL_BYTES
+						|| !label
+							.bytes()
+							.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+					{
+						return Err("mark requires a label of 1 through 64 ASCII letters, digits, underscores or hyphens".into());
+					}
+					if !labels.insert(label.as_str()) {
+						return Err(format!("Duplicate replay mark {label:?}"));
+					}
+					if labels.len() > MAX_REPLAY_MARKERS {
+						return Err("Replay exceeds 128 marks".into());
+					}
+				}
+				ReplayAction::CameraInput(_) if self.schema_version < 2 => {
+					return Err("camera_input requires replay schema version 2".into());
+				}
+				ReplayAction::CameraInput(sample) => sample.validate()?,
+				ReplayAction::KeyboardInput { .. } if self.schema_version < 3 => {
+					return Err("keyboard_input requires replay schema version 3".into());
+				}
+				ReplayAction::ControllerInput { .. } if self.schema_version < 4 => {
+					return Err("controller_input requires replay schema version 4".into());
+				}
+				ReplayAction::Command { command, .. }
+					if matches!(
+						command.as_ref(),
+						EditorCommandDto::SetPlayCameraInput { .. }
+					) =>
+				{
+					return Err(
+						"Use the version 2 camera_input action to address the current replay scene"
+							.into(),
+					);
+				}
+				ReplayAction::Tick { count, .. } => {
+					total = total
+						.checked_add(*count)
+						.filter(|value| *value <= MAX_TICK_CALLS)
+						.ok_or("Replay and --steps exceed 100000 tick calls")?;
+				}
+				_ => {}
+			}
+		}
+		Ok(())
+	}
 }
 fn one() -> u32 {
 	1
@@ -159,6 +227,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 		parsed,
 		documents,
 		asset_root,
+		project_manifest_sha256,
 	} = source(&options)?;
 	let source_schema = parsed.source_schema_version;
 	let animation_root = asset_root.clone();
@@ -171,54 +240,29 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 		.build()
 		.map_err(|e| e.to_string())?;
 	let mut measures = Measurements::default();
+	let mut replay_report = ReplayReport::default();
 	let steps = options
 		.steps
 		.unwrap_or(if options.replay.is_some() { 0 } else { 60 });
 	if let Some(path) = &options.replay {
-		let replay: Replay = serde_json::from_str(&read_bounded(path, MAX_REPLAY_BYTES)?)
-			.map_err(|e| format!("Invalid replay: {e}"))?;
-		if !matches!(replay.schema_version, 1..=4) {
-			return Err("Supported replay schema versions are 1 through 4".into());
+		let replay_text = read_bounded(path, MAX_REPLAY_BYTES)?;
+		let replay: Replay =
+			serde_json::from_str(&replay_text).map_err(|e| format!("Invalid replay: {e}"))?;
+		replay.validate(steps)?;
+		if replay.schema_version >= 4 && options.dt.is_none() && steps == 0 {
+			replay_report.identity =
+				project_manifest_sha256.map(|project_manifest_sha256| ReplayIdentity {
+					replay_sha256: format!("{:x}", Sha256::digest(replay_text.as_bytes())),
+					project_manifest_sha256,
+				});
 		}
-		replay.actions.iter().try_fold(steps, |total, action| {
-			match action {
-				ReplayAction::CameraInput(_) if replay.schema_version == 1 => {
-					return Err("camera_input requires replay schema version 2".to_string());
-				}
-				ReplayAction::CameraInput(sample) => sample.validate()?,
-				ReplayAction::KeyboardInput { .. } if replay.schema_version < 3 => {
-					return Err("keyboard_input requires replay schema version 3".into());
-				}
-				ReplayAction::ControllerInput { .. } if replay.schema_version < 4 => {
-					return Err("controller_input requires replay schema version 4".into());
-				}
-				ReplayAction::Command { command, .. }
-					if matches!(
-						command.as_ref(),
-						EditorCommandDto::SetPlayCameraInput { .. }
-					) =>
-				{
-					return Err(
-						"Use the version 2 camera_input action to address the current replay scene"
-							.into(),
-					);
-				}
-				_ => {}
-			}
-			let count = if let ReplayAction::Tick { count, .. } = action {
-				*count
-			} else {
-				0
-			};
-			total
-				.checked_add(count)
-				.filter(|value| *value <= MAX_TICK_CALLS)
-				.ok_or_else(|| "Replay and --steps exceed 100000 tick calls".to_string())
-		})?;
 		let mut controls = ReplayControls::default();
 		for action in replay.actions {
 			check_budget(started, budget)?;
 			match action {
+				ReplayAction::Mark { label } => replay_report
+					.markers
+					.push(ReplayMarker::capture(&engine, label)?),
 				ReplayAction::CameraInput(sample) => {
 					let owner = engine
 						.camera_input_owner()
@@ -346,7 +390,15 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 		)?;
 	}
 	check_budget(started, budget)?;
-	report::finish(&engine, &options, &measures, source_schema, started, budget)
+	report::finish(
+		&engine,
+		&options,
+		&measures,
+		replay_report,
+		source_schema,
+		started,
+		budget,
+	)
 }
 
 fn advance(

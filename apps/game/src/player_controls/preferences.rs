@@ -1,4 +1,5 @@
-use super::Preset;
+use super::{ControlsSettings, Preset};
+use runtime::input::ControllerBindings;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -9,17 +10,32 @@ use std::{
 };
 
 const MAX_BYTES: usize = 256;
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Record {
+struct RecordV1 {
 	schema_version: u32,
 	movement: Preset,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecordV2 {
+	schema_version: u32,
+	movement: Preset,
+	controller: ControllerBindings,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Record {
+	Second(RecordV2),
+	First(RecordV1),
+}
+
 impl Record {
-	fn read(file: File) -> Result<Preset, String> {
+	fn read(file: File) -> Result<ControlsSettings, String> {
 		let mut bytes = Vec::new();
 		file.take((MAX_BYTES + 1) as u64)
 			.read_to_end(&mut bytes)
@@ -27,12 +43,19 @@ impl Record {
 		if bytes.len() > MAX_BYTES {
 			return Err("Saved controls exceed 256 bytes".into());
 		}
-		let record: Self =
-			serde_json::from_slice(&bytes).map_err(|_| "Saved controls are invalid")?;
-		if record.schema_version != SCHEMA_VERSION {
-			return Err("Saved controls version is unsupported".into());
+		match serde_json::from_slice(&bytes).map_err(|_| "Saved controls are invalid")? {
+			Self::First(record) if record.schema_version == 1 => Ok(ControlsSettings {
+				movement: record.movement,
+				..ControlsSettings::default()
+			}),
+			Self::Second(record) if record.schema_version == SCHEMA_VERSION => {
+				Ok(ControlsSettings {
+					movement: record.movement,
+					controller: record.controller.validate()?,
+				})
+			}
+			_ => Err("Saved controls version is unsupported".into()),
 		}
-		Ok(record.movement)
 	}
 }
 
@@ -70,13 +93,13 @@ impl Preferences {
 		})
 	}
 
-	pub(super) fn load(&self) -> Result<Preset, String> {
+	pub(super) fn load(&self) -> Result<ControlsSettings, String> {
 		let Some(folder) = self.folder(false)? else {
-			return Ok(Preset::Project);
+			return Ok(ControlsSettings::default());
 		};
 		let path = folder.join(&self.filename);
 		if !regular_record(&path)? {
-			return Ok(Preset::Project);
+			return Ok(ControlsSettings::default());
 		}
 		let mut options = OpenOptions::new();
 		options.read(true);
@@ -98,12 +121,16 @@ impl Preferences {
 		Record::read(file)
 	}
 
-	pub(super) fn save(&self, preset: Preset) -> Result<(), String> {
-		let bytes = serde_json::to_vec(&Record {
+	pub(super) fn save(&self, controls: ControlsSettings) -> Result<(), String> {
+		let bytes = serde_json::to_vec(&RecordV2 {
 			schema_version: SCHEMA_VERSION,
-			movement: preset,
+			movement: controls.movement,
+			controller: controls.controller.validate()?,
 		})
-			.map_err(|error| format!("Cannot encode controls: {error}"))?;
+		.map_err(|error| format!("Cannot encode controls: {error}"))?;
+		if bytes.len() > MAX_BYTES {
+			return Err("Saved controls exceed 256 bytes".into());
+		}
 		let folder = self
 			.folder(true)?
 			.ok_or("Local controls storage is unavailable")?;

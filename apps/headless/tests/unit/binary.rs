@@ -21,6 +21,7 @@ fn measure_camera_room_fixed_steps() {
 		parsed,
 		documents,
 		asset_root,
+		..
 	} = source(&options).unwrap();
 	let step = 1.0 / f64::from(project.fixed_hz);
 	let mut engine = EngineBuilder::new(parsed.data, project)

@@ -63,7 +63,7 @@ fn command_line_override_cannot_be_changed_in_controls() {
 }
 
 #[test]
-fn continue_row_explains_slot_availability_and_keeps_focus() {
+fn continue_actions_have_stable_availability_labels() {
 	use ContinueAvailability::*;
 
 	for (availability, label, enabled) in [
@@ -73,16 +73,64 @@ fn continue_row_explains_slot_availability_and_keeps_focus() {
 		(IncompatibleRelease, "Incompatible with this release", false),
 		(Unreadable, "Unreadable save", false),
 	] {
-		let controls = PlayerControls {
-			menu: Some(Menu {
-				focus: Row::Continue,
-				draft: Preset::Project,
-				checkpoints: true,
-				continue_availability: availability,
-			}),
-			..PlayerControls::default()
-		};
-		assert_eq!(controls.rows().unwrap()[4], format!("> Continue ({label})"));
+		assert_eq!(continue_label(availability), label);
 		assert_eq!(availability.can_continue(), enabled);
 	}
+}
+
+#[test]
+fn controller_draft_is_cancelled_and_focus_stays_visible_in_a_short_menu() {
+	let mut app = GameApp::default();
+	for key in [
+		Key::Escape,
+		Key::ArrowDown,
+		Key::ArrowDown,
+		Key::Enter,
+		Key::ArrowDown,
+		Key::ArrowLeft,
+	] {
+		assert!(app.player_controls_key(key));
+	}
+	assert_eq!(
+		app.player_controls.rows_with_capacity(2).unwrap()[0],
+		"> Interact: B"
+	);
+	assert_eq!(app.player_controls.controller().interact, FaceButton::X);
+	app.player_controls_key(Key::Escape);
+	assert!(
+		app.player_controls
+			.rows()
+			.unwrap()
+			.iter()
+			.any(|row| row == "> Controller")
+	);
+	assert_eq!(app.player_controls.controller().interact, FaceButton::X);
+}
+
+#[test]
+fn gate_labels_follow_the_device_and_only_the_bound_logical_action() {
+	let mut profile = InputProfile::default();
+	profile.actions.push(GameInputBinding {
+		id: "interact".into(),
+		key: Key::E,
+		animation_parameter: None,
+	});
+	let map = ControllerBindings {
+		jump: FaceButton::A,
+		interact: FaceButton::B,
+	};
+	let hint = |device| {
+		crate::scene_rendering::interact_hint(Some(&profile), Some("interact"), map, device)
+	};
+	assert!(hint(PromptDevice::Controller).starts_with("Press B"));
+	assert!(hint(PromptDevice::Keyboard).starts_with("Press E"));
+	assert!(
+		crate::scene_rendering::interact_hint(
+			None,
+			Some("interact"),
+			map,
+			PromptDevice::Controller
+		)
+		.contains("unbound")
+	);
 }

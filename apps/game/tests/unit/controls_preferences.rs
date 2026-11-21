@@ -31,11 +31,19 @@ fn preferences_round_trip_and_replace_within_the_local_directory() {
 		root: root.path().to_owned(),
 		filename: "controls.json".into(),
 	};
-	assert_eq!(settings.load().unwrap(), Preset::Project);
-	settings.save(Preset::Arrows).unwrap();
-	assert_eq!(settings.load().unwrap(), Preset::Arrows);
-	settings.save(Preset::Wasd).unwrap();
-	assert_eq!(settings.load().unwrap(), Preset::Wasd);
+	assert_eq!(settings.load().unwrap(), ControlsSettings::default());
+	let controls = ControlsSettings {
+		movement: Preset::Arrows,
+		..ControlsSettings::default()
+	};
+	settings.save(controls).unwrap();
+	assert_eq!(settings.load().unwrap(), controls);
+	let controls = ControlsSettings {
+		movement: Preset::Wasd,
+		..controls
+	};
+	settings.save(controls).unwrap();
+	assert_eq!(settings.load().unwrap(), controls);
 	assert_eq!(
 		fs::read_dir(root.path().join("GameEngine/controls"))
 			.unwrap()
@@ -79,6 +87,34 @@ fn a_nonregular_destination_is_preserved() {
 		.unwrap()
 		.join("controls.json");
 	fs::create_dir(&path).unwrap();
-	assert!(settings.save(Preset::Arrows).is_err());
+	assert!(settings.save(ControlsSettings::default()).is_err());
 	assert!(path.is_dir());
+}
+
+#[test]
+fn reads_v1_without_rewriting_and_v2_persists_a_remap() {
+	use runtime::input::FaceButton;
+	let root = Scratch::new();
+	let settings = Preferences {
+		root: root.path().to_owned(),
+		filename: "controls.json".into(),
+	};
+	let path = settings
+		.folder(true)
+		.unwrap()
+		.unwrap()
+		.join("controls.json");
+	let legacy = br#"{"schema_version":1,"movement":"arrows"}"#;
+	fs::write(&path, legacy).unwrap();
+	let mut controls = settings.load().unwrap();
+	assert_eq!(controls.movement, Preset::Arrows);
+	assert_eq!(controls.controller, ControllerBindings::default());
+	assert_eq!(fs::read(&path).unwrap(), legacy);
+	controls.controller.interact = FaceButton::B;
+	settings.save(controls).unwrap();
+	let persisted = fs::read(&path).unwrap();
+	assert_eq!(settings.load().unwrap(), controls);
+	controls.controller.jump = FaceButton::B;
+	assert!(settings.save(controls).is_err());
+	assert_eq!(fs::read(&path).unwrap(), persisted);
 }

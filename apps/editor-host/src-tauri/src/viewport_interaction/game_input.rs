@@ -161,9 +161,10 @@ impl ViewportInteraction {
 		&mut self,
 		workspace: &mut EditorWorkspace,
 	) -> Result<(), String> {
-		workspace
-			.backend
-			.set_game_controls_from_codes(&self.keys, self.play_gamepad.sample())
+		workspace.backend.set_game_controls_from_codes(
+			&self.keys,
+			runtime::input::ControllerBindings::default().resolve(self.play_gamepad.sample()),
+		)
 	}
 
 	#[cfg(windows)]
@@ -175,12 +176,15 @@ impl ViewportInteraction {
 			&& self.generation == Some(workspace.generation)
 			&& session.is_playing()
 			&& !session.is_paused())
-			.then(|| (workspace.generation, session.revision()))
+		.then(|| (workspace.generation, session.revision()))
 	}
 
 	#[cfg(windows)]
 	pub(crate) fn poll_gamepad(&mut self, now: std::time::Instant) -> bool {
+		let bindings = runtime::input::ControllerBindings::default();
+		let previous = bindings.resolve(self.play_gamepad.sample());
 		self.play_gamepad.poll(now, runtime::input::poll_gamepad)
+			&& previous != bindings.resolve(self.play_gamepad.sample())
 	}
 
 	#[cfg(windows)]

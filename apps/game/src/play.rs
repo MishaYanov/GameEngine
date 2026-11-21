@@ -37,8 +37,9 @@ impl GameApp {
 	pub(super) fn update_player(&mut self, delta_seconds: f32) {
 		let completed = self.game_completed();
 		// The completion message promises F10 even when gameplay normally owns it.
-		if (completed && self.input.just_pressed(Key::F10))
-			|| self.player_shortcut_pressed(Key::F10)
+		if self.play_trace.is_none()
+			&& ((completed && self.input.just_pressed(Key::F10))
+				|| self.player_shortcut_pressed(Key::F10))
 		{
 			let result = self.restart_player_game();
 			report_update_result(
@@ -52,7 +53,8 @@ impl GameApp {
 		if completed {
 			return;
 		}
-		if !self.installed_project
+		if self.play_trace.is_none()
+			&& !self.installed_project
 			&& self.player_shortcut_pressed(Key::F8)
 			&& self.editor.pending_play_scene().is_none()
 		{
@@ -65,7 +67,8 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if !self.installed_project
+		if self.play_trace.is_none()
+			&& !self.installed_project
 			&& self.player_shortcut_pressed(Key::F7)
 			&& self
 				.editor
@@ -115,7 +118,8 @@ impl GameApp {
 	}
 
 	pub(super) fn advance_play(&mut self, delta_seconds: f32) -> Result<(), String> {
-		if self.input.just_pressed(Key::F8)
+		if self.play_trace.is_none()
+			&& self.input.just_pressed(Key::F8)
 			&& let Some(scene_id) = self.editor.pending_play_scene().cloned()
 		{
 			let result = self.install_play_scene(scene_id, false);
@@ -130,13 +134,30 @@ impl GameApp {
 				.ok_or("Renderer is unavailable")?
 				.wait_idle()?;
 		}
+		let pad = self.logical_gamepad();
+		let was_paused = self.editor.simulation_paused();
 		let mut outcome = self.editor.update_play_with_gamepad(
 			&mut self.scene,
 			&self.input,
-			self.play_gamepad.sample(),
+			pad,
 			delta_seconds,
 		)?;
+		let paused = self.editor.simulation_paused();
+		if let Some(trace) = self.play_trace.as_mut() {
+			trace.record_paused(paused);
+			trace.record_controls(
+				&self.input,
+				if paused != was_paused {
+					GamepadSample::default()
+				} else {
+					pad
+				},
+			);
+		}
 		loop {
+			if let Some(trace) = self.play_trace.as_mut() {
+				trace.record_steps(outcome.steps);
+			}
 			if let Some(camera) = self.editor.play_rig_camera() {
 				self.camera = camera;
 			}
@@ -369,6 +390,18 @@ impl GameApp {
 		prepared: runtime::scene_editor::PreparedScene,
 		scene_path: PathBuf,
 	) -> Result<(), String> {
+		self.adopt_prepared_scene_checked(document, prepared, scene_path, |_| Ok(()))
+	}
+
+	pub(super) fn adopt_prepared_scene_checked(
+		&mut self,
+		document: &runtime::scene_data::SceneData,
+		prepared: runtime::scene_editor::PreparedScene,
+		scene_path: PathBuf,
+		before_commit: impl FnOnce(
+			Option<&courtyard_gameplay::checkpoint::CheckpointRegistry>,
+		) -> Result<(), String>,
+	) -> Result<(), String> {
 		let renderer = self
 			.renderer
 			.as_ref()
@@ -383,6 +416,7 @@ impl GameApp {
 		// Completion also makes cache-only allocations from rejected loads safe to prune.
 		renderer.wait_idle()?;
 		let installed = candidate.and_then(|(scene, camera)| {
+			before_commit(self.checkpoints.as_ref())?;
 			self.editor
 				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
 			// No fallible operations between committing the CPU world and its view.
@@ -392,7 +426,7 @@ impl GameApp {
 		});
 		assets.prune_unused();
 		installed?;
-		self.play_gamepad.reset();
+		self.clear_game_controls();
 		self.set_mouse_capture(false);
 		if self.standalone_runtime {
 			self.scene_path = Some(scene_path);

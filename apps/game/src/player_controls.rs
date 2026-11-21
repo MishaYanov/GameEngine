@@ -1,17 +1,19 @@
-//! Installed Player keyboard settings and focus, independent of the authored input profile.
+//! Installed Player Controls and input presentation.
 
 mod preferences;
+mod save_menu;
 
 use courtyard_gameplay::checkpoint::ContinueAvailability;
 use runtime::{
 	Key,
-	input::{InputProfile, MovementBindings},
+	input::{ControllerBindings, FaceButton, InputProfile, MovementBindings},
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use super::GameApp;
 use preferences::Preferences;
+use save_menu::{Intent, SaveMenu};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +64,7 @@ enum Row {
 	Apply,
 	Save,
 	Continue,
+	Controller,
 	Back,
 }
 
@@ -73,9 +76,10 @@ impl Row {
 				Self::Apply,
 				Self::Save,
 				Self::Continue,
+				Self::Controller,
 				Self::Back,
 			],
-			false => &[Self::Layout, Self::Apply, Self::Back],
+			false => &[Self::Layout, Self::Apply, Self::Controller, Self::Back],
 		}
 	}
 
@@ -86,17 +90,41 @@ impl Row {
 	}
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ControlsSettings {
+	movement: Preset,
+	controller: ControllerBindings,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum PromptDevice {
+	#[default]
+	Keyboard,
+	Controller,
+}
+
+enum Page {
+	Main,
+	Controller {
+		focus: usize,
+		draft: ControllerBindings,
+	},
+	Saves(SaveMenu),
+}
+
 struct Menu {
 	focus: Row,
 	draft: Preset,
 	checkpoints: bool,
-	continue_availability: ContinueAvailability,
+	page: Page,
 }
 
 #[derive(Default)]
 pub(super) struct PlayerControls {
 	menu: Option<Menu>,
 	applied: Preset,
+	controller: ControllerBindings,
+	prompt_device: PromptDevice,
 	preferences: Option<Preferences>,
 	override_active: bool,
 	message: Option<String>,
@@ -111,22 +139,26 @@ impl PlayerControls {
 		override_active: bool,
 	) -> Option<InputProfile> {
 		self.override_active = override_active;
-		if override_active {
-			return None;
-		}
 		let project = project?;
 		let settings = Preferences::for_project(project, save_id);
 		match settings {
 			Ok(preferences) => {
-				let choice = preferences.load().and_then(|preset| {
-					let profile = preset.resolve(authored)?;
-					Ok((preset, profile))
-				});
+				let choice = preferences.load();
 				self.preferences = Some(preferences);
 				match choice {
-					Ok((preset, profile)) => {
-						self.applied = preset;
-						return (preset != Preset::Project).then_some(profile);
+					Ok(settings) => {
+						self.controller = settings.controller;
+						if override_active {
+							self.applied = settings.movement;
+							return None;
+						}
+						match settings.movement.resolve(authored) {
+							Ok(profile) => {
+								self.applied = settings.movement;
+								return (settings.movement != Preset::Project).then_some(profile);
+							}
+							Err(error) => self.message = Some(error),
+						}
 					}
 					Err(error) => self.message = Some(error),
 				}
@@ -141,38 +173,80 @@ impl PlayerControls {
 		self.menu.is_some()
 	}
 
+	pub(super) fn controller(&self) -> ControllerBindings {
+		self.controller
+	}
+
+	pub(super) fn prompt_device(&self) -> PromptDevice {
+		self.prompt_device
+	}
+
+	pub(super) fn set_prompt_device(&mut self, device: PromptDevice) -> bool {
+		let previous = std::mem::replace(&mut self.prompt_device, device);
+		previous != device
+	}
+
+	#[cfg(test)]
 	pub(super) fn rows(&self) -> Option<Vec<String>> {
+		self.rows_with_capacity(8)
+	}
+
+	pub(super) fn rows_with_capacity(&self, capacity: usize) -> Option<Vec<String>> {
 		let menu = self.menu.as_ref()?;
+		let (title, actions, focus) = match &menu.page {
+			Page::Controller { focus, draft } => (
+				"Controller".into(),
+				vec![
+					format!("Jump: {:?}", draft.jump),
+					format!("Interact: {:?}", draft.interact),
+					"Apply".into(),
+					"Back".into(),
+				],
+				*focus,
+			),
+			Page::Saves(saves) => saves.rows(),
+			Page::Main => self.main_rows(menu),
+		};
+		let help = self
+			.message
+			.as_deref()
+			.unwrap_or("Arrows: navigate  Enter: select  Esc: back");
+		Some(focused_rows(title, actions, focus, help, capacity))
+	}
+
+	fn main_rows(&self, menu: &Menu) -> (String, Vec<String>, usize) {
 		let layout = if self.override_active {
 			"Launch profile override"
 		} else {
 			menu.draft.label()
 		};
-		let mut rows = vec!["Controls".into()];
-		for row in Row::available(menu.checkpoints) {
-			let name = match row {
-				Row::Layout => format!("Movement: {layout}"),
-				Row::Apply if self.override_active => "Apply disabled".into(),
-				Row::Apply => "Apply".into(),
-				Row::Save => "Save checkpoint".into(),
-				Row::Continue => {
-					format!("Continue ({})", continue_label(menu.continue_availability))
-				}
-				Row::Back => "Back".into(),
-			};
-			let focus = if *row == menu.focus { "> " } else { "  " };
-			rows.push(format!("{focus}{name}"));
-		}
-		if let Some(message) = &self.message {
-			rows.push(message.clone());
-		} else if !self.override_active {
-			rows.push(format!("Active: {}", self.applied.label()));
-		}
-		rows.push("Arrows: navigate  Enter: select  Esc: back".into());
-		Some(rows)
+		let available = Row::available(menu.checkpoints);
+		let rows = available
+			.iter()
+			.map(|row| {
+				let name = match row {
+					Row::Layout => format!("Movement: {layout}"),
+					Row::Apply if self.override_active => "Apply disabled".into(),
+					Row::Apply => "Apply".into(),
+					Row::Save => "Save checkpoint".into(),
+					Row::Continue => "Continue from slot".into(),
+					Row::Controller => "Controller".into(),
+					Row::Back => "Back".into(),
+				};
+				name
+			})
+			.collect();
+		(
+			"Controls".into(),
+			rows,
+			available
+				.iter()
+				.position(|row| *row == menu.focus)
+				.unwrap_or_default(),
+		)
 	}
 
-	fn apply(
+	fn apply_movement(
 		&mut self,
 		preset: Preset,
 		authored: Option<&InputProfile>,
@@ -182,99 +256,204 @@ impl PlayerControls {
 			.preferences
 			.as_ref()
 			.ok_or("Local controls storage is unavailable")?;
-		preferences.save(preset)?;
+		preferences.save(ControlsSettings {
+			movement: preset,
+			controller: self.controller,
+		})?;
 		self.applied = preset;
 		self.message = None;
-		self.menu = None;
 		Ok(profile)
+	}
+
+	fn apply_controller(&mut self, controller: ControllerBindings) -> Result<(), String> {
+		let controller = controller.validate()?;
+		let preferences = self
+			.preferences
+			.as_ref()
+			.ok_or("Local controls storage is unavailable")?;
+		preferences.save(ControlsSettings {
+			movement: self.applied,
+			controller,
+		})?;
+		self.controller = controller;
+		self.message = None;
+		Ok(())
 	}
 }
 
 impl GameApp {
 	pub(super) fn player_controls_key(&mut self, key: Key) -> bool {
-		let Some(menu) = &mut self.player_controls.menu else {
+		let Some(mut menu) = self.player_controls.menu.take() else {
 			if key != Key::Escape {
 				return false;
 			}
 			let checkpoints = self.checkpoints.is_some();
-			let continue_availability = if checkpoints {
-				self.checkpoint_availability()
-			} else {
-				ContinueAvailability::Empty
-			};
 			self.player_controls.menu = Some(Menu {
 				focus: Row::Layout,
 				draft: self.player_controls.applied,
 				checkpoints,
-				continue_availability,
+				page: Page::Main,
 			});
 			self.clear_controls_input();
 			return true;
 		};
+		let close = match &mut menu.page {
+			Page::Main => self.controls_main_key(&mut menu, key),
+			Page::Controller { focus, draft } => {
+				if self.controller_menu_key(focus, draft, key) {
+					menu.page = Page::Main;
+				}
+				false
+			}
+			Page::Saves(saves) => {
+				if !saves.key(self, key) {
+					menu.page = Page::Main;
+				}
+				false
+			}
+		};
+		if close {
+			self.clear_controls_input();
+		} else {
+			self.player_controls.menu = Some(menu);
+		}
+		true
+	}
+
+	fn controls_main_key(&mut self, menu: &mut Menu, key: Key) -> bool {
 		match key {
 			Key::Escape | Key::Enter if key == Key::Escape || matches!(menu.focus, Row::Back) => {
-				self.player_controls.menu = None;
-				self.clear_controls_input();
+				return true;
 			}
 			Key::ArrowUp | Key::ArrowDown => {
 				menu.focus = menu.focus.adjacent(key == Key::ArrowDown, menu.checkpoints);
 			}
 			Key::ArrowLeft | Key::ArrowRight
-			if !self.player_controls.override_active && matches!(menu.focus, Row::Layout) =>
-				{
-					menu.draft = menu.draft.adjacent(key == Key::ArrowRight);
-				}
+				if !self.player_controls.override_active && matches!(menu.focus, Row::Layout) =>
+			{
+				menu.draft = menu.draft.adjacent(key == Key::ArrowRight);
+			}
 			Key::Enter
-			if !self.player_controls.override_active && matches!(menu.focus, Row::Apply) =>
-				{
-					let preset = menu.draft;
-					let authored = self
-						.project
-						.as_ref()
-						.and_then(|project| project.input_profile.as_ref());
-					match self.player_controls.apply(preset, authored) {
-						Ok(profile) => {
-							self.editor
-								.set_play_input_profile(profile.clone(), &mut self.input);
-							self.input_profile_override = Some(profile);
-							self.clear_controls_input();
-						}
-						Err(error) => self.player_controls.message = Some(error),
-					}
+				if !self.player_controls.override_active && matches!(menu.focus, Row::Apply) =>
+			{
+				if self.play_trace.is_some() {
+					self.player_controls.message =
+						Some("Movement cannot change during playtrace recording".into());
+					return false;
 				}
+				let preset = menu.draft;
+				let authored = self
+					.project
+					.as_ref()
+					.and_then(|project| project.input_profile.as_ref());
+				match self.player_controls.apply_movement(preset, authored) {
+					Ok(profile) => {
+						self.editor
+							.set_play_input_profile(profile.clone(), &mut self.input);
+						self.input_profile_override = Some(profile);
+						return true;
+					}
+					Err(error) => self.player_controls.message = Some(error),
+				}
+			}
 			Key::Enter if matches!(menu.focus, Row::Save) => {
-				let result = self.save_checkpoint();
-				self.show_checkpoint_result(result);
+				self.player_controls.message = None;
+				menu.page = Page::Saves(SaveMenu::new(self, Intent::Save));
 			}
 			Key::Enter if matches!(menu.focus, Row::Continue) => {
-				let availability = self.checkpoint_availability();
-				let result = if availability.can_continue() {
-					self.continue_checkpoint()
-				} else {
-					Err(continue_label(availability).into())
+				self.player_controls.message = None;
+				menu.page = Page::Saves(SaveMenu::new(self, Intent::Continue));
+			}
+			Key::Enter if matches!(menu.focus, Row::Controller) => {
+				self.player_controls.message = None;
+				menu.page = Page::Controller {
+					focus: 0,
+					draft: self.player_controls.controller,
 				};
-				self.show_checkpoint_result(result);
 			}
 			_ => {}
 		}
-		true
+		false
+	}
+
+	fn controller_menu_key(
+		&mut self,
+		focus: &mut usize,
+		draft: &mut ControllerBindings,
+		key: Key,
+	) -> bool {
+		match key {
+			Key::Escape => return true,
+			Key::ArrowUp | Key::ArrowDown => *focus = advance_row(*focus, 4, key),
+			Key::ArrowLeft | Key::ArrowRight if *focus < 2 => {
+				let button = if *focus == 0 {
+					&mut draft.jump
+				} else {
+					&mut draft.interact
+				};
+				let step = if key == Key::ArrowRight { 1 } else { 3 };
+				*button = FaceButton::ALL[(*button as usize + step) % FaceButton::ALL.len()];
+				self.player_controls.message = None;
+			}
+			Key::Enter if *focus == 2 => match self.player_controls.apply_controller(*draft) {
+				Ok(()) => {
+					self.clear_controls_input();
+					self.player_controls.message = Some("Controller mapping saved".into());
+					return true;
+				}
+				Err(error) => self.player_controls.message = Some(error),
+			},
+			Key::Enter if *focus == 3 => return true,
+			_ => {}
+		}
+		false
 	}
 
 	fn clear_controls_input(&mut self) {
 		self.set_mouse_capture(false);
-		self.play_gamepad.reset();
 		self.input.suppress_held();
-		self.editor.clear_play_input();
+		self.clear_game_controls();
 		self.clock.reset();
 	}
+}
 
-	fn show_checkpoint_result(&mut self, result: Result<String, String>) {
-		let availability = self.checkpoint_availability();
-		if let Some(menu) = self.player_controls.menu.as_mut() {
-			menu.continue_availability = availability;
-		}
-		self.player_controls.message = Some(result.unwrap_or_else(|error| error));
+fn focused_rows(
+	title: String,
+	actions: Vec<String>,
+	focus: usize,
+	help: &str,
+	capacity: usize,
+) -> Vec<String> {
+	if capacity == 0 || actions.is_empty() {
+		return Vec::new();
 	}
+	let header = capacity >= 3;
+	let body_capacity =
+		(capacity - usize::from(header) - usize::from(capacity >= 2)).min(actions.len());
+	let first = focus.saturating_sub(body_capacity - 1);
+	let mut rows = Vec::with_capacity(capacity);
+	if header {
+		rows.push(title);
+	}
+	rows.extend(
+		actions
+			.into_iter()
+			.enumerate()
+			.skip(first)
+			.take(body_capacity)
+			.map(|(index, text)| {
+				let prefix = if index == focus { "> " } else { "  " };
+				format!("{prefix}{text}")
+			}),
+	);
+	if capacity >= 2 {
+		rows.push(help.into());
+	}
+	rows
+}
+
+fn advance_row(index: usize, count: usize, key: Key) -> usize {
+	(index + if key == Key::ArrowDown { 1 } else { count - 1 }) % count
 }
 
 fn continue_label(availability: ContinueAvailability) -> &'static str {

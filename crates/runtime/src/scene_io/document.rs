@@ -34,6 +34,18 @@ pub fn save_project_data(path: &Path, data: &crate::project::ProjectData) -> Res
 	save_json(path, &json)
 }
 
+/// Publish a flushed sibling file without replacing an occupied destination.
+pub fn save_new_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+	let (temporary, mut file) = create_temporary_file(path)?;
+	let flushed = file.write_all(bytes).and_then(|()| file.sync_all());
+	drop(file);
+	let result = flushed
+		.map_err(|error| error.to_string())
+		.and_then(|()| crate::assets::project_assets::install_new(&temporary, path));
+	let _ = fs::remove_file(temporary);
+	result
+}
+
 fn save_json(path: &Path, json: &str) -> Result<(), String> {
 	let (temporary_path, mut file) = create_temporary_file(path)?;
 	let write_result = file

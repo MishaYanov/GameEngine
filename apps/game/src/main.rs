@@ -8,6 +8,7 @@ mod gizmo_overlay;
 mod native_input;
 mod play;
 mod player_controls;
+mod playtrace;
 mod scene_documents;
 mod scene_rendering;
 mod selection_overlay;
@@ -27,12 +28,15 @@ use selection_overlay::SelectionOverlay;
 
 use ::game::launch::{LaunchMode, LaunchOptions};
 use engine_logger::ResultLogExt;
+use player_controls::PromptDevice;
 use renderer::{WindowRenderer, vulkan::CameraUniform};
 use runtime::assets::AssetManager;
 use runtime::camera_input::{
 	CameraInputOwner, CameraIntent, WheelSample, normalize_mouse, normalize_wheel,
 };
-use runtime::input::{GamepadOwner, InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
+use runtime::input::{
+	GamepadOwner, GamepadSample, InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings,
+};
 use runtime::scene_catalog::SceneId;
 use runtime::scene_editor::ProjectData;
 use runtime::scene_io;
@@ -100,6 +104,7 @@ struct GameApp {
 	project: Option<ProjectData>,
 	input_profile_override: Option<InputProfile>,
 	player_controls: player_controls::PlayerControls,
+	play_trace: Option<playtrace::PlayTrace>,
 	checkpoints: Option<courtyard_gameplay::checkpoint::CheckpointRegistry>,
 	checkpoint_base: Option<Arc<runtime::scene_data::SceneData>>,
 	interaction_action: Option<String>,
@@ -189,7 +194,7 @@ impl GameApp {
 	fn needs_continuous_redraw(&self) -> bool {
 		if self.window_occluded
 			|| (self.standalone_runtime
-			&& (self.game_completed() || self.player_controls.is_open()))
+				&& (self.game_completed() || self.player_controls.is_open()))
 		{
 			return false;
 		}
@@ -232,25 +237,86 @@ impl GameApp {
 			|| self.editor.simulation_paused()
 			|| self.game_completed()
 			|| !self.window.as_ref().is_some_and(|window| {
-			let size = window.inner_size();
-			window.has_focus() && size.width > 0 && size.height > 0
-		}) {
+				let size = window.inner_size();
+				window.has_focus() && size.width > 0 && size.height > 0
+			}) {
 			self.play_gamepad.reset();
 			return None;
 		}
-		if self.play_gamepad.poll(now, runtime::input::poll_gamepad) {
-			if let Err(error) = self
-				.editor
-				.sample_play_controls(&self.input, self.play_gamepad.sample())
-			{
+		let was_connected = self.play_gamepad.connected();
+		let previous = self.logical_gamepad();
+		let changed = self.play_gamepad.poll(now, runtime::input::poll_gamepad)
+			&& previous != self.logical_gamepad();
+		let disconnected = was_connected && !self.play_gamepad.connected();
+		if disconnected {
+			self.player_controls
+				.set_prompt_device(PromptDevice::Keyboard);
+		}
+		if changed {
+			if let Err(error) = self.submit_play_controls() {
 				engine_logger::error!(target: "game", "Controller input rejected: {error}");
-				self.editor.clear_play_input();
-				self.play_gamepad.reset();
+				self.clear_game_controls();
 				return Some(now + Duration::from_millis(16));
 			}
+			self.note_controller_activity(previous);
+		}
+		if changed || disconnected {
 			self.request_input_frame();
 		}
 		self.play_gamepad.deadline()
+	}
+
+	fn logical_gamepad(&self) -> GamepadSample {
+		self.player_controls
+			.controller()
+			.resolve(self.play_gamepad.sample())
+	}
+
+	fn effective_input_profile(&self) -> Option<&InputProfile> {
+		self.input_profile_override
+			.as_ref()
+			.or_else(|| self.project.as_ref()?.input_profile.as_ref())
+	}
+
+	fn submit_play_controls(&mut self) -> Result<(), String> {
+		let pad = self.logical_gamepad();
+		self.editor.sample_play_controls(&self.input, pad)?;
+		if let Some(trace) = self.play_trace.as_mut() {
+			trace.record_controls(&self.input, pad);
+		}
+		Ok(())
+	}
+
+	#[cfg(windows)]
+	fn note_controller_activity(&mut self, previous: GamepadSample) {
+		let pad = self.logical_gamepad();
+		let moving = pad.movement() != [0.0; 2]
+			&& [pad.left_x, pad.left_y] != [previous.left_x, previous.left_y]
+			&& self.editor.play_movement_bindings().direction(&self.input) == [0.0; 2];
+		let action = self.effective_input_profile().is_some_and(|profile| {
+			profile.actions.iter().any(|binding| {
+				!self.input.is_held(binding.key)
+					&& match binding.id.as_str() {
+						"jump" => pad.jump && !previous.jump,
+						"interact" => pad.interact && !previous.interact,
+						_ => false,
+					}
+			})
+		});
+		if moving || action {
+			self.player_controls
+				.set_prompt_device(PromptDevice::Controller);
+		}
+	}
+
+	fn clear_game_controls(&mut self) {
+		self.editor.clear_play_input();
+		self.play_gamepad.reset();
+		self.player_controls
+			.set_prompt_device(PromptDevice::Keyboard);
+		if let Some(trace) = self.play_trace.as_mut() {
+			trace.clear_controls();
+		}
 	}
 
 	fn handle_scene_commands(&mut self) -> bool {
@@ -604,8 +670,7 @@ impl GameApp {
 		if !capture && let Some(owner) = self.orbit_capture.take() {
 			self.input.suppress_held();
 			if self.editor.owns_camera_input(&owner) {
-				self.editor.clear_play_input();
-				self.play_gamepad.reset();
+				self.clear_game_controls();
 			}
 		}
 		let Some(window) = self.window.as_ref() else {
@@ -817,6 +882,15 @@ impl ApplicationHandler for GameApp {
 				if is_synthetic && event.state == ElementState::Pressed {
 					return;
 				}
+				if self.standalone_runtime
+					&& event.state == ElementState::Pressed
+					&& (self.window_occluded
+						|| !self.window.as_ref().is_some_and(|window| {
+							let size = window.inner_size();
+							window.has_focus() && size.width > 0 && size.height > 0
+						})) {
+					return;
+				}
 				if event.state == ElementState::Pressed
 					&& self.mouse_captured
 					&& event.physical_key == PhysicalKey::Code(winit::keyboard::KeyCode::Escape)
@@ -859,11 +933,21 @@ impl ApplicationHandler for GameApp {
 					ElementState::Pressed => {}
 					ElementState::Released => self.input.release(key),
 				}
-				if let Err(error) = self
-					.editor
-					.sample_play_controls(&self.input, self.play_gamepad.sample())
-				{
-					engine_logger::error!(target: "game", "Gameplay input rejected: {error}");
+				match self.submit_play_controls() {
+					Err(error) => {
+						engine_logger::error!(target: "game", "Gameplay input rejected: {error}")
+					}
+					Ok(()) => {
+						if self.standalone_runtime
+							&& !self.editor.simulation_paused()
+							&& self.input.just_pressed(key)
+							&& event.state == ElementState::Pressed
+							&& !event.repeat && self.editor.play_input_binds_key(key)
+						{
+							self.player_controls
+								.set_prompt_device(PromptDevice::Keyboard);
+						}
+					}
 				}
 			}
 			WindowEvent::Focused(false) => {
@@ -873,8 +957,7 @@ impl ApplicationHandler for GameApp {
 				}
 				self.set_mouse_capture(false);
 				self.input.suppress_held();
-				self.editor.clear_play_input();
-				self.play_gamepad.reset();
+				self.clear_game_controls();
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -893,8 +976,7 @@ impl ApplicationHandler for GameApp {
 				if occluded {
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
-					self.editor.clear_play_input();
-					self.play_gamepad.reset();
+					self.clear_game_controls();
 				} else {
 					self.window.as_ref().unwrap().request_redraw();
 				}
@@ -912,8 +994,7 @@ impl ApplicationHandler for GameApp {
 					}
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
-					self.editor.clear_play_input();
-					self.play_gamepad.reset();
+					self.clear_game_controls();
 					self.clock.reset();
 
 					self.next_frame_deadline = None;
@@ -1163,6 +1244,19 @@ fn run() -> Result<(), String> {
 					.map(|route| route.action);
 		}
 	}
+	if let Some(path) = options.record_playtrace {
+		let project = app
+			.project
+			.as_ref()
+			.ok_or("Playtrace requires an authored project")?;
+		let defaults = InputProfile::default();
+		let authored = project.input_profile.as_ref().unwrap_or(&defaults);
+		app.play_trace = Some(playtrace::PlayTrace::new(
+			path,
+			authored,
+			app.effective_input_profile().unwrap_or(&defaults),
+		)?);
+	}
 	engine_logger::debug!(target: "game", "Launch configuration selected: mode={:?}, installed={}", options.mode, app.installed_project);
 
 	// Validate launch configuration before creating platform/GPU resources.
@@ -1181,6 +1275,9 @@ fn run() -> Result<(), String> {
 	}
 	if app.smoke_test && !app.smoke_test_completed {
 		return Err("Startup smoke test exited without completing a frame".into());
+	}
+	if let Some(trace) = app.play_trace.take() {
+		trace.finish()?;
 	}
 	Ok(())
 }
@@ -1292,3 +1389,7 @@ mod camera_native_tests;
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_checkpoint_native.rs"]
 mod checkpoint_native_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/tests_playtrace_native.rs"]
+mod playtrace_native_tests;

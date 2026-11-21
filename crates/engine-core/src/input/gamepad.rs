@@ -1,4 +1,6 @@
-/// Portable snapshot of the left stick and the supported gamepad buttons.
+use serde::{Deserialize, Serialize};
+
+/// Portable snapshot of the left stick and the resolved logical actions.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GamepadSample {
 	pub left_x: i16,
@@ -28,6 +30,78 @@ impl GamepadSample {
 	/// Reports whether movement and both buttons are at rest.
 	pub fn is_neutral(self) -> bool {
 		!self.jump && !self.interact && self.movement() == [0.0; 2]
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaceButton {
+	A,
+	B,
+	X,
+	Y,
+}
+
+impl FaceButton {
+	pub const ALL: [Self; 4] = [Self::A, Self::B, Self::X, Self::Y];
+}
+
+/// Face button order is A, B, X, Y. Rearming checks all four buttons.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicalGamepadSample {
+	pub left_x: i16,
+	pub left_y: i16,
+	pub face_buttons: [bool; 4],
+}
+
+impl PhysicalGamepadSample {
+	pub fn movement(self) -> [f32; 2] {
+		self.stick().movement()
+	}
+
+	pub fn is_neutral(self) -> bool {
+		self.face_buttons == [false; 4] && self.movement() == [0.0; 2]
+	}
+
+	fn stick(self) -> GamepadSample {
+		GamepadSample {
+			left_x: self.left_x,
+			left_y: self.left_y,
+			..GamepadSample::default()
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerBindings {
+	pub jump: FaceButton,
+	pub interact: FaceButton,
+}
+
+impl Default for ControllerBindings {
+	fn default() -> Self {
+		Self {
+			jump: FaceButton::A,
+			interact: FaceButton::X,
+		}
+	}
+}
+
+impl ControllerBindings {
+	pub fn validate(self) -> Result<Self, &'static str> {
+		if self.jump == self.interact {
+			return Err("Choose different buttons for Jump and Interact");
+		}
+		Ok(self)
+	}
+
+	pub fn resolve(self, input: PhysicalGamepadSample) -> GamepadSample {
+		GamepadSample {
+			jump: input.face_buttons[self.jump as usize],
+			interact: input.face_buttons[self.interact as usize],
+			..input.stick()
+		}
 	}
 }
 

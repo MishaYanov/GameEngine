@@ -4,6 +4,24 @@
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_19_27": {
+    "date": "2026-11-21",
+    "inspected_head": "4f98841a1c327c45c872c68eaeb6ab0606a8a30b",
+    "scope": "Milestones 19 through 21 implement Windows standalone controller profiles and device prompts, Courtyard save slots with explicit recovery, and playtrace recording, comparison and handoff. The local learning guides reflect those implementations and define Milestones 22 through 27 as build-along exercises.",
+    "verification": [
+      "715 focused Rust tests and 176 editor-host tests passed in the standard runs. Four separately enabled Windows and Vulkan test cases passed against the verified copied package, covering slot isolation, a backup restore, earlier package compatibility and controller remapping with injected input.",
+      "The local qualification built and verified the Windows candidate archive and two packaged Player smoke modes. The native trace finished Courtyard in headless. The v5 marker comparison identified the omitted Interact edge at after-gate and the evidence bundle verified against the candidate receipt and archive. Nine focused Python tests passed.",
+      "The guide, test, defensive security and optimization reviews checked source paths, native harness coverage, final slot generation validation, atomic trace publication and removal of redundant slot and render work.",
+      "The documentation site rebuilt and link-checked 65 pages and passed eight tests. All 79 generated files matched the existing site byte for byte. The local guide check covered 36 updated or added files, including 26 feature pages with code examples and final resource sections."
+    ],
+    "verification_limits": [
+      "Physical XInput and a separate clean Windows host remain manual acceptance checks. The native controller test injects input and the candidate receipt records a dirty checkout.",
+      "Verification uses a trusted qualification receipt and archive and confirms trace and manifest identity. It does not authenticate human-entered metadata or replay results and does not execute the trace during evidence verification.",
+      "Milestones 22 through 27 are planned exercises. Timing thresholds, hardware results and release approval are still to be established in those exercises."
+    ],
+    "candidate_archive_sha256": "7dbe69292818aef519e01ee62298bb24e2bbed085f98374c16807d21ea1617f7",
+    "pending_documentation_changes": []
+  },
   "courtyard_release_milestones_16_21": {
     "date": "2026-11-21",
     "inspected_head": "8c579a17b07be495d4ae7975f92bed570874ba09",

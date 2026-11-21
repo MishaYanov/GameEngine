@@ -27,8 +27,61 @@ struct CameraPose {
 	yaw: f32,
 	pitch: f32,
 }
+
+#[derive(Serialize)]
+pub(super) struct ReplayIdentity {
+	pub(super) replay_sha256: String,
+	pub(super) project_manifest_sha256: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct ReplayMarker {
+	label: String,
+	scene_id: SceneId,
+	simulation_tick: u64,
+	completed: Option<bool>,
+	score: Option<i32>,
+	has_courtyard_key: Option<bool>,
+	route_gate_open: Option<bool>,
+}
+
+impl ReplayMarker {
+	pub(super) fn capture(engine: &Engine, label: String) -> Result<Self, String> {
+		let session = engine.session();
+		let scene_id = session.play_scene_id().ok_or("mark requires Play mode")?;
+		let courtyard = session.play_progress::<courtyard_gameplay::CampaignProgress>();
+		let gameplay = courtyard
+			.is_none()
+			.then(|| engine.play_status().and_then(|status| status.gameplay))
+			.flatten();
+		Ok(Self {
+			label,
+			scene_id: scene_id.clone(),
+			simulation_tick: session.simulation_stats().map_or(0, |stats| stats.0),
+			completed: courtyard
+				.map(|facts| facts.completed)
+				.or_else(|| gameplay.as_ref().map(|status| status.completed)),
+			score: courtyard
+				.map(|facts| facts.score)
+				.or_else(|| gameplay.and_then(|status| status.score)),
+			has_courtyard_key: courtyard.map(|facts| facts.has_courtyard_key),
+			route_gate_open: courtyard.map(|facts| facts.route_gate_open),
+		})
+	}
+}
+
+#[derive(Default)]
+pub(super) struct ReplayReport {
+	pub(super) identity: Option<ReplayIdentity>,
+	pub(super) markers: Vec<ReplayMarker>,
+}
+
 #[derive(Serialize)]
 pub(super) struct Summary {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	replay_identity: Option<ReplayIdentity>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	markers: Vec<ReplayMarker>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	orbit_camera_pose: Option<CameraPose>,
 	camera_runtime: Option<engine_core::camera_replay::CameraReplayProjection>,
@@ -81,6 +134,7 @@ pub(super) fn finish(
 	engine: &Engine,
 	options: &Options,
 	measures: &Measurements,
+	replay: ReplayReport,
 	source_schema: u32,
 	started: Instant,
 	budget: Duration,
@@ -117,6 +171,8 @@ pub(super) fn finish(
 	serde_json::to_writer(&mut camera_hash, &camera_runtime)
 		.map_err(|error| format!("Cannot hash camera replay: {error}"))?;
 	let summary = Summary {
+		replay_identity: replay.identity,
+		markers: replay.markers,
 		camera_runtime,
 		camera_runtime_hash_algorithm: "fnv1a64",
 		camera_runtime_hash_scope: "camera_runtime_v1",

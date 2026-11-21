@@ -1,4 +1,4 @@
-use super::GamepadSample;
+use super::PhysicalGamepadSample;
 use std::time::{Duration, Instant};
 
 const CONNECTED_INTERVAL: Duration = Duration::from_millis(16);
@@ -8,7 +8,7 @@ const DISCOVERY_INTERVAL: Duration = Duration::from_millis(250);
 pub struct GamepadOwner {
 	slot: Option<u32>,
 	next_poll: Option<Instant>,
-	sample: GamepadSample,
+	sample: PhysicalGamepadSample,
 	waiting_for_neutral: bool,
 }
 
@@ -17,14 +17,14 @@ impl Default for GamepadOwner {
 		Self {
 			slot: None,
 			next_poll: None,
-			sample: GamepadSample::default(),
+			sample: PhysicalGamepadSample::default(),
 			waiting_for_neutral: true,
 		}
 	}
 }
 
 impl GamepadOwner {
-	pub fn sample(&self) -> GamepadSample {
+	pub fn sample(&self) -> PhysicalGamepadSample {
 		self.sample
 	}
 
@@ -32,10 +32,14 @@ impl GamepadOwner {
 		self.next_poll
 	}
 
+	pub fn connected(&self) -> bool {
+		self.slot.is_some()
+	}
+
 	/// Clear input when focus, play ownership, or scene identity changes.
 	pub fn reset(&mut self) {
 		self.next_poll = None;
-		self.sample = GamepadSample::default();
+		self.sample = PhysicalGamepadSample::default();
 		self.waiting_for_neutral = true;
 	}
 
@@ -43,7 +47,7 @@ impl GamepadOwner {
 	pub fn poll(
 		&mut self,
 		now: Instant,
-		mut read: impl FnMut(u32) -> Option<GamepadSample>,
+		mut read: impl FnMut(u32) -> Option<PhysicalGamepadSample>,
 	) -> bool {
 		if self.next_poll.is_some_and(|deadline| now < deadline) {
 			return false;

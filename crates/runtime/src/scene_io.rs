@@ -11,7 +11,7 @@ use crate::{
 mod document;
 mod native;
 
-pub use document::{load_data, save_data, save_project_data};
+pub use document::{load_data, save_data, save_new_bytes, save_project_data};
 pub use native::{instantiate, instantiate_with_progress};
 
 pub struct LoadedScene {

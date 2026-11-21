@@ -12,6 +12,14 @@ pub struct ScreenOverlay {
 	visible: bool,
 }
 impl ScreenOverlay {
+	/// Number of text rows available at this physical extent and DPI scale.
+	pub fn row_capacity(extent: [u32; 2], scale: f64) -> usize {
+		if !scale.is_finite() || scale <= 0.0 {
+			return 0;
+		}
+		((((extent[1] as f32 / scale as f32) - 32.0).max(0.0) / 22.0) as usize).min(8)
+	}
+
 	pub fn new(renderer: &WindowRenderer) -> Result<Self, String> {
 		let texture = renderer
 			.upload_rgba8(128, 64, &bitmap_font_pixels())
@@ -39,7 +47,7 @@ impl ScreenOverlay {
 		];
 		let width = (size[0] - 32.0).clamp(0.0, 760.0);
 		let columns = ((width - 24.0).max(0.0) / 12.0) as usize;
-		let available_rows = (((size[1] - 32.0).max(0.0) / 22.0) as usize).min(8);
+		let available_rows = Self::row_capacity(extent, scale);
 		let rows = rows
 			.iter()
 			.take(available_rows)

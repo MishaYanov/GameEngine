@@ -1,9 +1,10 @@
 use super::args::Options;
 use engine_core::{
-	project::ProjectData,
+	project::{MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::SceneId,
 	scene_data::{MAX_SCENE_BYTES, SceneData, validate_model_path},
 };
+use sha2::{Digest, Sha256};
 use std::{
 	collections::HashSet,
 	fs::File,
@@ -16,13 +17,18 @@ pub(super) struct Source {
 	pub(super) project: ProjectData,
 	pub(super) parsed: engine_core::scene_data::ParsedScene,
 	pub(super) documents: Vec<(SceneId, SceneData)>,
+	pub(super) project_manifest_sha256: Option<String>,
 }
 pub(super) fn source(options: &Options) -> Result<Source, String> {
 	if let Some(path) = &options.project {
 		let manifest = path
 			.canonicalize()
 			.map_err(|e| format!("Cannot open project: {e}"))?;
-		let project = ProjectData::load(&manifest)?;
+		let manifest_text = read_bounded(&manifest, MAX_PROJECT_BYTES)?;
+		let project = ProjectData::from_json(&manifest_text)?;
+		// Custom asset roots are useful for diagnostics but cannot claim a package manifest identity.
+		let project_manifest_sha256 = (options.replay.is_some() && options.asset_root.is_none())
+			.then(|| format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
 		let root = options
 			.asset_root
 			.clone()
@@ -61,6 +67,7 @@ pub(super) fn source(options: &Options) -> Result<Source, String> {
 			project,
 			parsed: parsed.ok_or("Startup scene is missing")?,
 			documents,
+			project_manifest_sha256,
 		});
 	}
 	let scene = options
@@ -103,6 +110,7 @@ pub(super) fn source(options: &Options) -> Result<Source, String> {
 		)?,
 		parsed,
 		documents: Vec::new(),
+		project_manifest_sha256: None,
 	})
 }
 fn contained(root: &Path, relative: &str) -> Result<PathBuf, String> {

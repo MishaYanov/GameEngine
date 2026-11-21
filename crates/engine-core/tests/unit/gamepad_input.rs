@@ -1,6 +1,30 @@
-use super::GamepadSample;
+use super::{ControllerBindings, FaceButton, GamepadSample, PhysicalGamepadSample};
 use crate::input::{GameInputBinding, InputProfile, InputState, Key};
 use std::collections::HashSet;
+
+#[test]
+fn physical_layout_remaps_b_and_preserves_default_jump() {
+	let sample = PhysicalGamepadSample {
+		face_buttons: [true, true, false, false],
+		..PhysicalGamepadSample::default()
+	};
+	let settings = ControllerBindings {
+		jump: FaceButton::A,
+		interact: FaceButton::B,
+	};
+	assert!(settings.validate().is_ok());
+	assert!(settings.resolve(sample).interact);
+	assert!(settings.resolve(sample).jump);
+	assert!(!ControllerBindings::default().resolve(sample).interact);
+	assert!(
+		ControllerBindings {
+			jump: FaceButton::B,
+			..settings
+		}
+		.validate()
+		.is_err()
+	);
+}
 
 #[test]
 fn radial_dead_zone_filters_drift_without_discarding_partial_speed() {
@@ -16,7 +40,7 @@ fn radial_dead_zone_filters_drift_without_discarding_partial_speed() {
 			jump: true,
 			..drift
 		}
-			.is_neutral()
+		.is_neutral()
 	);
 
 	let just_outside = GamepadSample {
@@ -44,7 +68,7 @@ fn signed_extents_and_diagonals_share_the_same_maximum_speed() {
 			left_y: axis,
 			..horizontal
 		}
-			.movement();
+		.movement();
 		assert!((x.hypot(y) - 1.0).abs() <= f32::EPSILON);
 		assert_eq!(x, y);
 		assert_eq!(x.signum(), direction);

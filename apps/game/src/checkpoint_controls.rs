@@ -1,6 +1,8 @@
 //! Player actions for the opted-in Courtyard checkpoint registry.
 
-use courtyard_gameplay::checkpoint::ContinueAvailability;
+use courtyard_gameplay::checkpoint::{
+	CheckpointWrite, ContinueAvailability, RestoreSource, SaveSlot, SlotGeneration, SlotInspection,
+};
 
 use super::*;
 
@@ -13,6 +15,7 @@ fn storage_root() -> Result<PathBuf, String> {
 }
 
 impl GameApp {
+	#[cfg(all(test, windows))]
 	pub(super) fn checkpoint_availability(&self) -> ContinueAvailability {
 		let (Some(registry), Some(project), Ok(root)) =
 			(&self.checkpoints, &self.project, storage_root())
@@ -25,7 +28,44 @@ impl GameApp {
 		})
 	}
 
+	pub(super) fn checkpoint_slots(&self) -> [SlotInspection; 3] {
+		let (Some(registry), Some(project), Ok(root)) =
+			(&self.checkpoints, &self.project, storage_root())
+		else {
+			return std::array::from_fn(|_| SlotInspection::default());
+		};
+		registry.inspect_slots(&root, project, |scene_id| {
+			self.authored_checkpoint_scene(scene_id)
+				.map(|(_, document)| document)
+		})
+	}
+
+	pub(super) fn checkpoint_slot(&self, slot: SaveSlot) -> SlotInspection {
+		let (Some(registry), Some(project), Ok(root)) =
+			(&self.checkpoints, &self.project, storage_root())
+		else {
+			return SlotInspection::default();
+		};
+		registry.inspect_slot(&root, slot, project, |scene_id| {
+			self.authored_checkpoint_scene(scene_id)
+				.map(|(_, document)| document)
+		})
+	}
+
+	#[cfg(all(test, windows))]
 	pub(super) fn save_checkpoint(&self) -> Result<String, String> {
+		let expected = self
+			.checkpoint_slot(SaveSlot::One)
+			.generation
+			.ok_or("Checkpoint storage is unavailable")?;
+		self.save_checkpoint_slot(SaveSlot::One, &expected)
+	}
+
+	pub(super) fn save_checkpoint_slot(
+		&self,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+	) -> Result<String, String> {
 		let registry = self
 			.checkpoints
 			.as_ref()
@@ -47,18 +87,45 @@ impl GameApp {
 			.checkpoint_base
 			.as_deref()
 			.ok_or("Authored checkpoint base is unavailable")?;
-		registry.save(&storage_root()?, checkpoint, project, &authored, progress)?;
+		registry.save_slot(
+			&storage_root()?,
+			slot,
+			expected,
+			CheckpointWrite {
+				checkpoint,
+				project,
+				authored,
+				progress,
+			},
+			|scene_id| {
+				self.authored_checkpoint_scene(scene_id)
+					.map(|(_, document)| document)
+			},
+		)?;
 		Ok(format!("Saved {}", checkpoint.id))
 	}
 
+	#[cfg(all(test, windows))]
 	pub(super) fn continue_checkpoint(&mut self) -> Result<String, String> {
+		let expected = self
+			.checkpoint_slot(SaveSlot::One)
+			.generation
+			.ok_or("Checkpoint storage is unavailable")?;
+		self.continue_checkpoint_slot(SaveSlot::One, &expected, RestoreSource::Current)
+	}
+
+	pub(super) fn continue_checkpoint_slot(
+		&mut self,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		source: RestoreSource,
+	) -> Result<String, String> {
 		let registry = self
 			.checkpoints
 			.as_ref()
 			.ok_or("This project has no checkpoints")?;
-		let saved = registry
-			.load(&storage_root()?)?
-			.ok_or("No saved checkpoint")?;
+		let profile = storage_root()?;
+		let saved = registry.load_slot_for_restore(&profile, slot, expected, source)?;
 		let project = self.project.as_ref().ok_or("Project is unavailable")?;
 		let scene_id = saved.scene_id().clone();
 		let (path, authored) = self.authored_checkpoint_scene(&scene_id)?;
@@ -68,15 +135,19 @@ impl GameApp {
 		let prepared =
 			self.editor
 				.prepare_restored_game(scene_id, Arc::clone(&document), progress)?;
-		self.adopt_prepared_scene(&document, prepared, path)?;
+		self.adopt_prepared_scene_checked(&document, prepared, path, |registry| {
+			registry
+				.ok_or("Checkpoint registry changed")?
+				.verify_slot_generation(&profile, slot, expected)
+		})?;
 		self.checkpoint_base = Some(Arc::new(authored));
-		Ok(
-			if status == ContinueAvailability::CompatibleEarlierRelease {
-				format!("Loaded earlier save ({})", saved.checkpoint_id())
-			} else {
-				format!("Continued from {}", saved.checkpoint_id())
-			},
-		)
+		Ok(if source == RestoreSource::Previous {
+			format!("Recovered prior save ({})", saved.checkpoint_id())
+		} else if status == ContinueAvailability::CompatibleEarlierRelease {
+			format!("Loaded earlier save ({})", saved.checkpoint_id())
+		} else {
+			format!("Continued from {}", saved.checkpoint_id())
+		})
 	}
 
 	fn authored_checkpoint_scene(

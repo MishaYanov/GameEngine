@@ -1,13 +1,16 @@
 //! Read an XInput slot without taking ownership of gameplay input.
 
-use super::GamepadSample;
+use super::PhysicalGamepadSample;
 use std::mem::MaybeUninit;
 use windows_sys::Win32::{
 	Foundation::ERROR_SUCCESS,
-	UI::Input::XboxController::{XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_X, XINPUT_STATE, XInputGetState},
+	UI::Input::XboxController::{
+		XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y, XINPUT_STATE,
+		XInputGetState,
+	},
 };
 
-pub fn poll_gamepad(slot: u32) -> Option<GamepadSample> {
+pub fn poll_gamepad(slot: u32) -> Option<PhysicalGamepadSample> {
 	if slot > 3 {
 		return None;
 	}
@@ -18,10 +21,15 @@ pub fn poll_gamepad(slot: u32) -> Option<GamepadSample> {
 	}
 	// SAFETY: a successful XInputGetState call initializes the state.
 	let pad = unsafe { state.assume_init() }.Gamepad;
-	Some(GamepadSample {
+	Some(PhysicalGamepadSample {
 		left_x: pad.sThumbLX,
 		left_y: pad.sThumbLY,
-		jump: pad.wButtons & XINPUT_GAMEPAD_A != 0,
-		interact: pad.wButtons & XINPUT_GAMEPAD_X != 0,
+		face_buttons: [
+			XINPUT_GAMEPAD_A,
+			XINPUT_GAMEPAD_B,
+			XINPUT_GAMEPAD_X,
+			XINPUT_GAMEPAD_Y,
+		]
+		.map(|button| pad.wButtons & button != 0),
 	})
 }

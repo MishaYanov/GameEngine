@@ -1,16 +1,14 @@
 use super::*;
 
-const ACTIVE: GamepadSample = GamepadSample {
+const ACTIVE: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 18_000,
 	left_y: 0,
-	jump: true,
-	interact: false,
+	face_buttons: [true, false, false, false],
 };
-const CENTERED: GamepadSample = GamepadSample {
+const CENTERED: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 1_000,
 	left_y: -2_000,
-	jump: false,
-	interact: false,
+	face_buttons: [false; 4],
 };
 
 #[test]
@@ -56,5 +54,20 @@ fn centered_noise_does_not_invalidate_the_current_sample() {
 	let now = Instant::now();
 	assert!(!owner.poll(now, |_| Some(CENTERED)));
 	assert!(!owner.poll(now + CONNECTED_INTERVAL, |_| Some(CENTERED)));
-	assert_eq!(owner.sample(), GamepadSample::default());
+	assert_eq!(owner.sample(), PhysicalGamepadSample::default());
+}
+
+#[test]
+fn unassigned_face_button_still_blocks_rearming() {
+	let mut owner = GamepadOwner::default();
+	let now = Instant::now();
+	let held_y = PhysicalGamepadSample {
+		face_buttons: [false, false, false, true],
+		..CENTERED
+	};
+	assert!(!owner.poll(now, |_| Some(held_y)));
+	assert!(owner.connected());
+	assert!(!owner.poll(now + CONNECTED_INTERVAL, |_| Some(ACTIVE)));
+	assert!(!owner.poll(now + CONNECTED_INTERVAL * 2, |_| Some(CENTERED)));
+	assert!(owner.poll(now + CONNECTED_INTERVAL * 3, |_| Some(ACTIVE)));
 }

@@ -1,6 +1,6 @@
 //! Save and Continue through the release fixture in two fresh native processes.
 use super::*;
-use courtyard_gameplay::checkpoint::ContinueAvailability;
+use courtyard_gameplay::checkpoint::{ContinueAvailability, SaveSlot};
 use std::{
 	fs,
 	os::windows::process::CommandExt,
@@ -9,17 +9,17 @@ use std::{
 };
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
-const PHASE_VAR: &str = "GAME_ENGINE_QA_CHECKPOINT_PHASE";
+pub(super) const PHASE_VAR: &str = "GAME_ENGINE_QA_CHECKPOINT_PHASE";
 const PRIOR_PROJECT_VAR: &str = "GAME_ENGINE_QA_PRIOR_PROJECT";
-const CURRENT_PROJECT_VAR: &str = "GAME_ENGINE_QA_PROJECT";
+pub(super) const CURRENT_PROJECT_VAR: &str = "GAME_ENGINE_QA_PROJECT";
 const UNAPPROVED_PROJECT_VAR: &str = "GAME_ENGINE_QA_UNAPPROVED_PROJECT";
 const RELEASE_SAVE_ID: &str = "c70545a2-181c-42d0-906e-87fb32547914";
 const STEP: f32 = 1.0 / 60.0;
 
-struct ProfileDir(PathBuf);
+pub(super) struct ProfileDir(pub(super) PathBuf);
 
 impl ProfileDir {
-	fn new() -> Self {
+	pub(super) fn new() -> Self {
 		static NEXT: AtomicU64 = AtomicU64::new(0);
 		let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 			.join("../../target")
@@ -97,7 +97,41 @@ fn save_package_upgrade_preserves_old_bytes_until_explicit_save() {
 	assert_eq!(fs::read(slot).unwrap(), upgraded);
 }
 
-fn run_isolated_phase(test: &str, phase: &str, profile: &ProfileDir, manifest: Option<&Path>) {
+#[test]
+#[ignore = "requires the release fixture, a native Windows session and Vulkan"]
+fn courtyard_slots_restore_across_processes_and_offer_explicit_recovery() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str = "checkpoint_native_tests::courtyard_slots_restore_across_processes_and_offer_explicit_recovery";
+	let profile = ProfileDir::new();
+	let directory = profile
+		.0
+		.join("GameEngine/checkpoints")
+		.join(RELEASE_SAVE_ID);
+	run_isolated_phase(TEST, "slots-save", &profile, None);
+	let slot_one = directory.join("slot.json");
+	let previous_one = directory.join("slot.previous.json");
+	let slot_two = directory.join("slot-2.json");
+	let saved_two = fs::read(&slot_two).unwrap();
+	let previous = fs::read(&previous_one).unwrap();
+	assert_ne!(fs::read(&slot_one).unwrap(), previous);
+	let corrupt = b"simulated interrupted checkpoint";
+	fs::write(&slot_one, corrupt).unwrap();
+	run_isolated_phase(TEST, "slots-restore", &profile, None);
+	assert_eq!(fs::read(slot_one).unwrap(), corrupt);
+	assert_eq!(fs::read(previous_one).unwrap(), previous);
+	assert_eq!(fs::read(slot_two).unwrap(), saved_two);
+	assert!(!directory.join("slot-3.json").exists());
+}
+
+pub(super) fn run_isolated_phase(
+	test: &str,
+	phase: &str,
+	profile: &ProfileDir,
+	manifest: Option<&Path>,
+) {
 	let mut command = Command::new(std::env::current_exe().unwrap());
 	command
 		.args(["--ignored", "--exact", test, "--nocapture"])
@@ -182,6 +216,11 @@ impl ApplicationHandler for NativePhase {
 				assert_eq!(app.checkpoint_availability(), ContinueAvailability::Current);
 			}
 			"deny" => reject_unlisted_slot(&mut app),
+			"slots-save" => save_independent_slots(&mut app),
+			"slots-restore" => restore_independent_slots(&mut app),
+			"trace-remap" | "trace-record" => {
+				super::playtrace_native_tests::run_phase(&mut app, &self.phase)
+			}
 			_ => panic!("Unknown checkpoint verification phase"),
 		}
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
@@ -195,7 +234,7 @@ impl ApplicationHandler for NativePhase {
 	fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
 }
 
-fn run_native_phase(phase: &str) {
+pub(super) fn run_native_phase(phase: &str) {
 	let local = std::env::var_os("LOCALAPPDATA").expect("isolated profile");
 	let isolated =
 		std::env::var_os("GAME_ENGINE_QA_CHECKPOINT_PROFILE").expect("isolated test profile");
@@ -254,13 +293,11 @@ fn take_checkpoint(app: &mut GameApp) {
 	app.tick_play(STEP).unwrap();
 	assert!(progress(app).route_gate_open);
 	move_for(app, Key::ArrowLeft, 64);
-	menu_keys(
-		app,
-		&[Key::Escape, Key::ArrowDown, Key::ArrowDown, Key::Enter],
-	);
+	open_slot_actions(app, true, SaveSlot::One);
+	menu_keys(app, &[Key::Enter]);
 	let saved = app.player_controls.rows().unwrap().join("\n");
 	assert!(saved.contains("after_gate"), "{saved}");
-	menu_keys(app, &[Key::Escape]);
+	close_checkpoint_menu(app);
 	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
 }
 
@@ -273,19 +310,11 @@ fn restore_and_finish(app: &mut GameApp) {
 		&runtime::input::MovementBindings::ARROWS
 	);
 	let before = app.editor.play_status().unwrap().run_id;
-	menu_keys(
-		app,
-		&[
-			Key::Escape,
-			Key::ArrowDown,
-			Key::ArrowDown,
-			Key::ArrowDown,
-			Key::Enter,
-		],
-	);
+	open_slot_actions(app, false, SaveSlot::One);
+	menu_keys(app, &[Key::Enter]);
 	let continued = app.player_controls.rows().unwrap().join("\n");
 	assert!(continued.contains("after_gate"), "{continued}");
-	menu_keys(app, &[Key::Escape]);
+	close_checkpoint_menu(app);
 	assert_ne!(app.editor.play_status().unwrap().run_id, before);
 	assert!(progress(app).has_courtyard_key && progress(app).route_gate_open);
 	assert_eq!(progress(app).score, 1);
@@ -318,10 +347,7 @@ fn resume_earlier_slot(app: &mut GameApp) {
 		ContinueAvailability::CompatibleEarlierRelease
 	);
 	let before = app.editor.play_status().unwrap().run_id;
-	menu_keys(
-		app,
-		&[Key::Escape, Key::ArrowDown, Key::ArrowDown, Key::ArrowDown],
-	);
+	open_slot_actions(app, false, SaveSlot::One);
 	assert!(
 		app.player_controls
 			.rows()
@@ -353,7 +379,7 @@ fn resume_earlier_slot(app: &mut GameApp) {
 		.find(|entity| entity.key.as_str() == "courtyard-route-gate")
 		.unwrap();
 	assert!(!gate.renderable && !gate.collision_enabled);
-	menu_keys(app, &[Key::Escape]);
+	close_checkpoint_menu(app);
 }
 
 fn reject_unlisted_slot(app: &mut GameApp) {
@@ -362,16 +388,7 @@ fn reject_unlisted_slot(app: &mut GameApp) {
 		app.checkpoint_availability(),
 		ContinueAvailability::IncompatibleRelease
 	);
-	menu_keys(
-		app,
-		&[
-			Key::Escape,
-			Key::ArrowDown,
-			Key::ArrowDown,
-			Key::ArrowDown,
-			Key::Enter,
-		],
-	);
+	open_slot_actions(app, false, SaveSlot::One);
 	assert!(
 		app.player_controls
 			.rows()
@@ -383,6 +400,83 @@ fn reject_unlisted_slot(app: &mut GameApp) {
 	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
 	assert_eq!(progress(app).score, 0);
 	assert!(!progress(app).has_courtyard_key && !progress(app).route_gate_open);
+}
+
+fn save_independent_slots(app: &mut GameApp) {
+	take_checkpoint(app);
+	app.restart_player_game().unwrap();
+
+	open_slot_actions(app, true, SaveSlot::Two);
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(
+		app.checkpoint_slot(SaveSlot::Two).checkpoint_id.as_deref(),
+		Some("entry")
+	);
+	close_checkpoint_menu(app);
+
+	open_slot_actions(app, true, SaveSlot::One);
+	// Enter again lands on Cancel, leaving the original checkpoint intact.
+	menu_keys(app, &[Key::Enter, Key::Enter]);
+	assert_eq!(
+		app.checkpoint_slot(SaveSlot::One).checkpoint_id.as_deref(),
+		Some("after_gate")
+	);
+	menu_keys(app, &[Key::Enter, Key::ArrowRight, Key::Enter]);
+	assert_eq!(
+		app.checkpoint_slot(SaveSlot::One).checkpoint_id.as_deref(),
+		Some("entry")
+	);
+	close_checkpoint_menu(app);
+}
+
+fn restore_independent_slots(app: &mut GameApp) {
+	let before = app.editor.play_status().unwrap().run_id;
+	open_slot_actions(app, false, SaveSlot::Two);
+	menu_keys(app, &[Key::Enter]);
+	assert_ne!(app.editor.play_status().unwrap().run_id, before);
+	assert_eq!(progress(app).score, 0);
+	let rows = app.player_controls.rows().unwrap().join("\n");
+	assert!(rows.contains("Continued from entry"), "{rows}");
+	close_checkpoint_menu(app);
+
+	let before = app.editor.play_status().unwrap().run_id;
+	open_slot_actions(app, false, SaveSlot::One);
+	let rows = app.player_controls.rows().unwrap().join("\n");
+	assert!(rows.contains("Recover prior"), "{rows}");
+	menu_keys(app, &[Key::ArrowDown, Key::Enter]);
+	assert_ne!(app.editor.play_status().unwrap().run_id, before);
+	assert!(progress(app).route_gate_open);
+	assert_eq!(progress(app).score, 1);
+	let rows = app.player_controls.rows().unwrap().join("\n");
+	assert!(rows.contains("Recovered prior save (after_gate)"), "{rows}");
+}
+
+fn open_slot_actions(app: &mut GameApp, saving: bool, slot: SaveSlot) {
+	menu_keys(app, &[Key::Escape, Key::ArrowDown, Key::ArrowDown]);
+	if !saving {
+		menu_keys(app, &[Key::ArrowDown]);
+	}
+	menu_keys(app, &[Key::Enter]);
+	for candidate in SaveSlot::ALL {
+		if candidate == slot {
+			break;
+		}
+		menu_keys(app, &[Key::ArrowDown]);
+	}
+	menu_keys(app, &[Key::Enter]);
+}
+
+fn close_checkpoint_menu(app: &mut GameApp) {
+	for _ in 0..4 {
+		if !app.player_controls.is_open() {
+			return;
+		}
+		menu_keys(app, &[Key::Escape]);
+	}
+	assert!(
+		!app.player_controls.is_open(),
+		"Escape should return to Play"
+	);
 }
 
 fn menu_keys(app: &mut GameApp, keys: &[Key]) {

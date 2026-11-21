@@ -215,7 +215,8 @@ pub enum Key {
 
 impl Key {
 	/// Matches the physical key names forwarded by the desktop viewport.
-	pub(super) fn physical_code(self) -> String {
+	/// Returns the canonical physical key code used by editor input and replay.
+	pub fn physical_code(self) -> String {
 		let name = match self {
 			Self::Unidentified(code) => return format!("{code:?}"),
 			key => format!("{key:?}"),

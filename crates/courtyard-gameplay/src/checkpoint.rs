@@ -1,11 +1,11 @@
 //! Versioned local Courtyard checkpoints and fresh-scene reconstruction.
 
 use std::{
-	collections::HashSet,
-	fs::{self, File, OpenOptions},
-	io::{self, Read, Write},
+	collections::{HashMap, HashSet},
+	fs,
+	io::{self, Write},
 	path::{Path, PathBuf},
-	sync::atomic::{AtomicU64, Ordering},
+	sync::Arc,
 };
 
 use engine_core::{
@@ -26,6 +26,11 @@ use super::{
 
 #[path = "checkpoint_compatibility.rs"]
 mod compatibility;
+#[path = "checkpoint_storage.rs"]
+mod storage;
+
+pub use storage::{RestoreSource, SaveSlot, SlotGeneration, SlotInspection};
+use storage::{SlotFiles, is_ordinary, lock_slot, publish_record, read_record, storage_error};
 
 const SAVE_VERSION: u32 = 1;
 const MAX_SAVE_BYTES: usize = 4096;
@@ -48,13 +53,15 @@ impl ContinueAvailability {
 }
 
 enum SlotReadError {
-	Unreadable(String),
+	Corrupt(String),
 	Incompatible(String),
 }
 
-impl From<String> for SlotReadError {
-	fn from(error: String) -> Self {
-		Self::Unreadable(error)
+impl SlotReadError {
+	fn message(self) -> String {
+		match self {
+			Self::Corrupt(message) | Self::Incompatible(message) => message,
+		}
 	}
 }
 
@@ -83,6 +90,14 @@ impl CheckpointDef {
 	fn admits_position(&self, position: [f32; 3]) -> bool {
 		distance_squared(self.spawn, position) <= f64::from(self.activation_radius).powi(2)
 	}
+}
+
+/// The authored checkpoint and live facts to capture in a Save operation.
+pub struct CheckpointWrite<'a> {
+	pub checkpoint: &'a CheckpointDef,
+	pub project: &'a ProjectData,
+	pub authored: &'a SceneData,
+	pub progress: &'a CampaignProgress,
 }
 
 pub struct CheckpointRegistry {
@@ -126,10 +141,10 @@ impl CheckpointRegistry {
 			if checkpoint.id.is_empty()
 				|| checkpoint.id.len() > 64
 				|| !checkpoint.id.bytes().all(|byte| {
-				byte.is_ascii_lowercase()
-					|| byte.is_ascii_digit()
-					|| matches!(byte, b'_' | b'-')
-			}) || !ids.insert(checkpoint.id.as_str())
+					byte.is_ascii_lowercase()
+						|| byte.is_ascii_digit()
+						|| matches!(byte, b'_' | b'-')
+				}) || !ids.insert(checkpoint.id.as_str())
 			{
 				return Err(
 					"Checkpoint IDs must be unique and use 1–64 lowercase identifier bytes".into(),
@@ -158,10 +173,10 @@ impl CheckpointRegistry {
 			}
 			if checkpoint.requires_gate
 				&& (!checkpoint.requires_key
-				|| settings
-				.route_gate
-				.as_ref()
-				.is_none_or(|route| route.scene_id != checkpoint.scene_id))
+					|| settings
+						.route_gate
+						.as_ref()
+						.is_none_or(|route| route.scene_id != checkpoint.scene_id))
 			{
 				return Err(
 					"A gate checkpoint must require the key and a route gate in its scene".into(),
@@ -170,9 +185,9 @@ impl CheckpointRegistry {
 			if settings.checkpoints[..index].iter().any(|previous| {
 				previous.scene_id == checkpoint.scene_id
 					&& distance_squared(previous.spawn, checkpoint.spawn)
-					<= (f64::from(previous.activation_radius)
-					+ f64::from(checkpoint.activation_radius))
-					.powi(2)
+						<= (f64::from(previous.activation_radius)
+							+ f64::from(checkpoint.activation_radius))
+						.powi(2)
 			}) {
 				return Err(
 					"Checkpoint activation areas in the same scene must not overlap".into(),
@@ -201,14 +216,14 @@ impl CheckpointRegistry {
 				&& checkpoint.admits(progress)
 				&& live.bindings.get("player") == Some(&checkpoint.player)
 				&& live.entities.iter().any(|entity| {
-				entity.key == checkpoint.player
-					&& entity.parent.is_none()
-					&& checkpoint.admits_position(entity.transform.position)
-			})
+					entity.key == checkpoint.player
+						&& entity.parent.is_none()
+						&& checkpoint.admits_position(entity.transform.position)
+				})
 		})
 	}
 
-	/// Publish one durable slot beneath an existing, trusted local profile root.
+	/// Save to the original Slot 1 for users of the single-slot API.
 	pub fn save(
 		&self,
 		profile_root: &Path,
@@ -217,6 +232,88 @@ impl CheckpointRegistry {
 		authored: &SceneData,
 		progress: &CampaignProgress,
 	) -> Result<(), String> {
+		self.publish_save(
+			profile_root,
+			SaveSlot::One,
+			None,
+			CheckpointWrite {
+				checkpoint,
+				project,
+				authored,
+				progress,
+			},
+			|_| Ok(None),
+			publish_record,
+		)
+	}
+
+	/// Save only if the files still match the inspected slot generation.
+	pub fn save_slot(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		request: CheckpointWrite<'_>,
+		load_authored: impl FnOnce(&SceneId) -> Result<SceneData, String>,
+	) -> Result<(), String> {
+		self.publish_save(
+			profile_root,
+			slot,
+			Some(expected),
+			request,
+			|scene_id| load_authored(scene_id).map(Some),
+			publish_record,
+		)
+	}
+
+	fn publish_save(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: Option<&SlotGeneration>,
+		request: CheckpointWrite<'_>,
+		load_authored: impl FnOnce(&SceneId) -> Result<Option<SceneData>, String>,
+		mut publish: impl FnMut(&Path, &str, &[u8]) -> Result<(), String>,
+	) -> Result<(), String> {
+		let bytes = self.encode_save(&request)?;
+		let parent = self
+			.slot_parent(profile_root, true)?
+			.ok_or("Courtyard save directory is unavailable")?;
+		let _lock = lock_slot(&parent, slot)?;
+		let files = SlotFiles::read(&parent, slot)?;
+		if let Some(expected) = expected {
+			files.verify(slot, expected)?;
+		}
+		if let Some(error) = &files.previous_error {
+			return Err(format!(
+				"Previous Courtyard generation is unavailable: {error}"
+			));
+		}
+		if let Some(previous) = files.primary.as_deref()
+			&& let Ok(saved) = self.decode_save(previous)
+		{
+			let compatible = if saved.scene_id() == &request.checkpoint.scene_id {
+				self.reconstruct(&saved, request.project, request.authored)
+					.is_ok()
+			} else {
+				load_authored(saved.scene_id())?.is_some_and(|authored| {
+					self.reconstruct(&saved, request.project, &authored).is_ok()
+				})
+			};
+			if compatible {
+				publish(&parent, slot.previous(), previous)?;
+			}
+		}
+		publish(&parent, slot.primary(), &bytes)
+	}
+
+	fn encode_save(&self, request: &CheckpointWrite<'_>) -> Result<Vec<u8>, String> {
+		let CheckpointWrite {
+			checkpoint,
+			project,
+			authored,
+			progress,
+		} = request;
 		let definition = self.definition(&checkpoint.id, &checkpoint.scene_id)?;
 		self.restore_document(definition, project, authored, progress)?;
 		let saved = CheckpointSave {
@@ -237,81 +334,205 @@ impl CheckpointRegistry {
 		if bytes.len() > MAX_SAVE_BYTES {
 			return Err("Courtyard save exceeds its size limit".into());
 		}
-		let parent = self
-			.slot_parent(profile_root, true)?
-			.ok_or("Courtyard save directory is unavailable")?;
-		write_slot(&parent, &bytes)
+		Ok(bytes)
 	}
 
+	/// Read Slot 1 using the original single-slot API.
 	pub fn load(&self, profile_root: &Path) -> Result<Option<CheckpointSave>, String> {
-		self.read_slot(profile_root).map_err(|error| match error {
-			SlotReadError::Unreadable(message) | SlotReadError::Incompatible(message) => message,
-		})
+		self.read_primary(profile_root, SaveSlot::One)?
+			.as_deref()
+			.map(|bytes| self.decode_save(bytes).map_err(SlotReadError::message))
+			.transpose()
 	}
 
-	/// Inspect the current single slot without changing it or preparing a run.
+	/// Inspect Slot 1 using the original single-slot API.
 	pub fn inspect(
 		&self,
 		profile_root: &Path,
 		project: &ProjectData,
 		load_authored: impl FnOnce(&SceneId) -> Result<SceneData, String>,
 	) -> ContinueAvailability {
-		let saved = match self.read_slot(profile_root) {
-			Ok(Some(saved)) => saved,
-			Ok(None) => return ContinueAvailability::Empty,
-			Err(SlotReadError::Unreadable(_)) => return ContinueAvailability::Unreadable,
-			Err(SlotReadError::Incompatible(_)) => {
-				return ContinueAvailability::IncompatibleRelease;
+		let Ok(bytes) = self.read_primary(profile_root, SaveSlot::One) else {
+			return ContinueAvailability::Unreadable;
+		};
+		let Some(bytes) = bytes else {
+			return ContinueAvailability::Empty;
+		};
+		match self.decode_save(&bytes) {
+			Ok(saved) => Self::inspect_save(&saved, project, load_authored),
+			Err(SlotReadError::Corrupt(_)) => ContinueAvailability::Unreadable,
+			Err(SlotReadError::Incompatible(_)) => ContinueAvailability::IncompatibleRelease,
+		}
+	}
+
+	/// Inspect both generations without locking, creating files, or altering gameplay.
+	pub fn inspect_slot(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		project: &ProjectData,
+		mut load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
+	) -> SlotInspection {
+		self.inspect_slot_with(profile_root, slot, project, |scene| {
+			let document = load_authored(scene)?;
+			let digest = content_digest(project, &document)?;
+			Ok((Arc::new(document), digest))
+		})
+	}
+
+	/// Share scene validation and fingerprints for one three-slot menu snapshot.
+	pub fn inspect_slots(
+		&self,
+		profile_root: &Path,
+		project: &ProjectData,
+		mut load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
+	) -> [SlotInspection; 3] {
+		let mut cache = HashMap::new();
+		SaveSlot::ALL.map(|slot| {
+			self.inspect_slot_with(profile_root, slot, project, |scene| {
+				cache
+					.entry(scene.clone())
+					.or_insert_with(|| {
+						let document = load_authored(scene)?;
+						let digest = content_digest(project, &document)?;
+						Ok((Arc::new(document), digest))
+					})
+					.clone()
+			})
+		})
+	}
+
+	fn inspect_slot_with(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		project: &ProjectData,
+		mut load_authored: impl FnMut(&SceneId) -> Result<(Arc<SceneData>, [u8; 32]), String>,
+	) -> SlotInspection {
+		let Ok(files) = self.read_generations(profile_root, slot) else {
+			return SlotInspection::default();
+		};
+		let mut status = SlotInspection {
+			generation: Some(files.generation(slot)),
+			..SlotInspection::default()
+		};
+		let decoded = files
+			.primary
+			.as_deref()
+			.map(|bytes| self.decode_save(bytes));
+		match decoded {
+			Some(Ok(saved)) => {
+				status.primary = load_authored(saved.scene_id())
+					.map_or(ContinueAvailability::Unreadable, |(_, digest)| {
+						Self::compatibility(&saved, digest)
+					});
+				status.checkpoint_id = Some(saved.checkpoint_id);
+			}
+			Some(Err(SlotReadError::Incompatible(_))) => {
+				status.primary = ContinueAvailability::IncompatibleRelease;
+			}
+			primary => {
+				if primary.is_none() {
+					status.primary = ContinueAvailability::Empty;
+				}
+				if let Some(previous) = files.previous.as_deref()
+					&& let Ok(saved) = self.decode_save(previous)
+					&& let Ok((authored, digest)) = load_authored(saved.scene_id())
+					&& self
+						.reconstruct_with_content(&saved, project, &authored, digest)
+						.is_ok()
+				{
+					status.recovery_checkpoint_id = Some(saved.checkpoint_id);
+				}
+			}
+		}
+		status
+	}
+
+	/// Load the explicitly targeted generation. Recovery is reserved for a missing or corrupt primary.
+	pub fn load_slot_for_restore(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		source: RestoreSource,
+	) -> Result<CheckpointSave, String> {
+		let files = self.read_generations(profile_root, slot)?;
+		files.verify(slot, expected)?;
+		let primary = files
+			.primary
+			.as_deref()
+			.map(|bytes| self.decode_save(bytes));
+		let selected = match source {
+			RestoreSource::Current => primary.ok_or("No saved checkpoint")?,
+			RestoreSource::Previous => {
+				if !matches!(primary, None | Some(Err(SlotReadError::Corrupt(_)))) {
+					return Err(
+						"Recovery is available only for a missing or corrupt primary".into(),
+					);
+				}
+				self.decode_save(files.previous.as_deref().ok_or("No previous checkpoint")?)
 			}
 		};
-		let authored = match load_authored(saved.scene_id()) {
-			Ok(authored) => authored,
-			Err(_) => return ContinueAvailability::Unreadable,
+		selected.map_err(SlotReadError::message)
+	}
+
+	/// Recheck the selected bytes before replacing the active run.
+	pub fn verify_slot_generation(
+		&self,
+		profile_root: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+	) -> Result<(), String> {
+		self.read_generations(profile_root, slot)?
+			.verify(slot, expected)
+	}
+
+	fn read_generations(&self, profile_root: &Path, slot: SaveSlot) -> Result<SlotFiles, String> {
+		let Some(parent) = self.slot_parent(profile_root, false)? else {
+			return Ok(SlotFiles::default());
+		};
+		SlotFiles::read(&parent, slot)
+	}
+
+	fn read_primary(&self, profile_root: &Path, slot: SaveSlot) -> Result<Option<Vec<u8>>, String> {
+		let Some(parent) = self.slot_parent(profile_root, false)? else {
+			return Ok(None);
+		};
+		read_record(&parent.join(slot.primary()))
+	}
+
+	fn inspect_save(
+		saved: &CheckpointSave,
+		project: &ProjectData,
+		load_authored: impl FnOnce(&SceneId) -> Result<SceneData, String>,
+	) -> ContinueAvailability {
+		let Ok(authored) = load_authored(saved.scene_id()) else {
+			return ContinueAvailability::Unreadable;
 		};
 		match content_digest(project, &authored) {
-			Ok(content) => Self::compatibility(&saved, content),
+			Ok(content) => Self::compatibility(saved, content),
 			Err(_) => ContinueAvailability::Unreadable,
 		}
 	}
 
-	fn read_slot(&self, profile_root: &Path) -> Result<Option<CheckpointSave>, SlotReadError> {
-		let Some(parent) = self.slot_parent(profile_root, false)? else {
-			return Ok(None);
-		};
-		let path = parent.join("slot.json");
-		if !ordinary_file_if_present(&path)? {
-			return Ok(None);
-		}
-		let file = open_slot(&path)?;
-		if !is_ordinary(&file.metadata().map_err(storage_error)?, false) {
-			return Err(SlotReadError::Unreadable(
-				"Courtyard slot is not an ordinary file".into(),
-			));
-		}
-		let mut bytes = Vec::new();
-		file.take((MAX_SAVE_BYTES + 1) as u64)
-			.read_to_end(&mut bytes)
-			.map_err(storage_error)?;
-		if bytes.len() > MAX_SAVE_BYTES {
-			return Err(SlotReadError::Unreadable(
-				"Courtyard save exceeds its size limit".into(),
-			));
-		}
-		let record: SaveEnvelope = serde_json::from_slice(&bytes)
-			.map_err(|error| format!("Invalid Courtyard save: {error}"))?;
-		if record.saved.version != SAVE_VERSION {
+	fn decode_save(&self, bytes: &[u8]) -> Result<CheckpointSave, SlotReadError> {
+		let invalid = |error| SlotReadError::Corrupt(format!("Invalid Courtyard save: {error}"));
+		let header: SaveHeader = serde_json::from_slice(bytes).map_err(invalid)?;
+		if header.saved.version != SAVE_VERSION {
 			return Err(SlotReadError::Incompatible(
 				"Unsupported Courtyard save version".into(),
 			));
 		}
-		if record.checksum != save_checksum(&record.saved)? {
-			return Err(SlotReadError::Unreadable(
+		let record: SaveEnvelope = serde_json::from_slice(bytes).map_err(invalid)?;
+		if record.checksum != save_checksum(&record.saved).map_err(SlotReadError::Corrupt)? {
+			return Err(SlotReadError::Corrupt(
 				"Courtyard save checksum does not match".into(),
 			));
 		}
 		self.saved_definition(&record.saved)
 			.map_err(SlotReadError::Incompatible)?;
-		Ok(Some(record.saved))
+		Ok(record.saved)
 	}
 
 	pub fn reconstruct(
@@ -330,8 +551,18 @@ impl CheckpointRegistry {
 		project: &ProjectData,
 		authored: &SceneData,
 	) -> Result<(SceneData, CampaignProgress, ContinueAvailability), String> {
+		self.reconstruct_with_content(saved, project, authored, content_digest(project, authored)?)
+	}
+
+	fn reconstruct_with_content(
+		&self,
+		saved: &CheckpointSave,
+		project: &ProjectData,
+		authored: &SceneData,
+		content: [u8; 32],
+	) -> Result<(SceneData, CampaignProgress, ContinueAvailability), String> {
 		let checkpoint = self.saved_definition(saved)?;
-		let status = Self::compatibility(saved, content_digest(project, authored)?);
+		let status = Self::compatibility(saved, content);
 		if !status.can_continue() {
 			return Err(
 				"Courtyard save is incompatible with the current authored project or scene".into(),
@@ -406,9 +637,9 @@ impl CheckpointRegistry {
 		if player.parent.is_some()
 			|| !player.collision_enabled
 			|| player
-			.collider
-			.as_ref()
-			.is_none_or(|shape| shape.interaction().sensor)
+				.collider
+				.as_ref()
+				.is_none_or(|shape| shape.interaction().sensor)
 		{
 			return Err(
 				"Checkpoint player must be a root entity with an enabled solid collider".into(),
@@ -530,6 +761,18 @@ struct SaveEnvelope {
 	checksum: [u8; 32],
 }
 
+// Read the version before validating the V1 shape, so a future release is
+// treated as incompatible even if its envelope has additional fields.
+#[derive(Deserialize)]
+struct SaveHeader {
+	saved: SaveVersion,
+}
+
+#[derive(Deserialize)]
+struct SaveVersion {
+	version: u32,
+}
+
 struct DigestWriter(Sha256);
 
 impl Write for DigestWriter {
@@ -562,9 +805,9 @@ fn save_checksum(saved: &CheckpointSave) -> Result<[u8; 32], String> {
 fn canonical_uuid(value: &str) -> bool {
 	value.len() == 36
 		&& value.bytes().enumerate().all(|(index, byte)| match index {
-		8 | 13 | 18 | 23 => byte == b'-',
-		_ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
-	})
+			8 | 13 | 18 | 23 => byte == b'-',
+			_ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
+		})
 }
 
 fn distance_squared(first: [f32; 3], second: [f32; 3]) -> f64 {
@@ -584,71 +827,6 @@ fn entity_mut<'a>(
 		.iter_mut()
 		.find(|entity| &entity.key == key)
 		.ok_or_else(|| format!("Checkpoint references a missing entity {:?}", key.as_str()))
-}
-
-fn is_ordinary(metadata: &fs::Metadata, directory: bool) -> bool {
-	#[cfg(windows)]
-	{
-		use std::os::windows::fs::MetadataExt;
-		const REPARSE_POINT: u32 = 0x400;
-		if metadata.file_attributes() & REPARSE_POINT != 0 {
-			return false;
-		}
-	}
-	if directory {
-		metadata.is_dir()
-	} else {
-		metadata.is_file()
-	}
-}
-
-fn ordinary_file_if_present(path: &Path) -> Result<bool, String> {
-	match fs::symlink_metadata(path) {
-		Ok(metadata) if is_ordinary(&metadata, false) => Ok(true),
-		Ok(_) => Err("Courtyard save slot must be an ordinary file".into()),
-		Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-		Err(error) => Err(storage_error(error)),
-	}
-}
-
-fn open_slot(path: &Path) -> Result<File, String> {
-	let mut options = OpenOptions::new();
-	options.read(true);
-	#[cfg(windows)]
-	{
-		use std::os::windows::fs::OpenOptionsExt;
-		const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-		options.custom_flags(OPEN_REPARSE_POINT);
-	}
-	options.open(path).map_err(storage_error)
-}
-
-fn write_slot(parent: &Path, bytes: &[u8]) -> Result<(), String> {
-	static NEXT: AtomicU64 = AtomicU64::new(0);
-	let destination = parent.join("slot.json");
-	ordinary_file_if_present(&destination)?;
-	let temporary = parent.join(format!(
-		".slot-{}-{}.next",
-		std::process::id(),
-		NEXT.fetch_add(1, Ordering::Relaxed)
-	));
-	let mut file = OpenOptions::new()
-		.write(true)
-		.create_new(true)
-		.open(&temporary)
-		.map_err(storage_error)?;
-	let write = file.write_all(bytes).and_then(|()| file.sync_all());
-	drop(file);
-	let result = write.and_then(|()| fs::rename(&temporary, &destination));
-	if let Err(error) = result {
-		let _ = fs::remove_file(&temporary);
-		return Err(storage_error(error));
-	}
-	Ok(())
-}
-
-fn storage_error(error: io::Error) -> String {
-	format!("Courtyard save storage: {error}")
 }
 
 #[cfg(test)]

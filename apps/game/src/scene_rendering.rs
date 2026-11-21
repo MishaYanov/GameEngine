@@ -2,31 +2,6 @@ use super::*;
 
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
-		let hud_rows = if self.standalone_runtime {
-			self.player_controls.rows().unwrap_or_else(|| {
-				let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
-				if let Some(prompt) = rows
-					.iter_mut()
-					.find(|row| *row == "Use Interact to open the route gate")
-				{
-					let profile = self
-						.input_profile_override
-						.as_ref()
-						.or_else(|| self.project.as_ref()?.input_profile.as_ref());
-					let binding = self.interaction_action.as_deref().and_then(|action| {
-						profile?.actions.iter().find(|binding| binding.id == action)
-					});
-					*prompt = binding.map_or_else(
-						|| "Interact is unbound in the active profile".into(),
-						|binding| format!("Press {:?} to open the route gate", binding.key),
-					);
-				}
-				rows.push("Esc: controls".into());
-				rows
-			})
-		} else {
-			Vec::new()
-		};
 		if let Some(camera) = self.editor.play_rig_camera() {
 			self.camera = camera;
 		}
@@ -46,6 +21,42 @@ impl GameApp {
 			None
 		};
 		let content_extent = game_rect.map_or([width, height], GameContentRect::extent);
+		let scale = self
+			.window
+			.as_ref()
+			.map_or(1.0, |window| window.scale_factor());
+		let hud_rows = if self.standalone_runtime {
+			let capacity = renderer::ui::ScreenOverlay::row_capacity(content_extent, scale);
+			self.player_controls
+				.rows_with_capacity(capacity)
+				.unwrap_or_else(|| {
+					let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
+					if let Some(prompt) = rows
+						.iter_mut()
+						.find(|row| *row == "Use Interact to open the route gate")
+					{
+						*prompt = interact_hint(
+							self.input_profile_override
+								.as_ref()
+								.or_else(|| self.project.as_ref()?.input_profile.as_ref()),
+							self.interaction_action.as_deref(),
+							self.player_controls.controller(),
+							self.player_controls.prompt_device(),
+						);
+					}
+					if let Some(trace) = &self.play_trace {
+						rows.push(if trace.is_full() {
+							"Playtrace full. Quit to save".into()
+						} else {
+							"Recording playtrace".into()
+						});
+					}
+					rows.push("Esc: controls".into());
+					rows
+				})
+		} else {
+			Vec::new()
+		};
 		let camera_uniform = CameraUniform::perspective(
 			self.camera.position,
 			self.camera.target(),
@@ -98,10 +109,6 @@ impl GameApp {
 				stats.triangles += object.mesh().index_count() as usize / 3;
 				objects.push(object);
 			}
-			let scale = self
-				.window
-				.as_ref()
-				.map_or(1.0, |window| window.scale_factor());
 			// The panel is one batched draw. Include its previous geometry in
 			// displayed totals; the current text has the same quad count.
 			if let Some(panel) = self.tools.panel.object() {
@@ -133,10 +140,6 @@ impl GameApp {
 				self.game_hud = Some(renderer::ui::ScreenOverlay::new(renderer)?);
 			}
 			let hud = self.game_hud.as_mut().expect("initialized HUD");
-			let scale = self
-				.window
-				.as_ref()
-				.map_or(1.0, |window| window.scale_factor());
 			hud.prepare(renderer, content_extent, scale, &hud_rows)?;
 			if let Some(object) = hud.object() {
 				objects.push(object);
@@ -149,6 +152,23 @@ impl GameApp {
 			Some(rect) => renderer.draw_in_rect(&camera_uniform, &objects, rect.pixels()),
 			None => renderer.draw(&camera_uniform, &objects),
 		}
+	}
+}
+
+pub(super) fn interact_hint(
+	profile: Option<&InputProfile>,
+	action: Option<&str>,
+	bindings: runtime::input::ControllerBindings,
+	device: PromptDevice,
+) -> String {
+	let binding =
+		action.and_then(|action| profile?.actions.iter().find(|binding| binding.id == action));
+	match binding {
+		Some(binding) if device == PromptDevice::Controller && binding.id == "interact" => {
+			format!("Press {:?} to open the route gate", bindings.interact)
+		}
+		Some(binding) => format!("Press {:?} to open the route gate", binding.key),
+		None => "Interact is unbound in the active profile".into(),
 	}
 }
 

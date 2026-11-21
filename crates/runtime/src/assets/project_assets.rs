@@ -134,7 +134,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
 	}
 	Ok(())
 }
-fn install_new(source: &Path, target: &Path) -> Result<(), String> {
+pub(crate) fn install_new(source: &Path, target: &Path) -> Result<(), String> {
 	// MoveFileExW without REPLACE_EXISTING publishes exclusively on volumes that
 	// do not support hard links. std::fs::rename may replace an existing target.
 	#[cfg(windows)]

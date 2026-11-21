@@ -55,6 +55,16 @@ confirms a Player frame from the copied package.
 Accepted, pending, or rejected. Give a reason and reproduction steps for each failed or blocked check. Keep raw save
 files and profile contents out of the candidate artifacts.
 
+## Playtest evidence
+
+Verify the candidate ZIP with its trusted local receipt before extracting it into a fresh directory. Record from that
+Player with `--record-playtrace <new-file>` and the authored keyboard profile. Replay the trace against the manifest and
+assets from that same extracted copy.
+
+The playtest collector checks the trace and manifest digests reported by headless. The separate candidate verifier
+checks every archived file against the receipt. The handoff records those inputs for reproduction. To verify runtime
+facts independently, replay the trace against the verified candidate and compare the generated report.
+
 ## Relevant information and resources
 
 - [Native two-process rehearsal](release-rehearsal-checklist.md)

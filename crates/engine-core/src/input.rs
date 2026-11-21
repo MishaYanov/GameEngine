@@ -5,7 +5,7 @@ mod mouse;
 mod profile;
 
 pub use button::InputButton;
-pub use gamepad::GamepadSample;
+pub use gamepad::{ControllerBindings, FaceButton, GamepadSample, PhysicalGamepadSample};
 pub use key::{Key, NativeKeyCode};
 pub use mouse::MouseButton;
 pub(crate) use profile::HeldGameActions;

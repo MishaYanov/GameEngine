@@ -84,3 +84,42 @@ fn smoke_mode_is_explicit_and_keeps_launch_selection() {
 	assert_eq!(options.mode, LaunchMode::Player);
 	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-test"], false, false).is_err());
 }
+
+#[test]
+fn playtrace_is_opt_in_and_requires_a_regular_player_run() {
+	use std::path::Path;
+
+	let options = LaunchOptions::parse(["--record-playtrace", "trial.json"], true, false).unwrap();
+	assert_eq!(
+		options.record_playtrace.as_deref(),
+		Some(Path::new("trial.json"))
+	);
+	assert!(
+		LaunchOptions::parse(
+			["--player", "--record-playtrace", "trial.json"],
+			false,
+			false
+		)
+		.is_ok()
+	);
+	assert!(
+		LaunchOptions::parse(["--player"], true, false)
+			.unwrap()
+			.record_playtrace
+			.is_none()
+	);
+	for arguments in [
+		vec!["--development", "--record-playtrace", "trial.json"],
+		vec!["--smoke-test", "--record-playtrace", "trial.json"],
+		vec!["--record-playtrace"],
+		vec!["--record-playtrace", "--player"],
+		vec![
+			"--record-playtrace",
+			"trial.json",
+			"--record-playtrace",
+			"again.json",
+		],
+	] {
+		assert!(LaunchOptions::parse(arguments, true, false).is_err());
+	}
+}
