@@ -45,6 +45,7 @@ fn runtime_status_and_restart_use_separate_play_and_run_identities() {
 		game_status: Some(PlayStatusDto {
 			play_session_id: "play-1".into(),
 			run_id: "run-2".into(),
+			scene_generation: 1,
 			scene_id: engine_core::scene_catalog::SceneId::new("finish").unwrap(),
 			paused: false,
 			pending_scene_id: None,
@@ -60,6 +61,7 @@ fn runtime_status_and_restart_use_separate_play_and_run_identities() {
 	let wire = serde_json::to_value(&state).unwrap();
 	assert_eq!(wire["game_status"]["play_session_id"], "play-1");
 	assert_eq!(wire["game_status"]["run_id"], "run-2");
+	assert_eq!(wire["game_status"]["scene_generation"], 1);
 	let decoded: ViewportEditorStateDto = serde_json::from_value(wire.clone()).unwrap();
 	assert_eq!(decoded.game_status, state.game_status);
 	let mut legacy = wire;

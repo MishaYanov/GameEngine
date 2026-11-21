@@ -1,4 +1,5 @@
 import {
+    afterNextRender,
     afterRenderEffect,
     Component,
     computed,
@@ -6,6 +7,7 @@ import {
     effect,
     ElementRef,
     inject,
+    Injector,
     input,
     output,
     signal,
@@ -19,6 +21,9 @@ import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
 import type {SceneEntitiesModel} from './scene-entities.model';
+import {ContextActionBuilder} from '../../../../shared/actions/context-action';
+import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
+import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
 
 export interface HierarchyReparentRequest {
     readonly key: EntityKey;
@@ -38,12 +43,17 @@ interface HierarchyRow {
     readonly indent: number;
 }
 
+interface EntityMenuContext {
+    readonly key: EntityKey;
+    readonly contextKey: string;
+}
+
 const ENTITY_DRAG_TYPE = 'application/x-game-engine-hierarchy-entity';
 let nextHierarchyId = 0;
 
 @Component({
     selector: 'scene-entities-panel',
-    imports: [EditorPane, Drawer, EditorIcon],
+    imports: [EditorPane, Drawer, EditorIcon, EditorContextMenuTrigger],
     templateUrl: './scene-entities-panel.html',
     styleUrl: './scene-entities-panel.scss',
 })
@@ -55,6 +65,7 @@ export class SceneEntitiesPanel {
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
     readonly selectionRequested = output<EntityKey>();
+    readonly usagesRequested = output<EntityKey>();
     readonly reparentRequested = output<HierarchyReparentRequest>();
 
     protected readonly rowHeight = 28;
@@ -70,7 +81,9 @@ export class SceneEntitiesPanel {
     protected readonly status = signal<string | null>(null);
     private readonly scrollTop = signal(0);
     private readonly viewportHeight = signal(280);
+    private readonly drawer = viewChild(Drawer);
     private readonly tree = viewChild<ElementRef<HTMLElement>>('tree');
+    private readonly injector = inject(Injector);
     private destroyed = false;
     private previousContext: string | null = null;
     private previousSelectionIdentity = '';
@@ -161,6 +174,41 @@ export class SceneEntitiesPanel {
     });
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
+    private readonly entityMenuBuilder = ContextMenuBuilder.create<EntityMenuContext>()
+        .action(ContextActionBuilder.create<EntityMenuContext>('entity.select', 'Select')
+            .icon('object')
+            .enabledWhen(context => this.canUseEntityMenu(context))
+            .run(context => {
+                this.cancelParenting();
+                this.focus(context.key);
+                this.selectionRequested.emit(context.key);
+            }).build())
+        .action(ContextActionBuilder.create<EntityMenuContext>('entity.find-usages', 'Find Usages…')
+            .icon('graph')
+            .enabledWhen(context => this.canUseEntityMenu(context))
+            .run(context => this.usagesRequested.emit(context.key)).build())
+        .separator()
+        .submenu('entity.parenting', 'Parenting', menu => menu
+            .action(ContextActionBuilder.create<EntityMenuContext>('entity.set-parent', 'Set Parent…')
+                .enabledWhen(context => this.canUseEntityMenu(context))
+                .run(context => this.beginParenting(context.key)).build())
+            .action(ContextActionBuilder.create<EntityMenuContext>('entity.move-to-root', 'Move to Root')
+                .enabledWhen(context => this.canUseEntityMenu(context) && this.canReparent(context.key, null))
+                .run(context => this.requestReparent(context.key, null)).build()));
+    protected readonly activeEntityMenu = (): readonly ContextMenuItem[] => {
+        const key = this.activeKey();
+        return key ? this.entityMenu(key)() : [];
+    };
+
+    protected entityMenu(key: EntityKey): () => readonly ContextMenuItem[] {
+        const context: EntityMenuContext = {key, contextKey: this.contextKey()};
+        return () => this.entityMenuBuilder.build(context);
+    }
+
+    private canUseEntityMenu(context: EntityMenuContext): boolean {
+        return context.contextKey === this.contextKey() && this.scene().projectOpen &&
+            !this.disabled() && this.forest().byKey.has(context.key);
+    }
 
     constructor() {
         inject(DestroyRef).onDestroy(() => this.destroyed = true);
@@ -224,6 +272,25 @@ export class SceneEntitiesPanel {
 
     protected rowId(key: EntityKey): string {
         return `${this.treeId}-${encodeURIComponent(key)}`;
+    }
+
+    revealEntity(key: EntityKey): void {
+        const {byKey, parents} = this.forest();
+        if (!byKey.has(key)) return;
+        const context = this.contextKey();
+        this.drawer()?.config.update(config => ({...config, collapsed: false, expanded: true}));
+        const collapsed = new Set(this.collapsed());
+        const seen = new Set<EntityKey>();
+        let parent = parents.get(key);
+        while (parent && !seen.has(parent)) {
+            seen.add(parent);
+            collapsed.delete(parent);
+            parent = parents.get(parent);
+        }
+        this.collapsed.set(collapsed);
+        afterNextRender(() => {
+            if (context === this.contextKey() && this.forest().byKey.has(key)) this.focus(key);
+        }, {injector: this.injector});
     }
 
     protected scrolled(event: Event): void {
@@ -312,8 +379,8 @@ export class SceneEntitiesPanel {
         }
     }
 
-    protected beginParenting(): void {
-        const child = this.primary();
+    protected beginParenting(key?: EntityKey): void {
+        const child = key === undefined ? this.primary() : this.forest().byKey.get(key);
         if (!child || this.disabled()) return;
         this.parentingChild.set(child.key);
         this.dragKey.set(null);

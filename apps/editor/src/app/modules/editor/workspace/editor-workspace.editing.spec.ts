@@ -298,6 +298,73 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
     }
 
+    it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {
+        const setParent = async (parent: string) => {
+            nativeState = {
+                ...nativeState,
+                revision: nativeState.revision + 1,
+                scene_revision: nativeState.scene_revision + 1,
+                document: {
+                    ...nativeState.document, entities: nativeState.document.entities.map(entity =>
+                        entity.key === 'crate' ? {...entity, parent} : entity)
+                },
+            };
+            await editor.refresh();
+            await fixture.whenStable();
+        };
+        await setParent('robot');
+        const hierarchy = fixture.debugElement.query(By.directive(SceneEntitiesPanel)).injector.get(SceneEntitiesPanel);
+        hierarchy.usagesRequested.emit('robot');
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const usage = root.querySelector<HTMLElement>('editor-find-usages [role="treeitem"][aria-level="2"]')!;
+        expect(usage.textContent).toContain('crate · Parent');
+        usage.click();
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['crate']));
+        await fixture.whenStable();
+        expect(root.querySelector('editor-find-usages dialog[open]')).toBeNull();
+
+        await setParent('removed');
+        const button = root.querySelector<HTMLButtonElement>('.problems-button')!;
+        button.click();
+        await fixture.whenStable();
+        const problem = root.querySelector<HTMLButtonElement>('editor-problems-panel dialog[open] li button')!;
+        expect(problem.textContent).toContain('Entity “removed” does not exist in this scene.');
+        problem.click();
+        await fixture.whenStable();
+        expect(root.querySelector('editor-problems-panel dialog[open]')).toBeNull();
+        expect(document.activeElement).toBe(root.querySelector('.entity-list'));
+        await setParent('robot');
+        button.click();
+        await fixture.whenStable();
+        expect(root.querySelector('editor-problems-panel dialog[open]')?.textContent).toContain('No reference problems');
+    });
+
+    it('opens the palette from the hierarchy shortcut and dispatches Save Scene through the existing toolbar', async () => {
+        await selectRobot();
+        const name = fixture.nativeElement.querySelector('inspector-panel input[type="text"]') as HTMLInputElement;
+        await change(name, 'Robot renamed');
+        await editing.commit();
+        const root: HTMLElement = fixture.nativeElement;
+        const tree = root.querySelector<HTMLElement>('.entity-list')!;
+        tree.focus();
+        const shortcut = new KeyboardEvent('keydown', {
+            key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+        });
+        tree.dispatchEvent(shortcut);
+        await fixture.whenStable();
+        expect(shortcut.defaultPrevented).toBe(true);
+        const palette = root.querySelector<HTMLDialogElement>('editor-command-palette dialog[open]')!;
+        const search = palette.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+        search.value = 'save scene';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        palette.querySelector<HTMLElement>('[role="option"]')!.click();
+        await vi.waitFor(() => expect(editor.dirty()).toBe(false));
+        expect(savedDocument.entities.find(entity => entity.key === 'robot')?.name).toBe('Robot renamed');
+        expect(palette.open).toBe(false);
+    });
+
     it('applies game bindings, saves the project and reopens with the authored profile before Play', async () => {
         const inputManagerButton = () => fixture.nativeElement.querySelector('editor-game-input > button') as HTMLButtonElement;
         inputManagerButton().click();
@@ -580,6 +647,7 @@ describe('Workspace live editing flow', () => {
         const completed: PlayStatus = {
             play_session_id: snapshot.play_session_id!,
             run_id: 'run-1',
+            scene_generation: 1,
             scene_id: 'finish',
             paused: false,
             pending_scene_id: null,
@@ -609,7 +677,7 @@ describe('Workspace live editing flow', () => {
 
         let acceptRestart!: () => void;
         const restarted: PlayStatus = {
-            ...completed, run_id: 'run-2', scene_id: 'courtyard',
+            ...completed, run_id: 'run-2', scene_id: 'courtyard', scene_generation: 0,
             gameplay: {objective: 'Find the key', detail: null, score: 0, completed: false},
         };
         restartReply = () => new Promise(resolve => {

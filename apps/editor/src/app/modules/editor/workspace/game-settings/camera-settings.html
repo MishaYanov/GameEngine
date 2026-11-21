@@ -1,11 +1,29 @@
 <button type="button" [disabled]="!available()" (click)="show()">Game Camera…</button>
 <editor-dialog [(open)]="open" title="Game Camera" [renderFields]="false" [config]="{width: '36rem'}">
-    <p>Follow tracks an entity's world position. Scene navigation keeps its own editor camera.</p>
-    <fieldset [disabled]="pending()" class="fields">
+    @if (orbit(); as camera) {
+        <section aria-label="Orbit camera" class="fields">
+            <p #orbitField [attr.autofocus]="open() && focusTarget() ? '' : null" tabindex="-1">
+                Orbit target
+                @if (orbitTarget(); as target) {
+                    <strong>{{ target.label }}</strong> · {{ target.description }}
+                } @else {
+                    <strong class="error">Missing target: {{ camera.target }}</strong>
+                }
+            </p>
+        </section>
+    } @else {
+        <p>Follow tracks an entity's world position. Scene navigation keeps its own editor camera.</p>
+        <fieldset [disabled]="pending()" class="fields">
         <legend>Runtime camera</legend>
         <label>Mode<select [formField]="fields.mode"><option value="fixed">Fixed</option><option value="follow">Follow</option></select></label>
         @if (draft().mode === 'follow') {
-            <label>Target<select [formField]="fields.target"><option value="">Choose an entity</option>@for (entity of editor.snapshot()?.document.entities; track entity.key) { <option [value]="entity.key">{{ entity.name }} ({{ entity.key }})</option> }</select></label>
+            <editor-search-picker (picked)="fields.target().value.set($event)" [autofocus]="open() && focusTarget()"
+                                  [clearable]="true" [disabled]="pending()" [options]="entityOptions()"
+                                  [value]="draft().target" label="Target"
+                                  placeholder="Search entities…"/>
+            @if (canRevealTarget()) {
+                <button (click)="revealTarget()" type="button">Show Target in Hierarchy</button>
+            }
             @for (group of groups; track group.name) {
                 <fieldset><legend>{{ group.label }} in world units</legend><div class="vector">
                     @for (axis of axes; track axis) {
@@ -17,9 +35,16 @@
             <label>Smoothing in seconds<input type="text" inputmode="decimal" [formField]="fields.smoothing"/></label>
             <p>Zero follows immediately. Higher values smooth camera movement.</p>
         }
-    </fieldset>
-    @if (candidate().error; as failure) { <p class="error" role="status">{{ failure }}</p> }
+        </fieldset>
+        @if (candidate().error; as failure) {
+            <p class="error" role="status">{{ failure }}</p>
+        }
+    }
     @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
     @if (message(); as text) { <p role="status">{{ text }}</p> }
-    <button dialog-actions type="button" [disabled]="!available() || !!candidate().error" (click)="apply()">Apply Game Camera</button>
+    @if (!orbit()) {
+        <button (click)="apply()" [disabled]="!available() || !!candidate().error" dialog-actions type="button">Apply
+            Game Camera
+        </button>
+    }
 </editor-dialog>

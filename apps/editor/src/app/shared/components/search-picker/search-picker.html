@@ -1,0 +1,58 @@
+<label [for]="id" class="label">{{ label() }}</label>
+<div class="control">
+    <input
+        #field
+        (blur)="close()"
+        (click)="open()"
+        (focus)="open($event)"
+        (input)="search(field.value)"
+        (keydown)="navigate($event)"
+        [attr.aria-activedescendant]="visible() && active() !== null ? optionId(active()!) : null"
+        [attr.aria-controls]="visible() ? id + '-results' : null"
+        [attr.aria-describedby]="missing() ? id + '-missing' : null"
+        [attr.aria-expanded]="visible()"
+        [attr.aria-invalid]="missing() || null"
+        [attr.autofocus]="autofocus() ? '' : null"
+        [disabled]="disabled()"
+        [id]="id"
+        [placeholder]="placeholder()"
+        [value]="display()"
+        aria-autocomplete="list"
+        autocomplete="off"
+        role="combobox"
+        type="text"
+    />
+    @if (clearable() && value()) {
+        <button (click)="clear()" [attr.aria-label]="'Clear ' + label()" [disabled]="disabled()" type="button">Clear
+        </button>
+    }
+</div>
+@if (missing()) {
+    <small [id]="id + '-missing'" class="missing">Missing target: {{ value() }}</small>
+} @else if (selected()?.description; as description) {
+    @if (!visible()) {
+        <small class="detail">{{ description }}</small>
+    }
+}
+@if (visible()) {
+    <ul #list [attr.aria-label]="label() + ' results'" [id]="id + '-results'" class="results" role="listbox">
+        @for (option of matches(); track option.id) {
+            <li
+                    (click)="choose(option)"
+                    (mousedown)="$event.preventDefault()"
+                    [attr.aria-disabled]="option.disabled || null"
+                    [attr.aria-selected]="option.id === active()"
+                    [id]="optionId(option.id)"
+                    role="option"
+            >
+                <span>{{ option.label }}</span>
+                @if (option.description) {
+                    <small class="detail">{{ option.description }}</small>
+                }
+            </li>
+        }
+    </ul>
+    @if (!matches().length) {
+        <p class="empty" role="status">No matching results.</p>
+    }
+}

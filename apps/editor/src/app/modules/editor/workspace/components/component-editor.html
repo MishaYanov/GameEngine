@@ -1,7 +1,8 @@
 <section aria-label="Components" class="components">
 	<h3>Components</h3>
 	@for (component of components(); track component.id) {
-		<article class="component" [attr.aria-label]="label(component)">
+        <article [attr.aria-label]="label(component)" [attr.data-reference-component]="component.id" class="component"
+                 tabindex="-1">
 			<h4>{{ label(component) }}</h4>
 			<span>{{ component.enabled ? 'Enabled' : 'Disabled' }}</span>
 			<small class="reference">{{ component.id }}</small>
@@ -37,20 +38,10 @@
 	}
 	@if (types().length) {
 		<div class="actions">
-			<label
-				>Component type<select
-					#type
-					[value]="selectedKind()"
-					[disabled]="!available() || open() || !addTypes().length"
-					(change)="chooseKind(type.value)"
-				>
-					@for (type of addTypes(); track type.type_id) {
-						<option [value]="type.kind" [selected]="type.kind === selectedKind()">
-							{{ type.label }}
-						</option>
-					}
-				</select></label
-			>
+            <editor-search-picker (picked)="chooseKind($event)" [disabled]="!available() || open() || !addTypes().length"
+                                  [options]="typeOptions()" [value]="canAdd() ? selectedKind() : null"
+                                  label="Component type"
+                                  placeholder="Search component types…"/>
 			<button type="button" [disabled]="!available() || open() || !canAdd()" (click)="start()">
 				Add Component
 			</button>
@@ -127,6 +118,7 @@
 						<editor-machine-editor
 							[value]="draft().machine"
 							[entities]="entities()"
+                            [disabled]="!available()"
 							(changed)="machineChanged($event)"
 						/>
 					} @else if (draft().behavior_kind === 'timed_spawner') {
@@ -176,20 +168,12 @@
 											(input)="binding(index, 'name', slot.value)"
 											maxlength="64"
 									/></label>
-									<label
-										>Target<select
-											#target
-											[value]="row.target"
-											(change)="binding(index, 'target', target.value)"
-										>
-											<option value="">Choose target</option>
-											@for (entity of entities(); track entity.key) {
-												<option [value]="entity.key" [selected]="entity.key === row.target">
-													{{ entity.name }}
-												</option>
-											}
-										</select></label
-									>
+                                    <editor-search-picker (picked)="binding(index, 'target', $event)" [attr.data-component-reference-field]="'Spawn prefab slot: ' + row.name"
+                                                          [clearable]="true"
+                                                          [disabled]="!available()" [options]="entityOptions()"
+                                                          [value]="row.target"
+                                                          label="Target"
+                                                          placeholder="Search entities…"/>
 									<button
 										type="button"
 										(click)="removeBinding(index)"
@@ -209,15 +193,13 @@
 						</fieldset>
 					} @else {
 						@for (field of references(); track field.key) {
-							<label
-								>{{ field.label
-								}}<select [formField]="fields[field.key]">
-									<option value="">{{ field.optional ? 'None' : 'Choose entity' }}</option>
-									@for (entity of entities(); track entity.key) {
-										<option [value]="entity.key">{{ entity.name }}</option>
-									}
-								</select></label
-							>
+                            <editor-search-picker (picked)="fields[field.key]().value.set($event)"
+                                                  [attr.data-component-reference-field]="field.usageField ?? field.label"
+                                                  [clearable]="true"
+                                                  [disabled]="!available()" [label]="field.label"
+                                                  [options]="entityOptions()"
+                                                  [placeholder]="field.optional ? 'None' : 'Search entities…'"
+                                                  [value]="draft()[field.key]"/>
 						}
 						<p>
 							At Play, actors need colliders and trigger sensors must be enabled with compatible

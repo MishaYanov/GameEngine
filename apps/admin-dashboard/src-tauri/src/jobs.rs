@@ -3,7 +3,7 @@ use crate::{
 	processes::{ProcessState, Processes},
 	save_json,
 };
-use engine_logger::{Level, LogEntry};
+use engine_logger::{Context, Correlation, Level, LogEntry};
 use serde::{Deserialize, Serialize};
 use std::{
 	fs::File,
@@ -46,6 +46,31 @@ pub struct Run {
 	#[serde(default)]
 	pub offline: bool,
 	pub detail: Option<String>,
+}
+
+impl Run {
+	fn failure(&self, phase: &'static str, io_kind: Option<io::ErrorKind>) {
+		let mut correlation = Correlation {
+			operation_id: Some(self.id.clone()),
+			..Default::default()
+		};
+		match self.kind {
+			Kind::Build => correlation.build_id = Some(self.id.clone()),
+			Kind::Test => correlation.test_run_id = Some(self.id.clone()),
+		}
+		engine_logger::event(
+			Level::Error,
+			"admin::jobs",
+			format_args!(
+				"Cargo job failed: phase={phase}, exit_code={:?}, io_kind={io_kind:?}",
+				self.exit_code
+			),
+			Context {
+				correlation,
+				..Default::default()
+			},
+		);
+	}
 }
 pub const PACKAGES: &[&str] = &[
 	"game",
@@ -193,6 +218,9 @@ impl Jobs {
 				};
 				run.exit_code = process.exit_code;
 				run.ended_ms = process.ended_ms;
+				if run.state == Status::Failed {
+					run.failure("exit", None);
+				}
 				changed = true;
 			}
 		}
@@ -237,6 +265,7 @@ impl Jobs {
 					run.state = Status::Failed;
 					run.detail = Some(e.to_string());
 					run.ended_ms = Some(now_ms());
+					run.failure("spawn", Some(e.kind()));
 				}
 			}
 			changed = true;

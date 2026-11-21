@@ -39,6 +39,8 @@ const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
 const BOUNDS_RESERVATION_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct EditorWorkspace {
+	// A pause and resume may both finish before the native worker next wakes.
+	pub(crate) camera_capture_epoch: u64,
 	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
@@ -131,7 +133,7 @@ impl EditorWorkspace {
 			return Err("Project manifest must not be a symbolic link".into());
 		}
 		let (project, workspace_kind) = if project_path.exists() {
-			let project = ProjectData::load(&project_path)?;
+			let project = file_operation("load_project", ProjectData::load(&project_path))?;
 			if resolve_existing(&asset_root, project.startup_scene_path()?)? != scene_path {
 				return Err("Open the configured startup scene for this project".into());
 			}
@@ -177,7 +179,7 @@ impl EditorWorkspace {
 		let asset_root = location.assets().to_path_buf();
 		let project_path = location.manifest().to_path_buf();
 
-		let project = ProjectData::load(location.manifest())?;
+		let project = file_operation("load_project", ProjectData::load(location.manifest()))?;
 
 		let scene_path = resolve_existing(location.assets(), project.startup_scene_path()?)?;
 
@@ -328,11 +330,20 @@ impl EditorWorkspace {
 					self.bounds_queue.push_back(reference.clone());
 				}
 			}
+			if matches!(&purpose, PendingAsset::Import { .. })
+				&& matches!(&completed.result, Err(AssetJobError::Import(_)))
+			{
+				engine_logger::error!(target: "editor::asset_import", "Asset import failed: job={}, workspace_generation={}", completed.id.value(), self.generation);
+			}
 			let result = completed
 				.result
 				.map_err(|error| match error {
 					AssetJobError::Cancelled => ("cancelled", "Asset import cancelled".to_owned()),
 					AssetJobError::Import(message) => ("import_failed", message),
+					// The process panic hook already recorded this fault.
+					AssetJobError::Panicked => {
+						("import_failed", "CPU asset importer panicked".into())
+					}
 					AssetJobError::ByteLimit { .. } => (
 						"byte_limit",
 						"Asset import exceeded its byte reservation".to_owned(),
@@ -498,6 +509,12 @@ impl EditorWorkspace {
 		// Prepare filesystem-dependent intent before the coordinator mutates.
 		let preflight: Result<(), String> = (|| {
 			match &request.command {
+				Command::SetPlayCameraInput {
+					workspace_generation,
+					..
+				} if *workspace_generation != self.generation => {
+					return Err("Camera input belongs to a previous workspace".into());
+				}
 				Command::InstantiateLinkedPrefab { .. } | Command::UpdateLinkedPrefab { .. } => {
 					return Err("Linked source changes require the guarded prefab command and a reviewed source draft".into());
 				}
@@ -537,7 +554,11 @@ impl EditorWorkspace {
 			message,
 			current_revision: Some(self.backend.session().revision()),
 		})?;
+		let pauses = matches!(&request.command, Command::SetPaused { paused: true });
 		let receipt = self.backend.execute(request)?;
+		if pauses {
+			self.camera_capture_epoch = self.camera_capture_epoch.wrapping_add(1);
+		}
 		// Relative paths are already domain-validated. Resolve filesystem access
 		// only at file operations; no fallible path read after a committed edit.
 		self.scene_path = self.asset_root.join(
@@ -1078,6 +1099,7 @@ impl EditorWorkspace {
 			animation_preview: None,
 			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
+			camera_capture_epoch: 0,
 			backend,
 			asset_root,
 			scene_path,

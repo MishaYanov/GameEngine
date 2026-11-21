@@ -45,6 +45,14 @@ export class LinkedPrefabInspector {
 		Object.keys(this.updateSource()?.prefab.reference_slots ?? {}),
 	);
 	protected readonly entities = computed(() => this.editor.snapshot()?.document.entities ?? []);
+    protected readonly boundSlots = computed(() => {
+        const names = new Map(this.entities().map(entity => [entity.key, entity.name]));
+        const bindings = this.entity()?.linked_prefab?.bindings ?? this.status()?.bindings ?? {};
+        return Object.entries(bindings).map(([slot, key]) => ({
+            slot,
+            target: names.get(key) ?? `Missing entity: ${key}`
+        }));
+    });
 	protected readonly validBindings = computed(() =>
 		this.names().every(
 			(name) =>

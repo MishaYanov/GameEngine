@@ -31,6 +31,10 @@ h4 {
 	flex-wrap: wrap;
 	gap: var(--space-2);
 }
+
+.actions > editor-search-picker {
+  flex: 1 1 12rem;
+}
 label {
 	display: grid;
 	gap: var(--space-1);

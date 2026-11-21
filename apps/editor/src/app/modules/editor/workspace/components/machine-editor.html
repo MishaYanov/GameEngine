@@ -27,34 +27,14 @@
 					maxlength="64"
 					(input)="sensor(index, { id: inputId.value })"
 			/></label>
-			<label
-				>Sensor<select
-					#sensorEntity
-					[value]="item.sensor"
-					(change)="sensor(index, { sensor: sensorEntity.value })"
-				>
-					<option value="">Choose sensor</option>
-					@for (entity of entities(); track entity.key) {
-						<option [value]="entity.key" [selected]="entity.key === item.sensor">
-							{{ entity.name }}
-						</option>
-					}
-				</select></label
-			>
-			<label
-				>Actor<select
-					#actorEntity
-					[value]="item.actor"
-					(change)="sensor(index, { actor: actorEntity.value })"
-				>
-					<option value="">Choose actor</option>
-					@for (entity of entities(); track entity.key) {
-						<option [value]="entity.key" [selected]="entity.key === item.actor">
-							{{ entity.name }}
-						</option>
-					}
-				</select></label
-			>
+            <editor-search-picker (picked)="sensor(index, { sensor: $event })" [attr.data-component-reference-field]="'Sensor input ' + item.id + ': Sensor'" [clearable]="true"
+                                  [disabled]="disabled()"
+                                  [options]="entityOptions()" [value]="item.sensor" label="Sensor"
+                                  placeholder="Search entities…"/>
+            <editor-search-picker (picked)="sensor(index, { actor: $event })" [attr.data-component-reference-field]="'Sensor input ' + item.id + ': Actor'" [clearable]="true"
+                                  [disabled]="disabled()"
+                                  [options]="entityOptions()" [value]="item.actor" label="Actor"
+                                  placeholder="Search entities…"/>
 			<label
 				>Enter signal<select
 					#inputSignal
@@ -93,6 +73,8 @@
 					<editor-machine-action
 						[value]="entry"
 						[entities]="entities()"
+                        [disabled]="disabled()"
+                        [referencePrefix]="'State ' + item.id + ', action ' + (actionIndex + 1)"
 						(changed)="action(stateIndex, actionIndex, $event)"
 					/>
 					<button type="button" (click)="removeAction(stateIndex, actionIndex)">
@@ -157,6 +139,8 @@
 								label="Sender"
 								[entities]="entities()"
 								[value]="source"
+                                [disabled]="disabled()"
+                                [referenceField]="'State ' + item.id + ', transition ' + (ruleIndex + 1) + ': Signal sender'"
 								(changed)="
 									transition(stateIndex, ruleIndex, {
 										when: { kind: 'signal', signal: trigger.signal, source: $event },

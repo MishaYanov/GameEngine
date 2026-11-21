@@ -214,9 +214,9 @@ pub fn init(config: Config) -> Result<LoggingGuard, Box<dyn Error + Send + Sync>
 	}));
 	Ok(LoggingGuard)
 }
-/// Defaults to INFO; ENGINE_LOG_MODE=debug enables DEBUG in any build profile.
-/// ENGINE_LOG_DIR overrides the storage root. Console control is independent.
-pub fn init_application(application: &str) -> Result<LoggingGuard, Box<dyn Error + Send + Sync>> {
+/// File-backed defaults for applications that need to customize configuration before init.
+/// ENGINE_LOG_MODE controls the level and ENGINE_LOG_DIR overrides the storage root.
+pub fn application_config(application: &str) -> Result<Config, Box<dyn Error + Send + Sync>> {
 	let mut config = Config::new(application);
 	config.level = match std::env::var("ENGINE_LOG_MODE") {
 		Err(std::env::VarError::NotPresent) => LevelFilter::Info,
@@ -226,7 +226,11 @@ pub fn init_application(application: &str) -> Result<LoggingGuard, Box<dyn Error
 	};
 	config.console = !std::env::var("ENGINE_LOG_CONSOLE").is_ok_and(|v| v == "false" || v == "0");
 	config.storage = Some(StorageConfig::new(log_directory()));
-	init(config)
+	Ok(config)
+}
+
+pub fn init_application(application: &str) -> Result<LoggingGuard, Box<dyn Error + Send + Sync>> {
+	init(application_config(application)?)
 }
 /// The shared storage root used by client emitters and development collectors.
 pub fn log_directory() -> PathBuf {

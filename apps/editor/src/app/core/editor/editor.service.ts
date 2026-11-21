@@ -109,7 +109,7 @@ export class EditorService {
         if (this.capabilitiesRequest) return this.capabilitiesRequest;
         this.capabilitiesRequest = this.native<EditorCapabilities>('editor_capabilities')
             .then((capabilities) => {
-                if (capabilities.protocol_version !== 2 || ![3, 4].includes(capabilities.scene_schema_version)) {
+                if (capabilities.protocol_version !== 2 || ![3, 4, 5].includes(capabilities.scene_schema_version)) {
                     throw new EditorClientError(
                         'backend',
                         'editor_capabilities',

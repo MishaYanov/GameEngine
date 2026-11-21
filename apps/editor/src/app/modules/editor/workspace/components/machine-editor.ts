@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import {Component, computed, input, output} from '@angular/core';
 import {
 	GAMEPLAY_SIGNALS,
 	MACHINE_DESCRIPTOR,
@@ -13,17 +13,21 @@ import {
 import type { ComponentTarget } from './component-draft';
 import { MachineReferencePicker } from './machine-reference-picker';
 import { MachineActionEditor } from './machine-action-editor';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {sceneReferenceOptions} from '../scene-reference-options';
 
 @Component({
 	selector: 'editor-machine-editor',
-	imports: [MachineReferencePicker, MachineActionEditor],
+    imports: [MachineReferencePicker, MachineActionEditor, EditorSearchPicker],
 	templateUrl: './machine-editor.html',
 	styleUrl: './machine-editor.scss',
 })
 export class MachineEditor {
 	readonly value = input.required<MachineDefinition>();
 	readonly entities = input<readonly ComponentTarget[]>([]);
+    readonly disabled = input(false);
 	readonly changed = output<MachineDefinition>();
+    protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
 	protected readonly signals = GAMEPLAY_SIGNALS;
 	protected readonly limits = MACHINE_DESCRIPTOR;
 	protected initial(initial: string): void {

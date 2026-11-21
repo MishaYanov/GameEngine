@@ -6,6 +6,7 @@ import {EngineViewportDirective} from '../../../../core/editor/engine-viewport.d
 import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import type {ViewportInput, ViewportStatus} from '../../../../core/editor/editor.models';
 import {SceneViewport} from './scene-viewport';
+import {ContextMenuService} from '../../../../shared/components/context-menu/context-menu.service';
 
 @Directive({selector: '[engineViewport]', exportAs: 'engineViewport'})
 class ViewportStub {
@@ -120,6 +121,66 @@ describe('Scene viewport', () => {
             fixture.detectChanges();
             expect(directive.engineViewport()).toBe(false);
         });
+        modal.remove();
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(true);
+        });
+        querySpy.mockRestore();
+    });
+
+    it('hides the native surface for context menus and respects disabled and modal state when they close', async () => {
+        TestBed.configureTestingModule({
+            providers: [{provide: EditorService, useValue: {nativeAvailable: true}}],
+        });
+        TestBed.overrideComponent(SceneViewport, {
+            remove: {imports: [EngineViewportDirective]},
+            add: {imports: [ViewportStub]},
+        });
+        const query = document.querySelector.bind(document);
+        const querySpy = vi.spyOn(document, 'querySelector').mockImplementation(selector =>
+            query(selector === 'dialog:modal' ? 'dialog[open]' : selector));
+        const fixture = TestBed.createComponent(SceneViewport);
+        await fixture.whenStable();
+        const directive = fixture.debugElement.query(By.directive(ViewportStub)).injector.get(ViewportStub);
+        const menu = TestBed.inject(ContextMenuService);
+        const owner: HTMLElement = fixture.nativeElement;
+        const openMenu = () => menu.open({
+            label: 'Entity actions', owner, returnFocus: owner, x: 10, y: 10,
+            items: [{
+                kind: 'action', id: 'select', label: 'Select', disabled: false,
+                destructive: false, execute: vi.fn()
+            }],
+        });
+
+        expect(directive.engineViewport()).toBe(true);
+        expect(openMenu()).toBe(true);
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(false);
+        menu.close(false);
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(true);
+
+        openMenu();
+        fixture.componentRef.setInput('enabled', false);
+        menu.close(false);
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(false);
+        fixture.componentRef.setInput('enabled', true);
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(true);
+
+        const modal = document.createElement('dialog');
+        modal.setAttribute('open', '');
+        document.body.append(modal);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(false);
+        });
+        openMenu();
+        menu.close(false);
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(false);
         modal.remove();
         await vi.waitFor(() => {
             fixture.detectChanges();

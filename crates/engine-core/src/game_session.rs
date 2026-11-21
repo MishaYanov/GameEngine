@@ -1,3 +1,4 @@
+use crate::camera_input::{CameraInputOwner, CameraIntent};
 use crate::game_progress::{GameProgress, ProgressAction, ProgressState};
 use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
@@ -45,6 +46,7 @@ impl GameSession {
 		PlayStatusDto {
 			play_session_id: self.play_session_id.clone(),
 			run_id: self.run_id().to_owned(),
+			scene_generation: self.scene_generation,
 			scene_id: self.active.scene_id().clone(),
 			paused: self.active.paused(),
 			pending_scene_id: self.pending_scene.clone(),
@@ -69,6 +71,7 @@ impl GameSession {
 		)?;
 		if let Some(scene_id) = &outcome.requested_scene {
 			self.pending_scene = Some(scene_id.clone());
+			engine_logger::debug!(target: "engine_core::play", "Runtime scene transition requested: tick={}, generation={}", outcome.tick, self.scene_generation);
 		}
 		Ok(outcome)
 	}
@@ -181,6 +184,40 @@ impl GameSession {
 		})
 	}
 
+	/// Capture an owner once when a native viewport grabs the pointer.
+	pub fn camera_input_owner(&self) -> Option<CameraInputOwner> {
+		self.camera_input_active().then(|| CameraInputOwner {
+			run_id: self.run_id().to_owned(),
+			scene_generation: self.scene_generation,
+		})
+	}
+
+	pub fn owns_camera_input(&self, owner: &CameraInputOwner) -> bool {
+		self.camera_input_active()
+			&& self.scene_generation == owner.scene_generation
+			&& self.run_id() == owner.run_id
+	}
+
+	fn camera_input_active(&self) -> bool {
+		!self.active.paused()
+			&& self
+			.active
+			.orbit_state()
+			.is_some_and(|rig| !rig.target_lost)
+	}
+
+	pub fn submit_camera_input(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		intent: CameraIntent,
+	) -> Result<(), String> {
+		if self.run_id() != run_id || self.scene_generation() != scene_generation {
+			return Err("Camera input belongs to an inactive run or scene".into());
+		}
+		self.active_mut().submit_camera_input(intent)
+	}
+
 	pub fn commit_scene(&mut self, mut prepared: PreparedScene) -> Result<(), String> {
 		if !Arc::ptr_eq(&self.identity, &prepared.owner) {
 			return Err("Prepared scene belongs to another game session".into());
@@ -189,7 +226,8 @@ impl GameSession {
 			return Err("Scene generation counter is out of sync".into());
 		}
 
-		let next_generation = if prepared.new_run.is_some() {
+		let restarted = prepared.new_run.is_some();
+		let next_generation = if restarted {
 			0
 		} else {
 			self.scene_generation
@@ -197,7 +235,7 @@ impl GameSession {
 				.ok_or_else(|| "Scene generation counter is exhausted".to_string())?
 		};
 
-		if prepared.new_run.is_none() {
+		if !restarted {
 			prepared.simulation.set_paused(self.active.paused());
 		}
 		prepared.simulation.clear_input();
@@ -209,6 +247,7 @@ impl GameSession {
 		self.active = prepared.simulation;
 		self.scene_generation = next_generation;
 		self.pending_scene = None;
+		engine_logger::info!(target: "engine_core::play", "Runtime scene committed: restarted={restarted}, generation={next_generation}");
 
 		Ok(())
 	}

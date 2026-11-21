@@ -17,7 +17,17 @@ function vector(value: unknown, length: number): boolean {
     return Array.isArray(value) && value.length === length && value.every(Number.isFinite);
 }
 
-function camera(value: unknown): boolean {
+function orbitCamera(value: unknown): boolean {
+    return record(value) && typeof value['target'] === 'string' &&
+        value['target'].length > 0 && vector(value['pivot_offset'], 3) &&
+        ['initial_yaw', 'initial_pitch', 'initial_distance', 'min_distance', 'max_distance',
+            'min_pitch', 'max_pitch', 'follow_seconds', 'recovery_seconds', 'teleport_distance',
+            'probe_radius'].every(key => Number.isFinite(value[key])) &&
+        integer(value['obstruction_mask']) && value['obstruction_mask'] > 0 &&
+        value['obstruction_mask'] <= 0xffff_ffff;
+}
+
+function camera(value: unknown, schema: unknown): boolean {
     const follow = record(value) ? value['follow'] : undefined;
     const validFollow = follow == null || (record(follow) && typeof follow['target'] === 'string' &&
         vector(follow['offset'], 3) && vector(follow['look_offset'], 3) &&
@@ -26,6 +36,7 @@ function camera(value: unknown): boolean {
     return (
         record(value) &&
         validFollow &&
+        (schema === 5 ? (value['orbit'] == null || (follow == null && orbitCamera(value['orbit']))) : !('orbit' in value)) &&
         vector(value['position'], 3) &&
         ['yaw', 'pitch', 'vertical_fov', 'near', 'far'].every((key) => Number.isFinite(value[key]))
     );
@@ -40,6 +51,7 @@ function entity(value: unknown): value is SceneEntity {
         typeof value['model_path'] === 'string' &&
         typeof value['renderable'] === 'boolean' &&
         (value['component_views'] === undefined || validComponentViews(value['component_views'])) &&
+        (value['linked_prefab'] == null || linkedPrefab(value['linked_prefab'])) &&
         ['position', 'rotation', 'scale'].every((key) => vector(transform[key], 3))
     );
 }
@@ -56,13 +68,19 @@ function light(value: unknown): boolean {
     );
 }
 
+function linkedPrefab(value: unknown): boolean {
+    if (!record(value) || !record(value['source']) || !record(value['bindings'])) return false;
+    return typeof value['source']['source_id'] === 'string' && typeof value['source']['path'] === 'string' &&
+        Object.values(value['bindings']).every(key => typeof key === 'string');
+}
+
 function validDocument(value: unknown): boolean {
     return (
         record(value) &&
-        (value['schema_version'] === 3 || value['schema_version'] === 4) &&
+        (value['schema_version'] === 3 || value['schema_version'] === 4 || value['schema_version'] === 5) &&
         record(value['bindings']) &&
         Object.values(value['bindings']).every((key) => typeof key === 'string') &&
-        camera(value['camera']) &&
+        camera(value['camera'], value['schema_version']) &&
         Array.isArray(value['lights']) &&
         value['lights'].every(light) &&
         Array.isArray(value['entities']) &&
@@ -170,7 +188,7 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
         changes['removed_entities'].length > 0 ||
         !Array.isArray(value['entities']) ||
         !value['entities'].every(entity) ||
-        (changes['camera_changed'] ? !camera(value['camera']) : value['camera'] !== null) ||
+        (changes['camera_changed'] ? !camera(value['camera'], previous.document.schema_version) : value['camera'] !== null) ||
         (changes['lights_changed']
             ? !Array.isArray(value['lights']) || !value['lights'].every(light)
             : value['lights'] !== null)

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Logger Agent"
+  short_description: "Add diff-based logging, debug mode, and error files"

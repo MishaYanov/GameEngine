@@ -1,5 +1,6 @@
 import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
+import {By} from '@angular/platform-browser';
 import {invoke} from '@tauri-apps/api/core';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
@@ -9,6 +10,8 @@ import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetsPanel} from './assets-panel';
+import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
+import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -82,11 +85,107 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         if (!candidate) throw new Error(`Missing asset file: ${path}`);
         return candidate;
     };
+    const contextAction = (path: string, id: string): Extract<ContextMenuItem, { kind: 'action' }> => {
+        const trigger = fixture.debugElement.queryAll(By.directive(EditorContextMenuTrigger))
+            .find(candidate => candidate.nativeElement === file(path))!.injector.get(EditorContextMenuTrigger);
+        const source = trigger.editorContextMenu();
+        const items = typeof source === 'function' ? source() : source;
+        const action = items.find(item => item.kind === 'action' && item.id === id);
+        if (!action || action.kind !== 'action') throw new Error(`Missing asset context action: ${id}`);
+        return action;
+    };
     await fixture.whenStable();
-    return {fixture, root, button, file, current, modelAssets, busy, assets, request, importModel, loadPrefab, drag};
+    return {
+        fixture,
+        root,
+        button,
+        file,
+        contextAction,
+        current,
+        modelAssets,
+        workspaceGeneration,
+        busy,
+        assets,
+        request,
+        importModel,
+        loadPrefab,
+        drag
+    };
 }
 
 describe('AssetsPanel', () => {
+    it('adds the clicked asset through the field commit flow independently of the selected file', async () => {
+        const crate: ModelAsset = {name: 'Crate', path: 'props/crate.glb'};
+        const withCommittedEdit = vi.fn(async (action: () => Promise<void>) => {
+            await action();
+            return true;
+        });
+        const panel = await createPanel({
+            models: [robot, crate], editing: {
+                ready: signal(true), error: signal(null), withCommittedEdit,
+            }
+        });
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        panel.file(robot.path).click();
+        await panel.fixture.whenStable();
+        await panel.contextAction(crate.path, 'asset.add-model').execute();
+        await panel.fixture.whenStable();
+        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith(crate.path, [0, 0, 0], 1, 1);
+        expect(withCommittedEdit).toHaveBeenCalledOnce();
+        expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('offers scene and prefab actions for their clicked files without selecting them first', async () => {
+        const prefab: ModelAsset = {name: 'Actor', path: 'prefabs/actor.json', kind: 'prefab'};
+        const panel = await createPanel({models: [robot, prefab]});
+        panel.button('prefabs').click();
+        await panel.fixture.whenStable();
+        await panel.contextAction(prefab.path, 'asset.instantiate-prefab').execute();
+        expect(panel.loadPrefab).toHaveBeenCalledExactlyOnceWith(prefab.path, [0, 0, 0], 1, 1);
+        panel.button('Up').click();
+        await panel.fixture.whenStable();
+        panel.button('scenes').click();
+        await panel.fixture.whenStable();
+        expect(panel.contextAction('scenes/main.json', 'asset.open-scene').disabled).toBe(true);
+        await panel.contextAction('scenes/courtyard.json', 'asset.open-scene').execute();
+        expect(panel.request).toHaveBeenCalledExactlyOnceWith('courtyard');
+    });
+
+    it('blocks an open asset action after authoring becomes unavailable, scene changes, or workspace changes', async () => {
+        const panel = await createPanel({models: [robot]});
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        const add = panel.contextAction(robot.path, 'asset.add-model');
+        panel.current.update(value => ({...value, mode: 'play'}));
+        await panel.fixture.whenStable();
+        await add.execute();
+        panel.current.update(value => ({...value, mode: 'edit', active_scene_id: 'courtyard'}));
+        await panel.fixture.whenStable();
+        await add.execute();
+        panel.current.update(value => ({...value, active_scene_id: 'main'}));
+        panel.workspaceGeneration.set(2);
+        await panel.fixture.whenStable();
+        await add.execute();
+        expect(panel.importModel).not.toHaveBeenCalled();
+    });
+
+    it('resolves moved asset identities and rejects deleted assets before context actions execute', async () => {
+        const original: ModelAsset = {...robot, asset_id: 'robot-id'};
+        const panel = await createPanel({models: [original]});
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        const add = panel.contextAction(original.path, 'asset.add-model');
+        panel.modelAssets.set([{...original, path: 'props/moved.glb'}]);
+        await panel.fixture.whenStable();
+        await add.execute();
+        expect(panel.importModel).toHaveBeenCalledExactlyOnceWith('props/moved.glb', [0, 0, 0], 1, 1);
+        panel.modelAssets.set([]);
+        await panel.fixture.whenStable();
+        await add.execute();
+        expect(panel.importModel).toHaveBeenCalledOnce();
+    });
+
     it('retains selection through real service publication and the following catalog refresh', async () => {
         const original: ModelAsset = {...robot, asset_id: 'robot-id', kind: 'model'};
         const moved: ModelAsset = {...original, path: 'props/moved.glb'};

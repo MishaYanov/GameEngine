@@ -16,7 +16,10 @@ impl<T: HasDisplayHandle + HasWindowHandle> WindowOwner for T {}
 /// Owns a presentation renderer. Uploaded resources must be released before this owner.
 /// Field order releases GPU dependants before the device, surface, instance and window.
 pub struct WindowRenderer {
-	resources: ManuallyDrop<RendererResources>,
+	// Vulkan dispatch tables make this ownership tree large. Heap ownership
+	// keeps debug constructor/move temporaries off the native main stack while
+	// retaining the same ordered shutdown and uncertain-completion policy.
+	resources: ManuallyDrop<Box<RendererResources>>,
 	size: [u32; 2],
 	dirty: bool,
 	lighting: LightingUniform,
@@ -130,7 +133,7 @@ impl WindowRenderer {
 		let material_layout =
 			Arc::new(VulkanMaterialLayout::new(device.raw()).map_err(|e| e.to_string())?);
 		let mut renderer = Self {
-			resources: ManuallyDrop::new(RendererResources {
+			resources: ManuallyDrop::new(Box::new(RendererResources {
 				targets: None,
 				editor: None,
 				pipelines: None,
@@ -140,7 +143,7 @@ impl WindowRenderer {
 				surface,
 				instance,
 				_window: window,
-			}),
+			})),
 			size: [width, height],
 			dirty: true,
 			lighting: LightingUniform::default(),
@@ -262,7 +265,7 @@ impl WindowRenderer {
 		if self.prepare()?.is_none() {
 			return Ok(DrawStatus::Suspended);
 		}
-		let resources = &mut *self.resources;
+		let resources = &mut **self.resources;
 		let targets = resources.targets.as_mut().expect("prepared render targets");
 		let editor = if self.editor_visuals.is_empty() {
 			None
@@ -445,6 +448,14 @@ mod tests {
 		fn drop(&mut self) {
 			self.0.borrow_mut().push(self.1);
 		}
+	}
+
+	#[test]
+	fn renderer_handle_stays_small_for_native_main_thread_startup() {
+		// Debug builds retain several constructor/move temporaries on the
+		// Windows main thread's 1 MiB stack. Keep the nested GPU ownership
+		// tree out of the handle passed through application initialization.
+		assert!(size_of::<super::WindowRenderer>() <= 4096);
 	}
 
 	#[test]

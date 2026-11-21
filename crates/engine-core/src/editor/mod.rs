@@ -8,6 +8,7 @@ mod linked_prefab;
 mod operations;
 mod prefab;
 mod runtime_lifecycle;
+use crate::camera_input::CameraIntent;
 use crate::command::{
 	CommandDescriptorDto, EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto,
 	PlayStatusDto, SnapSettingsDto,
@@ -225,6 +226,13 @@ impl CommandFactory {
 			("start_play", "Play", "simulation", false, false),
 			("stop_play", "Stop", "simulation", false, true),
 			("set_paused", "Pause simulation", "simulation", false, true),
+			(
+				"set_play_camera_input",
+				"Set orbit camera input",
+				"simulation",
+				false,
+				true,
+			),
 			(
 				"set_character_input",
 				"Set character movement and jump intent",
@@ -479,6 +487,10 @@ impl EditorSession {
 			.as_ref()
 			.map_or_else(|| Arc::clone(&self.data), |play| play.active().document())
 	}
+	pub fn orbit_state(&self) -> Option<&crate::game_camera::OrbitRuntimeState> {
+		self.play.as_ref()?.active().orbit_state()
+	}
+
 	pub fn render_camera(&self) -> crate::Camera {
 		if let Some(play) = &self.play {
 			return play.active().camera().clone();
@@ -782,11 +794,13 @@ impl EditorSession {
 				self.play = Some(run);
 				self.scene_revision += 1;
 				self.bump();
+				engine_logger::info!(target: "engine_core::play", "Play started: revision={}", self.revision);
 			}
 			Command::StopPlay => {
 				if self.play.take().is_some() {
 					self.scene_revision += 1;
 					self.bump();
+					engine_logger::info!(target: "engine_core::play", "Play stopped: revision={}", self.revision);
 				}
 			}
 			Command::SetPaused { paused } => {
@@ -794,6 +808,7 @@ impl EditorSession {
 				if play.active().paused() != paused {
 					play.active_mut().set_paused(paused);
 					self.bump();
+					engine_logger::debug!(target: "engine_core::play", "Play pause changed: paused={paused}, revision={}", self.revision);
 				}
 			}
 			Command::SetPlayInput { movement } => {
@@ -909,6 +924,24 @@ impl EditorSession {
 				self.revert_linked_prefab(root_key, property)?
 			}
 			Command::UnpackLinkedPrefab { root_key } => self.unpack_linked_prefab(root_key)?,
+			Command::SetPlayCameraInput {
+				workspace_generation: _,
+				run_id,
+				scene_generation,
+				yaw_delta,
+				pitch_delta,
+				log_distance_delta,
+			} => {
+				let input = CameraIntent {
+					yaw_delta,
+					pitch_delta,
+					log_distance_delta,
+				};
+				self.submit_camera_input(&run_id, scene_generation, input)?;
+				if !input.is_empty() {
+					self.bump();
+				}
+			}
 			mutation => {
 				self.require_edit()?;
 
@@ -1073,6 +1106,28 @@ impl EditorSession {
 }
 
 impl EditorSession {
+	pub fn camera_input_owner(&self) -> Option<crate::camera_input::CameraInputOwner> {
+		self.play.as_ref()?.camera_input_owner()
+	}
+
+	pub fn owns_camera_input(&self, owner: &crate::camera_input::CameraInputOwner) -> bool {
+		self.play
+			.as_ref()
+			.is_some_and(|play| play.owns_camera_input(owner))
+	}
+
+	pub fn submit_camera_input(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		intent: CameraIntent,
+	) -> Result<(), String> {
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.submit_camera_input(run_id, scene_generation, intent)
+	}
+
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
 		self.play.as_ref().map(GameSession::status)
 	}

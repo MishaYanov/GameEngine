@@ -206,14 +206,7 @@ pub(super) fn apply(
 			data.entities
 				.retain(|entity| !removed.contains(&entity.key));
 			data.bindings.retain(|_, key| !removed.contains(key));
-			if data
-				.camera
-				.follow
-				.as_ref()
-				.is_some_and(|follow| removed.contains(&follow.target))
-			{
-				data.camera.follow = None;
-			}
+			data.camera.clear_removed_targets(&removed);
 			selection.clear();
 		}
 		EditorCommandDto::Reparent {
@@ -902,6 +895,7 @@ mod tests {
 			],
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

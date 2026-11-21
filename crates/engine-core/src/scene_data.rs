@@ -1,11 +1,11 @@
 pub use crate::collider::{ColliderData, ColliderInteraction};
-pub use crate::game_camera::FollowCameraSettings;
+pub use crate::game_camera::{FollowCameraSettings, OrbitCameraSettings};
 use crate::{Transform, entity_key::EntityKey};
 use glam::{EulerRot, Mat4};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
 pub const MAX_SCENE_LIGHTS: usize = 16;
 pub const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
@@ -320,6 +320,8 @@ impl TransformData {
 pub struct CameraData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub follow: Option<crate::game_camera::FollowCameraSettings>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub orbit: Option<crate::game_camera::OrbitCameraSettings>,
 	pub position: [f32; 3],
 	pub yaw: f32,
 	pub pitch: f32,
@@ -329,16 +331,10 @@ pub struct CameraData {
 	#[serde(rename = "far")]
 	pub far_plane: f32,
 }
-
 #[derive(Debug)]
 pub struct ParsedScene {
 	pub data: SceneData,
 	pub source_schema_version: u32,
-}
-
-#[derive(Deserialize)]
-struct VersionHeader {
-	schema_version: u32,
 }
 
 #[derive(Deserialize)]
@@ -376,12 +372,16 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 	if source.len() > MAX_SCENE_BYTES {
 		return Err("Scene JSON exceeds the 32 MiB size limit".into());
 	}
-	let header = serde_json::from_str::<VersionHeader>(source)
-		.map_err(|error| format!("Invalid scene JSON: {error}"))?;
-	let parsed = match header.schema_version {
+	let value: serde_json::Value =
+		serde_json::from_str(source).map_err(|error| format!("Invalid scene JSON: {error}"))?;
+
+	let source_version = crate::scene_format::camera_schema_version(&value)?;
+
+	let parsed = match source_version {
 		1 => {
-			let legacy = serde_json::from_str::<SceneDataV1>(source)
+			let legacy: SceneDataV1 = serde_json::from_value(value)
 				.map_err(|error| format!("Invalid version-1 scene JSON: {error}"))?;
+
 			let entities = legacy
 				.entities
 				.into_iter()
@@ -395,7 +395,9 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 					.with_transform(entity.transform))
 				})
 				.collect::<Result<Vec<_>, String>>()?;
+
 			let lights = legacy_lights(&entities)?;
+
 			ParsedScene {
 				source_schema_version: legacy.schema_version,
 				data: SceneData {
@@ -407,9 +409,11 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 				},
 			}
 		}
+
 		2 => {
-			let legacy = serde_json::from_str::<SceneDataV2>(source)
+			let legacy: SceneDataV2 = serde_json::from_value(value)
 				.map_err(|error| format!("Invalid version-2 scene JSON: {error}"))?;
+
 			let entities = legacy
 				.entities
 				.into_iter()
@@ -418,7 +422,9 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 						.with_transform(entity.transform)
 				})
 				.collect::<Vec<_>>();
+
 			let lights = legacy_lights(&entities)?;
+
 			ParsedScene {
 				source_schema_version: legacy.schema_version,
 				data: SceneData {
@@ -430,20 +436,31 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 				},
 			}
 		}
-		3 | CURRENT_SCHEMA_VERSION => ParsedScene {
-			source_schema_version: header.schema_version,
-			data: serde_json::from_str::<SceneData>(source)
-				.map_err(|error| format!("Invalid scene JSON: {error}"))?,
-		},
-		version => return Err(format!("Unsupported schema version: {version}")),
+
+		3..=5 => {
+			let data = crate::scene_format::decode_scene(value, source_version)
+				.map_err(|error| format!("Invalid scene JSON: {error}"))?;
+
+			ParsedScene {
+				// Safe here: this branch accepts only 3, 4, or 5.
+				source_schema_version: source_version as u32,
+				data,
+			}
+		}
+
+		version => {
+			return Err(format!("Unsupported schema version: {version}"));
+		}
 	};
+
 	parsed.data.validate()?;
+	if parsed.source_schema_version != CURRENT_SCHEMA_VERSION {
+		engine_logger::debug!(target: "engine_core::scene", "Scene schema migrated: from={}, to={CURRENT_SCHEMA_VERSION}", parsed.source_schema_version);
+	}
+
 	Ok(parsed)
 }
 
-// Versions 1 and 2 predate authored lights and used the renderer's default.
-// Persist that appearance explicitly on migration; an empty v3 light list is
-// intentional and receives only the renderer's ambient contribution.
 fn legacy_lights(entities: &[EntityData]) -> Result<Vec<LightData>, String> {
 	let occupied: HashSet<_> = entities.iter().map(|entity| entity.key.as_str()).collect();
 	for index in 0..=entities.len() {
@@ -583,6 +600,12 @@ impl SceneData {
 			charge(256, &[follow.target.as_str()])?;
 			if !keys.contains(follow.target.as_str()) {
 				return Err("Follow camera target must reference an entity in this scene".into());
+			}
+		}
+		if let Some(orbit) = &self.camera.orbit {
+			charge(256, &[orbit.target.as_str()])?;
+			if !keys.contains(orbit.target.as_str()) {
+				return Err("Orbit camera target must reference an entity in this scene".into());
 			}
 		}
 		for (name, key) in &self.bindings {
@@ -738,9 +761,35 @@ fn validate_name(name: &str) -> Result<(), String> {
 }
 
 impl CameraData {
+	pub(crate) fn clear_removed_targets(&mut self, removed: &HashSet<EntityKey>) {
+		if self
+			.follow
+			.as_ref()
+			.is_some_and(|follow| removed.contains(&follow.target))
+		{
+			self.follow = None;
+		}
+		if self
+			.orbit
+			.as_ref()
+			.is_some_and(|orbit| removed.contains(&orbit.target))
+		{
+			self.orbit = None;
+		}
+	}
+
 	pub fn validate(&self) -> Result<(), String> {
+		if self.follow.is_some() && self.orbit.is_some() {
+			return Err("Choose either Follow or Orbit camera mode, not both".into());
+		}
+
 		if let Some(follow) = &self.follow {
 			follow.validate()?;
+		}
+
+		if let Some(orbit) = &self.orbit {
+			orbit.validate()?;
+			orbit.validate_projection(self.near_plane, self.vertical_fov)?;
 		}
 		if !self
 			.position

@@ -1,0 +1,34 @@
+@if (menu.request()) {
+    <div #surface (contextmenu)="$event.preventDefault()" class="menu-layer" popover="manual">
+        @for (level of levels(); track $index; let depth = $index) {
+            <div (keydown)="navigate($event, depth)" [attr.aria-label]="level.label" class="menu-panel"
+                 role="menu">
+                @for (item of level.items; track item.id; let index = $index) {
+                    @if (item.kind === 'separator') {
+                        <div class="separator" role="separator"></div>
+                    } @else {
+                        <button (click)="activate(depth, index)" (pointerenter)="hover(depth, index)" [attr.aria-disabled]="item.kind === 'action' && item.disabled ? true : null"
+                                [attr.aria-expanded]="item.kind === 'submenu' ? expanded(depth, index) : null" [attr.aria-haspopup]="item.kind === 'submenu' ? 'menu' : null"
+                                [attr.data-index]="index"
+                                [class.active]="active()[depth] === index"
+                                [class.destructive]="item.kind === 'action' && item.destructive"
+                                [id]="itemId(depth, index)"
+                                [tabindex]="active()[depth] === index ? 0 : -1"
+                                role="menuitem" type="button">
+                            <span class="item-icon">@if (item.icon) {
+                                <editor-icon [name]="item.icon"/>
+                            }</span>
+                            <span class="item-label">{{ item.label }}</span>
+                            @if (item.kind === 'action' && item.shortcut) {
+                                <span class="shortcut">{{ item.shortcut }}</span>
+                            }
+                            @if (item.kind === 'submenu') {
+                                <editor-icon name="expand"/>
+                            }
+                        </button>
+                    }
+                }
+            </div>
+        }
+    </div>
+}

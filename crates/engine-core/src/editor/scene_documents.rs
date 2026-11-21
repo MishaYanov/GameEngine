@@ -221,6 +221,7 @@ impl EditorSession {
 		self.check_document_budget(None)?;
 		self.activate(id, draft);
 		self.bump();
+		engine_logger::info!(target: "engine_core::editor", "Authored scene switched: revision={}", self.revision);
 		Ok(())
 	}
 
@@ -362,6 +363,7 @@ impl EditorSession {
 		self.activate(id, draft);
 		self.project = Arc::new(project);
 		self.bump();
+		engine_logger::debug!(target: "engine_core::editor", "History restored: redo={redo}, revision={}", self.revision);
 		Ok(())
 	}
 
@@ -454,6 +456,7 @@ mod tests {
 			)],
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

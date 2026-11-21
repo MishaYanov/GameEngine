@@ -1,5 +1,11 @@
 import type { ComponentRecord } from './editor-components';
-import type { EditorSnapshot, Transform, Vec3 } from './editor.models';
+import type {EditorSnapshot, EntityKey, Transform, Vec3} from './editor.models';
+
+/** The fields used for reference navigation from an authored linked instance root. */
+export interface LinkedPrefabReferenceView {
+    readonly source: { readonly source_id: string; readonly path: string };
+    readonly bindings: Readonly<Record<string, EntityKey>>;
+}
 
 export interface PrefabSourceEntity {
 	readonly key: string;

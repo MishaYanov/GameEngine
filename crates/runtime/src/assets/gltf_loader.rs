@@ -167,7 +167,7 @@ pub fn load_first_mesh(path: impl AsRef<Path>) -> Result<Vec<ImportedPrimitive>,
 	}
 	resources.prepare_mesh_images(0)?;
 	let parts = import_first_mesh(&resources.document, &resources.buffers, &resources.images)?;
-	engine_logger::info!("Imported {} parts from {}", parts.len(), path.display());
+	engine_logger::debug!("Imported glTF mesh: parts={}", parts.len());
 	Ok(parts)
 }
 
@@ -645,7 +645,7 @@ fn import_primitive(
 				charge(budget, image.pixels().len())?;
 			}
 
-			engine_logger::info!(
+			engine_logger::debug!(
 				"Primitive {}: image {}, {}x{}, {} RGBA bytes, UV set {}",
 				primitive_index,
 				image_index,
@@ -756,7 +756,7 @@ fn import_primitive(
 		})
 		.collect();
 
-	engine_logger::info!(
+	engine_logger::debug!(
 		"Imported primitive {}: {} vertices, {} indices, {} triangles",
 		primitive_index,
 		vertices.len(),

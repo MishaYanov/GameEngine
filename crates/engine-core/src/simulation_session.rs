@@ -1,10 +1,11 @@
 //! One simulation pipeline for editor Play, the derived player and headless runs.
+use crate::camera_input::{CameraInputLatch, CameraIntent};
 use crate::game_progress::{GameProgress, ProgressAction, ProgressState, ProgressView};
 use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
 	collision::{CollisionStats, CollisionWorld},
-	game_camera::GameCameraController,
+	game_camera::{GameCameraController, OrbitRuntimeState},
 	input::{GameKeyboardInput, HeldGameActions},
 	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
 	scene_data::{EntityData, MaterialOverrideData, SceneData, TransformData},
@@ -354,6 +355,9 @@ pub struct TickOutcome {
 	pub changes: WorldChange,
 	#[serde(default)]
 	pub progress_changed: bool,
+	/// Committed orbit diagnostics or pending input changed independently of the rendered pose.
+	#[serde(default)]
+	pub camera_status_changed: bool,
 	#[serde(default)]
 	pub progress_revision: u64,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -382,6 +386,7 @@ pub struct SimulationSession {
 	triggers: TriggerTracker,
 	camera: GameCameraController,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
+	camera_input: CameraInputLatch,
 }
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
@@ -465,8 +470,9 @@ impl SimulationSession {
 		let collisions = CollisionWorld::new(&world)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
-		let camera = GameCameraController::new(&world)?;
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
+		let camera = GameCameraController::new_with_lifecycle(&world, &lifecycle)?;
+		let camera_input = CameraInputLatch::default();
 
 		Ok(Self {
 			animations: Default::default(),
@@ -489,6 +495,7 @@ impl SimulationSession {
 			triggers,
 			camera,
 			visibility_capabilities: None,
+			camera_input,
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
@@ -506,8 +513,10 @@ impl SimulationSession {
 	pub fn camera(&self) -> &crate::Camera {
 		self.camera.camera()
 	}
-	/// Native hosts supply the entities whose models were successfully prepared.
-	/// CPU-only sessions leave this unset. It is runtime capability data, not authored state.
+	pub fn orbit_state(&self) -> Option<&OrbitRuntimeState> {
+		self.camera.orbit_state()
+	}
+
 	pub fn set_visibility_capabilities(
 		&mut self,
 		available: HashSet<EntityKey>,
@@ -545,6 +554,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
 	}
@@ -561,6 +571,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
 					.module
@@ -762,6 +773,7 @@ impl SimulationSession {
 	}
 	pub fn clear_input(&mut self) {
 		self.characters.clear_input();
+		self.camera_input.clear();
 		self.inputs.movement.clear();
 		self.inputs.game_actions = HeldGameActions::default();
 		self.clock.reset();
@@ -887,6 +899,20 @@ impl SimulationSession {
 		Ok(changed)
 	}
 
+	pub fn pending_camera_input(&self) -> CameraIntent {
+		self.camera_input.snapshot()
+	}
+
+	pub(crate) fn submit_camera_input(&mut self, intent: CameraIntent) -> Result<(), String> {
+		if self.paused {
+			return Err("Resume Play before submitting camera input".into());
+		}
+		if !self.orbit_state().is_some_and(|rig| !rig.target_lost) {
+			return Err("Camera input requires an orbit camera with a live target".into());
+		}
+		self.camera_input.submit(intent)
+	}
+
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
 		self.tick_with_progress(elapsed, &mut ProgressState::empty(), false)
 	}
@@ -923,6 +949,7 @@ impl SimulationSession {
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
 		let mut camera = self.camera.clone();
+		let mut camera_input = self.camera_input.clone();
 		let mut trigger_events = Vec::new();
 		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
@@ -1233,7 +1260,16 @@ impl SimulationSession {
 					});
 				}
 				let before_camera = camera.camera().clone();
-				camera.update(&self.world, report.step_seconds)?;
+				let clear_camera_input = camera.step(
+					&self.world,
+					&lifecycle,
+					report.step_seconds,
+					camera_input.take_for_step(),
+					self.tick + u64::from(steps) + 1,
+				)?;
+				if clear_camera_input {
+					camera_input.clear();
+				}
 				if before_camera.position != camera.camera().position
 					|| before_camera.yaw != camera.camera().yaw
 					|| before_camera.pitch != camera.camera().pitch
@@ -1276,6 +1312,8 @@ impl SimulationSession {
 			self.paused = true;
 			self.clear_input();
 			self.actions.clear();
+			// The application reports the returned failure. Record the recovery here.
+			engine_logger::debug!(target: "engine_core::simulation", "Simulation rolled back and paused: tick={}", self.tick);
 			return Err(format!("Simulation paused after rejected actions: {error}"));
 		}
 		outcome.progress_changed = progress_transaction.commit();
@@ -1301,7 +1339,14 @@ impl SimulationSession {
 		self.animations = animations;
 		self.animation_bindings
 			.retain(|key, _| self.world.entity_index(key).is_some());
+		outcome.camera_status_changed = self.camera_input != camera_input
+			|| self
+			.camera
+			.orbit_state()
+			.zip(camera.orbit_state())
+			.is_some_and(|(previous, next)| !previous.same_status(next));
 		self.camera = camera;
+		self.camera_input = camera_input;
 		outcome.trigger_events = trigger_events;
 		Ok(outcome)
 	}

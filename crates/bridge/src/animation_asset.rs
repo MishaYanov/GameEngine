@@ -161,6 +161,7 @@ pub fn prepare_scene_with_pins(
 		}
 		bindings.insert(entity.key.clone(), asset);
 	}
+	engine_logger::debug!(target: "bridge::animation", "Animation bindings prepared: bindings={}, assets={}, retained_bytes={retained}", bindings.len(), shared.len());
 	Ok(bindings)
 }
 fn charge(remaining: &mut usize, count: usize, stride: usize) -> Result<(), String> {

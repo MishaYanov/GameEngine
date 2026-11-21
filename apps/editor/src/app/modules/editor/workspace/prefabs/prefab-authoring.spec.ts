@@ -174,15 +174,19 @@ function configure() {
 function controls(root: HTMLElement) {
 	const button = (text: string) =>
 		[...root.querySelectorAll('button')].find((button) => button.textContent.trim() === text)!;
-	const field = (text: string) =>
-		[...root.querySelectorAll('label')]
-			.find((label) => label.firstChild?.textContent?.trim() === text)!
-			.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
+    const field = (text: string) => {
+        const label = [...root.querySelectorAll('label')]
+            .find((label) => label.firstChild?.textContent?.trim() === text)!;
+        return label.htmlFor
+            ? root.querySelector<HTMLInputElement>(`#${label.htmlFor}`)!
+            : label.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
+    };
 	const change = (label: string, value: string) => {
 		const input = field(label);
 		input.value = value;
 		input.dispatchEvent(new Event('input'));
 		input.dispatchEvent(new Event('change'));
+        if (input.getAttribute('role') === 'combobox') input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
 	};
 	return { button, field, change };
 }
@@ -384,7 +388,7 @@ describe('typed prefab authoring', () => {
 			4,
 		);
 		expect(root.querySelector('[role="alert"]')?.textContent).toContain('revision changed');
-		expect(ui.field('Actor').value).toBe('player');
+        expect(ui.field('Actor').value).toBe('Player');
 	});
 
 	it('closes a late native draft instead of opening it in another workspace', async () => {

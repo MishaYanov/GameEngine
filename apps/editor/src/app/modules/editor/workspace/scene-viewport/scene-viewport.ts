@@ -18,6 +18,7 @@ import {EditorClientError, EditorService} from '../../../../core/editor/editor.s
 import type {ViewportInput, ViewportStatus} from '../../../../core/editor/editor.models';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
+import {ContextMenuService} from '../../../../shared/components/context-menu/context-menu.service';
 
 /** Owns a native Vulkan viewport through the existing, serialized engine bridge. */
 @Component({
@@ -36,7 +37,8 @@ export class SceneViewport {
     protected readonly nativeAvailable = inject(EditorService).nativeAvailable;
     protected readonly error = signal<string | null>(null);
     private readonly modalOpen = signal(false);
-    protected readonly active = computed(() => this.enabled() && !this.modalOpen());
+    private readonly contextMenu = inject(ContextMenuService);
+    protected readonly active = computed(() => this.enabled() && !this.modalOpen() && !this.contextMenu.request());
     private readonly viewport = viewChild<EngineViewportDirective>('viewport');
     private readonly surface = viewChild<ElementRef<HTMLElement>>('surface');
     private readonly viewTools = inject(ViewportEditorService, {optional: true});
@@ -49,7 +51,7 @@ export class SceneViewport {
             if (!this.nativeAvailable) return;
             const surface = this.surface();
             if (surface) this.releaseSurface = this.viewTools?.registerSurface(surface.nativeElement) ?? null;
-            // Native child surfaces sit above WebView content. Hide them while a modal is open.
+            // Native child surfaces sit above WebView content. Hide them for menus and modal dialogs.
             const update = () => this.modalOpen.set(!!this.document.querySelector('dialog:modal'));
             update();
             this.observer = new MutationObserver((records) => {

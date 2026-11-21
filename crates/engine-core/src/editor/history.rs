@@ -110,6 +110,17 @@ impl Patch {
 				}
 			}
 		}
+		if let Some((a, b)) = &camera {
+			for camera in [a, b] {
+				// The patch slots cover inline settings. Cloned target keys own their strings.
+				if let Some(follow) = &camera.follow {
+					bytes = bytes.saturating_add(follow.target.as_str().len());
+				}
+				if let Some(orbit) = &camera.orbit {
+					bytes = bytes.saturating_add(orbit.target.as_str().len());
+				}
+			}
+		}
 		for selection in [selection_before, selection_after] {
 			bytes = bytes.saturating_add(selection.len().saturating_mul(size_of::<EntityKey>()));
 			for key in selection {

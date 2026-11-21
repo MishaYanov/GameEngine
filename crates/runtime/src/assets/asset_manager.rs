@@ -367,7 +367,7 @@ impl AssetManager {
 			};
 			let mesh = self.load_mesh(renderer, mesh_key, &imported.mesh)?;
 			let material = self.load_material(renderer, &image_key, &imported.material)?;
-			engine_logger::info!(
+			engine_logger::debug!(
 				"Prepared primitive {}: {} indices, double-sided {}",
 				imported.primitive_index,
 				mesh.index_count(),
@@ -376,9 +376,8 @@ impl AssetManager {
 			parts.push(ModelPart::new(mesh, material));
 		}
 
-		engine_logger::info!(
-			"Loaded {}: {} model parts; GPU meshes: {}, GPU textures: {}",
-			full_path.display(),
+		engine_logger::debug!(
+			"Model uploaded: {} model parts; GPU meshes: {}, GPU textures: {}",
 			parts.len(),
 			self.loaded_mesh_count(),
 			self.loaded_texture_count(),

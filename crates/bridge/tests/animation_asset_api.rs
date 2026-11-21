@@ -80,6 +80,7 @@ fn scene(looping: bool) -> SceneData {
 		entities: vec![entity],
 		camera: CameraData {
 			follow: None,
+			orbit: None,
 			position: camera.position,
 			yaw: camera.yaw,
 			pitch: camera.pitch,

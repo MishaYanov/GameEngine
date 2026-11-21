@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Best Practices"
+  short_description: "Write, organize, and review idiomatic Rust"
+  default_prompt: "Use $rust-best-practices to review the affected Rust files for item ordering and correctness."

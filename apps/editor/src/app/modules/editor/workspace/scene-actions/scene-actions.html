@@ -32,7 +32,7 @@
                 existing files are preserved.</p>
         </div>
     }
-    <div class="gameplay-settings">
+    <div aria-label="Gameplay settings" class="gameplay-settings" data-gameplay-settings role="group" tabindex="-1">
         <label>Gameplay module
             <select #gameplayModule [disabled]="!available() || gameplayModules() === undefined"
                     aria-describedby="gameplay-module-help" (change)="setGameplayModule(gameplayModule)">
@@ -69,6 +69,7 @@
 
                 <select
                     #roleSelect
+                    [attr.data-scene-binding]="role.name"
                     (change)="setRole(role.name, roleSelect)"
                     [attr.aria-describedby]="'gameplay-role-hint-' + index"
                 >

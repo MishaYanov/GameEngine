@@ -258,6 +258,7 @@ impl GameModuleFactory for CampaignFactory {
 
 		let base = ConfiguredBehaviorFactory.create_prepared(config)?;
 
+		engine_logger::debug!(target: "courtyard_gameplay", "Campaign scene prepared: finish={is_finish}, has_course_roles={}, has_interactions={}", roles.is_some(), interactions.is_some());
 		Ok(Box::new(CampaignModule {
 			base,
 			roles,

@@ -180,6 +180,7 @@ impl PrefabData {
 				.map_or_else(BTreeMap::new, |gameplay| gameplay.bindings.clone()),
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

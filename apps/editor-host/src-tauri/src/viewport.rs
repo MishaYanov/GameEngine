@@ -342,12 +342,15 @@ impl Drop for ViewportHost {
 #[cfg(windows)]
 mod windows {
 	use super::*;
-	use crate::viewport_interaction::ViewportInteraction;
+	use crate::viewport_interaction::{GameCameraCapture, ViewportInteraction};
 	use bridge::editor::{
 		ViewportInputDto, ViewportModifiersDto, ViewportSceneLoadDto, ViewportSceneLoadStage,
 	};
 	use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle};
 	use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
+	use runtime::camera_input::{
+		normalize_mouse, normalize_wheel, CameraInputPreferences, CameraIntent, WheelSample,
+	};
 	use runtime::{
 		assets::AssetManager, scene::Scene, scene_catalog::SceneId, scene_editor::PreparedScene,
 		scene_io, Camera,
@@ -1085,6 +1088,7 @@ mod windows {
 		last_editor_revision: u64,
 		game_keyboard_active: bool,
 		game_focus_pending: bool,
+		game_camera_capture: Option<GameCameraCapture>,
 		bounds: ViewportBoundsDto,
 		attached: bool,
 		parent_visible: bool,
@@ -1131,6 +1135,7 @@ mod windows {
 				last_editor_revision: u64::MAX,
 				game_keyboard_active: false,
 				game_focus_pending: false,
+				game_camera_capture: None,
 				bounds: ViewportBoundsDto::default(),
 				attached: false,
 				parent_visible: true,
@@ -1212,6 +1217,7 @@ mod windows {
 		}
 		fn note_keyboard_focus(&mut self, focused: bool) {
 			if !focused {
+				self.release_game_camera();
 				self.modifiers = ModifiersState::empty();
 				self.pending_motion = None;
 				self.pending_fly_motion = [0.0; 2];
@@ -1608,6 +1614,9 @@ mod windows {
 			}
 		}
 		fn update_capture(&self) {
+			if self.game_camera_capture.is_some() {
+				return;
+			}
 			if let Some(window) = self.window.as_ref() {
 				let captured = self.interaction.captured();
 				let _ = window.set_cursor_grab(if captured {
@@ -1615,6 +1624,108 @@ mod windows {
 				} else {
 					CursorGrabMode::None
 				});
+			}
+		}
+		fn camera_surface_focused(&self) -> bool {
+			self.active()
+				&& !self.failed
+				&& !self.control.keyboard_blurred.load(Ordering::Acquire)
+				&& self.native_keyboard_focused()
+				&& self.interaction.keyboard_focused()
+				&& self.interaction.game_keyboard_active()
+				&& self
+				.control
+				.latest
+				.lock()
+				.is_ok_and(|latest| !latest.clear_input && !latest.stop)
+		}
+		fn acquire_game_camera(&mut self) {
+			if self.game_camera_capture.is_some() || !self.camera_surface_focused() {
+				return;
+			}
+			let Some(window) = self.window.as_ref() else {
+				return;
+			};
+			let result = {
+				let Ok(slot) = self.shared.lock() else { return };
+				let Some(workspace) = slot.as_ref() else {
+					return;
+				};
+				GameCameraCapture::acquire(
+					&self.interaction,
+					workspace,
+					self.camera_surface_focused(),
+					|| {
+						window
+							.set_cursor_grab(CursorGrabMode::Locked)
+							.or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+							.map_err(|err| {
+								format!("Could not capture the Game camera. Click the viewport to retry: {err}")
+							})
+					},
+				)
+			};
+			match result {
+				Ok(Some(capture)) => {
+					self.pending_motion = None;
+					self.game_camera_capture = Some(capture);
+					self.interaction.clear_error();
+					window.set_cursor_visible(false);
+				}
+				Err(message) => self.interaction.report(message),
+				Ok(None) => {}
+			}
+		}
+		fn release_game_camera(&mut self) {
+			let Some(capture) = self.game_camera_capture.take() else {
+				return;
+			};
+			if let Ok(mut slot) = self.shared.lock() {
+				if let Some(workspace) = slot.as_mut().filter(|w| capture.current(w)) {
+					self.interaction.clear_play_input(workspace);
+				}
+			}
+			if let Some(window) = &self.window {
+				let result = window.set_cursor_grab(CursorGrabMode::None);
+				window.set_cursor_visible(true);
+				if let Err(error) = result {
+					self.interaction
+						.report(format!("Could not release the Game camera cursor: {error}"));
+				}
+			}
+		}
+		fn refresh_game_camera(&mut self) {
+			let Some(capture) = self.game_camera_capture.as_ref() else {
+				return;
+			};
+			if !self.camera_surface_focused()
+				|| !self.shared.lock().is_ok_and(|slot| {
+				slot.as_ref()
+					.is_some_and(|workspace| capture.current(workspace))
+			}) {
+				self.release_game_camera();
+			}
+		}
+		fn submit_game_camera(&mut self, normalized: Result<CameraIntent, String>) {
+			let Some(capture) = self.game_camera_capture.as_ref() else {
+				return;
+			};
+			let intent = match normalized {
+				Ok(intent) => intent,
+				Err(message) => {
+					self.interaction.report(message);
+					return;
+				}
+			};
+			// Run/scene are checked inside the same workspace lock as submission.
+			let accepted = self.shared.lock().is_ok_and(|mut slot| {
+				self.camera_surface_focused()
+					&& slot
+					.as_mut()
+					.is_some_and(|workspace| capture.submit(workspace, intent).is_ok())
+			});
+			if !accepted {
+				self.release_game_camera();
 			}
 		}
 		fn cancel_editor(&mut self) {
@@ -1681,6 +1792,7 @@ mod windows {
 				}
 				self.dirty = true;
 				self.refresh_game_keyboard_focus();
+				self.refresh_game_camera();
 				self.update_capture();
 				self.publish_editor(true);
 				let _ = reply.send(result.map(|()| self.interaction.state()));
@@ -2393,7 +2505,14 @@ mod windows {
 		}
 		fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
 			if let DeviceEvent::MouseMotion { delta } = event {
-				if self.interaction.is_flying()
+				self.drain_native_blur();
+				if self.game_camera_capture.is_some() {
+					self.submit_game_camera(normalize_mouse(
+						delta.0,
+						delta.1,
+						CameraInputPreferences::default(),
+					));
+				} else if self.interaction.is_flying()
 					&& self.interaction.keyboard_focused()
 					&& self.native_keyboard_focused()
 				{
@@ -2465,7 +2584,7 @@ mod windows {
 				}
 				WindowEvent::CursorMoved { position, .. } => {
 					self.cursor = [position.x, position.y];
-					if !self.interaction.is_flying() {
+					if !self.interaction.is_flying() && self.game_camera_capture.is_none() {
 						self.pending_motion = Some(self.cursor);
 					}
 				}
@@ -2492,6 +2611,10 @@ mod windows {
 						&& matches!(button.as_str(), "left" | "middle" | "right")
 					{
 						self.focus_keyboard();
+						if button == "left" {
+							self.refresh_game_camera();
+							self.acquire_game_camera();
+						}
 					}
 					self.process_input(
 						if state == ElementState::Pressed {
@@ -2517,6 +2640,16 @@ mod windows {
 					);
 				}
 				WindowEvent::MouseWheel { delta, .. } => {
+					if self.game_camera_capture.is_some() {
+						let sample = match delta {
+							MouseScrollDelta::LineDelta(_, y) => WheelSample::Lines(y as f64),
+							MouseScrollDelta::PixelDelta(position) => {
+								WheelSample::Pixels(position.y)
+							}
+						};
+						self.submit_game_camera(normalize_wheel(sample));
+						return;
+					}
 					let (kind, delta) = match delta {
 						MouseScrollDelta::LineDelta(x, y) => ("wheel_lines", [x as f64, y as f64]),
 						MouseScrollDelta::PixelDelta(position) => {
@@ -2585,6 +2718,7 @@ mod windows {
 				}
 			}
 			self.refresh_game_keyboard_focus();
+			self.refresh_game_camera();
 			if (self.pending_motion.is_some() || self.pending_fly_motion != [0.0; 2])
 				&& now.duration_since(self.last_motion) >= FRAME
 			{

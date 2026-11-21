@@ -1,6 +1,7 @@
 //! CPU-only runner for an authored project and bounded command/tick replay.
 use engine_core::{
 	Bounds3, Engine, EngineBuilder,
+	camera_input::CameraIntent,
 	command::{EditorCommandDto, EditorCommandRequest, PlayStatusDto},
 	project::{MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::SceneId,
@@ -24,7 +25,7 @@ use std::{
 const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REPLAY_ACTIONS: usize = 10_000;
 const MAX_TICK_CALLS: u32 = 100_000;
-const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Version-1 command/tick/restart_run/asset_metadata actions.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No GPU or window is loaded. Animated assets are decoded on the CPU.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\nNative component hashes cover lifecycle, controller and animation state; opaque\ngame-module state, scheduler state and render-only data are excluded.\n";
+const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Command/tick/restart_run/asset_metadata actions (v1/v2); v2 also accepts camera_input.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No GPU or window is loaded. Animated assets are decoded on the CPU.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\nNative component hashes cover lifecycle, controller and animation state; opaque\ngame-module state, scheduler state and render-only data are excluded.\n";
 
 #[derive(Default)]
 struct Options {
@@ -50,6 +51,7 @@ struct Replay {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ReplayAction {
 	RestartRun {},
+	CameraInput(CameraIntent),
 	Command {
 		#[serde(default)]
 		expected_revision: Option<u64>,
@@ -96,7 +98,15 @@ fn deserialize_actions<'de, D: de::Deserializer<'de>>(
 	deserializer.deserialize_seq(Actions)
 }
 #[derive(Serialize)]
+struct CameraPose {
+	position: [f32; 3],
+	yaw: f32,
+	pitch: f32,
+}
+#[derive(Serialize)]
 struct Summary {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	orbit_camera_pose: Option<CameraPose>,
 	runtime: Option<engine_core::runtime_lifecycle::RuntimeInspectionDto>,
 	schema_version: u32,
 	project: String,
@@ -155,11 +165,7 @@ fn main() -> ExitCode {
 			print!("{HELP}");
 			return Ok(());
 		}
-		let summary = run(options)?;
-		let stdout = io::stdout();
-		let mut output = stdout.lock();
-		serde_json::to_writer_pretty(&mut output, &summary).map_err(|e| e.to_string())?;
-		output.write_all(b"\n").map_err(|e| e.to_string())
+		run_logged(options)
 	});
 	match result {
 		Ok(()) => ExitCode::SUCCESS,
@@ -173,6 +179,27 @@ fn main() -> ExitCode {
 		}
 	}
 }
+
+fn run_logged(options: Options) -> Result<(), String> {
+	let mut config =
+		engine_logger::application_config("engine-headless").map_err(|error| error.to_string())?;
+	// stdout and stderr carry machine-readable results.
+	config.console = false;
+	let _logging = engine_logger::init(config).map_err(|error| error.to_string())?;
+	let summary = run(options).inspect_err(|_| {
+		engine_logger::error!(target: "headless", "Headless execution failed: operation=run");
+	})?;
+	let stdout = io::stdout();
+	let mut output = stdout.lock();
+	serde_json::to_writer_pretty(&mut output, &summary)
+		.map_err(io::Error::other)
+		.and_then(|()| output.write_all(b"\n"))
+		.map_err(|error| {
+			engine_logger::error!(target: "headless", "Headless execution failed: operation=write_summary");
+			error.to_string()
+		})
+}
+
 fn parse_options() -> Result<Options, String> {
 	let mut arguments: VecDeque<_> = std::env::args_os().skip(1).collect();
 	if arguments.len() > 32 {
@@ -287,10 +314,28 @@ fn run(options: Options) -> Result<Summary, String> {
 	if let Some(path) = &options.replay {
 		let replay: Replay = serde_json::from_str(&read_bounded(path, MAX_REPLAY_BYTES)?)
 			.map_err(|e| format!("Invalid replay: {e}"))?;
-		if replay.schema_version != 1 {
-			return Err("Only replay schema version 1 is supported".into());
+		if !matches!(replay.schema_version, 1 | 2) {
+			return Err("Supported replay schema versions are 1 and 2".into());
 		}
 		replay.actions.iter().try_fold(steps, |total, action| {
+			match action {
+				ReplayAction::CameraInput(_) if replay.schema_version == 1 => {
+					return Err("camera_input requires replay schema version 2".to_string());
+				}
+				ReplayAction::CameraInput(sample) => sample.validate()?,
+				ReplayAction::Command { command, .. }
+				if matches!(
+						command.as_ref(),
+						EditorCommandDto::SetPlayCameraInput { .. }
+					) =>
+					{
+						return Err(
+							"Use the version 2 camera_input action to address the current replay scene"
+								.into(),
+						);
+					}
+				_ => {}
+			}
 			let count = if let ReplayAction::Tick { count, .. } = action {
 				*count
 			} else {
@@ -299,11 +344,18 @@ fn run(options: Options) -> Result<Summary, String> {
 			total
 				.checked_add(count)
 				.filter(|value| *value <= MAX_TICK_CALLS)
-				.ok_or("Replay and --steps exceed 100000 tick calls")
+				.ok_or_else(|| "Replay and --steps exceed 100000 tick calls".to_string())
 		})?;
 		for action in replay.actions {
 			check_budget(started, budget)?;
 			match action {
+				ReplayAction::CameraInput(sample) => {
+					let owner = engine
+						.camera_input_owner()
+						.ok_or("camera_input requires an unpaused orbit camera in Play")?;
+					engine.submit_camera_input(&owner.run_id, owner.scene_generation, sample)?;
+					measures.commands += 1;
+				}
 				ReplayAction::RestartRun {} => {
 					let status = engine
 						.play_status()
@@ -425,6 +477,14 @@ fn run(options: Options) -> Result<Summary, String> {
 	serde_json::to_writer(&mut native_hash, &native_components)
 		.map_err(|error| error.to_string())?;
 	let summary = Summary {
+		orbit_camera_pose: engine.session().orbit_state().map(|_| {
+			let camera = engine.session().render_camera();
+			CameraPose {
+				position: camera.position,
+				yaw: camera.yaw,
+				pitch: camera.pitch,
+			}
+		}),
 		runtime: engine.runtime_inspection(0, 128).ok(),
 		schema_version: 1,
 		project: engine.session().project().name.clone(),

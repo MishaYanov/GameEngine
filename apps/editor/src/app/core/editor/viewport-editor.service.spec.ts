@@ -22,7 +22,7 @@ function state(revision = 1, generation = 1): ViewportEditorState {
 
 function gameStatus(playSessionId: string, runId: string, completed = false): PlayStatus {
     return {
-        play_session_id: playSessionId, run_id: runId, scene_id: 'courtyard',
+        play_session_id: playSessionId, run_id: runId, scene_id: 'courtyard', scene_generation: 0,
         paused: false, pending_scene_id: null,
         gameplay: {objective: completed ? 'Run complete' : 'Find the key', detail: null, score: 0, completed},
     };

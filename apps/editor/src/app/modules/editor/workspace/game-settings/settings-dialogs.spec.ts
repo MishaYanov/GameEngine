@@ -74,11 +74,18 @@ describe('game settings dialogs', () => {
         root.querySelector<HTMLButtonElement>('button')!.click();
         await fixture.whenStable();
         const button = (text: string) => [...root.querySelectorAll('button')].find(button => button.textContent.trim() === text)!;
-        const field = (text: string) => [...root.querySelectorAll('label')]
-            .find(label => label.textContent?.trim().startsWith(text))!.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
+        const field = (text: string) => {
+            const label = [...root.querySelectorAll('label')].find(label => label.textContent?.trim().startsWith(text))!;
+            return label.htmlFor ? root.querySelector<HTMLInputElement>(`#${label.htmlFor}`)!
+                : label.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
+        };
         const change = async (text: string, value: string) => {
             const input = field(text); input.value = value; input.dispatchEvent(new Event('input'));
             await fixture.whenStable();
+            if (input.getAttribute('role') === 'combobox') {
+                input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+                await fixture.whenStable();
+            }
         };
         return {fixture, root, current, generation, execute, committed, button, field, change};
     }
@@ -114,6 +121,7 @@ describe('game settings dialogs', () => {
     it('applies Follow to the latest fixed camera without replacing its pose', async () => {
         const panel = await setup('camera');
         await panel.change('Mode', 'follow');
+        await panel.change('Target', 'blocker');
         panel.committed.mockImplementationOnce(async action => {
             panel.current.update(value => ({...value, revision: 12, document: {...value.document,
                 camera: {...value.document.camera, position: [2, 3, 4]}}}));
@@ -123,10 +131,37 @@ describe('game settings dialogs', () => {
         await panel.fixture.whenStable();
         expect(panel.execute).toHaveBeenCalledExactlyOnceWith({
             type: 'set_camera', camera: {...snapshot().document.camera, position: [2, 3, 4],
-                follow: {target: 'player', offset: [0, 2, 5], look_offset: [0, 0, 0], smoothing_seconds: 0.15}},
+                follow: {target: 'blocker', offset: [0, 2, 5], look_offset: [0, 0, 0], smoothing_seconds: 0.15}
+            },
         }, 1, 12);
         await panel.change('Smoothing in seconds', '1e-');
         expect(panel.button('Apply Game Camera').disabled).toBe(true);
+    });
+
+    it('reveals an existing orbit target without offering a conflicting follow edit', async () => {
+        const panel = await setup('camera');
+        panel.current.update(value => ({
+            ...value, document: {
+                ...value.document, camera: {
+                    ...value.document.camera,
+                    orbit: {
+                        target: 'missing-player', pivot_offset: [0, 1, 0], initial_yaw: 0, initial_pitch: 0,
+                        initial_distance: 5, min_distance: 2, max_distance: 8, min_pitch: -1, max_pitch: 1,
+                        follow_seconds: 0.15, recovery_seconds: 0.15, teleport_distance: 10,
+                        probe_radius: 0.2, obstruction_mask: 1,
+                    },
+                }
+            }
+        }));
+        const camera = panel.fixture.componentInstance;
+        if (!(camera instanceof CameraSettings)) throw new Error('Expected camera settings');
+        expect(camera.show(true, 'orbit')).toBe(true);
+        await panel.fixture.whenStable();
+        const target = panel.root.querySelector<HTMLElement>('[aria-label="Orbit camera"] p');
+        expect(target?.textContent).toContain('Missing target: missing-player');
+        expect(panel.button('Apply Game Camera')).toBeUndefined();
+        expect(document.activeElement).toBe(target);
+        expect(panel.execute).not.toHaveBeenCalled();
     });
 
     it('requires a different Finish destination and enabled mutually compatible sensors', async () => {

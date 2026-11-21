@@ -34,7 +34,7 @@ fn collider(id: &str, enabled: bool, offset: [f32; 3]) -> ComponentRecord {
 	}
 }
 #[test]
-fn canonical_schema_four_has_one_typed_payload_and_flat_transport_is_a_read_projection() {
+fn canonical_scene_has_one_typed_payload_and_flat_transport_is_a_read_projection() {
 	let mut actor = entity("actor", [0.; 3]);
 	actor
 		.put_component(collider("collision", false, [0.1, 0., 0.]), false)
@@ -42,7 +42,10 @@ fn canonical_schema_four_has_one_typed_payload_and_flat_transport_is_a_read_proj
 	let data = scene(vec![actor]);
 	let source = data.to_json().unwrap();
 	let value: serde_json::Value = serde_json::from_str(&source).unwrap();
-	assert_eq!(value["schema_version"], 4);
+	assert_eq!(
+		value["schema_version"],
+		engine_core::scene_data::CURRENT_SCHEMA_VERSION
+	);
 	let saved = &value["entities"][0];
 	assert!(saved.get("model_path").is_none());
 	assert!(saved.get("collider").is_none());

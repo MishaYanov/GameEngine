@@ -14,6 +14,7 @@ use crate::{
 	picking::{self, CameraRay},
 	scene::{EntityId, MAX_SCENE_RENDER_OBJECTS, RetainedEntity, Scene},
 };
+use engine_core::camera_input::{CameraInputOwner, CameraIntent};
 use engine_core::game_progress::{GameProgress, ProgressAction};
 pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
@@ -112,6 +113,13 @@ impl SceneEditor {
 	}
 	pub fn render_camera(&self) -> Option<Camera> {
 		self.session.as_ref().map(EditorSession::render_camera)
+	}
+	/// A lost orbit target still owns its last accepted pose until Play changes scene.
+	pub fn play_rig_camera(&self) -> Option<Camera> {
+		let session = self.session.as_ref()?;
+		let world = session.render_world()?;
+		(session.orbit_state().is_some() || world.data().camera.follow.is_some())
+			.then(|| session.render_camera())
 	}
 	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
 		self.session
@@ -309,7 +317,32 @@ impl SceneEditor {
 			.expect("playing session")
 			.set_game_keyboard_input(&self.play_input_target, keyboard)
 	}
+	pub fn camera_input_owner(&self) -> Option<CameraInputOwner> {
+		self.session.as_ref()?.camera_input_owner()
+	}
+
+	pub fn owns_camera_input(&self, owner: &CameraInputOwner) -> bool {
+		self.session
+			.as_ref()
+			.is_some_and(|session| session.owns_camera_input(owner))
+	}
+
+	pub fn submit_camera_input(
+		&mut self,
+		owner: &CameraInputOwner,
+		intent: CameraIntent,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.submit_camera_input(&owner.run_id, owner.scene_generation, intent)
+	}
+
 	pub fn clear_play_keyboard(&mut self) {
+		self.clear_play_input();
+	}
+
+	pub fn clear_play_input(&mut self) {
 		if let Some(session) = &mut self.session {
 			session.clear_play_input();
 		}

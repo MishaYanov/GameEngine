@@ -105,6 +105,7 @@ impl AssetJobContext {
 pub enum AssetJobError {
 	Cancelled,
 	Import(String),
+	Panicked,
 	ByteLimit { bytes: usize, limit: usize },
 }
 pub struct AssetJobResult<T> {
@@ -204,6 +205,7 @@ impl<T: Send + 'static> AssetJobs<T> {
 		let worker = std::thread::Builder::new()
 			.name("engine-asset-import".into())
 			.spawn(move || {
+				engine_logger::debug!(target: "engine_core::asset_jobs", "CPU asset worker started: max_pending={}, max_reserved_bytes={}", limits.max_pending_jobs, limits.max_reserved_bytes);
 				while let Ok(request) = incoming.recv() {
 					if worker_shutdown.load(Ordering::Acquire) {
 						break;
@@ -222,16 +224,16 @@ impl<T: Send + 'static> AssetJobs<T> {
 								Ok(Ok(asset)) if asset.bytes <= request.context.byte_limit() => {
 									Ok(asset)
 								}
-								Ok(Ok(asset)) => Err(AssetJobError::ByteLimit {
-									bytes: asset.bytes,
-									limit: request.context.byte_limit(),
-								}),
+								Ok(Ok(asset)) => {
+									let limit = request.context.byte_limit();
+									engine_logger::debug!(target: "engine_core::asset_jobs", "Asset result exceeded reservation: job={}, generation={}, bytes={}, limit={limit}", request.id.value(), request.context.generation(), asset.bytes);
+									Err(AssetJobError::ByteLimit { bytes: asset.bytes, limit })
+								}
 								Ok(Err(error)) => {
+									engine_logger::debug!(target: "engine_core::asset_jobs", "Asset import failed: job={}, generation={}", request.id.value(), request.context.generation());
 									Err(AssetJobError::Import(bounded_import_error(error)))
 								}
-								Err(_) => {
-									Err(AssetJobError::Import("CPU asset importer panicked".into()))
-								}
+								Err(_) => Err(AssetJobError::Panicked),
 							}
 						}
 					};
@@ -250,6 +252,7 @@ impl<T: Send + 'static> AssetJobs<T> {
 					}
 					let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(&on_ready));
 				}
+				engine_logger::debug!(target: "engine_core::asset_jobs", "CPU asset worker stopped");
 			})
 			.map_err(|error| format!("Cannot start CPU asset importer: {error}"))?;
 		Ok(Self {

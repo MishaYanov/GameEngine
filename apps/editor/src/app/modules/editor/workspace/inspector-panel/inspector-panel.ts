@@ -1,4 +1,16 @@
-import {Component, computed, effect, input, output, signal} from '@angular/core';
+import {
+    afterNextRender,
+    Component,
+    computed,
+    effect,
+    ElementRef,
+    inject,
+    Injector,
+    input,
+    output,
+    signal,
+    viewChild
+} from '@angular/core';
 import {Drawer} from "../../../../shared/components/drawer/drawer";
 import {EditorPane} from "../../../../shared/components/pane/pane";
 import type {Config} from '../../../../shared/models/config.model';
@@ -44,6 +56,10 @@ export class InspectorPanel {
     readonly colliderInteractionChanged = output<ColliderInteractionChange>();
     readonly editCommitted = output<void>();
     readonly editCancelled = output<void>();
+    private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    private readonly injector = inject(Injector);
+    private readonly drawer = viewChild(Drawer);
+    private readonly components = viewChild(SceneComponentInspector);
 
     protected readonly positionLinked = signal(false);
     protected readonly rotationLinked = signal(false);
@@ -91,6 +107,26 @@ export class InspectorPanel {
             this.nameEntity.set(null);
             this.invalidName.set(false);
         });
+    }
+
+    revealReference(key: string, componentId?: string, section?: 'prefab', slot?: string, field?: string): void {
+        this.drawer()?.config.update(config => ({...config, collapsed: false, expanded: true}));
+        afterNextRender(() => {
+            if (this.entity()?.key !== key) return;
+            const components = this.components();
+            if (components && componentId !== undefined && field !== undefined &&
+                components.revealReference(componentId, field)) return;
+            const matching = componentId === undefined ? null :
+                [...this.element.querySelectorAll<HTMLElement>('[data-reference-component]')]
+                    .find(component => component.dataset['referenceComponent'] === componentId);
+            const prefab = section === 'prefab' ? this.element.querySelector<HTMLElement>('[data-reference-prefab]') : null;
+            const binding = slot === undefined ? null : [...(prefab?.querySelectorAll<HTMLElement>('[data-prefab-slot]') ?? [])]
+                .find(element => element.dataset['prefabSlot'] === slot);
+            const control = matching ?? binding ?? prefab ??
+                this.element.querySelector<HTMLElement>('[data-reference-entity]');
+            control?.scrollIntoView?.({block: 'nearest'});
+            control?.focus({preventScroll: true});
+        }, {injector: this.injector});
     }
 
     protected startName(input: HTMLInputElement): void {

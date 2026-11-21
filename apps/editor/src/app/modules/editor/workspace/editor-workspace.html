@@ -1,11 +1,18 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
-        <workspace-toolbar (viewSelected)="selectView($event)" [opening]="workspaceActionBlocked()"/>
+        <workspace-toolbar (paletteRequested)="openPalette()" (viewSelected)="selectView($event)"
+                           [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
         <editor-gameplay-settings [opening]="workspaceActionBlocked()"/>
         <editor-camera-settings [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
+        @if (editorService.snapshot()) {
+            <button (click)="openProblems()" [disabled]="workspaceActionBlocked()" aria-haspopup="dialog"
+                    class="problems-button" type="button">
+                Problems
+            </button>
+        }
         @if (gameView() && editorService.playing()) {
             <section aria-label="Game status" class="game-status">
                 @if (gameStatus(); as status) {
@@ -41,6 +48,7 @@
                 [actionError]="hierarchyError()"
                 (selectionRequested)="sceneEditing.select($event)"
                 (reparentRequested)="reparentEntity($event)"
+                (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
             @if (!gameView()) {
@@ -139,3 +147,11 @@
     </div>
     <editor-assets-panel [opening]="workspaceActionBlocked()" data-editor-shortcut-scope="assets"/>
 </section>
+<editor-command-palette (commandRequested)="dispatchEditorAction($event)" [(open)]="paletteOpen"
+                        [canRun]="canRunPaletteCommand"/>
+<editor-find-usages (closed)="closeUsages()" (revealRequested)="revealUsage($event)" [contextKey]="sceneContext()"
+                    [disabled]="!canRevealReference()" [references]="sceneReferences()"
+                    [target]="usageTarget()"/>
+<editor-problems-panel (closedPanel)="problemsActive.set(false)" (revealRequested)="revealProblem($event)" [(open)]="problemsOpen"
+                       [available]="canRevealReference()"
+                       [problems]="problems()"/>

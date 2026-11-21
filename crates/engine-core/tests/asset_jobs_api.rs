@@ -287,7 +287,8 @@ fn importer_panics_errors_and_oversized_payloads_are_isolated_and_worker_remains
 		jobs.try_submit(reference(path), 8).unwrap();
 		let result = drain(&mut jobs);
 		match path {
-			"panic.glb" | "error.glb" => {
+			"panic.glb" => assert!(matches!(result.result, Err(AssetJobError::Panicked))),
+			"error.glb" => {
 				assert!(matches!(result.result, Err(AssetJobError::Import(_))))
 			}
 			_ => assert!(matches!(

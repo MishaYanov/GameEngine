@@ -1,5 +1,6 @@
 import {Component, computed, inject, input, output, signal} from '@angular/core';
 import type {WorkspaceAction} from '../../../../core/editor/editor-actions';
+import {editorShortcutLabel} from '../../../../core/editor/editor-keymap';
 import {CommandBuilder} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
@@ -15,8 +16,11 @@ import {ViewportEditorService} from '../../../../core/editor/viewport-editor.ser
 })
 export class WorkspaceToolbar {
     readonly opening = input(false);
+    readonly paletteAvailable = input(false);
+    readonly paletteRequested = output<void>();
     readonly viewSelected = output<WorkspaceViewKind>();
 
+    protected readonly paletteShortcut = editorShortcutLabel('palette.open');
     protected readonly editorService = inject(EditorService);
     protected readonly sceneEditing = inject(SceneEditingService, {optional: true});
     private readonly viewportEditor = inject(ViewportEditorService, {optional: true});
@@ -40,7 +44,7 @@ export class WorkspaceToolbar {
         return true;
     }
 
-    protected canPerform(action: WorkspaceAction): boolean {
+    canPerform(action: WorkspaceAction): boolean {
         if (action === 'stop') return this.canRunAction() && this.editorService.playing();
         if (!this.canEditScene() || this.sceneEditing?.ready() === false) return false;
         switch (action) {

@@ -364,7 +364,7 @@ pub async fn editor_prepare_project_build(
 		let mut pending = pending_build
 			.lock()
 			.map_err(|_| "Build state lock failed")?;
-		let staged = compiler::stage_prepared_project(&prepared, &destination)?;
+		let staged = stage_project_build(&prepared, &destination)?;
 		let build_id = NEXT_BUILD_ID
 			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
 			.map_err(|_| "Build token space is exhausted")?;
@@ -435,6 +435,15 @@ fn finish_prepared_build(
 	result
 }
 
+fn stage_project_build(
+	prepared: &compiler::PreparedProject,
+	destination: &str,
+) -> Result<compiler::StagedProject, String> {
+	compiler::stage_prepared_project(prepared, destination).inspect_err(|_| {
+		engine_logger::error!(target: "project_build", "Build failed: operation=stage_prepared_project");
+	})
+}
+
 fn finish_project_build(
 	staged: compiler::StagedProject,
 	last_build: &Mutex<Option<compiler::InstalledProject>>,
@@ -469,7 +478,7 @@ pub async fn editor_build_project(
 	})
 	.await?;
 	tauri::async_runtime::spawn_blocking(move || {
-		let staged = compiler::stage_prepared_project(&prepared, &destination)?;
+		let staged = stage_project_build(&prepared, &destination)?;
 		finish_project_build(staged, &last_build)
 	})
 	.await
@@ -508,7 +517,10 @@ pub async fn editor_run_build(
 		let mut command = build_launch_command(latest.as_ref(), Path::new(&expected_path))?;
 		let child = command
 			.spawn()
-			.map_err(|error| format!("Could not run built game: {error}"))?;
+			.map_err(|error| {
+				engine_logger::error!(target: "project_build", "Built game launch failed: operation=spawn, kind={:?}", error.kind());
+				format!("Could not run built game: {error}")
+			})?;
 		Ok(ProjectRunDto {
 			path: expected_path,
 			process_id: child.id(),

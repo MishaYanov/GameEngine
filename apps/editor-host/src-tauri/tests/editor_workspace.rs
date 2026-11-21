@@ -50,6 +50,7 @@ impl Fixture {
 			)],
 			camera: runtime::scene_data::CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

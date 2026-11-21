@@ -98,7 +98,7 @@ pub fn instantiate_with_progress(
 		})
 		.collect();
 	let animations = bridge::animation_asset::prepare_scene_with_pins(assets.root(), data, &pins)?;
-	scene.set_camera_follow(data.camera.follow.clone());
+	scene.synchronize_camera_settings(&data.camera);
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
 	let mut render_objects = 0usize;

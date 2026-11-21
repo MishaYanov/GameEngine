@@ -1,0 +1,23 @@
+<editor-dialog (closed)="closed()" [(open)]="open" [config]="config" [renderFields]="false"
+               icon="script" preferenceKey="editor.problems" title="Problems">
+    @if (problems().length) {
+        <p role="status">{{ problems().length }} {{ problems().length === 1 ? 'problem' : 'problems' }}</p>
+        @for (group of groups(); track group[0]) {
+            <section>
+                <h3>{{ group[0] }}</h3>
+                <ul>
+                    @for (problem of group[1]; track problem.id) {
+                        <li>
+                            <button (click)="reveal(problem)" [disabled]="!available()" type="button">
+                                <strong>{{ problem.label }}</strong>
+                                <span>{{ problem.detail }}</span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+    } @else {
+        <p role="status">No reference problems in this scene or recent build failures.</p>
+    }
+</editor-dialog>

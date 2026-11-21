@@ -42,6 +42,7 @@ export interface ViewportEditorState {
 export interface PlayStatus {
     readonly play_session_id: string;
     readonly run_id: string;
+    readonly scene_generation: number;
     readonly scene_id: string;
     readonly paused: boolean;
     readonly pending_scene_id: string | null;

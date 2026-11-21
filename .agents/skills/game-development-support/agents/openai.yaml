@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Development Support"
+  short_description: "Build playable games and practical editor workflows"
+  default_prompt: "Use $game-development-support to identify and complete the next playable game-creation milestone in this engine."

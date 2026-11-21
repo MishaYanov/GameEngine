@@ -33,6 +33,14 @@ struct CachedCollider {
 	shape: Shape,
 	interaction: ColliderInteraction,
 }
+
+/// First blocker on the requested orbit arm, with a segment fraction in 0..=1.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CameraProbeHit {
+	pub blocker: crate::EntityKey,
+	pub fraction: f64,
+}
+
 impl CachedCollider {
 	fn borrowed(&self) -> WorldCollider<'_> {
 		WorldCollider {

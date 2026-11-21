@@ -1,4 +1,6 @@
 //! CPU world owned by a running authored project. GPU resources never live here.
+use crate::game_camera::CameraTargetSnapshot;
+use crate::runtime_lifecycle::RuntimeEntityHandle;
 use crate::{
 	EntityKey,
 	scene_data::{MaterialOverrideData, SceneData, TransformData},
@@ -7,7 +9,7 @@ use glam::Mat4;
 use serde::{Deserialize, Serialize};
 use std::{
 	collections::{HashMap, HashSet},
-	sync::Arc,
+	sync::{Arc, OnceLock},
 };
 
 pub const MAX_CHANGE_KEYS: usize = 4096;
@@ -185,6 +187,9 @@ impl ChangeAccumulator {
 }
 
 pub struct RuntimeWorld {
+	// Standalone consumers can distinguish two independently constructed worlds
+	// even when both contain the same authored keys. Ordinary edits retain this token.
+	instance_token: OnceLock<Arc<()>>,
 	document: Arc<SceneData>,
 	indices: HashMap<EntityKey, usize>,
 	parents: Vec<Option<usize>>,
@@ -212,6 +217,7 @@ impl RuntimeWorld {
 		}
 		let matrix_updates = matrices.len() as u64;
 		Ok(Self {
+			instance_token: OnceLock::new(),
 			document,
 			indices,
 			parents,
@@ -220,6 +226,10 @@ impl RuntimeWorld {
 			matrix_updates,
 		})
 	}
+	pub(crate) fn instance_token(&self) -> &Arc<()> {
+		self.instance_token.get_or_init(|| Arc::new(()))
+	}
+
 	pub fn data(&self) -> &SceneData {
 		&self.document
 	}
@@ -233,14 +243,7 @@ impl RuntimeWorld {
 		let mut data = self.data().clone();
 		data.entities.retain(|entity| !keys.contains(&entity.key));
 		data.bindings.retain(|_, key| !keys.contains(key));
-		if data
-			.camera
-			.follow
-			.as_ref()
-			.is_some_and(|follow| keys.contains(&follow.target))
-		{
-			data.camera.follow = None;
-		}
+		data.camera.clear_removed_targets(keys);
 		for entity in &mut data.entities {
 			entity.native_behaviors.retain(|component| {
 				component
@@ -396,6 +399,27 @@ impl RuntimeWorld {
 			self.matrices[index] = matrix;
 		}
 		Ok(change)
+	}
+	pub(crate) fn entity_world_position(&self, key: &EntityKey) -> Option<[f32; 3]> {
+		let index = self.entity_index(key)?;
+		Some(self.matrices[index].w_axis.truncate().to_array())
+	}
+
+	/// Sample world-space translation after the caller has validated the lifecycle handle.
+	pub fn camera_target_snapshot(
+		&self,
+		handle: &RuntimeEntityHandle,
+	) -> Result<CameraTargetSnapshot, String> {
+		let world_position = self
+			.entity_world_position(&handle.key)
+			.ok_or("Camera target is absent from the current world")?;
+		if !world_position.iter().all(|v| v.is_finite()) {
+			return Err("Camera target world position is not finite".into());
+		}
+		Ok(CameraTargetSnapshot {
+			handle: handle.clone(),
+			world_position,
+		})
 	}
 }
 

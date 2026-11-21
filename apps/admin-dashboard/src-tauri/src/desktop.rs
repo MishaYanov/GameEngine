@@ -327,6 +327,7 @@ pub fn run() {
 		])
 		.build(tauri::generate_context!())
 		.expect("build admin dashboard");
+	engine_logger::info!(target: "admin", "Admin dashboard started");
 	app.run(move |_, event| {
 		if matches!(event, tauri::RunEvent::Exit) {
 			let mut service = owned.lock().unwrap_or_else(|e| e.into_inner());
@@ -336,4 +337,5 @@ pub fn run() {
 			service.tick();
 		}
 	});
+	engine_logger::info!(target: "admin", "Admin dashboard stopped");
 }

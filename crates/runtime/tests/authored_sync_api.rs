@@ -102,6 +102,102 @@ fn metadata_bindings_and_camera_only_updates_preserve_world_matrices() {
 	assert_eq!(native.world_matrix(id).unwrap(), matrix);
 }
 
+fn orbit_scene() -> runtime::SceneData {
+	use runtime::scene_data::OrbitCameraSettings;
+	let mut data = scene(vec![entity("actor", [0.; 3]), entity("prop", [1.; 3])]);
+	data.camera.orbit = Some(OrbitCameraSettings {
+		target: key("actor"),
+		pivot_offset: [0., 0.7, 0.],
+		initial_yaw: 0.2,
+		initial_pitch: -0.3,
+		initial_distance: 5.,
+		min_distance: 1.,
+		max_distance: 8.,
+		min_pitch: -1.,
+		max_pitch: 0.5,
+		follow_seconds: 0.1,
+		recovery_seconds: 0.2,
+		teleport_distance: 8.,
+		probe_radius: 0.25,
+		obstruction_mask: 4,
+	});
+	data
+}
+
+#[test]
+fn orbit_settings_survive_native_sync_and_save_including_mode_changes_and_rebuilds() {
+	use runtime::scene_data::FollowCameraSettings;
+	use runtime::world::RuntimeWorld;
+
+	let camera = Camera::default();
+	let mut data = orbit_scene();
+	let mut native = native(&data);
+	let actor = native.entity_by_key(&key("actor")).unwrap();
+	assert_eq!(native.to_data(&camera).unwrap(), data);
+	assert!(native.matches_data(&data, &camera));
+
+	// A camera-only revision can change settings without changing the fallback pose.
+	data.camera.orbit.as_mut().unwrap().initial_distance = 6.;
+	assert!(!native.matches_data(&data, &camera));
+	let camera_changed = WorldChange {
+		camera_changed: true,
+		..Default::default()
+	};
+	assert!(
+		native
+			.synchronize_authored(data.validated().unwrap(), &camera_changed)
+			.unwrap()
+	);
+	assert_eq!(native.to_data(&camera).unwrap(), data);
+
+	// Remove a different object to force the retained-resource rebuild.
+	data.entities.pop();
+	let world = RuntimeWorld::new(Arc::new(data.clone())).unwrap();
+	let structural = WorldChange {
+		topology_changed: true,
+		..Default::default()
+	};
+	assert!(native.synchronize_world(&world, &structural).unwrap());
+	assert_eq!(native.entity_by_key(&key("actor")), Some(actor));
+	let saved = native.to_data(&camera).unwrap().to_json().unwrap();
+	assert_eq!(runtime::SceneData::from_json(&saved).unwrap(), data);
+
+	// A Play sync switching modes must clear the previous mode.
+	data.camera.orbit = None;
+	data.camera.follow = Some(FollowCameraSettings {
+		target: key("actor"),
+		offset: [0., 2., 5.],
+		look_offset: [0.; 3],
+		smoothing_seconds: 0.2,
+	});
+	let world = RuntimeWorld::new(Arc::new(data.clone())).unwrap();
+	assert!(native.synchronize_world(&world, &camera_changed).unwrap());
+	assert!(native.camera_orbit().is_none());
+	assert_eq!(native.to_data(&camera).unwrap(), data);
+}
+
+#[test]
+fn native_removal_and_restore_keep_the_target_rig_and_reject_camera_conflicts_atomically() {
+	let camera = Camera::default();
+	let data = orbit_scene();
+	let mut native = native(&data);
+	let actor = native.entity_by_key(&key("actor")).unwrap();
+	let snapshot = native.snapshot(actor).unwrap();
+	native.remove(actor).unwrap();
+	assert!(native.to_data(&camera).unwrap().camera.orbit.is_none());
+
+	let mut replacement_rig = data.camera.orbit.clone().unwrap();
+	replacement_rig.target = key("prop");
+	native.set_camera_orbit(Some(replacement_rig));
+	let before_conflict = native.to_data(&camera).unwrap();
+	assert!(native.restore(&snapshot).is_err());
+	assert_eq!(native.to_data(&camera).unwrap(), before_conflict);
+
+	native.set_camera_orbit(None);
+	native.restore(&snapshot).unwrap();
+	assert_eq!(native.to_data(&camera).unwrap(), data);
+}
+
 #[test]
 fn fallbacks_reject_before_publishing_partial_changes() {
 	let data = scene(vec![entity("a", [0.0; 3]), entity("b", [0.0; 3])]);

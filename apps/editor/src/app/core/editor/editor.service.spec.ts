@@ -3,6 +3,7 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import {EditorService} from './editor.service';
+import {CommandBuilder} from './editor.models';
 import type {
     Camera,
     CommandReceipt,
@@ -19,6 +20,20 @@ import type {
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
+
+it('preserves the native camera owner and rejects numbers that cannot cross IPC intact', () => {
+    const sample = {
+        workspace_generation: 14, run_id: 'run-7', scene_generation: 3,
+        yaw_delta: 0.3, pitch_delta: -0.2, log_distance_delta: 0.1,
+    };
+    expect(CommandBuilder.playCameraInput(sample)).toEqual({type: 'set_play_camera_input', ...sample});
+    expect(() => CommandBuilder.playCameraInput({
+        ...sample,
+        scene_generation: Number.MAX_SAFE_INTEGER + 1
+    })).toThrow(RangeError);
+    expect(() => CommandBuilder.playCameraInput({...sample, workspace_generation: -1})).toThrow(RangeError);
+    expect(() => CommandBuilder.playCameraInput({...sample, yaw_delta: NaN})).toThrow(RangeError);
+});
 
 function snapshot(revision: number): EditorSnapshot {
     return {
@@ -1007,6 +1022,34 @@ describe('EditorService native command and viewport queues', () => {
         expect(invoke).toHaveBeenLastCalledWith('editor_reimport_asset', {
             assetId: 'actor-id', expectedFingerprint: 'captured-fingerprint', sourcePath: 'C:/Models/new.glb', expectedRevision: 4,
         });
+    });
+
+    it('accepts schema 5 orbit cameras through a full snapshot and a camera-only delta', async () => {
+        const start = snapshot(1);
+        const orbit = {
+            target: 'actor', pivot_offset: [0, 0.7, 0] as const, initial_yaw: 0, initial_pitch: -0.3,
+            initial_distance: 5, min_distance: 1, max_distance: 8, min_pitch: -1, max_pitch: 1,
+            follow_seconds: 0.1, recovery_seconds: 0.2, teleport_distance: 8,
+            probe_radius: 0.25, obstruction_mask: 1,
+        };
+        const original = {
+            ...start,
+            document: {...start.document, schema_version: 5 as const, entities: [entity('actor')]}
+        };
+        const camera = {...original.document.camera, orbit};
+        const authored = {...original, revision: 2, scene_revision: 2, document: {...original.document, camera}};
+        const tuned = {...camera, orbit: {...orbit, initial_distance: 6}};
+        const next = {...authored, revision: 3, scene_revision: 3};
+        vi.mocked(invoke).mockResolvedValueOnce(original)
+            .mockResolvedValueOnce({...capabilities, scene_schema_version: 5})
+            .mockResolvedValueOnce(commandUpdate(authored))
+            .mockResolvedValueOnce(delta(next, [], tuned));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.execute({type: 'set_camera', camera});
+        expect(service.document()?.camera.orbit).toEqual(orbit);
+        await service.execute({type: 'set_camera', camera: tuned});
+        expect(service.document()?.camera).toEqual(tuned);
     });
 
     it('accepts schema4 component metadata and carries its per-entity views through deltas', async () => {

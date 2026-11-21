@@ -1,4 +1,4 @@
-//! Canonical version-4 disk format and the separate flat editor projection.
+//! Canonical component-based disk format and the separate flat editor projection.
 use crate::{
 	EntityKey,
 	components::{ComponentRecord, NO_MESH_PATH},
@@ -25,7 +25,8 @@ struct ProjectionScene {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredScene {
-	schema_version: u32,
+	#[serde(rename = "schema_version")]
+	_schema_version: u32,
 	bindings: BTreeMap<String, EntityKey>,
 	entities: Vec<StoredEntity>,
 	camera: CameraData,
@@ -65,16 +66,13 @@ impl StoredEntity {
 impl<'de> Deserialize<'de> for SceneData {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 		let value = serde_json::Value::deserialize(deserializer)?;
-		decode_scene(value).map_err(serde::de::Error::custom)
+		let version = camera_schema_version(&value).map_err(serde::de::Error::custom)?;
+		decode_scene(value, version).map_err(serde::de::Error::custom)
 	}
 }
-fn decode_scene(value: serde_json::Value) -> Result<SceneData, String> {
-	let version = value
-		.get("schema_version")
-		.and_then(|value| value.as_u64())
-		.ok_or("Scene requires an integer schema_version")?;
-	if version != 3 && version != CURRENT_SCHEMA_VERSION as u64 {
-		return Err("Direct scene DTO requires schema 3 or 4; use the historical scene loader for earlier versions".into());
+pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<SceneData, String> {
+	if !matches!(version, 3..=5) {
+		return Err("Direct scene DTO requires schema 3, 4 or 5".into());
 	}
 	let canonical = value
 		.get("entities")
@@ -85,13 +83,13 @@ fn decode_scene(value: serde_json::Value) -> Result<SceneData, String> {
 				.any(|entity| entity.get("components").is_some())
 		});
 	if canonical {
-		if version != CURRENT_SCHEMA_VERSION as u64 {
-			return Err("Typed component sources require scene schema 4".into());
+		if !matches!(version, 4 | 5) {
+			return Err("Typed component sources require scene schema 4 or 5".into());
 		}
 		let stored: StoredScene =
 			serde_json::from_value(value).map_err(|error| error.to_string())?;
 		Ok(SceneData {
-			schema_version: stored.schema_version,
+			schema_version: CURRENT_SCHEMA_VERSION,
 			bindings: stored.bindings,
 			entities: stored
 				.entities
@@ -192,4 +190,19 @@ pub fn deserialize_entities<'de, D: Deserializer<'de>>(
 	} else {
 		serde_json::from_value(value).map_err(serde::de::Error::custom)
 	}
+}
+
+pub(crate) fn camera_schema_version(value: &serde_json::Value) -> Result<u64, String> {
+	let version = value
+		.get("schema_version")
+		.and_then(serde_json::Value::as_u64)
+		.ok_or("Scene requires an integer schema_version")?;
+	let contains_orbit = value
+		.get("camera")
+		.and_then(serde_json::Value::as_object)
+		.is_some_and(|camera| camera.contains_key("orbit"));
+	if version < 5 && contains_orbit {
+		return Err("Orbit camera fields require scene schema 5".into());
+	}
+	Ok(version)
 }

@@ -1,3 +1,14 @@
+@if (boundSlots().length) {
+    <section aria-label="Linked prefab bindings" class="linked-prefab">
+        <h3>Prefab Bindings</h3>
+        <dl>
+            @for (binding of boundSlots(); track binding.slot) {
+                <dt>{{ binding.slot }}</dt>
+                <dd [attr.data-prefab-slot]="binding.slot" tabindex="-1">{{ binding.target }}</dd>
+            }
+        </dl>
+    </section>
+}
 @if (status(); as status) {
 	<section aria-label="Linked prefab" class="linked-prefab">
 		<h3>Linked Prefab</h3>

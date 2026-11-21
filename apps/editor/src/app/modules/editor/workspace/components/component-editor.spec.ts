@@ -64,13 +64,16 @@ function controls(root: HTMLElement) {
 		const element = [...root.querySelectorAll('label')].find(
 			(element) => element.firstChild?.textContent?.trim() === label,
 		);
-		return element!.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
+        return element!.htmlFor
+            ? root.querySelector<HTMLInputElement>(`#${element!.htmlFor}`)!
+            : element!.querySelector<HTMLInputElement | HTMLSelectElement>('input,select')!;
 	};
 	const change = (label: string, value: string) => {
 		const input = field(label);
 		input.value = value;
 		input.dispatchEvent(new Event('input'));
 		if (input instanceof HTMLSelectElement) input.dispatchEvent(new Event('change'));
+        if (input.getAttribute('role') === 'combobox') input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
 	};
 	return { button, field, change };
 }
@@ -117,6 +120,9 @@ describe('ComponentEditor', () => {
 
 	it('authors a separate collectible instance through typed entity references', async () => {
 		const panel = await setup();
+        panel.change('Component type', 'native independent');
+        await panel.fixture.whenStable();
+        expect(panel.field('Component type').value).toBe('Native Behavior');
 		panel.button('Add Component').click();
 		await panel.fixture.whenStable();
 		panel.change('Native behavior', 'collectible');
@@ -157,6 +163,33 @@ describe('ComponentEditor', () => {
 		expect(panel.button('Edit').disabled).toBe(true);
 		expect(panel.button('Remove').disabled).toBe(true);
 	});
+
+    it('opens a referenced behavior at its exact field and preserves a different draft', async () => {
+        const panel = await setup();
+        const collectible: ComponentRecord = {
+            id: 'collectible', schema_version: 1, enabled: true,
+            data: {
+                kind: 'native_behavior', behavior: {
+                    kind: 'collectible', actor: 'actor', trigger: 'sensor', visual: null, despawn_owner: false,
+                }
+            },
+        };
+        panel.fixture.componentRef.setInput('components', [mesh, collectible]);
+        await panel.fixture.whenStable();
+        panel.button('Edit').click();
+        await panel.fixture.whenStable();
+        panel.fixture.componentInstance.revealReference(collectible.id, 'Trigger');
+        await panel.fixture.whenStable();
+        expect(document.activeElement?.getAttribute('data-reference-component')).toBe(collectible.id);
+        expect(panel.field('Model path')).toBeTruthy();
+
+        panel.button('Discard Component Draft').click();
+        await panel.fixture.whenStable();
+        panel.fixture.componentInstance.revealReference(collectible.id, 'Trigger');
+        await panel.fixture.whenStable();
+        expect(document.activeElement).toBe(panel.field('Trigger sensor'));
+        expect(panel.intents).toEqual([]);
+    });
 
 	it('discards local drafts when the same entity key belongs to a replacement scene', async () => {
 		const panel = await setup();

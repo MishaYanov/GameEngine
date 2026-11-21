@@ -12,7 +12,9 @@ import type { ModelAsset } from '../../../../core/editor/editor.models';
 import type { PrefabSourceDraft } from '../../../../core/editor/linked-prefabs.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { EditorDialog } from '../../../../shared/components/dialog/dialog';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 import { SceneEditingService } from '../scene-editing.service';
+import {sceneReferenceOptions} from '../scene-reference-options';
 import { relativeAssetPath } from '../components/component-draft';
 import { PrefabSourceEditor } from './prefab-source-editor';
 import { readPrefabSource } from './prefab-source-values';
@@ -20,7 +22,7 @@ import { ReferenceBindings } from './reference-bindings';
 
 @Component({
 	selector: 'editor-prefab-authoring',
-	imports: [EditorDialog, PrefabSourceEditor, ReferenceBindings],
+    imports: [EditorDialog, EditorSearchPicker, PrefabSourceEditor, ReferenceBindings],
 	templateUrl: './prefab-authoring.html',
 	styleUrl: '../game-settings/settings.scss',
 })
@@ -43,6 +45,7 @@ export class PrefabAuthoring {
 	protected readonly createSlots = signal<readonly { name: string; target: string }[]>([]);
 	protected readonly bindings = signal<Readonly<Record<string, string>>>({});
 	protected readonly entities = computed(() => this.editor.snapshot()?.document.entities ?? []);
+    protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
 	protected readonly slotNames = computed(() =>
 		Object.keys(this.link()?.prefab.reference_slots ?? {}),
 	);

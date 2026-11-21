@@ -96,6 +96,19 @@ describe('ProjectBuild', () => {
         expect(exportButton().disabled).toBe(true);
     });
 
+    it('exposes export errors for Problems and clears them when another workspace opens', async () => {
+        const {fixture, root, workspaceGeneration, finishBuild, exportButton} = await createBuild();
+        finishBuild.mockRejectedValueOnce(new Error('Compiler failed'));
+        exportButton().click();
+        await fixture.whenStable();
+        expect(fixture.componentInstance.exportFailure()).toBe('Compiler failed');
+        fixture.componentInstance.revealExportFailure();
+        expect(document.activeElement).toBe(root.querySelector('[role="alert"]'));
+        workspaceGeneration.update(value => value + 1);
+        await fixture.whenStable();
+        expect(fixture.componentInstance.exportFailure()).toBeNull();
+    });
+
     it('rechecks dirty state after destination selection', async () => {
         const {fixture, root, current, chooseDestination, prepareBuild, exportButton} = await createBuild();
         let choose!: (path: string | null) => void;

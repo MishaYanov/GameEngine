@@ -5,6 +5,7 @@ export type WorkspaceAction =
     | 'selectAll' | 'duplicate' | 'deleteSelection' | 'frameSelection';
 
 type EditorActionDefinition =
+    | { readonly target: 'editor'; readonly label: string }
     | { readonly target: 'workspace'; readonly label: string; readonly command: WorkspaceAction }
     | {
     readonly target: 'viewport';
@@ -14,6 +15,7 @@ type EditorActionDefinition =
 
 /** Editor intents are independent of the key, pane, or input device that invokes them. */
 export const EDITOR_ACTIONS = {
+    'palette.open': {target: 'editor', label: 'Open Command Palette'},
     'scene.tool.hand': {target: 'viewport', label: 'Hand', command: {type: 'set_tool', tool: 'hand'}},
     'scene.tool.move': {target: 'viewport', label: 'Move', command: {type: 'set_tool', tool: 'move'}},
     'scene.tool.rotate': {target: 'viewport', label: 'Rotate', command: {type: 'set_tool', tool: 'rotate'}},
@@ -35,11 +37,14 @@ export const EDITOR_ACTIONS = {
     },
     'scene.cancel': {target: 'viewport', label: 'Cancel viewport gesture', command: {type: 'cancel'}},
     'document.save': {target: 'workspace', label: 'Save Scene', command: 'save'},
+    'document.save-all': {target: 'workspace', label: 'Save All', command: 'saveAll'},
     'document.undo': {target: 'workspace', label: 'Undo', command: 'undo'},
     'document.redo': {target: 'workspace', label: 'Redo', command: 'redo'},
     'selection.all': {target: 'workspace', label: 'Select all', command: 'selectAll'},
     'selection.duplicate': {target: 'workspace', label: 'Duplicate selection', command: 'duplicate'},
     'selection.delete': {target: 'workspace', label: 'Delete selection', command: 'deleteSelection'},
+    'game.play': {target: 'workspace', label: 'Play', command: 'play'},
+    'game.stop': {target: 'workspace', label: 'Stop', command: 'stop'},
 } as const satisfies Readonly<Record<string, EditorActionDefinition>>;
 
 export type EditorActionId = keyof typeof EDITOR_ACTIONS;

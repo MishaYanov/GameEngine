@@ -1,4 +1,15 @@
-import { Component, computed, effect, input, output, signal } from '@angular/core';
+import {
+    afterNextRender,
+    Component,
+    computed,
+    effect,
+    ElementRef,
+    inject,
+    Injector,
+    input,
+    output,
+    signal
+} from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import type {
 	ComponentData,
@@ -19,6 +30,8 @@ import { CONTROLLER_FIELDS } from '../../../../core/editor/character-controller.
 import type { MachineDefinition } from '../../../../core/editor/state-machine.models';
 import type { AnimationSettings } from '../../../../core/editor/animation.models';
 import { AnimationEditor } from './animation-editor';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {sceneReferenceOptions} from '../scene-reference-options';
 
 export type ComponentEditIntent =
 	| { readonly kind: 'add'; readonly component: ComponentRecord; readonly expected: string | null }
@@ -32,7 +45,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-	imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -50,6 +63,8 @@ export class ComponentEditor {
 	readonly previewAllowed = input(false);
 	readonly actionRequested = output<ComponentEditIntent>();
 	readonly draftOpenChanged = output<boolean>();
+    private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+    private readonly injector = inject(Injector);
 	protected readonly open = signal(false);
 	protected readonly selectedKind = signal<ComponentData['kind']>('native_behavior');
 	protected readonly draft = signal(componentDraft('native_behavior', '', ''));
@@ -83,6 +98,13 @@ export class ComponentEditor {
 	protected readonly canAdd = computed(() =>
 		this.addTypes().some((type) => type.kind === this.selectedKind()),
 	);
+    protected readonly typeOptions = computed(() => this.addTypes().map(type => ({
+        id: type.kind,
+        label: type.label,
+        description: type.description,
+        keywords: type.type_id,
+    })));
+    protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
 	protected readonly candidate = computed(() => {
 		try {
 			if (this.animationPending()) throw new Error('Wait for animation preparation to finish.');
@@ -106,18 +128,19 @@ export class ComponentEditor {
 			key: 'actor' | 'key_trigger' | 'door' | 'key_visual' | 'trigger' | 'visual';
 			label: string;
 			optional?: boolean;
+            usageField?: string;
 		}[]
 	>(() => {
 		if (this.draft().behavior_kind === 'key_door')
 			return [
 				{ key: 'actor', label: 'Actor' },
-				{ key: 'key_trigger', label: 'Key sensor' },
+                {key: 'key_trigger', label: 'Key sensor', usageField: 'Key trigger'},
 				{ key: 'door', label: 'Door' },
 				{ key: 'key_visual', label: 'Key visual', optional: true },
 			];
 		return [
 			{ key: 'actor', label: 'Actor' },
-			{ key: 'trigger', label: 'Trigger sensor' },
+            {key: 'trigger', label: 'Trigger sensor', usageField: 'Trigger'},
 			{ key: 'visual', label: 'Visual', optional: true },
 		];
 	});
@@ -174,6 +197,28 @@ export class ComponentEditor {
 		this.colliderInvalid.set(false);
 		this.open.set(true);
 	}
+
+    revealReference(id: string, field: string): void {
+        const component = this.components().find(record => record.id === id);
+        if (!component) return;
+        const context = this.contextKey();
+        if (!this.open()) this.start(component);
+        afterNextRender(() => {
+            if (this.contextKey() !== context) return;
+            const host = this.host.nativeElement;
+            const reference = this.open() && this.original()?.id === id
+                ? [...host.querySelectorAll<HTMLElement>('[data-component-reference-field]')]
+                    .find(element => element.dataset['componentReferenceField'] === field)
+                : undefined;
+            const selector = 'input:enabled, select:enabled';
+            const control = reference?.matches(selector) ? reference : reference?.querySelector<HTMLElement>(selector);
+            const article = [...host.querySelectorAll<HTMLElement>('[data-reference-component]')]
+                .find(element => element.dataset['referenceComponent'] === id);
+            const destination = control ?? article;
+            destination?.scrollIntoView?.({block: 'nearest'});
+            destination?.focus({preventScroll: true});
+        }, {injector: this.injector});
+    }
 
 	protected submit(): void {
 		const component = this.candidate().value;

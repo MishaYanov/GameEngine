@@ -14,11 +14,14 @@
                 @if (rows().length) {
                     <div #tree aria-label="Entities in the active scene" aria-multiselectable="true" class="entity-list"
                          role="tree" tabindex="0"
+                         [editorContextMenu]="activeEntityMenu" editorContextMenuLabel="Entity actions"
                          [attr.aria-disabled]="disabled()" [attr.aria-activedescendant]="activeId()"
                          (scroll)="scrolled($event)" (keydown)="keydown($event)">
                         <div class="virtual-space" role="presentation" [style.height.px]="totalHeight()">
                             @for (row of renderedRows(); track row.key) {
                                 <button type="button" role="treeitem" tabindex="-1" class="entity-button"
+                                        [editorContextMenuLabel]="row.entity.name + ' actions'"
+                                        [editorContextMenu]="entityMenu(row.key)"
                                         [id]="rowId(row.key)" [attr.data-key]="row.key"
                                         (click)="choose(row)"
                                         (dragend)="dragEnded()"

@@ -99,21 +99,34 @@ impl EngineBuilder {
 		self
 	}
 	pub fn build(self) -> Result<Engine, BackendError> {
-		let invalid = |message| BackendError {
-			code: BackendErrorCode::InvalidCommand,
-			message,
-			current_revision: None,
+		let invalid = |phase: &'static str| {
+			move |message| {
+				engine_logger::debug!(target: "engine_core::engine", "Engine build rejected: phase={phase}");
+				BackendError {
+					code: BackendErrorCode::InvalidCommand,
+					message,
+					current_revision: None,
+				}
+			}
 		};
-		self.project.validate_scene(&self.scene).map_err(invalid)?;
-		let assets = AssetRegistry::new(self.asset_limits).map_err(invalid)?;
-		let mut session = EditorSession::for_project(self.scene, self.project).map_err(invalid)?;
-		session.load_saved_scenes(self.documents).map_err(invalid)?;
+		self.project
+			.validate_scene(&self.scene)
+			.map_err(invalid("validate_scene"))?;
+		let assets = AssetRegistry::new(self.asset_limits).map_err(invalid("asset_registry"))?;
+		let mut session = EditorSession::for_project(self.scene, self.project)
+			.map_err(invalid("editor_session"))?;
+		session
+			.load_saved_scenes(self.documents)
+			.map_err(invalid("load_scenes"))?;
 		session
 			.set_module_resolver(self.module_resolver)
-			.map_err(invalid)?;
+			.map_err(invalid("gameplay_module"))?;
 		if let Some(resolver) = self.animation_resolver {
-			session.set_animation_resolver(resolver).map_err(invalid)?;
+			session
+				.set_animation_resolver(resolver)
+				.map_err(invalid("animation_resolver"))?;
 		}
+		engine_logger::debug!(target: "engine_core::engine", "Engine initialized: entities={}, fixed_hz={}", session.authored_document().entities.len(), session.project().fixed_hz);
 		Ok(Engine {
 			session,
 			assets,
@@ -186,6 +199,7 @@ impl Engine {
 		self.publish(BackendEventKind::DocumentChanged {
 			changes: changes.clone(),
 		})?;
+		engine_logger::debug!(target: "engine_core::assets", "Asset metadata invalidated: revision={}", self.session.revision());
 		Ok(CommandReceipt {
 			revision: self.session.revision(),
 			scene_revision: self.session.scene_revision(),
@@ -208,6 +222,7 @@ impl Engine {
 		request: EditorCommandRequest,
 	) -> Result<CommandReceipt, BackendError> {
 		if request.expected_revision != self.session.revision() {
+			engine_logger::debug!(target: "engine_core::editor", "Command rejected: code=conflict, expected_revision={}, current_revision={}", request.expected_revision, self.session.revision());
 			return Err(self.error(
 				BackendErrorCode::Conflict,
 				format!(
@@ -217,9 +232,14 @@ impl Engine {
 				),
 			));
 		}
-		CommandFactory::validate(&request.command)
-			.map_err(|message| self.error(BackendErrorCode::InvalidCommand, message))?;
-		self.mutate_session(|session| session.execute_validated_command(request))
+		let result = CommandFactory::validate(&request.command)
+			.map_err(|message| self.error(BackendErrorCode::InvalidCommand, message))
+			.and_then(|()| {
+				self.mutate_session(|session| session.execute_validated_command(request))
+			});
+		result.inspect_err(|error| {
+			engine_logger::debug!(target: "engine_core::editor", "Command failed: code={:?}, revision={}", error.code, self.session.revision());
+		})
 	}
 
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, BackendError> {
@@ -246,9 +266,29 @@ impl Engine {
 			self.publish_runtime(BackendEventKind::SimulationAdvanced {
 				tick: outcome.tick,
 				changes: outcome.changes.clone(),
+				camera_status_changed: outcome.camera_status_changed,
 			})?;
 		}
 		Ok(outcome)
+	}
+
+	pub fn camera_input_owner(&self) -> Option<crate::camera_input::CameraInputOwner> {
+		self.session.camera_input_owner()
+	}
+
+	pub fn owns_camera_input(&self, owner: &crate::camera_input::CameraInputOwner) -> bool {
+		self.session.owns_camera_input(owner)
+	}
+
+	/// Native input is ephemeral and does not create authored changes or advance the command revision.
+	pub fn submit_camera_input(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		intent: crate::camera_input::CameraIntent,
+	) -> Result<(), String> {
+		self.session
+			.submit_camera_input(run_id, scene_generation, intent)
 	}
 
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
@@ -285,6 +325,7 @@ impl Engine {
 		self.publish_runtime(BackendEventKind::SimulationAdvanced {
 			tick: self.session.simulation_stats().map_or(0, |stats| stats.0),
 			changes,
+			camera_status_changed: false,
 		})?;
 		Ok(())
 	}
@@ -469,6 +510,7 @@ impl Engine {
 		let receipt = self.replace_entities(entities, selection, label)?;
 		self.assets = assets;
 		self.refresh_asset_bounds();
+		engine_logger::debug!(target: "engine_core::assets", "Entities and asset metadata installed: revision={}", receipt.revision);
 		Ok(receipt)
 	}
 	pub fn register_assets(
@@ -480,6 +522,7 @@ impl Engine {
 			.register_batch(metadata)
 			.map_err(|message| self.error(BackendErrorCode::ResourceLimit, message))?;
 		self.refresh_asset_bounds();
+		engine_logger::debug!(target: "engine_core::assets", "Asset metadata registered: handles={}", handles.len());
 		Ok(handles)
 	}
 	pub fn clear_assets(&mut self) {

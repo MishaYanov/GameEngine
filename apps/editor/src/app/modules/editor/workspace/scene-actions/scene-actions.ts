@@ -1,4 +1,4 @@
-import {Component, computed, effect, inject, input, signal} from '@angular/core';
+import {Component, computed, effect, ElementRef, inject, input, signal} from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
@@ -18,6 +18,7 @@ export class SceneActions {
     protected readonly editor = inject(EditorService);
     protected readonly sceneSwitch = inject(SceneSwitchService);
     private readonly editing = inject(SceneEditingService, {optional: true});
+    private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly pending = signal(false);
     protected readonly expanded = signal(false);
     protected readonly message = signal<string | null>(null);
@@ -67,6 +68,14 @@ export class SceneActions {
             this.error.set(null);
             this.message.set(null);
         });
+    }
+
+    revealBinding(name: string): void {
+        const control = [...this.element.querySelectorAll<HTMLElement>('[data-scene-binding]')]
+                .find(element => element.dataset['sceneBinding'] === name) ??
+            this.element.querySelector<HTMLElement>('[data-gameplay-settings]');
+        control?.scrollIntoView?.({block: 'nearest'});
+        control?.focus({preventScroll: true});
     }
 
     protected switchScene(select: HTMLSelectElement): void {

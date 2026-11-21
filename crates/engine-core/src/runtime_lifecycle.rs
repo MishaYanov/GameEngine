@@ -685,6 +685,7 @@ mod tests {
 			entities: vec![EntityData::new(key("owner"), "Owner", "models/item.gltf")],
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,

@@ -1,8 +1,11 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {By} from '@angular/platform-browser';
 import axe from 'axe-core';
 import {vi} from 'vitest';
 import type {SceneEntity} from '../../../../core/editor/editor.models';
 import {SceneEntitiesPanel} from './scene-entities-panel';
+import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
+import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 
 function entity(key: string, parent: string | null = null, name = key): SceneEntity {
     return {key, parent, name, model_path: 'props/robot.glb', renderable: true,
@@ -58,6 +61,81 @@ describe('SceneEntitiesPanel hierarchy', () => {
     function action(label: string): HTMLButtonElement {
         return [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')].find(button => button.textContent?.trim() === label)!;
     }
+
+    function contextAction(element: HTMLElement, id: string): Extract<ContextMenuItem, { kind: 'action' }> {
+        const trigger = fixture.debugElement.queryAll(By.directive(EditorContextMenuTrigger))
+            .find(candidate => candidate.nativeElement === element)!.injector.get(EditorContextMenuTrigger);
+        const source = trigger.editorContextMenu();
+        const items = typeof source === 'function' ? source() : source;
+        const pending = [...items];
+        while (pending.length) {
+            const item = pending.shift()!;
+            if (item.kind === 'action' && item.id === id) return item;
+            if (item.kind === 'submenu') pending.push(...item.children);
+        }
+        throw new Error(`Missing entity context action: ${id}`);
+    }
+
+    it('builds entity actions for the clicked row independently of the current selection', async () => {
+        await open(nested, ['parent']);
+        const usages = vi.fn();
+        component.usagesRequested.subscribe(usages);
+        contextAction(row('child'), 'entity.find-usages').execute();
+        expect(usages).toHaveBeenCalledExactlyOnceWith('child');
+        expect(requested).not.toHaveBeenCalled();
+        contextAction(row('child'), 'entity.select').execute();
+        expect(requested).toHaveBeenLastCalledWith('child');
+        contextAction(row('child'), 'entity.move-to-root').execute();
+        expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: null});
+
+        contextAction(row('child'), 'entity.set-parent').execute();
+        row('other').click();
+        expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: 'other'});
+        expect(row('parent').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('uses the active descendant for keyboard context actions and rechecks stale hierarchy contexts', async () => {
+        await open(nested, ['parent']);
+        await keydown('ArrowDown');
+        requested.mockReset();
+        contextAction(tree(), 'entity.select').execute();
+        expect(requested).toHaveBeenCalledExactlyOnceWith('child');
+        const move = contextAction(row('child'), 'entity.move-to-root');
+        fixture.componentRef.setInput('contextKey', 'another-scene');
+        await fixture.whenStable();
+        move.execute();
+        expect(reparented).not.toHaveBeenCalled();
+    });
+
+    it('reveals and focuses a usage source through collapsed ancestors', async () => {
+        await open(nested, ['parent']);
+        row('parent').querySelector<HTMLElement>('.disclosure')!.click();
+        await fixture.whenStable();
+        expect(keys()).not.toContain('grandchild');
+        component.revealEntity('grandchild');
+        await fixture.whenStable();
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('grandchild').id);
+        expect(document.activeElement).toBe(tree());
+        expect(requested).not.toHaveBeenCalled();
+    });
+
+    it('rechecks disabled and removed entities before executing an open context action', async () => {
+        await open(nested, ['parent']);
+        const select = contextAction(row('child'), 'entity.select');
+        const move = contextAction(row('child'), 'entity.move-to-root');
+        fixture.componentRef.setInput('disabled', true);
+        await fixture.whenStable();
+        select.execute();
+        move.execute();
+        expect(requested).not.toHaveBeenCalled();
+        expect(reparented).not.toHaveBeenCalled();
+        fixture.componentRef.setInput('disabled', false);
+        await open([entity('parent')], ['parent']);
+        select.execute();
+        move.execute();
+        expect(requested).not.toHaveBeenCalled();
+        expect(reparented).not.toHaveBeenCalled();
+    });
 
     it('keeps project-closed and empty-scene states readable', async () => {
         expect(root.textContent).toContain('Open a project to view its scene entities.');

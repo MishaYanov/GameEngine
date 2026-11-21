@@ -20,5 +20,7 @@
         <p [class.progress]="pending() === 'build'" [class.success]="result() && pending() !== 'build'"
            role="status">{{ message }}</p>
     }
-    @if (error(); as failure) { <p class="error" role="alert">{{ failure }}</p> }
+    @if (error() ?? exportFailure(); as failure) {
+        <p #failureMessage class="error" role="alert" tabindex="-1">{{ failure }}</p>
+    }
 </section>

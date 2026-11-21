@@ -690,10 +690,12 @@ impl Builder {
 				Ok(()) => {
 					run.state = "SUCCEEDED".into();
 					run.detail = Some("Validated independent workspace is ready".into());
+					engine_logger::info!(target: "admin::project_builder", "Generated project published: job={}", run.job_id);
 				}
 				Err(e) => {
 					run.state = "FAILED".into();
 					run.detail = Some(e.to_string());
+					engine_logger::error!(target: "admin::project_builder", "Generated project publication failed: job={}, kind={:?}", run.job_id, e.kind());
 				}
 			}
 		}

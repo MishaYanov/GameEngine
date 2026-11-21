@@ -51,6 +51,7 @@ impl Fixture {
 			],
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -90,11 +91,24 @@ impl Fixture {
 		command.arg("--project").arg(&self.project);
 		command
 	}
+	fn configure_orbit(&self, follow_seconds: f32) {
+		let mut scene: Value = serde_json::from_slice(&fs::read(&self.scene).unwrap()).unwrap();
+		scene["camera"]["orbit"] = json!({
+			"target":"actor", "pivot_offset":[0,0,0], "initial_yaw":0.0, "initial_pitch":0.0,
+			"initial_distance":4.0, "min_distance":1.0, "max_distance":10.0, "min_pitch":-1.0,
+			"max_pitch":1.0, "follow_seconds":follow_seconds, "recovery_seconds":0.0,
+			"teleport_distance":5.0, "probe_radius":0.3, "obstruction_mask":1
+		});
+		fs::write(&self.scene, scene.to_string()).unwrap();
+	}
 	fn replay(&self, actions: Vec<Value>) -> PathBuf {
+		self.replay_version(1, actions)
+	}
+	fn replay_version(&self, schema_version: u32, actions: Vec<Value>) -> PathBuf {
 		let path = self.root.join("replay.json");
 		fs::write(
 			&path,
-			json!({"schema_version":1,"actions":actions}).to_string(),
+			json!({"schema_version":schema_version,"actions":actions}).to_string(),
 		)
 		.unwrap();
 		path
@@ -164,6 +178,64 @@ fn failure(output: Output) -> Value {
 	let error: Value = serde_json::from_slice(&output.stderr).unwrap();
 	assert_eq!(error["error"]["code"], "headless_run_failed");
 	error
+}
+
+#[test]
+fn core_logs_use_application_sinks_without_polluting_cli_output() {
+	let fixture = Fixture::new();
+	for mode in ["regular", "debug"] {
+		let logs = fixture.root.join(mode);
+		let output = fixture
+			.command()
+			.args(["--steps", "1"])
+			.env("ENGINE_LOG_DIR", &logs)
+			.env("ENGINE_LOG_MODE", mode)
+			.env("ENGINE_LOG_CONSOLE", "1")
+			.output()
+			.unwrap();
+		assert!(output.stderr.is_empty());
+		success(output);
+		let session = fs::read_dir(logs).unwrap().next().unwrap().unwrap().path();
+		let records = engine_logger::read_jsonl(session.join("000000.jsonl"), 512 * 1024).unwrap();
+		assert!(
+			records
+				.iter()
+				.any(|entry| entry.component == "engine_core::play"
+					&& entry.level == engine_logger::Level::Info
+					&& entry.message.starts_with("Play started"))
+		);
+		assert_eq!(
+			records
+				.iter()
+				.any(|entry| entry.component == "engine_core::engine"
+					&& entry.level == engine_logger::Level::Debug),
+			mode == "debug",
+		);
+	}
+
+	let logs = fixture.root.join("failed");
+	let replay = fixture.replay(vec![
+		json!({"type":"command","expected_revision":100,"command":{"type":"select","keys":[]}}),
+	]);
+	let output = fixture
+		.command()
+		.arg("--replay")
+		.arg(replay)
+		.env("ENGINE_LOG_DIR", &logs)
+		.env("ENGINE_LOG_MODE", "debug")
+		.env("ENGINE_LOG_CONSOLE", "1")
+		.output()
+		.unwrap();
+	assert!(output.stdout.is_empty());
+	failure(output);
+	let session = fs::read_dir(logs).unwrap().next().unwrap().unwrap().path();
+	let errors = engine_logger::read_jsonl(session.join("errors.jsonl"), 512 * 1024).unwrap();
+	assert_eq!(errors.len(), 1);
+	assert_eq!(errors[0].component, "headless");
+	assert_eq!(
+		errors[0].message,
+		"Headless execution failed: operation=run"
+	);
 }
 
 #[test]
@@ -505,6 +577,154 @@ fn headless_rejects_an_unavailable_gameplay_module() {
 			.as_str()
 			.unwrap()
 			.contains("missing_module")
+	);
+}
+
+#[test]
+fn version_two_orbit_replay_exposes_the_same_pose_across_frame_groupings() {
+	let fixture = Fixture::new();
+	fixture.configure_orbit(0.0);
+	let start = json!({"type":"command", "command":{"type":"start_play"}});
+	let sample = json!({"type":"camera_input","yaw_delta":0.25,"pitch_delta":-0.125,"log_distance_delta":-0.5});
+	let invoke = |version, actions| {
+		fixture
+			.command()
+			.arg("--replay")
+			.arg(fixture.replay_version(version, actions))
+			.output()
+			.unwrap()
+	};
+	let baseline = success(invoke(1, vec![start.clone()]));
+	let queued = success(invoke(
+		2,
+		vec![
+			start.clone(),
+			sample.clone(),
+			json!({"type":"tick","elapsed_seconds":0.001}),
+		],
+	));
+	assert_eq!(queued["orbit_camera_pose"], baseline["orbit_camera_pose"]);
+	let group = vec![
+		start.clone(),
+		sample.clone(),
+		json!({"type":"tick","elapsed_seconds":0.05}),
+	];
+	let result = success(invoke(2, group.clone()));
+	let repeated = success(invoke(2, group));
+	let split = success(invoke(
+		2,
+		vec![
+			start.clone(),
+			sample.clone(),
+			json!({"type":"tick","count":3}),
+		],
+	));
+	let pose = &result["orbit_camera_pose"];
+	assert_eq!(result["fixed_steps"], 3);
+	assert_eq!(split["fixed_steps"], 3);
+	assert_eq!(*pose, split["orbit_camera_pose"]);
+	assert_eq!(*pose, repeated["orbit_camera_pose"]);
+	assert_eq!(pose["yaw"], 0.25);
+	assert_eq!(pose["pitch"], -0.125);
+	let position = pose["position"].as_array().unwrap();
+	let distance = position
+		.iter()
+		.map(|n| n.as_f64().unwrap().powi(2))
+		.sum::<f64>()
+		.sqrt();
+	assert!((distance - 4.0 * (-0.5_f64).exp()).abs() < 1e-5);
+	let mut malformed = sample.clone();
+	malformed["unexpected"] = json!(true);
+	assert!(
+		failure(invoke(2, vec![malformed]))["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("unknown field")
+	);
+	let mut excessive = sample.clone();
+	excessive["log_distance_delta"] = json!(20.0);
+	assert!(
+		failure(invoke(2, vec![excessive]))["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("4x")
+	);
+	let err = failure(invoke(1, vec![start, sample.clone()]));
+	assert!(
+		err["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("version 2")
+	);
+	let err = failure(invoke(2, vec![sample]));
+	assert!(
+		err["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("requires an unpaused orbit")
+	);
+}
+
+#[test]
+fn orbit_follows_a_moving_target_and_settles_without_manual_camera_input() {
+	let fixture = Fixture::new();
+	fixture.configure_orbit(0.15);
+	let mut project = ProjectData::load(&fixture.project).unwrap();
+	project
+		.behaviors
+		.retain(|entry| matches!(entry.behavior, BehaviorSpec::ControlledMove { .. }));
+	fs::write(&fixture.project, project.to_json().unwrap()).unwrap();
+	let move_actor = |x| {
+		json!({"type":"command", "command":{
+			"type":"set_entity_input", "entity":"actor", "movement":[x,0,0]
+		}})
+	};
+	let run = |output, ticks, settle| {
+		let state_path = fixture.root.join(output);
+		let mut actions = vec![
+			json!({"type":"command","command":{"type":"start_play"}}),
+			move_actor(1),
+			ticks,
+		];
+		if settle {
+			actions.push(move_actor(0));
+			actions.push(json!({"type":"tick", "count":180}));
+		}
+		let summary = success(
+			fixture
+				.command()
+				.arg("--replay")
+				.arg(fixture.replay(actions))
+				.arg("--state-output")
+				.arg(&state_path)
+				.output()
+				.unwrap(),
+		);
+		let world = SceneData::from_json(&fs::read_to_string(&state_path).unwrap()).unwrap();
+		(summary, world.entities[0].transform.position[0])
+	};
+	let grouped = json!({"type":"tick", "elapsed_seconds":0.05});
+	let split = json!({"type":"tick", "count":3});
+	let (moving, actor_x) = run("moving-grouped.json", grouped.clone(), false);
+	let (split_moving, split_x) = run("moving-split.json", split.clone(), false);
+	assert_eq!(moving["fixed_steps"], 3);
+	assert_eq!(actor_x, split_x);
+	assert!((actor_x - 0.1).abs() < 1e-6);
+	let camera = &moving["orbit_camera_pose"];
+	let eye_x = camera["position"][0].as_f64().unwrap();
+	assert!(eye_x > 0.0 && eye_x < f64::from(actor_x));
+	assert_eq!(camera, &split_moving["orbit_camera_pose"]);
+	let (settled, final_x) = run("settled-grouped.json", grouped, true);
+	let (split_settled, _) = run("settled-split.json", split, true);
+	let pose = &settled["orbit_camera_pose"];
+	assert_eq!(pose, &split_settled["orbit_camera_pose"]);
+	assert_eq!(final_x, actor_x);
+	let eye: [f32; 3] = serde_json::from_value(pose["position"].clone()).unwrap();
+	assert_eq!(eye, [final_x, 0.0, 4.0]);
+	let steps = settled["fixed_steps"].as_u64().unwrap();
+	assert!(
+		(4..183).contains(&steps),
+		"settled cameras stop scheduling steps"
 	);
 }
 

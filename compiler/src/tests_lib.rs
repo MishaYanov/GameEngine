@@ -165,6 +165,7 @@ fn authored_scene_fixture(source: &Path) -> (ProjectData, SceneData) {
 		lights: vec![],
 		camera: engine_core::scene_data::CameraData {
 			follow: None,
+			orbit: None,
 			position: camera.position,
 			yaw: camera.yaw,
 			pitch: camera.pitch,
@@ -228,6 +229,48 @@ fn preparing_an_authored_project_captures_its_actual_scene_assets_and_behavior_c
 	assert_eq!(
 		fs::read(source.join("scenes/main.json")).unwrap(),
 		fs::read(destination.join("scenes/main.json")).unwrap()
+	);
+}
+
+#[test]
+fn staging_preserves_authored_orbit_on_a_meshless_target() {
+	let fixture = AssetFixture::new();
+	let source = fixture.0.join("source");
+	let (project, mut scene) = authored_scene_fixture(&source);
+	let target = engine_core::EntityKey::new("pivot").unwrap();
+	scene.entities.push(
+		engine_core::scene_data::EntityData::new(
+			target.clone(),
+			"Orbit pivot",
+			engine_core::components::NO_MESH_PATH,
+		)
+			.with_renderable(false),
+	);
+	scene.camera.orbit = Some(engine_core::scene_data::OrbitCameraSettings {
+		target,
+		pivot_offset: [0.0, 0.7, 0.0],
+		initial_yaw: 0.0,
+		initial_pitch: -0.3,
+		initial_distance: 5.0,
+		min_distance: 1.0,
+		max_distance: 8.0,
+		min_pitch: -1.0,
+		max_pitch: 0.5,
+		follow_seconds: 0.1,
+		recovery_seconds: 0.2,
+		teleport_distance: 8.0,
+		probe_radius: 0.25,
+		obstruction_mask: 1,
+	});
+	fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+
+	let prepared = prepare_project(&project, &source).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+	let packaged = read_scene_file(&staged.path().join("assets/scenes/main.json")).unwrap();
+	assert_eq!(packaged.camera, scene.camera);
+	assert_eq!(
+		packaged.schema_version,
+		engine_core::scene_data::CURRENT_SCHEMA_VERSION
 	);
 }
 

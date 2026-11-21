@@ -19,6 +19,9 @@ use ::game::launch::{LaunchMode, LaunchOptions};
 use engine_logger::ResultLogExt;
 use renderer::{WindowRenderer, vulkan::CameraUniform};
 use runtime::assets::AssetManager;
+use runtime::camera_input::{
+	CameraInputOwner, CameraIntent, WheelSample, normalize_mouse, normalize_wheel,
+};
 use runtime::input::{InputProfile, MAX_INPUT_PROFILE_BYTES, MovementBindings};
 use runtime::scene_catalog::SceneId;
 use runtime::scene_editor::ProjectData;
@@ -71,6 +74,7 @@ struct GameApp {
 	camera: Camera,
 	camera_controller: CameraController,
 	mouse_captured: bool,
+	orbit_capture: Option<CameraInputOwner>,
 	last_heartbeat: Option<Instant>,
 	project_name: Option<String>,
 	asset_root: Option<PathBuf>,
@@ -88,6 +92,9 @@ struct GameApp {
 	installed_project: bool,
 	play_update_error_reported: bool,
 	edit_update_error_reported: bool,
+	smoke_test: bool,
+	smoke_test_completed: bool,
+	fatal_error: Option<String>,
 }
 
 impl GameApp {
@@ -199,6 +206,18 @@ impl GameApp {
 	}
 
 	fn tick_play(&mut self, delta_seconds: f32) -> Result<(), String> {
+		let result = self.advance_play(delta_seconds);
+		if self
+			.orbit_capture
+			.as_ref()
+			.is_some_and(|owner| !self.editor.owns_camera_input(owner) || self.game_completed())
+		{
+			self.set_mouse_capture(false);
+		}
+		result
+	}
+
+	fn advance_play(&mut self, delta_seconds: f32) -> Result<(), String> {
 		if self.input.just_pressed(Key::F8)
 			&& let Some(scene_id) = self.editor.pending_play_scene().cloned()
 		{
@@ -218,9 +237,7 @@ impl GameApp {
 			.editor
 			.update_play(&mut self.scene, &self.input, delta_seconds)?;
 		loop {
-			if self.scene.camera_follow().is_some()
-				&& let Some(camera) = self.editor.render_camera()
-			{
+			if let Some(camera) = self.editor.play_rig_camera() {
 				self.camera = camera;
 			}
 			if let Some(scene_id) = outcome.requested_scene {
@@ -322,7 +339,7 @@ impl GameApp {
 	}
 
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
-		if self.editor.is_playing() && self.scene.camera_follow().is_some() {
+		if self.editor.play_rig_camera().is_some() {
 			return;
 		}
 		let game_owns_arrow = self.editor.is_playing()
@@ -358,7 +375,8 @@ impl GameApp {
 			|| (!self.standalone_runtime
 				&& self.authored.is_none()
 				&& MovementBindings::WASD.any_held(&self.input))
-			|| MovementBindings::ARROWS.any_held(&self.input)
+			|| (MovementBindings::ARROWS.any_held(&self.input)
+			&& self.editor.play_rig_camera().is_none())
 	}
 
 	fn request_input_frame(&mut self) {
@@ -499,6 +517,7 @@ impl GameApp {
 			event_loop
 				.create_window(
 					Window::default_attributes()
+						.with_visible(!self.smoke_test)
 						.with_title(self.project_name.as_deref().unwrap_or("Game Engine"))
 						.with_inner_size(winit::dpi::LogicalSize::new(1280, 720)),
 				)
@@ -852,15 +871,12 @@ impl GameApp {
 				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
 			// No fallible operations between committing the CPU world and its view.
 			self.scene = scene;
-			self.camera = if self.scene.camera_follow().is_some() {
-				self.editor.render_camera().unwrap_or(camera)
-			} else {
-				camera
-			};
+			self.camera = self.editor.play_rig_camera().unwrap_or(camera);
 			Ok(())
 		});
 		assets.prune_unused();
 		installed?;
+		self.set_mouse_capture(false);
 		if self.standalone_runtime {
 			self.scene_path = Some(scene_path);
 		}
@@ -931,24 +947,21 @@ impl GameApp {
 		Ok(())
 	}
 
-	fn render(&mut self) -> Result<(), String> {
+	fn render(&mut self) -> Result<renderer::DrawStatus, String> {
 		let hud_rows = if self.standalone_runtime {
 			gameplay_hud_rows(self.editor.play_status().as_ref())
 		} else {
 			Vec::new()
 		};
-		if self.editor.is_playing()
-			&& self.scene.camera_follow().is_some()
-			&& let Some(camera) = self.editor.render_camera()
-		{
+		if let Some(camera) = self.editor.play_rig_camera() {
 			self.camera = camera;
 		}
 		let dirty = !self.standalone_runtime && self.is_dirty();
 		let Some(renderer) = self.renderer.as_mut() else {
-			return Ok(());
+			return Ok(renderer::DrawStatus::Suspended);
 		};
 		let Some([width, height]) = renderer.prepare()? else {
-			return Ok(());
+			return Ok(renderer::DrawStatus::Suspended);
 		};
 		let camera_uniform = CameraUniform::perspective(
 			self.camera.position,
@@ -1049,8 +1062,7 @@ impl GameApp {
 		self.tools.stats = stats;
 
 		renderer.set_lights(&self.scene.renderer_lights())?;
-		renderer.draw(&camera_uniform, &objects)?;
-		Ok(())
+		renderer.draw(&camera_uniform, &objects)
 	}
 
 	fn pick_entity(&mut self) -> Result<(), String> {
@@ -1082,17 +1094,63 @@ impl GameApp {
 		Ok(())
 	}
 
+	fn submit_captured_orbit(&mut self, intent: Result<CameraIntent, String>) {
+		let Some(owner) = &self.orbit_capture else {
+			return;
+		};
+		let Ok(intent) = intent else { return };
+		match self.editor.submit_camera_input(owner, intent) {
+			Ok(()) => {
+				if let Some(window) = &self.window {
+					window.request_redraw();
+				}
+			}
+			Err(error) => {
+				engine_logger::debug!("Play camera input rejected: {error}");
+				self.set_mouse_capture(false);
+			}
+		}
+	}
+
+	fn captured_motion(&mut self, dx: f64, dy: f64) {
+		if self.orbit_capture.is_some() {
+			self.submit_captured_orbit(normalize_mouse(dx, dy, Default::default()));
+		} else if self.editor.play_rig_camera().is_none() {
+			self.request_input_frame();
+			self.camera_controller
+				.mouse_motion(&mut self.camera, dx, dy);
+		}
+	}
+
 	fn set_mouse_capture(&mut self, capture: bool) {
+		if !capture && let Some(owner) = self.orbit_capture.take() {
+			self.input.suppress_held();
+			if self.editor.owns_camera_input(&owner) {
+				self.editor.clear_play_input();
+			}
+		}
 		let Some(window) = self.window.as_ref() else {
 			self.mouse_captured = false;
 			return;
 		};
 
 		if capture {
-			if self.mouse_captured || !window.has_focus() {
+			let size = window.inner_size();
+			if self.mouse_captured
+				|| !window.has_focus()
+				|| self.window_occluded
+				|| size.width == 0
+				|| size.height == 0
+			{
 				return;
 			}
 
+			let orbit_owner = self.editor.camera_input_owner();
+			if self.editor.play_rig_camera().is_some()
+				&& (orbit_owner.is_none() || self.game_completed())
+			{
+				return;
+			}
 			let result = window
 				.set_cursor_grab(CursorGrabMode::Locked)
 				.or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
@@ -1100,6 +1158,7 @@ impl GameApp {
 			match result {
 				Ok(()) => {
 					window.set_cursor_visible(false);
+					self.orbit_capture = orbit_owner;
 					self.mouse_captured = true;
 				}
 				Err(error) => {
@@ -1122,12 +1181,42 @@ impl ApplicationHandler for GameApp {
 		if self.window.is_some() {
 			return;
 		}
-		if self
+		if let Err(error) = self
 			.initialize(event_loop)
 			.map_err(std::io::Error::other)
 			.log_error_for("game::renderer", "initialize game")
-			.is_err()
 		{
+			self.fatal_error = Some(error.to_string());
+			event_loop.exit();
+			return;
+		}
+		if self.smoke_test {
+			// Hidden windows may not receive redraw events. Exercise the normal
+			// rendering path here on the executable's ordinary main-thread stack.
+			// A bounded retry tolerates an initial swapchain recreation.
+			let result = (|| {
+				for _ in 0..8 {
+					if self.render()? == renderer::DrawStatus::Rendered {
+						self.wait_for_gpu()?;
+						return Ok(());
+					}
+				}
+				Err("Startup smoke test did not render a frame".to_owned())
+			})();
+			match result {
+				Ok(()) => {
+					self.smoke_test_completed = true;
+					println!(
+						"GAME_STARTUP_SMOKE_OK mode={}",
+						if self.standalone_runtime {
+							"player"
+						} else {
+							"development"
+						}
+					);
+				}
+				Err(error) => self.fatal_error = Some(error),
+			}
 			event_loop.exit();
 			return;
 		}
@@ -1193,6 +1282,19 @@ impl ApplicationHandler for GameApp {
 				}
 				self.request_input_frame();
 			}
+			WindowEvent::MouseWheel { delta, .. } if self.orbit_capture.is_some() => {
+				if self
+					.window
+					.as_ref()
+					.is_some_and(|window| window.has_focus())
+				{
+					let sample = match delta {
+						MouseScrollDelta::LineDelta(_, y) => WheelSample::Lines(f64::from(y)),
+						MouseScrollDelta::PixelDelta(position) => WheelSample::Pixels(position.y),
+					};
+					self.submit_captured_orbit(normalize_wheel(sample));
+				}
+			}
 			WindowEvent::MouseWheel { delta, .. } if !self.standalone_runtime => {
 				if let Some(pixel) = self.cursor_position {
 					let scale = self
@@ -1215,6 +1317,14 @@ impl ApplicationHandler for GameApp {
 				// Winit synthesizes presses for keys already held when focus returns.
 				// Those are not new gameplay presses; releases still re-arm suppression.
 				if is_synthetic && event.state == ElementState::Pressed {
+					return;
+				}
+				if event.state == ElementState::Pressed
+					&& self.mouse_captured
+					&& event.physical_key == PhysicalKey::Code(winit::keyboard::KeyCode::Escape)
+				{
+					self.set_mouse_capture(false);
+					self.request_input_frame();
 					return;
 				}
 				if !self.standalone_runtime
@@ -1240,10 +1350,6 @@ impl ApplicationHandler for GameApp {
 				if let Err(error) = self.editor.sample_play_keyboard(&self.input) {
 					engine_logger::error!(target: "game", "Gameplay input rejected: {error}");
 				}
-
-				if key == Key::Escape && event.state == ElementState::Pressed {
-					self.set_mouse_capture(false);
-				}
 			}
 			WindowEvent::Focused(false) => {
 				if !self.standalone_runtime {
@@ -1252,7 +1358,7 @@ impl ApplicationHandler for GameApp {
 				}
 				self.set_mouse_capture(false);
 				self.input.suppress_held();
-				self.editor.clear_play_keyboard();
+				self.editor.clear_play_input();
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -1271,7 +1377,7 @@ impl ApplicationHandler for GameApp {
 				if occluded {
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
-					self.editor.clear_play_keyboard();
+					self.editor.clear_play_input();
 				} else {
 					self.window.as_ref().unwrap().request_redraw();
 				}
@@ -1288,6 +1394,8 @@ impl ApplicationHandler for GameApp {
 						self.cancel_drag();
 					}
 					self.set_mouse_capture(false);
+					self.input.suppress_held();
+					self.editor.clear_play_input();
 					self.clock.reset();
 
 					self.next_frame_deadline = None;
@@ -1328,12 +1436,12 @@ impl ApplicationHandler for GameApp {
 				self.input.end_frame();
 				self.update_selection_title();
 
-				if self
+				if let Err(error) = self
 					.render()
 					.map_err(std::io::Error::other)
 					.log_error_for("game::renderer", "render frame")
-					.is_err()
 				{
+					self.fatal_error = Some(error.to_string());
 					event_loop.exit();
 					return;
 				}
@@ -1370,9 +1478,7 @@ impl ApplicationHandler for GameApp {
 		}
 
 		if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
-			self.request_input_frame();
-			self.camera_controller
-				.mouse_motion(&mut self.camera, dx, dy);
+			self.captured_motion(dx, dy);
 		}
 	}
 
@@ -1512,6 +1618,10 @@ fn run() -> Result<(), String> {
 		.map(load_input_profile)
 		.transpose()?;
 
+	app.smoke_test = options.smoke_test;
+	if app.smoke_test {
+		suppress_smoke_error_dialogs();
+	}
 	app.standalone_runtime = options.mode == LaunchMode::Player;
 	if app.standalone_runtime
 		&& let Some(project) = &app.project
@@ -1531,7 +1641,28 @@ fn run() -> Result<(), String> {
 		.expect("game event loop failed");
 
 	engine_logger::component_health("game", "STOPPED", false, "Game event loop stopped");
+	if let Some(error) = app.fatal_error.take() {
+		return Err(error);
+	}
+	if app.smoke_test && !app.smoke_test_completed {
+		return Err("Startup smoke test exited without completing a frame".into());
+	}
 	Ok(())
+}
+
+// A crashing unattended smoke process must terminate instead of opening a
+// Windows Error Reporting dialog. This does not change ordinary interactive runs.
+fn suppress_smoke_error_dialogs() {
+	#[cfg(windows)]
+	unsafe {
+		#[link(name = "kernel32")]
+		unsafe extern "system" {
+			fn SetErrorMode(mode: u32) -> u32;
+		}
+		const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+		const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+		SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+	}
 }
 
 // Diagnostics latch only: simulation and input continue to follow their existing

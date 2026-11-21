@@ -2,6 +2,16 @@
 import type {ComponentPreview, ComponentSection} from './component-registry';
 
 export const componentRegistry: readonly ComponentSection[] = [
+    {
+        id: "context-menu", title: "Context Menu", requiredInputs: [], load: async () => {
+            const [module, preview] = await Promise.all([import("../../../src/app/shared/components/context-menu/context-menu"), import("./previews/context-menu.design")]);
+            const options: ComponentPreview = preview.default;
+            return {
+                requiredInputs: options.component ? [] : [], ...options,
+                component: options.component ?? module["EditorContextMenu"]
+            };
+        }
+    },
     {id: "dialog", title: "Dialog", requiredInputs: ["title"], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/dialog/dialog"), import("./previews/dialog.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : ["title"], ...options, component: options.component ?? module["EditorDialog"]}; }},
     {id: "drawer", title: "Drawer", requiredInputs: [], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/drawer/drawer"), import("./previews/drawer.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : [], ...options, component: options.component ?? module["Drawer"]}; }},
     {

@@ -56,20 +56,9 @@
 						maxlength="64"
 						(input)="changeSlot(index, 'name', name.value)"
 				/></label>
-				<label
-					>External scene reference<select
-						#target
-						[value]="slot.target"
-						(change)="changeSlot(index, 'target', target.value)"
-					>
-						<option value="">Choose external entity</option>
-						@for (entity of entities(); track entity.key) {
-							<option [value]="entity.key" [selected]="slot.target === entity.key">
-								{{ entity.name }}
-							</option>
-						}
-					</select></label
-				>
+                <editor-search-picker (picked)="changeSlot(index, 'target', $event)" [clearable]="true"
+                                      [disabled]="pending()" [options]="entityOptions()" [value]="slot.target"
+                                      label="External scene reference" placeholder="Search scene entities…"/>
 				<button type="button" (click)="removeSlot(index)">Remove reference slot</button>
 			}
 			<button type="button" [disabled]="createSlots().length >= 128" (click)="addSlot()">

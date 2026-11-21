@@ -25,6 +25,14 @@ const documentScopes = ['workspace', 'scene', 'hierarchy', 'inspector', 'assets'
 
 /** Physical key codes match the native Scene surface. A key fallback is for DOM input without a code. */
 export const EDITOR_KEYMAP: readonly EditorShortcut[] = [
+    {
+        action: 'palette.open',
+        scopes: documentScopes,
+        code: 'KeyP',
+        key: 'p',
+        modifiers: 'primary-shift',
+        label: 'Ctrl/Cmd + Shift + P'
+    },
     {action: 'scene.tool.hand', scopes: scene, code: 'KeyQ', key: 'q', label: 'Q'},
     {action: 'scene.tool.move', scopes: scene, code: 'KeyW', key: 'w', label: 'W'},
     {action: 'scene.tool.rotate', scopes: scene, code: 'KeyE', key: 'e', label: 'E'},
@@ -142,13 +150,13 @@ export function resolveEditorShortcut(event: KeyboardEvent): EditorActionId | un
 }
 
 /** The native worker handles local navigation, tools, history, and selection itself. */
-export function resolveNativeEditorShortcut(input: ViewportInput): 'document.save' | undefined {
+export function resolveNativeEditorShortcut(input: ViewportInput): 'document.save' | 'palette.open' | undefined {
     if (input.kind !== 'key_down' || input.repeat || input.modifiers.alt) return;
     const action = matchKeymap({
         code: input.code ?? '', key: '', ctrlKey: input.modifiers.control,
         metaKey: input.modifiers.super_key, shiftKey: input.modifiers.shift,
     }, 'scene');
-    return action === 'document.save' ? action : undefined;
+    return action === 'document.save' || action === 'palette.open' ? action : undefined;
 }
 
 export function editorShortcutLabel(action: EditorActionId): string {

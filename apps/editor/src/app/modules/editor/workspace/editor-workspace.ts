@@ -1,8 +1,9 @@
-import {Component, computed, effect, inject, input, output, signal, viewChild} from '@angular/core';
+import {Component, computed, DOCUMENT, effect, inject, input, output, signal, viewChild} from '@angular/core';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import {EditorPane} from '../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../shared/icons/editor-icon';
+import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 import {EditorService} from "../../../core/editor/editor.service";
 import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {SceneViewport} from "./scene-viewport/scene-viewport";
@@ -24,12 +25,21 @@ import {GameInputManager} from './game-input/game-input-manager';
 import {GameplaySettings} from './game-settings/gameplay-settings';
 import {CameraSettings} from './game-settings/camera-settings';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
-import {CommandBuilder} from '../../../core/editor/editor.models';
+import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
+import {CommandPalette} from './command-palette/command-palette';
+import {FindUsages} from './find-usages/find-usages';
+import {collectSceneReferences, type SceneReference} from './find-usages/scene-references';
+import {editorProblems} from './problems-panel/editor-problems';
+import {ProblemsPanel, type EditorProblem, type ProblemLocation} from './problems-panel/problems-panel';
 
 @Component({
     selector: 'editor-workspace',
     providers: [SceneEditingService, ViewportEditorService, ViewportAssetDragService, SceneSwitchService],
-    imports: [EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel, WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager, GameplaySettings, CameraSettings, RuntimeInspector],
+    imports: [
+        EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
+        WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
+        GameplaySettings, CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
+    ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
     host: {'(keydown)': 'handleEditorShortcut($event)', 'data-editor-shortcut-scope': 'workspace'},
@@ -44,6 +54,8 @@ export class EditorWorkspace {
     protected readonly viewportEditor = inject(ViewportEditorService);
     protected readonly assetDrag = inject(ViewportAssetDragService);
     protected readonly sceneSwitch = inject(SceneSwitchService);
+    private readonly document = inject(DOCUMENT);
+    private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
     protected readonly sceneContext = computed(() => `${this.editorService.workspaceGeneration()}:${this.editorService.snapshot()?.active_scene_id ?? ''}`);
@@ -100,6 +112,44 @@ export class EditorWorkspace {
     });
     private readonly sceneToolbar = viewChild(ViewportToolbar);
     private readonly workspaceToolbar = viewChild(WorkspaceToolbar);
+    private readonly hierarchy = viewChild(SceneEntitiesPanel);
+    private readonly inspector = viewChild(InspectorPanel);
+    private readonly cameraSettings = viewChild(CameraSettings);
+    private readonly sceneActions = viewChild(SceneActions);
+    private readonly projectBuild = viewChild(ProjectBuild);
+    protected readonly paletteOpen = signal(false);
+    protected readonly problemsOpen = signal(false);
+    protected readonly problemsActive = signal(false);
+    private readonly usage = signal<{ key: EntityKey; context: string } | null>(null);
+    protected readonly usageTarget = computed(() => {
+        const usage = this.usage();
+        if (!usage || usage.context !== this.sceneContext()) return null;
+        return this.editorService.document()?.entities.find(entity => entity.key === usage.key) ?? null;
+    });
+    protected readonly sceneReferences = computed(() => {
+        if (!this.usageTarget() && !this.problemsActive()) return [];
+        const document = this.editorService.document();
+        return document ? collectSceneReferences(document) : [];
+    });
+    protected readonly problems = computed(() => editorProblems(
+        this.sceneReferences(), this.projectBuild()?.exportFailure() ?? null,
+    ));
+    protected readonly canRevealReference = computed(() => !this.workspaceActionBlocked() && this.sceneEditing.ready());
+    protected readonly canOpenPalette = computed(() => !!this.editorService.snapshot() &&
+        !this.workspaceActionBlocked() && !this.viewportEditor.state()?.gesture && this.contextMenu.request() === null);
+    protected readonly canRunPaletteCommand = (id: EditorActionId): boolean => {
+        if (!this.canOpenPalette()) return false;
+        const action = EDITOR_ACTIONS[id];
+        switch (action.target) {
+            case 'editor':
+                return false;
+            case 'workspace':
+                return this.workspaceToolbar()?.canPerform(action.command) === true;
+            case 'viewport':
+                return this.sceneToolbar()?.canPerform(typeof action.command === 'function'
+                    ? action.command(this.viewportEditor.settings()) : action.command) === true;
+        }
+    };
     private requestedView: 'scene' | 'game' | null = null;
     protected readonly sceneEntities = computed<SceneEntitiesModel>(() => {
         const snapshot = this.editorService.snapshot();
@@ -112,7 +162,14 @@ export class EditorWorkspace {
 
     constructor() {
         effect(() => this.activeViewKind.set(this.editorService.playing() ? 'game-preview' : 'scene-viewport'));
-        effect(() => {this.sceneContext(); this.hierarchyError.set(null);});
+        effect(() => {
+            this.sceneContext();
+            this.hierarchyError.set(null);
+            this.usage.set(null);
+            this.paletteOpen.set(false);
+            this.problemsOpen.set(false);
+            this.problemsActive.set(false);
+        });
         effect(() => this.sceneEditing.blocked.set(this.opening() || this.viewportEditor.authoringGesture()));
         effect(() => {
             const state = this.viewportEditor.state();
@@ -152,9 +209,9 @@ export class EditorWorkspace {
     }
 
     protected handleEditorShortcut(event: KeyboardEvent): void {
-        if (this.workspaceActionBlocked() || this.activeViewKind() !== 'scene-viewport') return;
+        if (this.workspaceActionBlocked()) return;
         const id = resolveEditorShortcut(event);
-        if (id && this.dispatchEditorAction(id)) {
+        if (id && (id === 'palette.open' || this.activeViewKind() === 'scene-viewport') && this.dispatchEditorAction(id)) {
             event.preventDefault();
             event.stopPropagation();
         }
@@ -166,12 +223,62 @@ export class EditorWorkspace {
         if (state?.settings.view === 'scene' && state.focused && state.gesture === null) this.dispatchEditorAction(id);
     }
 
-    private dispatchEditorAction(id: EditorActionId): boolean | undefined {
+    protected dispatchEditorAction(id: EditorActionId): boolean | undefined {
         const action = EDITOR_ACTIONS[id];
+        if (action.target === 'editor') return this.openPalette();
         return action.target === 'workspace'
             ? this.workspaceToolbar()?.dispatch(action.command)
             : this.sceneToolbar()?.dispatch(typeof action.command === 'function'
                 ? action.command(this.viewportEditor.settings()) : action.command);
+    }
+
+    protected openPalette(): boolean {
+        if (!this.canOpenPalette() || this.document.querySelector('dialog[open]')) return false;
+        this.paletteOpen.set(true);
+        return true;
+    }
+
+    protected showUsages(key: EntityKey): void {
+        if (this.canRevealReference()) this.usage.set({key, context: this.sceneContext()});
+    }
+
+    protected closeUsages(): void {
+        this.usage.set(null);
+    }
+
+    protected revealUsage(reference: SceneReference): void {
+        void this.revealReference(reference.location, reference.field);
+    }
+
+    protected openProblems(): void {
+        this.problemsActive.set(true);
+        this.problemsOpen.set(true);
+    }
+
+    protected revealProblem(problem: EditorProblem): void {
+        void this.revealReference(problem.location, problem.field);
+    }
+
+    private async revealReference(location: ProblemLocation, field?: string): Promise<void> {
+        if (!this.canRevealReference()) return;
+        switch (location.kind) {
+            case 'build':
+                this.projectBuild()?.revealExportFailure();
+                return;
+            case 'camera':
+                this.cameraSettings()?.show(true, location.mode);
+                return;
+            case 'binding':
+                this.sceneActions()?.revealBinding(location.name);
+                return;
+            case 'entity': {
+                const context = this.sceneContext();
+                await this.sceneEditing.select(location.key);
+                if (context !== this.sceneContext() || this.sceneEditing.entity()?.key !== location.key) return;
+                if (location.section === 'hierarchy') this.hierarchy()?.revealEntity(location.key);
+                else this.inspector()?.revealReference(location.key, location.componentId, location.section, location.slot, field);
+            }
+        }
     }
 
     protected async reparentEntity(request: HierarchyReparentRequest): Promise<void> {

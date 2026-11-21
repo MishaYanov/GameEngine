@@ -453,6 +453,9 @@ impl ProjectData {
 			value.schema_version = PROJECT_SCHEMA_VERSION;
 		}
 		value.validate()?;
+		if header.schema_version != PROJECT_SCHEMA_VERSION {
+			engine_logger::debug!(target: "engine_core::project", "Project schema migrated: from={}, to={PROJECT_SCHEMA_VERSION}", header.schema_version);
+		}
 		Ok(value)
 	}
 

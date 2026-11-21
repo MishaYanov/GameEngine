@@ -32,6 +32,12 @@
             Stop
         </button>
     </div>
+    <div aria-label="Command palette" class="action-group" role="group">
+        <button (click)="paletteRequested.emit()" [disabled]="!paletteAvailable()"
+                [title]="paletteShortcut" aria-haspopup="dialog"
+                aria-keyshortcuts="Control+Shift+P Meta+Shift+P" type="button">Commands
+        </button>
+    </div>
 </div>
 @if (actionError(); as message) {
     <div class="action-error" role="alert">{{ message }}</div>

@@ -6,9 +6,19 @@ use std::collections::VecDeque;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BackendEventKind {
-	DocumentChanged { changes: WorldChange },
-	SimulationAdvanced { tick: u64, changes: WorldChange },
-	RuntimeSceneChanged { from: SceneId, to: SceneId },
+	DocumentChanged {
+		changes: WorldChange,
+	},
+	SimulationAdvanced {
+		tick: u64,
+		changes: WorldChange,
+		#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+		camera_status_changed: bool,
+	},
+	RuntimeSceneChanged {
+		from: SceneId,
+		to: SceneId,
+	},
 	StateChanged,
 	ProjectChanged,
 }

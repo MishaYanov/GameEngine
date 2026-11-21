@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import {Component, computed, input, output} from '@angular/core';
 import {
 	GAMEPLAY_SIGNALS,
 	type GameplaySignal,
@@ -6,10 +6,12 @@ import {
 } from '../../../../core/editor/state-machine.models';
 import type { ComponentTarget } from './component-draft';
 import { MachineReferencePicker } from './machine-reference-picker';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {sceneReferenceOptions} from '../scene-reference-options';
 
 @Component({
 	selector: 'editor-machine-action',
-	imports: [MachineReferencePicker],
+    imports: [MachineReferencePicker, EditorSearchPicker],
 	template: `
 		<label
 			>Entry action<select #kind [value]="value().kind" (change)="choose(kind.value)">
@@ -25,6 +27,8 @@ import { MachineReferencePicker } from './machine-reference-picker';
 				label="Recipient"
 				[entities]="entities()"
 				[value]="action.target"
+				[disabled]="disabled()"
+				[referenceField]="referencePrefix() ? referencePrefix() + ': Signal target' : null"
 				(changed)="changed.emit({ kind: 'emit', target: $event, signal: action.signal })"
 			/>
 			<label
@@ -35,16 +39,10 @@ import { MachineReferencePicker } from './machine-reference-picker';
 				</select></label
 			>
 		} @else if (action.kind === 'set_visible' || action.kind === 'set_collision_enabled') {
-			<label
-				>Target entity<select #entity [value]="action.entity" (change)="setEntity(entity.value)">
-					<option value="">Choose entity</option>
-					@for (item of entities(); track item.key) {
-						<option [value]="item.key" [selected]="item.key === action.entity">
-							{{ item.name }}
-						</option>
-					}
-				</select></label
-			>
+			<editor-search-picker label="Target entity" placeholder="Search entities…"
+				[attr.data-component-reference-field]="referencePrefix() ? referencePrefix() + ': Target entity' : null"
+				[options]="entityOptions()" [value]="action.entity" [clearable]="true"
+				[disabled]="disabled()" (picked)="setEntity($event)" />
 			@if (action.kind === 'set_visible') {
 				<label class="check"
 					><input
@@ -81,7 +79,10 @@ import { MachineReferencePicker } from './machine-reference-picker';
 export class MachineActionEditor {
 	readonly value = input.required<MachineAction>();
 	readonly entities = input<readonly ComponentTarget[]>([]);
+    readonly disabled = input(false);
+    readonly referencePrefix = input<string>();
 	readonly changed = output<MachineAction>();
+    protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
 	protected readonly signals = GAMEPLAY_SIGNALS;
 	protected choose(kind: string): void {
 		switch (kind) {

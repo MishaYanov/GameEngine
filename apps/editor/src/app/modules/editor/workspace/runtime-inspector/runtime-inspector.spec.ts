@@ -15,6 +15,7 @@ import { RuntimeInspector } from './runtime-inspector';
 const status: PlayStatus = {
 	play_session_id: 'play-1',
 	run_id: 'run-1',
+    scene_generation: 0,
 	scene_id: 'main',
 	paused: false,
 	pending_scene_id: null,

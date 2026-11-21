@@ -44,13 +44,14 @@ export class ViewportToolbar {
     ];
 
     dispatch(action: ViewportAction): boolean {
-        if (action.type === 'cancel' ? !this.viewport.authoringGesture() : !this.available()) return false;
-        const authoring = action.type === 'set_tool' || action.type === 'set_space' || action.type === 'set_pivot';
-        const handDuringPlay = action.type === 'set_tool' && action.tool === 'hand' && this.editor.playing();
-        const settleEdit = authoring && !handDuringPlay;
-        if (settleEdit && !this.authoringAvailable()) return false;
-        void this.execute(action, settleEdit);
+        if (!this.canPerform(action)) return false;
+        void this.execute(action, this.shouldCommitEdit(action));
         return true;
+    }
+
+    canPerform(action: ViewportAction): boolean {
+        if (action.type === 'cancel') return this.viewport.authoringGesture();
+        return this.available() && (!this.shouldCommitEdit(action) || this.authoringAvailable());
     }
 
     protected space(value: string): void {
@@ -102,6 +103,11 @@ export class ViewportToolbar {
         } else {
             move.value = String(this.settings().move_snap); rotate.value = String(this.settings().rotation_snap_degrees); scale.value = String(this.settings().scale_snap);
         }
+    }
+
+    private shouldCommitEdit(action: ViewportAction): boolean {
+        if (action.type === 'set_tool' && action.tool === 'hand' && this.editor.playing()) return false;
+        return action.type === 'set_tool' || action.type === 'set_space' || action.type === 'set_pivot';
     }
 
     private async execute(action: ViewportAction, settleEdit: boolean): Promise<void> {

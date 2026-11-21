@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
 import type { EditorCommand, SceneEntity } from '../../../../core/editor/editor.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { SceneEditingService } from '../scene-editing.service';
@@ -25,6 +25,7 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 export class SceneComponentInspector {
 	readonly entity = input<SceneEntity | null>(null);
 	readonly editable = input(false);
+    private readonly componentEditor = viewChild(ComponentEditor);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types ?? []);
@@ -50,6 +51,14 @@ export class SceneComponentInspector {
 			this.error.set(null);
 		});
 	}
+
+    revealReference(componentId: string, field: string): boolean {
+        const editor = this.componentEditor();
+        if (!editor || !this.entity()?.component_views?.some(component => component.id === componentId))
+            return false;
+        editor.revealReference(componentId, field);
+        return true;
+    }
 
 	protected async apply(intent: ComponentEditIntent): Promise<void> {
 		const entity = this.entity();

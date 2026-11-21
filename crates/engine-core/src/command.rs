@@ -236,6 +236,14 @@ pub enum EditorCommandDto {
 		name: String,
 		target: SceneBindingTarget,
 	},
+	SetPlayCameraInput {
+		workspace_generation: u64,
+		run_id: String,
+		scene_generation: u64,
+		yaw_delta: f64,
+		pitch_delta: f64,
+		log_distance_delta: f64,
+	},
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -258,6 +266,8 @@ pub use crate::simulation_session::GameplayStatus;
 pub struct PlayStatusDto {
 	pub play_session_id: String,
 	pub run_id: String,
+	#[serde(default)]
+	pub scene_generation: u64,
 	pub scene_id: SceneId,
 	pub paused: bool,
 	#[serde(default)]

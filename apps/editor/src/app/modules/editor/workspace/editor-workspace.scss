@@ -36,6 +36,26 @@
   max-width: 100%;
 }
 
+.problems-button {
+  min-height: var(--layout-subject-control-height);
+  margin: var(--space-1);
+  padding-inline: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.problems-button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+.problems-button:disabled {
+  color: var(--color-text-disabled);
+}
+
 .game-status, .game-error {
   flex-basis: 100%;
   margin: 0;

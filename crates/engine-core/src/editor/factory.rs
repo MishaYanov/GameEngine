@@ -5,13 +5,13 @@ use std::{
 	io::{self, Write},
 };
 
+use super::CommandFactory;
+use crate::camera_input::CameraIntent;
 use crate::{
 	EntityKey,
 	command::{EditorCommandDto, EditorCommandRequest, SceneBindingTarget, TransformDto},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, SceneData, validate_model_path},
 };
-
-use super::CommandFactory;
 
 pub const MAX_COMMAND_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TARGETS: usize = 4096;
@@ -162,6 +162,7 @@ impl CommandFactory {
 					entities: Vec::new(),
 					camera: CameraData {
 						follow: None,
+						orbit: None,
 						position: camera.position,
 						yaw: camera.yaw,
 						pitch: camera.pitch,
@@ -254,6 +255,27 @@ impl CommandFactory {
 					}
 					SceneBindingTarget::Clear {} => {}
 				}
+			}
+			EditorCommandDto::SetPlayCameraInput {
+				workspace_generation,
+				yaw_delta,
+				pitch_delta,
+				log_distance_delta,
+				run_id,
+				scene_generation,
+			} => {
+				validate_name(run_id, 128)?;
+				if (*scene_generation).max(*workspace_generation) > 9_007_199_254_740_991 {
+					return Err(
+						"Camera input generation exceeds the exact JSON integer range".into(),
+					);
+				}
+				CameraIntent {
+					yaw_delta: *yaw_delta,
+					pitch_delta: *pitch_delta,
+					log_distance_delta: *log_distance_delta,
+				}
+					.validate()?;
 			}
 			EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection

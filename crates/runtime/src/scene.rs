@@ -67,6 +67,7 @@ pub struct Scene {
 	next_id: u64,
 	lights: Vec<LightData>,
 	camera_follow: Option<engine_core::game_camera::FollowCameraSettings>,
+	camera_orbit: Option<engine_core::game_camera::OrbitCameraSettings>,
 	id_indices: HashMap<EntityId, usize>,
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
@@ -79,6 +80,7 @@ pub struct EntitySnapshot {
 	entry: SceneEntry,
 	index: usize,
 	bindings: BTreeMap<String, EntityKey>,
+	orbit_target_settings: Option<Box<engine_core::game_camera::OrbitCameraSettings>>,
 }
 
 /// Resource retention does not need the binding/history payload of a snapshot.
@@ -157,7 +159,26 @@ impl Scene {
 		&mut self,
 		follow: Option<engine_core::game_camera::FollowCameraSettings>,
 	) {
+		if follow.is_some() {
+			self.camera_orbit = None;
+		}
 		self.camera_follow = follow;
+	}
+	pub fn camera_orbit(&self) -> Option<&engine_core::game_camera::OrbitCameraSettings> {
+		self.camera_orbit.as_ref()
+	}
+	pub fn set_camera_orbit(
+		&mut self,
+		orbit: Option<engine_core::game_camera::OrbitCameraSettings>,
+	) {
+		if orbit.is_some() {
+			self.camera_follow = None;
+		}
+		self.camera_orbit = orbit;
+	}
+	pub(crate) fn synchronize_camera_settings(&mut self, camera: &CameraData) {
+		self.camera_follow.clone_from(&camera.follow);
+		self.camera_orbit.clone_from(&camera.orbit);
 	}
 	pub(crate) fn retain_entity(&self, id: EntityId) -> Result<RetainedEntity, String> {
 		let index = self
@@ -185,6 +206,7 @@ impl Scene {
 		self.bindings == data.bindings
 			&& self.lights == data.lights
 			&& self.camera_follow == data.camera.follow
+			&& self.camera_orbit == data.camera.orbit
 			&& self.entries.len() == data.entities.len()
 			&& self
 				.entries
@@ -230,6 +252,11 @@ impl Scene {
 			.map(|(name, key)| (name.clone(), key.clone()))
 			.collect();
 		Ok(EntitySnapshot {
+			orbit_target_settings: self
+				.camera_orbit
+				.as_ref()
+				.filter(|orbit| Some(&orbit.target) == entry.key.as_ref())
+				.map(|orbit| Box::new(orbit.clone())),
 			entry,
 			index,
 			bindings,
@@ -264,6 +291,11 @@ impl Scene {
 				));
 			}
 		}
+		if snapshot.orbit_target_settings.is_some()
+			&& (self.camera_orbit.is_some() || self.camera_follow.is_some())
+		{
+			return Err("Cannot restore orbit target: another camera rig is configured".into());
+		}
 		let next_id = entry
 			.id
 			.0
@@ -279,6 +311,9 @@ impl Scene {
 		}
 		*self.world_cache.get_mut() = None;
 		self.bindings.extend(snapshot.bindings.clone());
+		if let Some(orbit) = snapshot.orbit_target_settings.as_deref() {
+			self.camera_orbit = Some(orbit.clone());
+		}
 		self.authored_children = None;
 		self.next_id = self.next_id.max(next_id);
 		Ok(entry.id)
@@ -418,6 +453,13 @@ impl Scene {
 		if let Some(key) = entry.key.as_ref() {
 			self.key_ids.remove(key);
 			self.bindings.retain(|_, target| target != key);
+			if self
+				.camera_orbit
+				.as_ref()
+				.is_some_and(|orbit| &orbit.target == key)
+			{
+				self.camera_orbit = None;
+			}
 		}
 
 		Some(entry.instance)
@@ -557,6 +599,7 @@ impl Scene {
 			entities,
 			camera: CameraData {
 				follow: self.camera_follow.clone(),
+				orbit: self.camera_orbit.clone(),
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -774,7 +817,7 @@ impl Scene {
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
-		self.camera_follow.clone_from(&data.camera.follow);
+		self.synchronize_camera_settings(&data.camera);
 		true
 	}
 
@@ -921,7 +964,7 @@ impl Scene {
 			self.lights.clone_from(&data.lights);
 		}
 		if changes.camera_changed {
-			self.camera_follow.clone_from(&data.camera.follow);
+			self.synchronize_camera_settings(&data.camera);
 		}
 		Ok(true)
 	}
@@ -1021,7 +1064,7 @@ impl Scene {
 			self.lights.clone_from(&world.data().lights);
 		}
 		if changes.camera_changed {
-			self.camera_follow.clone_from(&world.data().camera.follow);
+			self.synchronize_camera_settings(&world.data().camera);
 		}
 		Ok(true)
 	}
@@ -1087,9 +1130,9 @@ impl Scene {
 			next_id: self.next_id,
 			bindings: data.bindings.clone(),
 			lights: data.lights.clone(),
-			camera_follow: data.camera.follow.clone(),
 			..Scene::default()
 		};
+		next.synchronize_camera_settings(&data.camera);
 		let mut object_count = 0usize;
 		for entity in &data.entities {
 			let existing = self

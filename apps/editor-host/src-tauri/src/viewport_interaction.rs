@@ -14,6 +14,7 @@ use bridge::editor::{
 use bridge::viewport::*;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use renderer::{EditorGrid, EditorLine, EditorVisuals};
+use runtime::camera_input::{CameraInputOwner, CameraIntent};
 use runtime::{scene::Scene, simulation_session::TickOutcome, BackendError, Bounds3};
 
 use crate::editor::{AssetTicket, EditorWorkspace};
@@ -23,6 +24,60 @@ use crate::viewport_tools::{
 
 const TRANSFORM_LABEL: &str = "Viewport transform";
 const MAX_VIEW_BOOKMARKS: usize = 128;
+
+/// Identity established by a successful native grab. Every sample retains it until release.
+pub(crate) struct GameCameraCapture {
+	workspace: u64,
+	epoch: u64,
+	owner: CameraInputOwner,
+}
+
+impl GameCameraCapture {
+	pub fn acquire(
+		interaction: &ViewportInteraction,
+		workspace: &EditorWorkspace,
+		native_focused: bool,
+		grab: impl FnOnce() -> Result<(), String>,
+	) -> Result<Option<Self>, String> {
+		if !native_focused
+			|| !interaction.keyboard_focused()
+			|| !interaction.game_keyboard_active()
+			|| interaction.generation != Some(workspace.generation)
+		{
+			return Ok(None);
+		}
+		let Some(owner) = workspace.backend.camera_input_owner() else {
+			return Ok(None);
+		};
+		grab()?;
+		Ok(Some(Self {
+			workspace: workspace.generation,
+			epoch: workspace.camera_capture_epoch,
+			owner,
+		}))
+	}
+
+	pub fn current(&self, workspace: &EditorWorkspace) -> bool {
+		self.workspace == workspace.generation
+			&& self.epoch == workspace.camera_capture_epoch
+			&& workspace.backend.owns_camera_input(&self.owner)
+	}
+
+	pub fn submit(
+		&self,
+		workspace: &mut EditorWorkspace,
+		intent: CameraIntent,
+	) -> Result<(), String> {
+		if self.workspace != workspace.generation || self.epoch != workspace.camera_capture_epoch {
+			return Err("Game camera capture expired".into());
+		}
+		workspace.backend.submit_camera_input(
+			&self.owner.run_id,
+			self.owner.scene_generation,
+			intent,
+		)
+	}
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NavigationMode {

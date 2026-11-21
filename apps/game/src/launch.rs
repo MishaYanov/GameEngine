@@ -11,6 +11,8 @@ pub enum LaunchMode {
 pub struct LaunchOptions {
 	pub mode: LaunchMode,
 	pub input_profile: Option<PathBuf>,
+	/// Exercise real startup and one GPU frame in a hidden window, then exit.
+	pub smoke_test: bool,
 }
 
 impl LaunchOptions {
@@ -25,6 +27,7 @@ impl LaunchOptions {
 		let mut args = arguments.into_iter();
 		let mut explicit = None;
 		let mut input_profile = None;
+		let mut smoke_test = false;
 
 		while let Some(argument) = args.next() {
 			match argument.as_ref() {
@@ -43,6 +46,12 @@ impl LaunchOptions {
 
 					explicit = Some(mode);
 				}
+				"--smoke-test" => {
+					if smoke_test {
+						return Err("Specify --smoke-test only once".into());
+					}
+					smoke_test = true;
+				}
 				"--input-profile" => {
 					if input_profile.is_some() {
 						return Err("Specify --input-profile only once".into());
@@ -60,7 +69,7 @@ impl LaunchOptions {
 				argument => {
 					return Err(format!(
 						"Unknown game argument {argument:?}; supported arguments are \
-                     --development, --player, and --input-profile <path>"
+                     --development, --player, --input-profile <path>, and --smoke-test"
 					));
 				}
 			}
@@ -79,6 +88,7 @@ impl LaunchOptions {
 		Ok(Self {
 			mode,
 			input_profile,
+			smoke_test,
 		})
 	}
 }

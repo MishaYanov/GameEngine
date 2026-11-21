@@ -34,7 +34,7 @@
                 @if (invalidName()) {
                     <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
                 }
-                <dl class="entity-reference">
+                <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
                     <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
                     <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
                 </dl>
@@ -80,7 +80,8 @@
                 </section>
                 @if (selected.component_views !== undefined) {
                     <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>
-                    <editor-linked-prefab-inspector [entity]="selected" [editable]="editable()"/>
+                    <editor-linked-prefab-inspector [editable]="editable()" [entity]="selected"
+                                                    aria-label="Linked prefab" data-reference-prefab tabindex="-1"/>
                 } @else {
                 <editor-collider-inspector
                     [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"

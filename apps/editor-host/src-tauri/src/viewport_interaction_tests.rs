@@ -687,6 +687,7 @@ impl Fixture {
 				.collect(),
 			camera: CameraData {
 				follow: None,
+				orbit: None,
 				position: camera.position,
 				yaw: camera.yaw,
 				pitch: camera.pitch,
@@ -1945,6 +1946,112 @@ fn numpad_changes_orientation_and_projection() {
 		controller.settings.projection,
 		ViewportProjection::Perspective
 	);
+}
+
+#[test]
+fn game_camera_capture_requires_focused_orbit_and_expires_across_pause_or_replacement() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	let forbidden_grab =
+		|| -> Result<(), String> { panic!("ineligible viewport attempted a grab") };
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	focus_keyboard(&mut controller, &mut workspace);
+	controller.settings.view = ViewportView::Game;
+	command(&mut workspace, Command::StartPlay);
+	controller.sync(&mut workspace).unwrap();
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	command(&mut workspace, Command::StopPlay);
+
+	let mut document = (*workspace.backend.session().authored_document()).clone();
+	document.camera.orbit = Some(
+		serde_json::from_value(serde_json::json!({
+			"target": "entity-0", "pivot_offset": [0, 0, 0],
+			"initial_yaw": 0, "initial_pitch": 0, "initial_distance": 6,
+			"min_pitch": -1, "max_pitch": 1, "min_distance": 1, "max_distance": 12,
+			"follow_seconds": 0, "recovery_seconds": 0, "teleport_distance": 10,
+			"probe_radius": 1, "obstruction_mask": 1
+		}))
+			.unwrap(),
+	);
+	workspace.backend.replace_document(document).unwrap();
+	command(&mut workspace, Command::StartPlay);
+	controller.sync(&mut workspace).unwrap();
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, false, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	controller.settings.view = ViewportView::Scene;
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	controller.settings.view = ViewportView::Game;
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, || Err(
+			"OS refused grab".into()
+		))
+			.is_err()
+	);
+	let capture = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+		.unwrap()
+		.unwrap();
+	let intent = CameraIntent {
+		yaw_delta: 0.2,
+		..Default::default()
+	};
+	assert!(capture.current(&workspace));
+	capture.submit(&mut workspace, intent).unwrap();
+	assert!(workspace.backend.session().needs_tick());
+	command(&mut workspace, Command::SetPaused { paused: true });
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	command(&mut workspace, Command::SetPaused { paused: false });
+	assert!(!capture.current(&workspace));
+	assert!(capture.submit(&mut workspace, intent).is_err());
+	let capture = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+		.unwrap()
+		.unwrap();
+	let mut replacement = fixture.open();
+	assert!(!capture.current(&replacement));
+	assert!(capture.submit(&mut replacement, intent).is_err());
+	assert!(
+		GameCameraCapture::acquire(&controller, &replacement, true, forbidden_grab)
+			.unwrap()
+			.is_none()
+	);
+	let request = |generation| EditorCommandRequest {
+		expected_revision: workspace.backend.session().revision(),
+		command: Command::SetPlayCameraInput {
+			workspace_generation: generation,
+			run_id: capture.owner.run_id.clone(),
+			scene_generation: capture.owner.scene_generation,
+			yaw_delta: 0.2,
+			pitch_delta: 0.0,
+			log_distance_delta: 0.0,
+		},
+	};
+	let wrong = request(replacement.generation);
+	let correct = request(workspace.generation);
+	assert!(workspace
+		.execute_receipt(wrong)
+		.unwrap_err()
+		.message
+		.contains("previous workspace"));
+	workspace.execute_receipt(correct).unwrap();
 }
 
 #[test]

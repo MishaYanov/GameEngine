@@ -20,6 +20,7 @@ import {
 export interface ComponentTarget {
 	readonly key: string;
 	readonly name: string;
+    readonly parent?: string | null;
 	readonly component_views?: readonly ComponentRecord[];
 	readonly components?: readonly ComponentRecord[];
 }

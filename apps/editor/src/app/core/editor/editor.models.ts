@@ -1,6 +1,10 @@
 import type {GameInputProfile} from '../game-input/game-input.models';
 import type {ComponentRecord, ComponentTypeDescriptor, NativeBehaviorAttachment} from './editor-components';
-import type {LinkedPrefabOverrideTarget, PrefabSourceDocument} from './linked-prefabs.models';
+import type {
+    LinkedPrefabOverrideTarget,
+    LinkedPrefabReferenceView,
+    PrefabSourceDocument
+} from './linked-prefabs.models';
 import type {CharacterControllerAttachment} from './character-controller.models';
 import type {AnimationAttachment} from './animation.models';
 import type {MachineDescriptor} from './state-machine.models';
@@ -70,6 +74,24 @@ export interface Camera {
     readonly near: number;
     readonly far: number;
     readonly follow?: FollowCamera | null;
+    readonly orbit?: OrbitCamera | null;
+}
+
+export interface OrbitCamera {
+    readonly target: EntityKey;
+    readonly pivot_offset: Vec3;
+    readonly initial_yaw: number;
+    readonly initial_pitch: number;
+    readonly initial_distance: number;
+    readonly min_distance: number;
+    readonly max_distance: number;
+    readonly min_pitch: number;
+    readonly max_pitch: number;
+    readonly follow_seconds: number;
+    readonly recovery_seconds: number;
+    readonly teleport_distance: number;
+    readonly probe_radius: number;
+    readonly obstruction_mask: number;
 }
 
 export interface FollowCamera {
@@ -110,6 +132,7 @@ export interface SceneEntity {
     readonly native_behaviors?: readonly NativeBehaviorAttachment[];
     readonly character_controller?: CharacterControllerAttachment | null;
     readonly animation?: AnimationAttachment | null;
+    readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
 
 export interface Light {
@@ -124,7 +147,7 @@ export interface Light {
 }
 
 export interface SceneDocument {
-    readonly schema_version: 3 | 4;
+    readonly schema_version: 3 | 4 | 5;
     readonly bindings: Readonly<Record<string, EntityKey>>;
     readonly entities: readonly SceneEntity[];
     readonly camera: Camera;
@@ -235,6 +258,7 @@ export type EditorCommand =
     | { readonly type: 'stop_play' }
     | { readonly type: 'set_paused'; readonly paused: boolean }
     | { readonly type: 'set_play_input'; readonly movement: Vec3 }
+    | PlayCameraInputCommand
     | {
     readonly type: 'set_scene_binding';
     readonly scene_id: SceneId;
@@ -245,6 +269,17 @@ export type EditorCommand =
 export interface EditorCommandRequest {
     readonly expected_revision: number;
     readonly command: EditorCommand;
+}
+
+/** Owner values come from native viewport state and its matching Play status. */
+export interface PlayCameraInputCommand {
+    readonly type: 'set_play_camera_input';
+    readonly workspace_generation: number;
+    readonly run_id: string;
+    readonly scene_generation: number;
+    readonly yaw_delta: number;
+    readonly pitch_delta: number;
+    readonly log_distance_delta: number;
 }
 
 export interface EditorSnapshot {
@@ -582,5 +617,15 @@ export class CommandBuilder {
 
     static playInput(movement: Vec3): EditorCommand {
         return {type: 'set_play_input', movement: [...movement]};
+    }
+
+    static playCameraInput(sample: Omit<PlayCameraInputCommand, 'type'>): PlayCameraInputCommand {
+        if (![sample.workspace_generation, sample.scene_generation].every(value => Number.isSafeInteger(value) && value >= 0)) {
+            throw new RangeError('Camera input generations must be nonnegative safe integers.');
+        }
+        if (![sample.yaw_delta, sample.pitch_delta, sample.log_distance_delta].every(Number.isFinite)) {
+            throw new RangeError('Camera input deltas must be finite.');
+        }
+        return {...sample, type: 'set_play_camera_input'};
     }
 }

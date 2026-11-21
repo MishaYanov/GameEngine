@@ -29,6 +29,7 @@ fn valid_data() -> SceneData {
 			.collect(),
 		camera: CameraData {
 			follow: None,
+			orbit: None,
 			position: [1.0, 2.0, 3.0],
 			yaw: 0.25,
 			pitch: -0.1,

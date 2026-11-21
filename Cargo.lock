@@ -743,6 +743,7 @@ name = "courtyard-gameplay"
 version = "0.1.0"
 dependencies = [
  "engine-core",
+ "engine-logger",
  "serde",
  "serde_json",
 ]
@@ -1148,6 +1149,7 @@ dependencies = [
 name = "engine-core"
 version = "0.1.0"
 dependencies = [
+ "engine-logger",
  "glam",
  "serde",
  "serde_json",
@@ -1161,6 +1163,7 @@ dependencies = [
  "bridge",
  "courtyard-gameplay",
  "engine-core",
+ "engine-logger",
  "serde",
  "serde_json",
 ]

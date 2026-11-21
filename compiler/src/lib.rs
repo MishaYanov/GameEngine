@@ -297,6 +297,7 @@ pub fn stage_prepared_project(
 			path.display()
 		));
 	}
+	engine_logger::debug!(target: "compiler::packaging", "Project staged: assets={}, bytes={}", prepared.asset_count(), prepared.total_bytes());
 	Ok(StagedProject {
 		path,
 		manifest_bytes: project_json.len() as u64,
@@ -312,6 +313,7 @@ pub fn finish_staged_project(staged: StagedProject) -> Result<PathBuf, String> {
 
 pub fn complete_staged_project(staged: StagedProject) -> Result<InstalledProject, String> {
 	validate_export_snapshot(&staged, None)?;
+	engine_logger::debug!(target: "compiler::packaging", "Staged project verified; compiling player");
 	let executable = compile_player().map_err(|error| {
 		format!(
 			"{error}; incomplete output retained at {}",

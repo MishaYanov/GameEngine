@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, effect, inject, input, signal} from '@angular/core';
+import {Component, computed, DestroyRef, effect, ElementRef, inject, input, signal, viewChild} from '@angular/core';
 import type {ProjectBuildPreparation, ProjectBuildResult} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ProjectService} from '../../../../core/project/project.service';
@@ -18,6 +18,9 @@ export class ProjectBuild {
     protected readonly result = signal<ProjectBuildResult | null>(null);
     protected readonly retryPreparation = signal<ProjectBuildPreparation | null>(null);
     protected readonly error = signal<string | null>(null);
+    private readonly exportError = signal<string | null>(null);
+    readonly exportFailure = this.exportError.asReadonly();
+    private readonly failureMessage = viewChild<ElementRef<HTMLElement>>('failureMessage');
     protected readonly status = signal<string | null>(null);
     protected readonly destination = signal('');
     protected readonly unsaved = computed(() => this.editor.dirty() || this.editing?.hasChanges() === true);
@@ -32,15 +35,24 @@ export class ProjectBuild {
             this.projectIdentity();
             this.result.set(null);
             this.retryPreparation.set(null);
+            this.error.set(null);
+            this.exportError.set(null);
             this.status.set(null);
         });
         inject(DestroyRef).onDestroy(() => this.destroyed = true);
+    }
+
+    revealExportFailure(): void {
+        const message = this.failureMessage()?.nativeElement;
+        message?.scrollIntoView?.({block: 'nearest'});
+        message?.focus({preventScroll: true});
     }
 
     protected async exportProject(): Promise<void> {
         if (!this.available()) return;
         this.pending.set('choose');
         this.error.set(null);
+        this.exportError.set(null);
         const identity = this.projectIdentity();
         try {
             const destination = await this.projects.chooseDestination(this.destination() || null);
@@ -52,16 +64,17 @@ export class ProjectBuild {
                 captured.preparation = await this.editor.prepareBuild(destination);
             };
             const accepted = this.editing ? await this.editing.withCommittedEdit(capture) : (await capture(), true);
+            if (this.destroyed || identity !== this.projectIdentity()) return;
             if (!accepted || !captured.preparation) {
-                this.error.set(this.editing?.error() ?? 'Finish the current edit and try exporting again.');
+                this.reportExportFailure(this.editing?.error() ?? 'Finish the current edit and try exporting again.');
                 return;
             }
             this.pending.set('build');
             this.retryPreparation.set(captured.preparation);
             await this.compile(captured.preparation, identity);
         } catch (error) {
-            if (!this.destroyed) {
-                this.error.set(error instanceof Error ? error.message : String(error));
+            if (!this.destroyed && identity === this.projectIdentity()) {
+                this.reportExportFailure(error);
                 this.status.set(null);
             }
         } finally {
@@ -74,16 +87,24 @@ export class ProjectBuild {
         if (!preparation || this.pending() || this.opening() || !this.editor.nativeAvailable) return;
         this.pending.set('build');
         this.error.set(null);
+        this.exportError.set(null);
+        const identity = this.projectIdentity();
         try {
-            await this.compile(preparation, this.projectIdentity());
+            await this.compile(preparation, identity);
         } catch (error) {
-            if (!this.destroyed) {
-                this.error.set(error instanceof Error ? error.message : String(error));
+            if (!this.destroyed && identity === this.projectIdentity()) {
+                this.reportExportFailure(error);
                 this.status.set(null);
             }
         } finally {
             if (!this.destroyed) this.pending.set(null);
         }
+    }
+
+    private reportExportFailure(error: unknown): void {
+        const message = error instanceof Error ? error.message : String(error);
+        this.error.set(message);
+        this.exportError.set(message);
     }
 
     private async compile(preparation: ProjectBuildPreparation, identity: number): Promise<void> {
@@ -101,11 +122,14 @@ export class ProjectBuild {
         if (!result || this.pending() || !this.editor.nativeAvailable) return;
         this.pending.set('run');
         this.error.set(null);
+        const identity = this.projectIdentity();
         try {
             const launched = await this.editor.runBuild(result.path);
-            if (!this.destroyed) this.status.set(`Standalone player started from ${launched.path}.`);
+            if (!this.destroyed && identity === this.projectIdentity())
+                this.status.set(`Standalone player started from ${launched.path}.`);
         } catch (error) {
-            if (!this.destroyed) this.error.set(error instanceof Error ? error.message : String(error));
+            if (!this.destroyed && identity === this.projectIdentity())
+                this.error.set(error instanceof Error ? error.message : String(error));
         } finally {
             if (!this.destroyed) this.pending.set(null);
         }

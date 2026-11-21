@@ -38,6 +38,8 @@
                     @for (file of folderContents().files; track file.kind === 'scene' ? file.sceneId : file.path) {
                         <li [title]="file.path" class="asset-file">
                             <button
+                                    [editorContextMenuLabel]="file.name + ' actions'"
+                                    [editorContextMenu]="assetMenu(file)"
                                     (click)="selectFile(file)"
                                     (pointerdown)="beginAssetDrag(file, $event)"
                                     [attr.aria-pressed]="isSelected(file)"

@@ -7,6 +7,7 @@ import {EditorPortal} from "./components/editor-portal/editor-portal";
 import {EditorClientError, EditorService} from "../../core/editor/editor.service";
 import {EditorSettingsService} from '../../core/editor/settings/editor-settings.service';
 import {EditorSettingsDialog} from '../editor-settings/editor-settings-dialog';
+import {EditorContextMenu} from '../../shared/components/context-menu/context-menu';
 
 enum OpenMessages {
     RESTORING = 'Checking for the open project…',
@@ -25,6 +26,7 @@ enum OpenMessages {
         EditorFooter,
         EditorPortal,
         EditorSettingsDialog,
+        EditorContextMenu,
     ],
     templateUrl: './editor.html',
     styleUrl: './editor.scss',

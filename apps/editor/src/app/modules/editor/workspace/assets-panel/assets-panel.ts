@@ -11,6 +11,9 @@ import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
+import {ContextActionBuilder} from '../../../../shared/actions/context-action';
+import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
+import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
 
 interface AssetFile {
     readonly path: string;
@@ -21,9 +24,15 @@ type SceneAsset = AssetFile & { readonly kind: 'scene'; readonly sceneId: SceneI
 type AssetEntry = SceneAsset | (ModelAsset & {readonly kind: 'model' | 'prefab'});
 type AssetAction = 'models' | 'add';
 
+interface AssetMenuContext {
+    readonly file: AssetEntry;
+    readonly generation: number;
+    readonly sceneId: SceneId | null;
+}
+
 @Component({
     selector: 'editor-assets-panel',
-    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, PrefabAuthoring],
+    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, PrefabAuthoring, EditorContextMenuTrigger],
     templateUrl: './assets-panel.html',
     styleUrl: './assets-panel.scss',
 })
@@ -105,6 +114,58 @@ export class AssetsPanel {
             files: files.sort((a, b) => a.name.localeCompare(b.name)),
         };
     });
+    private readonly assetMenuBuilder = ContextMenuBuilder.create<AssetMenuContext>()
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.select', 'Select Asset')
+            .icon('object')
+            .enabledWhen(context => this.menuFile(context) !== null)
+            .run(context => {
+                const file = this.menuFile(context);
+                if (file) this.selectFile(file);
+            }).build())
+        .separator()
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.open-scene', 'Open Scene')
+            .icon('cube')
+            .when(context => context.file.kind === 'scene')
+            .enabledWhen(context => {
+                const file = this.menuFile(context);
+                return file?.kind === 'scene' && this.canOpenScene() && !this.isActiveScene(file);
+            })
+            .run(async context => {
+                const file = this.menuFile(context);
+                if (file?.kind === 'scene') await this.openSceneFile(file);
+            }).build())
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.add-model', 'Add to Scene')
+            .icon('plus')
+            .when(context => context.file.kind === 'model')
+            .enabledWhen(context => this.menuFile(context) !== null && this.canRunAction())
+            .run(async context => {
+                const file = this.menuFile(context);
+                if (file?.kind === 'model') await this.addModelFile(file);
+            }).build())
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.instantiate-prefab', 'Instantiate Prefab')
+            .icon('plus')
+            .when(context => context.file.kind === 'prefab')
+            .enabledWhen(context => this.menuFile(context) !== null && this.canRunAction())
+            .run(async context => {
+                const file = this.menuFile(context);
+                if (file?.kind === 'prefab') await this.addModelFile(file);
+            }).build());
+
+    protected assetMenu(file: AssetEntry): () => readonly ContextMenuItem[] {
+        const context: AssetMenuContext = {
+            file,
+            generation: this.editor.workspaceGeneration(),
+            sceneId: this.editor.snapshot()?.active_scene_id ?? null,
+        };
+        return () => this.assetMenuBuilder.build(context);
+    }
+
+    private menuFile(context: AssetMenuContext): AssetEntry | null {
+        const snapshot = this.editor.snapshot();
+        if (!snapshot || context.generation !== this.editor.workspaceGeneration() ||
+            context.sceneId !== snapshot.active_scene_id) return null;
+        return this.entries().find(file => this.sameFile(file, context.file)) ?? null;
+    }
 
     constructor() {
         effect(() => {
@@ -169,13 +230,20 @@ export class AssetsPanel {
     protected async addModel(): Promise<void> {
         const selected = this.selected();
         if (!selected || selected.kind === 'scene') return;
+        await this.addModelFile(selected);
+    }
+
+    private async addModelFile(selected: Exclude<AssetEntry, SceneAsset>): Promise<void> {
         const generation = this.editor.workspaceGeneration();
+        const sceneId = this.editor.snapshot()?.active_scene_id;
         await this.addAsset(async () => {
-            if (generation !== this.editor.workspaceGeneration()) return;
-            if (selected.kind === 'prefab') {
-                await this.editor.loadPrefab(selected.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
-            } else await this.editor.importModel(selected.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
-            if (generation === this.editor.workspaceGeneration()) this.status.set(`Added ${selected.name} to the scene.`);
+            if (generation !== this.editor.workspaceGeneration() || sceneId !== this.editor.snapshot()?.active_scene_id) return;
+            const file = this.entries().find(entry => this.sameFile(entry, selected));
+            if (!file || file.kind === 'scene') return;
+            if (file.kind === 'prefab') {
+                await this.editor.loadPrefab(file.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
+            } else await this.editor.importModel(file.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
+            if (generation === this.editor.workspaceGeneration()) this.status.set(`Added ${file.name} to the scene.`);
         });
     }
 

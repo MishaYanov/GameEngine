@@ -92,6 +92,7 @@ fn fixture() -> SceneData {
 			near_plane: 0.1,
 			far_plane: 100.0,
 			follow: None,
+			orbit: None,
 		},
 		lights: vec![],
 	}

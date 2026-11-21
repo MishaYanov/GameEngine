@@ -66,3 +66,21 @@ fn real_executable_rejects_invalid_launch_arguments_before_creating_platform_res
 	assert!(stderr.contains("--development") && stderr.contains("--player"));
 	assert!(!stderr.contains("failed to create event loop"));
 }
+
+#[test]
+fn smoke_mode_is_explicit_and_keeps_launch_selection() {
+	assert!(
+		!LaunchOptions::parse(std::iter::empty::<&str>(), false, false)
+			.unwrap()
+			.smoke_test
+	);
+	for arguments in [vec!["--smoke-test"], vec!["--smoke-test", "--development"]] {
+		let options = LaunchOptions::parse(arguments, false, false).unwrap();
+		assert!(options.smoke_test);
+		assert_eq!(options.mode, LaunchMode::Development);
+	}
+	let options = LaunchOptions::parse(["--player", "--smoke-test"], false, false).unwrap();
+	assert!(options.smoke_test);
+	assert_eq!(options.mode, LaunchMode::Player);
+	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-test"], false, false).is_err());
+}
