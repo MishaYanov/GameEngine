@@ -1,6 +1,13 @@
 import type { Collider, MaterialOverride, Vec3 } from './editor.models';
+import { validMachine, type MachineDefinition } from './state-machine.models';
+import {
+	validControllerSettings,
+	type CharacterControllerSettings,
+} from './character-controller.models';
+import { validAnimationSettings, type AnimationSettings } from './animation.models';
 
 export type NativeBehaviorSpec =
+	| { readonly kind: 'state_machine'; readonly definition: MachineDefinition }
 	| {
 			readonly kind: 'key_door';
 			readonly actor: string;
@@ -34,6 +41,8 @@ export type ComponentData =
 			readonly material?: MaterialOverride | null;
 	  }
 	| { readonly kind: 'collider'; readonly collider: Collider }
+	| { readonly kind: 'character_controller'; readonly settings: CharacterControllerSettings }
+	| { readonly kind: 'animation'; readonly settings: AnimationSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
 
 export interface ComponentRecord {
@@ -123,9 +132,13 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 		);
 	}
 	if (data['kind'] === 'collider') return collider(data['collider']);
+	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
+	if (data['kind'] === 'animation') return validAnimationSettings(data['settings']);
 	if (data['kind'] !== 'native_behavior' || !record(data['behavior'])) return false;
 	const behavior = data['behavior'];
 	switch (behavior['kind']) {
+		case 'state_machine':
+			return validMachine(behavior['definition']);
 		case 'key_door':
 			return (
 				nonempty(behavior['actor']) &&
@@ -167,6 +180,8 @@ export function validComponentViews(value: unknown): value is readonly Component
 		new Set(value.map((component) => component.id)).size === value.length &&
 		value.filter((component) => component.data.kind === 'mesh_renderer').length <= 1 &&
 		value.filter((component) => component.data.kind === 'collider').length <= 1 &&
+		value.filter((component) => component.data.kind === 'character_controller').length <= 1 &&
+		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
 	);
 }
@@ -178,7 +193,13 @@ export function validComponentTypes(value: unknown): value is readonly Component
 			(item: unknown) =>
 				record(item) &&
 				nonempty(item['type_id']) &&
-				['mesh_renderer', 'collider', 'native_behavior'].includes(String(item['kind'])) &&
+				[
+					'mesh_renderer',
+					'collider',
+					'native_behavior',
+					'character_controller',
+					'animation',
+				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&
 				nonempty(item['description']) &&
 				integer(item['max_per_object'], 1, item['kind'] === 'native_behavior' ? 8 : 1),

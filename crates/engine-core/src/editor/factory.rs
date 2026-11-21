@@ -230,6 +230,12 @@ impl CommandFactory {
 			}
 			EditorCommandDto::BeginTransaction { label } => validate_name(label, 256)?,
 			EditorCommandDto::SetPlayInput { movement } => finite(movement, "Movement")?,
+			EditorCommandDto::SetCharacterInput {
+				key, movement_xz, ..
+			} => {
+				validate_key(key)?;
+				finite(movement_xz, "Character movement")?;
+			}
 			EditorCommandDto::SetEntityInput { entity, movement } => {
 				validate_key(entity)?;
 				finite(movement, "Movement")?;

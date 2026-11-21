@@ -120,9 +120,16 @@
 							<option value="key_door">Key and Door</option>
 							<option value="collectible">Collectible</option>
 							<option value="timed_spawner">Timed Spawner</option>
+							<option value="state_machine">State Machine</option>
 						</select></label
 					>
-					@if (draft().behavior_kind === 'timed_spawner') {
+					@if (draft().behavior_kind === 'state_machine') {
+						<editor-machine-editor
+							[value]="draft().machine"
+							[entities]="entities()"
+							(changed)="machineChanged($event)"
+						/>
+					} @else if (draft().behavior_kind === 'timed_spawner') {
 						<label
 							>Spawn prefab path<input
 								[formField]="fields.prefab_path"
@@ -223,6 +230,34 @@
 							>
 						}
 					}
+				}
+				@case ('character_controller') {
+					<p>
+						Upright box body at scene root: identity rotation, unit scale, enabled blocking
+						collider. A capsule mesh still uses box collision. Linked bodies need Unpack and
+						detachment to the scene root before Play.
+					</p>
+					@for (field of controllerFields; track field.key) {
+						<label
+							>{{ field.label
+							}}<input [formField]="fields.controller[field.key]" inputmode="decimal"
+						/></label>
+					}
+					<label>Jump action ID<input [formField]="fields.controller.jump_action" /></label>
+					<p>
+						Add this action in Game Input and bind it to your chosen key. Movement uses the XZ
+						ground plane.
+					</p>
+				}
+				@case ('animation') {
+					<editor-animation-editor
+						[value]="draft().animation"
+						[models]="models()"
+						[entityKey]="ownerKey()"
+						[previewAllowed]="previewSourceMatches()"
+						(changed)="animationChanged($event)"
+						(pendingChanged)="animationPending.set($event)"
+					/>
 				}
 			}
 			@if (candidate().error; as message) {

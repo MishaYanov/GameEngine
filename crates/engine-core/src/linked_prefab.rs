@@ -32,6 +32,8 @@ pub enum LinkedPrefabProperty {
 	TransformScale,
 	MeshRenderer,
 	Collider,
+	CharacterController,
+	Animation,
 	NativeBehavior { component_id: ComponentId },
 }
 
@@ -155,6 +157,8 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 		if anchor.has_mesh_component()
 			|| anchor.collider.is_some()
 			|| !anchor.native_behaviors.is_empty()
+			|| anchor.character_controller.is_some()
+			|| anchor.animation.is_some()
 		{
 			return Err(
 				"Linked instance anchors are transform-only objects; edit a member or Unpack first"
@@ -281,6 +285,8 @@ pub(crate) fn properties(entities: &[&EntityData]) -> BTreeSet<LinkedPrefabPrope
 		TransformScale,
 		MeshRenderer,
 		Collider,
+		CharacterController,
+		Animation,
 	]);
 	for entity in entities {
 		for component in &entity.native_behaviors {
@@ -295,6 +301,18 @@ pub(crate) fn properties(entities: &[&EntityData]) -> BTreeSet<LinkedPrefabPrope
 pub(crate) fn value(entity: &EntityData, property: &LinkedPrefabProperty) -> LinkedPrefabValue {
 	use LinkedPrefabProperty::*;
 	match property {
+		CharacterController => LinkedPrefabValue::Component(
+			entity
+				.component_records()
+				.into_iter()
+				.find(|r| r.type_id() == crate::components::CHARACTER_TYPE),
+		),
+		Animation => LinkedPrefabValue::Component(
+			entity
+				.component_records()
+				.into_iter()
+				.find(|r| r.type_id() == crate::components::ANIMATION_TYPE),
+		),
 		Name => LinkedPrefabValue::Name(entity.name.clone()),
 		TransformPosition => LinkedPrefabValue::Vector(entity.transform.position),
 		TransformRotation => LinkedPrefabValue::Vector(entity.transform.rotation),
@@ -344,6 +362,8 @@ pub(crate) fn apply_value(
 			}
 			if let Some(component) = component {
 				let correct = match property {
+					CharacterController => component.type_id() == crate::components::CHARACTER_TYPE,
+					Animation => component.type_id() == crate::components::ANIMATION_TYPE,
 					MeshRenderer => component.type_id() == crate::components::MESH_TYPE,
 					Collider => component.type_id() == crate::components::COLLIDER_TYPE,
 					NativeBehavior { component_id } => {

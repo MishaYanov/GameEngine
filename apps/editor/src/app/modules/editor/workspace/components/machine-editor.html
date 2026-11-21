@@ -1,0 +1,196 @@
+<p>
+	Signals arrive on the next simulation step. Entry actions run once when entering a state. Apply
+	saves the entire table as one undoable change.
+</p>
+<p>Up to {{ limits.max_states }} states, {{ limits.max_inputs }} sensor inputs and {{ limits.max_transitions }} transitions. Timers use 1–{{ limits.max_timer_ticks }} simulation ticks.</p>
+<label
+	>Initial state<select
+		#initialState
+		[value]="value().initial"
+		(change)="initial(initialState.value)"
+	>
+		<option value="">Choose state</option>
+		@for (item of value().states; track $index) {
+			<option [value]="item.id" [selected]="item.id === value().initial">{{ item.id }}</option>
+		}
+	</select></label
+>
+<fieldset>
+	<legend>Sensor inputs</legend>
+	@for (item of value().inputs; track $index; let index = $index) {
+		<fieldset>
+			<legend>Sensor input {{ index + 1 }}</legend>
+			<label
+				>Input ID<input
+					#inputId
+					[value]="item.id"
+					maxlength="64"
+					(input)="sensor(index, { id: inputId.value })"
+			/></label>
+			<label
+				>Sensor<select
+					#sensorEntity
+					[value]="item.sensor"
+					(change)="sensor(index, { sensor: sensorEntity.value })"
+				>
+					<option value="">Choose sensor</option>
+					@for (entity of entities(); track entity.key) {
+						<option [value]="entity.key" [selected]="entity.key === item.sensor">
+							{{ entity.name }}
+						</option>
+					}
+				</select></label
+			>
+			<label
+				>Actor<select
+					#actorEntity
+					[value]="item.actor"
+					(change)="sensor(index, { actor: actorEntity.value })"
+				>
+					<option value="">Choose actor</option>
+					@for (entity of entities(); track entity.key) {
+						<option [value]="entity.key" [selected]="entity.key === item.actor">
+							{{ entity.name }}
+						</option>
+					}
+				</select></label
+			>
+			<label
+				>Enter signal<select
+					#inputSignal
+					[value]="item.signal"
+					(change)="sensorSignal(index, inputSignal.value)"
+				>
+					@for (signal of signals; track signal) {
+						<option [value]="signal" [selected]="signal === item.signal">{{ signal }}</option>
+					}
+				</select></label
+			>
+			<button type="button" (click)="removeSensor(index)">
+				Remove sensor input {{ index + 1 }}
+			</button>
+		</fieldset>
+	}
+	<button type="button" [disabled]="value().inputs.length >= 8" (click)="addSensor()">
+		Add sensor input
+	</button>
+</fieldset>
+@for (item of value().states; track $index; let stateIndex = $index) {
+	<fieldset>
+		<legend>State {{ stateIndex + 1 }}</legend>
+		<label
+			>State ID<input
+				#stateId
+				[value]="item.id"
+				maxlength="64"
+				(input)="rename(stateIndex, stateId.value)"
+		/></label>
+		<fieldset>
+			<legend>On entry</legend>
+			@for (entry of item.on_enter; track $index; let actionIndex = $index) {
+				<fieldset>
+					<legend>Action {{ actionIndex + 1 }}</legend>
+					<editor-machine-action
+						[value]="entry"
+						[entities]="entities()"
+						(changed)="action(stateIndex, actionIndex, $event)"
+					/>
+					<button type="button" (click)="removeAction(stateIndex, actionIndex)">
+						Remove action {{ actionIndex + 1 }}
+					</button>
+				</fieldset>
+			}
+			<button type="button" [disabled]="item.on_enter.length >= 8" (click)="addAction(stateIndex)">
+				Add entry action
+			</button>
+		</fieldset>
+		<fieldset>
+			<legend>Transitions</legend>
+			@for (rule of item.transitions; track $index; let ruleIndex = $index) {
+				<fieldset>
+					<legend>Transition {{ ruleIndex + 1 }}</legend>
+					<label
+						>When<select
+							#when
+							[value]="rule.when.kind"
+							(change)="transitionKind(stateIndex, ruleIndex, when.value)"
+						>
+							<option value="signal" [selected]="rule.when.kind === 'signal'">
+								Signal arrives
+							</option>
+							<option value="after_ticks" [selected]="rule.when.kind === 'after_ticks'">
+								Timer expires
+							</option>
+						</select></label
+					>
+					@let trigger = rule.when;
+					@if (trigger.kind === 'after_ticks') {
+						<label
+							>Delay (ticks)<input
+								#ticks
+								inputmode="numeric"
+								[value]="trigger.ticks"
+								(input)="timer(stateIndex, ruleIndex, ticks.value)"
+						/></label>
+					} @else {
+						<label
+							>Signal<select
+								#event
+								[value]="trigger.signal"
+								(change)="signal(stateIndex, ruleIndex, event.value)"
+							>
+								@for (kind of signals; track kind) {
+									<option [value]="kind" [selected]="kind === trigger.signal">{{ kind }}</option>
+								}
+							</select></label
+						>
+						<label class="check"
+							><input
+								#restricted
+								type="checkbox"
+								[checked]="trigger.source !== null"
+								(change)="filter(stateIndex, ruleIndex, restricted.checked)"
+							/>Only from one component</label
+						>
+						@if (trigger.source; as source) {
+							<editor-machine-reference
+								label="Sender"
+								[entities]="entities()"
+								[value]="source"
+								(changed)="
+									transition(stateIndex, ruleIndex, {
+										when: { kind: 'signal', signal: trigger.signal, source: $event },
+									})
+								"
+							/>
+						}
+					}
+					<label
+						>Next state<select
+							#next
+							[value]="rule.next"
+							(change)="transition(stateIndex, ruleIndex, { next: next.value })"
+						>
+							<option value="">Choose state</option>
+							@for (destination of value().states; track $index) {
+								<option [value]="destination.id" [selected]="destination.id === rule.next">
+									{{ destination.id }}
+								</option>
+							}
+						</select></label
+					>
+					<button type="button" (click)="removeTransition(stateIndex, ruleIndex)">
+						Remove transition {{ ruleIndex + 1 }}
+					</button>
+				</fieldset>
+			}
+			<button type="button" (click)="addTransition(stateIndex)">Add transition</button>
+		</fieldset>
+		<button type="button" [disabled]="value().states.length <= 1" (click)="removeState(stateIndex)">
+			Remove state {{ item.id }}
+		</button>
+	</fieldset>
+}
+<button type="button" [disabled]="value().states.length >= 32" (click)="addState()">
+	Add state
+</button>

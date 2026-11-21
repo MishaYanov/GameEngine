@@ -42,6 +42,8 @@ struct Closure<'a> {
 	files: BTreeMap<PathBuf, PackageAsset>,
 	ids: HashSet<AssetId>,
 	models: HashMap<PathBuf, usize>,
+	animations: HashMap<AssetId, Arc<engine_core::animation::AnimationAsset>>,
+	animation_bytes: usize,
 	prefabs: HashSet<PathBuf>,
 	prefab_stack: HashSet<PathBuf>,
 	generated_files: BTreeMap<PathBuf, Vec<u8>>,
@@ -230,6 +232,43 @@ impl Closure<'_> {
 	}
 	fn entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
 		for entity in entities {
+			if let Some(component) = &entity.animation {
+				let id = &component.settings.source.asset_id;
+				let source = self
+					.catalog
+					.by_id(id)
+					.ok_or("Animation source identity is missing from the catalog")?
+					.clone();
+				if source.kind != AssetKind::Model {
+					return Err("Animation source must be a model asset".into());
+				}
+				let asset = if let Some(asset) = self.animations.get(id) {
+					Arc::clone(asset)
+				} else {
+					let asset =
+						bridge::animation_asset::load(self.root, &component.settings.source)?;
+					self.animation_bytes = self
+						.animation_bytes
+						.checked_add(asset.retained_bytes())
+						.filter(|bytes| *bytes <= 128 * 1024 * 1024)
+						.ok_or("Export animation preparation exceeds 128 MiB")?;
+					self.animations.insert(id.clone(), Arc::clone(&asset));
+					asset
+				};
+				asset.validate_settings(&component.settings)?;
+				let mesh = self.catalog.by_path(&entity.model_path);
+				if !entity.has_mesh_component()
+					|| mesh.is_none_or(|mesh| &mesh.id != id)
+					|| entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
+					|| entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
+				{
+					return Err(
+						"Animation requires its source model and selected mesh on the same entity"
+							.into(),
+					);
+				}
+				self.record(id)?;
+			}
 			if let Some(link) = &entity.linked_prefab {
 				let path = self
 					.catalog
@@ -573,6 +612,8 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 		files: BTreeMap::new(),
 		ids: HashSet::new(),
 		models: HashMap::new(),
+		animations: HashMap::new(),
+		animation_bytes: 0,
 		prefabs: HashSet::new(),
 		prefab_stack: HashSet::new(),
 		generated_files: BTreeMap::new(),
@@ -751,6 +792,8 @@ mod tests {
 			files: BTreeMap::new(),
 			ids: HashSet::new(),
 			models: HashMap::new(),
+			animations: HashMap::new(),
+			animation_bytes: 0,
 			prefabs: HashSet::new(),
 			prefab_stack: HashSet::new(),
 			generated_files: BTreeMap::new(),
@@ -812,6 +855,8 @@ mod tests {
 			files: BTreeMap::new(),
 			ids: HashSet::new(),
 			models: HashMap::new(),
+			animations: HashMap::new(),
+			animation_bytes: 0,
 			prefabs: HashSet::new(),
 			prefab_stack: HashSet::new(),
 			generated_files: BTreeMap::new(),

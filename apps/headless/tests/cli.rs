@@ -173,7 +173,9 @@ fn help_and_invalid_options_exit_without_graphics_or_project_io() {
 		.output()
 		.unwrap();
 	assert!(help.status.success());
-	assert!(String::from_utf8_lossy(&help.stdout).contains("No models, GPU or window"));
+	let help = String::from_utf8_lossy(&help.stdout);
+	assert!(help.contains("No GPU or window is loaded"));
+	assert!(help.contains("Animated assets are decoded on the CPU"));
 	for args in [
 		vec![],
 		vec!["--unknown"],

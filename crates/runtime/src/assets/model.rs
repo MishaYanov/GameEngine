@@ -41,18 +41,38 @@ impl ModelPart {
 pub struct Model {
 	parts: Vec<ModelPart>,
 	bounds: Option<crate::Bounds3>,
+	animation_asset: Option<Arc<engine_core::animation::AnimationAsset>>,
 }
 
 impl Model {
+	pub fn skinned(
+		parts: Vec<ModelPart>,
+		asset: Arc<engine_core::animation::AnimationAsset>,
+	) -> Self {
+		Self {
+			parts,
+			bounds: None,
+			animation_asset: Some(asset),
+		}
+	}
+	pub fn animation_asset(&self) -> Option<&Arc<engine_core::animation::AnimationAsset>> {
+		self.animation_asset.as_ref()
+	}
+
 	pub fn new(parts: Vec<ModelPart>) -> Self {
 		Self {
 			parts,
 			bounds: None,
+			animation_asset: None,
 		}
 	}
 
 	pub fn with_bounds(parts: Vec<ModelPart>, bounds: Option<crate::Bounds3>) -> Self {
-		Self { parts, bounds }
+		Self {
+			parts,
+			bounds,
+			animation_asset: None,
+		}
 	}
 
 	pub fn bounds(&self) -> Option<crate::Bounds3> {

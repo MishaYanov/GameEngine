@@ -116,6 +116,11 @@ impl PrefabData {
 			|| self.entities.len() > MAX_PREFAB_ENTITIES
 			|| (self.schema_version == 1 && self.gameplay.is_some())
 			|| (self.schema_version < 3 && !self.reference_slots.is_empty())
+			|| (self.schema_version < 3
+				&& self
+					.entities
+					.iter()
+					.any(|e| e.character_controller.is_some() || e.animation.is_some()))
 		{
 			return Err(
 				"A version-1/2/3 prefab requires 1–4096 entities; gameplay requires version 2 and reference slots version 3".into(),
@@ -186,26 +191,17 @@ impl PrefabData {
 		};
 		// The isolated scene rejects duplicate/invalid keys, external parents,
 		// cycles, invalid paths and every material/collider/transform defect.
-		let enabled: Vec<Vec<bool>> = validation
+		// External placeholders deliberately have no capabilities. Validate the
+		// entity graph first, then restore all attachments for the slot-aware
+		// component validation below (including disabled machine definitions).
+		let attachments: Vec<_> = validation
 			.entities
 			.iter_mut()
-			.map(|entity| {
-				entity
-					.native_behaviors
-					.iter_mut()
-					.map(|component| {
-						let enabled = component.enabled;
-						component.enabled = false;
-						enabled
-					})
-					.collect()
-			})
+			.map(|entity| std::mem::take(&mut entity.native_behaviors))
 			.collect();
 		validation.validate()?;
-		for (entity, enabled) in validation.entities.iter_mut().zip(enabled) {
-			for (component, enabled) in entity.native_behaviors.iter_mut().zip(enabled) {
-				component.enabled = enabled;
-			}
+		for (entity, attachments) in validation.entities.iter_mut().zip(attachments) {
+			entity.native_behaviors = attachments;
 		}
 		crate::components::validate_scene_components_with_slots(
 			&validation,

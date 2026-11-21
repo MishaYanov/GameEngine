@@ -1,0 +1,855 @@
+{
+  "schema_version": 4,
+  "bindings": {},
+  "entities": [
+    {
+      "key": "player",
+      "name": "Animated controller: WASD + Space",
+      "transform": {
+        "position": [
+          0,
+          0.901,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.3,
+                0.9,
+                0.3
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        },
+        {
+          "id": "character",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "character_controller",
+            "settings": {
+              "walk_speed": 4,
+              "ground_acceleration": 30,
+              "air_acceleration": 8,
+              "gravity": 20,
+              "max_fall_speed": 30,
+              "jump_speed": 7,
+              "ground_probe": 0.02,
+              "step_height": 0.25,
+              "coyote_ticks": 5,
+              "jump_buffer_ticks": 5,
+              "jump_action": "jump"
+            }
+          }
+        },
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "characters/two-joint.glb",
+            "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+            "mesh_index": 0
+          }
+        },
+        {
+          "id": "animation",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animation",
+            "settings": {
+              "source": {
+                "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+                "expected_sha256": "fc1848e4b5788aed342a497b341b15d5787f9817fc776562951e52ce4fc9cfbf",
+                "scene_index": 0,
+                "mesh_node": 3,
+                "skin_index": 0
+              },
+              "playback": {
+                "kind": "locomotion3",
+                "idle": 0,
+                "walk": 1,
+                "air": 2
+              },
+              "speed_numerator": 1,
+              "speed_denominator": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "player-visual",
+      "name": "Player Visual",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.9,
+          0.3
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/capsule.glb",
+            "material": {
+              "base_color_factor": [
+                0.2,
+                0.65,
+                1,
+                1
+              ]
+            }
+          }
+        }
+      ],
+      "parent": "player"
+    },
+    {
+      "key": "floor",
+      "name": "Floor",
+      "transform": {
+        "position": [
+          0,
+          -0.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          14,
+          1,
+          14
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.4,
+                0.45,
+                0.5,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "low-step",
+      "name": "Low Step",
+      "transform": {
+        "position": [
+          2,
+          0.1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          0.2,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.2,
+                0.8,
+                0.35,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "high-step",
+      "name": "High Step",
+      "transform": {
+        "position": [
+          -2,
+          0.25,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          0.5,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.9,
+                0.3,
+                0.2,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "wall",
+      "name": "Wall",
+      "transform": {
+        "position": [
+          0,
+          1,
+          -4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          8,
+          2,
+          0.5
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.65,
+                0.7,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "ceiling",
+      "name": "Ceiling",
+      "transform": {
+        "position": [
+          3,
+          2.05,
+          3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2,
+          0.1,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.8,
+                0.5,
+                0.2,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "covered-step",
+      "name": "Covered Step",
+      "transform": {
+        "position": [
+          3,
+          0.1,
+          3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          0.2,
+          2
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.2,
+                0.8,
+                0.35,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "lower-landing",
+      "name": "Lower Landing",
+      "transform": {
+        "position": [
+          9,
+          -2,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          4,
+          1,
+          6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.45,
+                0.3,
+                0.6,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "sensor-zone",
+      "name": "Sensor Zone",
+      "transform": {
+        "position": [
+          0,
+          0.15,
+          3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          0.3,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.8,
+                0.8,
+                0.2,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "conservative-obstacle-not-ramp",
+      "name": "Conservative Obstacle Not Ramp",
+      "transform": {
+        "position": [
+          -3,
+          0.4,
+          3
+        ],
+        "rotation": [
+          0,
+          0,
+          0.3
+        ],
+        "scale": [
+          2,
+          0.4,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.5,
+                0.2,
+                0.2,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 1,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "clip-demo",
+      "name": "Independent looping clip",
+      "transform": {
+        "position": [
+          3,
+          0.9,
+          2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "characters/two-joint.glb",
+            "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+            "mesh_index": 0
+          }
+        },
+        {
+          "id": "animation",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animation",
+            "settings": {
+              "source": {
+                "asset_id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+                "expected_sha256": "fc1848e4b5788aed342a497b341b15d5787f9817fc776562951e52ce4fc9cfbf",
+                "scene_index": 0,
+                "mesh_node": 3,
+                "skin_index": 0
+              },
+              "playback": {
+                "kind": "single_clip",
+                "clip_index": 1,
+                "looping": true
+              },
+              "speed_numerator": 1,
+              "speed_denominator": 1
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "position": [
+      0,
+      4,
+      8
+    ],
+    "yaw": 0,
+    "pitch": -0.35,
+    "vertical_fov": 1.0471976,
+    "near": 0.1,
+    "far": 200,
+    "follow": {
+      "target": "player",
+      "offset": [
+        0,
+        4,
+        8
+      ],
+      "look_offset": [
+        0,
+        0.4,
+        0
+      ],
+      "smoothing_seconds": 0.1
+    }
+  },
+  "lights": [
+    {
+      "key": "sun",
+      "name": "Sun",
+      "kind": "directional",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1,
+        0.95,
+        0.85
+      ],
+      "intensity": 0.9,
+      "range": 10
+    }
+  ]
+}

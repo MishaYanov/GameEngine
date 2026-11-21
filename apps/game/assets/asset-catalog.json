@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "a9a07900-9dc2-4d9f-8ff1-718defec0291",
+      "path": "characters/two-joint.glb",
+      "kind": "model",
+      "revision": 1,
+      "fingerprint": "fc1848e4b5788aed342a497b341b15d5787f9817fc776562951e52ce4fc9cfbf",
+      "bytes": 3568,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Two joint ribbon",
+          "primitives": 2
+        }
+      ]
+    }
+  ]
+}

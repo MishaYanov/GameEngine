@@ -1,0 +1,153 @@
+<p>
+	Review a supported GLB to capture its current version and native clip list. Animation uses
+	in-place clips; the character controller owns movement.
+</p>
+<p>
+	The Mesh Renderer on this entity must use the same model and selected mesh. Choose it there before
+	Play.
+</p>
+<label
+	>Animation asset<select
+		#selected
+		[value]="asset()"
+		[disabled]="pending()"
+		(change)="chooseAsset(selected.value)"
+	>
+		<option value="">Choose registered model</option>
+		@for (item of assets(); track item.asset_id) {
+			<option [value]="item.asset_id" [selected]="item.asset_id === asset()">
+				{{ item.name }}
+			</option>
+		}
+	</select></label
+>
+<button type="button" [disabled]="!asset() || pending()" (click)="inspect()">
+	{{ pending() ? 'Preparing animation…' : 'Review Animation Asset' }}
+</button>
+@if (error(); as message) {
+	<p role="alert">{{ message }}</p>
+}
+@if (review(); as inspected) {
+	<p>
+		{{ inspected.metadata.nodes }} transform nodes · {{ inspected.metadata.joints }} joints ·
+		{{ inspected.metadata.clips.length }} clips
+	</p>
+}
+@if (value(); as settings) {
+	<label
+		>Playback<select
+			#mode
+			[value]="settings.playback.kind"
+			[disabled]="!compatible() || pending()"
+			(change)="playback(mode.value)"
+		>
+			<option value="single_clip" [selected]="settings.playback.kind === 'single_clip'">
+				Single clip
+			</option>
+			<option value="locomotion3" [selected]="settings.playback.kind === 'locomotion3'">
+				Idle / Walk / Air
+			</option>
+		</select></label
+	>
+	@if (settings.playback.kind === 'single_clip') {
+		<label
+			>Clip<select
+				#single
+				[value]="settings.playback.clip_index"
+				[disabled]="!compatible() || pending()"
+				(change)="clip('clip_index', single.value)"
+			>
+				@for (item of clips(); track item.index) {
+					<option [value]="item.index" [selected]="item.index === settings.playback.clip_index">
+						{{ item.name }} ({{ item.duration_seconds }} s)
+					</option>
+				}
+			</select></label
+		>
+		<label class="check"
+			><input
+				#loop
+				type="checkbox"
+				[checked]="settings.playback.looping"
+				(change)="looping(loop.checked)"
+			/>Loop clip</label
+		>
+	} @else {
+		@for (slot of locomotionSlots; track slot) {
+			<label
+				>{{ slot }} clip<select
+					#choice
+					[disabled]="!compatible() || pending()"
+					(change)="clip(slot, choice.value)"
+				>
+					@for (item of clips(); track item.index) {
+						<option [value]="item.index" [selected]="item.index === settings.playback[slot]">
+							{{ item.name }} ({{ item.duration_seconds }} s)
+						</option>
+					}
+				</select></label
+			>
+		}
+		<p>
+			Requires an enabled Character Controller on the same entity. Uses resolved ground contact and
+			speed.
+		</p>
+	}
+	<label
+		>Speed numerator<input
+			#numerator
+			inputmode="numeric"
+			[value]="settings.speed_numerator"
+			(input)="speed('speed_numerator', numerator.value)"
+	/></label>
+	<label
+		>Speed denominator<input
+			#denominator
+			inputmode="numeric"
+			[value]="settings.speed_denominator"
+			(input)="speed('speed_denominator', denominator.value)"
+	/></label>
+	<p>Use whole values 1–16, with a ratio from ¼ to 4.</p>
+	@if (previewAllowed()) {
+		<fieldset>
+			<legend>Native clip preview</legend>
+			<p>
+				Scrub the applied component in Scene view. Preview does not advance Play or change saved
+				data.
+			</p>
+			<label
+				>Preview clip<select
+					#previewChoice
+					[value]="previewClip()"
+					[disabled]="!compatible() || pending()"
+					(change)="choosePreview(previewChoice.value)"
+				>
+					@for (item of clips(); track item.index) {
+						<option [value]="item.index" [selected]="item.index === previewClip()">
+							{{ item.name }}
+						</option>
+					}
+				</select></label
+			>
+			<button type="button" [disabled]="!compatible() || pending()" (click)="openPreview()">
+				Open Native Preview
+			</button>
+			@if (preview(); as active) {
+				<label
+					>Preview time (seconds)<input
+						#seconds
+						inputmode="decimal"
+						[value]="time()"
+						(input)="time.set(seconds.value)"
+				/></label>
+				<button type="button" [disabled]="pending()" (click)="sample()">Show Pose</button>
+				<button type="button" [disabled]="pending()" (click)="close()">Close Preview</button>
+				<p role="status">
+					Preview at {{ active.time_seconds }} of {{ active.duration_seconds }} seconds
+				</p>
+			}
+		</fieldset>
+	} @else {
+		<p>Apply the component to a scene entity, then reopen it to preview clips.</p>
+	}
+}

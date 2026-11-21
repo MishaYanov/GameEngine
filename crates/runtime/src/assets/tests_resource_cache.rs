@@ -65,6 +65,7 @@ fn candidate_promotion_replaces_all_source_keys_and_discard_preserves_active_sna
 		drop(assets.load_scene(path).unwrap());
 	}
 	let prepared = || PreparedGpuAsset {
+		animation_candidate: None,
 		candidate: fixture.root.join("unused.gltf"),
 		destination: fixture.root.join("active.gltf"),
 		candidate_relative: "unused.gltf".into(),

@@ -1,7 +1,7 @@
 pub mod assets;
 pub use engine_core::{
-	asset_catalog, asset_jobs, asset_registry, events, game_progress, project, scene_catalog,
-	simulation_session, world,
+	animation, asset_catalog, asset_jobs, asset_registry, character_controller, events,
+	game_progress, project, scene_catalog, simulation_session, world,
 };
 pub mod bounds;
 pub mod camera;
@@ -31,6 +31,7 @@ pub use camera_controller::CameraController;
 pub use engine::{GraphicsProbe, GraphicsProbeError};
 pub use engine_core::components;
 pub use engine_core::linked_prefab;
+pub use engine_core::state_machine;
 pub use engine_core::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineBuilder};
 pub use entity_key::EntityKey;
 pub use input::{InputButton, InputState, Key, MouseButton, NativeKeyCode};

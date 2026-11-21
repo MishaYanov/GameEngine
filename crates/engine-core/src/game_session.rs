@@ -6,6 +6,7 @@ use crate::{SceneData, command::PlayStatusDto};
 use std::sync::Arc;
 
 pub struct GameSession {
+	animation_resolver: Option<crate::animation::AnimationResolver>,
 	project: Arc<ProjectData>,
 	factory: Arc<dyn GameModuleFactory>,
 	active: SimulationSession,
@@ -24,6 +25,14 @@ pub struct PreparedScene {
 }
 
 impl GameSession {
+	pub fn set_animation_resolver(
+		&mut self,
+		resolver: crate::animation::AnimationResolver,
+	) -> Result<(), String> {
+		self.active.set_animation_resolver(Arc::clone(&resolver))?;
+		self.animation_resolver = Some(resolver);
+		Ok(())
+	}
 	pub fn play_session_id(&self) -> &str {
 		&self.play_session_id
 	}
@@ -109,6 +118,10 @@ impl GameSession {
 		)?;
 
 		simulation.set_paused(self.active.paused());
+		if let Some(resolver) = &self.animation_resolver {
+			simulation.set_animation_resolver(Arc::clone(resolver))?;
+		}
+		simulation.require_animation_ready()?;
 
 		Ok(PreparedScene {
 			new_run: None,
@@ -133,6 +146,7 @@ impl GameSession {
 		)?;
 
 		Ok(Self {
+			animation_resolver: None,
 			project,
 			factory,
 			active,
@@ -149,12 +163,16 @@ impl GameSession {
 		scene_id: SceneId,
 		document: Arc<SceneData>,
 	) -> Result<PreparedScene, String> {
-		let next = Self::with_factory_for_scene(
+		let mut next = Self::with_factory_for_scene(
 			Arc::clone(&self.project),
 			scene_id,
 			document,
 			Arc::clone(&self.factory),
 		)?;
+		if let Some(resolver) = &self.animation_resolver {
+			next.set_animation_resolver(Arc::clone(resolver))?;
+		}
+		next.active.require_animation_ready()?;
 		Ok(PreparedScene {
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,

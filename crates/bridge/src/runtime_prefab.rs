@@ -43,7 +43,7 @@ pub fn load(root: &Path, relative: &str) -> Result<(PrefabData, String), String>
 		PrefabData::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)?;
 	Ok((prefab, format!("{:x}", Sha256::digest(&bytes))))
 }
-fn contained_file(root: &Path, relative: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn contained_file(root: &Path, relative: &str) -> Result<std::path::PathBuf, String> {
 	validate_model_path(relative)?;
 	let mut path = root.to_path_buf();
 	for component in Path::new(relative).components() {
@@ -62,7 +62,7 @@ fn contained_file(root: &Path, relative: &str) -> Result<std::path::PathBuf, Str
 	}
 	Ok(path)
 }
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
 	let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
 	if !metadata.is_file() || metadata.len() > limit as u64 {
 		return Err("Runtime prefab/catalog must be a regular file within its byte limit".into());

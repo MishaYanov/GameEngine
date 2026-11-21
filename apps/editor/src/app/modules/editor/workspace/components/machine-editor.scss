@@ -1,0 +1,45 @@
+:host {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+}
+fieldset {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+	padding: var(--space-2);
+	border: var(--border-width) solid var(--color-border-strong);
+}
+label {
+	display: grid;
+	gap: var(--space-1);
+}
+.check {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+input,
+select,
+button {
+	min-width: 0;
+	min-height: var(--layout-control-height);
+	padding: var(--space-1) var(--space-2);
+	border: var(--border-width) solid var(--color-border-strong);
+	border-radius: var(--radius-sm);
+	color: var(--color-text);
+	background: var(--color-control);
+	font: inherit;
+}
+input:not([type='checkbox']),
+select {
+	width: 100%;
+	box-sizing: border-box;
+}
+button:disabled {
+	color: var(--color-text-disabled);
+	background: var(--color-control-disabled);
+}
+p {
+	margin: 0;
+}

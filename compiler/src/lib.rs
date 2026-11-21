@@ -743,14 +743,10 @@ fn validate_catalog_scenes(
 ) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
-	let gameplay = if project.gameplay_module.is_some() {
-		Some((
-			Arc::new(project.clone()),
-			courtyard_gameplay::resolve(project)?,
-		))
-	} else {
-		None
-	};
+	let gameplay = (
+		Arc::new(project.clone()),
+		courtyard_gameplay::resolve(project)?,
+	);
 	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
 	for behavior in &project.behaviors {
 		targets
@@ -767,13 +763,19 @@ fn validate_catalog_scenes(
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result =
 			validate_catalog_scene(scene_targets, root, entry, &packaged).and_then(|scene| {
-				if let Some((project, factory)) = &gameplay {
-					GameSession::with_factory_for_scene(
+				{
+					let (project, factory) = &gameplay;
+					let mut game = GameSession::with_factory_for_scene(
 						Arc::clone(project),
 						entry.id().clone(),
 						Arc::new(scene),
 						Arc::clone(factory),
 					)
+					.map_err(|cause| scene_error(entry, cause))?;
+					let animation_root = root.to_path_buf();
+					game.set_animation_resolver(Arc::new(move |scene| {
+						bridge::animation_asset::prepare_scene(&animation_root, scene)
+					}))
 					.map_err(|cause| scene_error(entry, cause))?;
 				}
 				Ok(())

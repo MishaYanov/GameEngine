@@ -24,7 +24,7 @@ use std::{
 const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REPLAY_ACTIONS: usize = 10_000;
 const MAX_TICK_CALLS: u32 = 100_000;
-const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Version-1 command/tick/restart_run/asset_metadata actions.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No models, GPU or window are loaded.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\n";
+const HELP: &str = "engine-headless --project <project.json> [--asset-root <assets>]\n  or: engine-headless --scene <scene.json> [--asset-root <assets>]\nOptions:\n  --steps <0..100000>     Tick calls (default 60, or 0 with replay).\n  --dt <seconds>          Elapsed time per call; default project's fixed interval.\n  --replay <replay.json>  Version-1 command/tick/restart_run/asset_metadata actions.\n  --budget-ms <1..300000> Budget checked between actions; default 30000.\n  --output <json>         Write summary to a new file as well as stdout.\n  --state-output <json>   Write final render scene to a new file.\n  --help                 Show help.\nProject scenes resolve beneath the asset root (default project folder/assets).\nStandalone scenes have no implicit behaviors. --steps starts Play; replay owns\nits mode transitions. Outputs must not exist. No GPU or window is loaded. Animated assets are decoded on the CPU.\nReplay asset_metadata actions supply optional CPU bounds for picking/framing.\nNative component hashes cover lifecycle, controller and animation state; opaque\ngame-module state, scheduler state and render-only data are excluded.\n";
 
 #[derive(Default)]
 struct Options {
@@ -127,6 +127,11 @@ struct Summary {
 	state_hash_scope: &'static str,
 	state_hash: String,
 	state_hash_bytes: usize,
+	native_components_hash_algorithm: &'static str,
+	native_components_hash_scope: &'static str,
+	native_components_hash: String,
+	native_components_hash_bytes: usize,
+	native_components: serde_json::Value,
 	fresh_entity_ids_generated: bool,
 	elapsed_ms: f64,
 	tick_total_ms: f64,
@@ -266,9 +271,13 @@ fn run(options: Options) -> Result<Summary, String> {
 		asset_root,
 	} = source(&options)?;
 	let source_schema = parsed.source_schema_version;
+	let animation_root = asset_root.clone();
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
 		.module_resolver(Arc::new(courtyard_gameplay::resolve))
+		.animation_resolver(Arc::new(move |scene| {
+			bridge::animation_asset::prepare_scene(&animation_root, scene)
+		}))
 		.build()
 		.map_err(|e| e.to_string())?;
 	let mut measures = Measurements::default();
@@ -408,6 +417,13 @@ fn run(options: Options) -> Result<Summary, String> {
 		.map(|e| (&e.model_path, e.mesh_index.unwrap_or(0)))
 		.collect();
 	let stats = engine.session().simulation_stats();
+	let native_components = engine.session().native_replay_state();
+	let mut native_hash = StateHash {
+		value: 0xcbf29ce484222325,
+		bytes: 0,
+	};
+	serde_json::to_writer(&mut native_hash, &native_components)
+		.map_err(|error| error.to_string())?;
 	let summary = Summary {
 		runtime: engine.runtime_inspection(0, 128).ok(),
 		schema_version: 1,
@@ -441,6 +457,11 @@ fn run(options: Options) -> Result<Summary, String> {
 		state_hash_scope: "project_and_render_scene",
 		state_hash: format!("{:016x}", hash.value),
 		state_hash_bytes: hash.bytes,
+		native_components_hash_algorithm: "fnv1a64",
+		native_components_hash_scope: "native_components_v1",
+		native_components_hash: format!("{:016x}", native_hash.value),
+		native_components_hash_bytes: native_hash.bytes,
+		native_components,
 		fresh_entity_ids_generated: measures.fresh_ids,
 		elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
 		tick_total_ms: measures.tick_total.as_secs_f64() * 1000.0,

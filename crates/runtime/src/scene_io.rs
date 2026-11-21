@@ -80,10 +80,24 @@ pub fn instantiate_with_progress(
 	renderer: &WindowRenderer,
 	mut prepared: impl FnMut(usize, usize),
 ) -> Result<(Scene, Camera), String> {
-	data.validate()?;
+	let placements = data.validated_world_matrices()?;
+	crate::scene::validate_animation_placements(data, &placements)?;
 	let total = data.entities.len();
 	prepared(0, total);
 	let mut scene = Scene::default();
+	scene.set_animation_root(assets.root().to_path_buf());
+	let pins: engine_core::animation::PreparedAnimationBindings = data
+		.entities
+		.iter()
+		.filter_map(|entity| {
+			entity
+				.animation
+				.as_ref()
+				.and_then(|c| assets.cached_animation(&c.settings.source))
+				.map(|asset| (entity.key.clone(), asset))
+		})
+		.collect();
+	let animations = bridge::animation_asset::prepare_scene_with_pins(assets.root(), data, &pins)?;
 	scene.set_camera_follow(data.camera.follow.clone());
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
@@ -94,7 +108,11 @@ pub fn instantiate_with_progress(
 			Some(entity.mesh_index.unwrap_or(0)),
 		)?
 		.with_asset_id(entity.asset_id.clone());
-		let model = if !entity.has_mesh_component()
+		let model = if let Some(asset) = animations.get(&entity.key) {
+			assets
+				.load_animation(renderer, asset.clone())
+				.map_err(|e| e.to_string())?
+		} else if !entity.has_mesh_component()
 			|| (!entity.renderable
 				&& !assets
 					.asset_exists(&cache_key)
@@ -127,12 +145,36 @@ pub fn instantiate_with_progress(
 			rotation: entity.transform.rotation,
 			scale: entity.transform.scale,
 		};
+		let mut instance = ModelInstance::new(model, transform);
+		if let Some(asset) = animations.get(&entity.key) {
+			let component = entity.animation.as_ref().unwrap();
+			let clip_index = match component.settings.playback {
+				engine_core::animation::AnimationPlayback::SingleClip { clip_index, .. } => {
+					clip_index
+				}
+				engine_core::animation::AnimationPlayback::Locomotion3 { idle, .. } => idle,
+			};
+			let mut pose = engine_core::animation::sample_pose(
+				asset.clone(),
+				clip_index,
+				0.,
+				glam::Mat4::IDENTITY,
+				0,
+			)?;
+			if !component.enabled {
+				pose.local = asset.nodes.iter().map(|n| n.rest).collect();
+				pose.globals = engine_core::animation::global_pose(asset, &pose.local)?;
+				pose.palette = engine_core::animation::mesh_local_palette(asset, &pose.globals)?;
+				pose.mesh_matrix = pose.globals[asset.skin.mesh_node as usize];
+			}
+			instance.set_animation_pose(&pose, true)?;
+		}
 		let id = scene
 			.spawn_keyed_model(
 				entity.key.clone(),
 				entity.name.clone(),
 				entity.model_path.clone(),
-				ModelInstance::new(model, transform),
+				instance,
 			)
 			.map_err(|error| format!("Scene entity {index}: {error}"))?;
 		scene.set_entity_metadata(id, entity)?;

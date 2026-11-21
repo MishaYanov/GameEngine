@@ -26,6 +26,8 @@ mod asset_authoring;
 pub use asset_authoring::*;
 mod linked_prefabs;
 pub use linked_prefabs::*;
+mod animation;
+pub use animation::*;
 
 pub(super) fn trusted_window(window: &WebviewWindow) -> Result<(), String> {
 	let url = window.url().map_err(|e| e.to_string())?;
@@ -91,6 +93,7 @@ pub fn editor_capabilities(window: WebviewWindow) -> Result<EditorCapabilitiesDt
 
 fn capabilities() -> EditorCapabilitiesDto {
 	EditorCapabilitiesDto {
+		state_machines: Some(runtime::state_machine::descriptor()),
 		component_types: runtime::components::descriptors(),
 		incremental_commands: true,
 		protocol_version: 2,

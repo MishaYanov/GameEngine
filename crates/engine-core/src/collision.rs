@@ -94,7 +94,141 @@ pub struct MovementContact {
 	/// Time of impact in 0..=1 for this iteration's remaining motion, before skin.
 	pub fraction: f64,
 }
+
+/// A speculative translation against the existing collision snapshot. No world
+/// or collider records are mutated, and all casts share the caller's budget.
+pub(crate) struct BodyCast {
+	pub applied: Vec3,
+	pub contact: Option<MovementContact>,
+	pub flat_support: bool,
+	pub obstacle_bounds: Option<Bounds3>,
+}
+
 impl CollisionWorld {
+	pub(crate) fn body_bounds(&self, key: &EntityKey) -> Result<Bounds3, String> {
+		self.indices
+			.get(key)
+			.map(|index| self.records[*index].bounds)
+			.ok_or_else(|| "Character body has no enabled collider".into())
+	}
+	pub(crate) fn cast_body(
+		&self,
+		world: &crate::world::RuntimeWorld,
+		key: &EntityKey,
+		offset: Vec3,
+		delta: Vec3,
+		remaining: &mut usize,
+	) -> Result<BodyCast, String> {
+		if !offset.is_finite() || !delta.is_finite() {
+			return Err("Character cast must be finite".into());
+		}
+		consume_candidates(remaining, 1)?;
+		let index = *self
+			.indices
+			.get(key)
+			.ok_or("Character collider is unavailable")?;
+		let start = translated(&self.records[index].borrowed(), offset)?;
+		let end = translated(&start, delta)?;
+		let swept = start.bounds.union(end.bounds);
+		let mut earliest: Option<(f64, Vec3, &CachedCollider)> = None;
+		for entry in &self.ordered {
+			let obstacle = &self.records[entry.index];
+			if obstacle.bounds.min()[0] > swept.max()[0] {
+				break;
+			}
+			consume_candidates(remaining, 1)?;
+			if entry.index == index
+				|| obstacle.interaction.sensor
+				|| !start.interaction.detects(obstacle.interaction)
+				|| !bounds_overlap(swept, obstacle.bounds)
+			{
+				continue;
+			}
+			if contact_geometry(&start, &obstacle.borrowed())
+				.is_some_and(|(_, depth)| depth > 0.0001)
+			{
+				return Err("Character body starts penetrating a blocking collider".into());
+			}
+			if let Some((fraction, normal)) = sweep_hit(&start, &obstacle.borrowed(), delta)?
+				&& earliest.as_ref().is_none_or(|(time, _, old)| {
+					fraction < *time || fraction == *time && obstacle.key < old.key
+				}) {
+				earliest = Some((fraction, normal, obstacle));
+			}
+		}
+		let Some((fraction, normal, obstacle)) = earliest else {
+			return Ok(BodyCast {
+				applied: delta,
+				contact: None,
+				flat_support: false,
+				obstacle_bounds: None,
+			});
+		};
+		let length = delta.as_dvec3().length();
+		let travel = if length > 0.0 {
+			(fraction - 0.0001 / length).max(0.0) as f32
+		} else {
+			0.0
+		};
+		let matrix = world.world_matrices()[obstacle.entity_index];
+		let mut used = [false; 3];
+		let aligned = [matrix.x_axis, matrix.y_axis, matrix.z_axis]
+			.iter()
+			.all(|column| {
+				let Some(axis) = column.truncate().try_normalize() else {
+					return false;
+				};
+				let values = axis.abs().to_array();
+				let largest = (0..3)
+					.max_by(|a, b| values[*a].total_cmp(&values[*b]))
+					.unwrap();
+				let valid = !used[largest]
+					&& values[largest] >= 1.0 - 1e-5
+					&& (0..3).all(|other| other == largest || values[other] <= 1e-5);
+				used[largest] = true;
+				valid
+			});
+		Ok(BodyCast {
+			applied: delta * travel,
+			contact: Some(MovementContact {
+				entity: obstacle.key.clone(),
+				normal: normal.to_array(),
+				fraction,
+			}),
+			flat_support: matches!(obstacle.shape, Shape::Box) && aligned && normal.y < -0.999,
+			obstacle_bounds: Some(obstacle.bounds),
+		})
+	}
+	pub(crate) fn slide_body(
+		&self,
+		world: &crate::world::RuntimeWorld,
+		key: &EntityKey,
+		delta: Vec3,
+		remaining: &mut usize,
+	) -> Result<(Vec3, Vec<MovementContact>), String> {
+		let mut applied = Vec3::ZERO;
+		let mut rest = delta;
+		let mut contacts = Vec::new();
+		for _ in 0..3 {
+			if rest.length_squared() <= EPSILON * EPSILON {
+				break;
+			}
+			let cast = self.cast_body(world, key, applied, rest, remaining)?;
+			applied += cast.applied;
+			let Some(contact) = cast.contact else {
+				break;
+			};
+			rest -= cast.applied;
+			let normal = Vec3::from_array(contact.normal);
+			let approach = rest.dot(normal);
+			contacts.push(contact);
+			if approach <= 0.0 {
+				break;
+			}
+			rest -= normal * approach;
+		}
+		Ok((applied, contacts))
+	}
 	pub fn new(world: &crate::world::RuntimeWorld) -> Result<Self, String> {
 		let records = world_colliders(world.data(), world.world_matrices())?
 			.into_iter()
@@ -876,4 +1010,39 @@ fn consume_candidates(remaining: &mut usize, count: usize) -> Result<(), String>
 	}
 	*remaining -= count;
 	Ok(())
+}
+
+#[cfg(test)]
+mod character_query_tests {
+	use super::*;
+	#[test]
+	fn speculative_casts_share_budget_and_never_mutate_the_world() {
+		let mut data = crate::SceneData::from_json(include_str!(
+			"../../../apps/game/assets/scenes/controller-room.json"
+		))
+		.unwrap();
+		// Keep the actual authored controller fixture, including its visual child.
+		data.camera.follow = None;
+		let world = crate::world::RuntimeWorld::new(std::sync::Arc::new(data)).unwrap();
+		let collisions = CollisionWorld::new(&world).unwrap();
+		let original = world.data().clone();
+		let matrices = world.world_matrices().to_vec();
+		let key = EntityKey::new("player").unwrap();
+		let mut budget = 1000;
+		let floor = collisions
+			.cast_body(&world, &key, Vec3::ZERO, -Vec3::Y * 0.02, &mut budget)
+			.unwrap();
+		assert!(floor.flat_support);
+		assert!(floor.contact.unwrap().normal[1] < -0.999);
+		assert!(budget < 1000);
+		let mut exhausted = 1;
+		assert!(
+			collisions
+				.cast_body(&world, &key, Vec3::ZERO, Vec3::X, &mut exhausted)
+				.is_err()
+		);
+		assert_eq!(exhausted, 0);
+		assert_eq!(world.data(), &original);
+		assert_eq!(world.world_matrices(), matrices);
+	}
 }

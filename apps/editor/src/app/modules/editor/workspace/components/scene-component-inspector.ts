@@ -15,6 +15,7 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[entities]="targets()"
 		[models]="models()"
 		[editable]="available()"
+		[previewAllowed]="true"
 		[pending]="pending()"
 		[error]="error()"
 		[acknowledged]="acknowledged()"

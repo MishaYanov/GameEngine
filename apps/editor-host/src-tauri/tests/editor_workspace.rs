@@ -1,4 +1,6 @@
 // Compile the CPU workspace service directly; Tauri's WebView module stays private.
+#[path = "../src/animation_preview.rs"]
+mod animation_preview;
 #[path = "../src/editor.rs"]
 mod editor;
 #[path = "../src/project_location.rs"]

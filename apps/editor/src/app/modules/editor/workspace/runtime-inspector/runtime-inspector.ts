@@ -44,6 +44,18 @@ export class RuntimeInspector {
 	protected readonly pageEnd = computed(
 		() => this.offset() + (this.result()?.entities.length ?? 0),
 	);
+	protected readonly motion = computed(
+		() =>
+			this.result()?.character_motion?.find(
+				(item) => runtimeHandleKey(item.entity) === this.selected(),
+			) ?? null,
+	);
+	protected readonly animation = computed(
+		() =>
+			this.result()?.animations?.find(
+				(item) => runtimeHandleKey(item.entity) === this.selected(),
+			) ?? null,
+	);
 	private readonly context = computed(() => {
 		const status = this.viewport.gameStatus();
 		if (!status) return null;

@@ -1,6 +1,9 @@
 import type {GameInputProfile} from '../game-input/game-input.models';
 import type {ComponentRecord, ComponentTypeDescriptor, NativeBehaviorAttachment} from './editor-components';
 import type {LinkedPrefabOverrideTarget, PrefabSourceDocument} from './linked-prefabs.models';
+import type {CharacterControllerAttachment} from './character-controller.models';
+import type {AnimationAttachment} from './animation.models';
+import type {MachineDescriptor} from './state-machine.models';
 
 export type SceneId = string;
 
@@ -105,6 +108,8 @@ export interface SceneEntity {
     readonly component_views?: readonly ComponentRecord[];
     readonly component_ids?: Readonly<Record<string, string>>;
     readonly native_behaviors?: readonly NativeBehaviorAttachment[];
+    readonly character_controller?: CharacterControllerAttachment | null;
+    readonly animation?: AnimationAttachment | null;
 }
 
 export interface Light {
@@ -308,6 +313,7 @@ export interface CommandDescriptor {
 }
 
 export interface EditorCapabilities {
+    readonly state_machines?: MachineDescriptor;
     readonly protocol_version: number;
     readonly scene_schema_version: number;
     readonly commands: readonly CommandDescriptor[];

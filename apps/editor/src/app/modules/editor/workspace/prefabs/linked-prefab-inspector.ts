@@ -214,6 +214,8 @@ export class LinkedPrefabInspector {
 			transform_scale: 'Scale',
 			mesh_renderer: 'Mesh Renderer',
 			collider: 'Collider',
+			character_controller: 'Character Controller',
+			animation: 'Animation',
 			native_behavior: 'Native Behavior',
 		}[target.property.kind];
 	}
@@ -228,6 +230,10 @@ export class LinkedPrefabInspector {
 			return `${enabled} · ${data.model_path} · Mesh ${data.mesh_index ?? 'default'}${data.material ? ' · Color ' + data.material.base_color_factor.join(', ') : ''}`;
 		if (data.kind === 'collider')
 			return `${enabled} · ${data.collider.kind === 'box' ? 'Box ' + data.collider.half_extents.join(', ') : 'Sphere radius ' + data.collider.radius} · Offset ${data.collider.offset.join(', ')}`;
+		if (data.kind === 'character_controller')
+			return `${enabled} · Walk ${data.settings.walk_speed} · Jump ${data.settings.jump_action}`;
+		if (data.kind === 'animation')
+			return `${enabled} · ${data.settings.playback.kind.replaceAll('_', ' ')} · ${data.settings.source.asset_id}`;
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;
 	}
 

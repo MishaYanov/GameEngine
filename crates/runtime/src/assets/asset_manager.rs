@@ -26,6 +26,7 @@ pub struct AssetManager {
 	meshes: HashMap<String, Arc<VulkanMesh>>,
 	image_textures: HashMap<String, Arc<VulkanTexture>>,
 	models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>>,
+	animated_models: HashMap<String, Arc<Model>>,
 	source_fingerprints: HashMap<PathBuf, String>,
 	scenes: HashMap<PathBuf, Arc<super::ImportedScene>>,
 	scene_order: VecDeque<PathBuf>,
@@ -48,6 +49,7 @@ pub struct PreparedGpuAsset {
 	candidate_relative: String,
 	destination_relative: String,
 	reuses_source: bool,
+	animation_candidate: Option<String>,
 }
 
 enum GpuReference {
@@ -159,6 +161,132 @@ impl From<VulkanMeshError> for AssetManagerError {
 }
 
 impl AssetManager {
+	pub fn root(&self) -> &Path {
+		&self.root
+	}
+	pub fn cached_animation(
+		&self,
+		source: &engine_core::animation::AnimationSourceRef,
+	) -> Option<Arc<engine_core::animation::AnimationAsset>> {
+		let key = format!(
+			"{}:{}:{}",
+			source.expected_sha256, source.mesh_node, source.skin_index
+		);
+		self.animated_models
+			.get(&key)
+			.and_then(|m| m.animation_asset())
+			.filter(|a| a.source_scene == source.scene_index)
+			.cloned()
+	}
+	pub fn load_animation(
+		&mut self,
+		renderer: &WindowRenderer,
+		asset: Arc<engine_core::animation::AnimationAsset>,
+	) -> Result<Arc<Model>, AssetManagerError> {
+		let key = format!(
+			"{}:{}:{}",
+			asset.source_sha256, asset.skin.source_mesh_node, asset.skin.source_skin
+		);
+		if let Some(model) = self.animated_models.get(&key) {
+			return Ok(model.clone());
+		}
+		if self.animated_models.len() >= 64 {
+			return Err(AssetManagerError::ResourceBudget(
+				"Animated model cache limit reached".into(),
+			));
+		}
+		let bytes: usize = asset
+			.primitives
+			.iter()
+			.map(|p| {
+				p.vertices.len()
+					* (size_of::<Vertex>() + size_of::<renderer::vulkan::mesh::SkinInfluence>())
+					+ p.indices.len() * 4
+			})
+			.sum();
+		self.check_gpu_budget(
+			bytes + asset.images.iter().map(|i| i.rgba.len()).sum::<usize>() + 4,
+			asset.primitives.len() + asset.images.len() + 1,
+		)?;
+		// Construct/copy each decoded image only on its first cache miss, even
+		// when hundreds of primitives share the same material image.
+		let mut textures = Vec::with_capacity(asset.images.len());
+		for (index, image) in asset.images.iter().enumerate() {
+			let image_id = format!("animation:{}:{index}", asset.source_sha256);
+			let texture = if let Some(texture) = self.image_textures.get(&image_id) {
+				texture.clone()
+			} else {
+				let image = ImageAsset::from_rgba8(image.width, image.height, image.rgba.clone())?;
+				self.load_image_texture(renderer, image_id, &image)?
+			};
+			textures.push(texture);
+		}
+		let white = if asset
+			.primitives
+			.iter()
+			.any(|p| p.base_color_image.is_none())
+		{
+			Some(
+				if let Some(texture) = self.image_textures.get("builtin:white") {
+					texture.clone()
+				} else {
+					self.load_image_texture(
+						renderer,
+						"builtin:white",
+						&ImageAsset::from_rgba8(1, 1, vec![255; 4])?,
+					)?
+				},
+			)
+		} else {
+			None
+		};
+		let mut parts = Vec::new();
+		for primitive in &asset.primitives {
+			let vertices: Vec<_> = primitive
+				.vertices
+				.iter()
+				.map(|v| Vertex {
+					position: v.position,
+					normal: v.normal,
+					uv: v.uv,
+				})
+				.collect();
+			let influences: Vec<_> = primitive
+				.vertices
+				.iter()
+				.map(|v| renderer::vulkan::mesh::SkinInfluence {
+					joints: v.joints,
+					weights: v.weights,
+				})
+				.collect();
+			let mesh = Arc::new(renderer.upload_skinned_mesh(
+				&vertices,
+				&primitive.indices,
+				&influences,
+			)?);
+			let logical_bytes = vertices.len()
+				* (size_of::<Vertex>() + size_of::<renderer::vulkan::mesh::SkinInfluence>())
+				+ primitive.indices.len() * 4;
+			self.gpu_allocations.push(GpuAllocation {
+				resource: GpuReference::Mesh(Arc::downgrade(&mesh)),
+				bytes: logical_bytes,
+			});
+			self.gpu_bytes += logical_bytes;
+			let texture = match primitive.base_color_image {
+				Some(index) => textures[index].clone(),
+				None => white
+					.as_ref()
+					.expect("untextured primitive preflight")
+					.clone(),
+			};
+			let material = VulkanMaterial::new(texture, primitive.double_sided, primitive.color);
+			parts.push(ModelPart::new(mesh, material));
+		}
+		let model = Arc::new(Model::skinned(parts, asset));
+		self.animated_models.insert(key, model.clone());
+		Ok(model)
+	}
+
 	/// Logical vertex/index/RGBA storage, excluding driver alignment, staging
 	/// buffers and renderer-owned targets. Cached and external retained Arcs
 	/// both count until their allocations are actually released.
@@ -325,13 +453,34 @@ impl AssetManager {
 			.expect("resolved candidate belongs to asset root")
 			.to_string_lossy()
 			.replace('\\', "/");
-		let prepared = PreparedGpuAsset {
+		let mut prepared = PreparedGpuAsset {
 			candidate,
 			destination,
 			candidate_relative,
 			destination_relative: change.destination_path().to_owned(),
 			reuses_source,
+			animation_candidate: None,
 		};
+		if let Ok(asset) =
+			bridge::animation_asset::load_path(&self.root, &prepared.candidate_relative)
+		{
+			let key = format!(
+				"{}:{}:{}",
+				asset.source_sha256, asset.skin.source_mesh_node, asset.skin.source_skin
+			);
+			if !self.animated_models.contains_key(&key) {
+				prepared.animation_candidate = Some(key);
+			}
+			if let Err(error) = self.load_animation(renderer, asset) {
+				self.discard_gpu_asset(prepared);
+				return Err(error);
+			}
+			self.source_fingerprints.insert(
+				prepared.candidate.clone(),
+				change.asset().fingerprint.clone(),
+			);
+			return Ok(prepared);
+		}
 		for mesh in &change.asset().meshes {
 			if let Err(error) = self.load_model_mesh(renderer, &prepared.candidate, mesh.index) {
 				self.discard_gpu_asset(prepared);
@@ -395,6 +544,12 @@ impl AssetManager {
 	}
 
 	pub fn discard_gpu_asset(&mut self, prepared: PreparedGpuAsset) {
+		if let Some(key) = &prepared.animation_candidate {
+			self.animated_models.remove(key);
+			let hash = key.split(':').next().expect("animation cache key");
+			let prefix = format!("animation:{hash}:");
+			self.image_textures.retain(|id, _| !id.starts_with(&prefix));
+		}
 		if !prepared.reuses_source {
 			self.forget_source(&prepared.candidate, &prepared.candidate_relative);
 		}
@@ -489,6 +644,7 @@ impl AssetManager {
 			meshes: HashMap::new(),
 			image_textures: HashMap::new(),
 			models: HashMap::new(),
+			animated_models: HashMap::new(),
 			source_fingerprints: HashMap::new(),
 			scenes: HashMap::new(),
 			scene_order: VecDeque::new(),
@@ -592,9 +748,14 @@ impl AssetManager {
 
 	pub fn loaded_mesh_count(&self) -> usize {
 		self.meshes.len()
+			+ self
+				.animated_models
+				.values()
+				.map(|m| m.parts().len())
+				.sum::<usize>()
 	}
 	pub fn loaded_model_count(&self) -> usize {
-		self.models.len()
+		self.models.len() + self.animated_models.len()
 	}
 
 	pub fn gpu_logical_bytes(&self) -> usize {
@@ -643,6 +804,7 @@ impl AssetManager {
 
 	pub fn clear(&mut self) {
 		self.models.clear();
+		self.animated_models.clear();
 		self.source_fingerprints.clear();
 		self.scenes.clear();
 		self.scene_order.clear();
@@ -664,6 +826,8 @@ impl AssetManager {
 	/// otherwise-unused GPU allocations alive. CPU source snapshots are retained
 	/// only for live model paths or externally retained hierarchy metadata.
 	pub fn prune_unused(&mut self) {
+		self.animated_models
+			.retain(|_, model| Arc::strong_count(model) > 1);
 		self.models.retain(|_, model| {
 			// A legacy owned Model clone retains meshes rather than Arc<Model>.
 			// The cache and this model account for the first two mesh owners.

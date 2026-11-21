@@ -183,6 +183,9 @@ impl SceneEditor {
 		self.session.as_ref().is_some_and(EditorSession::is_paused)
 	}
 
+	pub fn animations(&self) -> Option<&engine_core::animation::AnimationBank> {
+		self.session.as_ref().and_then(EditorSession::animations)
+	}
 	pub fn needs_tick(&self) -> bool {
 		self.session.as_ref().is_some_and(EditorSession::needs_tick)
 	}
@@ -190,10 +193,21 @@ impl SceneEditor {
 	pub fn start_play(&mut self, scene: &mut Scene) -> Result<(), String> {
 		self.initialize(scene)?;
 		self.finish_gesture()?;
+		if let Some(root) = scene.animation_root().map(std::path::Path::to_path_buf) {
+			self.session
+				.as_mut()
+				.unwrap()
+				.set_animation_resolver(Arc::new(move |data| {
+					bridge::animation_asset::prepare_scene(&root, data)
+				}))?;
+		}
 		self.execute_core(Command::StartPlay)?;
 		self.play_input_target = MovementTarget::default();
 		let session = self.session.as_ref().expect("initialized session");
 		scene.synchronize(&session.render_document())?;
+		if let Some(bank) = session.animations() {
+			scene.synchronize_animation(bank)?;
+		}
 		Ok(())
 	}
 
@@ -206,6 +220,7 @@ impl SceneEditor {
 			.expect("initialized session")
 			.authored_document();
 		scene.synchronize_retained(&document, &self.resources, None)?;
+		scene.restore_authored_animation();
 		self.refresh_selection(scene);
 		Ok(())
 	}
@@ -262,6 +277,9 @@ impl SceneEditor {
 					.into(),
 			);
 		}
+		if let Some(bank) = session.animations() {
+			scene.synchronize_animation(bank)?;
+		}
 		Ok(())
 	}
 
@@ -278,6 +296,23 @@ impl SceneEditor {
 	pub fn set_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
 		self.execute_core(Command::SetPlayInput { movement })?;
 		Ok(())
+	}
+	/// Capture every physical transition, including a down/up pair before a frame.
+	pub fn sample_play_keyboard(&mut self, input: &InputState) -> Result<(), String> {
+		if !self.is_playing() {
+			return Ok(());
+		}
+		let profile = self.play_input_profile().cloned().unwrap_or_default();
+		let keyboard = profile.resolve_keyboard(input);
+		self.session
+			.as_mut()
+			.expect("playing session")
+			.set_game_keyboard_input(&self.play_input_target, keyboard)
+	}
+	pub fn clear_play_keyboard(&mut self) {
+		if let Some(session) = &mut self.session {
+			session.clear_play_input();
+		}
 	}
 
 	pub fn set_play_movement_bindings(

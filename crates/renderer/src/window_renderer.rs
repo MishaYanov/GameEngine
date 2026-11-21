@@ -50,6 +50,25 @@ pub enum DrawStatus {
 }
 
 impl WindowRenderer {
+	/// The physical device actually selected for this presentation surface.
+	pub fn physical_device_info(&self) -> PhysicalDeviceInfo {
+		let p = unsafe {
+			self.resources
+				.instance
+				.raw()
+				.get_physical_device_properties(self.resources.device.physical_device())
+		};
+		PhysicalDeviceInfo {
+			name: unsafe { std::ffi::CStr::from_ptr(p.device_name.as_ptr()) }
+				.to_string_lossy()
+				.into_owned(),
+			device_type: p.device_type,
+			api_version: p.api_version,
+			driver_version: p.driver_version,
+			vendor_id: p.vendor_id,
+			device_id: p.device_id,
+		}
+	}
 	/// Upload a bounded group with one submission. Results preserve input order
 	/// and are ready to draw on return; staging is retained until completion.
 	pub fn upload_batch(
@@ -289,6 +308,21 @@ impl WindowRenderer {
 			&self.resources.device,
 			vertices,
 			indices,
+		)
+	}
+
+	pub fn upload_skinned_mesh(
+		&self,
+		vertices: &[Vertex],
+		indices: &[u32],
+		influences: &[crate::vulkan::mesh::SkinInfluence],
+	) -> Result<VulkanMesh, VulkanMeshError> {
+		VulkanMesh::new_skinned(
+			self.resources.instance.raw(),
+			&self.resources.device,
+			vertices,
+			indices,
+			influences,
 		)
 	}
 

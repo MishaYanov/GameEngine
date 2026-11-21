@@ -1,10 +1,27 @@
 import type { ComponentData, ComponentRecord } from '../../../../core/editor/editor-components';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
+import {
+	defaultMachine,
+	machineError,
+	machineReferences,
+	type MachineDefinition,
+} from '../../../../core/editor/state-machine.models';
+import {
+	CONTROLLER_FIELDS,
+	type CharacterControllerSettings,
+	type ControllerNumberKey,
+} from '../../../../core/editor/character-controller.models';
+import {
+	validAnimationSettings,
+	type AnimationSettings,
+} from '../../../../core/editor/animation.models';
 
 export interface ComponentTarget {
 	readonly key: string;
 	readonly name: string;
+	readonly component_views?: readonly ComponentRecord[];
+	readonly components?: readonly ComponentRecord[];
 }
 export interface ComponentDraft {
 	id: string;
@@ -14,7 +31,10 @@ export interface ComponentDraft {
 	mesh_index: string;
 	tint: boolean;
 	color: { r: string; g: string; b: string; a: string };
-	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner';
+	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner' | 'state_machine';
+	machine: MachineDefinition;
+	controller: Record<ControllerNumberKey, string> & { jump_action: string };
+	animation: AnimationSettings | null;
 	actor: string;
 	key_trigger: string;
 	door: string;
@@ -45,6 +65,14 @@ export function componentDraft(
 		tint: false,
 		color: { r: '1', g: '1', b: '1', a: '1' },
 		behavior_kind: 'key_door',
+		machine: defaultMachine(),
+		controller: {
+			...(Object.fromEntries(
+				CONTROLLER_FIELDS.map((field) => [field.key, String(field.initial)]),
+			) as Record<ControllerNumberKey, string>),
+			jump_action: 'jump',
+		},
+		animation: null,
 		actor: '',
 		key_trigger: '',
 		door: owner,
@@ -71,10 +99,28 @@ export function componentDraft(
 			b: String(color[2]),
 			a: String(color[3]),
 		};
+	} else if (value.data.kind === 'character_controller') {
+		draft.controller = {
+			...(Object.fromEntries(
+				CONTROLLER_FIELDS.map((field) => [
+					field.key,
+					String(
+						value.data.kind === 'character_controller'
+							? value.data.settings[field.key]
+							: field.initial,
+					),
+				]),
+			) as Record<ControllerNumberKey, string>),
+			jump_action: value.data.settings.jump_action,
+		};
+	} else if (value.data.kind === 'animation') {
+		draft.animation = structuredClone(value.data.settings);
 	} else if (value.data.kind === 'native_behavior') {
 		const behavior = value.data.behavior;
 		draft.behavior_kind = behavior.kind;
-		if (behavior.kind === 'timed_spawner') {
+		if (behavior.kind === 'state_machine') {
+			draft.machine = structuredClone(behavior.definition);
+		} else if (behavior.kind === 'timed_spawner') {
 			draft.prefab_path = behavior.prefab_path;
 			draft.interval_ticks = String(behavior.interval_ticks);
 			draft.max_alive = String(behavior.max_alive);
@@ -173,7 +219,49 @@ export function componentFromDraft(
 			material: draft.tint ? { base_color_factor: color } : null,
 		};
 	} else if (draft.kind === 'collider') data = { kind: 'collider', collider };
-	else if (draft.behavior_kind === 'key_door') {
+	else if (draft.kind === 'character_controller') {
+		const numbers = Object.fromEntries(
+			CONTROLLER_FIELDS.map((field) => [
+				field.key,
+				field.key.endsWith('_ticks')
+					? uint(draft.controller[field.key], field.label, field.min, field.max)
+					: finite(draft.controller[field.key], field.label, field.min, field.max),
+			]),
+		);
+		if (!/^[A-Za-z0-9_-]{1,64}$/.test(draft.controller.jump_action))
+			throw new Error('Choose the jump action ID from Game Input.');
+		data = {
+			kind: 'character_controller',
+			settings: {
+				...numbers,
+				jump_action: draft.controller.jump_action,
+			} as unknown as CharacterControllerSettings,
+		};
+	} else if (draft.kind === 'animation') {
+		if (!validAnimationSettings(draft.animation))
+			throw new Error(
+				'Review an animation asset, choose its clips, and enter a valid speed ratio.',
+			);
+		data = { kind: 'animation', settings: structuredClone(draft.animation) };
+	} else if (draft.behavior_kind === 'state_machine') {
+		const problem = machineError(draft.machine);
+		if (problem) throw new Error(problem);
+		for (const input of draft.machine.inputs) {
+			reference(input.actor, 'sensor actor');
+			reference(input.sensor, 'sensor');
+		}
+		for (const state of draft.machine.states)
+			for (const action of state.on_enter) {
+				if (action.kind === 'set_visible' || action.kind === 'set_collision_enabled')
+					reference(action.entity, 'action target');
+			}
+		for (const target of machineReferences(draft.machine))
+			reference(target.entity, 'component target');
+		data = {
+			kind: 'native_behavior',
+			behavior: { kind: 'state_machine', definition: structuredClone(draft.machine) },
+		};
+	} else if (draft.behavior_kind === 'key_door') {
 		const actor = reference(draft.actor, 'actor');
 		const trigger = reference(draft.key_trigger, 'key sensor');
 		const door = reference(draft.door, 'door');

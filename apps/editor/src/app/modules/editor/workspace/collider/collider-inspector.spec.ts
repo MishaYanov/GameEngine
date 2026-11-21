@@ -87,14 +87,12 @@ describe('ColliderInspector', () => {
         expect([...fixture.nativeElement.querySelectorAll('input,select')].every(element => (element as HTMLInputElement).disabled)).toBe(true);
     });
 
-    it('has accessible controls and invalid feedback for both shapes', async () => {
-        for (const value of [sphere, {kind: 'box', offset: [0, 0, 0], half_extents: [0.5, 0.5, 0.5]}] as const) {
+    it.each([sphere, {kind: 'box', offset: [0, 0, 0], half_extents: [0.5, 0.5, 0.5]}] as const)('has accessible controls for $kind', async value => {
             fixture.componentRef.setInput('collider', value);
             await fixture.whenStable();
             fixture.nativeElement.querySelector('details').open = true;
             const report = await axe.run(fixture.nativeElement, {rules: {'color-contrast': {enabled: false}}});
             expect(report.violations.map(violation => violation.id)).toEqual([]);
-        }
     });
 
     it('shows legacy blocking defaults and emits one unsigned layer intent without optimistic changes', async () => {

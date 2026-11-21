@@ -1,3 +1,4 @@
+mod animation_preview;
 mod asset_reimport_gpu;
 mod commands;
 mod editor;
@@ -69,6 +70,10 @@ pub fn run() {
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
 			editor_capabilities,
+			editor_animation_metadata,
+			editor_animation_preview_open,
+			editor_animation_preview_sample,
+			editor_animation_preview_close,
 			editor_open,
 			editor_open_project,
 			editor_register_scene,

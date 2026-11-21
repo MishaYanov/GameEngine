@@ -1004,6 +1004,8 @@ mod windows {
 	}
 
 	struct RenderPacket {
+		animations: Option<runtime::animation::AnimationBank>,
+		animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 		document: Option<Arc<runtime::SceneData>>,
 		camera: Camera,
 		revision: u64,
@@ -2032,6 +2034,8 @@ mod windows {
 						};
 						let camera = session.render_camera();
 						Some(RenderPacket {
+							animations: session.animations().cloned(),
+							animation_preview: workspace.active_animation_preview(),
 							document,
 							camera,
 							revision,
@@ -2055,6 +2059,8 @@ mod windows {
 				self.prepared_extent = None;
 			};
 			let RenderPacket {
+				animations,
+				animation_preview,
 				mut document,
 				camera,
 				revision,
@@ -2193,6 +2199,17 @@ mod windows {
 				gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
 			}
 			gpu.camera = camera;
+			gpu.scene.reset_animation_overrides();
+			if let Some(bank) = &animations {
+				gpu.scene.synchronize_animation(bank)?;
+			} else {
+				gpu.scene.restore_authored_animation();
+			}
+			if self.interaction.settings.view == bridge::viewport::ViewportView::Scene {
+				if let Some((key, pose)) = &animation_preview {
+					gpu.scene.set_animation_pose(key, Some(pose))?;
+				}
+			}
 			// Do not hold a strong document snapshot across frame fences or
 			// presentation. Play can mutate its uniquely owned Arc in place.
 			drop(document);

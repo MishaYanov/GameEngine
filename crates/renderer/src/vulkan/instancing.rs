@@ -54,6 +54,8 @@ pub struct DrawMetrics {
 	pub instances: u64,
 	pub triangles: u64,
 	pub instanced_draw_calls: u64,
+	pub skinned_draw_calls: u64,
+	pub skin_palette_matrices: u64,
 	pub gpu_time_ms: Option<f64>,
 	pub gpu_timestamps_supported: bool,
 }

@@ -13,6 +13,8 @@ pub const MAX_ACTIVE_NATIVE_BEHAVIORS: usize = 4096;
 pub const MESH_TYPE: &str = "engine.mesh_renderer";
 pub const COLLIDER_TYPE: &str = "engine.collider";
 pub const NATIVE_TYPE: &str = "engine.native_behavior";
+pub const CHARACTER_TYPE: &str = "engine.character_controller";
+pub const ANIMATION_TYPE: &str = "engine.animation";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -61,6 +63,9 @@ fn enabled() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeBehaviorSpec {
+	StateMachine {
+		definition: crate::state_machine::MachineDef,
+	},
 	KeyDoor {
 		actor: EntityKey,
 		key_trigger: EntityKey,
@@ -89,6 +94,7 @@ pub enum NativeBehaviorSpec {
 impl NativeBehaviorSpec {
 	pub fn entity_references(&self) -> Vec<&EntityKey> {
 		match self {
+			Self::StateMachine { definition } => definition.entity_references(),
 			Self::KeyDoor {
 				actor,
 				key_trigger,
@@ -112,10 +118,15 @@ impl NativeBehaviorSpec {
 		}
 	}
 	pub fn validate(&self) -> Result<(), String> {
+		if let Self::StateMachine { definition } = self {
+			// Validate shape before allocating the bounded reference traversal.
+			return definition.validate();
+		}
 		for key in self.entity_references() {
 			validate_reference(key)?;
 		}
 		match self {
+			Self::StateMachine { definition } => definition.validate(),
 			Self::KeyDoor {
 				actor,
 				key_trigger,
@@ -167,6 +178,7 @@ impl NativeBehaviorSpec {
 			}
 		}
 		match self {
+			Self::StateMachine { definition } => definition.remap(remap),
 			Self::KeyDoor {
 				actor,
 				key_trigger,
@@ -211,6 +223,12 @@ fn validate_reference(key: &EntityKey) -> Result<(), String> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	CharacterController {
+		settings: crate::character_controller::CharacterControllerSettings,
+	},
+	Animation {
+		settings: crate::animation::AnimationSettings,
+	},
 	MeshRenderer {
 		model_path: String,
 		#[serde(default)]
@@ -238,6 +256,8 @@ pub struct ComponentRecord {
 impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
+			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
+			ComponentData::Animation { .. } => ANIMATION_TYPE,
 			ComponentData::MeshRenderer { .. } => MESH_TYPE,
 			ComponentData::Collider { .. } => COLLIDER_TYPE,
 			ComponentData::NativeBehavior { .. } => NATIVE_TYPE,
@@ -249,6 +269,8 @@ impl ComponentRecord {
 			return Err("Unsupported component schema version".into());
 		}
 		match &self.data {
+			ComponentData::CharacterController { settings } => settings.validate(),
+			ComponentData::Animation { settings } => settings.validate(),
 			ComponentData::MeshRenderer {
 				model_path,
 				mesh_index,
@@ -286,6 +308,20 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			CHARACTER_TYPE,
+			"character_controller",
+			"Character Controller",
+			"Grounded motion for an upright scene-root box body.",
+			1,
+		),
+		(
+			ANIMATION_TYPE,
+			"animation",
+			"Animation",
+			"Deterministic native animation playback.",
+			1,
+		),
 		(
 			MESH_TYPE,
 			"mesh_renderer",
@@ -325,6 +361,8 @@ pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PropertyId {
+	CharacterController,
+	Animation,
 	Name,
 	TransformPosition,
 	TransformRotation,
@@ -341,6 +379,16 @@ pub enum PropertyId {
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(component) = &self.character_controller {
+			bytes = bytes
+				.saturating_add(component.id.as_str().len())
+				.saturating_add(component.settings.jump_action.capacity());
+		}
+		if let Some(component) = &self.animation {
+			bytes = bytes
+				.saturating_add(component.id.as_str().len())
+				.saturating_add(component.settings.retained_bytes());
+		}
 		for (kind, id) in &self.component_ids {
 			bytes = bytes
 				.saturating_add(kind.capacity())
@@ -353,6 +401,9 @@ impl EntityData {
 		);
 		for component in &self.native_behaviors {
 			bytes = bytes.saturating_add(component.id.as_str().len());
+			if let NativeBehaviorSpec::StateMachine { definition } = &component.behavior {
+				bytes = bytes.saturating_add(definition.retained_bytes());
+			}
 			for key in component.behavior.entity_references() {
 				bytes = bytes.saturating_add(key.as_str().len());
 			}
@@ -387,6 +438,26 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		if let Some(component) = &self.character_controller {
+			records.push(ComponentRecord {
+				id: component.id.clone(),
+				schema_version: 1,
+				enabled: component.enabled,
+				data: ComponentData::CharacterController {
+					settings: component.settings.clone(),
+				},
+			});
+		}
+		if let Some(component) = &self.animation {
+			records.push(ComponentRecord {
+				id: component.id.clone(),
+				schema_version: 1,
+				enabled: component.enabled,
+				data: ComponentData::Animation {
+					settings: component.settings.clone(),
+				},
+			});
+		}
 		if self.has_mesh_component() {
 			records.push(ComponentRecord {
 				id: self.component_id(MESH_TYPE),
@@ -474,6 +545,21 @@ impl EntityData {
 			return Err("This component type permits one attachment per object".into());
 		}
 		match component.data {
+			ComponentData::CharacterController { settings } => {
+				self.character_controller =
+					Some(crate::character_controller::CharacterControllerComponent {
+						id: component.id,
+						enabled: component.enabled,
+						settings,
+					})
+			}
+			ComponentData::Animation { settings } => {
+				self.animation = Some(crate::animation::AnimationComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				})
+			}
 			ComponentData::MeshRenderer {
 				model_path,
 				asset_id,
@@ -519,6 +605,8 @@ impl EntityData {
 			.find(|record| &record.id == id)
 			.ok_or("Component does not exist")?;
 		match record.data {
+			ComponentData::CharacterController { .. } => self.character_controller = None,
+			ComponentData::Animation { .. } => self.animation = None,
 			ComponentData::MeshRenderer { .. } => {
 				self.model_path = NO_MESH_PATH.into();
 				self.asset_id = None;
@@ -586,6 +674,9 @@ pub fn validate_scene_components_with_slots(
 					));
 				}
 			}
+			if let NativeBehaviorSpec::StateMachine { definition } = &component.behavior {
+				definition.validate_scene(&entities, slots)?;
+			}
 			if !component.enabled {
 				continue;
 			}
@@ -643,7 +734,8 @@ pub fn validate_scene_components_with_slots(
 							required_visual(&entities, slots, visual)?;
 						}
 					}
-					NativeBehaviorSpec::TimedSpawner { .. } => {}
+					NativeBehaviorSpec::TimedSpawner { .. }
+					| NativeBehaviorSpec::StateMachine { .. } => {}
 				}
 				Ok::<(), String>(())
 			})();
@@ -698,7 +790,7 @@ fn required_visual(
 pub fn singleton_ids(records: &[ComponentRecord]) -> BTreeMap<String, ComponentId> {
 	records
 		.iter()
-		.filter(|record| record.type_id() != NATIVE_TYPE)
+		.filter(|record| matches!(record.type_id(), MESH_TYPE | COLLIDER_TYPE))
 		.filter(|record| {
 			record.id.as_str()
 				!= if record.type_id() == MESH_TYPE {

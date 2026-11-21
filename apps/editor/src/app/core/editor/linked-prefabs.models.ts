@@ -47,6 +47,8 @@ export interface LinkedPrefabOverrideTarget {
 			| 'transform_scale'
 			| 'mesh_renderer'
 			| 'collider'
+			| 'character_controller'
+			| 'animation'
 			| 'native_behavior';
 		readonly component_id?: string;
 	};

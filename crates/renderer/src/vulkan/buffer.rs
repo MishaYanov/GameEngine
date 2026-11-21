@@ -109,6 +109,19 @@ impl VulkanBuffer {
 		)
 	}
 
+	pub(crate) fn host_storage(
+		device: &VulkanDevice,
+		size: vk::DeviceSize,
+	) -> Result<Self, VulkanBufferError> {
+		Self::with_memory_properties(
+			device,
+			size,
+			vk::BufferUsageFlags::STORAGE_BUFFER,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+			device.memory_properties(),
+		)
+	}
+
 	fn with_memory_properties(
 		device: &VulkanDevice,
 		size: vk::DeviceSize,

@@ -138,6 +138,7 @@ pub struct VulkanFrame {
 	invalidated: bool,
 	// None only while consuming a completed frame to transfer its storage.
 	instances: Option<InstanceStorage>,
+	palettes: Option<super::skinning::PaletteStorage>,
 	timer: Option<GpuTimer>,
 	metrics: DrawMetrics,
 	lighting: LightingUniform,
@@ -405,6 +406,7 @@ impl VulkanFrame {
 			completion_observed: AtomicBool::new(true),
 			invalidated: false,
 			instances: Some(instances),
+			palettes: None,
 			timer,
 			metrics,
 			lighting: LightingUniform::default(),
@@ -502,6 +504,14 @@ impl VulkanFrame {
 		}
 
 		self.prepare_instances(device, objects)?;
+		if objects.iter().any(|object| object.skin_palette().is_some()) {
+			if self.palettes.is_none() {
+				self.palettes = Some(super::skinning::PaletteStorage::new(device)?);
+			}
+			self.palettes.as_mut().unwrap().prepare(objects)?;
+		} else if let Some(palettes) = &mut self.palettes {
+			palettes.prepare(objects)?;
+		}
 
 		camera.update(camera_uniform)?;
 		camera.update_lighting(&self.lighting)?;
@@ -571,6 +581,14 @@ impl VulkanFrame {
 			.map_or((0, 0), |editor| editor.pass.draw_counts());
 		let instances = self.instances.as_ref().expect("live frame storage");
 		self.metrics = DrawMetrics {
+			skinned_draw_calls: objects
+				.iter()
+				.filter(|o| o.skin_palette().is_some())
+				.count() as u64,
+			skin_palette_matrices: self
+				.palettes
+				.as_ref()
+				.map_or(0, |p| p.matrix_count() as u64),
 			draw_calls: instances.batches.len() as u64 + editor_draws,
 			instances: objects.len() as u64,
 			triangles: instances
@@ -849,10 +867,18 @@ impl VulkanFrame {
 
 				let material = object.material();
 
-				let pipeline = pipelines.for_object(
-					material.double_sided(),
-					object.transform().flags[0] & (2 | 8) != 0,
-				);
+				let palette = object
+					.skin_palette()
+					.and(self.palettes.as_ref())
+					.and_then(|storage| storage.ranges[batch.object]);
+				let pipeline = if palette.is_some() {
+					pipelines.for_skin(material.double_sided())
+				} else {
+					pipelines.for_object(
+						material.double_sided(),
+						object.transform().flags[0] & (2 | 8) != 0,
+					)
+				};
 				let pipeline_layout = pipeline.layout();
 				if bound_pipeline != pipeline.raw() {
 					self.device.cmd_bind_pipeline(
@@ -913,7 +939,26 @@ impl VulkanFrame {
 					bound_mesh = Some(mesh_buffers);
 				}
 
+				if palette.is_some() {
+					self.device.cmd_bind_vertex_buffers(
+						self.command_buffer,
+						2,
+						&[mesh.skin_buffer().expect("validated skin buffer").raw()],
+						&[0],
+					);
+					self.device.cmd_bind_descriptor_sets(
+						self.command_buffer,
+						vk::PipelineBindPoint::GRAPHICS,
+						pipeline_layout,
+						2,
+						&[self.palettes.as_ref().unwrap().set],
+						&[],
+					);
+				}
 				let mut push_constants = *object.transform();
+				if let Some((base, count)) = palette {
+					super::skinning::apply_palette_range(&mut push_constants, base, count);
+				}
 				for (component, factor) in push_constants
 					.base_color_factor
 					.iter_mut()
@@ -986,7 +1031,8 @@ impl VulkanFrame {
 }
 
 fn batchable(object: &RenderObject<'_>) -> bool {
-	object.transform().flags[0] == 0
+	object.skin_palette().is_none()
+		&& object.transform().flags[0] == 0
 		&& object.transform().base_color_factor[3] >= 1.0
 		&& object.material().base_color_factor()[3] >= 1.0
 }

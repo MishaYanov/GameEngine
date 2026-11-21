@@ -16,6 +16,10 @@ fn advertised_modules_resolve_through_the_editors_gameplay_resolver() {
 	assert!(courtyard_gameplay::resolve(&project).is_ok());
 	let wire = serde_json::to_value(capabilities).unwrap();
 	assert_eq!(
+		wire["state_machines"],
+		serde_json::to_value(runtime::state_machine::descriptor()).unwrap()
+	);
+	assert_eq!(
 		wire["gameplay_modules"][0]["id"],
 		courtyard_gameplay::COURTYARD_RUN_ID
 	);

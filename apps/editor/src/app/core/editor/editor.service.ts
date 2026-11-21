@@ -4,6 +4,8 @@ import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {applyEditorUpdate} from './editor-updates';
 import {validGameplayModules} from './gameplay-modules';
 import {validComponentTypes} from './editor-components';
+import {validMachineDescriptor} from './state-machine.models';
+import {readAnimationReview, readAnimationPreview, type AnimationReview, type AnimationPreview} from './animation.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import type {LinkedPrefabStatus, PrefabSourceDocument, PrefabSourceDraft, PrefabSourceSave, PrefabSourceValidation} from './linked-prefabs.models';
 import type {
@@ -123,6 +125,9 @@ export class EditorService {
                 }
                 if (capabilities.component_types !== undefined && !validComponentTypes(capabilities.component_types)) {
                     throw new EditorClientError('backend', 'editor_capabilities', 'The native editor returned invalid component metadata.');
+                }
+                if (capabilities.state_machines !== undefined && !validMachineDescriptor(capabilities.state_machines)) {
+                    throw new EditorClientError('backend', 'editor_capabilities', 'The native state-machine definition is incompatible with this frontend.');
                 }
                 this.capabilitiesState.set(capabilities);
                 return capabilities;
@@ -470,6 +475,77 @@ export class EditorService {
             throw new Error('Choose a runtime page with a nonnegative offset and 1–128 entities.');
         }
         return readRuntimeInspection(await this.native<unknown>('editor_runtime_inspect', {offset, limit}), limit);
+    }
+
+    inspectAnimation(
+        assetId: string,
+        expectedGeneration: number,
+        expectedRevision: number,
+    ): Promise<AnimationReview> {
+        return this.enqueue(
+            'editor_animation_metadata',
+            async () => {
+                this.requireGeneration(expectedGeneration);
+                const result = readAnimationReview(
+                    await this.native<unknown>('editor_animation_metadata', { assetId, expectedRevision }),
+                );
+                this.requireGeneration(expectedGeneration);
+                if (result.revision !== expectedRevision)
+                    throw new Error('Animation review belongs to a different scene revision.');
+                return result;
+            },
+            false,
+            expectedGeneration,
+        );
+    }
+
+    openAnimationPreview(
+        entityKey: string,
+        clipIndex: number,
+        expectedGeneration: number,
+        expectedRevision: number,
+    ): Promise<AnimationPreview> {
+        return this.enqueue(
+            'editor_animation_preview_open',
+            async () => {
+                this.requireGeneration(expectedGeneration);
+                return readAnimationPreview(
+                    await this.native<unknown>('editor_animation_preview_open', {
+                        entityKey,
+                        clipIndex,
+                        expectedRevision,
+                    }),
+                );
+            },
+            false,
+            expectedGeneration,
+        );
+    }
+
+    sampleAnimationPreview(
+        token: string,
+        timeSeconds: number,
+        expectedGeneration: number,
+    ): Promise<AnimationPreview> {
+        return this.enqueue(
+            'editor_animation_preview_sample',
+            async () => {
+                this.requireGeneration(expectedGeneration);
+                return readAnimationPreview(
+                    await this.native<unknown>('editor_animation_preview_sample', { token, timeSeconds }),
+                );
+            },
+            false,
+            expectedGeneration,
+        );
+    }
+
+    closeAnimationPreview(token: string): Promise<void> {
+        return this.enqueue(
+            'editor_animation_preview_close',
+            () => this.native<void>('editor_animation_preview_close', { token }),
+            false,
+        );
     }
 
     /** One Angular host can own the single embedded viewport at a time. */

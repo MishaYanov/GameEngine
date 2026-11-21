@@ -62,6 +62,7 @@ pub struct EngineBuilder {
 	scene: SceneData,
 	project: ProjectData,
 	module_resolver: GameModuleResolver,
+	animation_resolver: Option<crate::animation::AnimationResolver>,
 	asset_limits: AssetRegistryLimits,
 }
 impl EngineBuilder {
@@ -71,6 +72,7 @@ impl EngineBuilder {
 			scene,
 			project,
 			module_resolver: Arc::new(resolve_default_gameplay),
+			animation_resolver: None,
 			asset_limits: AssetRegistryLimits::default(),
 		}
 	}
@@ -92,6 +94,10 @@ impl EngineBuilder {
 		self.asset_limits = limits;
 		self
 	}
+	pub fn animation_resolver(mut self, resolver: crate::animation::AnimationResolver) -> Self {
+		self.animation_resolver = Some(resolver);
+		self
+	}
 	pub fn build(self) -> Result<Engine, BackendError> {
 		let invalid = |message| BackendError {
 			code: BackendErrorCode::InvalidCommand,
@@ -105,6 +111,9 @@ impl EngineBuilder {
 		session
 			.set_module_resolver(self.module_resolver)
 			.map_err(invalid)?;
+		if let Some(resolver) = self.animation_resolver {
+			session.set_animation_resolver(resolver).map_err(invalid)?;
+		}
 		Ok(Engine {
 			session,
 			assets,

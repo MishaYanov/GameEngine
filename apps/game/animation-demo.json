@@ -1,0 +1,30 @@
+{
+  "schema_version": 3,
+  "name": "Animated Character Room",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behavior_definitions": [],
+  "behaviors": [],
+  "scenes": [
+    {
+      "id": "animation-room",
+      "asset_path": "scenes/animation-room.json"
+    }
+  ],
+  "startup_scene_id": "animation-room",
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "jump",
+        "key": "space"
+      }
+    ]
+  }
+}

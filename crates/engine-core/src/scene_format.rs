@@ -109,6 +109,8 @@ fn decode_scene(value: serde_json::Value) -> Result<SceneData, String> {
 				!entity.native_behaviors.is_empty()
 					|| !entity.component_ids.is_empty()
 					|| entity.linked_prefab.is_some()
+					|| entity.character_controller.is_some()
+					|| entity.animation.is_some()
 			}) {
 			return Err(
 				"Native component attachments and linked instances require scene schema 4".into(),

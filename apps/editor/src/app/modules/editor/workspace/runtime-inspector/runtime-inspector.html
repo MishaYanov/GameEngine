@@ -26,6 +26,14 @@
 					<dd>{{ page.timer_count }}</dd>
 					<dt>Pending spawns</dt>
 					<dd>{{ page.pending_spawns }}</dd>
+					@if (page.pending_events !== undefined) {
+						<dt>Pending signals</dt>
+						<dd>{{ page.pending_events }}</dd>
+						<dt>Machine deadlines</dt>
+						<dd>{{ page.machine_deadlines }}</dd>
+						<dt>Discarded stale signals</dt>
+						<dd>{{ page.stale_events_discarded }}</dd>
+					}
 				</dl>
 				@if (page.last_error; as message) {
 					<p role="alert" class="error">{{ message }}</p>
@@ -83,11 +91,47 @@
 							<dd>{{ item.instance_id ?? 'None' }}</dd>
 						</dl>
 						<h4>Behavior lifecycle</h4>
+						@if (motion(); as movement) {
+							<h4>Character motion at tick {{ movement.tick }}</h4>
+							<dl>
+								<dt>Support</dt>
+								<dd>{{ movement.grounded ? 'Grounded' : 'Airborne' }}</dd>
+								<dt>Planar speed</dt>
+								<dd>{{ movement.planar_speed }}</dd>
+								<dt>Vertical speed</dt>
+								<dd>{{ movement.vertical_speed }}</dd>
+								<dt>Last jump tick</dt>
+								<dd>{{ movement.jumped_at_tick ?? 'None' }}</dd>
+								<dt>Last landing tick</dt>
+								<dd>{{ movement.landed_at_tick ?? 'None' }}</dd>
+							</dl>
+						}
+						@if (animation(); as pose) {
+							<h4>Animation</h4>
+							<dl>
+								<dt>Clip index</dt>
+								<dd>{{ pose.clip_index }}</dd>
+								<dt>Clip ticks</dt>
+								<dd>{{ pose.elapsed_ticks }}</dd>
+								<dt>Locomotion</dt>
+								<dd>{{ pose.mode }}</dd>
+								<dt>Playback</dt>
+								<dd>
+									{{ pose.playing ? 'Playing' : 'Stopped' }}{{ pose.blending ? ' · Blending' : '' }}
+								</dd>
+							</dl>
+						}
 						<ul aria-label="Runtime behavior states">
 							@for (behavior of item.behavior_states; track behavior.component_id) {
 								<li>
 									{{ behavior.kind }} · {{ behavior.activated ? 'Activated' : 'Not activated' }} ·
 									{{ behavior.elapsed_ticks }} ticks
+									@if (behavior.machine_state) {
+										<span
+											>State {{ behavior.machine_state }} · Entered at
+											{{ behavior.entered_step }}</span
+										>
+									}
 									<span class="reference">{{ behavior.component_id }}</span>
 								</li>
 							} @empty {

@@ -15,6 +15,27 @@ use renderer::vulkan::{ModelPushConstants, RenderObject};
 /// Bounds CPU submission storage independently of the renderer's GPU buffers.
 pub const MAX_SCENE_RENDER_OBJECTS: usize = 65_536;
 
+pub(crate) fn validate_animation_placements(
+	data: &SceneData,
+	matrices: &[glam::Mat4],
+) -> Result<(), String> {
+	for (entity, matrix) in data.entities.iter().zip(matrices) {
+		if entity.animation.is_some() {
+			validate_animation_placement(&entity.name, *matrix)?;
+		}
+	}
+	Ok(())
+}
+fn validate_animation_placement(name: &str, matrix: glam::Mat4) -> Result<(), String> {
+	engine_core::animation::checked_similarity_inverse(matrix)
+		.map(|_| ())
+		.map_err(|error| {
+			format!(
+				"Animated entity {name:?} needs positive uniform world scale and no reflection/shear: {error}"
+			)
+		})
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntityId(u64);
 
@@ -35,6 +56,8 @@ struct SceneEntry {
 	component_ids: BTreeMap<String, engine_core::components::ComponentId>,
 	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
 	linked_prefab: Option<engine_core::linked_prefab::LinkedPrefabInstance>,
+	animation: Option<engine_core::animation::AnimationComponent>,
+	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
 }
 
 #[derive(Clone, Default)]
@@ -48,6 +71,7 @@ pub struct Scene {
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
 	authored_children: Option<Vec<Vec<usize>>>,
+	animation_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone)]
@@ -77,6 +101,55 @@ impl EntitySnapshot {
 }
 
 impl Scene {
+	pub fn set_animation_root(&mut self, root: std::path::PathBuf) {
+		self.animation_root = Some(root);
+	}
+	pub fn animation_root(&self) -> Option<&std::path::Path> {
+		self.animation_root.as_deref()
+	}
+	pub fn restore_authored_animation(&mut self) {
+		for entry in &mut self.entries {
+			entry.instance.restore_authored_animation();
+		}
+	}
+	pub fn reset_animation_overrides(&mut self) {
+		for entry in &mut self.entries {
+			entry.instance.reset_animation_override();
+		}
+	}
+	pub fn set_animation_pose(
+		&mut self,
+		key: &EntityKey,
+		pose: Option<&engine_core::animation::AnimationPose>,
+	) -> Result<(), String> {
+		let id = self
+			.entity_by_key(key)
+			.ok_or("Animation preview entity no longer exists")?;
+		let index = self.id_indices[&id];
+		match pose {
+			Some(pose) => self.entries[index].instance.set_animation_pose(pose, false),
+			None => {
+				self.entries[index].instance.reset_animation_override();
+				Ok(())
+			}
+		}
+	}
+	pub fn synchronize_animation(
+		&mut self,
+		bank: &engine_core::animation::AnimationBank,
+	) -> Result<(), String> {
+		for (key, pose) in bank.poses() {
+			let id = self
+				.entity_by_key(key)
+				.ok_or("Animation entity is missing from native scene")?;
+			let index = self.id_indices[&id];
+			self.entries[index]
+				.instance
+				.set_animation_pose(pose, true)?;
+		}
+		Ok(())
+	}
+
 	pub fn camera_follow(&self) -> Option<&engine_core::game_camera::FollowCameraSettings> {
 		self.camera_follow.as_ref()
 	}
@@ -135,6 +208,8 @@ impl Scene {
 						&& entry.component_ids == saved.component_ids
 						&& entry.native_behaviors == saved.native_behaviors
 						&& entry.linked_prefab == saved.linked_prefab
+						&& entry.animation == saved.animation
+						&& entry.character_controller == saved.character_controller
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -307,6 +382,8 @@ impl Scene {
 			component_ids: BTreeMap::new(),
 			native_behaviors: Vec::new(),
 			linked_prefab: None,
+			animation: None,
+			character_controller: None,
 		});
 		self.authored_children = None;
 
@@ -390,14 +467,17 @@ impl Scene {
 		let world_matrices = self.cached_world_matrices()?;
 		for (entry, matrix) in self.entries.iter().zip(world_matrices.iter().copied()) {
 			let instance = &entry.instance;
+			if instance.animation_palette().is_some() {
+				validate_animation_placement(&entry.name, matrix)?;
+			}
 			stats.total_entities += 1;
 			if !entry.renderable {
 				continue;
 			}
 			let outside = frustum.is_some_and(|frustum| {
 				instance
-					.model()
-					.bounds()
+					.animation_bounds()
+					.or_else(|| instance.model().bounds())
 					.and_then(|bounds| bounds.transformed(matrix).ok())
 					.is_some_and(|bounds| !frustum.intersects(bounds))
 			});
@@ -407,7 +487,7 @@ impl Scene {
 			}
 			stats.visible_entities += 1;
 			let mut constants = ModelPushConstants::identity();
-			constants.model = matrix.to_cols_array();
+			constants.model = (matrix * instance.animation_mesh_matrix()).to_cols_array();
 			if let Some(material) = &entry.material {
 				constants.base_color_factor = material.base_color_factor;
 			}
@@ -417,7 +497,11 @@ impl Scene {
 			for part in instance.model().parts() {
 				stats.draw_calls += 1;
 				stats.triangles += part.mesh().index_count() as usize / 3;
-				objects.push(RenderObject::new(part.mesh(), part.material(), constants));
+				let mut object = RenderObject::new(part.mesh(), part.material(), constants);
+				if let Some(palette) = instance.animation_palette() {
+					object = object.with_skin_palette(palette);
+				}
+				objects.push(object);
 			}
 		}
 
@@ -462,6 +546,8 @@ impl Scene {
 				component_ids: entry.component_ids.clone(),
 				native_behaviors: entry.native_behaviors.clone(),
 				linked_prefab: entry.linked_prefab.clone(),
+				animation: entry.animation.clone(),
+				character_controller: entry.character_controller.clone(),
 			});
 		}
 
@@ -604,6 +690,8 @@ impl Scene {
 			}
 		}
 		entry.linked_prefab = source_metadata.linked_prefab;
+		entry.animation = source_metadata.animation;
+		entry.character_controller = source_metadata.character_controller;
 		Ok(id)
 	}
 
@@ -626,6 +714,10 @@ impl Scene {
 		entry.component_ids.clone_from(&data.component_ids);
 		entry.native_behaviors.clone_from(&data.native_behaviors);
 		entry.linked_prefab.clone_from(&data.linked_prefab);
+		entry.animation.clone_from(&data.animation);
+		entry
+			.character_controller
+			.clone_from(&data.character_controller);
 		self.authored_children = None;
 		*self.world_cache.get_mut() = None;
 		Ok(())
@@ -635,6 +727,7 @@ impl Scene {
 	/// sources are unchanged. Returns false when the GPU factory must rebuild.
 	pub fn synchronize(&mut self, data: &SceneData) -> Result<bool, String> {
 		let world = data.validated_world_matrices()?;
+		validate_animation_placements(data, &world)?;
 		if !self.synchronize_entries(data) {
 			return Ok(false);
 		}
@@ -653,6 +746,7 @@ impl Scene {
 						&& entry.model_path.as_deref() == Some(entity.model_path.as_str())
 						&& entry.asset_id == entity.asset_id
 						&& entry.mesh_index == entity.mesh_index
+						&& entry.animation == entity.animation
 						&& (!entity.renderable
 							|| entry.renderable || !entry.instance.model().parts().is_empty())
 				}) {
@@ -672,6 +766,10 @@ impl Scene {
 			entry.component_ids.clone_from(&entity.component_ids);
 			entry.native_behaviors.clone_from(&entity.native_behaviors);
 			entry.linked_prefab.clone_from(&entity.linked_prefab);
+			entry.animation.clone_from(&entity.animation);
+			entry
+				.character_controller
+				.clone_from(&entity.character_controller);
 		}
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
@@ -712,6 +810,7 @@ impl Scene {
 				|| entry.model_path.as_deref() != Some(entity.model_path.as_str())
 				|| entry.asset_id != entity.asset_id
 				|| entry.mesh_index != entity.mesh_index
+				|| entry.animation != entity.animation
 				|| (entity.renderable
 					&& !entry.renderable
 					&& entry.instance.model().parts().is_empty())
@@ -783,6 +882,11 @@ impl Scene {
 				}
 			}
 		}
+		for (&index, &matrix) in &matrices {
+			if self.entries[index].animation.is_some() {
+				validate_animation_placement(&self.entries[index].name, matrix)?;
+			}
+		}
 		for index in changed {
 			let entity = &data.entities[index];
 			let entry = &mut self.entries[index];
@@ -799,6 +903,10 @@ impl Scene {
 			entry.component_ids.clone_from(&entity.component_ids);
 			entry.native_behaviors.clone_from(&entity.native_behaviors);
 			entry.linked_prefab.clone_from(&entity.linked_prefab);
+			entry.animation.clone_from(&entity.animation);
+			entry
+				.character_controller
+				.clone_from(&entity.character_controller);
 		}
 		if let Some(cache) = self.world_cache.get_mut() {
 			for (index, matrix) in matrices {
@@ -838,6 +946,7 @@ impl Scene {
 						entry.model_path.as_deref() == Some(entity.model_path.as_str())
 							&& entry.asset_id == entity.asset_id
 							&& entry.mesh_index == entity.mesh_index
+							&& entry.animation == entity.animation
 					})
 				});
 				if !all_prepared {
@@ -866,6 +975,7 @@ impl Scene {
 			if entry.model_path.as_deref() != Some(entity.model_path.as_str())
 				|| entry.asset_id != entity.asset_id
 				|| entry.mesh_index != entity.mesh_index
+				|| entry.animation != entity.animation
 				|| (entity.renderable
 					&& !entry.renderable
 					&& entry.instance.model().parts().is_empty())
@@ -898,6 +1008,10 @@ impl Scene {
 			entry.component_ids.clone_from(&entity.component_ids);
 			entry.native_behaviors.clone_from(&entity.native_behaviors);
 			entry.linked_prefab.clone_from(&entity.linked_prefab);
+			entry.animation.clone_from(&entity.animation);
+			entry
+				.character_controller
+				.clone_from(&entity.character_controller);
 			self.world_cache
 				.get_mut()
 				.as_mut()
@@ -963,11 +1077,13 @@ impl Scene {
 		supplied_model: Option<&ModelInstance>,
 	) -> Result<(), String> {
 		let world = data.validated_world_matrices()?;
+		validate_animation_placements(data, &world)?;
 		if self.synchronize_entries(data) {
 			*self.world_cache.get_mut() = Some(world);
 			return Ok(());
 		}
 		let mut next = Scene {
+			animation_root: self.animation_root.clone(),
 			next_id: self.next_id,
 			bindings: data.bindings.clone(),
 			lights: data.lights.clone(),
@@ -985,6 +1101,7 @@ impl Scene {
 				if entry.model_path.as_deref() != Some(entity.model_path.as_str())
 					|| entry.asset_id != entity.asset_id
 					|| entry.mesh_index != entity.mesh_index
+					|| entry.animation != entity.animation
 					|| (entity.renderable
 						&& !entry.renderable
 						&& entry.instance.model().parts().is_empty())
@@ -997,6 +1114,7 @@ impl Scene {
 					entry.model_path.as_deref() == Some(entity.model_path.as_str())
 						&& entry.asset_id == entity.asset_id
 						&& entry.mesh_index == entity.mesh_index
+						&& entry.animation == entity.animation
 						&& (!entity.renderable
 							|| entry.renderable || !entry.instance.model().parts().is_empty())
 				});
@@ -1037,6 +1155,8 @@ impl Scene {
 					component_ids: entity.component_ids.clone(),
 					native_behaviors: entity.native_behaviors.clone(),
 					linked_prefab: entity.linked_prefab.clone(),
+					animation: entity.animation.clone(),
+					character_controller: entity.character_controller.clone(),
 				}
 			};
 			let transform = entry.instance.transform_mut();
@@ -1052,6 +1172,10 @@ impl Scene {
 			entry.component_ids.clone_from(&entity.component_ids);
 			entry.native_behaviors.clone_from(&entity.native_behaviors);
 			entry.linked_prefab.clone_from(&entity.linked_prefab);
+			entry.animation.clone_from(&entity.animation);
+			entry
+				.character_controller
+				.clone_from(&entity.character_controller);
 			object_count = object_count
 				.checked_add(entry.instance.model().parts().len())
 				.ok_or("Scene render-object count overflow")?;
@@ -1112,8 +1236,8 @@ impl Scene {
 	pub fn world_bounds(&self, id: EntityId) -> Result<Option<crate::Bounds3>, String> {
 		let instance = self.get(id).ok_or("Entity is missing")?;
 		instance
-			.model()
-			.bounds()
+			.animation_bounds()
+			.or_else(|| instance.model().bounds())
 			.map(|bounds| bounds.transformed(self.world_matrix(id)?))
 			.transpose()
 	}

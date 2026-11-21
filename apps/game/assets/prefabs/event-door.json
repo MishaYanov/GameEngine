@@ -1,0 +1,689 @@
+{
+  "schema_version": 3,
+  "entities": [
+    {
+      "key": "left",
+      "name": "left",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.5,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 2,
+                "mask": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "logic",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "native_behavior",
+            "behavior": {
+              "kind": "state_machine",
+              "definition": {
+                "schema_version": 1,
+                "initial": "ready",
+                "inputs": [
+                  {
+                    "id": "touch",
+                    "sensor": "left",
+                    "actor": "slot-actor",
+                    "signal": "activated"
+                  }
+                ],
+                "states": [
+                  {
+                    "id": "ready",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": null
+                        },
+                        "next": "latched"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "latched",
+                    "on_enter": [
+                      {
+                        "kind": "emit",
+                        "target": {
+                          "entity": "door",
+                          "component": "logic"
+                        },
+                        "signal": "activated"
+                      }
+                    ],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "reset",
+                          "source": {
+                            "entity": "door",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "ready"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "right",
+      "name": "right",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.5,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 2,
+                "mask": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "logic",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "native_behavior",
+            "behavior": {
+              "kind": "state_machine",
+              "definition": {
+                "schema_version": 1,
+                "initial": "ready",
+                "inputs": [
+                  {
+                    "id": "touch",
+                    "sensor": "right",
+                    "actor": "slot-actor",
+                    "signal": "activated"
+                  }
+                ],
+                "states": [
+                  {
+                    "id": "ready",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": null
+                        },
+                        "next": "latched"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "latched",
+                    "on_enter": [
+                      {
+                        "kind": "emit",
+                        "target": {
+                          "entity": "door",
+                          "component": "logic"
+                        },
+                        "signal": "activated"
+                      }
+                    ],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "reset",
+                          "source": {
+                            "entity": "door",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "ready"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "door",
+      "name": "door",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/cube.glb",
+            "material": {
+              "base_color_factor": [
+                0.7,
+                0.2,
+                0.15,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                1.8,
+                1.5,
+                0.25
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 4,
+                "mask": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "logic",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "native_behavior",
+            "behavior": {
+              "kind": "state_machine",
+              "definition": {
+                "schema_version": 1,
+                "initial": "closed",
+                "inputs": [],
+                "states": [
+                  {
+                    "id": "closed",
+                    "on_enter": [
+                      {
+                        "kind": "set_collision_enabled",
+                        "entity": "door",
+                        "enabled": true
+                      }
+                    ],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": {
+                            "entity": "left",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "left_only"
+                      },
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": {
+                            "entity": "right",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "right_only"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "left_only",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": {
+                            "entity": "right",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "open"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "right_only",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "activated",
+                          "source": {
+                            "entity": "left",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "open"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "open",
+                    "on_enter": [
+                      {
+                        "kind": "set_collision_enabled",
+                        "entity": "door",
+                        "enabled": false
+                      },
+                      {
+                        "kind": "set_visible",
+                        "entity": "door",
+                        "visible": false
+                      }
+                    ],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "after_ticks",
+                          "ticks": 180
+                        },
+                        "next": "resetting"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "resetting",
+                    "on_enter": [
+                      {
+                        "kind": "set_collision_enabled",
+                        "entity": "door",
+                        "enabled": true
+                      },
+                      {
+                        "kind": "set_visible",
+                        "entity": "door",
+                        "visible": true
+                      },
+                      {
+                        "kind": "emit",
+                        "target": {
+                          "entity": "left",
+                          "component": "logic"
+                        },
+                        "signal": "reset"
+                      },
+                      {
+                        "kind": "emit",
+                        "target": {
+                          "entity": "right",
+                          "component": "logic"
+                        },
+                        "signal": "reset"
+                      }
+                    ],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "after_ticks",
+                          "ticks": 1
+                        },
+                        "next": "closed"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "pickup",
+      "name": "pickup",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -5.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/robot.glb",
+            "material": {
+              "base_color_factor": [
+                0.8,
+                0.15,
+                1,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "sphere",
+              "radius": 0.5,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 2,
+                "mask": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "logic",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "native_behavior",
+            "behavior": {
+              "kind": "state_machine",
+              "definition": {
+                "schema_version": 1,
+                "initial": "present",
+                "inputs": [
+                  {
+                    "id": "touch",
+                    "sensor": "pickup",
+                    "actor": "slot-actor",
+                    "signal": "collected"
+                  }
+                ],
+                "states": [
+                  {
+                    "id": "present",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "collected",
+                          "source": null
+                        },
+                        "next": "spent"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "spent",
+                    "on_enter": [
+                      {
+                        "kind": "set_visible",
+                        "entity": "pickup",
+                        "visible": false
+                      },
+                      {
+                        "kind": "set_collision_enabled",
+                        "entity": "pickup",
+                        "enabled": false
+                      },
+                      {
+                        "kind": "emit",
+                        "target": {
+                          "entity": "complete",
+                          "component": "logic"
+                        },
+                        "signal": "collected"
+                      }
+                    ],
+                    "transitions": []
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "complete",
+      "name": "complete",
+      "transform": {
+        "position": [
+          0,
+          1,
+          -6.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": false,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "props/sphere.glb",
+            "material": {
+              "base_color_factor": [
+                0.1,
+                1,
+                0.2,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "logic",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "native_behavior",
+            "behavior": {
+              "kind": "state_machine",
+              "definition": {
+                "schema_version": 1,
+                "initial": "waiting",
+                "inputs": [],
+                "states": [
+                  {
+                    "id": "waiting",
+                    "on_enter": [],
+                    "transitions": [
+                      {
+                        "when": {
+                          "kind": "signal",
+                          "signal": "collected",
+                          "source": {
+                            "entity": "pickup",
+                            "component": "logic"
+                          }
+                        },
+                        "next": "done"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "done",
+                    "on_enter": [
+                      {
+                        "kind": "set_visible",
+                        "entity": "complete",
+                        "visible": true
+                      }
+                    ],
+                    "transitions": []
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "reference_slots": {
+    "actor": "slot-actor"
+  }
+}

@@ -37,6 +37,8 @@ pub struct RuntimeBehaviorStateDto {
 	pub kind: String,
 	pub activated: bool,
 	pub elapsed_ticks: u32,
+	pub machine_state: Option<String>,
+	pub entered_step: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeEntityDto {
@@ -57,6 +59,12 @@ pub struct RuntimeInspectionDto {
 	pub entities: Vec<RuntimeEntityDto>,
 	pub timer_count: usize,
 	pub pending_spawns: usize,
+	pub pending_events: usize,
+	pub event_sequence: u64,
+	pub machine_deadlines: usize,
+	pub stale_events_discarded: u64,
+	pub character_motion: Vec<crate::character_controller::CommittedMotion>,
+	pub animations: Vec<crate::animation::AnimationInspection>,
 	pub last_error: Option<String>,
 }
 
@@ -100,6 +108,11 @@ pub(crate) struct RuntimeLifecycle {
 	generations: Arc<BTreeMap<EntityKey, u64>>,
 	instances: Arc<RuntimeInstances>,
 	pub states: BTreeMap<(EntityKey, ComponentId), NativeBehaviorState>,
+	pub machines:
+		Arc<BTreeMap<(EntityKey, ComponentId), Arc<crate::state_machine::CompiledMachine>>>,
+	pub machine_states: BTreeMap<(EntityKey, ComponentId), crate::state_machine::MachineInstance>,
+	pub events: crate::gameplay_events::EventQueue,
+	pub stale_events_discarded: u64,
 	timers: Vec<RuntimeTimer>,
 	requests: BTreeMap<u64, RuntimeSpawnRequest>,
 	pub last_error: Option<String>,
@@ -156,6 +169,13 @@ impl RuntimeLifecycle {
 			),
 			instances: Arc::new(RuntimeInstances::default()),
 			states: BTreeMap::new(),
+			machines: Arc::new(
+				Self::compile_machines(&world.data().entities)
+					.expect("runtime world has validated machine definitions"),
+			),
+			machine_states: BTreeMap::new(),
+			events: crate::gameplay_events::EventQueue::default(),
+			stale_events_discarded: 0,
 			timers: Vec::new(),
 			requests: BTreeMap::new(),
 			last_error: None,
@@ -190,9 +210,66 @@ impl RuntimeLifecycle {
 					.any(|component| &component.id == id)
 			})
 		});
+		let live = |(key, id): &(EntityKey, ComponentId)| {
+			world.entity_index(key).is_some_and(|index| {
+				world.data().entities[index]
+					.native_behaviors
+					.iter()
+					.any(|component| {
+						&component.id == id
+							&& component.enabled && matches!(
+							component.behavior,
+							NativeBehaviorSpec::StateMachine { .. }
+						)
+					})
+			})
+		};
+		if self.machines.keys().any(|address| !live(address)) {
+			Arc::make_mut(&mut self.machines).retain(|address, _| live(address));
+		}
+		self.machine_states.retain(|address, _| live(address));
 	}
 	pub fn needs_tick(&self) -> bool {
 		!self.timers.is_empty()
+			|| self.events.len() > 0
+			|| self.machines.iter().any(|(address, definition)| {
+				self.machine_states.get(address).is_none_or(|state| {
+					!state.initialized || definition.states[state.state].timer.is_some()
+				})
+			})
+	}
+	pub fn machine_deadlines(&self) -> usize {
+		self.machine_states
+			.iter()
+			.filter(|(address, state)| {
+				state.initialized
+					&& self
+						.machines
+						.get(*address)
+						.is_some_and(|definition| definition.states[state.state].timer.is_some())
+			})
+			.count()
+	}
+	fn compile_machines(
+		entities: &[EntityData],
+	) -> Result<
+		BTreeMap<(EntityKey, ComponentId), Arc<crate::state_machine::CompiledMachine>>,
+		String,
+	> {
+		let mut definitions = BTreeMap::new();
+		for entity in entities {
+			for component in &entity.native_behaviors {
+				if component.enabled
+					&& let NativeBehaviorSpec::StateMachine { definition } = &component.behavior
+				{
+					definitions.insert(
+						(entity.key.clone(), component.id.clone()),
+						Arc::new(crate::state_machine::compile(definition)?),
+					);
+				}
+			}
+		}
+		Ok(definitions)
 	}
 	pub fn requests(&self) -> Vec<RuntimeSpawnRequest> {
 		self.requests.values().cloned().collect()
@@ -347,6 +424,7 @@ impl RuntimeLifecycle {
 		Ok(data)
 	}
 	pub fn admit(&mut self, prepared: &PreparedRuntimeSpawn, tick: u64) -> Result<(), String> {
+		let machines = Self::compile_machines(&prepared.entities)?;
 		let next_revision = self
 			.topology_revision
 			.checked_add(1)
@@ -374,6 +452,9 @@ impl RuntimeLifecycle {
 			})
 			.transpose()?;
 		self.topology_revision = next_revision;
+		if !machines.is_empty() {
+			Arc::make_mut(&mut self.machines).extend(machines);
+		}
 		self.next_instance = prepared.instance_serial + 1;
 		let keys: Vec<_> = prepared
 			.entities
@@ -485,6 +566,12 @@ impl RuntimeLifecycle {
 			}
 		}
 		self.states.retain(|(key, _), _| !keys.contains(key));
+		if self.machines.keys().any(|(key, _)| keys.contains(key)) {
+			Arc::make_mut(&mut self.machines).retain(|(key, _), _| !keys.contains(key));
+		}
+		self.machine_states
+			.retain(|(key, _), _| !keys.contains(key));
+		self.events.remove_owners(keys);
 		self.timers
 			.retain(|timer| !keys.contains(&timer.target.key));
 		self.requests
@@ -525,10 +612,27 @@ impl RuntimeLifecycle {
 									NativeBehaviorSpec::KeyDoor { .. } => "key_door",
 									NativeBehaviorSpec::Collectible { .. } => "collectible",
 									NativeBehaviorSpec::TimedSpawner { .. } => "timed_spawner",
+									NativeBehaviorSpec::StateMachine { .. } => "state_machine",
 								}
 								.into(),
 								activated: state.activated,
 								elapsed_ticks: state.elapsed_ticks,
+								machine_state: self
+									.machine_states
+									.get(&(entity.key.clone(), component.id.clone()))
+									.filter(|state| state.initialized)
+									.and_then(|state| {
+										self.machines
+											.get(&(entity.key.clone(), component.id.clone()))
+											.map(|definition| {
+												definition.states[state.state].id.clone()
+											})
+									}),
+								entered_step: self
+									.machine_states
+									.get(&(entity.key.clone(), component.id.clone()))
+									.filter(|state| state.initialized)
+									.map(|state| state.entered_step),
 							}
 						})
 						.collect(),
@@ -541,6 +645,24 @@ impl RuntimeLifecycle {
 	}
 	pub fn request_count(&self) -> usize {
 		self.requests.len()
+	}
+	/// Deterministic native-state evidence. UUID ownership is normalized to a
+	/// same-world predicate while key/generation identity remains observable.
+	pub fn replay_state(&self) -> serde_json::Value {
+		let handle = |h: &RuntimeEntityHandle| serde_json::json!({"entity":h.key,"generation":h.generation,"same_world":h.world_id==self.world_id});
+		let machines=self.machines.iter().map(|((key,id),definition)| {
+			let state=self.machine_states.get(&(key.clone(),id.clone())).cloned().unwrap_or_default();
+			let index=if state.initialized{state.state}else{definition.initial};
+			serde_json::json!({"entity":key,"generation":self.generations.get(key),"component":id,"state":definition.states[index].id,"entered_step":state.entered_step,"initialized":state.initialized})
+		}).collect::<Vec<_>>();
+		serde_json::json!({
+			"events":self.events.replay_state(&self.world_id),"stale_events_discarded":self.stale_events_discarded,
+			"machines":machines,"topology_revision":self.topology_revision,"next_instance":self.next_instance,"next_request":self.next_request,"generations":self.generations.as_ref(),
+			"legacy_states":self.states.iter().map(|((key,id),state)|serde_json::json!({"entity":key,"component":id,"state":state})).collect::<Vec<_>>(),
+			"timers":self.timers.iter().map(|timer|serde_json::json!({"target":handle(&timer.target),"due_tick":timer.due})).collect::<Vec<_>>(),
+			"requests":self.requests.values().map(|r|serde_json::json!({"id":r.id,"owner":handle(&r.owner),"component":r.component_id,"prefab_path":r.prefab_path,"bindings":r.bindings,"position":r.position,"lifetime_ticks":r.lifetime_ticks})).collect::<Vec<_>>(),
+			"instances":self.instances.by_id.iter().map(|(id,i)|serde_json::json!({"id":id,"entities":i.keys,"owner":i.owner.as_ref().map(handle),"component":i.component_id})).collect::<Vec<_>>()
+		})
 	}
 }
 

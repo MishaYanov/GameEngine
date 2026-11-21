@@ -11,6 +11,14 @@ pub struct VulkanMesh {
 	vertex_buffer: VulkanBuffer,
 	index_buffer: VulkanBuffer,
 	index_count: u32,
+	skin: Option<VulkanBuffer>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SkinInfluence {
+	pub joints: [u16; 4],
+	pub weights: [f32; 4],
 }
 
 #[derive(Debug)]
@@ -81,6 +89,7 @@ impl VulkanMesh {
 			vertex_buffer,
 			index_buffer,
 			index_count: 0,
+			skin: None,
 		})
 	}
 
@@ -145,6 +154,7 @@ impl VulkanMesh {
 				vertex_buffer,
 				index_buffer,
 				index_count,
+				skin: None,
 			},
 			[vertices, indices],
 		))
@@ -152,6 +162,24 @@ impl VulkanMesh {
 
 	pub fn vertex_buffer(&self) -> &VulkanBuffer {
 		&self.vertex_buffer
+	}
+
+	pub fn new_skinned(
+		instance: &Instance,
+		device: &VulkanDevice,
+		vertices: &[Vertex],
+		indices: &[u32],
+		influences: &[SkinInfluence],
+	) -> Result<Self, VulkanMeshError> {
+		if vertices.len() != influences.len() {
+			return Err(VulkanMeshError::TooManyIndices);
+		}
+		let mut mesh = Self::new(instance, device, vertices, indices)?;
+		mesh.skin = Some(VulkanBuffer::vertex(instance, device, influences)?);
+		Ok(mesh)
+	}
+	pub fn skin_buffer(&self) -> Option<&VulkanBuffer> {
+		self.skin.as_ref()
 	}
 
 	pub fn index_buffer(&self) -> &VulkanBuffer {

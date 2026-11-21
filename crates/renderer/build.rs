@@ -12,6 +12,7 @@ fn main() {
 
 	compile_shader("shaders/triangle.frag", "triangle.frag.spv");
 	for shader in [
+		"skinned.vert",
 		"editor-grid.vert",
 		"editor-grid.frag",
 		"editor-lines.vert",

@@ -14,6 +14,11 @@ import {
 	type ColliderKind,
 } from '../collider/collider';
 import { componentDraft, componentFromDraft, type ComponentTarget } from './component-draft';
+import { MachineEditor } from './machine-editor';
+import { CONTROLLER_FIELDS } from '../../../../core/editor/character-controller.models';
+import type { MachineDefinition } from '../../../../core/editor/state-machine.models';
+import type { AnimationSettings } from '../../../../core/editor/animation.models';
+import { AnimationEditor } from './animation-editor';
 
 export type ComponentEditIntent =
 	| { readonly kind: 'add'; readonly component: ComponentRecord; readonly expected: string | null }
@@ -27,7 +32,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-	imports: [FormField, ColliderInspector],
+	imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -42,6 +47,7 @@ export class ComponentEditor {
 	readonly pending = input(false);
 	readonly error = input<string | null>(null);
 	readonly acknowledged = input(0);
+	readonly previewAllowed = input(false);
 	readonly actionRequested = output<ComponentEditIntent>();
 	readonly draftOpenChanged = output<boolean>();
 	protected readonly open = signal(false);
@@ -50,9 +56,20 @@ export class ComponentEditor {
 	protected readonly fields = form(this.draft);
 	protected readonly collider = signal<Collider>(defaultCollider('box')!);
 	protected readonly colliderInvalid = signal(false);
+	protected readonly animationPending = signal(false);
 	protected readonly original = signal<ComponentRecord | undefined>(undefined);
 	protected readonly axes = ['x', 'y', 'z'] as const;
 	protected readonly colors = ['r', 'g', 'b', 'a'] as const;
+	protected readonly controllerFields = CONTROLLER_FIELDS;
+	protected readonly previewSourceMatches = computed(() => {
+		const original = this.original();
+		return (
+			this.previewAllowed() &&
+			original?.data.kind === 'animation' &&
+			JSON.stringify(original.data.settings.source) ===
+				JSON.stringify(this.draft().animation?.source)
+		);
+	});
 	protected readonly available = computed(() => this.editable() && !this.pending());
 	protected readonly addTypes = computed(() =>
 		this.components().length >= 16
@@ -68,6 +85,7 @@ export class ComponentEditor {
 	);
 	protected readonly candidate = computed(() => {
 		try {
+			if (this.animationPending()) throw new Error('Wait for animation preparation to finish.');
 			if (this.colliderInvalid()) throw new Error('Finish or discard the invalid collider value.');
 			return {
 				value: componentFromDraft(
@@ -134,6 +152,7 @@ export class ComponentEditor {
 				key_door: 'Key and Door',
 				collectible: 'Collectible',
 				timed_spawner: 'Timed Spawner',
+				state_machine: 'State Machine',
 			}[component.data.behavior.kind];
 		return (
 			this.types().find((type) => type.kind === component.data.kind)?.label ??
@@ -208,6 +227,12 @@ export class ComponentEditor {
 				...value,
 				bindings: [...value.bindings, { name: '', target: '' }],
 			}));
+	}
+	protected machineChanged(machine: MachineDefinition): void {
+		this.draft.update((draft) => ({ ...draft, machine }));
+	}
+	protected animationChanged(animation: AnimationSettings): void {
+		this.draft.update((draft) => ({ ...draft, animation }));
 	}
 	protected binding(index: number, field: 'name' | 'target', value: string): void {
 		this.draft.update((draft) => ({

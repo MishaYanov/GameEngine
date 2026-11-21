@@ -173,6 +173,11 @@ fn signatures(
 		budget.preflight_json(&bytes).map_err(|e| e.to_string())?;
 	}
 	let parsed = gltf::Gltf::from_slice(&bytes).map_err(|e| e.to_string())?;
+	if parsed.skins().len() > 0 {
+		// The shared CPU decoder owns skin/clip validation; the static scene
+		// importer deliberately rejects skins and is not used for this path.
+		bridge::animation_asset::decode(&bytes)?;
+	}
 	if self_contained
 		&& (parsed.buffers().any(
 			|b| matches!(b.source(),gltf::buffer::Source::Uri(uri) if !uri.starts_with("data:")),
@@ -683,6 +688,15 @@ fn prefab_dependencies(
 ) -> Result<Vec<AssetId>, String> {
 	let mut dependencies = HashSet::new();
 	for entity in &prefab.entities {
+		if let Some(animation) = &entity.animation {
+			let asset = catalog
+				.by_id(&animation.settings.source.asset_id)
+				.ok_or("Prefab animation source is not registered")?;
+			if asset.kind != AssetKind::Model {
+				return Err("Prefab animation source must be a model".into());
+			}
+			dependencies.insert(asset.id.clone());
+		}
 		if let Some(asset) = catalog.resolve(
 			entity.asset_id.as_ref(),
 			&entity.model_path,

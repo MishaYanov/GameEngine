@@ -43,6 +43,7 @@ pub struct EditorSession {
 	project: Arc<ProjectData>,
 	saved_project: Arc<ProjectData>,
 	module_resolver: GameModuleResolver,
+	animation_resolver: Option<crate::animation::AnimationResolver>,
 	saved: Arc<SceneData>,
 	selection: Vec<EntityKey>,
 	history: History,
@@ -225,6 +226,13 @@ impl CommandFactory {
 			("stop_play", "Stop", "simulation", false, true),
 			("set_paused", "Pause simulation", "simulation", false, true),
 			(
+				"set_character_input",
+				"Set character movement and jump intent",
+				"simulation",
+				false,
+				true,
+			),
+			(
 				"set_play_input",
 				"Set movement intent",
 				"simulation",
@@ -265,6 +273,7 @@ impl EditorSession {
 			saved_project: Arc::clone(&project),
 			project,
 			module_resolver: Arc::new(resolve_default_gameplay),
+			animation_resolver: None,
 			saved: Arc::clone(&data),
 			data,
 			selection: Vec::new(),
@@ -292,6 +301,14 @@ impl EditorSession {
 			)
 		})
 	}
+	/// Full deterministic native diagnostics for the active play scene; edit
+	/// mode has no runtime component state. Opaque game-module state is excluded.
+	pub fn native_replay_state(&self) -> serde_json::Value {
+		self.play
+			.as_ref()
+			.map(|run| run.active().native_replay_state())
+			.unwrap_or(serde_json::Value::Null)
+	}
 	pub fn set_module_factory(
 		&mut self,
 		factory: Arc<dyn GameModuleFactory>,
@@ -307,6 +324,17 @@ impl EditorSession {
 
 	pub fn render_world(&self) -> Option<&crate::world::RuntimeWorld> {
 		self.play.as_ref().map(|session| session.active().world())
+	}
+	pub fn set_animation_resolver(
+		&mut self,
+		resolver: crate::animation::AnimationResolver,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.animation_resolver = Some(resolver);
+		Ok(())
+	}
+	pub fn animations(&self) -> Option<&crate::animation::AnimationBank> {
+		self.play.as_ref().map(|run| run.active().animations())
 	}
 
 	pub fn revision(&self) -> u64 {
@@ -741,12 +769,16 @@ impl EditorSession {
 				self.require_edit()?;
 				self.require_no_transaction()?;
 				let factory = (self.module_resolver)(&self.project)?;
-				let run = GameSession::with_factory_for_scene(
+				let mut run = GameSession::with_factory_for_scene(
 					Arc::clone(&self.project),
 					self.active_scene_id.clone(),
 					Arc::clone(&self.data),
 					factory,
 				)?;
+				if let Some(resolver) = &self.animation_resolver {
+					run.set_animation_resolver(Arc::clone(resolver))?;
+				}
+				run.active().require_animation_ready()?;
 				self.play = Some(run);
 				self.scene_revision += 1;
 				self.bump();
@@ -772,6 +804,19 @@ impl EditorSession {
 				{
 					self.bump();
 				}
+			}
+			Command::SetCharacterInput {
+				key,
+				movement_xz,
+				jump_held,
+			} => {
+				let key = EntityKey::new(key)?;
+				self.play
+					.as_mut()
+					.ok_or("Play mode is not active")?
+					.active_mut()
+					.set_character_input(&key, movement_xz, jump_held)?;
+				self.bump();
 			}
 			Command::SetEntityInput { entity, movement } => {
 				let entity = EntityKey::new(entity)?;

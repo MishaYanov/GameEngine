@@ -39,6 +39,7 @@ const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
 const BOUNDS_RESERVATION_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct EditorWorkspace {
+	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
 	pub backend: runtime::Engine,
@@ -145,6 +146,7 @@ impl EditorWorkspace {
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
 			.module_resolver(Arc::new(courtyard_gameplay::resolve))
+			.animation_resolver(animation_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -185,6 +187,7 @@ impl EditorWorkspace {
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
 			.module_resolver(Arc::new(courtyard_gameplay::resolve))
+			.animation_resolver(animation_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -627,6 +630,7 @@ impl EditorWorkspace {
 		let mut candidate = runtime::EngineBuilder::new(data, project)
 			.with_scenes(documents)
 			.module_resolver(Arc::new(courtyard_gameplay::resolve))
+			.animation_resolver(animation_resolver(&self.asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 		candidate
@@ -635,6 +639,7 @@ impl EditorWorkspace {
 		let snapshot = candidate.snapshot().map_err(|e| e.to_string())?;
 		self.jobs.advance_generation().map_err(|e| e.to_string())?;
 		self.backend = candidate;
+		self.animation_preview = None;
 		// The replacement owns a fresh journal and scene revision sequence. A
 		// new workspace generation also forces existing viewport caches to resync.
 		self.generation = NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed);
@@ -1070,6 +1075,7 @@ impl EditorWorkspace {
 		jobs: AssetImportService,
 	) -> EditorWorkspace {
 		Self {
+			animation_preview: None,
 			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			backend,
@@ -1095,6 +1101,11 @@ fn file_operation<T>(operation: &'static str, result: Result<T, String>) -> Resu
 	result.inspect_err(|_| {
 		engine_logger::error!(target: "editor", "Editor file operation failed: operation={operation}");
 	})
+}
+
+fn animation_resolver(root: &Path) -> runtime::animation::AnimationResolver {
+	let root = root.to_path_buf();
+	Arc::new(move |scene| bridge::animation_asset::prepare_scene(&root, scene))
 }
 fn relative(path: &str) -> Result<(), String> {
 	if path.is_empty()

@@ -292,6 +292,10 @@ impl GameApp {
 						.collect(),
 				)?;
 				self.editor.commit_runtime_spawn(prepared)?;
+				let mut scene = scene;
+				if let Some(bank) = self.editor.animations() {
+					scene.synchronize_animation(bank)?;
+				}
 				self.scene = scene;
 				Ok::<(), String>(())
 			})();
@@ -1203,7 +1207,16 @@ impl ApplicationHandler for GameApp {
 					self.request_input_frame();
 				}
 			}
-			WindowEvent::KeyboardInput { event, .. } => {
+			WindowEvent::KeyboardInput {
+				event,
+				is_synthetic,
+				..
+			} => {
+				// Winit synthesizes presses for keys already held when focus returns.
+				// Those are not new gameplay presses; releases still re-arm suppression.
+				if is_synthetic && event.state == ElementState::Pressed {
+					return;
+				}
 				if !self.standalone_runtime
 					&& event.state == ElementState::Pressed
 					&& let PhysicalKey::Code(code) = event.physical_key
@@ -1224,6 +1237,9 @@ impl ApplicationHandler for GameApp {
 					ElementState::Pressed => {}
 					ElementState::Released => self.input.release(key),
 				}
+				if let Err(error) = self.editor.sample_play_keyboard(&self.input) {
+					engine_logger::error!(target: "game", "Gameplay input rejected: {error}");
+				}
 
 				if key == Key::Escape && event.state == ElementState::Pressed {
 					self.set_mouse_capture(false);
@@ -1235,7 +1251,8 @@ impl ApplicationHandler for GameApp {
 					self.tools.panel.edit = None;
 				}
 				self.set_mouse_capture(false);
-				self.input.reset();
+				self.input.suppress_held();
+				self.editor.clear_play_keyboard();
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -1253,7 +1270,8 @@ impl ApplicationHandler for GameApp {
 				self.next_frame_deadline = None;
 				if occluded {
 					self.set_mouse_capture(false);
-					self.input.reset();
+					self.input.suppress_held();
+					self.editor.clear_play_keyboard();
 				} else {
 					self.window.as_ref().unwrap().request_redraw();
 				}
@@ -1592,3 +1610,7 @@ mod asset_reimport_tests;
 #[cfg(all(test, windows))]
 #[path = "tests_runtime_lifecycle.rs"]
 mod runtime_lifecycle_tests;
+
+#[cfg(all(test, windows))]
+#[path = "tests_animation_native.rs"]
+mod animation_native_tests;

@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod push_constants;
 pub mod render_object;
 mod rollback;
+mod skinning;
 mod surface;
 mod swapchain;
 #[cfg(test)]

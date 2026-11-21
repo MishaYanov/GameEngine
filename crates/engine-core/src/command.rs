@@ -222,6 +222,11 @@ pub enum EditorCommandDto {
 	SetPlayInput {
 		movement: [f32; 3],
 	},
+	SetCharacterInput {
+		key: String,
+		movement_xz: [f32; 2],
+		jump_held: bool,
+	},
 	SetEntityInput {
 		entity: String,
 		movement: [f32; 3],
@@ -323,6 +328,8 @@ pub struct GameplayModuleDescriptorDto {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorCapabilitiesDto {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub state_machines: Option<crate::state_machine::MachineDescriptor>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub component_types: Vec<crate::components::ComponentTypeDescriptor>,
 	#[serde(default)]

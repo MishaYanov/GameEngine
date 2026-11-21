@@ -2,11 +2,18 @@ use super::{ModelPushConstants, Vertex, instancing::InstanceData};
 use ash::{Device, util::read_spv, vk};
 use std::io::Cursor;
 
+struct PipelineOptions {
+	double_sided: bool,
+	overlay: bool,
+	skinned: bool,
+}
+
 pub struct VulkanGraphicsPipeline {
 	_metrics: Vec<engine_logger::metrics::ResourceGuard>,
 	device: Device,
 	pipeline: vk::Pipeline,
 	layout: vk::PipelineLayout,
+	_palette_layout: Option<super::skinning::PaletteLayout>,
 }
 
 /// Opaque-material pipeline variants with identical descriptor/push layouts.
@@ -17,6 +24,8 @@ pub struct VulkanMaterialPipelines {
 	single_sided: VulkanGraphicsPipeline,
 	double_sided: VulkanGraphicsPipeline,
 	overlay: VulkanGraphicsPipeline,
+	skinned_single: VulkanGraphicsPipeline,
+	skinned_double: VulkanGraphicsPipeline,
 }
 
 impl VulkanMaterialPipelines {
@@ -27,6 +36,7 @@ impl VulkanMaterialPipelines {
 			device: device.clone(),
 			pipeline: vk::Pipeline::null(),
 			layout: vk::PipelineLayout::null(),
+			_palette_layout: None,
 		};
 		Self {
 			color_format: vk::Format::B8G8R8A8_SRGB,
@@ -34,6 +44,8 @@ impl VulkanMaterialPipelines {
 			single_sided: pipeline(),
 			double_sided: pipeline(),
 			overlay: pipeline(),
+			skinned_single: pipeline(),
+			skinned_double: pipeline(),
 		}
 	}
 	pub fn new(
@@ -70,7 +82,33 @@ impl VulkanMaterialPipelines {
 			true,
 			true,
 		)?;
+		let skinned_single = VulkanGraphicsPipeline::new_kind(
+			device,
+			color_format,
+			depth_format,
+			camera_layout,
+			texture_layout,
+			PipelineOptions {
+				double_sided: false,
+				overlay: false,
+				skinned: true,
+			},
+		)?;
+		let skinned_double = VulkanGraphicsPipeline::new_kind(
+			device,
+			color_format,
+			depth_format,
+			camera_layout,
+			texture_layout,
+			PipelineOptions {
+				double_sided: true,
+				overlay: false,
+				skinned: true,
+			},
+		)?;
 		Ok(Self {
+			skinned_single,
+			skinned_double,
 			color_format,
 			depth_format,
 			single_sided,
@@ -83,6 +121,13 @@ impl VulkanMaterialPipelines {
 		self.color_format == color && self.depth_format == depth
 	}
 
+	pub fn for_skin(&self, double_sided: bool) -> &VulkanGraphicsPipeline {
+		if double_sided {
+			&self.skinned_double
+		} else {
+			&self.skinned_single
+		}
+	}
 	pub fn for_material(&self, double_sided: bool) -> &VulkanGraphicsPipeline {
 		if double_sided {
 			&self.double_sided
@@ -111,9 +156,41 @@ impl VulkanGraphicsPipeline {
 		double_sided: bool,
 		overlay: bool,
 	) -> Result<Self, String> {
+		Self::new_kind(
+			device,
+			color_format,
+			depth_format,
+			camera_layout,
+			texture_layout,
+			PipelineOptions {
+				double_sided,
+				overlay,
+				skinned: false,
+			},
+		)
+	}
+	fn new_kind(
+		device: &Device,
+		color_format: vk::Format,
+		depth_format: vk::Format,
+		camera_layout: vk::DescriptorSetLayout,
+		texture_layout: vk::DescriptorSetLayout,
+		options: PipelineOptions,
+	) -> Result<Self, String> {
+		let PipelineOptions {
+			double_sided,
+			overlay,
+			skinned,
+		} = options;
+		let palette_layout = super::skinning::PaletteLayout::new(device)
+			.map_err(|e| format!("Skin descriptor layout: {e:?}"))?;
 		let vertex_shader = create_shader_module(
 			device,
-			include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv")),
+			if skinned {
+				include_bytes!(concat!(env!("OUT_DIR"), "/skinned.vert.spv"))
+			} else {
+				include_bytes!(concat!(env!("OUT_DIR"), "/triangle.vert.spv"))
+			},
 		)?;
 		let _vertex_metrics = crate::metrics::object(
 			device,
@@ -150,7 +227,7 @@ impl VulkanGraphicsPipeline {
 			.offset(ModelPushConstants::OFFSET)
 			.size(ModelPushConstants::SIZE)];
 
-		let descriptor_set_layouts = [camera_layout, texture_layout];
+		let descriptor_set_layouts = [camera_layout, texture_layout, palette_layout.raw];
 
 		let layout_info = vk::PipelineLayoutCreateInfo::default()
 			.set_layouts(&descriptor_set_layouts)
@@ -183,13 +260,40 @@ impl VulkanGraphicsPipeline {
 				.name(entry_point),
 		];
 
-		let vertex_binding_descriptions = [
-			Vertex::binding_description(),
-			InstanceData::binding_description(),
-		];
-
+		let vertex_binding_descriptions = if skinned {
+			vec![
+				Vertex::binding_description(),
+				vk::VertexInputBindingDescription {
+					binding: 2,
+					stride: size_of::<super::mesh::SkinInfluence>() as u32,
+					input_rate: vk::VertexInputRate::VERTEX,
+				},
+			]
+		} else {
+			vec![
+				Vertex::binding_description(),
+				InstanceData::binding_description(),
+			]
+		};
 		let mut vertex_attribute_descriptions = Vec::from(Vertex::attribute_descriptions());
-		vertex_attribute_descriptions.extend(InstanceData::attribute_descriptions());
+		if skinned {
+			vertex_attribute_descriptions.extend([
+				vk::VertexInputAttributeDescription {
+					location: 3,
+					binding: 2,
+					format: vk::Format::R16G16B16A16_UINT,
+					offset: 0,
+				},
+				vk::VertexInputAttributeDescription {
+					location: 4,
+					binding: 2,
+					format: vk::Format::R32G32B32A32_SFLOAT,
+					offset: 8,
+				},
+			]);
+		} else {
+			vertex_attribute_descriptions.extend(InstanceData::attribute_descriptions());
+		}
 
 		let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
 			.vertex_binding_descriptions(&vertex_binding_descriptions)
@@ -303,6 +407,7 @@ impl VulkanGraphicsPipeline {
 				),
 			],
 			layout,
+			_palette_layout: Some(palette_layout),
 		})
 	}
 

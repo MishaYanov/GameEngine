@@ -362,6 +362,10 @@ pub struct TickOutcome {
 	pub trigger_events: Vec<TriggerEvent>,
 }
 pub struct SimulationSession {
+	animations: crate::animation::AnimationBank,
+	animation_bindings: crate::animation::PreparedAnimationBindings,
+	animation_resolver: Option<crate::animation::AnimationResolver>,
+	characters: crate::character_controller::CharacterRuntime,
 	lifecycle: crate::runtime_lifecycle::RuntimeLifecycle,
 	project: Arc<ProjectData>,
 	world: RuntimeWorld,
@@ -429,10 +433,17 @@ impl SimulationSession {
 			document
 		};
 		let world = RuntimeWorld::new(runtime_document)?;
+		let characters = crate::character_controller::CharacterRuntime::new(&world, &project)?;
 		let mut controlled_targets = Vec::new();
 		let mut seen = HashSet::new();
 
 		for (index, behavior) in behaviors.iter().enumerate() {
+			if characters.contains(&behavior.entity) {
+				return Err(
+					"Character controller owns its body's motion; remove configured movement/spin"
+						.into(),
+				);
+			}
 			if world.entity_index(&behavior.entity).is_none() {
 				return Err(format!(
 					"Behavior {index} targets missing entity {:?}",
@@ -458,6 +469,10 @@ impl SimulationSession {
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
 
 		Ok(Self {
+			animations: Default::default(),
+			animation_bindings: Default::default(),
+			animation_resolver: None,
+			characters,
 			lifecycle,
 			project,
 			world,
@@ -518,9 +533,16 @@ impl SimulationSession {
 	pub fn tick_index(&self) -> u64 {
 		self.tick
 	}
+	/// Native replay evidence excludes random world IDs and opaque module-owned
+	/// state. The visible world and project remain separate host hash inputs.
+	pub fn native_replay_state(&self) -> serde_json::Value {
+		serde_json::json!({"schema_version":1,"lifecycle":self.lifecycle.replay_state(),"characters":self.characters.replay_state(),"animations":self.animations.replay_state()})
+	}
 	pub fn needs_tick(&self) -> bool {
 		!self.paused
-			&& (self.lifecycle.needs_tick()
+			&& (self.animations.needs_tick()
+				|| self.characters.needs_tick()
+				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| self.camera.needs_tick(&self.world)
@@ -534,7 +556,9 @@ impl SimulationSession {
 
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
-			&& (self.lifecycle.needs_tick()
+			&& (self.animations.needs_tick()
+				|| self.characters.needs_tick()
+				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| self.camera.needs_tick(&self.world)
@@ -544,6 +568,46 @@ impl SimulationSession {
 	}
 	pub fn collision_stats(&self) -> CollisionStats {
 		self.collisions.stats()
+	}
+	pub fn animations(&self) -> &crate::animation::AnimationBank {
+		&self.animations
+	}
+	pub fn install_animation_bindings(
+		&mut self,
+		bindings: crate::animation::PreparedAnimationBindings,
+	) -> Result<(), String> {
+		let handles = self
+			.world
+			.data()
+			.entities
+			.iter()
+			.filter_map(|e| self.lifecycle.handle(&e.key).map(|h| (e.key.clone(), h)))
+			.collect();
+		let bank = crate::animation::AnimationBank::new(&self.world, &bindings, &handles)?;
+		self.animations = bank;
+		self.animation_bindings = bindings;
+		Ok(())
+	}
+	pub fn set_animation_resolver(
+		&mut self,
+		resolver: crate::animation::AnimationResolver,
+	) -> Result<(), String> {
+		let bindings = resolver(self.world.data())?;
+		self.install_animation_bindings(bindings)?;
+		self.animation_resolver = Some(resolver);
+		Ok(())
+	}
+	pub fn require_animation_ready(&self) -> Result<(), String> {
+		if self
+			.world
+			.data()
+			.entities
+			.iter()
+			.any(|e| e.animation.is_some() && !self.animation_bindings.contains_key(&e.key))
+		{
+			return Err("Prepare animation assets before starting this scene".into());
+		}
+		Ok(())
 	}
 	pub fn has_runtime_instances(&self) -> bool {
 		self.lifecycle.has_instances()
@@ -556,6 +620,29 @@ impl SimulationSession {
 	}
 	pub fn pending_runtime_spawns(&self) -> Vec<crate::runtime_lifecycle::RuntimeSpawnRequest> {
 		self.lifecycle.requests()
+	}
+	pub fn character_motion(&self) -> Vec<crate::character_controller::CommittedMotion> {
+		self.characters
+			.keys()
+			.filter_map(|key| {
+				Some(
+					self.characters
+						.state(key)?
+						.motion(self.lifecycle.handle(key)?),
+				)
+			})
+			.collect()
+	}
+	pub fn set_character_input(
+		&mut self,
+		key: &EntityKey,
+		movement_xz: [f32; 2],
+		jump_held: bool,
+	) -> Result<(), String> {
+		if self.paused {
+			return Ok(());
+		}
+		self.characters.set_input(key, movement_xz, jump_held)
 	}
 	pub fn reject_runtime_spawn(&mut self, id: u64, error: &str) {
 		self.lifecycle.reject_request(id, error);
@@ -596,8 +683,32 @@ impl SimulationSession {
 		}
 		let world = RuntimeWorld::new(Arc::new(data))?;
 		let collisions = CollisionWorld::new(&world)?;
+		let mut characters = self.characters.clone();
+		characters.reconcile(&world, &self.project)?;
 		let mut lifecycle = self.lifecycle.clone();
 		lifecycle.admit(&prepared, self.tick)?;
+		let mut animation_bindings = self.animation_bindings.clone();
+		let mut missing = world.data().clone();
+		missing
+			.entities
+			.retain(|e| e.animation.is_some() && !animation_bindings.contains_key(&e.key));
+		if !missing.entities.is_empty() {
+			let resolver = self
+				.animation_resolver
+				.as_ref()
+				.ok_or("Runtime animation assets have no resolver")?;
+			animation_bindings.extend(resolver(&missing)?);
+		}
+		animation_bindings.retain(|k, _| world.entity_index(k).is_some());
+		let handles = world
+			.data()
+			.entities
+			.iter()
+			.filter_map(|e| lifecycle.handle(&e.key).map(|h| (e.key.clone(), h)))
+			.collect();
+		let mut animations =
+			crate::animation::AnimationBank::new(&world, &animation_bindings, &handles)?;
+		animations.preserve_existing(&self.animations);
 		let keys = prepared
 			.entities
 			.iter()
@@ -607,7 +718,10 @@ impl SimulationSession {
 			available.extend(prepared.visible.into_iter().flatten());
 		}
 		self.world = world;
+		self.animations = animations;
+		self.animation_bindings = animation_bindings;
 		self.collisions = collisions;
+		self.characters = characters;
 		self.lifecycle = lifecycle;
 		self.triggers.structural_change(&self.world);
 		Ok(WorldChange {
@@ -628,6 +742,8 @@ impl SimulationSession {
 			return Err("Runtime inspection page size must be 1..=128".into());
 		}
 		Ok(crate::runtime_lifecycle::RuntimeInspectionDto {
+			character_motion: self.character_motion(),
+			animations: self.animations.inspection(self.paused),
 			play_session_id: play_session_id.into(),
 			run_id: run_id.into(),
 			scene_id: self.scene_id.clone(),
@@ -637,10 +753,15 @@ impl SimulationSession {
 			entities: self.lifecycle.entities(&self.world, offset, limit),
 			timer_count: self.lifecycle.timer_count(),
 			pending_spawns: self.lifecycle.request_count(),
+			pending_events: self.lifecycle.events.len(),
+			event_sequence: self.lifecycle.events.sequence(),
+			machine_deadlines: self.lifecycle.machine_deadlines(),
+			stale_events_discarded: self.lifecycle.stale_events_discarded,
 			last_error: self.lifecycle.last_error.clone(),
 		})
 	}
 	pub fn clear_input(&mut self) {
+		self.characters.clear_input();
 		self.inputs.movement.clear();
 		self.inputs.game_actions = HeldGameActions::default();
 		self.clock.reset();
@@ -652,11 +773,16 @@ impl SimulationSession {
 		}
 	}
 	pub fn set_input(&mut self, entity: &EntityKey, movement: [f32; 3]) -> Result<bool, String> {
+		let movement = normalized_input(movement)?;
+		if self.characters.contains(entity) {
+			self.characters
+				.set_movement(entity, [movement[0], movement[2]])?;
+			return Ok(true);
+		}
 		if !self.controlled_target_set.contains(entity) {
 			return Err("Input target has no configured controlled movement behavior".into());
 		}
 
-		let movement = normalized_input(movement)?;
 		Ok(Self::apply_input(
 			&mut self.inputs,
 			&mut self.clock,
@@ -684,10 +810,32 @@ impl SimulationSession {
 		if self.paused {
 			return Ok(());
 		}
-		// Projects can use digital actions without declaring a movement behavior.
-		if !matches!(target, MovementTarget::AllControlled) || !self.controlled_targets.is_empty() {
-			let [x, y] = input.movement;
-			self.set_targeted_input(target, [x, y, 0.0])?;
+		let [x, y] = input.movement;
+		// The legacy controlled mover uses XY; upright characters use XZ.
+		// Route each target once so the legacy path cannot overwrite character Z.
+		match target {
+			MovementTarget::AllControlled => {
+				self.characters.sample_keyboard(
+					&self.world,
+					None,
+					input.movement,
+					&input.actions,
+				)?;
+				for entity in &self.controlled_targets {
+					Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
+				}
+			}
+			MovementTarget::Entity(entity) if self.characters.contains(entity) => {
+				self.characters.sample_keyboard(
+					&self.world,
+					Some(entity),
+					input.movement,
+					&input.actions,
+				)?;
+			}
+			MovementTarget::Entity(entity) => {
+				self.set_input(entity, [x, y, 0.0])?;
+			}
 		}
 		self.inputs.game_actions = input.actions;
 		Ok(())
@@ -719,8 +867,13 @@ impl SimulationSession {
 
 	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
 		let movement = normalized_input(movement)?;
+		let character_keys = self.characters.keys().cloned().collect::<Vec<_>>();
+		for key in &character_keys {
+			self.characters
+				.set_movement(key, [movement[0], movement[2]])?;
+		}
 
-		if self.controlled_targets.is_empty() && movement != [0.0; 3] {
+		if self.controlled_targets.is_empty() && character_keys.is_empty() && movement != [0.0; 3] {
 			return Err(
 				"Configure a controlled movement behavior before supplying movement".into(),
 			);
@@ -747,6 +900,7 @@ impl SimulationSession {
 		if !elapsed.is_finite() || elapsed < 0.0 {
 			return Err("Elapsed time must be finite and nonnegative".into());
 		}
+		self.require_animation_ready()?;
 		let mut outcome = TickOutcome {
 			tick: self.tick,
 			progress_revision: progress.view().revision(),
@@ -765,12 +919,15 @@ impl SimulationSession {
 		let mut structural_before: Option<Arc<SceneData>> = None;
 		let mut structural_work = 0usize;
 		let mut lifecycle = self.lifecycle.clone();
+		let mut characters = self.characters.clone();
+		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
 		let mut camera = self.camera.clone();
 		let mut trigger_events = Vec::new();
 		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
+		let mut gameplay_deliveries = 0usize;
 		let mut steps = 0;
 		let mut pending_steps = 0;
 		let mut requested_scene = None;
@@ -794,6 +951,16 @@ impl SimulationSession {
 					)?;
 				}
 				self.actions.clear();
+				let mut gameplay_emissions = crate::state_machine_runtime::plan(
+					&self.world,
+					&mut lifecycle,
+					self.tick + u64::from(steps) + 1,
+					&trigger_events[event_start..],
+					&mut gameplay_deliveries,
+					&mut ActionWriter {
+						actions: &mut self.actions,
+					},
+				)?;
 				crate::native_behavior_runtime::plan(
 					&self.world,
 					triggers.view(),
@@ -821,11 +988,51 @@ impl SimulationSession {
 					},
 				)?;
 				// Structural removals become visible at the end of this step, after
+				let count = characters.keys().count();
+				actions_applied += count;
+				if actions_applied > Self::MAX_ACTIONS_PER_TICK {
+					return Err("Character action budget exceeded".into());
+				}
+				let character_change = characters.step(
+					&mut self.world,
+					&mut self.collisions,
+					self.tick + u64::from(steps) + 1,
+					report.step_seconds,
+					&mut collision_candidates_remaining,
+					&mut before,
+				)?;
+				if !character_change.is_empty() {
+					triggers.invalidate();
+				}
+				changes.merge(character_change);
+				if self
+					.world
+					.matrix_updates()
+					.saturating_sub(initial_matrix_updates)
+					> Self::MAX_MATRIX_UPDATES_PER_TICK
+				{
+					return Err("Character matrix update budget exceeded".into());
+				}
+				// Structural removals become visible at the end of this step, after
 				// all systems have planned against the same stable world.
 				self.actions
 					.sort_by_key(|action| matches!(action, SimulationAction::Despawn { .. }));
 				let mut removed_handles = HashSet::new();
 				for action in self.actions.drain(..) {
+					let forbidden = match &action {
+						SimulationAction::Move { entity, .. }
+						| SimulationAction::Rotate { entity, .. }
+						| SimulationAction::SetTransform { entity, .. } => characters.contains(entity),
+						SimulationAction::SetCollisionEnabled { entity, enabled } => {
+							characters.forbids_collider_change(&self.world, entity, *enabled)
+						}
+						_ => false,
+					};
+					if forbidden {
+						return Err(
+							"Character controller owns its body transform and collider".into()
+						);
+					}
 					if actions_applied == Self::MAX_ACTIONS_PER_TICK {
 						return Err("Simulation tick action budget exceeded".into());
 					}
@@ -860,6 +1067,7 @@ impl SimulationSession {
 							let change = self.world.remove_runtime_entities(&keys)?;
 							self.collisions = CollisionWorld::new(&self.world)?;
 							lifecycle.removed(&keys)?;
+							characters.prune(&self.world);
 							lifecycle.prune_states(&self.world);
 							triggers.invalidate();
 							changes.merge(change);
@@ -988,6 +1196,42 @@ impl SimulationSession {
 					}
 					changes.merge(change);
 				}
+				// Removal or disabling of a support must be visible to later staged systems.
+				characters.prune(&self.world);
+				crate::state_machine_runtime::route_motion(
+					&self.world,
+					&mut lifecycle,
+					&characters,
+					self.tick + u64::from(steps) + 1,
+					&mut gameplay_emissions,
+				)?;
+				let motions = characters
+					.keys()
+					.filter_map(|key| {
+						let state = characters.state(key)?;
+						Some((
+							key.clone(),
+							crate::animation::AnimationMotion {
+								entity: lifecycle.handle(key)?,
+								tick: state.tick,
+								grounded: state.grounded,
+								planar_speed: state.planar_speed,
+								vertical_speed: state.velocity[1],
+							},
+						))
+					})
+					.collect();
+				if animations.step(
+					&self.world,
+					&motions,
+					self.tick + u64::from(steps) + 1,
+					self.project.fixed_hz,
+				)? {
+					changes.merge(WorldChange {
+						changed_entities: animations.poses().map(|(k, _)| k.clone()).collect(),
+						..WorldChange::default()
+					});
+				}
 				let before_camera = camera.camera().clone();
 				camera.update(&self.world, report.step_seconds)?;
 				if before_camera.position != camera.camera().position
@@ -1053,6 +1297,10 @@ impl SimulationSession {
 			available.retain(|key| self.world.entity_index(key).is_some());
 		}
 		self.lifecycle = lifecycle;
+		self.characters = characters;
+		self.animations = animations;
+		self.animation_bindings
+			.retain(|key, _| self.world.entity_index(key).is_some());
 		self.camera = camera;
 		outcome.trigger_events = trigger_events;
 		Ok(outcome)

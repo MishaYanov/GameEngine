@@ -36,6 +36,7 @@ pub(crate) fn plan(
 			let key = (entity.key.clone(), component.id.clone());
 			let mut instance = state.states.get(&key).cloned().unwrap_or_default();
 			match &component.behavior {
+				NativeBehaviorSpec::StateMachine { .. } => continue,
 				NativeBehaviorSpec::KeyDoor {
 					actor,
 					key_trigger,
