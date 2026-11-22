@@ -70,6 +70,10 @@ impl GamepadOwner {
 					sample.left_x = 0;
 					sample.left_y = 0;
 				}
+				if sample.right_stick() == [0.0; 2] {
+					sample.right_x = 0;
+					sample.right_y = 0;
+				}
 				self.sample = sample;
 			}
 		} else {

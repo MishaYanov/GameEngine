@@ -26,13 +26,15 @@ pub fn poll_gamepad(slot: u32) -> Option<PhysicalGamepadSample> {
 	Some(PhysicalGamepadSample {
 		left_x: pad.sThumbLX,
 		left_y: pad.sThumbLY,
+		right_x: pad.sThumbRX,
+		right_y: pad.sThumbRY,
 		face_buttons: [
 			XINPUT_GAMEPAD_A,
 			XINPUT_GAMEPAD_B,
 			XINPUT_GAMEPAD_X,
 			XINPUT_GAMEPAD_Y,
 		]
-			.map(pressed),
+		.map(pressed),
 		menu: MenuButtons {
 			open: pressed(XINPUT_GAMEPAD_START),
 			up: pressed(XINPUT_GAMEPAD_DPAD_UP),

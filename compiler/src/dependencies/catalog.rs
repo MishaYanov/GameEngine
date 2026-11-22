@@ -45,6 +45,9 @@ impl Closure<'_> {
 				self.model(Path::new(&asset.path), None)?;
 			}
 			AssetKind::Prefab => self.prefab(Path::new(&asset.path))?,
+			AssetKind::InputActions => {
+				engine_core::input::InputActionMap::from_json(&bytes)?;
+			}
 			AssetKind::Scene => {
 				let scene = SceneData::from_json(
 					std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,

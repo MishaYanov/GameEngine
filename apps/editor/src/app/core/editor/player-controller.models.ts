@@ -1,4 +1,6 @@
-export type InputActionsRef = {readonly kind: 'project_default'};
+import {validInputActionsId} from '../game-input/input-actions.models';
+
+export type InputActionsRef = {readonly kind: 'project_default'} | {readonly kind: 'asset'; readonly asset_id: string};
 
 export type PlayerMovementSpace = 'world' | 'camera_relative';
 
@@ -19,5 +21,8 @@ export function validPlayerControllerSettings(value: unknown): value is PlayerCo
         !('space' in value) || (value.space !== 'world' && value.space !== 'camera_relative') ||
         !('local' in value) || typeof value.local !== 'boolean' ||
         !('input' in value) || !value.input || typeof value.input !== 'object') return false;
-    return Object.keys(value.input).length === 1 && 'kind' in value.input && value.input.kind === 'project_default';
+    const input = value.input;
+    if (!('kind' in input)) return false;
+    if (input.kind === 'project_default') return Object.keys(input).length === 1;
+    return input.kind === 'asset' && Object.keys(input).length === 2 && 'asset_id' in input && validInputActionsId(input.asset_id);
 }

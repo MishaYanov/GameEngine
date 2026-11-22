@@ -101,7 +101,7 @@ impl MovementBindings {
 		self.direction_from_held(|key| input.is_held(key))
 	}
 
-	fn direction_from_held(&self, mut is_held: impl FnMut(Key) -> bool) -> [f32; 2] {
+	pub(super) fn direction_from_held(&self, mut is_held: impl FnMut(Key) -> bool) -> [f32; 2] {
 		let mut direction = [0.0_f32; 2];
 
 		if is_held(self.positive_x) {

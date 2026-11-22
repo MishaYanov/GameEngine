@@ -26,6 +26,8 @@ mod asset_authoring;
 pub use asset_authoring::*;
 mod feedback_audio;
 pub use feedback_audio::*;
+mod input_actions;
+pub use input_actions::*;
 mod linked_prefabs;
 mod nested_props;
 pub use nested_props::*;
@@ -143,6 +145,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		embedded_viewport_supported: cfg!(target_os = "windows"),
 		scene_warming_supported: cfg!(target_os = "windows"),
 		scene_verification_supported: true,
+		input_action_assets: true,
 	}
 }
 

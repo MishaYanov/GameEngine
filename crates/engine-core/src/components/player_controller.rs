@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 pub enum InputActionsRef {
 	#[default]
 	ProjectDefault,
+	Asset {
+		asset_id: crate::asset_catalog::AssetId,
+	},
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

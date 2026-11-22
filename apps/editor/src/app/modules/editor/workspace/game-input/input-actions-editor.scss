@@ -1,0 +1,10 @@
+:host([hidden]) { display: none; }
+:host { display: block; min-width: 0; }
+.fields, label { display: grid; gap: var(--space-2); }
+.asset-controls, .actions, .binding { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+.action { border: 1px solid var(--color-border); padding: var(--space-2); }
+.action-heading { cursor: pointer; text-align: start; width: 100%; margin-block-end: var(--space-2); overflow-wrap: anywhere; }
+.action small { color: var(--color-text-secondary); }
+.binding { margin-block: var(--space-2); border-block-start: 1px solid var(--color-border); padding-block-start: var(--space-2); }
+p { margin: 0; overflow-wrap: anywhere; }
+.error { color: var(--color-danger); }

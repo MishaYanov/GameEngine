@@ -22,6 +22,7 @@ import type {
 import type {ComponentRecord} from '../../../core/editor/editor-components';
 import type {CharacterControllerSettings} from '../../../core/editor/character-controller.models';
 import type {PlayerControllerSettings} from '../../../core/editor/player-controller.models';
+import type {InputActionMap, InputActionsAsset, InputActionsCapture, InputActionsDocument} from '../../../core/game-input/input-actions.models';
 import type {LinkedPrefabStatus, NestedPropPlacementRequest, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
@@ -96,6 +97,7 @@ const playerMotor: CharacterControllerSettings = {
     walk_speed: 4, ground_acceleration: 30, air_acceleration: 10, gravity: 20, max_fall_speed: 30,
     jump_speed: 7, ground_probe: 0.02, step_height: 0.25, coyote_ticks: 6, jump_buffer_ticks: 6, jump_action: 'jump',
 };
+const controlsAssetId = '00000000-0000-0000-0000-000000000321';
 
 const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
 const nestedAsset = {kind: 'prefab', asset_id: '00000000-0000-0000-0000-000000000001',
@@ -177,6 +179,8 @@ describe('Workspace live editing flow', () => {
     let nextProp: PrefabSourceDraft['prefab'] | null;
     let savePropFailure: string | null;
     let nestedPropFailure: string | null;
+    let inputActionsSupported: boolean;
+    let inputActions: Map<string, InputActionsDocument>;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -210,6 +214,8 @@ describe('Workspace live editing flow', () => {
         nextProp = null;
         savePropFailure = null;
         nestedPropFailure = null;
+        inputActionsSupported = false;
+        inputActions = new Map();
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -231,6 +237,7 @@ describe('Workspace live editing flow', () => {
                 ],
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
                 gameplay_modules: [gameplayModule],
+                input_action_assets: inputActionsSupported,
             };
             if (operation === 'editor_open_project') {
                 nativeState = {...initialSnapshot(), revision: nativeState.revision + 1,
@@ -252,6 +259,26 @@ describe('Workspace live editing flow', () => {
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_assets') return assets;
+            if (operation === 'editor_list_input_actions' || operation === 'editor_open_input_actions' ||
+                operation === 'editor_save_input_actions' || operation === 'editor_move_input_actions') {
+                const request = args as {
+                    expectedGeneration: number; expectedRevision: number; assetId?: string;
+                    destination?: string; capture?: InputActionsCapture | null; map?: InputActionMap;
+                };
+                expect(request.expectedGeneration).toBe(viewportEditorState.workspace_generation);
+                expect(request.expectedRevision).toBe(nativeState.revision);
+                if (operation === 'editor_list_input_actions') return [...inputActions.values()].map(document => document.asset);
+                if (operation === 'editor_open_input_actions') return inputActions.get(request.assetId!);
+                const old = request.capture ? inputActions.get(request.capture.id) : undefined;
+                expect(old?.asset.fingerprint ?? null).toBe(request.capture?.fingerprint ?? null);
+                const revision = (old?.asset.revision ?? 0) + 1;
+                const asset: InputActionsAsset = {id: old?.asset.id ?? controlsAssetId, path: request.destination!,
+                    revision, kind: 'input_actions', fingerprint: operation === 'editor_move_input_actions' ? old!.asset.fingerprint :
+                        revision.toString(16).repeat(64), bytes: 1024};
+                const document = {asset, map: request.map ?? old!.map};
+                inputActions.set(asset.id, document);
+                return operation === 'editor_move_input_actions' ? asset : document;
+            }
             if (operation === 'editor_prefab_source_open') {
                 const {path, expectedRevision} = args as {path: string; expectedRevision: number};
                 propDraft = await openPropSource(expectedRevision, path);
@@ -744,6 +771,109 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(entity('player-2')?.player_controller?.settings.space).toBe('camera_relative'));
         action('Undo').click();
         await vi.waitFor(() => expect(localPlayer()).toBe('player-1'));
+    });
+
+    it('edits typed Input Actions, monitors deliberate key input, and assigns the same asset ID after a move', async () => {
+        inputActionsSupported = true;
+        await editor.loadCapabilities();
+        await editor.execute({type: 'create_player'});
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string, within: ParentNode = root) => [...within.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const field = (label: string, within: ParentNode) => [...within.querySelectorAll<HTMLLabelElement>('label')]
+            .find(item => item.firstChild?.textContent?.trim() === label)!;
+        await vi.waitFor(() => expect(button('Game Input…').disabled).toBe(false));
+        button('Game Input…').click();
+        await vi.waitFor(() => expect(button('Input Actions Assets')).toBeDefined());
+        button('Input Actions Assets').click();
+        await fixture.whenStable();
+        const panel = root.querySelector('editor-input-actions-editor')!;
+        await vi.waitFor(() => expect(button('New Asset', panel).disabled).toBe(false));
+        button('New Asset', panel).click();
+        await fixture.whenStable();
+        const jump = panel.querySelector<HTMLElement>('[data-action-id="jump"]')!;
+        jump.querySelector('button')!.click();
+        await fixture.whenStable();
+        const capture = jump.querySelector<HTMLButtonElement>('button[aria-label="Capture Keyboard key"]')!;
+        const key = (code: string, kind = 'keydown') => new KeyboardEvent(kind, {code, bubbles: true, cancelable: true});
+        capture.click();
+        await fixture.whenStable();
+        expect(capture.getAttribute('aria-pressed')).toBe('true');
+        capture.dispatchEvent(key('Escape'));
+        await fixture.whenStable();
+        expect(capture.getAttribute('aria-pressed')).toBe('false');
+        expect(field('Keyboard key', jump).querySelector('select')?.value).toBe('space');
+        capture.click();
+        capture.dispatchEvent(key('KeyQ'));
+        await fixture.whenStable();
+        expect(field('Keyboard key', jump).querySelector('select')?.value).toBe('q');
+
+        const display = field('Display name', jump).querySelector('input')!;
+        await change(display, 'Leap');
+        const monitor = panel.querySelector<HTMLElement>('[aria-label="Monitor Input Actions"]')!;
+        monitor.focus();
+        monitor.dispatchEvent(key('KeyQ'));
+        await fixture.whenStable();
+        const result = () => [...monitor.querySelectorAll('dt')].find(item => item.textContent === 'Leap')?.nextElementSibling?.textContent;
+        expect(result()).toBe('Pressed');
+        display.focus();
+        await fixture.whenStable();
+        expect(result()).toBe('Released');
+
+        const valueType = field('Value type', jump).querySelector('select')!;
+        valueType.value = 'vector2';
+        valueType.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+        expect(panel.textContent).toContain('jump needs the button value type');
+        expect(button('Save Input Actions', panel).disabled).toBe(true);
+        valueType.value = 'button';
+        valueType.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+        button('Add Input Action', panel).click();
+        await fixture.whenStable();
+        const custom = panel.querySelector<HTMLElement>('[data-action-id="action_5"]')!;
+        button('Add Binding', custom).click();
+        await fixture.whenStable();
+        const customType = field('Value type', custom).querySelector('select')!;
+        customType.value = 'vector2';
+        customType.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+        expect(panel.textContent).toContain('action_5 has a binding with the wrong value type');
+        expect(button('Save Input Actions', panel).disabled).toBe(true);
+        button('Remove Action', custom).click();
+        await fixture.whenStable();
+        button('Save Input Actions', panel).click();
+        await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.map.actions.find(action => action.id === 'jump'))
+            .toMatchObject({id: 'jump', label: 'Leap', bindings: [{kind: 'key', key: 'q'}, {kind: 'gamepad_button', button: 'a'}]}));
+        await fixture.whenStable();
+        button('Move or Rename Asset…', panel).click();
+        await fixture.whenStable();
+        await change(field('New asset path', panel).querySelector('input')!, 'keyboard.input-actions.json');
+        button('Move Asset', panel).click();
+        await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.asset.path).toBe('keyboard.input-actions.json'));
+        await fixture.whenStable();
+        button('Open Asset', panel).click();
+        await vi.waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_open_input_actions',
+            expect.objectContaining({assetId: controlsAssetId, expectedGeneration: 1})));
+        await fixture.whenStable();
+        root.querySelector<HTMLButtonElement>('button[aria-label="Close Game Input Manager"]')!.click();
+        await fixture.whenStable();
+
+        const edit = root.querySelector<HTMLButtonElement>('button[aria-label="Edit Player Controller"]')!;
+        edit.click();
+        await fixture.whenStable();
+        const inspector = root.querySelector('editor-component-editor')!;
+        const inputSource = field('Input source', inspector).querySelector('select')!;
+        inputSource.value = controlsAssetId;
+        inputSource.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+        button('Apply Component', inspector).click();
+        await vi.waitFor(() => expect(editor.document()?.entities.find(entity => entity.key === 'player-1')
+            ?.player_controller?.settings.input).toEqual({kind: 'asset', asset_id: controlsAssetId}));
+        expect(commands.filter(command => command.type === 'replace_component')).toHaveLength(1);
     });
 
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {

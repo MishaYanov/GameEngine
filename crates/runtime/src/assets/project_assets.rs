@@ -16,9 +16,11 @@ use std::{
 	path::{Path, PathBuf},
 };
 
+mod input_actions;
 mod migration;
 mod prefab;
 
+pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;
 
@@ -567,7 +569,16 @@ pub fn prepare_move(
 				.map_err(|e| e.to_string())?,
 			)?;
 		}
-		_ => return Err("Only model and prefab assets support this move operation".into()),
+		AssetKind::InputActions => {
+			if !destination
+				.to_ascii_lowercase()
+				.ends_with(engine_core::input::INPUT_ACTION_MAP_SUFFIX)
+			{
+				return Err("Input Actions assets use .input-actions.json".into());
+			}
+			load_input_actions(asset_root, old)?;
+		}
+		_ => return Err("This asset kind does not support moving".into()),
 	}
 	prepare(
 		asset_root,

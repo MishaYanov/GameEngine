@@ -6,6 +6,9 @@ import type {EditorCommand, EditorSnapshot, ProjectData} from '../../../../core/
 import {EditorService} from '../../../../core/editor/editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {GameInputManager} from './game-input-manager';
+import {InputActionsKeyField} from './input-actions-key-field';
+import {InputActionsMonitor} from './input-actions-monitor';
+import {starterInputActions} from '../../../../core/game-input/input-actions.models';
 import {SceneEditingService} from '../scene-editing.service';
 
 const project: ProjectData = {
@@ -13,6 +16,81 @@ const project: ProjectData = {
     startup_scene_id: 'main', fixed_hz: 60, max_catchup_steps: 8, behaviors: [], behavior_definitions: [],
     gameplay_module: 'campaign',
 };
+
+it('expires a key capture and rejects events from its expired or disabled field', async () => {
+    const fixture = TestBed.createComponent(InputActionsKeyField);
+    fixture.componentRef.setInput('label', 'Keyboard key');
+    fixture.componentRef.setInput('value', 'space');
+    const captured = vi.fn();
+    fixture.componentInstance.keySelected.subscribe(captured);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    const button = root.querySelector('button')!;
+    const press = () => button.dispatchEvent(new KeyboardEvent('keydown', {code: 'KeyQ', bubbles: true, cancelable: true}));
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    try {
+        button.click();
+        fixture.detectChanges();
+        expect(button.getAttribute('aria-pressed')).toBe('true');
+        vi.advanceTimersByTime(8000);
+        fixture.detectChanges();
+        expect(root.textContent).toContain('Key capture timed out');
+        press();
+        expect(captured).not.toHaveBeenCalled();
+        button.click();
+        fixture.componentRef.setInput('disabled', true);
+        fixture.detectChanges();
+        press();
+        expect(captured).not.toHaveBeenCalled();
+    } finally {
+        vi.useRealTimers();
+    }
+});
+
+it('updates the monitored face buttons and sticks across gamepad disconnect and reconnect while focused', async () => {
+    const fixture = TestBed.createComponent(InputActionsMonitor);
+    fixture.componentRef.setInput('map', starterInputActions());
+    fixture.componentRef.setInput('active', true);
+    let pad: Partial<Gamepad> | null = null;
+    const property = Object.getOwnPropertyDescriptor(navigator, 'getGamepads');
+    Object.defineProperty(navigator, 'getGamepads', {configurable: true, value: () => [pad]});
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+    const monitor = root.querySelector('section')!;
+    const value = (action: string) => [...monitor.querySelectorAll('dt')]
+        .find(label => label.textContent === action)?.nextElementSibling?.textContent;
+    vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+    const tick = () => {
+        vi.advanceTimersByTime(50);
+        fixture.detectChanges();
+    };
+    try {
+        monitor.focus();
+        fixture.detectChanges();
+        expect(monitor.textContent).toContain('No gamepad detected');
+        pad = {connected: true, mapping: 'standard', axes: [1, 0, 0, -1],
+            buttons: [{pressed: true, touched: true, value: 1}]};
+        tick();
+        expect(value('Jump')).toBe('Pressed');
+        expect(value('Move')).toBe('1.00, 0.00');
+        expect(value('Look')).toContain('0.00, 1.00');
+        pad = null;
+        tick();
+        expect(value('Jump')).toBe('Released');
+        expect(value('Move')).toBe('0.00, 0.00');
+        pad = {connected: true, mapping: 'standard', axes: [-1, 0, 0, 0], buttons: []};
+        tick();
+        expect(value('Move')).toBe('-1.00, 0.00');
+        monitor.blur();
+        tick();
+        expect(value('Move')).toBe('0.00, 0.00');
+    } finally {
+        fixture.destroy();
+        vi.useRealTimers();
+        if (property) Object.defineProperty(navigator, 'getGamepads', property);
+        else Reflect.deleteProperty(navigator, 'getGamepads');
+    }
+});
 
 describe('Game Input Manager', () => {
     const prototype = HTMLDialogElement.prototype;

@@ -299,3 +299,52 @@ fn migration_charges_unrecognized_and_malformed_json_before_skipping_it() {
 		AssetCatalog::default()
 	);
 }
+#[test]
+fn authored_input_actions_keep_identity_and_guard_disk_changes() {
+	use engine_core::input::InputActionMap;
+	let f = Fixture::new();
+	let root = f.root();
+	let map = InputActionMap::starter();
+	let path = "controls.input-actions.json";
+	let created = prepare_input_actions(&root, path, None, &map)
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(load_input_actions(&root, &created).unwrap(), map);
+	assert!(prepare_input_actions(&root, path, None, &map).is_err());
+	let mut edited = map.clone();
+	edited.actions[2].label = "Leap".into();
+	let saved = prepare_input_actions(
+		&root,
+		path,
+		Some((&created.id, &created.fingerprint)),
+		&edited,
+	)
+	.unwrap()
+	.publish()
+	.unwrap();
+	assert_eq!(saved.id, created.id);
+	assert!(
+		prepare_input_actions(
+			&root,
+			path,
+			Some((&created.id, &created.fingerprint)),
+			&edited
+		)
+		.is_err()
+	);
+	let moved = prepare_move(&root, &created.id, "movement.input-actions.json")
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(moved.id, created.id);
+	assert_eq!(load_input_actions(&root, &moved).unwrap(), edited);
+	assert_eq!(
+		load_catalog(&root).unwrap().by_path(path).unwrap().id,
+		created.id
+	);
+	assert!(!root.join(path).exists());
+	fs::write(root.join(&moved.path), "[malformed").unwrap();
+	assert!(load_input_actions(&root, &moved).is_err());
+	assert!(prepare_move(&root, &moved.id, "other.input-actions.json").is_err());
+}

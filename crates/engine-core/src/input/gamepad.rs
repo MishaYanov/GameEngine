@@ -61,6 +61,8 @@ pub struct MenuButtons {
 pub struct PhysicalGamepadSample {
 	pub left_x: i16,
 	pub left_y: i16,
+	pub right_x: i16,
+	pub right_y: i16,
 	pub face_buttons: [bool; 4],
 	pub menu: MenuButtons,
 }
@@ -70,10 +72,20 @@ impl PhysicalGamepadSample {
 		self.stick().movement()
 	}
 
+	pub fn right_stick(self) -> [f32; 2] {
+		GamepadSample {
+			left_x: self.right_x,
+			left_y: self.right_y,
+			..GamepadSample::default()
+		}
+		.movement()
+	}
+
 	pub fn is_neutral(self) -> bool {
 		self.face_buttons == [false; 4]
 			&& self.menu == MenuButtons::default()
 			&& self.movement() == [0.0; 2]
+			&& self.right_stick() == [0.0; 2]
 	}
 
 	fn stick(self) -> GamepadSample {

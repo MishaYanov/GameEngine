@@ -813,3 +813,6 @@ mod scene_verification;
 
 #[path = "editor_workspace/prop_roundtrip.rs"]
 mod prop_roundtrip;
+
+#[path = "editor_workspace/input_actions.rs"]
+mod input_actions;

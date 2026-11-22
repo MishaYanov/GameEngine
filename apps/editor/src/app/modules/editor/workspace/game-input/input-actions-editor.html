@@ -1,0 +1,123 @@
+<section aria-label="Input Actions assets" class="fields">
+    <div class="asset-controls">
+        <label>Input Actions asset
+            <select #asset [value]="selectedId()" [disabled]="!available() || dirty()" (change)="selectedId.set(asset.value)">
+                <option value="" [selected]="!selectedId()">Choose an asset</option>
+                @for (item of catalog.assets(); track item.id) {
+                    <option [value]="item.id" [selected]="item.id === selectedId()">{{ item.path }}</option>
+                }
+            </select>
+        </label>
+        <button type="button" (click)="catalog.refresh()" [disabled]="!available() || catalog.pending()">Refresh Assets</button>
+        <button type="button" (click)="openSelected()" [disabled]="!available() || dirty() || !selectedId()">Open Asset</button>
+        <button type="button" (click)="create()" [disabled]="!available() || dirty()">New Asset</button>
+    </div>
+    @if (catalog.pending()) {
+        <p role="status">Loading Input Actions…</p>
+    }
+    @if (catalog.error(); as error) {
+        <p class="error" role="alert">{{ error }}</p>
+    }
+    @if (draft(); as map) {
+        @if (source(); as asset) {
+            <p><strong>{{ asset.path }}</strong></p>
+        } @else {
+            <label>Asset path
+                <input #destination [value]="path()" [disabled]="!available()" (input)="path.set(destination.value)" autocomplete="off"/>
+            </label>
+            <p>Save to a project-relative path ending in {{ extension }}.</p>
+        }
+        @if (dirty()) {
+            <p role="status">Unsaved Input Actions edits</p>
+        }
+        <div class="actions">
+            <button type="button" (click)="save()" [disabled]="!savable()">Save Input Actions</button>
+            <button type="button" (click)="discard()" [disabled]="!available() || !dirty()">Discard Edits</button>
+            @if (source()) {
+                <button type="button" (click)="beginMove()" [disabled]="!available() || dirty() || moving()">Move or Rename Asset…</button>
+            }
+        </div>
+        @if (moving()) {
+            <div class="actions">
+                <label>New asset path
+                    <input #newPath [value]="movePath()" [disabled]="!available()" (input)="movePath.set(newPath.value)" autocomplete="off"/>
+                </label>
+                <button type="button" (click)="move()" [disabled]="!canMove()">Move Asset</button>
+                <button type="button" (click)="moving.set(false)" [disabled]="!available()">Cancel Move</button>
+            </div>
+        }
+        <fieldset [disabled]="!available()" class="fields">
+            <legend>Actions</legend>
+            @for (action of map.actions; track $index; let actionIndex = $index) {
+                <article class="action" [attr.data-action-id]="action.id">
+                    <button type="button" class="action-heading" [attr.aria-expanded]="expandedAction() === actionIndex"
+                            (click)="toggleAction(actionIndex)">{{ action.label || action.id || 'Unnamed action' }} <small>{{ action.id }}</small></button>
+                    @if (expandedAction() === actionIndex) {
+                    <div class="actions">
+                        <label>Action ID
+                            <input #id [value]="action.id" maxlength="32" (input)="patchAction(actionIndex, {id: id.value})" autocomplete="off"/>
+                        </label>
+                        <label>Display name
+                            <input #name [value]="action.label" maxlength="96" (input)="patchAction(actionIndex, {label: name.value})" autocomplete="off"/>
+                        </label>
+                        <label>Value type
+                            <select #value [value]="action.value" (change)="changeValue(actionIndex, value.value)">
+                                @for (type of types; track type.value) {
+                                    <option [value]="type.value" [selected]="type.value === action.value">{{ type.label }}</option>
+                                }
+                            </select>
+                        </label>
+                        <button type="button" (click)="removeAction(actionIndex)"
+                                [attr.aria-label]="'Remove action ' + action.label">Remove Action</button>
+                    </div>
+                    @for (binding of action.bindings; track $index; let bindingIndex = $index) {
+                        <div class="binding" role="group" [attr.aria-label]="action.label + ' binding ' + (bindingIndex + 1)">
+                            <label>Binding type
+                                <select #bindingType [value]="binding.kind" (change)="changeBinding(actionIndex, bindingIndex, bindingType.value)">
+                                    @for (option of bindingKinds(action.value, binding.kind); track option.kind) {
+                                        <option [value]="option.kind" [selected]="option.kind === binding.kind">{{ option.label }}</option>
+                                    }
+                                </select>
+                            </label>
+                            @if (binding.kind === 'key') {
+                                <editor-input-actions-key-field label="Keyboard key" [value]="binding.key" [disabled]="!available()"
+                                                                (keySelected)="changeKey(actionIndex, bindingIndex, $event)"/>
+                            } @else if (binding.kind === 'keyboard_vector' || binding.kind === 'keyboard_look') {
+                                @for (axis of axes; track axis.field) {
+                                    <editor-input-actions-key-field [label]="binding.kind === 'keyboard_look' ? axis.label.replace('Move', 'Look') : axis.label"
+                                                                    [value]="binding.keys[axis.field]" [disabled]="!available()"
+                                                                    (keySelected)="changeKey(actionIndex, bindingIndex, $event, axis.field)"/>
+                                }
+                            } @else if (binding.kind === 'gamepad_button') {
+                                <label>Face button
+                                    <select #face [value]="binding.button" (change)="changeButton(actionIndex, bindingIndex, face.value)">
+                                        @for (button of buttons; track button) {
+                                            <option [value]="button" [selected]="button === binding.button">{{ button.toUpperCase() }}</option>
+                                        }
+                                    </select>
+                                </label>
+                            }
+                            <button type="button" (click)="removeBinding(actionIndex, bindingIndex)"
+                                    [attr.aria-label]="'Remove ' + action.label + ' binding ' + (bindingIndex + 1)">Remove</button>
+                        </div>
+                    }
+                    <button type="button" (click)="addBinding(actionIndex)" [disabled]="action.bindings.length >= maxBindings">Add Binding</button>
+                    }
+                </article>
+            }
+            <button type="button" (click)="addAction()" [disabled]="map.actions.length >= maxActions">Add Input Action</button>
+        </fieldset>
+        <editor-input-actions-monitor [map]="map" [active]="active() && !pending()"/>
+    } @else {
+        <p>Open an existing asset or create one with Move, Look, Jump, and Attack.</p>
+    }
+    @if (invalid(); as error) {
+        <p role="status" class="error">{{ error }}</p>
+    }
+    @if (failure(); as error) {
+        <p role="alert" class="error">{{ error }}</p>
+    }
+    @if (message(); as status) {
+        <p role="status">{{ status }}</p>
+    }
+</section>

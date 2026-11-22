@@ -12,12 +12,16 @@ const RELEASED_MENU: MenuButtons = MenuButtons {
 const ACTIVE: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 18_000,
 	left_y: 0,
+	right_x: 0,
+	right_y: 0,
 	face_buttons: [true, false, false, false],
 	menu: RELEASED_MENU,
 };
 const CENTERED: PhysicalGamepadSample = PhysicalGamepadSample {
 	left_x: 1_000,
 	left_y: -2_000,
+	right_x: 0,
+	right_y: 0,
 	face_buttons: [false; 4],
 	menu: RELEASED_MENU,
 };
@@ -106,4 +110,23 @@ fn held_menu_or_dpad_blocks_rearming_until_every_control_is_released() {
 	assert!(!owner.poll(now + CONNECTED_INTERVAL * 2, |_| Some(CENTERED)));
 	assert!(owner.poll(now + CONNECTED_INTERVAL * 3, |_| Some(menu)));
 	assert_eq!(owner.sample().menu, menu.menu);
+}
+
+#[test]
+fn right_stick_waits_for_neutral_after_reconnect() {
+	let mut owner = GamepadOwner::default();
+	let now = Instant::now();
+	let look = PhysicalGamepadSample {
+		right_x: 24_000,
+		..Default::default()
+	};
+	assert!(!owner.poll(now, |_| Some(look)));
+	assert!(!owner.poll(now + CONNECTED_INTERVAL, |_| Some(Default::default())));
+	assert!(owner.poll(now + CONNECTED_INTERVAL * 2, |_| Some(look)));
+	assert!(owner.poll(now + CONNECTED_INTERVAL * 3, |_| None));
+	assert!(owner.sample().is_neutral());
+	let reconnect = now + CONNECTED_INTERVAL * 3 + DISCOVERY_INTERVAL;
+	assert!(!owner.poll(reconnect, |_| Some(look)));
+	assert!(!owner.poll(reconnect + CONNECTED_INTERVAL, |_| Some(Default::default())));
+	assert!(owner.poll(reconnect + CONNECTED_INTERVAL * 2, |_| Some(look)));
 }

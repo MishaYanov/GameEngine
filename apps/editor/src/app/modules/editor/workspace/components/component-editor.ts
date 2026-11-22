@@ -34,6 +34,8 @@ import {EditorSearchPicker} from '../../../../shared/components/search-picker/se
 import {sceneReferenceOptions} from '../scene-reference-options';
 import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {validateCameraLens} from './camera-component-draft';
+import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
+import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
 
 export type ComponentEditIntent =
 	| { readonly kind: 'add'; readonly component: ComponentRecord; readonly expected: string | null }
@@ -59,6 +61,8 @@ export class ComponentEditor {
     readonly gameActions = input<readonly string[]>([]);
     readonly interactablePinned = input(false);
     readonly playerBodyIssue = input<string | null>(null);
+    readonly inputActionAssets = input<readonly InputActionsAsset[]>([]);
+    readonly inputActionAssetsEnabled = input(false);
 	readonly ownerKey = input('');
 	readonly contextKey = input('');
 	readonly editable = input(false);
@@ -209,6 +213,21 @@ export class ComponentEditor {
 			(component.data.kind === 'collider' ? 'Collider' : 'Mesh Renderer')
 		);
 	}
+
+    protected inputAssetId(ref: InputActionsRef): string { return ref.kind === 'asset' ? ref.asset_id : ''; }
+
+    protected inputSource(ref: InputActionsRef): string {
+        if (ref.kind === 'project_default') return 'Project Input';
+        return this.inputActionAssets().find(asset => asset.id === ref.asset_id)?.path ?? 'Unavailable Input Actions asset';
+    }
+
+    protected chooseInputAsset(id: string): void {
+        if (!this.available() || !this.open() || !this.inputActionAssetsEnabled() ||
+            this.draft().kind !== 'player_controller') return;
+        if (id && !this.inputActionAssets().some(asset => asset.id === id)) return;
+        const input: InputActionsRef = id ? {kind: 'asset', asset_id: id} : {kind: 'project_default'};
+        this.fields.playerController.input().value.set(input);
+    }
 
     protected pinned(kind: ComponentData['kind']): boolean {
         return kind === 'interactable' && this.interactablePinned();

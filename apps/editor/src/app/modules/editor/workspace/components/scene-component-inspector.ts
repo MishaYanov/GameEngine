@@ -5,6 +5,7 @@ import { ViewportEditorService } from '../../../../core/editor/viewport-editor.s
 import { SceneEditingService } from '../scene-editing.service';
 import { WorkspaceViewService } from '../scene-viewport/workspace-view.service';
 import { SelectedCameraPreviewService } from '../game-settings/selected-camera-preview.service';
+import { InputActionsCatalog } from '../game-input/input-actions-catalog.service';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 
 @Component({
@@ -20,6 +21,8 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[gameActions]="gameActions()"
 		[interactablePinned]="interactablePinned()"
 		[playerBodyIssue]="playerBodyIssue()"
+		[inputActionAssets]="inputActions?.assets() ?? []"
+		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[pending]="pending()"
@@ -61,6 +64,7 @@ export class SceneComponentInspector {
 	private readonly viewport = inject(ViewportEditorService, {optional: true});
 	private readonly views = inject(WorkspaceViewService, {optional: true});
 	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
+	protected readonly inputActions = inject(InputActionsCatalog, {optional: true});
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types ?? []);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);

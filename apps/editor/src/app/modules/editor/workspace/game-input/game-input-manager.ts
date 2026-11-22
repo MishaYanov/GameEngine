@@ -14,6 +14,8 @@ import {
 } from '../../../../core/game-input/game-input.models';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
+import {InputActionsCatalog} from './input-actions-catalog.service';
+import {InputActionsEditor} from './input-actions-editor';
 
 interface ActionDraft {
     row: number;
@@ -29,7 +31,7 @@ interface InputDraft {
 
 @Component({
     selector: 'editor-game-input',
-    imports: [EditorDialog, FormField],
+    imports: [EditorDialog, FormField, InputActionsEditor],
     templateUrl: './game-input-manager.html',
     styleUrl: './game-input-manager.scss',
     host: {'(window:blur)': 'clearPreview()'},
@@ -37,6 +39,8 @@ interface InputDraft {
 export class GameInputManager {
     readonly opening = input(false);
     protected readonly open = signal(false);
+    protected readonly showingAssets = signal(false);
+    protected readonly inputActions = inject(InputActionsCatalog, {optional: true});
     protected readonly pending = signal(false);
     protected readonly message = signal<string | null>(null);
     protected readonly error = signal<string | null>(null);
@@ -102,7 +106,13 @@ export class GameInputManager {
         this.message.set(null);
         this.error.set(null);
         this.clearPreview();
+        this.showingAssets.set(false);
         this.open.set(true);
+    }
+
+    protected showAssetTools(active: boolean): void {
+        this.clearPreview();
+        this.showingAssets.set(active);
     }
 
     protected addAction(): void {

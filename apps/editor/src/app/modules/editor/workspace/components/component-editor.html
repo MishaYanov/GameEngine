@@ -11,7 +11,7 @@
             } @else if (component.data.kind === 'camera') {
                 <p>{{ component.data.settings.rig.mode }}</p>
             } @else if (component.data.kind === 'player_controller') {
-                <p>Input source: Project Input</p>
+                <p>Input source: {{ inputSource(component.data.settings.input) }}</p>
                 <p>{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
             }
             @if (pinned(component.data.kind)) {
@@ -260,7 +260,21 @@
 					</p>
 				}
 				@case ('player_controller') {
-					<p>Input source: Project Input. Assign local input on the Player object.</p>
+					@if (inputActionAssetsEnabled()) {
+						<label>Input source
+							<select #source [value]="inputAssetId(draft().playerController.input)" (change)="chooseInputAsset(source.value)">
+								<option value="" [selected]="!inputAssetId(draft().playerController.input)">Project Input</option>
+								@if (draft().playerController.input.kind === 'asset' && inputSource(draft().playerController.input) === 'Unavailable Input Actions asset') {
+									<option [value]="inputAssetId(draft().playerController.input)" [selected]="true">Unavailable Input Actions asset</option>
+								}
+								@for (asset of inputActionAssets(); track asset.id) {
+									<option [value]="asset.id" [selected]="asset.id === inputAssetId(draft().playerController.input)">{{ asset.path }}</option>
+								}
+							</select>
+						</label>
+					} @else {
+						<p>Input source: Project Input</p>
+					}
 					<label>Movement space
 						<select [formField]="fields.playerController.space">
 							<option value="world">World</option>

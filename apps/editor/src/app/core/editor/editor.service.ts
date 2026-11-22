@@ -2,6 +2,10 @@ import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import type {UnlistenFn} from '@tauri-apps/api/event';
 import {EditorClientError} from './editor-client-error';
+import {
+    type InputActionMap, type InputActionsAsset, type InputActionsCapture, type InputActionsDocument,
+    readInputActionsAsset, readInputActionsCatalog, readInputActionsDocument,
+} from '../game-input/input-actions.models';
 import {applyEditorUpdate} from './editor-updates';
 import {ViewportAttachment} from './viewport/viewport-attachment';
 import {validGameplayModules} from './gameplay-modules';
@@ -61,6 +65,12 @@ export {EditorClientError, type EditorErrorKind} from './editor-client-error';
 export interface ProjectOpenOptions {
     readonly expectedRevision?: number | null;
     readonly discardUnsaved?: boolean;
+}
+
+export interface InputActionsScope {
+    readonly workspaceGeneration: number;
+    readonly nativeGeneration: number;
+    readonly revision: number;
 }
 
 /** One authoritative document queue. UI drafts and input bindings stay in their owners. */
@@ -373,6 +383,37 @@ export class EditorService {
             });
         this.assetRequest = {generation, promise};
         return promise;
+    }
+
+    listInputActions(scope: InputActionsScope): Promise<readonly InputActionsAsset[]> {
+        return this.inputActionsOperation('editor_list_input_actions', {}, scope, readInputActionsCatalog);
+    }
+
+    openInputActions(assetId: string, scope: InputActionsScope): Promise<InputActionsDocument> {
+        return this.inputActionsOperation('editor_open_input_actions', {assetId}, scope, readInputActionsDocument);
+    }
+
+    saveInputActions(
+        destination: string, map: InputActionMap, capture: InputActionsCapture | null, scope: InputActionsScope,
+    ): Promise<InputActionsDocument> {
+        return this.inputActionsOperation('editor_save_input_actions', {destination, map, capture}, scope, readInputActionsDocument);
+    }
+
+    moveInputActions(destination: string, capture: InputActionsCapture, scope: InputActionsScope): Promise<InputActionsAsset> {
+        return this.inputActionsOperation('editor_move_input_actions', {destination, capture}, scope, readInputActionsAsset);
+    }
+
+    private inputActionsOperation<T>(
+        operation: string, args: Record<string, unknown>, scope: InputActionsScope, read: (value: unknown) => T,
+    ): Promise<T> {
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(scope.workspaceGeneration);
+            const response = await this.native<unknown>(operation, {
+                ...args, expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+            });
+            this.requireGeneration(scope.workspaceGeneration);
+            return read(response);
+        }, false, scope.workspaceGeneration);
     }
 
     importModel(path: string, position: Vec3, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {

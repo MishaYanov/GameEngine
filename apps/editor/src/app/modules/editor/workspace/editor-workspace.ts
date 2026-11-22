@@ -29,6 +29,7 @@ import {ViewportEditorService} from '../../../core/editor/viewport-editor.servic
 import {ViewportAssetDragService} from './viewport-asset-drag.service';
 import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
+import {InputActionsCatalog} from './game-input/input-actions-catalog.service';
 import {CameraSettings} from './game-settings/camera-settings';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
@@ -45,6 +46,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService,
         SelectedCameraPreviewService,
+        InputActionsCatalog,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,

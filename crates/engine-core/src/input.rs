@@ -1,9 +1,14 @@
+mod action_map;
 mod button;
 mod gamepad;
 mod key;
 mod mouse;
 mod profile;
 
+pub use action_map::{
+	ActionBinding, INPUT_ACTION_MAP_SUFFIX, InputActionKind, InputActionLayout, InputActionMap,
+	MAX_INPUT_ACTION_MAP_BYTES, NamedInputAction, ResolvedInputActions,
+};
 pub use button::InputButton;
 pub use gamepad::{
 	ControllerBindings, FaceButton, GamepadSample, MenuButtons, PhysicalGamepadSample,

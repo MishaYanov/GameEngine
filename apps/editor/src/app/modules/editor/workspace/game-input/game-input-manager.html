@@ -2,6 +2,14 @@
 
 <editor-dialog (closed)="clearPreview()" [(open)]="open" [config]="dialogConfig"
                [renderFields]="false" preferenceKey="game-input-manager" title="Game Input Manager">
+    @if (inputActions?.supported()) {
+        <div class="actions" role="group" aria-label="Game Input settings">
+            <button type="button" (click)="showAssetTools(false)" [attr.aria-pressed]="!showingAssets()" [disabled]="pending()">Project Bindings</button>
+            <button type="button" (click)="showAssetTools(true)" [attr.aria-pressed]="showingAssets()" [disabled]="pending()">Input Actions Assets</button>
+        </div>
+        <editor-input-actions-editor [active]="open() && showingAssets() && !opening()" [hidden]="!showingAssets()"/>
+    }
+    @if (!showingAssets()) {
     <p>Map physical keys to movement and game actions. An action can drive a boolean animation parameter while its key
         is held.</p>
 
@@ -79,7 +87,10 @@
     @if (message(); as status) {
         <p role="status">{{ status }}</p>
     }
+    }
+    @if (!showingAssets()) {
     <button (click)="apply()" [disabled]="!available() || !!validation() || !changed()" dialog-actions type="button">
         {{ pending() ? 'Applying…' : 'Apply Bindings' }}
     </button>
+    }
 </editor-dialog>

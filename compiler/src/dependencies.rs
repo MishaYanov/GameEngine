@@ -92,6 +92,17 @@ impl Closure<'_> {
 			.and_then(|value| value.to_str())
 			.unwrap_or("")
 			.to_ascii_lowercase();
+		if relative
+			.to_string_lossy()
+			.to_ascii_lowercase()
+			.ends_with(engine_core::input::INPUT_ACTION_MAP_SUFFIX)
+			&& metadata.len() > engine_core::input::MAX_INPUT_ACTION_MAP_BYTES as u64
+		{
+			return Err(format!(
+				"Input Actions {} exceeds 64 KiB",
+				relative.display()
+			));
+		}
 		if !metadata.is_file()
 			|| metadata.len() > 64 * 1024 * 1024
 			|| (extension == "json" && metadata.len() > 16 * 1024 * 1024)
@@ -183,6 +194,19 @@ impl Closure<'_> {
 	}
 
 	fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
+		if let Some(controller) = &entity.player_controller
+			&& let engine_core::components::InputActionsRef::Asset { asset_id } =
+				&controller.settings.input
+		{
+			let asset = self
+				.catalog
+				.by_id(asset_id)
+				.ok_or("Player Controller Input Actions identity is missing")?;
+			if asset.kind != AssetKind::InputActions {
+				return Err("Player Controller requires an Input Actions asset".into());
+			}
+			self.record(asset_id)?;
+		}
 		if let Some(component) = &entity.animation {
 			let id = &component.settings.source.asset_id;
 			let source = self

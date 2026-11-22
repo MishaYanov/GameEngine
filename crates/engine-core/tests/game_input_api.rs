@@ -316,3 +316,102 @@ fn native_codes_and_player_keys_feed_the_same_actions_and_parameters() {
 		);
 	}
 }
+#[test]
+fn action_asset_binds_stable_ids_to_keyboard_and_physical_controller() {
+	use engine_core::{
+		asset_catalog::AssetId,
+		input::{
+			ActionBinding, InputActionKind, InputActionLayout, InputActionMap,
+			PhysicalGamepadSample, ResolvedInputActions,
+		},
+	};
+	use std::collections::BTreeMap;
+	let map = InputActionMap::starter();
+	let id = AssetId::generate();
+	let digest = map.binding_digest().unwrap();
+	let bindings = BTreeMap::from([("jump".into(), vec![ActionBinding::Key { key: Key::J }])]);
+	let layout = InputActionLayout {
+		schema_version: 1,
+		asset_id: id.clone(),
+		binding_digest: digest.clone(),
+		overrides: bindings,
+	};
+	let mut renamed = map.clone();
+	renamed.actions[2].label = "Leap".into();
+	assert_eq!(renamed.binding_digest().unwrap(), digest);
+	assert!(
+		renamed
+			.with_layout(&AssetId::generate(), &layout)
+			.is_err()
+	);
+	let saved = InputActionMap::from_json(&renamed.to_json().unwrap()).unwrap();
+	let mut keyboard = InputState::default();
+	keyboard.press(Key::Space);
+	assert!(
+		saved
+			.resolve(&keyboard, Default::default(), [0.0; 2])
+			.buttons
+			.contains("jump")
+	);
+	let controller = PhysicalGamepadSample {
+		face_buttons: [true, false, false, false],
+		..Default::default()
+	};
+	assert!(
+		saved
+			.resolve(&Default::default(), controller, [0.0; 2])
+			.buttons
+			.contains("jump")
+	);
+
+	let look = PhysicalGamepadSample {
+		right_x: 24_000,
+		..Default::default()
+	};
+	assert!(
+		saved
+			.resolve(&Default::default(), look, [0.0; 2])
+			.look_rates["look"][0]
+			> 0.5
+	);
+
+	let customised = saved.with_layout(&id, &layout).unwrap();
+	assert!(
+		!customised
+			.resolve(&keyboard, controller, [0.0; 2])
+			.buttons
+			.contains("jump")
+	);
+	keyboard.press(Key::J);
+	assert!(
+		customised
+			.resolve(&keyboard, Default::default(), [0.0; 2])
+			.buttons
+			.contains("jump")
+	);
+
+	keyboard.suppress_held();
+	assert!(
+		customised
+			.resolve(&keyboard, Default::default(), [0.0; 2])
+			.buttons
+			.is_empty()
+	);
+	let invalid_motion = customised.resolve(&keyboard, Default::default(), [f32::NAN, 10.0]);
+	assert_eq!(invalid_motion.deltas["look"], [0.0; 2]);
+
+	let mut conflict = map.clone();
+	conflict.actions[3]
+		.bindings
+		.push(ActionBinding::Key { key: Key::Space });
+	assert!(conflict.to_json().unwrap_err().contains("conflicting"));
+	let mut wrong_type = map.clone();
+	wrong_type.actions[2].value = InputActionKind::Vector2;
+	assert!(wrong_type.validate().is_err());
+	assert!(InputActionMap::from_json(&[b' '; 65_537]).is_err());
+	let mut keys = InputState::default();
+	keys.press(Key::ArrowRight);
+	let legacy = ResolvedInputActions::from_legacy(&profile(), &keys, Default::default());
+	assert!(legacy.buttons.contains("move_right"));
+	assert!(legacy.animation_parameters.contains("IsMoving"));
+}

@@ -42,6 +42,7 @@ impl<'de> Deserialize<'de> for AssetId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
+	InputActions,
 	Model,
 	Prefab,
 	Scene,
@@ -79,6 +80,18 @@ pub struct PersistentAsset {
 impl PersistentAsset {
 	pub fn validate(&self) -> Result<(), String> {
 		validate_model_path(&self.path)?;
+		if self.kind == AssetKind::InputActions
+			&& (!self
+				.path
+				.to_ascii_lowercase()
+				.ends_with(crate::input::INPUT_ACTION_MAP_SUFFIX)
+				|| self.bytes > crate::input::MAX_INPUT_ACTION_MAP_BYTES as u64)
+		{
+			return Err(
+				"Input Actions catalog entry requires a .input-actions.json asset within 64 KiB"
+					.into(),
+			);
+		}
 		if self.revision == 0
 			|| self.fingerprint.len() != 64
 			|| !self
