@@ -1,48 +1,7 @@
 use super::*;
 use engine_core::input::{INPUT_ACTION_MAP_SUFFIX, InputActionMap, MAX_INPUT_ACTION_MAP_BYTES};
 
-pub fn load_input_actions(
-	asset_root: &Path,
-	asset: &PersistentAsset,
-) -> Result<InputActionMap, String> {
-	if asset.kind != AssetKind::InputActions
-		|| !asset
-			.path
-			.to_ascii_lowercase()
-			.ends_with(INPUT_ACTION_MAP_SUFFIX)
-	{
-		return Err("Select an Input Actions asset".into());
-	}
-	let path = asset_path(asset_root, &asset.path, true)?;
-	let bytes = read(&path, MAX_INPUT_ACTION_MAP_BYTES)?;
-	if asset.bytes != bytes.len() as u64 || asset.fingerprint != fingerprint(&bytes) {
-		return Err("Input Actions file changed outside its catalog".into());
-	}
-	InputActionMap::from_json(&bytes)
-}
-
-pub fn active_input_actions(
-	asset_root: &Path,
-	scene: &engine_core::SceneData,
-) -> Result<Option<InputActionMap>, String> {
-	let Some(settings) = scene
-		.local_player()
-		.and_then(|player| player.player_controller.as_ref())
-		.map(|component| &component.settings)
-	else {
-		return Ok(None);
-	};
-	match &settings.input {
-		engine_core::components::InputActionsRef::ProjectDefault => Ok(None),
-		engine_core::components::InputActionsRef::Asset { asset_id } => {
-			let catalog = load_catalog(asset_root)?;
-			let asset = catalog
-				.by_id(asset_id)
-				.ok_or("Active Player Controller Input Actions identity is unavailable")?;
-			load_input_actions(asset_root, asset).map(Some)
-		}
-	}
-}
+pub use bridge::input_actions::{load as load_input_actions, load_scene as active_input_actions};
 
 pub fn prepare_input_actions(
 	asset_root: &Path,

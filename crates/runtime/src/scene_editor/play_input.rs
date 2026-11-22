@@ -4,7 +4,7 @@ use super::{MovementTarget, SceneEditor};
 use crate::{
 	EntityKey, InputState, Key,
 	editor::command::EditorCommandDto as Command,
-	input::{GamepadSample, InputProfile, MovementBindings},
+	input::{GamepadSample, InputProfile, MovementBindings, PhysicalGamepadSample},
 };
 use engine_core::camera_input::{CameraInputOwner, CameraIntent};
 
@@ -22,18 +22,32 @@ impl SceneEditor {
 		input: &InputState,
 		gamepad: GamepadSample,
 	) -> Result<(), String> {
+		self.sample_play_action_controls(input, gamepad, PhysicalGamepadSample::default())
+	}
+
+	pub fn sample_play_action_controls(
+		&mut self,
+		input: &InputState,
+		gamepad: GamepadSample,
+		physical: PhysicalGamepadSample,
+	) -> Result<(), String> {
 		if !self.is_playing() {
 			return Ok(());
 		}
 		let profile = self.play_input_profile().cloned().unwrap_or_default();
 		let controls = profile.resolve_controls(input, gamepad);
-		self.session
-			.as_mut()
-			.expect("playing session")
-			.set_game_keyboard_input(&self.play_input_target, controls)
+		let session = self.session.as_mut().expect("playing session");
+		if session.sample_action_keys(input, physical)? {
+			Ok(())
+		} else {
+			session.set_game_keyboard_input(&self.play_input_target, controls)
+		}
 	}
 	pub fn camera_input_owner(&self) -> Option<CameraInputOwner> {
-		self.session.as_ref()?.camera_input_owner()
+		self.session
+			.as_ref()
+			.filter(|session| session.action_map_uses_pointer_look())?
+			.camera_input_owner()
 	}
 
 	pub fn owns_camera_input(&self, owner: &CameraInputOwner) -> bool {
@@ -112,7 +126,24 @@ impl SceneEditor {
 			.unwrap_or(&MovementBindings::WASD)
 	}
 
+	pub fn play_input_action_map(&self) -> Option<&crate::input::InputActionMap> {
+		self.session.as_ref()?.play_input_action_map()
+	}
+
+	pub fn has_authored_input_actions(&self) -> bool {
+		self.session
+			.as_ref()
+			.is_some_and(|session| session.has_authored_input_actions())
+	}
+
 	pub fn play_input_binds_key(&self, key: Key) -> bool {
+		if let Some(bound) = self
+			.session
+			.as_ref()
+			.and_then(|session| session.action_map_binds_key(key))
+		{
+			return bound;
+		}
 		self.play_input_profile().map_or_else(
 			|| MovementBindings::WASD.contains_key(key),
 			|profile| profile.contains_key(key),

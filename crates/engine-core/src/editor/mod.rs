@@ -49,6 +49,7 @@ pub struct EditorSession {
 	saved_project: Arc<ProjectData>,
 	module_resolver: GameModuleResolver,
 	animation_resolver: Option<crate::animation::AnimationResolver>,
+	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
 	saved: Arc<SceneData>,
 	selection: Vec<EntityKey>,
 	history: History,
@@ -87,6 +88,7 @@ impl EditorSession {
 			project,
 			module_resolver: Arc::new(resolve_default_gameplay),
 			animation_resolver: None,
+			input_actions_resolver: None,
 			saved: Arc::clone(&data),
 			data,
 			selection: Vec::new(),
@@ -154,6 +156,14 @@ impl EditorSession {
 	) -> Result<(), String> {
 		self.require_edit()?;
 		self.animation_resolver = Some(resolver);
+		Ok(())
+	}
+	pub fn set_input_actions_resolver(
+		&mut self,
+		resolver: crate::simulation_session::InputActionsResolver,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.input_actions_resolver = Some(resolver);
 		Ok(())
 	}
 	pub fn animations(&self) -> Option<&crate::animation::AnimationBank> {

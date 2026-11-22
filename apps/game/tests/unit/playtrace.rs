@@ -251,3 +251,32 @@ fn alternate_data_streams_are_not_output_files() {
 	assert!(PlayTrace::new(output, &authored, &authored).is_err());
 	assert!(!scratch.output().exists());
 }
+#[test]
+fn typed_trace_keeps_raw_gamepad_and_uses_version_five() {
+	let scratch = Scratch::new();
+	let profile = profile();
+	let mut trace = PlayTrace::new(scratch.output(), &profile, &profile).unwrap();
+	let pad = PhysicalGamepadSample {
+		right_x: -13_000,
+		face_buttons: [false, true, false, false],
+		..Default::default()
+	};
+	trace.record_input_actions(vec!["KeyJ".into()], pad);
+	trace.record_input_actions(vec!["KeyJ".into()], pad);
+	trace.record_steps(1);
+	trace.finish().unwrap();
+	let bytes = fs::read(scratch.output()).unwrap();
+	let trace: Value = serde_json::from_slice(&bytes).unwrap();
+	assert_eq!(trace["schema_version"], 5);
+	assert_eq!(trace["actions"].as_array().unwrap().len(), 4);
+	assert_eq!(
+		trace["actions"][1],
+		json!({"type":"keyboard_input", "keys":["KeyJ"]})
+	);
+	assert_eq!(trace["actions"][2]["type"], "physical_controller_input");
+	assert_eq!(trace["actions"][2]["right_x"], -13_000);
+	assert_eq!(
+		trace["actions"][2]["face_buttons"],
+		json!([false, true, false, false])
+	);
+}

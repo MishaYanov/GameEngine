@@ -4,7 +4,7 @@ use super::{MovementTarget, PreparedScene, SceneEditor, TickOutcome};
 use crate::{
 	Camera, EntityKey, InputState, Key, SceneData,
 	editor::{EditorSession, command::EditorCommandDto as Command},
-	input::{GamepadSample, InputProfile},
+	input::{GamepadSample, PhysicalGamepadSample},
 	scene::Scene,
 };
 use engine_core::{
@@ -156,6 +156,13 @@ impl SceneEditor {
 		self.initialize(scene)?;
 		self.finish_gesture()?;
 		if let Some(root) = scene.animation_root().map(std::path::Path::to_path_buf) {
+			let input_root = root.clone();
+			self.session
+				.as_mut()
+				.expect("initialized session")
+				.set_input_actions_resolver(Arc::new(move |data| {
+					bridge::input_actions::load_scene(&input_root, data)
+				}))?;
 			self.session
 				.as_mut()
 				.unwrap()
@@ -200,7 +207,24 @@ impl SceneEditor {
 		&mut self,
 		scene: &mut Scene,
 		input: &InputState,
+		gamepad: GamepadSample,
+		elapsed: f32,
+	) -> Result<TickOutcome, String> {
+		self.update_play_with_action_controls(
+			scene,
+			input,
+			gamepad,
+			PhysicalGamepadSample::default(),
+			elapsed,
+		)
+	}
+
+	pub fn update_play_with_action_controls(
+		&mut self,
+		scene: &mut Scene,
+		input: &InputState,
 		mut gamepad: GamepadSample,
+		mut physical: PhysicalGamepadSample,
 		elapsed: f32,
 	) -> Result<TickOutcome, String> {
 		self.initialize(scene)?;
@@ -209,16 +233,13 @@ impl SceneEditor {
 				paused: !self.simulation_paused(),
 			})?;
 			gamepad = GamepadSample::default();
+			physical = PhysicalGamepadSample::default();
 		}
-		let defaults = InputProfile::default();
-		let profile = self.play_input_profile().unwrap_or(&defaults);
-		let controls = profile.resolve_controls(input, gamepad);
-
+		self.sample_play_action_controls(input, gamepad, physical)?;
 		let session = self.session.as_mut().expect("initialized session");
 		if !session.has_play_visibility_capabilities() {
 			session.set_play_visibility_capabilities(scene.visibility_capabilities())?;
 		}
-		session.set_game_keyboard_input(&self.play_input_target, controls)?;
 		let outcome = session.tick(elapsed as f64)?;
 		Self::synchronize_play_tick(scene, session, &outcome)?;
 		Ok(outcome)

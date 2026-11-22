@@ -14,7 +14,8 @@ impl GameCameraCapture {
 		native_focused: bool,
 		grab: impl FnOnce() -> Result<(), String>,
 	) -> Result<Option<Self>, String> {
-		if !native_focused
+		if !workspace.backend.session().action_map_uses_pointer_look()
+			|| !native_focused
 			|| !interaction.keyboard_focused()
 			|| !interaction.game_keyboard_active()
 			|| interaction.generation != Some(workspace.generation)
@@ -161,9 +162,11 @@ impl ViewportInteraction {
 		&mut self,
 		workspace: &mut EditorWorkspace,
 	) -> Result<(), String> {
-		workspace.backend.set_game_controls_from_codes(
+		let physical = self.play_gamepad.sample();
+		workspace.backend.set_action_controls_from_codes(
 			&self.keys,
-			runtime::input::ControllerBindings::default().resolve(self.play_gamepad.sample()),
+			physical,
+			runtime::input::ControllerBindings::default().resolve(physical),
 		)
 	}
 
@@ -181,10 +184,7 @@ impl ViewportInteraction {
 
 	#[cfg(windows)]
 	pub(crate) fn poll_gamepad(&mut self, now: std::time::Instant) -> bool {
-		let bindings = runtime::input::ControllerBindings::default();
-		let previous = bindings.resolve(self.play_gamepad.sample());
 		self.play_gamepad.poll(now, runtime::input::poll_gamepad)
-			&& previous != bindings.resolve(self.play_gamepad.sample())
 	}
 
 	#[cfg(windows)]

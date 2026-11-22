@@ -16,6 +16,10 @@ impl EditorSession {
 			run.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		run.active().require_animation_ready()?;
+		if let Some(resolver) = &self.input_actions_resolver {
+			run.set_input_actions_resolver(Arc::clone(resolver))?;
+		}
+		run.active().require_input_actions_ready()?;
 		self.play = Some(run);
 		self.scene_revision += 1;
 		self.bump();
@@ -111,6 +115,50 @@ impl EditorSession {
 		let profile = self.project.input_profile.as_ref().unwrap_or(&defaults);
 		let input = profile.resolve_controls_from_codes(held_codes, gamepad);
 		self.set_game_keyboard_input(&MovementTarget::AllControlled, input)
+	}
+
+	pub fn sample_action_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+		physical: crate::input::PhysicalGamepadSample,
+	) -> Result<bool, String> {
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut()
+			.sample_action_codes(held_codes, physical)
+	}
+
+	pub fn sample_action_keys(
+		&mut self,
+		state: &crate::InputState,
+		physical: crate::input::PhysicalGamepadSample,
+	) -> Result<bool, String> {
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut()
+			.sample_action_keys(state, physical)
+	}
+
+	pub fn has_authored_input_actions(&self) -> bool {
+		self.play
+			.as_ref()
+			.is_some_and(|run| run.active().input_action_map().is_some())
+	}
+
+	pub fn play_input_action_map(&self) -> Option<&crate::input::InputActionMap> {
+		self.play.as_ref()?.active().input_action_map()
+	}
+
+	pub fn action_map_binds_key(&self, key: crate::Key) -> Option<bool> {
+		self.play.as_ref()?.active().authored_action_binds_key(key)
+	}
+
+	pub fn action_map_uses_pointer_look(&self) -> bool {
+		self.play
+			.as_ref()
+			.is_none_or(|run| run.active().uses_pointer_look())
 	}
 
 	pub fn play_has_game_camera_owner(&self) -> bool {

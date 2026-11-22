@@ -229,8 +229,8 @@ impl GameApp {
 	fn needs_continuous_redraw(&self) -> bool {
 		if self.window_occluded
 			|| (self.standalone_runtime
-			&& ((self.game_completed() && !self.cinder_victory_animation_active())
-			|| self.player_controls.is_open()))
+				&& ((self.game_completed() && !self.cinder_victory_animation_active())
+					|| self.player_controls.is_open()))
 		{
 			return false;
 		}
@@ -298,7 +298,8 @@ impl GameApp {
 			// Opening, closing, or applying can reset the polling owner.
 			return Some(self.play_gamepad.deadline().unwrap_or(now));
 		}
-		let changed = changed && previous != self.logical_gamepad();
+		let changed = changed
+			&& (self.editor.has_authored_input_actions() || previous != self.logical_gamepad());
 		if changed {
 			if let Err(error) = self.submit_play_controls() {
 				engine_logger::error!(target: "game", "Controller input rejected: {error}");
@@ -313,19 +314,21 @@ impl GameApp {
 		self.play_gamepad.deadline()
 	}
 
-	fn logical_gamepad(&self) -> GamepadSample {
-		let pad = self
-			.player_controls
-			.controller()
-			.resolve(self.play_gamepad.sample());
-		if pad != GamepadSample::default()
-			&& (self.player_controls.is_open()
-				|| self.editor.simulation_paused()
-				|| self.game_completed())
+	fn physical_gamepad(&self) -> runtime::input::PhysicalGamepadSample {
+		if self.player_controls.is_open()
+			|| self.editor.simulation_paused()
+			|| self.game_completed()
 		{
-			return GamepadSample::default();
+			runtime::input::PhysicalGamepadSample::default()
+		} else {
+			self.play_gamepad.sample()
 		}
-		pad
+	}
+
+	fn logical_gamepad(&self) -> GamepadSample {
+		self.player_controls
+			.controller()
+			.resolve(self.physical_gamepad())
 	}
 
 	fn effective_input_profile(&self) -> Option<&InputProfile> {
@@ -347,9 +350,9 @@ impl GameApp {
 	fn cinder_victory_animation_active(&self) -> bool {
 		self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Victory)
 			&& self
-			.editor
-			.animations()
-			.is_some_and(|bank| bank.has_active_runtime_one_shot())
+				.editor
+				.animations()
+				.is_some_and(|bank| bank.has_active_runtime_one_shot())
 	}
 
 	fn pointer_attack_input(&self) -> Option<InputState> {
@@ -372,11 +375,17 @@ impl GameApp {
 
 	fn submit_play_controls(&mut self) -> Result<(), String> {
 		let pad = self.logical_gamepad();
+		let physical = self.physical_gamepad();
 		let pointer_input = self.pointer_attack_input();
 		let input = pointer_input.as_ref().unwrap_or(&self.input);
-		self.editor.sample_play_controls(input, pad)?;
+		self.editor
+			.sample_play_action_controls(input, pad, physical)?;
 		if let Some(trace) = self.play_trace.as_mut() {
-			trace.record_controls(input, pad);
+			if let Some(map) = self.editor.play_input_action_map() {
+				trace.record_input_actions(map.held_keyboard_codes(input), physical);
+			} else {
+				trace.record_controls(input, pad);
+			}
 		}
 		Ok(())
 	}

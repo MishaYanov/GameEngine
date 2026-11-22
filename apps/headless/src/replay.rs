@@ -7,7 +7,7 @@ use engine_core::{
 	Bounds3, Engine, EngineBuilder,
 	camera_input::CameraIntent,
 	command::{EditorCommandDto, EditorCommandRequest},
-	input::GamepadSample,
+	input::{ControllerBindings, GamepadSample, PhysicalGamepadSample},
 };
 use serde::{
 	Deserialize,
@@ -52,6 +52,13 @@ enum ReplayAction {
 		left_y: i16,
 		jump: bool,
 		interact: bool,
+	},
+	PhysicalControllerInput {
+		left_x: i16,
+		left_y: i16,
+		right_x: i16,
+		right_y: i16,
+		face_buttons: [bool; 4],
 	},
 	Command {
 		#[serde(default)]
@@ -110,6 +117,9 @@ impl Replay {
 				}
 				ReplayAction::ControllerInput { .. } if self.schema_version < 4 => {
 					return Err("controller_input requires replay schema version 4".into());
+				}
+				ReplayAction::PhysicalControllerInput { .. } if self.schema_version < 5 => {
+					return Err("physical_controller_input requires replay schema version 5".into());
 				}
 				ReplayAction::Command { command, .. }
 					if matches!(
@@ -204,6 +214,7 @@ pub(super) struct Measurements {
 	pub(super) tick_total: Duration,
 	pub(super) tick_max: Duration,
 	pub(super) fresh_ids: bool,
+	pub(super) accepted_action_presses: Vec<engine_core::simulation_session::CommittedInputAction>,
 	pub(super) bounds: HashSet<(String, usize)>,
 }
 
@@ -211,11 +222,12 @@ pub(super) struct Measurements {
 struct ReplayControls {
 	keyboard: HashSet<String>,
 	gamepad: GamepadSample,
+	physical: PhysicalGamepadSample,
 }
 
 impl ReplayControls {
 	fn submit(&self, engine: &mut Engine) -> Result<(), String> {
-		engine.set_game_controls_from_codes(&self.keyboard, self.gamepad)
+		engine.set_action_controls_from_codes(&self.keyboard, self.physical, self.gamepad)
 	}
 }
 
@@ -231,11 +243,15 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 	} = source(&options)?;
 	let source_schema = parsed.source_schema_version;
 	let animation_root = asset_root.clone();
+	let input_root = asset_root.clone();
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
 		.module_resolver(Arc::new(gameplay_catalog::resolve))
 		.animation_resolver(Arc::new(move |scene| {
 			bridge::animation_asset::prepare_scene(&animation_root, scene)
+		}))
+		.input_actions_resolver(Arc::new(move |scene| {
+			bridge::input_actions::load_scene(&input_root, scene)
 		}))
 		.build()
 		.map_err(|e| e.to_string())?;
@@ -287,6 +303,31 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 						jump,
 						interact,
 					};
+					controls.physical = PhysicalGamepadSample {
+						left_x,
+						left_y,
+						face_buttons: [jump, false, interact, false],
+						..Default::default()
+					};
+					controls.submit(&mut engine)?;
+					measures.commands += 1;
+				}
+				ReplayAction::PhysicalControllerInput {
+					left_x,
+					left_y,
+					right_x,
+					right_y,
+					face_buttons,
+				} => {
+					controls.physical = PhysicalGamepadSample {
+						left_x,
+						left_y,
+						right_x,
+						right_y,
+						face_buttons,
+						..Default::default()
+					};
+					controls.gamepad = ControllerBindings::default().resolve(controls.physical);
 					controls.submit(&mut engine)?;
 					measures.commands += 1;
 				}
@@ -450,6 +491,11 @@ fn advance(
 					}
 				}
 			}
+			const MAX_REPORTED_ACTION_PRESSES: usize = 256;
+			let available = MAX_REPORTED_ACTION_PRESSES - measures.accepted_action_presses.len();
+			measures
+				.accepted_action_presses
+				.extend(outcome.accepted_action_presses.into_iter().take(available));
 			measures.fixed_steps += outcome.steps as u64;
 			measures.dropped += outcome.dropped_seconds;
 			if outcome.pending_steps == 0 {

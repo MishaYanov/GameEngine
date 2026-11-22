@@ -223,6 +223,20 @@ impl Engine {
 	}
 
 	/// Updates the merged Play input sample without changing the authored document.
+	pub fn set_action_controls_from_codes(
+		&mut self,
+		held_codes: &HashSet<String>,
+		physical: crate::input::PhysicalGamepadSample,
+		logical: GamepadSample,
+	) -> Result<(), String> {
+		if self.session.sample_action_codes(held_codes, physical)? {
+			Ok(())
+		} else {
+			self.session
+				.set_game_controls_from_codes(held_codes, logical)
+		}
+	}
+
 	pub fn set_game_controls_from_codes(
 		&mut self,
 		held_codes: &HashSet<String>,

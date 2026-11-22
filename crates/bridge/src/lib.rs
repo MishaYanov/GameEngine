@@ -1,5 +1,6 @@
 pub mod animation_asset;
 mod asset_io;
+pub mod input_actions;
 pub mod editor;
 pub mod engine;
 pub mod feedback_audio;

@@ -19,6 +19,8 @@ use std::{collections::HashMap, sync::Arc};
 mod camera_objects;
 mod gameplay;
 mod input;
+mod player_control;
+pub use player_control::InputActionsResolver;
 
 pub use gameplay::{
 	ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameModuleResolver,
@@ -26,6 +28,12 @@ pub use gameplay::{
 	SimulationAction, resolve_default_gameplay,
 };
 pub use input::{InputFrame, MovementTarget};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommittedInputAction {
+	pub id: String,
+	pub tick: u64,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TickOutcome {
@@ -48,6 +56,8 @@ pub struct TickOutcome {
 	pub requested_scene: Option<SceneId>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub trigger_events: Vec<TriggerEvent>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub accepted_action_presses: Vec<CommittedInputAction>,
 }
 pub struct SimulationSession {
 	animations: crate::animation::AnimationBank,
@@ -70,6 +80,7 @@ pub struct SimulationSession {
 	triggers: TriggerTracker,
 	camera: GameCameraController,
 	camera_objects: camera_objects::CameraObjects,
+	input_action_map: Option<crate::input::InputActionMap>,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
 	camera_input: CameraInputLatch,
 	camera_exclusions: Option<CameraExclusions>,
@@ -186,6 +197,7 @@ impl SimulationSession {
 			triggers,
 			camera,
 			camera_objects,
+			input_action_map: None,
 			visibility_capabilities: None,
 			camera_input,
 			camera_exclusions,
@@ -260,6 +272,8 @@ impl SimulationSession {
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
+				|| self.inputs.controller_movement != [0.0; 2]
+				|| self.inputs.controller_look != [0.0; 2]
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
@@ -278,6 +292,8 @@ impl SimulationSession {
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
+				|| self.inputs.controller_movement != [0.0; 2]
+				|| self.inputs.controller_look != [0.0; 2]
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
@@ -547,6 +563,7 @@ impl SimulationSession {
 		let mut camera_input = self.camera_input.clone();
 		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
+		let mut accepted_action_presses = Vec::new();
 		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
@@ -613,9 +630,29 @@ impl SimulationSession {
 						actions: &mut self.actions,
 					},
 				)?;
+				player_control::apply_local_player(
+					&self.world,
+					&mut characters,
+					&self.inputs,
+					camera.camera(),
+				)?;
 				// Later catch-up steps see held state only. A rejected tick
 				// rolls back its actions and clears all input on pause.
-				self.inputs.action_presses.clear();
+				if self.inputs.controller_owned && !self.inputs.action_presses.is_empty() {
+					let tick = self.tick + u64::from(steps) + 1;
+					accepted_action_presses.extend(
+						self.inputs
+							.action_presses
+							.drain()
+							.map(|id| CommittedInputAction { id, tick }),
+					);
+					accepted_action_presses.sort_unstable_by(|left, right| {
+						(left.tick, &left.id).cmp(&(right.tick, &right.id))
+					});
+				} else {
+					self.inputs.action_presses.clear();
+				}
+
 				// Structural removals become visible at the end of this step, after
 				let count = characters.keys().count();
 				actions_applied += count;
@@ -882,7 +919,11 @@ impl SimulationSession {
 						&self.world,
 						&lifecycle,
 						report.step_seconds,
-						camera_input.take_for_step(),
+						player_control::step_camera_intent(
+							camera_input.take_for_step(),
+							self.inputs.controller_look,
+							report.step_seconds,
+						),
 						camera_tick,
 						obstruction_query(
 							&self.world,
@@ -1042,6 +1083,7 @@ impl SimulationSession {
 		self.camera_input = camera_input;
 		self.camera_exclusions = camera_exclusions;
 		outcome.trigger_events = trigger_events;
+		outcome.accepted_action_presses = accepted_action_presses;
 		Ok(outcome)
 	}
 }

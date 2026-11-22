@@ -67,6 +67,7 @@ pub struct EngineBuilder {
 	project: ProjectData,
 	module_resolver: GameModuleResolver,
 	animation_resolver: Option<crate::animation::AnimationResolver>,
+	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
 	asset_limits: AssetRegistryLimits,
 }
 impl EngineBuilder {
@@ -77,6 +78,7 @@ impl EngineBuilder {
 			project,
 			module_resolver: Arc::new(resolve_default_gameplay),
 			animation_resolver: None,
+			input_actions_resolver: None,
 			asset_limits: AssetRegistryLimits::default(),
 		}
 	}
@@ -96,6 +98,13 @@ impl EngineBuilder {
 	}
 	pub fn asset_limits(mut self, limits: AssetRegistryLimits) -> Self {
 		self.asset_limits = limits;
+		self
+	}
+	pub fn input_actions_resolver(
+		mut self,
+		resolver: crate::simulation_session::InputActionsResolver,
+	) -> Self {
+		self.input_actions_resolver = Some(resolver);
 		self
 	}
 	pub fn animation_resolver(mut self, resolver: crate::animation::AnimationResolver) -> Self {
@@ -125,6 +134,11 @@ impl EngineBuilder {
 		session
 			.set_module_resolver(self.module_resolver)
 			.map_err(invalid("gameplay_module"))?;
+		if let Some(resolver) = self.input_actions_resolver {
+			session
+				.set_input_actions_resolver(resolver)
+				.map_err(invalid("input_actions_resolver"))?;
+		}
 		if let Some(resolver) = self.animation_resolver {
 			session
 				.set_animation_resolver(resolver)

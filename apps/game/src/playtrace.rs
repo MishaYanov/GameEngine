@@ -2,7 +2,7 @@
 
 use runtime::{
 	InputState, Key,
-	input::{GamepadSample, InputProfile},
+	input::{GamepadSample, InputProfile, PhysicalGamepadSample},
 };
 use serde::Serialize;
 use std::{
@@ -24,6 +24,9 @@ pub(super) struct PlayTrace {
 	interact: bool,
 	keyboard: u32,
 	gamepad: GamepadSample,
+	named_keys: Vec<String>,
+	physical: PhysicalGamepadSample,
+	typed_recorded: bool,
 	paused: bool,
 	actions: Vec<TraceAction>,
 	reserved_bytes: usize,
@@ -77,6 +80,9 @@ impl PlayTrace {
 			interact: has_action("interact"),
 			keyboard: 0,
 			gamepad: GamepadSample::default(),
+			named_keys: Vec::new(),
+			physical: PhysicalGamepadSample::default(),
+			typed_recorded: false,
 			paused: false,
 			actions: Vec::new(),
 			reserved_bytes: 64,
@@ -134,6 +140,33 @@ impl PlayTrace {
 		}
 	}
 
+	/// Typed action assets record physical input; replay resolves bindings from the same asset.
+	pub(super) fn record_input_actions(
+		&mut self,
+		keys: Vec<String>,
+		physical: PhysicalGamepadSample,
+	) {
+		if self.full || self.paused {
+			return;
+		}
+		if keys.len() > MAX_HELD_KEYS as usize {
+			self.full = true;
+			return;
+		}
+		let mut actions = Vec::with_capacity(2);
+		if keys != self.named_keys {
+			actions.push(TraceAction::KeyboardInput { keys: keys.clone() });
+		}
+		if physical != self.physical {
+			actions.push(TraceAction::physical_controller(physical));
+		}
+		if !actions.is_empty() && self.append(actions) {
+			self.named_keys = keys;
+			self.physical = physical;
+			self.typed_recorded = true;
+		}
+	}
+
 	/// Count only accepted fixed steps, including a host's explicit drains.
 	pub(super) fn record_steps(&mut self, steps: u32) {
 		if self.full || self.paused || steps == 0 {
@@ -155,6 +188,8 @@ impl PlayTrace {
 			self.paused = paused;
 			self.keyboard = 0;
 			self.gamepad = GamepadSample::default();
+			self.named_keys.clear();
+			self.physical = PhysicalGamepadSample::default();
 		}
 	}
 
@@ -164,11 +199,16 @@ impl PlayTrace {
 			return;
 		}
 		let mut actions = Vec::with_capacity(4);
-		if self.keyboard != 0 {
+		if self.keyboard != 0 || !self.named_keys.is_empty() {
 			actions.push(TraceAction::KeyboardInput { keys: Vec::new() });
 		}
 		if self.gamepad != GamepadSample::default() {
 			actions.push(TraceAction::controller(GamepadSample::default()));
+		}
+		if self.physical != PhysicalGamepadSample::default() {
+			actions.push(TraceAction::physical_controller(
+				PhysicalGamepadSample::default(),
+			));
 		}
 		// v4 has no clear-input record. Toggling Pause without a step clears
 		// pending button edges, including a complete press/release since the last tick.
@@ -176,6 +216,8 @@ impl PlayTrace {
 		if self.append(actions) {
 			self.keyboard = 0;
 			self.gamepad = GamepadSample::default();
+			self.named_keys.clear();
+			self.physical = PhysicalGamepadSample::default();
 		}
 	}
 
@@ -186,7 +228,11 @@ impl PlayTrace {
 	/// Publish the accepted prefix and never open an already occupied destination.
 	pub(super) fn finish(self) -> Result<(), String> {
 		let mut bytes = serde_json::to_vec(&TraceFile {
-			schema_version: SCHEMA_VERSION,
+			schema_version: if self.typed_recorded {
+				5
+			} else {
+				SCHEMA_VERSION
+			},
 			actions: &self.actions,
 		})
 		.map_err(|error| format!("Could not encode playtrace: {error}"))?;
@@ -246,6 +292,13 @@ enum TraceAction {
 		jump: bool,
 		interact: bool,
 	},
+	PhysicalControllerInput {
+		left_x: i16,
+		left_y: i16,
+		right_x: i16,
+		right_y: i16,
+		face_buttons: [bool; 4],
+	},
 	Tick {
 		count: u32,
 	},
@@ -261,6 +314,16 @@ impl TraceAction {
 		}
 	}
 
+	fn physical_controller(sample: PhysicalGamepadSample) -> Self {
+		Self::PhysicalControllerInput {
+			left_x: sample.left_x,
+			left_y: sample.left_y,
+			right_x: sample.right_x,
+			right_y: sample.right_y,
+			face_buttons: sample.face_buttons,
+		}
+	}
+
 	fn pause(paused: bool) -> Self {
 		Self::Command {
 			command: TraceCommand::SetPaused { paused },
@@ -271,6 +334,7 @@ impl TraceAction {
 		// Enough for the longest fixed-size record, integer growth after tick
 		// coalescing, and delimiters. Physical codes use only ASCII alphanumerics.
 		112 + match self {
+			Self::PhysicalControllerInput { .. } => 80,
 			Self::KeyboardInput { keys } => keys.iter().map(|key| key.len() + 3).sum(),
 			_ => 0,
 		}

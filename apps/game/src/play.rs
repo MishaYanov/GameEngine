@@ -88,36 +88,50 @@ impl GameApp {
 				.wait_idle()?;
 		}
 		let pad = self.logical_gamepad();
+		let physical = self.physical_gamepad();
 		let was_paused = self.editor.simulation_paused();
 		let mut prior_combat = self.combat_sound_facts();
 		let pointer_input = self.pointer_attack_input();
 		let input = pointer_input.as_ref().unwrap_or(&self.input);
-		let mut outcome =
-			self.editor
-				.update_play_with_gamepad(&mut self.scene, input, pad, delta_seconds)?;
+		let mut outcome = self.editor.update_play_with_action_controls(
+			&mut self.scene,
+			input,
+			pad,
+			physical,
+			delta_seconds,
+		)?;
 		let paused = self.editor.simulation_paused();
 		if paused != was_paused {
 			self.reset_gamepad_input();
 		}
+		let input = pointer_input.as_ref().unwrap_or(&self.input);
 		if let Some(trace) = self.play_trace.as_mut() {
 			trace.record_paused(paused);
-			trace.record_controls(
-				pointer_input.as_ref().unwrap_or(&self.input),
-				if paused != was_paused {
+			if let Some(map) = self.editor.play_input_action_map() {
+				let sample = if paused != was_paused {
+					Default::default()
+				} else {
+					physical
+				};
+				trace.record_input_actions(map.held_keyboard_codes(input), sample);
+			} else {
+				let sample = if paused != was_paused {
 					GamepadSample::default()
 				} else {
 					pad
-				},
-			);
+				};
+				trace.record_controls(input, sample);
+			}
 		}
 		loop {
 			if outcome.steps > 0
 				&& let (Some(prior), Some(after)) = (prior_combat, self.combat_sound_facts())
 			{
 				if let Some(cue) = self.project_sound.emit_combat_change(
-					prior, after, self.player_controls.feedback_mix(),
-				)
-					&& self.standalone_runtime
+					prior,
+					after,
+					self.player_controls.feedback_mix(),
+				) && self.standalone_runtime
 					&& self.player_controls.display().cue_captions
 				{
 					self.feedback_captions.push(cue, Instant::now());

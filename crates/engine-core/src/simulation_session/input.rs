@@ -19,6 +19,9 @@ pub struct InputFrame {
 	pub(super) movement: HashMap<EntityKey, [f32; 3]>,
 	pub(super) game_actions: HeldGameActions,
 	pub(super) action_presses: HashSet<String>,
+	pub(super) controller_owned: bool,
+	pub(super) controller_movement: [f32; 2],
+	pub(super) controller_look: [f32; 2],
 }
 impl InputFrame {
 	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
@@ -28,6 +31,8 @@ impl InputFrame {
 		self.movement.is_empty()
 			&& self.game_actions.ids.is_empty()
 			&& self.action_presses.is_empty()
+			&& self.controller_movement == [0.0; 2]
+			&& self.controller_look == [0.0; 2]
 	}
 	pub fn action_held(&self, id: &str) -> bool {
 		self.game_actions.ids.contains(id)
@@ -49,6 +54,9 @@ impl SimulationSession {
 		self.inputs.movement.clear();
 		self.inputs.game_actions = HeldGameActions::default();
 		self.inputs.action_presses.clear();
+		self.inputs.controller_owned = false;
+		self.inputs.controller_movement = [0.0; 2];
+		self.inputs.controller_look = [0.0; 2];
 		self.clock.reset();
 	}
 	pub fn set_paused(&mut self, paused: bool) {
@@ -111,18 +119,21 @@ impl SimulationSession {
 		// The legacy controlled mover uses XY; upright characters use XZ.
 		// Route each target once so the legacy path cannot overwrite character Z.
 		match target {
+			MovementTarget::AllControlled
+				if self.characters.local_input_owner(&self.world).is_some() =>
+			{
+				self.inputs.controller_owned = true;
+				self.inputs.controller_movement = input.movement;
+			}
 			MovementTarget::AllControlled => {
-				let local = self.characters.local_input_owner(&self.world).cloned();
 				self.characters.sample_keyboard(
 					&self.world,
-					local.as_ref(),
+					None,
 					input.movement,
 					&input.actions,
 				)?;
-				if local.is_none() {
-					for entity in &self.controlled_targets {
-						Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
-					}
+				for entity in &self.controlled_targets {
+					Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
 				}
 			}
 			MovementTarget::Entity(entity) if self.characters.contains(entity) => {

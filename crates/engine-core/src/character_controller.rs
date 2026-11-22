@@ -290,6 +290,21 @@ impl CharacterRuntime {
 		input.held = jump;
 		Ok(())
 	}
+	pub(crate) fn set_controller_intent(
+		&mut self,
+		key: &EntityKey,
+		movement: [f32; 2],
+		jump_held: bool,
+		jump_pressed: bool,
+	) -> Result<(), String> {
+		self.set_input(key, movement, jump_held)?;
+		self.inputs
+			.get_mut(key)
+			.expect("validated controller")
+			.pressed |= jump_pressed;
+		Ok(())
+	}
+
 	pub fn set_movement(&mut self, key: &EntityKey, movement: [f32; 2]) -> Result<(), String> {
 		let held = self
 			.inputs

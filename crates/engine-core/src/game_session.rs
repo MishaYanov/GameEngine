@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 pub struct GameSession {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
+	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
 	project: Arc<ProjectData>,
 	factory: Arc<dyn GameModuleFactory>,
 	active: SimulationSession,
@@ -41,6 +42,15 @@ impl GameSession {
 		self.animation_resolver = Some(resolver);
 		Ok(())
 	}
+	pub fn set_input_actions_resolver(
+		&mut self,
+		resolver: crate::simulation_session::InputActionsResolver,
+	) -> Result<(), String> {
+		self.active.set_input_actions_resolver(&resolver)?;
+		self.input_actions_resolver = Some(resolver);
+		Ok(())
+	}
+
 	pub fn play_session_id(&self) -> &str {
 		&self.play_session_id
 	}
@@ -137,6 +147,10 @@ impl GameSession {
 			simulation.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		simulation.require_animation_ready()?;
+		if let Some(resolver) = &self.input_actions_resolver {
+			simulation.set_input_actions_resolver(resolver)?;
+		}
+		simulation.require_input_actions_ready()?;
 
 		Ok(PreparedScene {
 			new_run: None,
@@ -163,6 +177,7 @@ impl GameSession {
 
 		Ok(Self {
 			animation_resolver: None,
+			input_actions_resolver: None,
 			project,
 			factory,
 			active,
@@ -212,6 +227,10 @@ impl GameSession {
 			next.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		next.active.require_animation_ready()?;
+		if let Some(resolver) = &self.input_actions_resolver {
+			next.set_input_actions_resolver(Arc::clone(resolver))?;
+		}
+		next.active.require_input_actions_ready()?;
 		let restore_guard = restored_progress
 			.as_ref()
 			.map(|_| (self.active.tick_index(), self.progress_revision()));
