@@ -8,6 +8,16 @@ impl EditorSession {
 		&self,
 		reference_slots: BTreeMap<String, EntityKey>,
 	) -> Result<PrefabData, String> {
+		self.export_prefab_with_slots_at(reference_slots, None)
+	}
+
+	/// Export the selected subtrees relative to an included object's world origin,
+	/// or their average root position when no pivot is chosen.
+	pub fn export_prefab_with_slots_at(
+		&self,
+		reference_slots: BTreeMap<String, EntityKey>,
+		pivot: Option<&EntityKey>,
+	) -> Result<PrefabData, String> {
 		self.require_edit()?;
 		self.require_no_transaction()?;
 		for target in reference_slots.values() {
@@ -65,6 +75,21 @@ impl EditorSession {
 			pending.extend_from_slice(&children[index]);
 		}
 		let world = data.world_matrices()?;
+		let explicit_pivot = if let Some(key) = pivot {
+			let index = indices
+				.get(key)
+				.copied()
+				.filter(|&index| included[index])
+				.ok_or_else(|| {
+					format!(
+						"Prop pivot {:?} must belong to the reviewed selection",
+						key.as_str()
+					)
+				})?;
+			Some(world[index].w_axis.truncate().to_array())
+		} else {
+			None
+		};
 		let mut entities = Vec::with_capacity(count);
 		for (index, entity) in data.entities.iter().enumerate() {
 			if !included[index] {
@@ -78,21 +103,25 @@ impl EditorSession {
 				.is_some_and(|parent| !included[indices[parent]])
 			{
 				entity.parent = None;
-				entity.transform = TransformData::from_matrix(world[index])?;
+				entity.transform = TransformData::from_matrix(world[index]).map_err(|error| {
+					format!("Cannot use {:?} as a Prop root: {error}", entity.name)
+				})?;
 			}
 			entities.push(entity);
 		}
-		let roots: Vec<_> = entities
-			.iter()
-			.filter(|entity| entity.parent.is_none())
-			.map(|entity| entity.transform.position)
-			.collect();
-		let count = roots.len().max(1) as f64;
-		let pivot: [f32; 3] = std::array::from_fn(|axis| {
-			(roots
+		let pivot = explicit_pivot.unwrap_or_else(|| {
+			let roots: Vec<_> = entities
 				.iter()
-				.map(|position| position[axis] as f64 / count)
-				.sum::<f64>()) as f32
+				.filter(|entity| entity.parent.is_none())
+				.map(|entity| entity.transform.position)
+				.collect();
+			let count = roots.len().max(1) as f64;
+			std::array::from_fn(|axis| {
+				(roots
+					.iter()
+					.map(|position| position[axis] as f64 / count)
+					.sum::<f64>()) as f32
+			})
 		});
 		for entity in &mut entities {
 			if entity.parent.is_none() {

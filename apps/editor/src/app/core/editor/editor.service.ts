@@ -39,6 +39,7 @@ import type {
     EditorCommand,
     EditorCommandRequest,
     EditorSnapshot,
+    EntityKey,
     ModelAsset,
     Prefab,
     ProjectBuildPreparation,
@@ -489,10 +490,16 @@ export class EditorService {
         return this.prefabDraftOperation('editor_prefab_source_open', {path}, expectedGeneration, expectedRevision);
     }
 
-    createLinkedPrefabSource(path: string, referenceSlots: Readonly<Record<string, string>>, expectedGeneration?: number, expectedRevision?: number): Promise<PrefabSourceDraft> {
+    createLinkedPrefabSource(
+        path: string, referenceSlots: Readonly<Record<string, string>>, expectedGeneration?: number,
+        expectedRevision?: number, pivot?: EntityKey,
+    ): Promise<PrefabSourceDraft> {
         return this.enqueue('editor_create_linked_prefab_source', async () => {
             this.requireGeneration(expectedGeneration);
-            const draft = await this.native<PrefabSourceDraft>('editor_create_linked_prefab_source', {path, referenceSlots, expectedRevision: expectedRevision ?? this.revision()});
+            const draft = await this.native<PrefabSourceDraft>('editor_create_linked_prefab_source', {
+                path, referenceSlots, expectedRevision: expectedRevision ?? this.revision(),
+                ...(pivot === undefined ? {} : {pivot}),
+            });
             this.invalidateAssetCatalog();
             return draft;
         }, true, expectedGeneration);

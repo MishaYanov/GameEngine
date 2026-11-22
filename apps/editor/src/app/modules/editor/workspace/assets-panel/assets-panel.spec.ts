@@ -272,7 +272,7 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         panel.file(prefab.path).click();
         await panel.fixture.whenStable();
-        panel.button('Instantiate Prefab').click();
+        panel.button('Place as Copy').click();
         await panel.fixture.whenStable();
         expect(panel.loadPrefab).toHaveBeenCalledExactlyOnceWith('prefabs/actor.json', [0, 0, 0], 1, 1);
         expect(panel.importModel).not.toHaveBeenCalled();

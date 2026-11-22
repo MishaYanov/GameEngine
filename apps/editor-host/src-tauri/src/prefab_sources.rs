@@ -216,6 +216,16 @@ impl EditorWorkspace {
 		reference_slots: std::collections::BTreeMap<String, EntityKey>,
 		revision: u64,
 	) -> Result<PrefabSourceDraftDto, String> {
+		self.create_linked_prefab_source_at(path, reference_slots, None, revision)
+	}
+
+	pub fn create_linked_prefab_source_at(
+		&mut self,
+		path: &str,
+		reference_slots: std::collections::BTreeMap<String, EntityKey>,
+		pivot: Option<&EntityKey>,
+		revision: u64,
+	) -> Result<PrefabSourceDraftDto, String> {
 		self.prefab_edit_context(revision)?;
 		self.scene_output(path, None)?;
 		if self.prefab_source_drafts.captures.len() >= 4 {
@@ -229,7 +239,7 @@ impl EditorWorkspace {
 		let prefab = self
 			.backend
 			.session()
-			.export_prefab_with_slots(reference_slots)?
+			.export_prefab_with_slots_at(reference_slots, pivot)?
 			.into_component_source()?;
 		let prepared =
 			runtime::assets::project_assets::prepare_prefab(&self.asset_root, path, &prefab)?;
@@ -238,8 +248,19 @@ impl EditorWorkspace {
 				"Source destination appeared while preparing it; choose another path".into(),
 			);
 		}
+		let id = AssetId::generate().as_str().to_owned();
+		let asset = prepared.asset();
+		let capture = Capture {
+			source_id: asset.id.clone(),
+			path: asset.path.clone(),
+			fingerprint: asset.fingerprint.clone(),
+			revision,
+			generation: self.generation,
+		};
+		let draft = self.source_dto(id.clone(), &capture, &prefab)?;
 		prepared.publish()?;
-		self.open_prefab_source(path, revision)
+		self.prefab_source_drafts.captures.insert(id, capture);
+		Ok(draft)
 	}
 }
 

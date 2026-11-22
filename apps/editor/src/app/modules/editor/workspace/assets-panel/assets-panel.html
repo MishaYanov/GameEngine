@@ -51,7 +51,7 @@
                             >
                                 <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
                                 <span>{{ file.name }}</span>
-                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : file.kind === 'prefab' ? 'Prefab' : 'Model' }}</span>
+                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : file.kind === 'prefab' ? 'Prop' : 'Model' }}</span>
                                 @if (isActiveScene(file)) {
                                     <span class="active-scene">Active</span>
                                 }
@@ -74,7 +74,7 @@
                                 Open Scene
                             </button>
                         } @else {
-                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">{{ file.kind === 'prefab' ? 'Instantiate Prefab' : 'Add to Scene' }}</button>
+                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">{{ file.kind === 'prefab' ? 'Place as Copy' : 'Add to Scene' }}</button>
                         }
                     </section>
                 }

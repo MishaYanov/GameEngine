@@ -1,13 +1,13 @@
 @if (supported()) {
-	<div class="actions" aria-label="Prefab authoring">
+	<div class="actions" aria-label="Prop authoring">
 		<button type="button" [disabled]="!available() || !hasSelection()" (click)="beginCreate()">
-			Create Linked Prefab Source…
+			Create Prop from Selection…
 		</button>
 		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(false)">
-			Edit Prefab Source…
+			Edit Prop Source…
 		</button>
 		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(true)">
-			Link Prefab…
+			Place Linked Prop…
 		</button>
 	</div>
 	@if (!createOpen() && !linkOpen()) {
@@ -27,23 +27,35 @@
 	}
 	<editor-dialog
 		[(open)]="createOpen"
-		title="Create Linked Prefab Source"
+		(openChange)="!$event && closeCreate()"
+		title="Create Prop from Selection"
 		[renderFields]="false"
 		[config]="{ width: '40rem' }"
 	>
-		<p>
-			Save the selected component assembly. Legacy gameplay bindings and project behaviors require
-			copied prefab placement.
-		</p>
+		<p>Save the assembly as a reusable source. Then choose Place Linked Prop or Place as Copy in Assets.</p>
+		@if (createReview(); as review) {
+			<p>{{ review.members.length }} included objects across {{ review.roots.length }} {{ review.roots.length === 1 ? 'root' : 'roots' }}.</p>
+			<details>
+				<summary>Included objects</summary>
+				<ul>
+					@for (member of review.members; track member.key) {
+						<li>{{ member.name }}</li>
+					}
+				</ul>
+			</details>
+		}
 		<fieldset [disabled]="pending()">
-			<legend>Component source</legend>
+			<legend>Prop source</legend>
 			<label
 				>Source path<input
 					#path
 					[value]="createPath()"
 					(input)="createPath.set(path.value)"
-					placeholder="linked-source.json"
+					placeholder="prop.json"
 			/></label>
+			<editor-search-picker (picked)="createPivot.set($event)" [clearable]="true"
+					[disabled]="pending()" [options]="pivotOptions()" [value]="createPivot()"
+					label="Pivot object" placeholder="Assembly center"/>
 			<p>
 				Declare references outside the selection, such as Actor = Player. These become explicit
 				source slots.
@@ -57,7 +69,7 @@
 						(input)="changeSlot(index, 'name', name.value)"
 				/></label>
                 <editor-search-picker (picked)="changeSlot(index, 'target', $event)" [clearable]="true"
-                                      [disabled]="pending()" [options]="entityOptions()" [value]="slot.target"
+                                      [disabled]="pending()" [options]="externalOptions()" [value]="slot.target"
                                       label="External scene reference" placeholder="Search scene entities…"/>
 				<button type="button" (click)="removeSlot(index)">Remove reference slot</button>
 			}
@@ -69,21 +81,21 @@
 			<p role="alert" class="error">{{ message }}</p>
 		}
 		<button dialog-actions type="button" [disabled]="!available()" (click)="create()">
-			Create Component Source
+			Create Prop Asset
 		</button>
 	</editor-dialog>
 	<editor-dialog
 		[(open)]="linkOpen"
 		(openChange)="!$event && closeLink()"
-		title="Link Prefab"
+		title="Place Linked Prop"
 		[renderFields]="false"
 		[config]="{ width: '40rem' }"
 	>
 		@if (link(); as source) {
-			<p>
-				{{ source.path }} · Place a linked instance at the scene origin. Move its anchor to position
-				the assembly.
-			</p>
+			<p>{{ source.path }} · This placement remembers its source. Updates can be reviewed later.</p>
+			<editor-vector3-field label="Placement position" [value]="linkPosition()" [disabled]="pending()"
+				(editStarted)="beginPositionEdit()" (valueChanged)="changePosition($event)"
+				(editCancelled)="cancelPositionEdit()"/>
 			<editor-reference-bindings
 				[names]="slotNames()"
 				[entities]="entities()"
@@ -101,7 +113,7 @@
 			[disabled]="!available() || !canLink()"
 			(click)="instantiate()"
 		>
-			Instantiate Linked Prefab
+			Place Linked Instance
 		</button>
 	</editor-dialog>
 }

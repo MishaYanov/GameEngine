@@ -34,6 +34,39 @@ fn session() -> EditorSession {
 	let project = ProjectData::for_scene("Links", "main.json", &scene).unwrap();
 	EditorSession::for_project(scene, project).unwrap()
 }
+
+#[test]
+fn selected_prop_pivot_offsets_roots_and_preserves_source_local_children() {
+	let document = scene(vec![
+		entity("frame", [4.0, 0.0, 0.0]),
+		entity("hinge", [2.0, 0.0, 0.0]).with_parent(Some(key("frame"))),
+		entity("plank", [8.0, 0.0, 0.0]),
+		entity("outside", [10.0, 0.0, 0.0]),
+	]);
+	let mut session = EditorSession::new(document.clone()).unwrap();
+	execute(
+		&mut session,
+		Command::Select {
+			keys: vec!["frame".into(), "plank".into()],
+		},
+	)
+	.unwrap();
+	let revision = session.revision();
+	let source = session
+		.export_prefab_with_slots_at(BTreeMap::new(), Some(&key("hinge")))
+		.unwrap();
+	assert_eq!(source.entities.len(), 3);
+	assert_eq!(source.entities[0].transform.position, [-2.0, 0.0, 0.0]);
+	assert_eq!(source.entities[1].parent, Some(key("frame")));
+	assert_eq!(source.entities[1].transform.position, [2.0, 0.0, 0.0]);
+	assert_eq!(source.entities[2].transform.position, [2.0, 0.0, 0.0]);
+	let error = session
+		.export_prefab_with_slots_at(BTreeMap::new(), Some(&key("outside")))
+		.unwrap_err();
+	assert!(error.contains("outside"));
+	assert_eq!(session.revision(), revision);
+	assert_eq!(session.authored_document().as_ref(), &document);
+}
 fn execute(session: &mut EditorSession, command: Command) -> Result<(), String> {
 	session
 		.execute_command(EditorCommandRequest {
@@ -480,7 +513,7 @@ fn linked_interactable_roundtrips_and_requires_source_or_unpack_to_change() {
 			root_key: root.as_str().into(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	execute(&mut session, disable()).unwrap();
 	let document = session.authored_document();
 	assert!(

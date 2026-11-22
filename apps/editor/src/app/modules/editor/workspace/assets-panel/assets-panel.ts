@@ -56,6 +56,7 @@ export class AssetsPanel {
     private readonly editor = inject(EditorService);
     private readonly propAssetSelection = inject(PropAssetSelection, {optional: true});
     private readonly drawer = viewChild(Drawer);
+    private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly destroy = inject(DestroyRef);
@@ -151,7 +152,15 @@ export class AssetsPanel {
                 const file = this.menuFile(context);
                 if (file?.kind === 'model') await this.addModelFile(file);
             }).build())
-        .action(ContextActionBuilder.create<AssetMenuContext>('asset.instantiate-prefab', 'Instantiate Prefab')
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.place-linked-prop', 'Place Linked Prop…')
+            .icon('plus')
+            .when(context => context.file.kind === 'prefab')
+            .enabledWhen(context => this.menuFile(context) !== null && this.canRunAction())
+            .run(async context => {
+                const file = this.menuFile(context);
+                if (file?.kind === 'prefab') await this.propAuthoring()?.placeLinkedProp(file);
+            }).build())
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.instantiate-prefab', 'Place as Copy')
             .icon('plus')
             .when(context => context.file.kind === 'prefab')
             .enabledWhen(context => this.menuFile(context) !== null && this.canRunAction())

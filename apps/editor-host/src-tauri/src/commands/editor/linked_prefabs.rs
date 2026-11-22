@@ -4,7 +4,7 @@ use super::*;
 use crate::editor::prefab_sources::{
 	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
 };
-use runtime::{linked_prefab::PrefabConflictResolution, EntityKey};
+use runtime::{EntityKey, linked_prefab::PrefabConflictResolution};
 use std::collections::BTreeMap;
 
 #[tauri::command]
@@ -66,6 +66,7 @@ pub async fn editor_create_linked_prefab_source(
 	state: State<'_, EditorState>,
 	path: String,
 	reference_slots: Option<BTreeMap<String, EntityKey>>,
+	pivot: Option<EntityKey>,
 	expected_revision: u64,
 ) -> Result<PrefabSourceDraftDto, String> {
 	trusted_window(&window)?;
@@ -74,11 +75,13 @@ pub async fn editor_create_linked_prefab_source(
 		false,
 		Some("create_linked_prefab_source"),
 		move |w| {
-			w.create_linked_prefab_source(
-				&path,
-				reference_slots.unwrap_or_default(),
-				expected_revision,
-			)
+			let slots = reference_slots.unwrap_or_default();
+			match pivot.as_ref() {
+				Some(pivot) => {
+					w.create_linked_prefab_source_at(&path, slots, Some(pivot), expected_revision)
+				}
+				None => w.create_linked_prefab_source(&path, slots, expected_revision),
+			}
 		},
 	)
 	.await

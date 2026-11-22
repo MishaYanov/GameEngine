@@ -336,33 +336,70 @@ describe('typed prefab authoring', () => {
 		expect(backend.savePrefabSource).toHaveBeenCalledTimes(1);
 	});
 
-	it('creates a component source with explicit external slots after the current Inspector edit', async () => {
+	it('reviews the selected assembly after the current edit and saves its explicit pivot and slots', async () => {
 		const backend = configure();
 		const fixture = TestBed.createComponent(PrefabAuthoring);
+		backend.current.update(value => ({
+			...value,
+			document: {entities: [...value.document.entities, {...entity, key: 'hinge', parent: entity.key, name: 'Hinge'}]},
+		}));
 		await fixture.whenStable();
 		const root: HTMLElement = fixture.nativeElement,
 			ui = controls(root);
-		ui.button('Create Linked Prefab Source…').click();
-		await fixture.whenStable();
-		ui.change('Source path', 'assembly.json');
-		ui.button('Add External Reference Slot').click();
-		await fixture.whenStable();
-		ui.change('Reference slot name', 'Actor');
-		ui.change('External scene reference', 'player');
 		backend.commit.mockImplementationOnce(async (action) => {
 			backend.current.update((value) => ({ ...value, revision: 12 }));
 			await action();
 			return true;
 		});
-		ui.button('Create Component Source').click();
+		ui.button('Create Prop from Selection…').click();
+		await fixture.whenStable();
+		expect(root.textContent).toContain('2 included objects across 1 root.');
+		expect(root.querySelector('details')?.textContent).toContain('Hinge');
+		ui.change('Source path', 'assembly.json');
+		ui.change('Pivot object', 'Hinge');
+		ui.button('Add External Reference Slot').click();
+		await fixture.whenStable();
+		ui.change('Reference slot name', 'Actor');
+		ui.change('External scene reference', 'player');
+		ui.button('Create Prop Asset').click();
 		await fixture.whenStable();
 		expect(backend.createLinkedPrefabSource).toHaveBeenCalledWith(
 			'assembly.json',
 			{ Actor: 'player' },
 			1,
 			12,
+			'hinge',
 		);
 		expect(root.textContent).toContain('Edit this source independently');
+	});
+
+	it('refuses to create a Prop from a scene revision that changed after review', async () => {
+		const backend = configure();
+		const fixture = TestBed.createComponent(PrefabAuthoring);
+		await fixture.whenStable();
+		const root: HTMLElement = fixture.nativeElement;
+		const ui = controls(root);
+		ui.button('Create Prop from Selection…').click();
+		await fixture.whenStable();
+		backend.current.update(value => ({...value, revision: 5}));
+		ui.button('Create Prop Asset').click();
+		await fixture.whenStable();
+		expect(root.querySelector('[role="alert"]')?.textContent).toContain('scene or selection changed');
+		expect(backend.createLinkedPrefabSource).not.toHaveBeenCalled();
+	});
+
+	it('closes a cancelled Prop review without creating a source or placing a scene instance', async () => {
+		const backend = configure();
+		const fixture = TestBed.createComponent(PrefabAuthoring);
+		await fixture.whenStable();
+		const root: HTMLElement = fixture.nativeElement;
+		const ui = controls(root);
+		ui.button('Create Prop from Selection…').click();
+		await fixture.whenStable();
+		root.querySelector<HTMLButtonElement>('button[aria-label="Close Create Prop from Selection"]')!.click();
+		await fixture.whenStable();
+		expect(backend.createLinkedPrefabSource).not.toHaveBeenCalled();
+		expect(backend.instantiateLinkedPrefab).not.toHaveBeenCalled();
 	});
 
 	it('requires reference bindings for a link and retains its reviewed revision', async () => {
@@ -372,19 +409,23 @@ describe('typed prefab authoring', () => {
 		await fixture.whenStable();
 		const root: HTMLElement = fixture.nativeElement,
 			ui = controls(root);
-		ui.button('Link Prefab…').click();
+		ui.button('Place Linked Prop…').click();
 		await fixture.whenStable();
-		expect(ui.button('Instantiate Linked Prefab').disabled).toBe(true);
+		expect(ui.button('Place Linked Instance').disabled).toBe(true);
 		ui.change('Actor', 'player');
 		await fixture.whenStable();
 		backend.current.update((value) => ({ ...value, revision: 9 }));
 		backend.instantiateLinkedPrefab.mockRejectedValueOnce(new Error('Authoring revision changed'));
-		ui.button('Instantiate Linked Prefab').click();
+		const x = root.querySelector<HTMLInputElement>('input[aria-label="Placement position X"]')!;
+		x.value = '7';
+		x.dispatchEvent(new Event('input'));
+		await fixture.whenStable();
+		ui.button('Place Linked Instance').click();
 		await fixture.whenStable();
 		expect(backend.instantiateLinkedPrefab).toHaveBeenCalledWith(
 			'door.json',
 			'draft-1',
-			[0, 0, 0],
+			[7, 0, 0],
 			{ Actor: 'player' },
 			1,
 			4,
@@ -402,7 +443,7 @@ describe('typed prefab authoring', () => {
 		await fixture.whenStable();
 		const root: HTMLElement = fixture.nativeElement,
 			ui = controls(root);
-		ui.button('Edit Prefab Source…').click();
+		ui.button('Edit Prop Source…').click();
 		await Promise.resolve();
 		backend.generation.set(2);
 		fixture.detectChanges();
