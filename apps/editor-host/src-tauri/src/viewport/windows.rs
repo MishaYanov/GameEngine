@@ -4,6 +4,7 @@ mod draw;
 mod mailbox;
 mod native_window;
 mod play;
+mod prop_preview;
 
 use crate::viewport_interaction::{GameCameraCapture, ViewportInteraction};
 use bridge::editor::{
@@ -208,6 +209,7 @@ pub(super) fn spawn(
 // Order matters: uploaded models/assets retire before the renderer/device.
 struct GpuState {
 	scene: Scene,
+	prop_preview: Option<prop_preview::PropGpuPreview>,
 	assets: ManuallyDrop<AssetManager>,
 	renderer: WindowRenderer,
 	asset_root: PathBuf,
@@ -279,7 +281,7 @@ impl Drop for GpuState {
 		let assets = unsafe { ManuallyDrop::take(&mut self.assets) };
 		if self
 			.renderer
-			.retire_resources((std::mem::take(&mut self.scene), assets))
+			.retire_resources((std::mem::take(&mut self.scene), self.prop_preview.take(), assets))
 			.is_err()
 		{
 			engine_logger::error!(target: "editor_viewport", "Viewport teardown failed: operation=gpu_wait_idle, generation={}", self.generation);
@@ -320,6 +322,7 @@ struct Worker {
 	last_authored_present: Option<(u64, SceneId)>,
 	play_load: Option<(u64, String, u64, SceneLoadTiming)>,
 	gpu: Option<GpuState>,
+	prop_navigation: Option<prop_preview::PropNavigation>,
 	focus_hook: Option<KeyboardFocusHook>,
 	window: Option<Arc<Window>>,
 	hwnd: isize,
@@ -372,6 +375,7 @@ impl Worker {
 			last_authored_present: None,
 			play_load: None,
 			gpu: None,
+			prop_navigation: None,
 			focus_hook: None,
 			window: None,
 			hwnd,
@@ -481,7 +485,10 @@ impl Worker {
 			return;
 		}
 		if let Some(window) = self.window.as_ref() {
-			let captured = self.interaction.captured();
+			let captured = self.prop_navigation.as_ref().map_or_else(
+				|| self.interaction.captured(),
+				prop_preview::PropNavigation::captured,
+			);
 			let _ = window.set_cursor_grab(if captured {
 				CursorGrabMode::Confined
 			} else {
@@ -614,6 +621,9 @@ impl Worker {
 		}
 	}
 	fn cancel_editor(&mut self) {
+		if let Some(navigation) = &mut self.prop_navigation {
+			navigation.cancel();
+		}
 		if let Ok(mut workspace) = self.shared.lock() {
 			if let Some(workspace) = workspace.as_mut() {
 				if let Err(error) = self.interaction.cancel(workspace) {
@@ -653,6 +663,14 @@ impl Worker {
 						// Waiting for the workspace lock can cross both project and
 						// timeout boundaries; reject before any action can mutate it.
 						request.validate_context(workspace.generation, Instant::now())?;
+						if workspace.prop_preview_active()
+							&& !matches!(
+								request.action,
+								ViewportActionDto::Cancel | ViewportActionDto::CancelPlacement
+							)
+						{
+							return Err("Close the Prop preview to use Scene tools".into());
+						}
 						self.interaction
 							.action(request.action.clone(), workspace, extent)
 					})
@@ -755,8 +773,8 @@ impl Worker {
 		}
 		result
 	}
-	/// Map a physical window position to the same content pixels used for this projection.
-	fn input_surface(&self) -> (Option<[f64; 2]>, [u32; 2]) {
+	/// Map a physical window position to the actual surface pixels.
+	fn raw_input_surface(&self) -> (Option<[f64; 2]>, [u32; 2]) {
 		let extent = self.prepared_extent.unwrap_or([0; 2]);
 		let point = self.window.as_ref().and_then(|window| {
 			let size = window.inner_size();
@@ -767,6 +785,11 @@ impl Worker {
 				]
 			})
 		});
+		(point, extent)
+	}
+	/// Map surface pixels to the same Game content rectangle used by the camera.
+	fn input_surface(&self) -> (Option<[f64; 2]>, [u32; 2]) {
+		let (point, extent) = self.raw_input_surface();
 		if self.interaction.settings.view == bridge::viewport::ViewportView::Game
 			|| self.interaction.preview_active()
 		{
@@ -785,6 +808,9 @@ impl Worker {
 		repeat: bool,
 		delta: Option<[f64; 2]>,
 	) {
+		if self.process_prop_input(kind, button.as_deref(), code.as_deref(), repeat, delta) {
+			return;
+		}
 		let (position, extent) = self.input_surface();
 		if extent.contains(&0) && !matches!(kind, "focused" | "blurred") {
 			return;
@@ -944,6 +970,9 @@ impl Worker {
 		repeat: bool,
 		delta: Option<[f64; 2]>,
 	) {
+		if self.prop_navigation.is_some() {
+			return;
+		}
 		if self.interaction.preview_active() && !matches!(kind, "focused" | "blurred") {
 			return;
 		}
@@ -1129,7 +1158,11 @@ impl ApplicationHandler<Wake> for Worker {
 				if state == ElementState::Pressed
 					&& matches!(button.as_str(), "left" | "middle" | "right")
 					&& !self.interaction.preview_active()
-					&& self.input_surface().0.is_some()
+					&& (if self.prop_navigation.is_some() {
+						self.raw_input_surface().0.is_some()
+					} else {
+						self.input_surface().0.is_some()
+					})
 				{
 					self.focus_keyboard();
 					if button == "left" {
@@ -1185,7 +1218,9 @@ impl ApplicationHandler<Wake> for Worker {
 				event,
 				is_synthetic: false,
 				..
-			} if self.interaction.keyboard_focused() && self.native_keyboard_focused() => {
+			} if (self.prop_navigation.is_some() || self.interaction.keyboard_focused())
+				&& self.native_keyboard_focused() =>
+			{
 				self.flush_fly_motion();
 				let release = event.state == ElementState::Pressed
 					&& !event.repeat

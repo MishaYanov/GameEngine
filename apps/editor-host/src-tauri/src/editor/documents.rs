@@ -92,6 +92,8 @@ impl EditorWorkspace {
 		self.backend = candidate;
 		self.animation_preview = None;
 		self.camera_preview = None;
+		self.prop_preview = None;
+		self.prop_preview_request = 0;
 		// The replacement owns a fresh journal and scene revision sequence. A
 		// new workspace generation also forces existing viewport caches to resync.
 		self.generation = NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed);

@@ -22,6 +22,9 @@ impl Worker {
 		if !self.active() {
 			return Ok(());
 		}
+		if self.try_draw_prop_preview()? {
+			return Ok(());
+		}
 		let measurement_started = self.warm_measurement.then(Instant::now);
 		let was_captured = self.interaction.captured();
 		let packet = loop {
@@ -368,6 +371,7 @@ impl Worker {
 			drop(data);
 			self.gpu = Some(GpuState {
 				scene,
+				prop_preview: None,
 				assets: ManuallyDrop::new(assets),
 				renderer,
 				asset_root,

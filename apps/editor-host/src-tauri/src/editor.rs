@@ -5,6 +5,8 @@ mod assets;
 mod documents;
 #[path = "prefab_sources.rs"]
 pub(crate) mod prefab_sources;
+#[path = "prop_preview.rs"]
+pub(crate) mod prop_preview;
 #[path = "editor/scene_warming.rs"]
 pub(crate) mod scene_warming;
 #[path = "editor/scene_verification.rs"]
@@ -52,6 +54,8 @@ pub struct EditorWorkspace {
 	pub(crate) camera_capture_epoch: u64,
 	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
+	pub(crate) prop_preview: Option<prop_preview::PropPreview>,
+	pub(crate) prop_preview_request: u64,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
 	scene_verification_gate: Arc<std::sync::Mutex<()>>,
@@ -321,6 +325,7 @@ impl EditorWorkspace {
 		let pauses = matches!(&request.command, Command::SetPaused { paused: true });
 		let receipt = self.backend.execute(request)?;
 		self.discard_stale_camera_preview();
+		self.discard_stale_prop_preview();
 		if pauses {
 			self.camera_capture_epoch = self.camera_capture_epoch.wrapping_add(1);
 		}
@@ -387,6 +392,8 @@ impl EditorWorkspace {
 		Self {
 			animation_preview: None,
 			camera_preview: None,
+			prop_preview: None,
+			prop_preview_request: 0,
 			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			scene_verification_gate: Default::default(),

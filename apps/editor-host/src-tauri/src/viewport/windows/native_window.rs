@@ -121,6 +121,10 @@ impl Worker {
 			self.modifiers = ModifiersState::empty();
 			self.pending_motion = None;
 			self.pending_fly_motion = [0.0; 2];
+			if let Some(navigation) = &mut self.prop_navigation {
+				navigation.cancel();
+				self.update_capture();
+			}
 		}
 		if self.interaction.keyboard_focused() != focused {
 			let event = if focused { "focused" } else { "blurred" };

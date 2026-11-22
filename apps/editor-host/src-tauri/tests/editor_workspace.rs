@@ -629,6 +629,8 @@ mod documents;
 mod incremental;
 #[path = "editor_workspace/play.rs"]
 mod play;
+#[path = "editor_workspace/prop_preview.rs"]
+mod prop_preview;
 
 #[path = "editor_workspace/scene_verification.rs"]
 mod scene_verification;

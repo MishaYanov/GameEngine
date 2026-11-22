@@ -2,6 +2,7 @@ import {afterNextRender, Component, computed, ElementRef, inject, output, viewCh
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {PropWorkspaceService} from './prop-workspace.service';
+import {PropPreviewService} from './prop-preview.service';
 
 @Component({
     selector: 'editor-prop-workspace',
@@ -12,6 +13,7 @@ import {PropWorkspaceService} from './prop-workspace.service';
 export class PropWorkspace {
     readonly closed = output<void>();
     protected readonly prop = inject(PropWorkspaceService);
+    protected readonly preview = inject(PropPreviewService);
     protected readonly parentName = computed(() => {
         const key = this.prop.selectedObject()?.parent;
         return this.prop.document()?.objects.find(object => object.key === key)?.name ?? 'Prop root';

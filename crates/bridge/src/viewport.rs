@@ -1,6 +1,27 @@
 //! Editor-only view/tool contracts. These are never serialized into a game scene.
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PropPreviewTargetDto {
+	Source {
+		draft_id: String,
+	},
+	Instance {
+		scene_id: engine_core::scene_catalog::SceneId,
+		root_key: engine_core::EntityKey,
+	},
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PropPreviewStateDto {
+	pub token: String,
+	pub workspace_generation: u64,
+	pub revision: u64,
+	pub request_id: u64,
+	pub selection: Option<engine_core::EntityKey>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewportTool {

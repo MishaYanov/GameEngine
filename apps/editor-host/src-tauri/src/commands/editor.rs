@@ -32,6 +32,8 @@ mod animation;
 pub use animation::*;
 mod camera;
 pub use camera::*;
+mod prop_preview;
+pub use prop_preview::*;
 mod build;
 pub use build::*;
 mod documents;
@@ -81,12 +83,13 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 			let workspace = slot.as_mut().ok_or_else(|| "Open a scene before using the editor".to_owned())?;
 			let scene = workspace.backend.session().active_scene_id().clone();
 			let requested = Instant::now();
-			let result = workspace.with_camera_preview_cleanup(operation);
+			let (result, camera_preview_closed) = workspace.with_camera_preview_cleanup(operation);
+			let preview_closed = workspace.discard_stale_prop_preview() || camera_preview_closed;
 			let current = workspace.backend.session();
 			if current.active_scene_id() != &scene {
 				workspace.scene_switch = Some((current.scene_revision(), requested, Instant::now()));
 			}
-			result
+			(result, preview_closed)
 		};
 		// Never hold the workspace mutex while taking the viewport mutex.
 		if preview_closed || (invalidate && result.is_ok()) {

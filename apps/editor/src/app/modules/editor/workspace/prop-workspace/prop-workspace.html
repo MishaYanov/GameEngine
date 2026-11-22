@@ -6,19 +6,28 @@
                 <span aria-hidden="true">/</span>
                 <strong aria-current="page">{{ document.name }}</strong>
             </nav>
-            <button (click)="closed.emit()" type="button">Close Prop</button>
+            <div class="preview-actions">
+                <button (click)="preview.frame()" [disabled]="!preview.ready()" type="button">Frame Prop</button>
+                <button (click)="closed.emit()" type="button">Close Prop</button>
+            </div>
         </header>
         <div class="prop-heading">
             <h2 #heading tabindex="-1">{{ document.kind === 'source' ? 'Prop source' : 'Pinned Prop instance' }}</h2>
             <small [title]="document.path">{{ document.path }}</small>
         </div>
+        @if (preview.loading()) {
+            <p role="status">Preparing isolated preview…</p>
+        } @else if (preview.error(); as message) {
+            <p role="alert">{{ message }}</p>
+            <button (click)="preview.retry()" type="button">Retry Preview</button>
+        }
         <div class="document-panes">
             <section aria-labelledby="prop-objects-heading">
                 <h3 id="prop-objects-heading">Objects</h3>
                 <ul aria-labelledby="prop-objects-heading" class="objects">
                     @for (object of document.objects; track object.key) {
                         <li>
-                            <button (click)="prop.selectObject(object.key)" [style.padding-inline-start.rem]="object.level > 9 ? 6.4 : 0.4 + (object.level - 1) * 0.75"
+                            <button (click)="preview.select(object.key)" [style.padding-inline-start.rem]="object.level > 9 ? 6.4 : 0.4 + (object.level - 1) * 0.75"
                                     [attr.aria-pressed]="prop.selectedObject()?.key === object.key" [attr.data-prop-object]="object.key" type="button">
                                 <editor-icon name="object"/>
                                 {{ object.name }}

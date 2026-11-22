@@ -166,6 +166,33 @@ impl EditorWorkspace {
 		}
 		Ok(source)
 	}
+	pub(crate) fn reviewed_prop_preview_source(
+		&self,
+		draft_id: &str,
+	) -> Result<LinkedPrefabSource, String> {
+		let capture = self
+			.prefab_source_drafts
+			.captures
+			.get(draft_id)
+			.filter(|capture| capture.generation == self.generation)
+			.ok_or("Prop draft expired or belongs to another workspace")?;
+		let source = self.prefab_source(&capture.path)?;
+		if source.source_id != capture.source_id
+			|| source.path != capture.path
+			|| source.fingerprint != capture.fingerprint
+		{
+			return Err("Prop source changed after opening; reopen its draft to preview the new version".into());
+		}
+		Ok(source)
+	}
+	pub(crate) fn prop_preview_source_matches(&self, draft_id: &str, fingerprint: &str) -> bool {
+		self.prefab_source_drafts
+			.captures
+			.get(draft_id)
+			.is_some_and(|capture| {
+				capture.generation == self.generation && capture.fingerprint == fingerprint
+			})
+	}
 	pub fn validate_prefab_source(
 		&self,
 		id: &str,

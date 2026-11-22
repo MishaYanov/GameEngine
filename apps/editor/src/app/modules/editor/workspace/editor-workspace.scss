@@ -103,6 +103,11 @@
   overflow: auto;
 }
 
+scene-viewport.prop-aperture {
+  block-size: clamp(10rem, 36vh, 24rem);
+  min-block-size: 10rem;
+}
+
 .viewport-keyboard-hint {
   min-width: 0;
   overflow: hidden;

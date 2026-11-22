@@ -197,6 +197,13 @@ describe('Workspace live editing flow', () => {
                 return openPropSource((args as {expectedRevision: number}).expectedRevision);
             }
             if (operation === 'editor_prefab_source_close') return undefined;
+            if (operation === 'editor_prop_preview_open') {
+                const {requestId, expectedGeneration, expectedRevision} =
+                    args as {requestId: number; expectedGeneration: number; expectedRevision: number};
+                return {token: 'workspace-prop-preview', workspace_generation: expectedGeneration,
+                    revision: expectedRevision, request_id: requestId, selection: null};
+            }
+            if (operation === 'editor_prop_preview_close' || operation === 'editor_prop_preview_select') return undefined;
             if (operation === 'editor_linked_prefab_status') return linkedStatus;
             if (operation === 'editor_viewport_bounds') return viewportStatus;
             if (operation === 'editor_viewport_editor_state') return viewportEditorState;
@@ -903,18 +910,22 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         const panel = root.querySelector<HTMLElement>('editor-prop-workspace')!;
         expect(root.querySelector('scene-viewport')).toBe(viewport);
-        expect(viewport?.hasAttribute('hidden')).toBe(true);
+        expect(viewport?.hasAttribute('hidden')).toBe(false);
+        expect(fixture.debugElement.query(By.directive(ViewportStub)).componentInstance.label())
+            .toBe('Isolated Prop viewport');
         expect(panel.textContent).toContain('arch.prefab.json');
         panel.querySelector<HTMLButtonElement>('[data-prop-object="stone"]')!.click();
         await fixture.whenStable();
         expect(panel.querySelector('[aria-label="Prop Inspector"]')?.textContent).toContain('Stone');
         expect(editor.selection()).toEqual(['robot']);
-        panel.querySelector('button')!.click();
+        Array.from(panel.querySelectorAll('button'))
+            .find(button => button.textContent?.trim() === 'Close Prop')!.click();
         await fixture.whenStable();
         expect(root.querySelector('editor-prop-workspace')).toBeNull();
         expect(root.querySelector('scene-viewport')).toBe(viewport);
         expect(document.activeElement).toBe(asset);
         expect(invoke).toHaveBeenCalledWith('editor_prefab_source_close', {draftId: 'arch-draft'});
+        expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'workspace-prop-preview'});
     });
 
     it('opens a pinned instance with unavailable source and restores its read-only tab after Play', async () => {
