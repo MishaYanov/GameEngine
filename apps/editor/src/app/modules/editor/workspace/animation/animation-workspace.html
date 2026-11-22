@@ -1,4 +1,10 @@
 <section aria-label="Animation clips" class="animation">
+    <div class="clip-kind" aria-label="Clip library source">
+        <button type="button" [attr.aria-pressed]="animation.library() === 'imported'"
+                (click)="animation.library.set('imported')">Imported Clips</button>
+        <button type="button" [attr.aria-pressed]="animation.library() === 'authored'"
+                (click)="animation.library.set('authored')">Authored Clips</button>
+    </div>
     @if (animation.propAvailable()) {
         <label>
             Preview target
@@ -8,7 +14,9 @@
             </select>
         </label>
     }
-    @if (animation.target(); as target) {
+    @if (animation.library() === 'authored') {
+        <editor-authored-clip-editor/>
+    } @else if (animation.target(); as target) {
         @if (animation.options().length > 1) {
             <label>
                 Animated object
@@ -28,7 +36,7 @@
         }
         @if (animation.clips().length) {
             <label>
-                Imported clip
+                Imported GLB clip
                 <select #clip [value]="animation.clipIndex()" (change)="animation.chooseClip(+clip.value)">
                     @for (item of animation.clips(); track item.index) {
                         <option [value]="item.index">{{ item.name }}</option>

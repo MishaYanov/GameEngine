@@ -3,6 +3,7 @@ import {TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import type {AnimationSettings} from '../../../../core/editor/animation.models';
 import type {AnimationWorkspaceTarget, ScopedAnimationPreview} from '../../../../core/editor/animation-workspace.models';
+import type {AuthoredClip, AuthoredClipPreviewRequest, ClipAssetDocument, VisualClipPreview} from '../../../../core/editor/authored-clip.models';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {SceneEntity, Transform} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
@@ -67,6 +68,31 @@ function setup() {
     }));
     const close = vi.fn(async (_token: string) => undefined);
     const frame = vi.fn(async (_token: string) => undefined);
+    const library = new Map<string, ClipAssetDocument>();
+    const listAuthoredClips = vi.fn(async () => [...library.values()].map(entry => entry.asset));
+    const openAuthoredClip = vi.fn(async (id: string) => library.get(id)!);
+    const saveAuthoredClip = vi.fn(async (path: string, clip: AuthoredClip) => {
+        const document: ClipAssetDocument = {
+            asset: {asset_id: 'authored-clip-id', path, fingerprint: 'e'.repeat(64), revision: 1},
+            clip, workspace_generation: 11,
+        };
+        library.set(document.asset.asset_id, document);
+        return document;
+    });
+    let authoredPreview: VisualClipPreview;
+    const openAuthoredClipPreview = vi.fn(async (request: AuthoredClipPreviewRequest) => {
+        authoredPreview = {
+            token: crypto.randomUUID(), workspace_generation: 11, revision: request.expectedRevision,
+            request_id: request.requestId, duration_ticks: 1000, tick: 0,
+            poses: [{entity_key: 'lever', position: [0, 0, 0], rotation_xyzw: [0, 0, 0, 1], scale: [1, 1, 1]}],
+        };
+        return authoredPreview;
+    });
+    const sampleAuthoredClipPreview = vi.fn(async (_token: string, tick: number, _generation: number) => ({
+        ...authoredPreview, tick,
+        poses: [{...authoredPreview.poses[0], position: [tick / 250, 0, 0] as const}],
+    }));
+    const closeAuthoredClipPreview = vi.fn(async (_token: string) => undefined);
     TestBed.configureTestingModule({
         providers: [
             AnimationWorkspaceService,
@@ -78,6 +104,7 @@ function setup() {
                 }),
                 inspectAnimation: inspect, openAnimationWorkspacePreview: open,
                 sampleAnimationWorkspacePreview: sample, closeAnimationPreview: close, frameAnimationWorkspacePreview: frame,
+                listAuthoredClips, openAuthoredClip, saveAuthoredClip, openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview,
             }},
             {provide: SceneEditingService, useValue: {entity: selected}},
             {provide: WorkspaceViewService, useValue: {animationView: active, animationOrigin: origin}},
@@ -87,7 +114,7 @@ function setup() {
     const fixture = TestBed.createComponent(AnimationWorkspace);
     return {
         fixture, selected, generation, revision, active, origin, playing, entities, propSource, placement,
-        open, inspect, sample, close, frame, opened, workspace: TestBed.inject(AnimationWorkspaceService),
+        open, inspect, sample, close, frame, opened, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview, workspace: TestBed.inject(AnimationWorkspaceService),
     };
 }
 
@@ -111,8 +138,8 @@ describe('Animation workspace', () => {
         await fixture.whenStable();
         expect(workspace.preview()?.clip_index).toBe(1);
         expect(settings.playback).toEqual({kind: 'single_clip', clip_index: 0, looping: true});
-        const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
-        button.click();
+        const buttons = fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>;
+        Array.from(buttons).find(button => button.textContent?.includes('Frame Animated Object'))?.click();
         expect(frame).toHaveBeenCalledWith(workspace.preview()?.token);
     });
 
@@ -215,5 +242,57 @@ describe('Animation workspace', () => {
         await fixture.whenStable();
         expect(workspace.preview()?.target.document).toMatchObject({draft_revision: 4});
         expect(close).toHaveBeenCalledWith(previous.token);
+    });
+    it('creates a visual clip, reopens its authored keys and samples halfway without a Scene edit', async () => {
+        const {fixture, selected, entities, workspace, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview} = setup();
+        const lever: SceneEntity = {...actor, name: 'Lever', key: 'lever', animation: null, parent: 'pivot'};
+        selected.set(lever);
+        entities.set([{...actor, key: 'pivot', renderable: false}, lever]);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const button = (name: string) => Array.from(root.querySelectorAll('button'))
+            .find(item => item.textContent?.trim() === name)!;
+        button('Authored Clips').click();
+        await fixture.whenStable();
+        button('New Visual Clip').click();
+        await fixture.whenStable();
+        const name = Array.from(root.querySelectorAll('label'))
+            .find(item => item.textContent?.trim() === 'Clip name')?.querySelector('input') as HTMLInputElement;
+        name.value = 'Lever Turn';
+        name.dispatchEvent(new Event('input'));
+        const end = root.querySelector<HTMLInputElement>('input[aria-label="End position X"]')!;
+        end.value = '4';
+        end.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        button('Save Clip').click();
+        await fixture.whenStable();
+        expect(saveAuthoredClip).toHaveBeenCalledWith('lever-turn.clip.json', expect.objectContaining({
+            name: 'Lever Turn', duration_ticks: 1000,
+            owner: {kind: 'scene', scene_id: 'arena'},
+        }), null, 1, 4);
+        expect(saveAuthoredClip.mock.calls[0][1].tracks[0]).toEqual({
+            target: {kind: 'scene', entity_key: 'lever'},
+            track: {kind: 'local_position', interpolation: 'linear', keys: [
+                {at: 0, value: [0, 0, 0]}, {at: 1000, value: [4, 0, 0]},
+            ]},
+        });
+        const library = root.querySelector('select')!;
+        library.value = 'authored-clip-id';
+        library.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        expect(openAuthoredClip).toHaveBeenCalledWith('authored-clip-id', 1);
+        expect(root.querySelector<HTMLInputElement>('input[aria-label="End position X"]')?.value).toBe('4');
+        button('Preview Saved Clip').click();
+        await fixture.whenStable();
+        const slider = root.querySelector<HTMLInputElement>('input[type=range]')!;
+        slider.value = '500';
+        slider.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        expect(sampleAuthoredClipPreview).toHaveBeenCalledWith(expect.any(String), 500, 1);
+        expect(root.textContent).toContain('Position 2, 0, 0');
+        expect(workspace.ready()).toBe(true);
+        button('Imported Clips').click();
+        await fixture.whenStable();
+        expect(closeAuthoredClipPreview).toHaveBeenCalled();
     });
 });

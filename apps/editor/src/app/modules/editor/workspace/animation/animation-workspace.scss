@@ -38,3 +38,20 @@ p {
 .error {
     color: var(--color-danger);
 }
+
+.clip-kind {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.clip-vectors {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+    gap: var(--space-2);
+}
+
+.clip-vectors input {
+    min-inline-size: 0;
+    inline-size: 100%;
+}

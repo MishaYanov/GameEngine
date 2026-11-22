@@ -40,6 +40,8 @@ pub use linked_prefabs::*;
 pub use prop_recovery::*;
 mod animation;
 pub use animation::*;
+mod authored_clip;
+pub use authored_clip::*;
 mod camera;
 pub use camera::*;
 mod prop_preview;
@@ -96,7 +98,8 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 			let (result, camera_preview_closed) = workspace.with_camera_preview_cleanup(operation);
 			let prop_preview_closed = workspace.discard_stale_prop_preview();
 			let animation_preview_closed = workspace.discard_stale_animation_preview();
-			let preview_closed = prop_preview_closed || camera_preview_closed || animation_preview_closed;
+			let authored_clip_closed = workspace.discard_stale_authored_clip_preview();
+			let preview_closed = prop_preview_closed || camera_preview_closed || animation_preview_closed || authored_clip_closed;
 			let current = workspace.backend.session();
 			if current.active_scene_id() != &scene {
 				workspace.scene_switch = Some((current.scene_revision(), requested, Instant::now()));

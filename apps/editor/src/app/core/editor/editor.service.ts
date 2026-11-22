@@ -29,6 +29,10 @@ import {
 import {
     readScopedAnimationPreview, type AnimationWorkspaceTarget, type ScopedAnimationPreview,
 } from './animation-workspace.models';
+import {
+    type AuthoredClip, type AuthoredClipPreviewRequest, type ClipAssetDocument, type ClipAssetIndex,
+    type ClipAssetSave, type ClipAssetVersion, readAuthoredClipPreview, type VisualClipPreview,
+} from './authored-clip.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import {isSceneSchemaVersion} from './editor.models';
 import type {
@@ -733,6 +737,55 @@ export class EditorService {
             false,
             expectedGeneration,
         );
+    }
+
+    listAuthoredClips(generation: number): Promise<readonly ClipAssetIndex[]> {
+        return this.enqueue('editor_animation_clips', () => {
+            this.requireGeneration(generation);
+            return this.native<readonly ClipAssetIndex[]>('editor_animation_clips');
+        }, false, generation);
+    }
+
+    openAuthoredClip(assetId: string, generation: number): Promise<ClipAssetDocument> {
+        return this.enqueue('editor_open_authored_clip', () => {
+            this.requireGeneration(generation);
+            return this.native<ClipAssetDocument>('editor_open_authored_clip', {assetId});
+        }, false, generation);
+    }
+
+    saveAuthoredClip(
+        path: string, clip: AuthoredClip, replacement: ClipAssetVersion | null,
+        generation: number, expectedRevision: number,
+    ): Promise<ClipAssetDocument> {
+        return this.enqueue('editor_save_authored_clip', async () => {
+            this.requireGeneration(generation);
+            const result = await this.native<ClipAssetSave>('editor_save_authored_clip', {
+                path, clip, replacement, expectedRevision,
+            });
+            this.requireGeneration(generation);
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result.document;
+        }, true, generation);
+    }
+
+    openAuthoredClipPreview(request: AuthoredClipPreviewRequest, generation: number): Promise<VisualClipPreview> {
+        return this.enqueue('editor_authored_clip_preview_open', async () => {
+            this.requireGeneration(generation);
+            return readAuthoredClipPreview(await this.native<unknown>('editor_authored_clip_preview_open', {...request}));
+        }, false, generation);
+    }
+
+    sampleAuthoredClipPreview(token: string, tick: number, generation: number): Promise<VisualClipPreview> {
+        return this.enqueue('editor_authored_clip_preview_sample', async () => {
+            this.requireGeneration(generation);
+            return readAuthoredClipPreview(await this.native<unknown>('editor_authored_clip_preview_sample', {token, tick}));
+        }, false, generation);
+    }
+
+    closeAuthoredClipPreview(token: string): Promise<void> {
+        return this.enqueue('editor_authored_clip_preview_close', () =>
+            this.native<void>('editor_authored_clip_preview_close', {token}));
     }
 
     openAnimationWorkspacePreview(

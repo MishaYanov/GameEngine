@@ -1,0 +1,78 @@
+<section aria-label="Authored Animation Clips" class="animation">
+    <div class="time-controls">
+        <label>
+            Clip library
+            <select #saved [value]="selected()?.asset?.asset_id ?? ''"
+                    [disabled]="!available()" (change)="open(saved.value)">
+                <option value="">Choose a saved clip</option>
+                @for (asset of assets(); track asset.asset_id) {
+                    <option [value]="asset.asset_id">{{ asset.path }}</option>
+                }
+            </select>
+        </label>
+        <button type="button" [disabled]="!canCreate()" (click)="begin()">New Visual Clip</button>
+    </div>
+    @if (draft(); as form) {
+        <p>Visual object {{ form.targetName }}</p>
+        <label>
+            Clip name
+            <input #name [value]="form.name" [disabled]="busy()" (input)="update('name', name.value)" maxlength="128"/>
+        </label>
+        <label>
+            Asset file
+            <input #path [value]="form.path" [readonly]="!!selected()" [disabled]="busy()"
+                   (input)="update('path', path.value)" maxlength="1024"/>
+        </label>
+        <label>
+            Duration in milliseconds
+            <input #duration type="number" min="1" max="600000" step="1" [value]="form.duration" [disabled]="busy()"
+                   (input)="update('duration', duration.value)"/>
+        </label>
+        @for (item of keyFields; track item.field) {
+            <fieldset [disabled]="busy()">
+                <legend>{{ item.label }}</legend>
+                <div class="clip-vectors">
+                    @for (value of form[item.field]; track $index) {
+                        <label>
+                            {{ axes[$index] }}
+                            <input #axis type="number" step="any" [attr.aria-label]="item.label + ' ' + axes[$index]"
+                                   [value]="value" (input)="updateKey(item.field, $index, axis.value)"/>
+                        </label>
+                    }
+                </div>
+            </fieldset>
+        }
+        <button type="button" [disabled]="!canSave()" (click)="save()">Save Clip</button>
+    } @else if (selected(); as clip) {
+        <p>{{ clip.clip.name }} · {{ clip.clip.duration_ticks }} ms</p>
+        <p>{{ clip.clip.tracks.length }} visual tracks</p>
+    } @else {
+        <p>Select a visible child object in Scene or a saved Prop to create a clip.</p>
+    }
+
+    @if (selected()) {
+        <div class="time-controls">
+            <button type="button" [disabled]="!available()" (click)="openPreview()">Preview Saved Clip</button>
+            @if (preview()) {
+                <button type="button" (click)="closePreview()">Close Clip Preview</button>
+            }
+        </div>
+    }
+    @if (preview(); as frame) {
+        <label class="time">
+            Clip time in milliseconds
+            <input #time type="range" min="0" step="1" [max]="frame.duration_ticks" [value]="frame.tick"
+                   [disabled]="busy()" (change)="sample(time.valueAsNumber)"/>
+        </label>
+        <output>{{ frame.tick }} / {{ frame.duration_ticks }} ms</output>
+        @for (pose of frame.poses; track pose.entity_key) {
+            <output>Position {{ pose.position.join(', ') }}</output>
+        }
+    }
+    @if (error(); as issue) {
+        <p role="alert" class="error">{{ issue }}</p>
+    }
+    @if (message(); as notice) {
+        <p role="status">{{ notice }}</p>
+    }
+</section>

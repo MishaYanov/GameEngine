@@ -2,7 +2,7 @@ import {computed, DestroyRef, effect, inject, Injectable, signal, untracked} fro
 import {listen} from '@tauri-apps/api/event';
 import type {AnimationReview, AnimationSource} from '../../../../core/editor/animation.models';
 import {
-    matchesAnimationTarget, type ScopedAnimationPreview,
+    matchesAnimationTarget, reserveAnimationPreviewRequest, type ScopedAnimationPreview,
 } from '../../../../core/editor/animation-workspace.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
@@ -34,8 +34,6 @@ interface ScrubPreview {
     readonly seconds: number;
 }
 
-let nextRequest = 0;
-
 /** Retains at most one native aperture and one in-flight seek for the Animation tab. */
 @Injectable()
 export class AnimationWorkspaceService {
@@ -58,6 +56,8 @@ export class AnimationWorkspaceService {
     private request = 0;
 
     readonly scope = signal<'scene' | 'prop'>('scene');
+    readonly library = signal<'imported' | 'authored'>('imported');
+    readonly authoredReady = signal(false);
     readonly clipIndex = signal(0);
     readonly nativeAvailable = this.editor.nativeAvailable;
     readonly propAvailable = computed(() => this.props.document() !== null);
@@ -82,7 +82,7 @@ export class AnimationWorkspaceService {
         const pin = this.pin();
         return pin && this.isActive(pin) ? pin : null;
     });
-    readonly ready = computed(() => this.preview() !== null);
+    readonly ready = computed(() => this.library() === 'authored' ? this.authoredReady() : this.preview() !== null);
     readonly loading = computed(() => this.status() === 'loading');
     readonly opening = computed(() => this.status() === 'opening');
     readonly seconds = this.time.asReadonly();
@@ -90,7 +90,7 @@ export class AnimationWorkspaceService {
 
     private readonly owner = computed<PreviewOwner | null>(() => {
         const snapshot = this.editor.snapshot();
-        if (!this.nativeAvailable || !this.views.animationView() || snapshot?.mode !== 'edit' ||
+        if (!this.nativeAvailable || this.library() !== 'imported' || !this.views.animationView() || snapshot?.mode !== 'edit' ||
             snapshot.transaction !== null || this.editor.playing()) return null;
         const option = this.target();
         if (!option) return null;
@@ -129,7 +129,7 @@ export class AnimationWorkspaceService {
         }
         inject(DestroyRef).onDestroy(() => {
             this.destroyed = true;
-            this.request = ++nextRequest;
+            this.request = reserveAnimationPreviewRequest();
             this.nextOpen = null;
             this.nextSeek = null;
             this.releasePreview();
@@ -175,7 +175,7 @@ export class AnimationWorkspaceService {
     }
 
     private synchronize(owner: PreviewOwner | null): void {
-        this.request = ++nextRequest;
+        this.request = reserveAnimationPreviewRequest();
         this.nextOpen = null;
         this.nextSeek = null;
         this.releasePreview();
@@ -215,7 +215,7 @@ export class AnimationWorkspaceService {
         this.failure.set(null);
         this.status.set('opening');
         this.clipIndex.set(clip);
-        this.request = ++nextRequest;
+        this.request = reserveAnimationPreviewRequest();
         this.nextOpen = {context, clip, request: this.request};
         void this.drainOpens();
     }

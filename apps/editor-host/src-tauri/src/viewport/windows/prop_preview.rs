@@ -22,6 +22,7 @@ pub(super) struct PropGpuPreview {
 	bounds: Option<Bounds3>,
 	temporary_position: Option<(EntityId, [f32; 3])>,
 	pose_revision: Option<u64>,
+	visual_revision: Option<u64>,
 }
 
 impl PropGpuPreview {
@@ -47,6 +48,7 @@ impl PropGpuPreview {
 			bounds,
 			temporary_position: None,
 			pose_revision: None,
+			visual_revision: None,
 		})
 	}
 
@@ -304,6 +306,19 @@ impl Worker {
 		let extent = [width, height];
 		let release_translation = navigation.retain_translation(frame, extent);
 		preview.preview_position(navigation.translation.as_ref());
+		if let Some(visual) = &frame.visual_pose {
+			if preview.visual_revision != Some(visual.revision) {
+				for pose in visual.poses.iter() {
+					let id = preview.scene.entity_by_key(&pose.entity_key).ok_or("Animation Clip object is missing from the viewport")?;
+					let entity = preview.scene.get_mut(id).ok_or("Animation Clip object is missing from the viewport")?;
+					let target = entity.transform_mut();
+					let local = pose.transform();
+					target.position = local.position;
+					target.rotation = local.rotation;
+				}
+				preview.visual_revision = Some(visual.revision);
+			}
+		}
 		if self.prepared_extent != Some(extent) {
 			self.last_status = Instant::now() - STATUS_INTERVAL;
 		}

@@ -46,3 +46,9 @@ export function matchesAnimationTarget(actual: AnimationWorkspaceTarget, expecte
             return actualDocument.kind === 'scene' && actualDocument.scene_id === expectedDocument.scene_id;
     }
 }
+
+let nextPreviewRequest = 0;
+
+export function reserveAnimationPreviewRequest(): number {
+    return ++nextPreviewRequest;
+}

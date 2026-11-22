@@ -121,6 +121,7 @@ impl EditorWorkspace {
 			content_revision: 0,
 			editable_source: false,
 			pose: None,
+			visual_pose: None,
 		};
 		let candidate = AnimationPreview {
 			token,
@@ -138,6 +139,7 @@ impl EditorWorkspace {
 		};
 		let result = candidate.dto(0.0);
 		self.prop_preview = None;
+		self.authored_clip_preview = None;
 		self.camera_preview = None;
 		self.animation_preview = Some(candidate);
 		Ok(result)

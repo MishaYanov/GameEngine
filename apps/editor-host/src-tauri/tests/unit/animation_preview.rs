@@ -334,5 +334,152 @@ fn workspace_scopes_nested_instances_and_source_drafts_to_their_own_preview_toke
 	);
 }
 
+#[test]
+fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() {
+	use runtime::{
+		animation::{
+			AuthoredClip, AuthoredClipOwner, ClipKey, ScopedTrack, VisualInterpolation,
+			VisualTargetId, VisualTrack,
+		},
+		components::NO_MESH_PATH,
+		editor::PrefabData,
+		linked_prefab::PropAddress,
+		scene_data::{ColliderData, EntityData},
+	};
+
+	let fixture = Fixture::new();
+	let mut workspace = fixture.workspace();
+	let pivot = EntityKey::new("pivot").unwrap();
+	let lever = EntityKey::new("lever").unwrap();
+	let prop_path = "lever.json";
+	let mut prefab = PrefabData {
+		schema_version: 3,
+		entities: vec![
+			EntityData::new(pivot.clone(), "Pivot", NO_MESH_PATH).with_renderable(false),
+			EntityData::new(lever.clone(), "Lever", "props/cube.glb").with_parent(Some(pivot)),
+		],
+		gameplay: None,
+		reference_slots: Default::default(),
+		composition: Default::default(),
+	};
+	let prop =
+		runtime::assets::project_assets::prepare_prefab(&workspace.asset_root, prop_path, &prefab)
+			.unwrap()
+			.publish()
+			.unwrap();
+	let target = VisualTargetId::Prop {
+		address: PropAddress::Object {
+			placement_path: vec![],
+			source_entity: lever.clone(),
+		},
+	};
+	let clip = AuthoredClip {
+		schema_version: 1,
+		name: "Lever Turn".into(),
+		owner: AuthoredClipOwner::Prop {
+			asset_id: prop.id.clone(),
+		},
+		duration_ticks: 1_000,
+		tracks: vec![
+			ScopedTrack {
+				target: target.clone(),
+				track: VisualTrack::LocalPosition {
+					interpolation: VisualInterpolation::Linear,
+					keys: vec![
+						ClipKey {
+							at: 0,
+							value: [0.0; 3],
+						},
+						ClipKey {
+							at: 1000,
+							value: [2.0, 0.0, 0.0],
+						},
+					],
+				},
+			},
+			ScopedTrack {
+				target,
+				track: VisualTrack::LocalRotation {
+					interpolation: VisualInterpolation::Linear,
+					keys: vec![
+						ClipKey {
+							at: 0,
+							value: [0.0, 0.0, 0.0, 1.0],
+						},
+						ClipKey {
+							at: 1000,
+							value: [0.0, 1.0, 0.0, 0.0],
+						},
+					],
+				},
+			},
+		],
+	};
+	let before = workspace.backend.session().authored_document();
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.generation;
+	let saved = workspace
+		.save_authored_clip_asset("lever-turn.clip.json", clip.clone(), None, revision)
+		.unwrap()
+		.document;
+	assert_eq!(workspace.authored_clip_assets().unwrap().len(), 1);
+	let reopened = workspace
+		.open_authored_clip_asset(&saved.asset.asset_id)
+		.unwrap();
+	assert_eq!(reopened.clip, clip);
+	assert_eq!(reopened.asset.fingerprint, saved.asset.fingerprint);
+	let revision = workspace.backend.session().revision();
+	let preview = workspace
+		.open_authored_clip_preview(
+			&saved.asset.asset_id,
+			&saved.asset.fingerprint,
+			None,
+			revision,
+			generation,
+			1,
+		)
+		.unwrap();
+	let half = workspace
+		.sample_authored_clip_preview(&preview.token, 500)
+		.unwrap();
+	assert_eq!(half.poses[0].position, [1.0, 0.0, 0.0]);
+	assert_eq!(half.poses[0].entity_key, lever);
+	assert!(workspace
+		.active_prop_preview()
+		.unwrap()
+		.visual_pose
+		.is_some());
+	assert_eq!(workspace.backend.session().authored_document(), before);
+	assert_eq!(workspace.backend.session().revision(), revision);
+	assert!(workspace
+		.sample_authored_clip_preview(&preview.token, 1001)
+		.is_err());
+	assert!(workspace.close_authored_clip_preview(&preview.token));
+	assert!(workspace.active_prop_preview().is_none());
+
+	let mut invalid = clip.clone();
+	if let VisualTrack::LocalPosition { keys, .. } = &mut invalid.tracks[0].track {
+		keys[1].at = 0;
+	}
+	assert!(workspace
+		.save_authored_clip_asset("invalid.clip.json", invalid, None, revision)
+		.is_err());
+	assert!(!workspace.asset_root.join("invalid.clip.json").exists());
+	prefab.entities[1].collider = Some(ColliderData::Sphere {
+		radius: 1.0,
+		offset: [0.0; 3],
+		interaction: Default::default(),
+	});
+	runtime::assets::project_assets::prepare_prefab(&workspace.asset_root, prop_path, &prefab)
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert!(workspace
+		.save_authored_clip_asset("physical.clip.json", clip, None, revision)
+		.is_err());
+	assert!(!workspace.asset_root.join("physical.clip.json").exists());
+	assert_eq!(workspace.authored_clip_assets().unwrap().len(), 1);
+}
+
 #[path = "../../../../../tests/support/project_fixture.rs"]
 mod test_project;

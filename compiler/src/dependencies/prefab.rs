@@ -156,6 +156,11 @@ pub(super) fn prefab_paths_excluding(
 		{
 			continue;
 		}
+		if path.file_name().and_then(|name| name.to_str())
+			.is_some_and(|name| name.to_ascii_lowercase().ends_with(".clip.json"))
+		{
+			continue;
+		}
 		let strict_prefab_folder = relative
 			.components()
 			.next()

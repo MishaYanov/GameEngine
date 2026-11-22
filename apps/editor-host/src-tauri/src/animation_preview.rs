@@ -1,4 +1,6 @@
 //! One isolated, pinned native pose. It never advances a game session or edits a document.
+#[path = "animation_preview/authored.rs"]
+pub(crate) mod authored;
 #[path = "animation_preview/scoped.rs"]
 mod scoped;
 
@@ -8,7 +10,7 @@ use runtime::{
 	asset_catalog::AssetId,
 	EntityKey,
 };
-pub use scoped::AnimationWorkspaceTarget;
+pub use scoped::{AnimationPreviewDocument, AnimationWorkspaceTarget};
 use scoped::ScopedAnimationPreview;
 use serde::Serialize;
 use std::sync::Arc;
@@ -82,7 +84,7 @@ impl EditorWorkspace {
 					.into(),
 			);
 		}
-		if self.has_active_animation_aperture() {
+		if self.has_active_animation_aperture() || self.active_authored_clip_aperture().is_some() {
 			return Err("Use the Animation workspace to preview the selected clip".into());
 		}
 		let data = session.authored_document();

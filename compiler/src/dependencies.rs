@@ -9,6 +9,7 @@ use engine_core::{
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+mod animation_clip;
 mod catalog;
 mod model;
 mod prefab;
@@ -386,6 +387,7 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 			.prefab(&path)
 			.map_err(|error| format!("Prefab {}: {error}", path.display()))?;
 	}
+	closure.record_animation_library()?;
 	// Include metadata for any dependency addressed by path, not only explicit IDs.
 	let catalog_paths: Vec<_> = closure
 		.catalog

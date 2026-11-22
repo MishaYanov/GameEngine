@@ -47,6 +47,7 @@ pub enum AssetKind {
 	Prefab,
 	Scene,
 	Texture,
+	AnimationClip,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +130,12 @@ impl PersistentAsset {
 			{
 				return Err("Asset mesh signature is invalid or duplicated".into());
 			}
+		}
+		if self.kind == AssetKind::AnimationClip
+			&& (!self.path.to_ascii_lowercase().ends_with(".clip.json")
+				|| self.bytes > crate::animation::MAX_AUTHORED_CLIP_BYTES as u64)
+		{
+			return Err("Animation Clip catalog entries require a .clip.json path and at most 1 MiB".into());
 		}
 		if self.kind != AssetKind::Model && !self.meshes.is_empty() {
 			return Err("Only model assets can declare meshes".into());

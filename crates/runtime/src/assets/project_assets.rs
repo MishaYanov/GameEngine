@@ -16,10 +16,12 @@ use std::{
 	path::{Path, PathBuf},
 };
 
+mod animation_clip;
 mod input_actions;
 mod migration;
 mod prefab;
 
+pub use animation_clip::{prepare_animation_clip, read_animation_clip};
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;

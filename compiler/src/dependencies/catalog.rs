@@ -54,6 +54,7 @@ impl Closure<'_> {
 				)?;
 				self.entities(&scene.entities)?;
 			}
+			AssetKind::AnimationClip => self.validate_animation_clip(&asset, &bytes)?,
 			AssetKind::Texture => {}
 		}
 		Ok(())
