@@ -45,7 +45,7 @@ impl Closure<'_> {
 
 	fn prefab_contents(&mut self, relative: &Path) -> Result<(), String> {
 		let bytes = self.file(relative)?;
-		let prefab =
+		let mut prefab =
 			PrefabData::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)?;
 		if let Some(gameplay) = &prefab.gameplay {
 			let keys: HashSet<_> = prefab.entities.iter().map(|entity| &entity.key).collect();
@@ -77,7 +77,11 @@ impl Closure<'_> {
 				}
 			}
 		}
-		self.entities(&prefab.expanded_entities()?)?;
+		if !prefab.composition.is_empty() {
+			prefab.entities = prefab.expanded_entities()?.into_owned();
+			prefab.composition = Default::default();
+		}
+		self.entities(&prefab.entities)?;
 		self.generate(relative.to_path_buf(), prefab.to_json()?.into_bytes())?;
 		Ok(())
 	}

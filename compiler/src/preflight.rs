@@ -1,7 +1,7 @@
 //! Validate scene documents, packaged references, and project behaviors.
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	sync::Arc,
 };
 
@@ -38,7 +38,7 @@ pub fn prepare_project(
 		catalog_output,
 	} = dependencies::prepare(project, &asset_root)?;
 
-	validate_catalog_scenes(project, &asset_root, &files)?;
+	validate_catalog_snapshot(project, &asset_root, &files, Some(&generated_files))?;
 
 	let total_bytes = files.iter().map(|entry| entry.bytes).sum();
 	Ok(PreparedProject {
@@ -75,6 +75,15 @@ pub(super) fn validate_catalog_scenes(
 	root: &Path,
 	files: &[PackageAsset],
 ) -> Result<(), String> {
+	validate_catalog_snapshot(project, root, files, None)
+}
+
+fn validate_catalog_snapshot(
+	project: &ProjectData,
+	root: &Path,
+	files: &[PackageAsset],
+	generated: Option<&BTreeMap<PathBuf, Vec<u8>>>,
+) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
 	let factory = gameplay_catalog::resolve(project)?;
@@ -93,20 +102,20 @@ pub(super) fn validate_catalog_scenes(
 
 	for entry in ordered_scenes(&project) {
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
-		let result =
-			validate_catalog_scene(scene_targets, root, entry, &packaged).and_then(|scene| {
+		let result = validate_catalog_scene(scene_targets, root, entry, &packaged, generated)
+			.and_then(|scene| {
 				let mut game = GameSession::with_factory_for_scene(
 					Arc::clone(&project),
 					entry.id().clone(),
 					Arc::new(scene),
 					Arc::clone(&factory),
 				)
-					.map_err(|cause| scene_error(entry, cause))?;
+				.map_err(|cause| scene_error(entry, cause))?;
 				let animation_root = root.to_path_buf();
 				game.set_animation_resolver(Arc::new(move |scene| {
 					bridge::animation_asset::prepare_scene(&animation_root, scene)
 				}))
-					.map_err(|cause| scene_error(entry, cause))
+				.map_err(|cause| scene_error(entry, cause))
 			});
 		if let Err(error) = result {
 			append_scene_error(&mut report, &error, &mut truncated);
@@ -170,10 +179,19 @@ fn validate_catalog_scene(
 	root: &Path,
 	entry: &SceneDescriptor,
 	packaged: &HashSet<&Path>,
+	generated: Option<&BTreeMap<PathBuf, Vec<u8>>>,
 ) -> Result<SceneData, String> {
 	let path = prepared_asset_path(root, Path::new(entry.asset_path()), packaged)
 		.map_err(|cause| scene_error(entry, cause))?;
-	let scene = read_scene_file(&path).map_err(|cause| scene_error(entry, cause))?;
+	let scene =
+		if let Some(bytes) = generated.and_then(|data| data.get(path.strip_prefix(root).ok()?)) {
+			std::str::from_utf8(bytes)
+				.map_err(|error| error.to_string())
+				.and_then(SceneData::from_json)
+		} else {
+			read_scene_file(&path)
+		}
+		.map_err(|cause| scene_error(entry, cause))?;
 
 	// read_scene_file parses and validates the document before returning it.
 	// Only cross-document target membership remains to check here.

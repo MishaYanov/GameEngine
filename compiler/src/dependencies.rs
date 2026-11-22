@@ -150,110 +150,128 @@ impl Closure<'_> {
 		}
 		Ok(())
 	}
-	fn entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
-		for entity in entities {
-			if let Some(component) = &entity.animation {
-				let id = &component.settings.source.asset_id;
-				let source = self
-					.catalog
-					.by_id(id)
-					.ok_or("Animation source identity is missing from the catalog")?
-					.clone();
-				if source.kind != AssetKind::Model {
-					return Err("Animation source must be a model asset".into());
-				}
-				let asset = if let Some(asset) = self.animations.get(id) {
-					Arc::clone(asset)
-				} else {
-					let asset =
-						bridge::animation_asset::load(self.root, &component.settings.source)?;
-					self.animation_bytes = self
-						.animation_bytes
-						.checked_add(asset.retained_bytes())
-						.filter(|bytes| *bytes <= 128 * 1024 * 1024)
-						.ok_or("Export animation preparation exceeds 128 MiB")?;
-					self.animations.insert(id.clone(), Arc::clone(&asset));
-					asset
-				};
-				asset.validate_settings(&component.settings)?;
-				let mesh = self.catalog.by_path(&entity.model_path);
-				if !entity.has_mesh_component()
-					|| mesh.is_none_or(|mesh| &mesh.id != id)
-					|| entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
-					|| entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
-				{
-					return Err(
-						"Animation requires its source model and selected mesh on the same entity"
-							.into(),
-					);
-				}
-				self.record(id)?;
-			}
-			if let Some(link) = &entity.linked_prefab {
+	fn linked_authoring_sources(&mut self, scene: &SceneData) {
+		for link in scene
+			.entities
+			.iter()
+			.filter_map(|entity| entity.linked_prefab.as_ref())
+		{
+			let path = self
+				.catalog
+				.by_id(&link.source.source_id)
+				.map_or(link.source.path.as_str(), |asset| asset.path.as_str());
+			self.linked_sources.insert(path.to_ascii_lowercase());
+			self.linked_sources
+				.insert(link.source.path.to_ascii_lowercase());
+			for pin in &link.source.prefab.composition.pins {
 				let path = self
 					.catalog
-					.by_id(&link.source.source_id)
-					.map_or(link.source.path.as_str(), |asset| asset.path.as_str());
+					.by_id(&pin.version.asset_id)
+					.map_or(pin.path.as_str(), |asset| asset.path.as_str());
 				self.linked_sources.insert(path.to_ascii_lowercase());
-				self.linked_sources
-					.insert(link.source.path.to_ascii_lowercase());
+				self.linked_sources.insert(pin.path.to_ascii_lowercase());
 			}
-			for component in entity
-				.native_behaviors
-				.iter()
-				.filter(|component| component.enabled)
-			{
-				if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
-					prefab_path,
-					..
-				} = &component.behavior
-				{
-					self.prefab_dependency(prefab_path)?;
-				}
-			}
-			if !entity.has_mesh_component() {
-				continue;
-			}
-			let resolved = self
-				.catalog
-				.resolve(
-					entity.asset_id.as_ref(),
-					&entity.model_path,
-					entity.mesh_index,
-				)?
-				.cloned();
-			if let Some(asset) = &resolved {
-				if asset.kind != AssetKind::Model {
-					return Err("Entity references a non-model asset identity".into());
-				}
-				self.record(&asset.id)?;
-			}
-			let path = resolved
-				.as_ref()
-				.map_or(entity.model_path.as_str(), |asset| asset.path.as_str());
-			// Invisible logical markers may intentionally have no loadable model.
-			if !entity.renderable && resolved.is_none() && !self.root.join(path).is_file() {
-				continue;
-			}
-			let relative = Path::new(path);
-			if !relative
-				.extension()
-				.and_then(|value| value.to_str())
-				.is_some_and(|extension| {
-					extension.eq_ignore_ascii_case("glb") || extension.eq_ignore_ascii_case("gltf")
-				}) {
-				if !entity.renderable {
-					continue;
-				}
-				return Err(format!(
-					"Renderable model '{}' must use glTF (.gltf or .glb)",
-					entity.model_path
-				));
-			}
-			self.model(relative, entity.mesh_index).map_err(|error| {
-				format!("Model '{}' preflight failed: {error}", entity.model_path)
-			})?;
 		}
+	}
+
+	fn entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
+		for entity in entities {
+			self.entity(entity)
+				.map_err(|error| format!("Object {:?}: {error}", entity.key.as_str()))?;
+		}
+		Ok(())
+	}
+
+	fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
+		if let Some(component) = &entity.animation {
+			let id = &component.settings.source.asset_id;
+			let source = self
+				.catalog
+				.by_id(id)
+				.ok_or("Animation source identity is missing from the catalog")?
+				.clone();
+			if source.kind != AssetKind::Model {
+				return Err("Animation source must be a model asset".into());
+			}
+			let asset = if let Some(asset) = self.animations.get(id) {
+				Arc::clone(asset)
+			} else {
+				let asset = bridge::animation_asset::load(self.root, &component.settings.source)?;
+				self.animation_bytes = self
+					.animation_bytes
+					.checked_add(asset.retained_bytes())
+					.filter(|bytes| *bytes <= 128 * 1024 * 1024)
+					.ok_or("Export animation preparation exceeds 128 MiB")?;
+				self.animations.insert(id.clone(), Arc::clone(&asset));
+				asset
+			};
+			asset.validate_settings(&component.settings)?;
+			let mesh = self.catalog.by_path(&entity.model_path);
+			if !entity.has_mesh_component()
+				|| mesh.is_none_or(|mesh| &mesh.id != id)
+				|| entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
+				|| entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
+			{
+				return Err(
+					"Animation requires its source model and selected mesh on the same entity"
+						.into(),
+				);
+			}
+			self.record(id)?;
+		}
+		for component in entity
+			.native_behaviors
+			.iter()
+			.filter(|component| component.enabled)
+		{
+			if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
+				prefab_path, ..
+			} = &component.behavior
+			{
+				self.prefab_dependency(prefab_path)?;
+			}
+		}
+		if !entity.has_mesh_component() {
+			return Ok(());
+		}
+		let resolved = self
+			.catalog
+			.resolve(
+				entity.asset_id.as_ref(),
+				&entity.model_path,
+				entity.mesh_index,
+			)?
+			.cloned();
+		if let Some(asset) = &resolved {
+			if asset.kind != AssetKind::Model {
+				return Err("Entity references a non-model asset identity".into());
+			}
+			self.record(&asset.id)?;
+		}
+		let path = resolved
+			.as_ref()
+			.map_or(entity.model_path.as_str(), |asset| asset.path.as_str());
+		// Invisible logical markers may intentionally have no loadable model.
+		if !entity.renderable && resolved.is_none() && !self.root.join(path).is_file() {
+			return Ok(());
+		}
+		let relative = Path::new(path);
+		if !relative
+			.extension()
+			.and_then(|value| value.to_str())
+			.is_some_and(|extension| {
+				extension.eq_ignore_ascii_case("glb") || extension.eq_ignore_ascii_case("gltf")
+			}) {
+			if !entity.renderable {
+				return Ok(());
+			}
+			return Err(format!(
+				"Renderable model '{}' must use glTF (.gltf or .glb)",
+				entity.model_path
+			));
+		}
+		self.model(relative, entity.mesh_index)
+			.map_err(|error| format!("Model '{}' preflight failed: {error}", entity.model_path))?;
 		Ok(())
 	}
 }
@@ -313,19 +331,14 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 					));
 				}
 			}
-			closure.entities(&scene.entities)?;
-			if scene
-				.entities
-				.iter()
-				.any(|entity| entity.linked_prefab.is_some())
-			{
+			closure.linked_authoring_sources(&scene);
+			if engine_core::linked_prefab::needs_runtime_projection(&scene) {
+				let runtime = engine_core::linked_prefab::resolve_scene(&scene);
+				closure.entities(&runtime.entities)?;
 				let key = closure.key(Path::new(entry.asset_path()))?;
-				closure.generate(
-					key,
-					engine_core::linked_prefab::resolve_scene(&scene)
-						.to_json()?
-						.into_bytes(),
-				)?;
+				closure.generate(key, runtime.to_json()?.into_bytes())?;
+			} else {
+				closure.entities(&scene.entities)?;
 			}
 			Ok::<_, String>(())
 		})();

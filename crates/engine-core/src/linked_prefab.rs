@@ -164,8 +164,17 @@ pub struct LinkedPrefabOverrideResolution {
 	pub resolution: PrefabConflictResolution,
 }
 
+pub fn needs_runtime_projection(scene: &SceneData) -> bool {
+	!scene.organization.is_empty()
+		|| scene
+			.entities
+			.iter()
+			.any(|entity| entity.linked_prefab.is_some())
+}
+
 pub fn resolve_scene(scene: &SceneData) -> SceneData {
 	let mut scene = scene.clone();
+	scene.organization = Default::default();
 	for entity in &mut scene.entities {
 		entity.linked_prefab = None;
 	}

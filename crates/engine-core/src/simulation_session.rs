@@ -108,16 +108,8 @@ impl SimulationSession {
 	) -> Result<Self, String> {
 		let behaviors = project.resolved_behaviors_for(&scene_id)?;
 		document.validate()?;
-		let runtime_document = if document
-			.entities
-			.iter()
-			.any(|entity| entity.linked_prefab.is_some())
-		{
-			let mut resolved = (*document).clone();
-			for entity in &mut resolved.entities {
-				entity.linked_prefab = None;
-			}
-			Arc::new(resolved)
+		let runtime_document = if crate::linked_prefab::needs_runtime_projection(&document) {
+			Arc::new(crate::linked_prefab::resolve_scene(&document))
 		} else {
 			document
 		};
@@ -263,7 +255,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
-			|| !self.inputs.action_presses.is_empty()
+				|| !self.inputs.action_presses.is_empty()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
@@ -281,7 +273,7 @@ impl SimulationSession {
 				|| self.lifecycle.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
-			|| !self.inputs.action_presses.is_empty()
+				|| !self.inputs.action_presses.is_empty()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
@@ -884,13 +876,13 @@ impl SimulationSession {
 					if !self.world.is_root_leaf(index)
 						|| visual.collider.is_some()
 						|| authored_camera
-						.follow
-						.as_ref()
-						.is_some_and(|rig| rig.target == entity)
+							.follow
+							.as_ref()
+							.is_some_and(|rig| rig.target == entity)
 						|| authored_camera
-						.orbit
-						.as_ref()
-						.is_some_and(|rig| rig.target == entity)
+							.orbit
+							.as_ref()
+							.is_some_and(|rig| rig.target == entity)
 					{
 						return Err(
 							"View attachment requires an independent root visual with no collider"

@@ -652,3 +652,6 @@ mod prop_recovery;
 
 #[path = "editor_workspace/scene_verification.rs"]
 mod scene_verification;
+
+#[path = "editor_workspace/prop_roundtrip.rs"]
+mod prop_roundtrip;
