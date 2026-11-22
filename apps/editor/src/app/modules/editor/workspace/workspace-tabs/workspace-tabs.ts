@@ -12,6 +12,7 @@ const WORKSPACE_TABS: readonly WorkspaceTabDefinition[] = [
     {kind: 'scene-viewport', label: 'Scene', icon: 'cube'},
     {kind: 'game-preview', label: 'Game', icon: 'play'},
     {kind: 'prop-workspace', label: 'Prop', icon: 'object'},
+    {kind: 'animation-workspace', label: 'Animation', icon: 'graph'},
 ];
 
 let nextWorkspaceTabsId = 0;
@@ -25,10 +26,14 @@ let nextWorkspaceTabsId = 0;
 export class WorkspaceTabs {
     readonly activeViewKind = input<WorkspaceViewKind>('scene-viewport');
     readonly propAvailable = input(false);
+    readonly animationAvailable = input(false);
     readonly viewSelected = output<WorkspaceViewKind>();
 
     readonly tabs = computed(() =>
-        WORKSPACE_TABS.filter(tab => tab.kind !== 'prop-workspace' || this.propAvailable()).map(tab => ({
+        WORKSPACE_TABS.filter(tab =>
+            (tab.kind !== 'prop-workspace' || this.propAvailable()) &&
+            (tab.kind !== 'animation-workspace' || this.animationAvailable()),
+        ).map(tab => ({
             ...tab,
             active: tab.kind === this.activeViewKind(),
         })),

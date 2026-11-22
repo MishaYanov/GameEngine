@@ -73,6 +73,7 @@ pub fn run() {
 			editor_capabilities,
 			editor_animation_metadata,
 			editor_animation_preview_open,
+			editor_animation_workspace_open,
 			editor_animation_preview_sample,
 			editor_animation_preview_close,
 			editor_camera_preview_open,

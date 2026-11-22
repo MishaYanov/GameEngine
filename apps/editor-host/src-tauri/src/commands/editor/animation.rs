@@ -61,6 +61,34 @@ pub async fn editor_animation_preview_open(
 	.await
 }
 #[tauri::command]
+pub async fn editor_animation_workspace_open(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	target: crate::animation_preview::AnimationWorkspaceTarget,
+	clip_index: u32,
+	expected_revision: u64,
+	expected_generation: u64,
+	request_id: u64,
+) -> Result<crate::animation_preview::AnimationPreviewDto, String> {
+	trusted_window(&window)?;
+	workspace(
+		state,
+		true,
+		Some("animation_workspace_open"),
+		move |workspace| {
+			workspace.open_animation_workspace_preview(
+				target,
+				clip_index,
+				expected_revision,
+				expected_generation,
+				request_id,
+			)
+		},
+	)
+	.await
+}
+
+#[tauri::command]
 pub async fn editor_animation_preview_sample(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,

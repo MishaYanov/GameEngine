@@ -21,6 +21,7 @@ pub(super) struct PropGpuPreview {
 	targets: Vec<PickTarget>,
 	bounds: Option<Bounds3>,
 	temporary_position: Option<(EntityId, [f32; 3])>,
+	pose_revision: Option<u64>,
 }
 
 impl PropGpuPreview {
@@ -45,6 +46,7 @@ impl PropGpuPreview {
 			targets,
 			bounds,
 			temporary_position: None,
+			pose_revision: None,
 		})
 	}
 
@@ -247,6 +249,12 @@ impl Worker {
 				gpu.renderer.retire_resources(preview)?;
 				gpu.assets.prune_unused();
 			}
+			if let Some((_, pose)) = &frame.pose {
+				// Seed the existing loader with the reviewed bytes already held by the preview.
+				gpu.assets
+					.load_animation(&gpu.renderer, Arc::clone(&pose.asset))
+					.map_err(|error| error.to_string())?;
+			}
 			let candidate = match scene_io::instantiate_cancellable(
 				&frame.document,
 				&mut gpu.assets,
@@ -338,6 +346,12 @@ impl Worker {
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
 		)?;
+		if let Some((key, pose)) = &frame.pose {
+			if preview.pose_revision != Some(pose.revision) {
+				preview.scene.set_animation_pose(key, Some(pose))?;
+				preview.pose_revision = Some(pose.revision);
+			}
+		}
 		let (objects, _) = preview.scene.try_render_visible(Some(&frustum))?;
 		if !current() {
 			self.dirty = true;

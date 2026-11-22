@@ -26,6 +26,9 @@ import {
     readAnimationPreview,
     readAnimationReview
 } from './animation.models';
+import {
+    readScopedAnimationPreview, type AnimationWorkspaceTarget, type ScopedAnimationPreview,
+} from './animation-workspace.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import {isSceneSchemaVersion} from './editor.models';
 import type {
@@ -730,6 +733,33 @@ export class EditorService {
             false,
             expectedGeneration,
         );
+    }
+
+    openAnimationWorkspacePreview(
+        target: AnimationWorkspaceTarget,
+        clipIndex: number,
+        expectedGeneration: number,
+        expectedRevision: number,
+        nativeGeneration: number,
+        requestId: number,
+    ): Promise<ScopedAnimationPreview> {
+        return this.enqueue('editor_animation_workspace_open', async () => {
+            this.requireGeneration(expectedGeneration);
+            return readScopedAnimationPreview(await this.native<unknown>('editor_animation_workspace_open', {
+                target, clipIndex, expectedRevision, expectedGeneration: nativeGeneration, requestId,
+            }));
+        }, false, expectedGeneration);
+    }
+
+    sampleAnimationWorkspacePreview(token: string, timeSeconds: number, expectedGeneration: number): Promise<ScopedAnimationPreview> {
+        return this.enqueue('editor_animation_preview_sample', async () => {
+            this.requireGeneration(expectedGeneration);
+            return readScopedAnimationPreview(await this.native<unknown>('editor_animation_preview_sample', {token, timeSeconds}));
+        }, false, expectedGeneration);
+    }
+
+    frameAnimationWorkspacePreview(token: string): Promise<void> {
+        return this.native<void>('editor_prop_preview_frame', {token});
     }
 
     openAnimationPreview(

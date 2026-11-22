@@ -1,0 +1,62 @@
+<section aria-label="Animation clips" class="animation">
+    @if (animation.propAvailable()) {
+        <label>
+            Preview target
+            <select #scope [value]="animation.scope()" (change)="animation.chooseScope(scope.value)">
+                <option value="scene">Scene selection</option>
+                <option value="prop">Prop Workspace selection</option>
+            </select>
+        </label>
+    }
+    @if (animation.target(); as target) {
+        @if (animation.options().length > 1) {
+            <label>
+                Animated object
+                <select #object [value]="target.key" (change)="animation.chooseTarget(object.value)">
+                    @for (item of animation.options(); track item.key) {
+                        <option [value]="item.key">{{ item.name }}</option>
+                    }
+                </select>
+            </label>
+        } @else {
+            <p class="target">{{ target.name }}</p>
+        }
+        @if (!animation.nativeAvailable) {
+            <p>Open this project in the desktop editor to preview its animation.</p>
+        } @else if (animation.loading()) {
+            <p role="status">Reading imported clips…</p>
+        }
+        @if (animation.clips().length) {
+            <label>
+                Imported clip
+                <select #clip [value]="animation.clipIndex()" (change)="animation.chooseClip(+clip.value)">
+                    @for (item of animation.clips(); track item.index) {
+                        <option [value]="item.index">{{ item.name }}</option>
+                    }
+                </select>
+            </label>
+        }
+        @if (animation.opening()) {
+            <p role="status">Preparing the isolated preview…</p>
+        }
+        @if (animation.preview(); as preview) {
+            <label class="time">
+                Clip time
+                <input #time type="range" min="0" [max]="preview.duration_seconds" step="any"
+                       [value]="animation.seconds()" (input)="animation.seek(time.valueAsNumber)"
+                       [attr.aria-valuetext]="animation.seconds().toFixed(3) + ' seconds'"
+                       [disabled]="preview.duration_seconds <= 0"/>
+            </label>
+            <div class="time-controls">
+                <output>{{ animation.seconds().toFixed(3) }} / {{ preview.duration_seconds.toFixed(3) }} s</output>
+                <button type="button" (click)="animation.frame()">Frame Animated Object</button>
+            </div>
+        }
+        @if (animation.error(); as message) {
+            <p class="error" role="alert">{{ message }}</p>
+            <button type="button" (click)="animation.retry()">Retry Animation Preview</button>
+        }
+    } @else {
+        <p>Select a visible object with an Animation component in Scene or Prop.</p>
+    }
+</section>

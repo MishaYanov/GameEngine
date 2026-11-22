@@ -49,6 +49,7 @@
     </div>
     <workspace-tabs #tabs (viewSelected)="workspaceView.selectView($event)"
                     [propAvailable]="!!propWorkspace.document() && !editorService.playing()"
+                    [animationAvailable]="!!editorService.snapshot() && !editorService.playing()"
                     [activeViewKind]="workspaceView.activeViewKind()"/>
 
     <div class="workspace-main">
@@ -71,7 +72,7 @@
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
-            @if (!workspaceView.gameView() && !workspaceView.propView() && !previewingCamera()) {
+            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !previewingCamera()) {
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
@@ -81,10 +82,10 @@
                     role="tabpanel"
                     tabindex="0"
             >
-                <editor-pane [icon]="workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' :
+                <editor-pane [icon]="workspaceView.animationView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
+                             [title]="workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' :
                                  previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
-                    @if (!workspaceView.propView() && sceneProgress(); as progress) {
+                    @if (!workspaceView.propView() && !workspaceView.animationView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
                             <progress
@@ -114,12 +115,14 @@
                                 (editorActionRequested)="handleNativeShortcut($event)"
                                 [enabled]="showingViewport() && !opening()"
                                 [hidden]="!showingViewport()"
-                                [class.prop-aperture]="workspaceView.propView()"
-                                [label]="workspaceView.propView() ? 'Isolated Prop viewport' : selectedCameraPreview.active() ? 'Selected camera preview viewport' :
+                                [class.prop-aperture]="workspaceView.propView() || workspaceView.animationView()"
+                                [label]="workspaceView.animationView() ? 'Isolated Animation viewport' : workspaceView.propView() ? 'Isolated Prop viewport' : selectedCameraPreview.active() ? 'Selected camera preview viewport' :
                                     workspaceView.gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
                         />
                         @if (workspaceView.propView()) {
                             <editor-prop-workspace (closed)="closePropWorkspace()"/>
+                        } @else if (workspaceView.animationView()) {
+                            <editor-animation-workspace/>
                         } @else if (!showingViewport()) {
                             <div class="empty-scene">
                                 <div class="empty-content">

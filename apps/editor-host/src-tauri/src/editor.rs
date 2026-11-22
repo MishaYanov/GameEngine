@@ -53,6 +53,7 @@ pub struct EditorWorkspace {
 	// A pause and resume may both finish before the native worker next wakes.
 	pub(crate) camera_capture_epoch: u64,
 	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
+	pub(crate) animation_preview_request: u64,
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	pub(crate) prop_preview: Option<prop_preview::PropPreview>,
 	pub(crate) prop_preview_request: u64,
@@ -399,6 +400,7 @@ impl EditorWorkspace {
 	) -> EditorWorkspace {
 		Self {
 			animation_preview: None,
+			animation_preview_request: 0,
 			camera_preview: None,
 			prop_preview: None,
 			prop_preview_request: 0,

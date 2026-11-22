@@ -9,6 +9,9 @@ import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspac
 export class WorkspaceViewService {
     readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
     readonly propView = computed(() => this.activeViewKind() === 'prop-workspace');
+    readonly animationView = computed(() => this.activeViewKind() === 'animation-workspace');
+    private readonly animationScope = signal<'scene' | 'prop'>('scene');
+    readonly animationOrigin = this.animationScope.asReadonly();
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService);
     readonly gameStatus = this.viewport.gameStatus;
@@ -49,7 +52,7 @@ export class WorkspaceViewService {
         });
         effect(() => {
             const state = this.viewport.state();
-            if (!state || this.propView()) return;
+            if (!state || this.propView() || this.animationView()) return;
             const view = this.gameView() ? 'game' : 'scene';
             if (state.settings.view === view || this.requestedView === view) return;
             this.requestedView = view;
@@ -60,7 +63,10 @@ export class WorkspaceViewService {
     }
 
     selectView(kind: WorkspaceViewKind): void {
-        if (kind === 'prop-workspace' && this.editor.playing()) return;
+        if ((kind === 'prop-workspace' || kind === 'animation-workspace') && this.editor.playing()) return;
+        if (kind === 'animation-workspace' && !this.animationView()) {
+            this.animationScope.set(this.propView() ? 'prop' : 'scene');
+        }
         this.activeView.set(kind);
     }
 

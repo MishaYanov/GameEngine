@@ -1,0 +1,40 @@
+.animation {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4);
+}
+
+label {
+    display: grid;
+    gap: var(--space-1);
+}
+
+select {
+    max-inline-size: 24rem;
+    min-block-size: var(--layout-control-height);
+    font: inherit;
+}
+
+p {
+    margin: 0;
+}
+
+.target {
+    font-weight: 600;
+}
+
+.time input {
+    inline-size: 100%;
+}
+
+.time-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.error {
+    color: var(--color-danger);
+}

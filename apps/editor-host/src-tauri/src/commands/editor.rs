@@ -94,7 +94,9 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 			let scene = workspace.backend.session().active_scene_id().clone();
 			let requested = Instant::now();
 			let (result, camera_preview_closed) = workspace.with_camera_preview_cleanup(operation);
-			let preview_closed = workspace.discard_stale_prop_preview() || camera_preview_closed;
+			let prop_preview_closed = workspace.discard_stale_prop_preview();
+			let animation_preview_closed = workspace.discard_stale_animation_preview();
+			let preview_closed = prop_preview_closed || camera_preview_closed || animation_preview_closed;
 			let current = workspace.backend.session();
 			if current.active_scene_id() != &scene {
 				workspace.scene_switch = Some((current.scene_revision(), requested, Instant::now()));

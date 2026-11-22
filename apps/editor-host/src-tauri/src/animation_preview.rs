@@ -1,10 +1,15 @@
 //! One isolated, pinned native pose. It never advances a game session or edits a document.
+#[path = "animation_preview/scoped.rs"]
+mod scoped;
+
 use crate::editor::EditorWorkspace;
 use runtime::{
 	animation::{sample_pose, AnimationPose},
 	asset_catalog::AssetId,
 	EntityKey,
 };
+pub use scoped::AnimationWorkspaceTarget;
+use scoped::ScopedAnimationPreview;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -16,6 +21,7 @@ pub(crate) struct AnimationPreview {
 	clip: u32,
 	placement: glam::Mat4,
 	pose: Arc<AnimationPose>,
+	isolated: Option<ScopedAnimationPreview>,
 }
 #[derive(Serialize)]
 pub struct AnimationPreviewDto {
@@ -26,6 +32,10 @@ pub struct AnimationPreviewDto {
 	pub clip_index: u32,
 	pub duration_seconds: f32,
 	pub time_seconds: f64,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub target: Option<AnimationWorkspaceTarget>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub request_id: Option<u64>,
 }
 impl AnimationPreview {
 	fn context(&self, workspace: &EditorWorkspace) -> bool {
@@ -33,6 +43,10 @@ impl AnimationPreview {
 			&& self.revision == workspace.backend.session().revision()
 			&& !workspace.backend.session().is_playing()
 			&& !workspace.backend.session().has_transaction()
+			&& self
+				.isolated
+				.as_ref()
+				.is_none_or(|scope| scope.context(workspace))
 	}
 	fn dto(&self, seconds: f64) -> AnimationPreviewDto {
 		AnimationPreviewDto {
@@ -43,6 +57,11 @@ impl AnimationPreview {
 			clip_index: self.clip,
 			duration_seconds: self.pose.asset.clips[self.clip as usize].duration_seconds,
 			time_seconds: seconds,
+			target: self.isolated.as_ref().map(|scope| scope.target.clone()),
+			request_id: self
+				.isolated
+				.as_ref()
+				.map(|scope| scope.frame.state.request_id),
 		}
 	}
 }
@@ -62,6 +81,9 @@ impl EditorWorkspace {
 				"Stop Play and finish the current edit; reopen animation preview for this revision"
 					.into(),
 			);
+		}
+		if self.has_active_animation_aperture() {
+			return Err("Use the Animation workspace to preview the selected clip".into());
 		}
 		let data = session.authored_document();
 		let index = data
@@ -85,6 +107,7 @@ impl EditorWorkspace {
 			clip,
 			placement,
 			pose,
+			isolated: None,
 		};
 		let result = candidate.dto(0.);
 		self.animation_preview = Some(candidate);
@@ -130,10 +153,20 @@ impl EditorWorkspace {
 			self.animation_preview = None;
 		}
 	}
+	pub(crate) fn discard_stale_animation_preview(&mut self) -> bool {
+		let stale = self
+			.animation_preview
+			.as_ref()
+			.is_some_and(|preview| !preview.context(self));
+		if stale {
+			self.animation_preview = None;
+		}
+		stale
+	}
 	pub fn active_animation_preview(&self) -> Option<(EntityKey, Arc<AnimationPose>)> {
 		self.animation_preview
 			.as_ref()
-			.filter(|preview| preview.context(self))
+			.filter(|preview| preview.isolated.is_none() && preview.context(self))
 			.map(|preview| (preview.entity.clone(), Arc::clone(&preview.pose)))
 	}
 }

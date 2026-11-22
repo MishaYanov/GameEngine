@@ -2,6 +2,7 @@
 use super::EditorWorkspace;
 use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto};
 use runtime::{
+	animation::AnimationPose,
 	editor::PrefabData,
 	scene_catalog::SceneId,
 	scene_data::{CameraData, EntityData, CURRENT_SCHEMA_VERSION},
@@ -36,6 +37,7 @@ pub(crate) struct PropPreviewFrame {
 	pub frame_request: u64,
 	pub content_revision: u64,
 	pub editable_source: bool,
+	pub pose: Option<(EntityKey, Arc<AnimationPose>)>,
 }
 
 pub(crate) struct PropDraftPreviewRefresh {
@@ -134,6 +136,7 @@ impl EditorWorkspace {
 				frame_request: 0,
 				content_revision,
 				editable_source,
+				pose: None,
 			},
 		});
 		Ok(state)
@@ -211,6 +214,9 @@ impl EditorWorkspace {
 		{
 			self.prop_preview = None;
 			true
+		} else if self.animation_aperture_is_current(token) {
+			self.close_animation_preview(token);
+			true
 		} else {
 			false
 		}
@@ -234,12 +240,14 @@ impl EditorWorkspace {
 			.as_ref()
 			.filter(|preview| preview.belongs_to(self))
 			.map(|preview| preview.frame.clone())
+			.or_else(|| self.active_animation_aperture())
 	}
 
 	pub(crate) fn prop_preview_active(&self) -> bool {
 		self.prop_preview
 			.as_ref()
 			.is_some_and(|preview| preview.belongs_to(self))
+			|| self.has_active_animation_aperture()
 	}
 
 	pub(crate) fn prop_preview_is_current(&self, token: &str) -> bool {
@@ -253,7 +261,7 @@ impl EditorWorkspace {
 			preview.frame.state.token == token
 				&& preview.frame.content_revision == revision
 				&& preview.belongs_to(self)
-		})
+		}) || (revision == 0 && self.animation_aperture_is_current(token))
 	}
 
 	pub(crate) fn prop_preview_edit_draft(
@@ -282,6 +290,9 @@ impl EditorWorkspace {
 	}
 
 	pub(crate) fn frame_prop_preview(&mut self, token: &str) -> Result<(), String> {
+		if self.animation_aperture_is_current(token) {
+			return self.frame_animation_aperture(token);
+		}
 		let frame = self.prop_preview_frame_mut(token)?;
 		frame.frame_request = frame
 			.frame_request
@@ -348,7 +359,7 @@ fn instance_entities(scene: &SceneData, root_key: &EntityKey) -> Result<Vec<Enti
 	Ok(entities)
 }
 
-fn visual_entity(entity: &EntityData) -> EntityData {
+pub(crate) fn visual_entity(entity: &EntityData) -> EntityData {
 	// External gameplay references and ownership stay in the source. The
 	// preview only needs visual data and collision bounds for child picking.
 	let mut visual = EntityData::new(entity.key.clone(), &entity.name, &entity.model_path)
@@ -363,7 +374,7 @@ fn visual_entity(entity: &EntityData) -> EntityData {
 	visual
 }
 
-fn preview_document(entities: Vec<EntityData>) -> Result<SceneData, String> {
+pub(crate) fn preview_document(entities: Vec<EntityData>) -> Result<SceneData, String> {
 	let camera = Camera::default();
 	let document = SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
