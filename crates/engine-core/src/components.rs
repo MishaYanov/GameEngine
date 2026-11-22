@@ -29,6 +29,7 @@ pub const COLLIDER_TYPE: &str = "engine.collider";
 pub const NATIVE_TYPE: &str = "engine.native_behavior";
 pub const CHARACTER_TYPE: &str = "engine.character_controller";
 pub const ANIMATION_TYPE: &str = "engine.animation";
+pub const ANIMATOR_TYPE: &str = "engine.animator";
 pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const CAMERA_TYPE: &str = "engine.camera";
 pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
@@ -80,6 +81,9 @@ pub enum ComponentData {
 	Animation {
 		settings: crate::animation::AnimationSettings,
 	},
+	Animator {
+		settings: crate::animation::AnimatorSettings,
+	},
 	Interactable {
 		settings: InteractableSettings,
 	},
@@ -114,6 +118,7 @@ impl ComponentRecord {
 			ComponentData::Camera { .. } => CAMERA_TYPE,
 			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
 			ComponentData::Animation { .. } => ANIMATION_TYPE,
+			ComponentData::Animator { .. } => ANIMATOR_TYPE,
 			ComponentData::Interactable { .. } => INTERACTABLE_TYPE,
 			ComponentData::MeshRenderer { .. } => MESH_TYPE,
 			ComponentData::Collider { .. } => COLLIDER_TYPE,
@@ -133,6 +138,7 @@ impl ComponentRecord {
 			ComponentData::Camera { settings } => settings.validate(),
 			ComponentData::CharacterController { settings } => settings.validate(),
 			ComponentData::Animation { settings } => settings.validate(),
+			ComponentData::Animator { settings } => settings.validate(),
 			ComponentData::Interactable { settings } => settings.validate(),
 			ComponentData::MeshRenderer {
 				model_path,
@@ -197,6 +203,13 @@ pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 			"animation",
 			"Animation",
 			"Deterministic native animation playback.",
+			1,
+		),
+		(
+			ANIMATOR_TYPE,
+			"animator",
+			"Animator",
+			"Reusable state graph with a rig or visual binding.",
 			1,
 		),
 		(

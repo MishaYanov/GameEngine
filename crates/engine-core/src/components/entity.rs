@@ -26,6 +26,16 @@ impl EntityData {
 				.saturating_add(component.id.as_str().len())
 				.saturating_add(component.settings.retained_bytes());
 		}
+		if let Some(component) = &self.animator {
+			bytes = bytes
+				.saturating_add(component.id.as_str().len())
+				.saturating_add(std::mem::size_of_val(component.as_ref()));
+			if let crate::animation::AnimatorBinding::Visual { targets } =
+				&component.settings.binding
+			{
+				bytes = bytes.saturating_add(targets.len().saturating_mul(640));
+			}
+		}
 		if let Some(component) = &self.interactable {
 			bytes = bytes
 				.saturating_add(component.id.as_str().len())
@@ -116,6 +126,16 @@ impl EntityData {
 				schema_version: 1,
 				enabled: component.enabled,
 				data: ComponentData::Animation {
+					settings: component.settings.clone(),
+				},
+			});
+		}
+		if let Some(component) = &self.animator {
+			records.push(ComponentRecord {
+				id: component.id.clone(),
+				schema_version: 1,
+				enabled: component.enabled,
+				data: ComponentData::Animator {
 					settings: component.settings.clone(),
 				},
 			});
@@ -249,6 +269,13 @@ impl EntityData {
 					settings,
 				})
 			}
+			ComponentData::Animator { settings } => {
+				self.animator = Some(Box::new(crate::animation::AnimatorComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::Interactable { settings } => {
 				self.interactable = Some(InteractableComponent {
 					id: component.id,
@@ -305,6 +332,7 @@ impl EntityData {
 			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,
 			ComponentData::Animation { .. } => self.animation = None,
+			ComponentData::Animator { .. } => self.animator = None,
 			ComponentData::Interactable { .. } => self.interactable = None,
 			ComponentData::MeshRenderer { .. } => {
 				self.model_path = NO_MESH_PATH.into();
@@ -343,6 +371,16 @@ impl EntityData {
 	) -> Result<(), String> {
 		if let Some(camera) = &mut self.camera {
 			camera.settings.rig.remap_target(remap);
+		}
+		if let Some(animator) = &mut self.animator
+			&& let crate::animation::AnimatorBinding::Visual { targets } =
+				&mut animator.settings.binding
+		{
+			for target in targets {
+				if let Some(key) = remap.get(&target.entity_key) {
+					target.entity_key.clone_from(key);
+				}
+			}
 		}
 		for component in &mut self.native_behaviors {
 			component.behavior.remap_entity_references(remap);

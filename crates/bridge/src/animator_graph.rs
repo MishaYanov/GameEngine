@@ -1,0 +1,167 @@
+//! Asset and per-actor Animator binding preparation shared by authoring and runtime.
+use crate::asset_io::{contained_file, is_link, read_bounded};
+use engine_core::{
+	SceneData,
+	animation::{
+		AnimationAsset, AnimationClipRef, AnimationPlayback, AnimationSettings, AnimatorBinding,
+		AnimatorGraph, AnimatorSettings, AuthoredClip, MAX_ANIMATOR_GRAPH_BYTES,
+		MAX_AUTHORED_CLIP_BYTES, ResolvedAuthoredClip,
+	},
+	asset_catalog::{
+		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset,
+	},
+	project::ProjectData,
+	scene_catalog::SceneId,
+	scene_data::EntityData,
+};
+use sha2::{Digest, Sha256};
+use std::{
+	collections::BTreeMap,
+	fs,
+	path::{Path, PathBuf},
+	sync::Arc,
+};
+
+pub struct PreparedAnimator {
+	pub graph: Arc<AnimatorGraph>,
+	pub clips: PreparedAnimatorClips,
+}
+
+pub enum PreparedAnimatorClips {
+	Imported(Arc<AnimationAsset>),
+	Visual(Vec<ResolvedAuthoredClip>),
+}
+
+fn root(root: &Path) -> Result<PathBuf, String> {
+	let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+	if !metadata.is_dir() || is_link(&metadata) {
+		return Err("Animator asset root must be an ordinary directory".into());
+	}
+	root.canonicalize().map_err(|error| error.to_string())
+}
+
+fn verified(
+	root: &Path,
+	asset: &PersistentAsset,
+	kind: AssetKind,
+	limit: usize,
+) -> Result<Vec<u8>, String> {
+	asset.validate()?;
+	if asset.kind != kind || asset.bytes > limit as u64 {
+		return Err(format!(
+			"Asset {:?} has the wrong kind or exceeds its byte limit",
+			asset.path
+		));
+	}
+	let bytes = read_bounded(&contained_file(root, &asset.path)?, limit)?;
+	if bytes.len() as u64 != asset.bytes
+		|| format!("{:x}", Sha256::digest(&bytes)) != asset.fingerprint
+	{
+		return Err(format!(
+			"Animator dependency {:?} changed outside its catalog",
+			asset.path
+		));
+	}
+	Ok(bytes)
+}
+
+pub fn load(root_path: &Path, asset: &PersistentAsset) -> Result<AnimatorGraph, String> {
+	AnimatorGraph::from_json(&verified(
+		&root(root_path)?,
+		asset,
+		AssetKind::AnimatorGraph,
+		MAX_ANIMATOR_GRAPH_BYTES,
+	)?)
+}
+
+pub fn prepare_actor(
+	root_path: &Path,
+	project: &ProjectData,
+	scene_id: &SceneId,
+	scene: &SceneData,
+	actor: &EntityData,
+	settings: &AnimatorSettings,
+) -> Result<PreparedAnimator, String> {
+	let root = root(root_path)?;
+	let raw = read_bounded(&contained_file(&root, CATALOG_FILE)?, MAX_CATALOG_BYTES)?;
+	let catalog =
+		AssetCatalog::from_json(std::str::from_utf8(&raw).map_err(|error| error.to_string())?)?;
+	let asset = catalog
+		.by_id(&settings.asset_id)
+		.ok_or("Animator asset identity is missing")?;
+	let graph = Arc::new(load(&root, asset)?);
+	graph.validate_binding(&settings.binding)?;
+	let clips = match &settings.binding {
+		AnimatorBinding::Imported { source } => {
+			let rendered =
+				catalog.resolve(actor.asset_id.as_ref(), &actor.model_path, actor.mesh_index)?;
+			if !actor.renderable
+				|| !actor.has_mesh_component()
+				|| rendered.is_none_or(|model| model.id != source.asset_id)
+			{
+				return Err("Animator rig must be the rendered model on the same actor".into());
+			}
+			let asset = crate::animation_asset::load(&root, source)?;
+			if actor.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize {
+				return Err("Animator rig targets a different mesh selection".into());
+			}
+			for state in &graph.states {
+				let AnimationClipRef::Imported { clip_index, .. } = &state.clip else {
+					return Err("Skeletal Animator state requires an imported clip".into());
+				};
+				asset
+					.validate_settings(&AnimationSettings {
+						source: source.clone(),
+						playback: AnimationPlayback::SingleClip {
+							clip_index: *clip_index,
+							looping: state.looping,
+						},
+						speed_numerator: 1,
+						speed_denominator: 1,
+					})
+					.map_err(|error| format!("Animator state {:?}: {error}", state.id))?;
+			}
+			PreparedAnimatorClips::Imported(asset)
+		}
+		AnimatorBinding::Visual { targets } => {
+			let mut cache = BTreeMap::<AssetId, AuthoredClip>::new();
+			let mut clips = Vec::with_capacity(graph.states.len());
+			for state in &graph.states {
+				let AnimationClipRef::Authored {
+					asset_id,
+					expected_sha256,
+				} = &state.clip
+				else {
+					return Err("Visual Animator state requires an authored clip".into());
+				};
+				let asset = catalog.by_id(asset_id).ok_or_else(|| {
+					format!(
+						"Animator state {:?} references a missing Animation Clip",
+						state.id
+					)
+				})?;
+				if &asset.fingerprint != expected_sha256 {
+					return Err(format!(
+						"Animator state {:?} pins a different Animation Clip revision",
+						state.id
+					));
+				}
+				if !cache.contains_key(asset_id) {
+					let bytes = verified(
+						&root,
+						asset,
+						AssetKind::AnimationClip,
+						MAX_AUTHORED_CLIP_BYTES,
+					)?;
+					cache.insert(asset_id.clone(), AuthoredClip::from_json(&bytes)?);
+				}
+				let resolved = cache[asset_id]
+					.resolve_animator(project, scene_id, scene, &actor.key, targets)
+					.map_err(|error| format!("Animator state {:?}: {error}", state.id))?;
+				clips.push(resolved);
+			}
+			PreparedAnimatorClips::Visual(clips)
+		}
+	};
+	Ok(PreparedAnimator { graph, clips })
+}

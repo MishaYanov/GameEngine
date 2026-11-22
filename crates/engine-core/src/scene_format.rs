@@ -158,6 +158,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 					|| entity.linked_prefab.is_some()
 					|| entity.character_controller.is_some()
 					|| entity.animation.is_some()
+					|| entity.animator.is_some()
 					|| entity.interactable.is_some()
 			}) {
 			return Err(

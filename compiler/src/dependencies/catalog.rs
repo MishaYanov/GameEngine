@@ -55,6 +55,32 @@ impl Closure<'_> {
 				self.entities(&scene.entities)?;
 			}
 			AssetKind::AnimationClip => self.validate_animation_clip(&asset, &bytes)?,
+			AssetKind::AnimatorGraph => {
+				let graph = engine_core::animation::AnimatorGraph::from_json(&bytes)?;
+				for state in graph.states {
+					use engine_core::animation::AnimationClipRef;
+					let (id, fingerprint, kind) = match &state.clip {
+						AnimationClipRef::Imported { source, .. } => {
+							(&source.asset_id, &source.expected_sha256, AssetKind::Model)
+						}
+						AnimationClipRef::Authored {
+							asset_id,
+							expected_sha256,
+						} => (asset_id, expected_sha256, AssetKind::AnimationClip),
+					};
+					if self
+						.catalog
+						.by_id(id)
+						.is_none_or(|entry| &entry.fingerprint != fingerprint || entry.kind != kind)
+					{
+						return Err(format!(
+							"Animator state {:?} refers to a missing or changed clip revision",
+							state.id
+						));
+					}
+					self.record(id)?;
+				}
+			}
 			AssetKind::Texture => {}
 		}
 		Ok(())

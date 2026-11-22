@@ -70,3 +70,11 @@ pub struct AnimationComponent {
 	pub enabled: bool,
 	pub settings: AnimationSettings,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnimatorComponent {
+	pub id: ComponentId,
+	pub enabled: bool,
+	pub settings: super::AnimatorSettings,
+}

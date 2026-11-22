@@ -816,3 +816,5 @@ mod prop_roundtrip;
 
 #[path = "editor_workspace/input_actions.rs"]
 mod input_actions;
+#[path = "editor_workspace/animator_graph.rs"]
+mod animator_graph;

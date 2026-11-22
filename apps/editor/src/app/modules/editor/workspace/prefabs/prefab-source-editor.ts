@@ -54,7 +54,7 @@ export class PrefabSourceEditor {
 	protected readonly componentOpen = signal(false);
 	protected readonly acknowledged = signal(0);
 	protected readonly componentTypes = computed(
-		() => this.editor.capabilities()?.component_types?.filter(type => type.kind !== 'player_controller') ?? [],
+		() => this.editor.capabilities()?.component_types?.filter(type => type.kind !== 'player_controller' && type.kind !== 'animator') ?? [],
 	);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
 	protected readonly axes = ['x', 'y', 'z'] as const;

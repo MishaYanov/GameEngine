@@ -40,6 +40,8 @@ pub use linked_prefabs::*;
 pub use prop_recovery::*;
 mod animation;
 pub use animation::*;
+mod animator;
+pub use animator::*;
 mod authored_clip;
 pub use authored_clip::*;
 mod clip_timeline;
@@ -152,6 +154,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		embedded_viewport_supported: cfg!(target_os = "windows"),
 		scene_warming_supported: cfg!(target_os = "windows"),
 		scene_verification_supported: true,
+		animator_assets: true,
 		input_action_assets: true,
 	}
 }

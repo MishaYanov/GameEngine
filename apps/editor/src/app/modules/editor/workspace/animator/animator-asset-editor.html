@@ -1,0 +1,78 @@
+<button type="button" (click)="begin()" [disabled]="!available()">Animator Assets…</button>
+<editor-dialog title="Animator Assets" [open]="open()" (openChange)="!$event && close()" [renderFields]="false"
+               [closeBlocked]="pending()" [config]="{width: '46rem'}">
+    <div class="asset-actions">
+        <label>Registered Animator asset
+            <select #existing [value]="registeredId()" [disabled]="pending()" (change)="registeredId.set(existing.value)">
+                <option value="" [selected]="!registeredId()">Choose an Animator asset</option>
+                @for (asset of library.assets(); track asset.id) {
+                    <option [value]="asset.id" [selected]="registeredId() === asset.id">{{ asset.path }}</option>
+                }
+            </select>
+        </label>
+        <button type="button" (click)="load()" [disabled]="!available() || !registeredId()">Open Definition</button>
+        <button type="button" (click)="newDefinition()" [disabled]="!available()">New Definition</button>
+    </div>
+    <fieldset class="asset-actions" [disabled]="pending()">
+        <legend>Start from a registered clip</legend>
+        <label>Clip library
+            <select #libraryKind [value]="sourceKind()" (change)="sourceKind.set(libraryKind.value === 'imported' ? 'imported' : 'authored')">
+                <option value="authored">Authored clips</option><option value="imported">Imported GLB clips</option>
+            </select>
+        </label>
+        @if (sourceKind() === 'authored') {
+            <label>Authored clip
+                <select #clip [value]="selectedClip()" (change)="selectedClip.set(clip.value)">
+                    <option value="" [selected]="!selectedClip()">Choose a clip</option>
+                    @for (asset of clips(); track asset.asset_id) {
+                        <option [value]="asset.asset_id" [selected]="selectedClip() === asset.asset_id">{{ asset.path }}</option>
+                    }
+                </select>
+            </label>
+        } @else {
+            <label>Rig model
+                <select #model [value]="importedModel()" (change)="chooseModel(model.value)">
+                    <option value="" [selected]="!importedModel()">Choose a GLB asset</option>
+                    @for (asset of importedModels(); track asset.path) {
+                        <option [value]="asset.asset_id ?? ''" [selected]="importedModel() === asset.asset_id">{{ asset.name }}</option>
+                    }
+                </select>
+            </label>
+            <button type="button" (click)="reviewRig()" [disabled]="!importedModel() || !available()">Review Rig Clips</button>
+            @if (rig(); as review) {
+                <label>Imported clip
+                    <select #clip [value]="importedClip()" (change)="importedClip.set(+clip.value)">
+                        @for (item of review.metadata.clips; track item.index) {
+                            <option [value]="item.index" [selected]="importedClip() === item.index">{{ item.name }}</option>
+                        }
+                    </select>
+                </label>
+            }
+        }
+        <button type="button" (click)="makeStarter()"
+                [disabled]="!available() || (sourceKind() === 'authored' ? !selectedClip() : !rig())">Create Starter Graph</button>
+    </fieldset>
+    <label>Import Animator JSON
+        <input #file type="file" accept=".json,application/json" [disabled]="pending()"
+               (change)="importFile(file.files?.[0]); file.value = ''"/>
+    </label>
+    <label>Animator graph JSON
+        <textarea #definition [value]="text()" (input)="editText(definition.value)" [disabled]="pending()"
+                  [attr.maxlength]="maxBytes" rows="10" spellcheck="false"></textarea>
+    </label>
+    <label>Asset path
+        <input #path [value]="destination()" [disabled]="pending() || !!source()"
+               (input)="destination.set(path.value)" autocomplete="off"/>
+    </label>
+    @if (graph(); as reviewed) {
+        <p>Entry {{ reviewed.entry }} · {{ reviewed.states.length }} states · {{ reviewed.parameters.length }} parameters</p>
+    }
+    @if (error(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+    }
+    @if (status(); as message) {
+        <p role="status">{{ message }}</p>
+    }
+    <button dialog-actions type="button" (click)="reviewText()" [disabled]="!available() || !text()">Review Definition</button>
+    <button dialog-actions type="button" (click)="save()" [disabled]="!available() || !graph() || !validPath(destination())">Save Animator Asset</button>
+</editor-dialog>

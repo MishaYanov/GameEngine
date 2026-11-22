@@ -141,6 +141,7 @@ export interface SceneEntity {
     readonly character_controller?: CharacterControllerAttachment | null;
     readonly player_controller?: import('./player-controller.models').PlayerControllerAttachment | null;
     readonly animation?: AnimationAttachment | null;
+    readonly animator?: import('./animator.models').AnimatorAttachment | null;
     readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
@@ -404,6 +405,7 @@ export interface CommandDescriptor {
 
 export interface EditorCapabilities {
     readonly input_action_assets?: boolean;
+    readonly animator_assets?: boolean;
     readonly state_machines?: MachineDescriptor;
     readonly protocol_version: number;
     readonly scene_schema_version: number;

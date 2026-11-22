@@ -512,6 +512,7 @@ export class LinkedPrefabInspector {
         if (data.kind === 'interactable') return [enabled, data.settings.action, data.settings.reach + ' m'].join(' · ');
         if (data.kind === 'camera') return `${enabled} · ${data.settings.rig.mode} Camera`;
         if (data.kind === 'player_controller') return `${enabled} · Player Controller`;
+        if (data.kind === 'animator') return `${enabled} · Animator ${data.settings.asset_id}`;
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;
 	}
 

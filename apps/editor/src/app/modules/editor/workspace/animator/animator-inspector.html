@@ -1,0 +1,85 @@
+<section class="animator" aria-label="Animator">
+    <h3>Animator</h3>
+    <editor-animator-asset-editor [actor]="actor()" [editable]="available()" (saved)="fromEditor($event)"/>
+    @if (actor().animator; as attachment) {
+        <p>{{ attachment.enabled ? 'Enabled' : 'Disabled' }}</p>
+    }
+    <div class="asset-actions">
+        <label>Animator asset
+            <select #asset [value]="selected()" [disabled]="!available()" (change)="review(asset.value)">
+                <option value="" [selected]="!selected()">Choose an Animator asset</option>
+                @for (entry of library.assets(); track entry.id) {
+                    <option [value]="entry.id" [selected]="entry.id === selected()">{{ entry.path }}</option>
+                }
+            </select>
+        </label>
+        <button type="button" (click)="library.refresh()" [disabled]="!available() || library.pending()">Refresh Animators</button>
+        <button type="button" (click)="review(selected())" [disabled]="!available() || !selected()">Review Asset</button>
+    </div>
+    @if (library.error(); as failure) {
+        <p role="alert" class="error">{{ failure }}</p>
+    }
+    @if (pending() || library.pending()) {
+        <p role="status">Checking Animator assets…</p>
+    }
+    @if (graph(); as graph) {
+        <p>Entry state: <strong>{{ entry()?.name ?? graph.entry }}</strong> ({{ graph.entry }})</p>
+        <details>
+            <summary>States ({{ graph.states.length }})</summary>
+            <ul>
+                @for (state of graph.states; track state.id) {
+                    <li>{{ state.name }} · {{ state.id }}{{ state.looping ? ' · Loop' : '' }}</li>
+                }
+            </ul>
+        </details>
+        <details>
+            <summary>Parameters ({{ graph.parameters.length }})</summary>
+            <ul>
+                @for (parameter of graph.parameters; track parameter.id) {
+                    <li>{{ parameter.name }} · {{ parameter.id }} · {{ parameterKind(parameter.source) }}</li>
+                }
+            </ul>
+        </details>
+        @if (channels().length) {
+            <fieldset>
+                <legend>Visual channels</legend>
+                @for (row of channels(); track row.id) {
+                    <label>{{ row.label }}
+                        <select #target [value]="choices().get(row.id) ?? ''" [disabled]="!available()"
+                                (change)="chooseTarget(row.id, target.value)">
+                            <option value="" [selected]="!choices().get(row.id)">{{ row.automatic ? 'Use saved scene target' : 'Choose a child' }}</option>
+                            @for (entity of targets(); track entity.key) {
+                                <option [value]="entity.key" [selected]="choices().get(row.id) === entity.key">{{ entity.name }}</option>
+                            }
+                        </select>
+                    </label>
+                }
+            </fieldset>
+        }
+        @if (plan().issue; as issue) {
+            <p role="status">{{ issue }}</p>
+        }
+        @if (legacyActive()) {
+            <p>Disable the Animation component before enabling an Animator on this actor.</p>
+        }
+        <button type="button" (click)="assign()" [disabled]="!available() || !plan().binding || legacyActive()">
+            {{ actor().animator ? 'Apply Animator Binding' : 'Attach Animator' }}
+        </button>
+    }
+    @if (actor().animator; as attachment) {
+        <div class="asset-actions">
+            <button type="button" (click)="validate()" [disabled]="!available()">Validate Animator</button>
+            <button type="button" (click)="toggle(!attachment.enabled)"
+                    [disabled]="!available() || !attachment.enabled && legacyActive()">
+                {{ attachment.enabled ? 'Disable Animator' : 'Enable Animator' }}
+            </button>
+            <button type="button" (click)="remove()" [disabled]="!available()">Remove Animator</button>
+        </div>
+    }
+    @if (validation(); as checked) {
+        <p role="status">Animator binding validated. Entry {{ checked.entry }} · {{ checked.states }} states · {{ checked.parameters }} parameters.</p>
+    }
+    @if (error(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+    }
+</section>

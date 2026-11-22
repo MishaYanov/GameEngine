@@ -5,6 +5,7 @@ import {
 	type CharacterControllerSettings,
 } from './character-controller.models';
 import { validAnimationSettings, type AnimationSettings } from './animation.models';
+import {validAnimatorSettings, type AnimatorSettings} from './animator.models';
 import {validPlayerControllerSettings, type PlayerControllerSettings} from './player-controller.models';
 
 import {validGameActionId} from '../game-input/game-input.models';
@@ -58,6 +59,7 @@ export type ComponentData =
 	| { readonly kind: 'character_controller'; readonly settings: CharacterControllerSettings }
 	| { readonly kind: 'player_controller'; readonly settings: PlayerControllerSettings }
 	| { readonly kind: 'animation'; readonly settings: AnimationSettings }
+	| { readonly kind: 'animator'; readonly settings: AnimatorSettings }
 	| { readonly kind: 'camera'; readonly settings: CameraComponentSettings }
     | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
@@ -175,6 +177,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	if (data['kind'] === 'player_controller') return validPlayerControllerSettings(data['settings']) &&
 		(value['enabled'] || !data['settings'].local);
 	if (data['kind'] === 'animation') return validAnimationSettings(data['settings']);
+	if (data['kind'] === 'animator') return validAnimatorSettings(data['settings']);
 	if (data['kind'] === 'camera') return validCameraComponentSettings(data['settings']);
     if (data['kind'] === 'interactable') {
         const settings = data['settings'];
@@ -230,6 +233,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'character_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'player_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
+		value.filter((component) => component.data.kind === 'animator').length <= 1 &&
 		value.filter((component) => component.data.kind === 'camera').length <= 1 &&
         value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
@@ -250,6 +254,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'character_controller',
 					'player_controller',
 					'animation',
+					'animator',
 					'camera',
                     'interactable',
 				].includes(String(item['kind'])) &&

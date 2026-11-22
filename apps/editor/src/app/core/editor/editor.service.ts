@@ -1,6 +1,10 @@
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import type {UnlistenFn} from '@tauri-apps/api/event';
+import {
+    type AnimatorActorValidation, type AnimatorAsset, type AnimatorAssetCapture, type AnimatorDocument, type AnimatorGraph,
+    readAnimatorCatalog, readAnimatorDocument, readAnimatorValidation,
+} from './animator.models';
 import {EditorClientError} from './editor-client-error';
 import {
     type InputActionMap, type InputActionsAsset, type InputActionsCapture, type InputActionsDocument,
@@ -75,11 +79,12 @@ export interface ProjectOpenOptions {
     readonly discardUnsaved?: boolean;
 }
 
-export interface InputActionsScope {
+export interface WorkspaceAssetScope {
     readonly workspaceGeneration: number;
     readonly nativeGeneration: number;
     readonly revision: number;
 }
+export type InputActionsScope = WorkspaceAssetScope;
 
 /** One authoritative document queue. UI drafts and input bindings stay in their owners. */
 @Service()
@@ -394,25 +399,43 @@ export class EditorService {
     }
 
     listInputActions(scope: InputActionsScope): Promise<readonly InputActionsAsset[]> {
-        return this.inputActionsOperation('editor_list_input_actions', {}, scope, readInputActionsCatalog);
+        return this.workspaceAssetOperation('editor_list_input_actions', {}, scope, readInputActionsCatalog);
     }
 
     openInputActions(assetId: string, scope: InputActionsScope): Promise<InputActionsDocument> {
-        return this.inputActionsOperation('editor_open_input_actions', {assetId}, scope, readInputActionsDocument);
+        return this.workspaceAssetOperation('editor_open_input_actions', {assetId}, scope, readInputActionsDocument);
     }
 
     saveInputActions(
         destination: string, map: InputActionMap, capture: InputActionsCapture | null, scope: InputActionsScope,
     ): Promise<InputActionsDocument> {
-        return this.inputActionsOperation('editor_save_input_actions', {destination, map, capture}, scope, readInputActionsDocument);
+        return this.workspaceAssetOperation('editor_save_input_actions', {destination, map, capture}, scope, readInputActionsDocument);
     }
 
     moveInputActions(destination: string, capture: InputActionsCapture, scope: InputActionsScope): Promise<InputActionsAsset> {
-        return this.inputActionsOperation('editor_move_input_actions', {destination, capture}, scope, readInputActionsAsset);
+        return this.workspaceAssetOperation('editor_move_input_actions', {destination, capture}, scope, readInputActionsAsset);
     }
 
-    private inputActionsOperation<T>(
-        operation: string, args: Record<string, unknown>, scope: InputActionsScope, read: (value: unknown) => T,
+    listAnimators(scope: WorkspaceAssetScope): Promise<readonly AnimatorAsset[]> {
+        return this.workspaceAssetOperation('editor_list_animators', {}, scope, readAnimatorCatalog);
+    }
+
+    openAnimator(assetId: string, scope: WorkspaceAssetScope): Promise<AnimatorDocument> {
+        return this.workspaceAssetOperation('editor_open_animator', {assetId}, scope, readAnimatorDocument);
+    }
+
+    saveAnimator(
+        destination: string, graph: AnimatorGraph, capture: AnimatorAssetCapture | null, scope: WorkspaceAssetScope,
+    ): Promise<AnimatorDocument> {
+        return this.workspaceAssetOperation('editor_save_animator', {destination, graph, capture}, scope, readAnimatorDocument);
+    }
+
+    validateAnimatorActor(entityKey: EntityKey, scope: WorkspaceAssetScope): Promise<AnimatorActorValidation> {
+        return this.workspaceAssetOperation('editor_validate_animator_actor', {entityKey}, scope, readAnimatorValidation);
+    }
+
+    private workspaceAssetOperation<T>(
+        operation: string, args: Record<string, unknown>, scope: WorkspaceAssetScope, read: (value: unknown) => T,
     ): Promise<T> {
         return this.enqueue(operation, async () => {
             this.requireGeneration(scope.workspaceGeneration);

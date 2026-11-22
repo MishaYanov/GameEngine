@@ -89,6 +89,59 @@ impl AuthoredClip {
 		)
 	}
 
+	/// Resolve portable visual channels to children of one Animator actor.
+	pub fn resolve_animator(
+		&self,
+		project: &ProjectData,
+		scene_id: &SceneId,
+		scene: &SceneData,
+		actor: &EntityKey,
+		bindings: &[super::super::AnimatorVisualTarget],
+	) -> Result<ResolvedAuthoredClip, String> {
+		self.validate()?;
+		let bindings: BTreeMap<_, _> = bindings
+			.iter()
+			.map(|target| (&target.channel, &target.entity_key))
+			.collect();
+		let parents: HashMap<_, _> = scene
+			.entities
+			.iter()
+			.map(|entity| (&entity.key, entity.parent.as_ref()))
+			.collect();
+		self.resolve(
+			&scene.entities,
+			protected_scene(project, scene_id, scene),
+			|target| {
+				let direct = match (&self.owner, target) {
+					(
+						AuthoredClipOwner::Scene { scene_id: owner },
+						VisualTargetId::Scene { entity_key },
+					) if owner == scene_id => Some(entity_key),
+					_ => None,
+				};
+				let key = bindings
+					.get(target)
+					.copied()
+					.or(direct)
+					.ok_or("Bind every Animator visual channel to a child of its actor")?;
+				let mut node = parents.get(key).copied().flatten();
+				for _ in 0..parents.len() {
+					let Some(current) = node else {
+						break;
+					};
+					if current == actor {
+						return Ok(key.clone());
+					}
+					node = parents.get(current).copied().flatten();
+				}
+				Err(format!(
+					"Animator target {:?} is outside the actor's visual subtree",
+					key.as_str()
+				))
+			},
+		)
+	}
+
 	fn check_prop_owner(&self, owner: &AssetId) -> Result<(), String> {
 		if matches!(&self.owner, AuthoredClipOwner::Prop { asset_id } if asset_id == owner) {
 			Ok(())

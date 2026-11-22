@@ -42,6 +42,7 @@ impl<'de> Deserialize<'de> for AssetId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
+	AnimatorGraph,
 	InputActions,
 	Model,
 	Prefab,
@@ -81,6 +82,17 @@ pub struct PersistentAsset {
 impl PersistentAsset {
 	pub fn validate(&self) -> Result<(), String> {
 		validate_model_path(&self.path)?;
+		if self.kind == AssetKind::AnimatorGraph
+			&& (!self
+				.path
+				.to_ascii_lowercase()
+				.ends_with(crate::animation::ANIMATOR_GRAPH_SUFFIX)
+				|| self.bytes > crate::animation::MAX_ANIMATOR_GRAPH_BYTES as u64)
+		{
+			return Err(
+				"Animator catalog entry requires a .animator.json asset within 256 KiB".into(),
+			);
+		}
 		if self.kind == AssetKind::InputActions
 			&& (!self
 				.path
@@ -135,7 +147,9 @@ impl PersistentAsset {
 			&& (!self.path.to_ascii_lowercase().ends_with(".clip.json")
 				|| self.bytes > crate::animation::MAX_AUTHORED_CLIP_BYTES as u64)
 		{
-			return Err("Animation Clip catalog entries require a .clip.json path and at most 1 MiB".into());
+			return Err(
+				"Animation Clip catalog entries require a .clip.json path and at most 1 MiB".into(),
+			);
 		}
 		if self.kind != AssetKind::Model && !self.meshes.is_empty() {
 			return Err("Only model assets can declare meshes".into());

@@ -3,6 +3,7 @@ import {
 } from './editor.models';
 import {validCameraComponentSettings, validComponentViews} from './editor-components';
 import {validPlayerControllerSettings} from './player-controller.models';
+import {validAnimatorSettings} from './animator.models';
 
 const maxSceneFolders = 1_024;
 const maxFolderDepth = 32;
@@ -56,6 +57,7 @@ function entity(value: unknown): value is SceneEntity {
     if (!record(value) || !record(value['transform'])) return false;
     const transform = value['transform'];
     const controller = value['player_controller'];
+    const animator = value['animator'];
     return (
         typeof value['key'] === 'string' &&
         typeof value['name'] === 'string' &&
@@ -66,6 +68,8 @@ function entity(value: unknown): value is SceneEntity {
         (controller == null || (record(controller) && typeof controller['id'] === 'string' &&
             typeof controller['enabled'] === 'boolean' && validPlayerControllerSettings(controller['settings']) &&
             (controller['enabled'] || !controller['settings'].local))) &&
+        (animator == null || (record(animator) && typeof animator['id'] === 'string' &&
+            typeof animator['enabled'] === 'boolean' && validAnimatorSettings(animator['settings']))) &&
         (value['component_views'] === undefined || validComponentViews(value['component_views'])) &&
         (value['linked_prefab'] == null || linkedPrefab(value['linked_prefab'])) &&
         ['position', 'rotation', 'scale'].every((key) => vector(transform[key], 3))

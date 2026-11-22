@@ -41,6 +41,7 @@ struct SceneEntry {
 	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
 	linked_prefab: Option<engine_core::linked_prefab::LinkedPrefabInstance>,
 	animation: Option<engine_core::animation::AnimationComponent>,
+	animator: Option<Box<engine_core::animation::AnimatorComponent>>,
 	interactable: Option<engine_core::components::InteractableComponent>,
 	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
 	camera: Option<Box<CameraComponent>>,
@@ -53,6 +54,7 @@ impl SceneEntry {
 			&& self.asset_id == entity.asset_id
 			&& self.mesh_index == entity.mesh_index
 			&& self.animation == entity.animation
+			&& self.animator == entity.animator
 	}
 
 	fn can_reuse_model(&self, entity: &EntityData) -> bool {
@@ -78,6 +80,7 @@ impl SceneEntry {
 		self.native_behaviors.clone_from(&entity.native_behaviors);
 		self.linked_prefab.clone_from(&entity.linked_prefab);
 		self.animation.clone_from(&entity.animation);
+		self.animator.clone_from(&entity.animator);
 		self.interactable.clone_from(&entity.interactable);
 		self.character_controller
 			.clone_from(&entity.character_controller);
@@ -288,6 +291,7 @@ impl Scene {
 						&& entry.native_behaviors == saved.native_behaviors
 						&& entry.linked_prefab == saved.linked_prefab
 						&& entry.animation == saved.animation
+						&& entry.animator == saved.animator
 						&& entry.character_controller == saved.character_controller
 						&& entry.interactable == saved.interactable
 						&& entry.camera == saved.camera
@@ -562,6 +566,7 @@ impl Scene {
 			native_behaviors: Vec::new(),
 			linked_prefab: None,
 			animation: None,
+			animator: None,
 			interactable: None,
 			character_controller: None,
 			camera: None,
@@ -675,6 +680,7 @@ impl Scene {
 				native_behaviors: entry.native_behaviors.clone(),
 				linked_prefab: entry.linked_prefab.clone(),
 				animation: entry.animation.clone(),
+				animator: entry.animator.clone(),
 				interactable: entry.interactable.clone(),
 				character_controller: entry.character_controller.clone(),
 				camera: entry.camera.clone(),
@@ -826,6 +832,7 @@ impl Scene {
 		}
 		entry.linked_prefab = source_metadata.linked_prefab;
 		entry.animation = source_metadata.animation;
+		entry.animator = source_metadata.animator;
 		entry.character_controller = source_metadata.character_controller;
 		entry.interactable = source_metadata.interactable;
 		entry.camera = source_metadata.camera;

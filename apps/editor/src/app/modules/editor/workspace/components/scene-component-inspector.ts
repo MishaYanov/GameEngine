@@ -6,13 +6,14 @@ import { SceneEditingService } from '../scene-editing.service';
 import { WorkspaceViewService } from '../scene-viewport/workspace-view.service';
 import { SelectedCameraPreviewService } from '../game-settings/selected-camera-preview.service';
 import { InputActionsCatalog } from '../game-input/input-actions-catalog.service';
+import { AnimatorInspector } from '../animator/animator-inspector';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 
 @Component({
 	selector: 'editor-scene-component-inspector',
-	imports: [ComponentEditor],
+	imports: [ComponentEditor, AnimatorInspector],
 	template: `<editor-component-editor
-		[components]="entity()?.component_views ?? []"
+		[components]="basicComponents()"
 		[types]="types()"
 		[ownerKey]="entity()?.key ?? ''"
 		[contextKey]="context()"
@@ -30,6 +31,9 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[acknowledged]="acknowledged()"
 		(actionRequested)="apply($event)"
 	/>
+    @if (animatorSupported() && entity(); as actor) {
+        <editor-animator-inspector [actor]="actor" [editable]="editable()"/>
+    }
     @if (canShowCameraActions()) {
         <button type="button" [disabled]="!canAlignCamera()" (click)="alignCamera()">Align Camera to Scene View</button>
     }
@@ -65,7 +69,9 @@ export class SceneComponentInspector {
 	private readonly views = inject(WorkspaceViewService, {optional: true});
 	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
 	protected readonly inputActions = inject(InputActionsCatalog, {optional: true});
-	protected readonly types = computed(() => this.editor.capabilities()?.component_types ?? []);
+	protected readonly basicComponents = computed(() => this.entity()?.component_views?.filter(component => component.data.kind !== 'animator') ?? []);
+	protected readonly types = computed(() => this.editor.capabilities()?.component_types?.filter(type => type.kind !== 'animator') ?? []);
+	protected readonly animatorSupported = computed(() => this.editor.capabilities()?.animator_assets === true);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
     protected readonly gameActions = computed(() =>

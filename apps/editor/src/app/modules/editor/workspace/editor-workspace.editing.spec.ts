@@ -23,6 +23,8 @@ import type {ComponentRecord} from '../../../core/editor/editor-components';
 import type {CharacterControllerSettings} from '../../../core/editor/character-controller.models';
 import type {PlayerControllerSettings} from '../../../core/editor/player-controller.models';
 import type {InputActionMap, InputActionsAsset, InputActionsCapture, InputActionsDocument} from '../../../core/game-input/input-actions.models';
+import type {AnimatorAsset, AnimatorAssetCapture, AnimatorDocument, AnimatorGraph} from '../../../core/editor/animator.models';
+import type {ClipAssetDocument} from '../../../core/editor/authored-clip.models';
 import type {LinkedPrefabStatus, NestedPropPlacementRequest, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
@@ -98,6 +100,29 @@ const playerMotor: CharacterControllerSettings = {
     jump_speed: 7, ground_probe: 0.02, step_height: 0.25, coyote_ticks: 6, jump_buffer_ticks: 6, jump_action: 'jump',
 };
 const controlsAssetId = '00000000-0000-0000-0000-000000000321';
+const animatorAssetId = '00000000-0000-0000-0000-000000000914';
+const clipAssetId = '00000000-0000-0000-0000-000000000922';
+const rigPropId = '00000000-0000-0000-0000-000000000925';
+const clipFingerprint = 'c'.repeat(64);
+const authoredClip: ClipAssetDocument = {
+    workspace_generation: 1, asset: {asset_id: clipAssetId, path: 'blade.animation.json', fingerprint: clipFingerprint, revision: 1},
+    clip: {schema_version: 1, name: 'Blade', owner: {kind: 'prop', asset_id: rigPropId}, duration_ticks: 500, tracks: [{
+        target: {kind: 'prop', address: {kind: 'object', placement_path: [], source_entity: 'blade'}},
+        track: {kind: 'local_position', interpolation: 'linear', keys: [{at: 0, value: [0, 0, 0]}]},
+    }]},
+};
+const animatorClip = {kind: 'authored', asset_id: clipAssetId, expected_sha256: clipFingerprint} as const;
+const walkGraph: AnimatorGraph = {
+    schema_version: 1, entry: 'idle', states: [
+        {id: 'idle', name: 'Idle', clip: animatorClip, looping: true},
+        {id: 'walk', name: 'Walk', clip: animatorClip, looping: true},
+    ],
+    parameters: [{id: 'moving', name: 'Is moving', source: {kind: 'moving', minimum_mm_per_second: 100}}],
+    transitions: [
+        {id: 'to_walk', from: 'idle', to: 'walk', condition: {kind: 'bool', parameter: 'moving', value: true}, blend_ticks: 6},
+        {id: 'to_idle', from: 'walk', to: 'idle', condition: {kind: 'bool', parameter: 'moving', value: false}, blend_ticks: 6},
+    ],
+};
 
 const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
 const nestedAsset = {kind: 'prefab', asset_id: '00000000-0000-0000-0000-000000000001',
@@ -181,6 +206,8 @@ describe('Workspace live editing flow', () => {
     let nestedPropFailure: string | null;
     let inputActionsSupported: boolean;
     let inputActions: Map<string, InputActionsDocument>;
+    let animatorSupported: boolean;
+    let animators: Map<string, AnimatorDocument>;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -216,6 +243,8 @@ describe('Workspace live editing flow', () => {
         nestedPropFailure = null;
         inputActionsSupported = false;
         inputActions = new Map();
+        animatorSupported = false;
+        animators = new Map();
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -234,10 +263,13 @@ describe('Workspace live editing flow', () => {
                     {type_id: 'engine.camera', kind: 'camera', label: 'Camera', description: 'Authored camera', max_per_object: 1},
                     {type_id: 'engine.player_controller', kind: 'player_controller', label: 'Player Controller', description: 'Local input', max_per_object: 1},
                     {type_id: 'engine.character_controller', kind: 'character_controller', label: 'Character Controller', description: 'Physics motor', max_per_object: 1},
+                    ...(animatorSupported ? [{type_id: 'engine.animator', kind: 'animator', label: 'Animator',
+                        description: 'Graph playback', max_per_object: 1}] : []),
                 ],
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
                 gameplay_modules: [gameplayModule],
                 input_action_assets: inputActionsSupported,
+                animator_assets: animatorSupported,
             };
             if (operation === 'editor_open_project') {
                 nativeState = {...initialSnapshot(), revision: nativeState.revision + 1,
@@ -259,6 +291,31 @@ describe('Workspace live editing flow', () => {
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_assets') return assets;
+            if (operation === 'editor_animation_clips') return [authoredClip.asset];
+            if (operation === 'editor_open_authored_clip') return authoredClip;
+            if (operation === 'editor_list_animators' || operation === 'editor_open_animator' ||
+                operation === 'editor_save_animator' || operation === 'editor_validate_animator_actor') {
+                const request = args as {expectedGeneration: number; expectedRevision: number;
+                    assetId?: string; destination?: string; capture?: AnimatorAssetCapture | null; graph?: AnimatorGraph; entityKey?: string};
+                expect(request.expectedGeneration).toBe(viewportEditorState.workspace_generation);
+                expect(request.expectedRevision).toBe(nativeState.revision);
+                if (operation === 'editor_list_animators') return [...animators.values()].map(document => document.asset);
+                if (operation === 'editor_open_animator') return animators.get(request.assetId!);
+                if (operation === 'editor_validate_animator_actor') {
+                    const attachment = nativeState.document.entities.find(entity => entity.key === request.entityKey)?.animator;
+                    const graph = animators.get(attachment!.settings.asset_id)!.graph;
+                    return {entry: graph.entry, states: graph.states.length, parameters: graph.parameters.length,
+                        runtime_digest: 'd'.repeat(64)};
+                }
+                const old = request.capture ? animators.get(request.capture.id) : undefined;
+                expect(old?.asset.fingerprint ?? null).toBe(request.capture?.fingerprint ?? null);
+                const revision = (old?.asset.revision ?? 0) + 1;
+                const asset: AnimatorAsset = {id: old?.asset.id ?? animatorAssetId, path: request.destination!, kind: 'animator_graph',
+                    revision, fingerprint: revision.toString(16).repeat(64), bytes: 1024};
+                const document = {asset, graph: request.graph!};
+                animators.set(asset.id, document);
+                return document;
+            }
             if (operation === 'editor_list_input_actions' || operation === 'editor_open_input_actions' ||
                 operation === 'editor_save_input_actions' || operation === 'editor_move_input_actions') {
                 const request = args as {
@@ -489,6 +546,7 @@ describe('Workspace live editing flow', () => {
                         })}};
                     break;
                 }
+                case 'add_component':
                 case 'replace_component': {
                     const {component, key} = command;
                     const data = component.data;
@@ -497,11 +555,13 @@ describe('Workspace live editing flow', () => {
                     nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
                         document: {...nativeState.document, entities: nativeState.document.entities.map(entity => {
                             if (entity.key !== key) return entity;
-                            const component_views = entity.component_views?.map(existing => existing.id === component.id ? component : existing);
+                            const component_views = command.type === 'add_component' ? [...(entity.component_views ?? []), component] :
+                                entity.component_views?.map(existing => existing.id === component.id ? component : existing);
                             const details = {id: component.id, enabled: component.enabled};
                             if (data.kind === 'camera') return {...entity, camera: {...details, settings: data.settings}, component_views};
                             if (data.kind === 'player_controller') return {...entity, player_controller: {...details, settings: data.settings}, component_views};
-                            throw new Error('Expected Camera or Player Controller fixture component');
+                            if (data.kind === 'animator') return {...entity, animator: {...details, settings: data.settings}, component_views};
+                            throw new Error('Unexpected fixture component');
                         })}};
                     break;
                 }
@@ -874,6 +934,88 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(editor.document()?.entities.find(entity => entity.key === 'player-1')
             ?.player_controller?.settings.input).toEqual({kind: 'asset', asset_id: controlsAssetId}));
         expect(commands.filter(command => command.type === 'replace_component')).toHaveLength(1);
+    });
+
+    it('reviews a registered Animator definition and binds the same graph to two independent visual actors', async () => {
+        animatorSupported = true;
+        const entity = initialSnapshot().document.entities[0];
+        nativeState = {...nativeState, revision: nativeState.revision + 1, document: {...nativeState.document,
+            entities: ['a', 'b'].flatMap(id => [{
+                ...entity, key: 'actor-' + id, name: 'Actor ' + id, model_path: '__no_mesh__', renderable: false,
+                component_views: [],
+            }, {
+                ...entity, key: 'blade-' + id, name: 'Blade ' + id, parent: 'actor-' + id,
+            }])}};
+        await editor.refresh();
+        await editor.loadCapabilities();
+        await fixture.debugElement.injector.get(ViewportEditorService).start();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (name: string, within: ParentNode = root) => [...within.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === name)!;
+        const field = (name: string, within: ParentNode) => [...within.querySelectorAll<HTMLLabelElement>('label')]
+            .find(item => item.firstChild?.textContent?.trim() === name)!;
+        const inspector = () => root.querySelector<HTMLElement>('editor-animator-inspector')!;
+        const choose = (select: HTMLSelectElement, value: string) => {
+            select.value = value;
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        };
+        const selectedActor = async (key: string) => {
+            root.querySelector<HTMLButtonElement>(`[data-key="${key}"]`)!.click();
+            await vi.waitFor(() => expect(editor.selection()).toEqual([key]));
+            await vi.waitFor(() => expect(button('Animator Assets…', inspector())?.disabled).toBe(false));
+        };
+        const bind = async (childKey: string) => {
+            await vi.waitFor(() => expect(inspector().textContent).toContain('Entry state: Idle'));
+            await fixture.whenStable();
+            const attach = button('Attach Animator', inspector());
+            expect(attach.disabled).toBe(true);
+            expect(inspector().textContent).toContain('Choose a renderable child');
+            const target = field('blade', inspector()).querySelector('select')!;
+            expect([...target.options].map(option => option.value)).toEqual(['', childKey]);
+            choose(target, childKey);
+            await fixture.whenStable();
+            attach.click();
+            await vi.waitFor(() => expect(inspector().textContent).toContain('Animator binding validated'));
+        };
+
+        await selectedActor('actor-a');
+        button('Animator Assets…', inspector()).click();
+        await fixture.whenStable();
+        const dialog = inspector().querySelector<HTMLDialogElement>('dialog[open]')!;
+        const text = field('Animator graph JSON', dialog).querySelector('textarea')!;
+        text.value = JSON.stringify({...walkGraph, entry: 'unknown'});
+        text.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        button('Review Definition', dialog).click();
+        await fixture.whenStable();
+        expect(dialog.textContent).toContain('Entry "unknown" must name an existing state');
+        expect(button('Save Animator Asset', dialog).disabled).toBe(true);
+        text.value = JSON.stringify(walkGraph);
+        text.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        button('Review Definition', dialog).click();
+        await fixture.whenStable();
+        button('Save Animator Asset', dialog).click();
+        await vi.waitFor(() => expect(animators.get(animatorAssetId)?.graph.transitions).toHaveLength(2));
+        await vi.waitFor(() => expect(dialog.textContent).toContain('Animator asset saved'));
+        await vi.waitFor(() => expect(dialog.querySelector<HTMLButtonElement>('button[aria-label="Close Animator Assets"]')?.disabled).toBe(false));
+        dialog.querySelector<HTMLButtonElement>('button[aria-label="Close Animator Assets"]')!.click();
+        await fixture.whenStable();
+        await bind('blade-a');
+
+        await selectedActor('actor-b');
+        const graphAsset = field('Animator asset', inspector()).querySelector('select')!;
+        await vi.waitFor(() => expect([...graphAsset.options].some(option => option.value === animatorAssetId)).toBe(true));
+        choose(graphAsset, animatorAssetId);
+        await bind('blade-b');
+        const settings = editor.document()?.entities.filter(item => item.animator).map(item => item.animator?.settings);
+        expect(settings).toEqual(['blade-a', 'blade-b'].map(entity_key => ({
+            asset_id: animatorAssetId,
+            binding: {kind: 'visual', targets: [{channel: authoredClip.clip.tracks[0].target, entity_key}]},
+        })));
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_validate_animator_actor',
+            expect.objectContaining({entityKey: 'actor-b', expectedGeneration: 1}));
     });
 
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {

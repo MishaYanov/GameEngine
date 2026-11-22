@@ -61,6 +61,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub animation: Option<crate::animation::AnimationComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub animator: Option<Box<crate::animation::AnimatorComponent>>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub interactable: Option<crate::components::InteractableComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub camera: Option<Box<crate::game_camera::CameraComponent>>,
@@ -93,6 +95,7 @@ impl EntityData {
 			native_behaviors: Vec::new(),
 			character_controller: None,
 			animation: None,
+			animator: None,
 			interactable: None,
 			camera: None,
 			player_controller: None,
@@ -159,6 +162,8 @@ struct EntityProjection {
 	#[serde(default)]
 	animation: Option<crate::animation::AnimationComponent>,
 	#[serde(default)]
+	animator: Option<Box<crate::animation::AnimatorComponent>>,
+	#[serde(default)]
 	interactable: Option<crate::components::InteractableComponent>,
 	#[serde(default)]
 	camera: Option<Box<crate::game_camera::CameraComponent>>,
@@ -197,6 +202,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			native_behaviors: value.native_behaviors,
 			character_controller: value.character_controller,
 			animation: value.animation,
+			animator: value.animator,
 			interactable: value.interactable,
 			camera: value.camera,
 			player_controller: value.player_controller,
@@ -240,6 +246,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.animation {
 			map.serialize_entry("animation", value)?;
+		}
+		if let Some(value) = &self.animator {
+			map.serialize_entry("animator", value)?;
 		}
 		if let Some(value) = &self.interactable {
 			map.serialize_entry("interactable", value)?;
