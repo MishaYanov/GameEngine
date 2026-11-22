@@ -13,6 +13,7 @@ import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
 import {AssetsPanel} from './assets-panel/assets-panel';
+import {PropAssetSelection} from './prefabs/prop-asset-selection';
 import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.model';
 import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
@@ -37,7 +38,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     selector: 'editor-workspace',
     providers: [
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
-        SceneSwitchService, WorkspaceViewService,
+        SceneSwitchService, WorkspaceViewService, PropAssetSelection,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,

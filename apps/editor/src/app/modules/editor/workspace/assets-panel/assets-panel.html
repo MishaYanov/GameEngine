@@ -43,6 +43,7 @@
                                     (click)="selectFile(file)"
                                     (pointerdown)="beginAssetDrag(file, $event)"
                                     [attr.aria-pressed]="isSelected(file)"
+                                    [attr.data-asset-id]="file.kind === 'scene' ? null : file.asset_id"
                                     [class.drag-source]="canDrag(file)"
                                     [class.selected]="isSelected(file)"
                                     [title]="canDrag(file) ? 'Drag into the Scene viewport' : file.path"

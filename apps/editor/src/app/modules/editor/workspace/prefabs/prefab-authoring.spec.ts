@@ -14,6 +14,7 @@ import { SceneEditingService } from '../scene-editing.service';
 import { PrefabAuthoring } from './prefab-authoring';
 import { PrefabSourceEditor } from './prefab-source-editor';
 import { LinkedPrefabInspector } from './linked-prefab-inspector';
+import { PropAssetSelection } from './prop-asset-selection';
 import { entityDraft, sourceEntityFromDraft, slotValues } from './prefab-source-values';
 
 const prefab: PrefabSourceDocument = {
@@ -114,6 +115,7 @@ function configure() {
 	const assets = vi.fn(async () => []);
 	TestBed.configureTestingModule({
 		providers: [
+			PropAssetSelection,
 			{
 				provide: LAYOUT_PREFERENCES_STORAGE,
 				useValue: { load: async () => null, save: async () => undefined },
@@ -419,7 +421,7 @@ describe('typed prefab authoring', () => {
 		const root: HTMLElement = fixture.nativeElement,
 			ui = controls(root);
 		expect(root.textContent).toContain('Custom door');
-		expect(root.textContent).toContain('Source changed');
+		expect(root.textContent).toContain('Source update available.');
 		ui.button('Revert Property').click();
 		await fixture.whenStable();
 		expect(backend.execute).toHaveBeenCalledWith(
@@ -434,6 +436,38 @@ describe('typed prefab authoring', () => {
 			1,
 			4,
 		);
+	});
+
+	it('shows linked source provenance and reveals the source asset across distinct instance keys', async () => {
+		const backend = configure();
+		const fixture = TestBed.createComponent(LinkedPrefabInspector);
+		const selection = TestBed.inject(PropAssetSelection);
+		fixture.componentRef.setInput('entity', entity);
+		await fixture.whenStable();
+		const root: HTMLElement = fixture.nativeElement;
+		const ui = controls(root);
+		expect(root.textContent).toContain('Saved source version');
+		expect(root.textContent).toContain(linked.source_fingerprint);
+		expect(root.textContent).toContain('Player');
+		ui.button('Select Prop Asset').click();
+		expect(selection.request()?.sourceId).toBe('source-id');
+
+		const moved = {...linked, root_key: 'another-anchor', source_path: 'props/moved/door.json', source_changed: false};
+		backend.linkedPrefabStatus.mockResolvedValueOnce(moved);
+		fixture.componentRef.setInput('entity', {...entity, key: 'another-instance', name: 'Renamed placement'});
+		await fixture.whenStable();
+		expect(root.textContent).toContain('props/moved/door.json');
+		expect(root.textContent).toContain('Source is current.');
+		ui.button('Select Prop Asset').click();
+		expect(selection.request()?.sourceId).toBe('source-id');
+		expect(backend.execute).not.toHaveBeenCalled();
+
+		backend.linkedPrefabStatus.mockResolvedValueOnce({...moved, source_error: 'File is missing'});
+		backend.current.update(snapshot => ({...snapshot, revision: 5}));
+		await fixture.whenStable();
+		expect(root.textContent).toContain('This placement retains its saved objects.');
+		expect(ui.button('Select Prop Asset').disabled).toBe(true);
+		expect(backend.execute).not.toHaveBeenCalled();
 	});
 
 	it('keeps an update conflict reviewable and retries only the chosen resolution', async () => {

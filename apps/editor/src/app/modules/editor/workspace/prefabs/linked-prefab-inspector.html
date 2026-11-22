@@ -10,20 +10,22 @@
     </section>
 }
 @if (status(); as status) {
-	<section aria-label="Linked prefab" class="linked-prefab">
-		<h3>Linked Prefab</h3>
-		<p>{{ status.source_path }}</p>
-		<p>
-			{{
-				status.source_changed
-					? 'Source changed. Update explicitly to review its changes.'
-					: 'Instance uses its saved source version.'
-			}}
-		</p>
+	<section aria-label="Linked Prop" class="linked-prefab">
+		<h3>Linked Prop</h3>
+		<dl>
+			<dt>Source</dt>
+			<dd>{{ status.source_path }}</dd>
+			<dt>Saved source version</dt>
+			<dd class="reference">{{ status.source_fingerprint }}</dd>
+		</dl>
 		@if (status.source_error; as message) {
+			<p>Source unavailable. This placement retains its saved objects.</p>
 			<p class="error" role="alert">{{ message }}</p>
+		} @else {
+			<p>{{ status.source_changed ? 'Source update available.' : 'Source is current.' }}</p>
 		}
 		<div class="actions">
+			<button type="button" [disabled]="!canSelectPropAsset()" (click)="selectPropAsset()">Select Prop Asset</button>
 			<button
 				type="button"
 				[disabled]="!available() || !!status.source_error"

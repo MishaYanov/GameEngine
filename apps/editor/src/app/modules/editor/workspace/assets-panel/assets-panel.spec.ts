@@ -10,6 +10,7 @@ import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetsPanel} from './assets-panel';
+import {PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
 import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 
@@ -62,6 +63,7 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
     });
     const loadPrefab = vi.fn(async (_path: string, _position: readonly [number, number, number], _generation?: number, _revision?: number) => current());
     TestBed.configureTestingModule({providers: [
+        PropAssetSelection,
         {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
         {provide: EditorService, useValue: {
             nativeAvailable: options.nativeAvailable ?? true,
@@ -114,6 +116,39 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
 }
 
 describe('AssetsPanel', () => {
+    it('reveals a linked Prop by stable asset ID and focuses its current catalogue row', async () => {
+        const source: ModelAsset = {
+            kind: 'prefab', asset_id: 'gate-source', name: 'Gate', path: 'props/moved/gate.json',
+        };
+        const duplicate = {...source, asset_id: 'different-source', path: 'prefabs/gate.json'};
+        const panel = await createPanel({models: [duplicate, source]});
+        const reveal = TestBed.inject(PropAssetSelection);
+
+        reveal.reveal({sourceId: source.asset_id!, workspaceGeneration: 1, sceneId: 'main'});
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).toContain('Assets / props/moved');
+        const selected = panel.file(source.path);
+        expect(selected.getAttribute('aria-pressed')).toBe('true');
+        expect(panel.root.ownerDocument.activeElement).toBe(selected);
+        expect(panel.assets).not.toHaveBeenCalled();
+        expect(panel.current().dirty).toBe(false);
+
+        reveal.reveal({sourceId: duplicate.asset_id, workspaceGeneration: 0, sceneId: 'main'});
+        await panel.fixture.whenStable();
+        expect(selected.getAttribute('aria-pressed')).toBe('true');
+        expect(reveal.request()).toBeNull();
+    });
+
+    it('reports a missing linked Prop without selecting an asset at its former path', async () => {
+        const panel = await createPanel({models: [{...robot, path: 'prefabs/gate.json', kind: 'prefab'}]});
+        TestBed.inject(PropAssetSelection).reveal({sourceId: 'removed', workspaceGeneration: 1, sceneId: 'main'});
+        await panel.fixture.whenStable();
+        expect(panel.assets).toHaveBeenCalledOnce();
+        expect(panel.root.querySelector('[role=alert]')?.textContent).toContain('linked Prop source is unavailable');
+        expect(panel.root.querySelector('.asset-details')).toBeNull();
+        expect(panel.loadPrefab).not.toHaveBeenCalled();
+    });
+
     it('adds the clicked asset through the field commit flow independently of the selected file', async () => {
         const crate: ModelAsset = {name: 'Crate', path: 'props/crate.glb'};
         const withCommittedEdit = vi.fn(async (action: () => Promise<void>) => {

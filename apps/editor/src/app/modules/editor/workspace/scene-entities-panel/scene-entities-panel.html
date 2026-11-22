@@ -38,7 +38,7 @@
                                         (dragstart)="entity && dragStarted($event, entity.key)"
                                         [attr.aria-expanded]="row.children ? row.expanded : null"
                                         (drop)="dropped($event, row.item)"
-                                        [attr.aria-label]="folder ? row.item.name + ' folder' : row.item.name"
+                                        [attr.aria-label]="folder ? row.item.name + ' folder' : entity?.linked_prefab ? row.item.name + ' linked Prop' : row.item.name"
                                         [class.drop-target]="isDropTarget(row.key) && dropTarget()?.valid"
                                         [class.drop-rejected]="isDropTarget(row.key) && !dropTarget()?.valid"
                                         [disabled]="disabled()" [draggable]="!disabled() && entity !== null"
@@ -56,6 +56,9 @@
                                           aria-hidden="true" (click)="toggle($event, row)">▸</span>
                                     <editor-icon [name]="folder ? 'folder' : 'object'"/>
                                     <span class="entity-name">{{ row.item.name }}</span>
+                                    @if (entity?.linked_prefab) {
+                                        <small aria-hidden="true">Linked Prop</small>
+                                    }
                                 </button>
                             }
                         </div>

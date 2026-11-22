@@ -1,4 +1,7 @@
-import {Component, computed, effect, inject, input, linkedSignal, signal} from '@angular/core';
+import {
+    afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, signal,
+    untracked, viewChild,
+} from '@angular/core';
 import type {ModelAsset, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
@@ -11,6 +14,7 @@ import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
+import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -50,6 +54,11 @@ export class AssetsPanel {
         maxHeight: '50%',
     };
     private readonly editor = inject(EditorService);
+    private readonly propAssetSelection = inject(PropAssetSelection, {optional: true});
+    private readonly drawer = viewChild(Drawer);
+    private readonly injector = inject(Injector);
+    private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    private readonly destroy = inject(DestroyRef);
     private readonly sceneEditing = inject(SceneEditingService, {optional: true});
     private readonly sceneSwitch = inject(SceneSwitchService);
     protected readonly canOpenScene = computed(() => this.canRunAction() && this.sceneSwitch.canSwitch());
@@ -174,6 +183,55 @@ export class AssetsPanel {
             this.catalogWorkspace = workspace;
             if (this.models() === null) void this.loadCatalog(false);
         });
+        effect(() => {
+            const request = this.propAssetSelection?.request();
+            if (!request) return;
+            if (!this.ownsReveal(request)) {
+                this.propAssetSelection?.complete(request);
+                return;
+            }
+            if (this.opening() || this.pendingAction() || !this.drawer()?.configReady()) return;
+            untracked(() => void this.revealProp(request));
+        });
+    }
+
+    private ownsReveal(request: PropAssetReveal): boolean {
+        return !this.destroy.destroyed &&
+            request.workspaceGeneration === this.editor.workspaceGeneration() &&
+            request.sceneId === this.editor.snapshot()?.active_scene_id &&
+            this.editor.snapshot()?.mode === 'edit';
+    }
+
+    private async revealProp(request: PropAssetReveal): Promise<void> {
+        const current = () => this.ownsReveal(request) && this.propAssetSelection?.request() === request;
+        const asset = () => this.entries().find(file => file.kind === 'prefab' && file.asset_id === request.sourceId);
+        let file = asset();
+        if (!file) {
+            this.pendingAction.set('models');
+            try {
+                await this.editor.assets(true);
+            } catch {
+                // Report the failed reveal in the Assets drawer below.
+            } finally {
+                this.pendingAction.set(null);
+            }
+            file = asset();
+        }
+        if (!current()) return;
+        this.propAssetSelection?.complete(request);
+        this.drawer()?.config.update(config => ({...config, expanded: true, collapsed: false}));
+        if (!file) {
+            this.error.set('The linked Prop source is unavailable in Assets.');
+            return;
+        }
+        this.folder.set(file.path.slice(0, Math.max(0, file.path.lastIndexOf('/'))));
+        this.selectFile(file);
+        afterNextRender(() => {
+            if (!this.ownsReveal(request) || this.selectedCatalogAsset()?.asset_id !== request.sourceId) return;
+            const row = [...this.element.querySelectorAll<HTMLButtonElement>('button[data-asset-id]')]
+                .find(button => button.dataset['assetId'] === request.sourceId);
+            row?.focus();
+        }, {injector: this.injector});
     }
 
     protected upOneFolder(location: HTMLElement): void {

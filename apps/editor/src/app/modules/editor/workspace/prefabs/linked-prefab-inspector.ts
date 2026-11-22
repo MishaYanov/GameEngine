@@ -21,6 +21,7 @@ import { SceneEditingService } from '../scene-editing.service';
 import { PrefabSourceEditor } from './prefab-source-editor';
 import { ReferenceBindings } from './reference-bindings';
 import { readPrefabSource } from './prefab-source-values';
+import { PropAssetSelection } from './prop-asset-selection';
 
 @Component({
 	selector: 'editor-linked-prefab-inspector',
@@ -33,6 +34,7 @@ export class LinkedPrefabInspector {
 	readonly editable = input(false);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
+	private readonly propAssets = inject(PropAssetSelection, { optional: true });
 	protected readonly status = signal<LinkedPrefabStatus | null>(null);
 	protected readonly error = signal<string | null>(null);
 	protected readonly pending = signal(false);
@@ -63,6 +65,10 @@ export class LinkedPrefabInspector {
 	protected readonly available = computed(
 		() => this.editable() && !this.pending() && !!this.status(),
 	);
+	protected readonly canSelectPropAsset = computed(() => {
+		const status = this.status();
+		return !!this.propAssets && !!status && !status.source_error && !this.pending();
+	});
 	private readonly context = computed(() =>
 		JSON.stringify([
 			this.editor.workspaceGeneration(),
@@ -125,6 +131,17 @@ export class LinkedPrefabInspector {
 			if (!this.destroyed && context === this.context() && request === this.request)
 				this.error.set(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	protected selectPropAsset(): void {
+		const status = this.status();
+		const snapshot = this.editor.snapshot();
+		if (!this.canSelectPropAsset() || !status || snapshot?.mode !== 'edit') return;
+		this.propAssets?.reveal({
+			sourceId: status.source_id,
+			workspaceGeneration: this.editor.workspaceGeneration(),
+			sceneId: snapshot.active_scene_id,
+		});
 	}
 
 	protected async openSource(update: boolean): Promise<void> {
