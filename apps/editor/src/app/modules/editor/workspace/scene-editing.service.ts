@@ -303,12 +303,17 @@ export class SceneEditingService {
     }
 
     async select(key: EntityKey): Promise<void> {
+        await this.selectMany([key]);
+    }
+
+    async selectMany(keys: readonly EntityKey[]): Promise<void> {
         await this.withCommittedEdit(async () => {
             const snapshot = this.editor.snapshot();
-            if (snapshot?.mode !== 'edit' || snapshot.transaction !== null ||
-                !snapshot.document.entities.some(entity => entity.key === key)) return;
-            if (snapshot.selection.length === 1 && snapshot.selection[0] === key) return;
-            await this.execute(CommandBuilder.select([key]));
+            if (snapshot?.mode !== 'edit' || snapshot.transaction !== null) return;
+            if (snapshot.selection.length === keys.length && keys.every((key, index) => snapshot.selection[index] === key)) return;
+            const known = new Set(snapshot.document.entities.map(entity => entity.key));
+            if (keys.some(key => !known.has(key))) return;
+            await this.execute(CommandBuilder.select(keys));
             this.errorState.set(null);
         });
     }

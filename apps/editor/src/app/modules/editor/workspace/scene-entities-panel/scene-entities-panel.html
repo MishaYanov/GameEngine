@@ -11,56 +11,76 @@
                     <editor-icon name="cube"/>
                     <span [title]="sceneLabel()">{{ sceneLabel() }}</span><small>Scene root</small>
                 </button>
+                @if (foldersEnabled()) {
+                    <label class="hierarchy-search">
+                        <input #searchBox (input)="search.set(searchBox.value)" (keydown.escape)="$event.stopPropagation(); search.set('')"
+                               [value]="search()" aria-label="Search Hierarchy" placeholder="Search Hierarchy" type="search"/>
+                    </label>
+                }
                 @if (rows().length) {
                     <div #tree aria-label="Entities in the active scene" aria-multiselectable="true" class="entity-list"
                          role="tree" tabindex="0"
-                         [editorContextMenu]="activeEntityMenu" editorContextMenuLabel="Entity actions"
+                         [editorContextMenu]="activeItemMenu" editorContextMenuLabel="Hierarchy actions"
                          [attr.aria-disabled]="disabled()" [attr.aria-activedescendant]="activeId()"
                          (scroll)="scrolled($event)" (keydown)="keydown($event)">
                         <div class="virtual-space" role="presentation" [style.height.px]="totalHeight()">
                             @for (row of renderedRows(); track row.key) {
+                                @let entity = row.item.kind === 'entity' ? row.item.entity : null;
+                                @let folder = row.item.kind === 'folder' ? row.item.folder : null;
                                 <button type="button" role="treeitem" tabindex="-1" class="entity-button"
-                                        [editorContextMenuLabel]="row.entity.name + ' actions'"
-                                        [editorContextMenu]="entityMenu(row.key)"
-                                        [id]="rowId(row.key)" [attr.data-key]="row.key"
-                                        (click)="choose(row)"
+                                        [editorContextMenuLabel]="row.item.name + ' actions'"
+                                        [editorContextMenu]="itemMenu(row.item)"
+                                        [id]="rowId(row.key)" [attr.data-key]="entity?.key ?? null"
+                                        [attr.data-folder-id]="folder?.id ?? null"
+                                        (click)="choose(row, $event)"
                                         (dragend)="dragEnded()"
-                                        (dragleave)="dragLeft($event)" (dragover)="dragOver($event, row.key)"
-                                        (dragstart)="dragStarted($event, row.key)"
+                                        (dragleave)="dragLeft($event)" (dragover)="dragOver($event, row.item)"
+                                        (dragstart)="entity && dragStarted($event, entity.key)"
                                         [attr.aria-expanded]="row.children ? row.expanded : null"
-                                        (drop)="dropped($event, row.key)"
-                                        [attr.aria-label]="row.entity.name"
+                                        (drop)="dropped($event, row.item)"
+                                        [attr.aria-label]="folder ? row.item.name + ' folder' : row.item.name"
                                         [class.drop-target]="isDropTarget(row.key) && dropTarget()?.valid"
                                         [class.drop-rejected]="isDropTarget(row.key) && !dropTarget()?.valid"
-                                        [disabled]="disabled()" [draggable]="!disabled()"
+                                        [disabled]="disabled()" [draggable]="!disabled() && entity !== null"
                                         [attr.aria-level]="row.level"
                                         [attr.aria-posinset]="row.position"
-                                        [title]="row.entity.name + ' · ' + row.entity.model_path"
-                                        [attr.aria-selected]="selection().has(row.key)"
+                                        [title]="entity ? entity.name + ' · ' + entity.model_path : row.item.name"
+                                        [attr.aria-selected]="entity ? selection().has(entity.key) : null"
                                         [attr.aria-setsize]="row.siblings"
                                         [class.focused]="activeKey() === row.key"
-                                        [class.selected]="selection().has(row.key)"
+                                        [class.selected]="entity && selection().has(entity.key)"
                                         [style.padding-inline-start.px]="row.indent"
                                         [style.top.px]="row.index * rowHeight">
                                     <span [class.expanded]="row.expanded" [class.has-children]="row.children"
                                           class="disclosure"
                                           aria-hidden="true" (click)="toggle($event, row)">▸</span>
-                                    <editor-icon name="object"/>
-                                    <span class="entity-name">{{ row.entity.name }}</span>
+                                    <editor-icon [name]="folder ? 'folder' : 'object'"/>
+                                    <span class="entity-name">{{ row.item.name }}</span>
                                 </button>
                             }
                         </div>
                     </div>
+                } @else if (search().trim()) {
+                    <p class="placeholder" role="status">No matching objects or folders.</p>
                 } @else {
                     <p class="placeholder">This scene contains no entities.</p>
                 }
-                <div class="hierarchy-actions" role="group" aria-label="Hierarchy parenting">
+                <div class="hierarchy-actions" role="group" aria-label="Hierarchy actions">
                     <button (click)="beginParenting()" [disabled]="disabled() || !primary()" type="button">Set Parent…
                     </button>
-                    <button (click)="moveToRoot()" [disabled]="disabled() || (!primary()?.parent && !parentingChild())"
+                    <button (click)="moveToRoot()" [disabled]="!canMoveToRoot()"
                             type="button">Move to Root
                     </button>
+                    @if (foldersEnabled()) {
+                        <button #newFolder (click)="createFolder()" [disabled]="disabled()" type="button">New Folder…</button>
+                        <button (click)="moveSelectionToFolder()" [disabled]="!canMoveSelection()" type="button">Move to Folder…</button>
+                    }
                 </div>
+                @if (folderEdit(); as edit) {
+                    <hierarchy-folder-editor [edit]="edit" [destinations]="folderDestinations()"
+                                             [disabled]="disabled()"
+                                             (cancelled)="closeFolderEdit()" (submitted)="submitFolderEdit($event)"/>
+                }
                 @if (primary(); as selected) {
                     <p class="entity-details" [title]="selected.model_path">{{ selected.model_path }}</p>
                 }

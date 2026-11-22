@@ -9,8 +9,9 @@ export function renderHierarchyWindow(
     viewportHeight: number,
     activeIndex: number | undefined
 ): readonly HierarchyRow[] {
-    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS);
-    const end = Math.min(rows.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + OVERSCAN_ROWS);
+    const top = Math.min(scrollTop, Math.max(0, rows.length * rowHeight - viewportHeight));
+    const start = Math.max(0, Math.floor(top / rowHeight) - OVERSCAN_ROWS);
+    const end = Math.min(rows.length, Math.ceil((top + viewportHeight) / rowHeight) + OVERSCAN_ROWS);
     const window = rows.slice(start, end);
     // Preserve the active-descendant reference even when manually scrolling.
     if (activeIndex !== undefined && (activeIndex < start || activeIndex >= end)) window.push(rows[activeIndex]);

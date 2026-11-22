@@ -72,6 +72,9 @@ const gameplayModule = {
     scene_roles: {},
 };
 
+const folderCapabilities = (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
+    .map(name => ({name, label: name, category: 'hierarchy', undoable: true, available_in_play: false}));
+
 describe('Workspace live editing flow', () => {
     const dialogPrototype = HTMLDialogElement.prototype;
     const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
@@ -144,7 +147,7 @@ describe('Workspace live editing flow', () => {
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
                 protocol_version: 2, scene_schema_version: 3, incremental_commands: true,
-                commands: [], embedded_viewport_supported: true,
+                commands: folderCapabilities, embedded_viewport_supported: true,
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
                 gameplay_modules: [gameplayModule],
             };
@@ -225,6 +228,20 @@ describe('Workspace live editing flow', () => {
                     nativeState = {...nativeState, dirty: true, document: {...nativeState.document,
                         entities: nativeState.document.entities.map(entity => entity.key === command.key ? {...entity, parent: command.parent} : entity)}};
                     break;
+                case 'move_roots_to_folder': {
+                    expect(nativeState.transaction).toBeNull();
+                    const organization = nativeState.document.organization!;
+                    const membership = {...organization.root_membership};
+                    for (const key of command.roots) {
+                        if (command.folder === null) delete membership[key];
+                        else membership[key] = command.folder;
+                    }
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, organization: {...organization, root_membership: membership}}};
+                    break;
+                }
                 case 'commit_transaction':
                     expect(transactionBefore).not.toBeNull();
                     undo.push(transactionBefore!);
@@ -812,6 +829,37 @@ describe('Workspace live editing flow', () => {
         panel.reparentRequested.emit({key: 'robot', parent: null});
         await vi.waitFor(() => expect(editor.document()!.entities[0].parent).toBeNull());
         expect(commands.filter(command => command.type === 'reparent').at(-1)).toEqual({type: 'reparent', key: 'robot', parent: null, keep_world: true});
+    });
+
+    it('organizes accepted root selections through the live hierarchy controls and restores placement on undo', async () => {
+        nativeState = {...nativeState, document: {...nativeState.document, schema_version: 6, organization: {
+            folders: [{id: 'floor', name: 'Floor'}], root_membership: {},
+        }}};
+        await editor.loadCapabilities();
+        await editor.refresh();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const robot = root.querySelector<HTMLButtonElement>('[data-key="robot"]')!;
+        const tree = root.querySelector<HTMLElement>('[role="tree"]')!;
+        robot.click();
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['robot']));
+        tree.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true}));
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['robot', 'crate']));
+        const move = [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')]
+            .find(button => button.textContent?.trim() === 'Move to Folder…')!;
+        move.click();
+        await fixture.whenStable();
+        root.querySelector('hierarchy-folder-editor form')!
+            .dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+        await vi.waitFor(() => expect(editor.document()?.organization?.root_membership).toEqual({robot: 'floor', crate: 'floor'}));
+        await fixture.whenStable();
+        expect(commands.at(-1)).toEqual({type: 'move_roots_to_folder', roots: ['robot', 'crate'], folder: 'floor'});
+        expect(robot.getAttribute('aria-level')).toBe('2');
+        expect(editor.document()?.entities[0].parent).toBeUndefined();
+        await editor.execute({type: 'undo'});
+        await fixture.whenStable();
+        expect(robot.getAttribute('aria-level')).toBe('1');
+        expect(editor.selection()).toEqual(['robot', 'crate']);
     });
 
     it('reports a rejected parent change and clears its error when another project opens', async () => {

@@ -2,7 +2,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {By} from '@angular/platform-browser';
 import axe from 'axe-core';
 import {vi} from 'vitest';
-import type {SceneEntity} from '../../../../core/editor/editor.models';
+import type {SceneEntity, SceneOrganization} from '../../../../core/editor/editor.models';
 import {SceneEntitiesPanel} from './scene-entities-panel';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
 import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
@@ -12,6 +12,11 @@ function entity(key: string, parent: string | null = null, name = key): SceneEnt
         transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]}};
 }
 const nested = [entity('child', 'parent'), entity('parent'), entity('grandchild', 'child'), entity('other')];
+const floors = [entity('floor1', null, 'Floor 1'), entity('floor2', null, 'Floor 2')];
+const floorFolders: SceneOrganization = {
+    folders: [{id: 'floor', name: 'Floor', parent: null}],
+    root_membership: {},
+};
 
 describe('SceneEntitiesPanel hierarchy', () => {
     let fixture: ComponentFixture<SceneEntitiesPanel>;
@@ -19,19 +24,34 @@ describe('SceneEntitiesPanel hierarchy', () => {
     let root: HTMLElement;
     const requested = vi.fn();
     const reparented = vi.fn();
+    const organized = vi.fn();
+    const selectedSet = vi.fn();
 
     beforeEach(async () => {
         localStorage.clear(); requested.mockReset(); reparented.mockReset();
+        organized.mockReset(); selectedSet.mockReset();
         await TestBed.configureTestingModule({imports: [SceneEntitiesPanel]}).compileComponents();
         fixture = TestBed.createComponent(SceneEntitiesPanel);
         fixture.componentRef.setInput('scene', {projectOpen: false, entities: []});
         component = fixture.componentInstance; root = fixture.nativeElement;
         component.selectionRequested.subscribe(requested);
         component.reparentRequested.subscribe(reparented);
+        component.folderRequested.subscribe(organized);
+        component.selectionSetRequested.subscribe(selectedSet);
         await fixture.whenStable();
     });
     async function open(entities: readonly SceneEntity[] = nested, selectedKeys: readonly string[] = []): Promise<void> {
         fixture.componentRef.setInput('scene', {projectOpen: true, entities});
+        fixture.componentRef.setInput('selectedKeys', selectedKeys);
+        await fixture.whenStable();
+    }
+    async function openFolders(
+        organization = floorFolders,
+        selectedKeys: readonly string[] = [],
+        entities: readonly SceneEntity[] = floors,
+    ): Promise<void> {
+        fixture.componentRef.setInput('foldersEnabled', true);
+        fixture.componentRef.setInput('scene', {projectOpen: true, entities, organization});
         fixture.componentRef.setInput('selectedKeys', selectedKeys);
         await fixture.whenStable();
     }
@@ -41,8 +61,8 @@ describe('SceneEntitiesPanel hierarchy', () => {
     }
     function tree(): HTMLElement {return root.querySelector('[role="tree"]')!;}
     function keys(): string[] {return [...root.querySelectorAll<HTMLElement>('[role="treeitem"]')].map(row => row.dataset['key']!);}
-    async function keydown(key: string): Promise<void> {
-        tree().dispatchEvent(new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true}));
+    async function keydown(key: string, options: KeyboardEventInit = {}): Promise<void> {
+        tree().dispatchEvent(new KeyboardEvent('keydown', {...options, key, bubbles: true, cancelable: true}));
         await fixture.whenStable();
     }
     function dragEvent(type: string, transfer: DataTransfer): DragEvent {
@@ -60,6 +80,16 @@ describe('SceneEntitiesPanel hierarchy', () => {
     }
     function action(label: string): HTMLButtonElement {
         return [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')].find(button => button.textContent?.trim() === label)!;
+    }
+
+    function folder(id: string): HTMLButtonElement {
+        const result = root.querySelector<HTMLButtonElement>(`[data-folder-id="${id}"]`);
+        expect(result, `Missing folder row: ${id}`).toBeTruthy();
+        return result!;
+    }
+
+    function submit(): void {
+        root.querySelector('hierarchy-folder-editor form')?.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
     }
 
     function contextAction(element: HTMLElement, id: string): Extract<ContextMenuItem, { kind: 'action' }> {
@@ -308,5 +338,133 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(root.querySelector('[role="alert"]')?.textContent).toContain('cannot preserve this pose');
         const report = await axe.run(root, {rules: {'color-contrast': {enabled: false}}});
         expect(report.violations.map(violation => violation.id)).toEqual([]);
+    });
+
+    it('moves two keyboard-selected scene roots using the destination picker and waits for accepted membership', async () => {
+        await openFolders();
+        await keydown('ArrowDown');
+        fixture.componentRef.setInput('selectedKeys', ['floor1']);
+        await fixture.whenStable();
+        await keydown('ArrowDown', {shiftKey: true});
+        expect(selectedSet).toHaveBeenLastCalledWith(['floor1', 'floor2']);
+        fixture.componentRef.setInput('selectedKeys', ['floor1', 'floor2']);
+        await fixture.whenStable();
+        action('Move to Folder…').click();
+        await fixture.whenStable();
+        const picker = root.querySelector<HTMLSelectElement>('hierarchy-folder-editor select')!;
+        expect(document.activeElement).toBe(picker);
+        expect([...picker.options].map(option => option.text)).toEqual(['Floor']);
+        submit();
+        expect(organized).toHaveBeenCalledExactlyOnceWith({
+            type: 'move_roots_to_folder', roots: ['floor1', 'floor2'], folder: 'floor',
+        });
+        expect(reparented).not.toHaveBeenCalled();
+        expect(row('floor1').getAttribute('aria-level')).toBe('1');
+        await openFolders({...floorFolders, root_membership: {floor1: 'floor', floor2: 'floor'}}, ['floor1', 'floor2']);
+        expect(row('floor1').getAttribute('aria-level')).toBe('2');
+        expect(row('floor2').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('shows only matching objects and their folder ancestors while searching a collapsed folder', async () => {
+        await openFolders({...floorFolders, root_membership: {floor1: 'floor', floor2: 'floor'}});
+        await keydown('ArrowLeft');
+        expect(root.querySelector('[data-key="floor2"]')).toBeNull();
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = 'FLOOR 2';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(folder('floor').getAttribute('aria-expanded')).toBe('true');
+        expect(row('floor2').getAttribute('aria-level')).toBe('2');
+        expect(root.querySelector('[data-key="floor1"]')).toBeNull();
+        await keydown('ArrowDown');
+        expect(requested).toHaveBeenLastCalledWith('floor2');
+        search.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        await fixture.whenStable();
+        expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('moves roots dropped on a folder but preserves a transform child and a stale drag', async () => {
+        // An omitted parent is the wire representation for a scene root.
+        const rootObject = {...floors[0], parent: undefined};
+        await openFolders(floorFolders, [], [rootObject, entity('child', 'floor1')]);
+        const child = await drag('child');
+        const rejected = dragEvent('dragover', child);
+        folder('floor').dispatchEvent(rejected);
+        expect(rejected.defaultPrevented).toBe(false);
+        folder('floor').dispatchEvent(dragEvent('drop', child));
+        expect(organized).not.toHaveBeenCalled();
+        const accepted = await drag('floor1');
+        const hover = dragEvent('dragover', accepted);
+        folder('floor').dispatchEvent(hover);
+        expect(hover.defaultPrevented).toBe(true);
+        folder('floor').dispatchEvent(dragEvent('drop', accepted));
+        expect(organized).toHaveBeenCalledExactlyOnceWith({type: 'move_roots_to_folder', roots: ['floor1'], folder: 'floor'});
+        expect(reparented).not.toHaveBeenCalled();
+        const stale = await drag('floor1');
+        fixture.componentRef.setInput('contextKey', 'another-scene');
+        await fixture.whenStable();
+        folder('floor').dispatchEvent(dragEvent('drop', stale));
+        expect(organized).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates and renames folders with a keyboard form and focuses the parent after removal', async () => {
+        const nestedFolders: SceneOrganization = {
+            folders: [...floorFolders.folders, {id: 'decals', name: 'Decals', parent: 'floor'}],
+            root_membership: {},
+        };
+        await openFolders(nestedFolders);
+        await keydown('ArrowDown');
+        await keydown('F2');
+        const rename = root.querySelector<HTMLInputElement>('hierarchy-folder-editor input')!;
+        expect(document.activeElement).toBe(rename);
+        expect(rename.value).toBe('Decals');
+        rename.value = 'Floor decals';
+        rename.dispatchEvent(new Event('input', {bubbles: true}));
+        submit();
+        await fixture.whenStable();
+        expect(organized).toHaveBeenLastCalledWith({type: 'rename_folder', id: 'decals', name: 'Floor decals'});
+        contextAction(folder('floor'), 'folder.create').execute();
+        await fixture.whenStable();
+        const name = root.querySelector<HTMLInputElement>('hierarchy-folder-editor input')!;
+        name.value = 'Tiles';
+        name.dispatchEvent(new Event('input', {bubbles: true}));
+        submit();
+        await fixture.whenStable();
+        expect(organized).toHaveBeenLastCalledWith({type: 'create_folder', parent: 'floor', name: 'Tiles'});
+        await keydown('Delete');
+        expect(organized).toHaveBeenLastCalledWith({type: 'remove_folder', id: 'decals'});
+        await openFolders();
+        expect(tree().getAttribute('aria-activedescendant')).toBe(folder('floor').id);
+    });
+
+    it('keeps filtered projection and focus virtualized in a scene with 12,000 folder members', async () => {
+        const entities = Array.from({length: 12000}, (_, index) => entity(`item-${index}`));
+        await openFolders({...floorFolders,
+            root_membership: Object.fromEntries(entities.map(item => [item.key, 'floor']))}, [], entities);
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
+        await keydown('End');
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('item-11999').id);
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = 'item-6000';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBe(2);
+        expect(row('item-6000').getAttribute('aria-level')).toBe('2');
+    });
+
+    it('validates the folder interface with accessibility structure checks and cancels a name draft', async () => {
+        await openFolders(floorFolders, ['floor1']);
+        action('New Folder…').click();
+        await fixture.whenStable();
+        expect(root.querySelector('hierarchy-folder-editor button[type="submit"]')).toHaveProperty('disabled', true);
+        const report = await axe.run(root, {rules: {'color-contrast': {enabled: false}}});
+        expect(report.violations.map(violation => violation.id)).toEqual([]);
+        const field = root.querySelector('hierarchy-folder-editor input')!;
+        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(root.querySelector('hierarchy-folder-editor')).toBeNull();
+        expect(document.activeElement).toBe(tree());
+        expect(organized).not.toHaveBeenCalled();
     });
 });

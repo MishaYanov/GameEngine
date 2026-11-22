@@ -14,6 +14,7 @@ import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
 import {AssetsPanel} from './assets-panel/assets-panel';
 import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.model';
+import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
@@ -62,6 +63,11 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
+    protected readonly hierarchyFoldersEnabled = computed(() => {
+        const names = new Set(this.editorService.capabilities()?.commands.map(command => command.name));
+        return (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
+            .every(name => names.has(name));
+    });
     protected readonly sceneContext = computed(() => `${this.editorService.workspaceGeneration()}:${this.editorService.snapshot()?.active_scene_id ?? ''}`);
     protected readonly sceneLabel = computed(() => {
         const snapshot = this.editorService.snapshot();
@@ -133,6 +139,7 @@ export class EditorWorkspace {
         return {
             projectOpen: snapshot !== null,
             entities: snapshot?.document.entities ?? [],
+            organization: snapshot?.document.organization,
         };
     });
 
@@ -235,4 +242,17 @@ export class EditorWorkspace {
         if (!accepted && context === this.sceneContext()) this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit and try changing the parent again.');
     }
 
+    protected async editHierarchyFolder(command: HierarchyFolderCommand): Promise<void> {
+        if (!this.hierarchyFoldersEnabled() || this.workspaceActionBlocked()) return;
+        const context = this.sceneContext();
+        this.hierarchyError.set(null);
+        const accepted = await this.sceneEditing.withCommittedEdit(async () => {
+            if (context === this.sceneContext() && !this.workspaceActionBlocked()) {
+                await this.editorService.execute(command);
+            }
+        });
+        if (!accepted && context === this.sceneContext()) {
+            this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit and try again.');
+        }
+    }
 }
