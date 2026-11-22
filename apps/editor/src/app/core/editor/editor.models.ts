@@ -225,6 +225,11 @@ export type EditorCommand =
     readonly additive: boolean;
 }
     | { readonly type: 'select'; readonly keys: readonly EntityKey[] }
+    | { readonly type: 'create_folder'; readonly name: string; readonly parent: FolderId | null }
+    | { readonly type: 'rename_folder'; readonly id: FolderId; readonly name: string }
+    | { readonly type: 'move_folder'; readonly id: FolderId; readonly parent: FolderId | null }
+    | { readonly type: 'move_roots_to_folder'; readonly roots: readonly EntityKey[]; readonly folder: FolderId | null }
+    | { readonly type: 'remove_folder'; readonly id: FolderId }
     | { readonly type: 'rename'; readonly key: EntityKey; readonly name: string }
     | { readonly type: 'spawn'; readonly entity: EntitySpec }
     | {
@@ -344,6 +349,7 @@ export interface CommandReceipt {
     readonly changes: WorldChange;
     readonly state_changed: boolean;
     readonly project_changed: boolean;
+    readonly organization_changed?: boolean;
     readonly active_scene_id: SceneId;
     readonly affected_scenes: readonly SceneId[];
 }
@@ -361,6 +367,7 @@ export type EditorCommandUpdate =
     readonly entities: readonly SceneEntity[];
     readonly camera: Camera | null;
     readonly lights: readonly Light[] | null;
+    readonly organization?: SceneOrganization;
 };
 
 export interface CommandDescriptor {

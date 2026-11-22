@@ -55,6 +55,8 @@ pub struct CommandReceipt {
 	pub changes: WorldChange,
 	pub state_changed: bool,
 	pub project_changed: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub organization_changed: bool,
 	pub active_scene_id: crate::scene_catalog::SceneId,
 	pub affected_scenes: Vec<crate::scene_catalog::SceneId>,
 }
@@ -254,6 +256,8 @@ impl Engine {
 		operation(&mut self.session)
 			.map_err(|message| self.error(BackendErrorCode::CommandRejected, message))?;
 		let after = self.session.authored_document();
+		let organization_changed =
+			!Arc::ptr_eq(&before, &after) && before.organization != after.organization;
 		let mut changes = if Arc::ptr_eq(&before, &after) {
 			WorldChange::default()
 		} else {
@@ -297,7 +301,7 @@ impl Engine {
 			})
 			.map(|s| s.id.clone())
 			.collect();
-		if !changes.is_empty() {
+		if organization_changed || !changes.is_empty() {
 			affected_scenes.push(self.session.active_scene_id().clone());
 		}
 		if project_changed {
@@ -338,6 +342,7 @@ impl Engine {
 			changes,
 			state_changed,
 			project_changed,
+			organization_changed,
 		})
 	}
 	fn ensure_event_capacity(&self) -> Result<(), BackendError> {

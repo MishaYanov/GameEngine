@@ -156,6 +156,29 @@ function delta(
     };
 }
 
+it('applies an empty organization delta when the last folder is removed', () => {
+    const initial = snapshot(1);
+    const previous: EditorSnapshot = {
+        ...initial,
+        document: {
+            ...initial.document,
+            schema_version: 6,
+            organization: {folders: [{id: 'floor', name: 'Floor'}], root_membership: {}},
+        },
+    };
+    const next = delta(snapshot(2));
+    const update = {
+        ...next,
+        receipt: {...next.receipt, organization_changed: true},
+        organization: {folders: [], root_membership: {}},
+    };
+    const result = applyEditorUpdate(previous, update);
+    expect(result.document.organization).toEqual(update.organization);
+    expect(result.document.entities).toBe(previous.document.entities);
+    expect(() => applyEditorUpdate(previous, {...update, organization: undefined})).toThrow('inconsistent');
+    expect(() => applyEditorUpdate(initial, update)).toThrow('inconsistent');
+});
+
 function entity(key: string): SceneEntity {
     return {
         key,

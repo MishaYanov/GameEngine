@@ -205,6 +205,7 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
         !strings(receipt['affected_scenes']) ||
         typeof receipt['state_changed'] !== 'boolean' ||
         typeof receipt['project_changed'] !== 'boolean' ||
+        (receipt['organization_changed'] !== undefined && typeof receipt['organization_changed'] !== 'boolean') ||
         !record(changes) ||
         !strings(changes['changed_entities']) ||
         !strings(changes['removed_entities']) ||
@@ -234,6 +235,7 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
         changes['topology_changed'] ||
         receipt['project_changed'] ||
         changes['removed_entities'].length > 0 ||
+        ((value['organization'] !== undefined) !== (receipt['organization_changed'] === true)) ||
         !Array.isArray(value['entities']) ||
         !value['entities'].every(entity) ||
         (changes['camera_changed'] ? !camera(value['camera'], previous.document.schema_version) : value['camera'] !== null) ||
@@ -262,14 +264,19 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
                 return replacement ?? item;
             });
     if (replaced !== replacements.size) return invalid();
+    if (update.organization !== undefined &&
+        (previous.document.schema_version !== 6 || !validOrganization(update.organization, entities))) {
+        return invalid();
+    }
     const document =
-        replacements.size === 0 && update.camera === null && update.lights === null
+        replacements.size === 0 && update.camera === null && update.lights === null && update.organization === undefined
             ? previous.document
             : {
                 ...previous.document,
                 entities,
                 camera: update.camera ?? previous.document.camera,
                 lights: update.lights ?? previous.document.lights,
+                ...(update.organization === undefined ? {} : {organization: update.organization}),
             };
     // Assign state fields explicitly so unexpected wire keys cannot overwrite document/project.
     return {

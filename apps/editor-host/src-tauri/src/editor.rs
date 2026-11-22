@@ -243,6 +243,7 @@ impl EditorWorkspace {
 			entities,
 			camera: receipt.changes.camera_changed.then(|| after.camera.clone()),
 			lights: receipt.changes.lights_changed.then(|| after.lights.clone()),
+			organization: receipt.organization_changed.then(|| after.organization.clone()),
 			receipt,
 		})
 	}

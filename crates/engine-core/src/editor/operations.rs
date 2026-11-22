@@ -4,6 +4,7 @@ mod camera;
 use camera::{camera_forward, camera_right, dolly, frame_selection, orbit};
 mod entities;
 use entities::{duplicate, fresh_key, reparent};
+mod organization;
 mod transform;
 use std::collections::{HashMap, HashSet};
 use transform::{
@@ -215,6 +216,9 @@ pub(super) fn apply(
 				.collect();
 			data.entities
 				.retain(|entity| !removed.contains(&entity.key));
+			data.organization
+				.root_membership
+				.retain(|key, _| !removed.contains(key));
 			data.bindings.retain(|_, key| !removed.contains(key));
 			data.camera.clear_removed_targets(&removed);
 			selection.clear();
@@ -224,6 +228,19 @@ pub(super) fn apply(
 			parent,
 			keep_world,
 		} => reparent(data, &key, parent.as_deref(), keep_world)?,
+		EditorCommandDto::CreateFolder { name, parent } => {
+			organization::create(&mut data.organization, name, parent)?
+		}
+		EditorCommandDto::RenameFolder { id, name } => {
+			organization::rename(&mut data.organization, &id, name)?
+		}
+		EditorCommandDto::MoveFolder { id, parent } => {
+			organization::move_folder(&mut data.organization, &id, parent)?
+		}
+		EditorCommandDto::MoveRootsToFolder { roots, folder } => {
+			organization::move_roots(data, roots, folder)?
+		}
+		EditorCommandDto::RemoveFolder { id } => organization::remove(&mut data.organization, &id)?,
 		EditorCommandDto::SetMaterial { key, material } => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].material = material;

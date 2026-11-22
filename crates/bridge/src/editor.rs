@@ -19,6 +19,8 @@ pub enum EditorCommandUpdateDto {
 		entities: Vec<engine_core::scene_data::EntityData>,
 		camera: Option<engine_core::scene_data::CameraData>,
 		lights: Option<Vec<engine_core::scene_data::LightData>>,
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		organization: Option<engine_core::scene_data::SceneOrganization>,
 	},
 }
 

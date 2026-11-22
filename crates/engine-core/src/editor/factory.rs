@@ -12,7 +12,9 @@ use crate::{
 		CommandDescriptorDto, EditorCommandDto, EditorCommandRequest, MAX_COLLIDER_UPDATES,
 		SceneBindingTarget, TransformDto,
 	},
-	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, SceneData, validate_model_path},
+	scene_data::{
+		CURRENT_SCHEMA_VERSION, CameraData, FolderRecord, SceneData, validate_model_path,
+	},
 };
 
 pub const MAX_COMMAND_BYTES: usize = 4 * 1024 * 1024;
@@ -139,6 +141,22 @@ impl CommandFactory {
 					validate_key(parent)?;
 				}
 			}
+			EditorCommandDto::CreateFolder { name, .. }
+			| EditorCommandDto::RenameFolder { name, .. } => FolderRecord::validate_name(name)?,
+			EditorCommandDto::MoveRootsToFolder { roots, .. } => {
+				target_count(roots.len())?;
+				if roots.is_empty() {
+					return Err("Select one or more scene roots to move".into());
+				}
+				let mut unique = HashSet::with_capacity(roots.len());
+				for key in roots {
+					validate_key(key.as_str())?;
+					if !unique.insert(key) {
+						return Err("A folder move may target each object only once".into());
+					}
+				}
+			}
+			EditorCommandDto::MoveFolder { .. } | EditorCommandDto::RemoveFolder { .. } => {}
 			EditorCommandDto::SetMaterial { key, material } => {
 				validate_key(key)?;
 				if let Some(material) = material
@@ -422,6 +440,17 @@ impl CommandFactory {
 			),
 			("delete_selection", "Delete group", "entity", true, false),
 			("reparent", "Change parent", "hierarchy", true, false),
+			("create_folder", "Create folder", "hierarchy", true, false),
+			("rename_folder", "Rename folder", "hierarchy", true, false),
+			("move_folder", "Move folder", "hierarchy", true, false),
+			(
+				"move_roots_to_folder",
+				"Move objects to folder",
+				"hierarchy",
+				true,
+				false,
+			),
+			("remove_folder", "Remove folder", "hierarchy", true, false),
 			(
 				"set_material",
 				"Set material override",

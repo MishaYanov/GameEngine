@@ -47,6 +47,7 @@ impl Engine {
 			changes,
 			state_changed: true,
 			project_changed: false,
+			organization_changed: false,
 			active_scene_id: self.session.active_scene_id().clone(),
 			affected_scenes: self
 				.session

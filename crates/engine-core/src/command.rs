@@ -1,7 +1,10 @@
 //! Input-independent transport contracts. Scene payloads are validated by the domain.
+use crate::EntityKey;
 use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
-use crate::scene_data::{CameraData, ColliderData, LightData, MaterialOverrideData, SceneData};
+use crate::scene_data::{
+	CameraData, ColliderData, FolderId, LightData, MaterialOverrideData, SceneData,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -143,6 +146,25 @@ pub enum EditorCommandDto {
 		key: String,
 		parent: Option<String>,
 		keep_world: bool,
+	},
+	CreateFolder {
+		name: String,
+		parent: Option<FolderId>,
+	},
+	RenameFolder {
+		id: FolderId,
+		name: String,
+	},
+	MoveFolder {
+		id: FolderId,
+		parent: Option<FolderId>,
+	},
+	MoveRootsToFolder {
+		roots: Vec<EntityKey>,
+		folder: Option<FolderId>,
+	},
+	RemoveFolder {
+		id: FolderId,
 	},
 	SetMaterial {
 		key: String,

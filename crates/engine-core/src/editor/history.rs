@@ -2,7 +2,7 @@ use crate::{
 	EntityKey,
 	project::ProjectData,
 	scene_catalog::SceneId,
-	scene_data::{CameraData, EntityData, LightData, SceneData},
+	scene_data::{CameraData, EntityData, FolderRecord, LightData, SceneData, SceneOrganization},
 };
 use std::{
 	collections::{HashMap, HashSet, VecDeque},
@@ -30,6 +30,7 @@ pub(super) struct Patch {
 		std::collections::BTreeMap<String, EntityKey>,
 		std::collections::BTreeMap<String, EntityKey>,
 	)>,
+	organization: Option<(SceneOrganization, SceneOrganization)>,
 	selection: (Vec<EntityKey>, Vec<EntityKey>),
 	bytes: usize,
 	_label: String,
@@ -87,6 +88,8 @@ impl Patch {
 			(before.lights != after.lights).then(|| (before.lights.clone(), after.lights.clone()));
 		let bindings = (before.bindings != after.bindings)
 			.then(|| (before.bindings.clone(), after.bindings.clone()));
+		let organization = (before.organization != after.organization)
+			.then(|| (before.organization.clone(), after.organization.clone()));
 		// Count owned Rust storage, including the two selection snapshots and
 		// heap strings. JSON length alone undercounts these allocations.
 		let mut bytes = size_of::<Self>()
@@ -150,6 +153,11 @@ impl Patch {
 				}
 			}
 		}
+		if let Some((a, b)) = &organization {
+			bytes = bytes
+				.saturating_add(organization_storage(a))
+				.saturating_add(organization_storage(b));
+		}
 		let project = (project_before != project_after)
 			.then(|| (project_before.clone(), project_after.clone()));
 		if let Some((a, b)) = &project {
@@ -191,6 +199,7 @@ impl Patch {
 			camera,
 			lights,
 			bindings,
+			organization,
 			selection: (selection_before.to_vec(), selection_after.to_vec()),
 			bytes,
 			_label: label,
@@ -202,6 +211,7 @@ impl Patch {
 			&& self.camera.is_none()
 			&& self.lights.is_none()
 			&& self.bindings.is_none()
+			&& self.organization.is_none()
 	}
 	fn apply(
 		&self,
@@ -291,6 +301,12 @@ impl Patch {
 			}
 			next.bindings = if forward { b } else { a }.clone();
 		}
+		if let Some((a, b)) = &self.organization {
+			if &current.organization != if forward { a } else { b } {
+				return Err("Undo scene folder state no longer matches".into());
+			}
+			next.organization = if forward { b } else { a }.clone();
+		}
 		next.validate()?;
 		let selection = if forward {
 			&self.selection.1
@@ -312,6 +328,29 @@ impl Patch {
 		project.validate_scene_for(&self.scene_id, &next)?;
 		Ok((next, project.clone(), selection.clone()))
 	}
+}
+fn organization_storage(value: &SceneOrganization) -> usize {
+	let mut bytes = value
+		.folders
+		.capacity()
+		.saturating_mul(size_of::<FolderRecord>());
+	for folder in &value.folders {
+		bytes = bytes
+			.saturating_add(folder.id.as_str().len())
+			.saturating_add(folder.name.capacity())
+			.saturating_add(folder.parent.as_ref().map_or(0, |id| id.as_str().len()));
+	}
+	if !value.root_membership.is_empty() {
+		// Allow for BTree node pointers, unused slots and allocator rounding.
+		bytes = bytes.saturating_add(1024);
+	}
+	for (key, folder) in &value.root_membership {
+		bytes = bytes
+			.saturating_add(256)
+			.saturating_add(key.as_str().len())
+			.saturating_add(folder.as_str().len());
+	}
+	bytes
 }
 #[derive(Default)]
 pub(super) struct History {

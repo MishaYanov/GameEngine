@@ -76,6 +76,16 @@ pub(super) fn duplicate(
 		copies.push(copy);
 	}
 	*selection = selection.iter().map(|key| keys[key].clone()).collect();
+	let folder_copies = keys
+		.iter()
+		.filter_map(|(original, copy)| {
+			data.organization
+				.root_membership
+				.get(original)
+				.map(|folder| (copy.clone(), folder.clone()))
+		})
+		.collect::<Vec<_>>();
+	data.organization.root_membership.extend(folder_copies);
 	// Existing semantic role bindings continue to identify the originals.
 	data.entities.extend(copies);
 	Ok(())
@@ -116,6 +126,11 @@ pub(super) fn reparent(
 		None
 	};
 	data.entities[index].parent = parent_index.map(|parent| data.entities[parent].key.clone());
+	if parent_index.is_some() {
+		data.organization
+			.root_membership
+			.remove(&data.entities[index].key);
+	}
 	if let Some(transform) = transform {
 		data.entities[index].transform = transform;
 	}

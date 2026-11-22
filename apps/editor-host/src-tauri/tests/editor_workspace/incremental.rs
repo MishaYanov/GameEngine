@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn folder_changes_roundtrip_without_a_render_change_and_can_clear_the_last_folder() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let mut client = workspace.backend.snapshot().unwrap();
+	let update = incremental(
+		&mut workspace,
+		Command::CreateFolder {
+			name: "Floor".into(),
+			parent: None,
+		},
+	);
+	let EditorCommandUpdateDto::Delta {
+		receipt,
+		entities,
+		organization: Some(organization),
+		..
+	} = &update
+	else {
+		panic!("expected an organization-only patch");
+	};
+	assert!(receipt.organization_changed);
+	assert!(receipt.changes.is_empty());
+	assert_eq!(receipt.affected_scenes, [client.active_scene_id.clone()]);
+	assert!(entities.is_empty());
+	let id = organization.folders[0].id.clone();
+	client = apply_incremental(client, &update);
+	for command in [
+		Command::MoveRootsToFolder {
+			roots: vec![EntityKey::new("a").unwrap()],
+			folder: Some(id.clone()),
+		},
+		Command::RemoveFolder { id },
+		Command::Undo,
+		Command::Redo,
+	] {
+		let update = incremental(&mut workspace, command);
+		let wire = serde_json::to_value(&update).unwrap();
+		assert_eq!(wire["receipt"]["organization_changed"], true);
+		assert!(wire["organization"]["folders"].is_array());
+		assert!(wire["organization"]["root_membership"].is_object());
+		let update = serde_json::from_value(wire).unwrap();
+		client = apply_incremental(client, &update);
+		assert_eq!(
+			serde_json::to_value(&client).unwrap(),
+			serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+		);
+	}
+	assert!(client.document.organization.is_empty());
+	assert!(!client.dirty);
+}
+
+#[test]
 fn incremental_commands_match_snapshots_through_edit_history_and_play() {
 	let fixture = Fixture::new();
 	let mut workspace = fixture.open();

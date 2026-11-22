@@ -555,6 +555,7 @@ fn apply_incremental(
 			entities,
 			camera,
 			lights,
+			organization,
 			..
 		} => {
 			let mut document = previous.document;
@@ -571,6 +572,9 @@ fn apply_incremental(
 			}
 			if let Some(lights) = lights {
 				document.lights = lights.clone();
+			}
+			if let Some(organization) = organization {
+				document.organization = organization.clone();
 			}
 			let mut json = serde_json::to_value(state).unwrap();
 			json["document"] = serde_json::to_value(document).unwrap();
