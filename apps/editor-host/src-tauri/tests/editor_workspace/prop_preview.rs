@@ -1,6 +1,6 @@
 use super::*;
 use bridge::viewport::PropPreviewTargetDto;
-use editor::prefab_sources::PrefabSourceDraftDto;
+use editor::prefab_sources::{PrefabSourceDraftDto, PropDraftEdit};
 
 const PROP_PATH: &str = "prefabs/table.json";
 
@@ -35,11 +35,9 @@ fn source_preview_selection_and_frame_are_scoped_without_editing_the_scene() {
 	let preview = workspace
 		.open_prop_preview(target.clone(), revision, generation, 2)
 		.unwrap();
-	assert!(
-		workspace
-			.open_prop_preview(target, revision, generation, 1)
-			.is_err()
-	);
+	assert!(workspace
+		.open_prop_preview(target, revision, generation, 1)
+		.is_err());
 	assert_eq!(workspace.active_prop_preview().unwrap().frame_request, 0);
 	let selected = workspace
 		.select_prop_preview(&preview.token, Some(EntityKey::new("a").unwrap()))
@@ -48,11 +46,9 @@ fn source_preview_selection_and_frame_are_scoped_without_editing_the_scene() {
 		selected.selection.as_ref().map(EntityKey::as_str),
 		Some("a")
 	);
-	assert!(
-		workspace
-			.select_prop_preview(&preview.token, Some(EntityKey::new("other").unwrap()))
-			.is_err()
-	);
+	assert!(workspace
+		.select_prop_preview(&preview.token, Some(EntityKey::new("other").unwrap()))
+		.is_err());
 	workspace.frame_prop_preview(&preview.token).unwrap();
 	assert_eq!(workspace.active_prop_preview().unwrap().frame_request, 1);
 	assert_eq!(
@@ -95,24 +91,20 @@ fn pinned_inspection_stays_available_without_its_source_and_invalidates_on_scene
 		.unwrap();
 	let render_document = workspace.active_prop_preview().unwrap().document;
 	assert_eq!(render_document.entities.len(), 2);
-	assert!(
-		render_document
-			.entities
-			.iter()
-			.all(|entity| entity.linked_prefab.is_none())
-	);
+	assert!(render_document
+		.entities
+		.iter()
+		.all(|entity| entity.linked_prefab.is_none()));
 	let anchor = render_document
 		.entities
 		.iter()
 		.find(|entity| entity.key == root)
 		.unwrap();
 	assert_eq!(anchor.transform.position, [0.0; 3]);
-	assert!(
-		render_document
-			.entities
-			.iter()
-			.all(|entity| entity.key.as_str() != "a")
-	);
+	assert!(render_document
+		.entities
+		.iter()
+		.all(|entity| entity.key.as_str() != "a"));
 	let newer = workspace
 		.open_prop_preview(target, revision(&workspace), workspace.generation, 2)
 		.unwrap();
@@ -145,16 +137,12 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 		draft_id: draft.draft_id,
 	};
 	let wrong_generation = workspace.generation + 1;
-	assert!(
-		workspace
-			.open_prop_preview(target.clone(), revision(&workspace), wrong_generation, 3)
-			.is_err()
-	);
-	assert!(
-		workspace
-			.open_prop_preview(target.clone(), 0, workspace.generation, 1)
-			.is_err()
-	);
+	assert!(workspace
+		.open_prop_preview(target.clone(), revision(&workspace), wrong_generation, 3)
+		.is_err());
+	assert!(workspace
+		.open_prop_preview(target.clone(), 0, workspace.generation, 1)
+		.is_err());
 	let preview = workspace
 		.open_prop_preview(
 			target.clone(),
@@ -165,12 +153,187 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 		.unwrap();
 	run(&mut workspace, Command::StartPlay);
 	assert!(workspace.active_prop_preview().is_none());
-	assert!(
-		workspace
-			.open_prop_preview(target, revision(&workspace), workspace.generation, 3)
-			.is_err()
-	);
+	assert!(workspace
+		.open_prop_preview(target, revision(&workspace), workspace.generation, 3)
+		.is_err());
 	run(&mut workspace, Command::StopPlay);
 	assert!(workspace.active_prop_preview().is_none());
 	assert!(!workspace.close_prop_preview(&preview.token));
+}
+
+#[test]
+fn accepted_draft_edits_refresh_the_pinned_preview_and_keep_the_scene_and_disk_unchanged() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let draft = create_source(&mut workspace);
+	let path = fixture.0.join(PROP_PATH);
+	let bytes = fs::read(&path).unwrap();
+	let scene = serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap();
+	let preview = workspace
+		.open_prop_preview(
+			PropPreviewTargetDto::Source {
+				draft_id: draft.draft_id.clone(),
+			},
+			revision(&workspace),
+			workspace.generation,
+			1,
+		)
+		.unwrap();
+	let mut candidate = draft.prefab.clone();
+	candidate["entities"][0]["name"] = serde_json::json!("Edited local source");
+	let applied = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			draft.draft_revision,
+			PropDraftEdit::Apply { prefab: candidate },
+		)
+		.unwrap();
+	assert!(applied.dirty && applied.can_undo && !applied.can_redo);
+	let frame = workspace.active_prop_preview().unwrap();
+	assert_eq!(frame.state.token, preview.token);
+	assert_eq!(frame.content_revision, applied.draft_revision);
+	assert_eq!(frame.document.entities[0].name, "Edited local source");
+	assert!(!workspace.prop_preview_content_is_current(&preview.token, draft.draft_revision));
+	assert!(workspace
+		.edit_prop_draft(&draft.draft_id, draft.draft_revision, PropDraftEdit::Undo)
+		.is_err());
+	assert!(workspace.close_prefab_source(&draft.draft_id).is_err());
+	assert!(workspace
+		.reload_with_policy(revision(&workspace), ReloadPolicy::DiscardUnsaved)
+		.is_err());
+	assert_eq!(fs::read(&path).unwrap(), bytes);
+	assert_eq!(
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
+		scene
+	);
+	let undone = workspace
+		.edit_prop_draft(&draft.draft_id, applied.draft_revision, PropDraftEdit::Undo)
+		.unwrap();
+	assert!(!undone.dirty && undone.can_redo);
+	assert_eq!(undone.prefab, draft.prefab);
+	let redone = workspace
+		.edit_prop_draft(&draft.draft_id, undone.draft_revision, PropDraftEdit::Redo)
+		.unwrap();
+	assert!(redone.dirty);
+	let discarded = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			redone.draft_revision,
+			PropDraftEdit::Discard,
+		)
+		.unwrap();
+	assert!(!discarded.dirty && !discarded.can_undo && !discarded.can_redo);
+	assert_eq!(discarded.prefab, draft.prefab);
+	assert_eq!(fs::read(&path).unwrap(), bytes);
+	workspace.close_prefab_source(&draft.draft_id).unwrap();
+}
+
+#[test]
+fn prop_save_updates_source_without_updating_existing_pins_and_refuses_external_changes() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let draft = create_source(&mut workspace);
+	let placed = workspace
+		.instantiate_linked_source(
+			PROP_PATH,
+			&draft.draft_id,
+			[4.0, 0.0, 0.0],
+			Default::default(),
+			revision(&workspace),
+		)
+		.unwrap();
+	let root = &placed.selection[0];
+	let mut candidate = draft.prefab.clone();
+	candidate["entities"][0]["name"] = serde_json::json!("Saved Prop part");
+	let applied = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			draft.draft_revision,
+			PropDraftEdit::Apply { prefab: candidate },
+		)
+		.unwrap();
+	let saved = workspace
+		.save_prop_draft(&draft.draft_id, applied.draft_revision)
+		.unwrap();
+	assert!(!saved.draft.dirty);
+	assert!(saved.draft.can_undo);
+	assert_eq!(saved.snapshot.revision, placed.revision);
+	assert_eq!(saved.snapshot.document, placed.document);
+	assert!(
+		workspace
+			.linked_prefab_status(root, revision(&workspace))
+			.unwrap()
+			.unwrap()
+			.source_changed
+	);
+	let mut candidate = saved.draft.prefab.clone();
+	candidate["entities"][0]["name"] = serde_json::json!("Local after save");
+	let applied = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			applied.draft_revision,
+			PropDraftEdit::Apply { prefab: candidate },
+		)
+		.unwrap();
+	let path = fixture.0.join(PROP_PATH);
+	let mut external = fs::read(&path).unwrap();
+	external.extend_from_slice(b"\n");
+	fs::write(&path, &external).unwrap();
+	assert!(workspace
+		.save_prop_draft(&draft.draft_id, applied.draft_revision)
+		.err()
+		.unwrap()
+		.contains("changed on disk"));
+	assert_eq!(fs::read(&path).unwrap(), external);
+	let undo = workspace
+		.edit_prop_draft(&draft.draft_id, applied.draft_revision, PropDraftEdit::Undo)
+		.unwrap();
+	assert_eq!(undo.prefab, saved.draft.prefab);
+}
+
+#[test]
+fn position_gesture_is_one_owned_draft_edit_and_rejects_obsolete_releases() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let draft = create_source(&mut workspace);
+	let preview = workspace
+		.open_prop_preview(
+			PropPreviewTargetDto::Source {
+				draft_id: draft.draft_id.clone(),
+			},
+			revision(&workspace),
+			workspace.generation,
+			1,
+		)
+		.unwrap();
+	let child = EntityKey::new("a").unwrap();
+	assert!(workspace
+		.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [1.0; 3])
+		.is_err());
+	workspace
+		.select_prop_preview(&preview.token, Some(child.clone()))
+		.unwrap();
+	let moved = workspace
+		.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [1.0; 3])
+		.unwrap();
+	assert_eq!(moved.draft_revision, draft.draft_revision + 1);
+	assert_eq!(
+		workspace.active_prop_preview().unwrap().document.entities[0]
+			.transform
+			.position,
+		[1.0; 3]
+	);
+	assert!(workspace
+		.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [3.0; 3])
+		.is_err());
+	let undone = workspace
+		.edit_prop_draft(&draft.draft_id, moved.draft_revision, PropDraftEdit::Undo)
+		.unwrap();
+	assert!(!undone.dirty && !undone.can_undo && undone.can_redo);
+	assert_eq!(undone.prefab, draft.prefab);
+	assert_eq!(revision(&workspace), preview.revision);
+	workspace.close_prop_preview(&preview.token);
+	assert!(workspace
+		.apply_prop_preview_position(&preview.token, undone.draft_revision, &child, [1.0; 3])
+		.is_err());
 }

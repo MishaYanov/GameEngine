@@ -17,7 +17,7 @@ import type {
     ViewportSceneLoad,
     ViewportStatus
 } from '../../../core/editor/editor.models';
-import type {LinkedPrefabStatus, PrefabSourceDraft} from '../../../core/editor/linked-prefabs.models';
+import type {LinkedPrefabStatus, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
 import {SceneEditingService} from './scene-editing.service';
@@ -134,6 +134,11 @@ describe('Workspace live editing flow', () => {
     let assets: readonly ModelAsset[];
     let linkedStatus: LinkedPrefabStatus | null;
     let openPropSource: (revision: number) => Promise<PrefabSourceDraft>;
+    let propDraft: PrefabSourceDraft | null;
+    let propDraftListener: ((event: TauriEvent<PrefabSourceDraft>) => void) | undefined;
+    let previousProp: PrefabSourceDraft['prefab'] | null;
+    let nextProp: PrefabSourceDraft['prefab'] | null;
+    let savePropFailure: string | null;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -159,9 +164,17 @@ describe('Workspace live editing flow', () => {
         assets = [];
         linkedStatus = null;
         openPropSource = async revision => propSource(revision);
+        propDraft = null;
+        propDraftListener = undefined;
+        previousProp = null;
+        nextProp = null;
+        savePropFailure = null;
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
+            }
+            if (name === 'editor://prop-draft-changed') {
+                propDraftListener = handler as (event: TauriEvent<PrefabSourceDraft>) => void;
             }
             return () => undefined;
         });
@@ -194,7 +207,48 @@ describe('Workspace live editing flow', () => {
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_assets') return assets;
             if (operation === 'editor_prefab_source_open') {
-                return openPropSource((args as {expectedRevision: number}).expectedRevision);
+                propDraft = await openPropSource((args as {expectedRevision: number}).expectedRevision);
+                return propDraft;
+            }
+            if (operation === 'editor_prop_draft_edit') {
+                const {draftId, expectedDraftRevision, edit} = args as {draftId: string; expectedDraftRevision: number; edit: PropDraftEdit};
+                const draft = propDraft!;
+                expect(draft.draft_id).toBe(draftId);
+                expect(draft.draft_revision).toBe(expectedDraftRevision);
+                let prefab = draft.prefab;
+                switch (edit.type) {
+                    case 'apply':
+                        previousProp = prefab;
+                        nextProp = null;
+                        prefab = edit.prefab;
+                        break;
+                    case 'undo':
+                        nextProp = prefab;
+                        prefab = previousProp!;
+                        previousProp = null;
+                        break;
+                    case 'redo':
+                        previousProp = prefab;
+                        prefab = nextProp!;
+                        nextProp = null;
+                        break;
+                    case 'discard':
+                        prefab = propSource(draft.revision).prefab;
+                        previousProp = null;
+                        nextProp = null;
+                        break;
+                }
+                propDraft = {...draft, prefab, draft_revision: expectedDraftRevision + 1,
+                    dirty: edit.type !== 'discard', can_undo: previousProp !== null, can_redo: nextProp !== null};
+                return propDraft;
+            }
+            if (operation === 'editor_prop_draft_save') {
+                const {draftId, expectedDraftRevision} = args as {draftId: string; expectedDraftRevision: number};
+                expect(propDraft?.draft_id).toBe(draftId);
+                expect(propDraft?.draft_revision).toBe(expectedDraftRevision);
+                if (savePropFailure) throw new Error(savePropFailure);
+                propDraft = {...propDraft!, dirty: false, draft_revision: expectedDraftRevision + 1, fingerprint: 'new saved fingerprint'};
+                return {draft: propDraft, snapshot: nativeState};
             }
             if (operation === 'editor_prefab_source_close') return undefined;
             if (operation === 'editor_prop_preview_open') {
@@ -977,6 +1031,77 @@ describe('Workspace live editing flow', () => {
         expect(invoke).toHaveBeenCalledWith('editor_prefab_source_close', {draftId: 'arch-draft'});
         expect(root.querySelector('editor-prop-workspace')).toBeNull();
         expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Scene');
+    });
+
+    it('applies and undoes typed Prop fields, keeps the preview owner, and guards a changed source file on close', async () => {
+        openPropSource = async revision => ({...propSource(revision), draft_revision: 1, dirty: false, can_undo: false, can_redo: false});
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('prop-object-editor')).not.toBeNull());
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const position = () => root.querySelector<HTMLInputElement>('input[aria-label="Prop local position X"]')!;
+        position().focus();
+        position().value = '3';
+        position().dispatchEvent(new Event('input', {bubbles: true}));
+        position().dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+        await vi.waitFor(() => expect(propDraft?.prefab.entities[0].transform.position[0]).toBe(3));
+        await fixture.whenStable();
+        expect(root.querySelector('editor-prop-workspace')?.textContent).toContain('Unsaved Prop changes');
+        const previewOpens = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'editor_prop_preview_open').length;
+        const leaseCount = previewOpens();
+        button('Undo Prop').click();
+        await vi.waitFor(() => expect(position().value).toBe('0'));
+        button('Redo Prop').click();
+        await vi.waitFor(() => expect(position().value).toBe('3'));
+        expect(editor.dirty()).toBe(false);
+        expect(commands).toEqual([]);
+        expect(previewOpens()).toBe(leaseCount);
+
+        savePropFailure = 'The source changed on disk.';
+        button('Close Prop').click();
+        await vi.waitFor(() => expect(root.querySelector('dialog[open]')?.textContent).toContain('Unsaved Prop changes'));
+        button('Save Prop and Continue').click();
+        await vi.waitFor(() => expect(root.querySelector('dialog[open]')?.textContent).toContain('changed on disk'));
+        expect(propDraft?.dirty).toBe(true);
+        expect(root.querySelector('editor-prop-workspace')).not.toBeNull();
+
+        savePropFailure = null;
+        button('Save Prop and Continue').click();
+        await vi.waitFor(() => expect(root.querySelector('editor-prop-workspace')).toBeNull());
+        expect(propDraft?.dirty).toBe(false);
+        expect(editor.dirty()).toBe(false);
+    });
+
+    it('adopts only advancing native Prop draft events for the current source', async () => {
+        openPropSource = async revision => ({...propSource(revision), draft_revision: 1, dirty: false, can_undo: false, can_redo: false});
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('prop-object-editor')).not.toBeNull());
+        const draft = propDraft!;
+        const moved = {...draft, draft_revision: 2, dirty: true, can_undo: true, prefab: {
+            ...draft.prefab,
+            entities: draft.prefab.entities.map((entity, index) => index === 0
+                ? {...entity, transform: {...entity.transform, position: [5, 0, 0] as const}} : entity),
+        }};
+        const publish = async (payload: PrefabSourceDraft) => {
+            propDraftListener?.({event: 'editor://prop-draft-changed', id: 1, payload});
+            await fixture.whenStable();
+        };
+        const position = () => root.querySelector<HTMLInputElement>('input[aria-label="Prop local position X"]')?.value;
+        await publish({...moved, draft_id: 'other-draft'});
+        expect(position()).toBe('0');
+        await publish(moved);
+        expect(position()).toBe('5');
+        await publish(draft);
+        expect(position()).toBe('5');
+        expect(editor.dirty()).toBe(false);
     });
 
     it('reports a rejected parent change and clears its error when another project opens', async () => {

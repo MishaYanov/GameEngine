@@ -523,6 +523,26 @@ export class EditorService {
         return this.native<void>('editor_prefab_source_close', {draftId});
     }
 
+    editPropDraft(
+        draftId: string, expectedDraftRevision: number,
+        edit: import('./linked-prefabs.models').PropDraftEdit, expectedGeneration: number,
+    ): Promise<PrefabSourceDraft> {
+        return this.enqueue('editor_prop_draft_edit', async () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<PrefabSourceDraft>('editor_prop_draft_edit', {draftId, expectedDraftRevision, edit});
+        }, false, expectedGeneration);
+    }
+
+    savePropDraft(draftId: string, expectedDraftRevision: number, expectedGeneration: number): Promise<PrefabSourceDraft> {
+        return this.enqueue('editor_prop_draft_save', async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<PrefabSourceSave>('editor_prop_draft_save', {draftId, expectedDraftRevision});
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result.draft;
+        }, false, expectedGeneration);
+    }
+
     linkedPrefabStatus(rootKey: string, expectedGeneration?: number, expectedRevision?: number): Promise<LinkedPrefabStatus | null> {
         return this.queue.then(async () => {
             this.requireGeneration(expectedGeneration);

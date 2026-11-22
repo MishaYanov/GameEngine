@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, inject, signal} from '@angular/core';
+import {Component, computed, DestroyRef, inject, signal, viewChild} from '@angular/core';
 import {RouterOutlet} from "@angular/router";
 import {EditorHeader} from "./components/editor-header/editor-header";
 import {EditorWorkspace} from './workspace/editor-workspace';
@@ -46,6 +46,7 @@ export class Editor {
         !this.editorService.snapshot()?.transaction
     );
     protected readonly canOpenProject = computed(() => this.canExit() && !this.editorService.playing());
+    private readonly workspace = viewChild(EditorWorkspace);
     private destroyed = false;
 
     async ngOnInit(): Promise<void> {
@@ -64,6 +65,8 @@ export class Editor {
 
     protected async openProject(): Promise<void> {
         if (!this.canOpenProject()) return;
+        const workspace = this.workspace();
+        if ((workspace && !await workspace.reviewPropNavigation()) || !this.canOpenProject()) return;
 
         this.openError.set(null);
         this.openMessage.set(OpenMessages.CREATING);
@@ -131,6 +134,8 @@ export class Editor {
 
     protected async exitEditor(): Promise<void> {
         if (!this.canExit()) return;
+        const workspace = this.workspace();
+        if ((workspace && !await workspace.reviewPropNavigation()) || !this.canExit()) return;
         this.openError.set(null);
         this.openMessage.set(OpenMessages.EXITING);
         let closing = false;

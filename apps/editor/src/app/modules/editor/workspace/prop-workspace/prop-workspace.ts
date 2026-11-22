@@ -3,10 +3,11 @@ import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {PropWorkspaceService} from './prop-workspace.service';
 import {PropPreviewService} from './prop-preview.service';
+import {PropObjectEditor} from './prop-object-editor';
 
 @Component({
     selector: 'editor-prop-workspace',
-    imports: [EditorIcon],
+    imports: [EditorIcon, PropObjectEditor],
     templateUrl: './prop-workspace.html',
     styleUrl: './prop-workspace.scss',
 })
@@ -28,10 +29,4 @@ export class PropWorkspace {
         return component.data.kind.replaceAll('_', ' ');
     }
 
-    protected handleKey(event: KeyboardEvent): void {
-        if (event.key !== 'Escape' || event.defaultPrevented) return;
-        event.preventDefault();
-        event.stopPropagation();
-        this.closed.emit();
-    }
 }

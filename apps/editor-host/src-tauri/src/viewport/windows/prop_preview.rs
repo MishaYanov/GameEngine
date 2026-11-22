@@ -1,23 +1,30 @@
 //! Preview rendering and navigation on the existing child window and device.
 use super::*;
 use crate::{
+	editor::prefab_sources::PropDraftEdit,
 	editor::prop_preview::PropPreviewFrame,
 	viewport_tools::{adaptive_grid_spacing, pick_nearest, EditorCamera, PickTarget},
 };
 use bridge::viewport::ViewportProjection;
 use glam::Vec2;
 use renderer::{vulkan::Light, EditorGrid, EditorVisuals};
-use runtime::{Bounds3, EntityKey};
+use runtime::{scene::EntityId, Bounds3, EntityKey};
+
+#[path = "prop_preview/translate.rs"]
+mod translate;
+use translate::{move_handles, PropTranslationDrag};
 
 pub(super) struct PropGpuPreview {
 	token: String,
+	content_revision: u64,
 	scene: Scene,
 	targets: Vec<PickTarget>,
 	bounds: Option<Bounds3>,
+	temporary_position: Option<(EntityId, [f32; 3])>,
 }
 
 impl PropGpuPreview {
-	fn new(token: String, scene: Scene) -> Result<Self, String> {
+	fn new(token: String, content_revision: u64, scene: Scene) -> Result<Self, String> {
 		let mut targets = Vec::new();
 		for id in scene.entity_ids() {
 			if let (Some(key), Some(bounds)) = (scene.key(id), scene.world_bounds(id)?) {
@@ -33,9 +40,11 @@ impl PropGpuPreview {
 			.reduce(Bounds3::union);
 		Ok(Self {
 			token,
+			content_revision,
 			scene,
 			targets,
 			bounds,
+			temporary_position: None,
 		})
 	}
 
@@ -49,6 +58,25 @@ impl PropGpuPreview {
 			.map(|target| target.bounds)
 			.or(self.bounds)
 	}
+
+	fn preview_position(&mut self, drag: Option<&PropTranslationDrag>) {
+		if let Some((id, baseline)) = self.temporary_position.take() {
+			if let Some(entity) = self.scene.get_mut(id) {
+				entity.transform_mut().position = baseline;
+			}
+		}
+		if let Some((id, position)) = drag.filter(|drag| drag.moved()).and_then(|drag| {
+			self.scene
+				.entity_by_key(&drag.key)
+				.map(|id| (id, drag.position()))
+		}) {
+			if let Some(entity) = self.scene.get_mut(id) {
+				let local = entity.transform_mut();
+				self.temporary_position = Some((id, local.position));
+				local.position = position;
+			}
+		}
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +89,7 @@ pub(super) struct PropNavigation {
 	token: String,
 	camera: EditorCamera,
 	drag: Option<(DragKind, [f64; 2])>,
+	translation: Option<PropTranslationDrag>,
 	frame_request: Option<u64>,
 }
 
@@ -70,16 +99,31 @@ impl PropNavigation {
 			token,
 			camera: EditorCamera::default(),
 			drag: None,
+			translation: None,
 			frame_request: None,
 		}
 	}
 
 	pub(super) fn captured(&self) -> bool {
-		self.drag.is_some()
+		self.drag.is_some() || self.translation.is_some()
 	}
 
 	pub(super) fn cancel(&mut self) {
 		self.drag = None;
+		self.translation = None;
+	}
+
+	fn retain_translation(&mut self, frame: &PropPreviewFrame, extent: [u32; 2]) -> bool {
+		if self.translation.as_ref().is_some_and(|drag| {
+			drag.revision != frame.content_revision
+				|| drag.extent != extent
+				|| frame.state.selection.as_ref() != Some(&drag.key)
+		}) {
+			self.translation = None;
+			true
+		} else {
+			false
+		}
 	}
 }
 
@@ -123,8 +167,11 @@ impl Worker {
 		self.play_load = None;
 		if let Err(message) = self.draw_prop_preview(&frame, asset_root) {
 			let closed = self.shared.lock().ok().is_some_and(|mut slot| {
-				slot.as_mut()
-					.is_some_and(|workspace| workspace.close_prop_preview(&frame.state.token))
+				slot.as_mut().is_some_and(|workspace| {
+					workspace
+						.prop_preview_content_is_current(&frame.state.token, frame.content_revision)
+						&& workspace.close_prop_preview(&frame.state.token)
+				})
 			});
 			if closed {
 				let state = &frame.state;
@@ -184,19 +231,18 @@ impl Worker {
 		let token = &frame.state.token;
 		let current = || {
 			self.shared.lock().is_ok_and(|slot| {
-				slot.as_ref()
-					.is_some_and(|workspace| workspace.prop_preview_is_current(token))
+				slot.as_ref().is_some_and(|workspace| {
+					workspace.prop_preview_content_is_current(token, frame.content_revision)
+				})
 			})
 		};
 		let gpu = self
 			.gpu
 			.as_mut()
 			.ok_or("Viewport renderer is not initialized")?;
-		if gpu
-			.prop_preview
-			.as_ref()
-			.is_none_or(|preview| &preview.token != token)
-		{
+		if gpu.prop_preview.as_ref().is_none_or(|preview| {
+			&preview.token != token || preview.content_revision != frame.content_revision
+		}) {
 			if let Some(preview) = gpu.prop_preview.take() {
 				gpu.renderer.retire_resources(preview)?;
 				gpu.assets.prune_unused();
@@ -227,7 +273,7 @@ impl Worker {
 				self.dirty = true;
 				return Ok(());
 			}
-			let preview = PropGpuPreview::new(token.clone(), scene)?;
+			let preview = PropGpuPreview::new(token.clone(), frame.content_revision, scene)?;
 			gpu.renderer.set_lights(&[Light::Directional {
 				direction: [0.2, -0.9, -0.4],
 				color: [1.0; 3],
@@ -237,7 +283,7 @@ impl Worker {
 		}
 		let preview = gpu
 			.prop_preview
-			.as_ref()
+			.as_mut()
 			.ok_or("Prop renderer lost its retained preview")?;
 		let navigation = self
 			.prop_navigation
@@ -248,6 +294,8 @@ impl Worker {
 			return Ok(());
 		};
 		let extent = [width, height];
+		let release_translation = navigation.retain_translation(frame, extent);
+		preview.preview_position(navigation.translation.as_ref());
 		if self.prepared_extent != Some(extent) {
 			self.last_status = Instant::now() - STATUS_INTERVAL;
 		}
@@ -275,7 +323,17 @@ impl Worker {
 				spacing,
 				..EditorGrid::default()
 			}),
-			lines: vec![],
+			lines: if frame.editable_source {
+				move_handles(
+					&preview.scene,
+					&navigation.camera,
+					extent,
+					self.dpi,
+					frame.state.selection.as_ref(),
+				)
+			} else {
+				Vec::new()
+			},
 		})?;
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
@@ -304,6 +362,9 @@ impl Worker {
 				status.gpu_timestamps_supported = metrics.gpu_timestamps_supported;
 			}
 		}
+		if release_translation {
+			self.update_capture();
+		}
 		Ok(())
 	}
 
@@ -330,7 +391,9 @@ impl Worker {
 			.gpu
 			.as_ref()
 			.and_then(|gpu| gpu.prop_preview.as_ref())
-			.filter(|preview| &preview.token == token);
+			.filter(|preview| {
+				&preview.token == token && preview.content_revision == frame.content_revision
+			});
 		let Some(navigation) = self
 			.prop_navigation
 			.as_mut()
@@ -338,30 +401,53 @@ impl Worker {
 		else {
 			return true;
 		};
+		navigation.retain_translation(&frame, extent);
 		match (kind, button, code, point) {
-			("pointer_down", Some("right"), _, Some(point)) => {
+			("pointer_down", Some("right"), _, Some(point)) if !navigation.captured() => {
 				navigation.drag = Some((DragKind::Orbit, point));
 			}
-			("pointer_down", Some("middle"), _, Some(point)) => {
+			("pointer_down", Some("middle"), _, Some(point)) if !navigation.captured() => {
 				navigation.drag = Some((DragKind::Pan, point));
 			}
-			("pointer_down", Some("left"), _, Some(point)) if self.modifiers.alt_key() => {
+			("pointer_down", Some("left"), _, Some(point))
+				if self.modifiers.alt_key() && !navigation.captured() =>
+			{
 				navigation.drag = Some((DragKind::Orbit, point));
 			}
 			("pointer_down", Some("left"), _, Some(point)) if !navigation.captured() => {
-				if let Some((preview, ray)) = ready.and_then(|preview| {
-					navigation
-						.camera
-						.ray(point, extent, ViewportProjection::Perspective)
-						.ok()
-						.map(|ray| (preview, ray))
-				}) {
+				if frame.editable_source {
+					navigation.translation = ready.and_then(|preview| {
+						PropTranslationDrag::begin(
+							&preview.scene,
+							&navigation.camera,
+							extent,
+							self.dpi,
+							frame.state.selection.clone()?,
+							frame.content_revision,
+							point,
+						)
+					});
+				}
+				if let Some((preview, ray)) = ready
+					.filter(|_| navigation.translation.is_none())
+					.and_then(|preview| {
+						navigation
+							.camera
+							.ray(point, extent, ViewportProjection::Perspective)
+							.ok()
+							.map(|ray| (preview, ray))
+					}) {
 					let key = pick_nearest(ray, &preview.targets)
 						.and_then(|hit| EntityKey::new(hit.key).ok());
-					let accepted =
-						self.shared.lock().ok().and_then(|mut slot| {
-							slot.as_mut()?.select_prop_preview(token, key).ok()
-						});
+					let accepted = self.shared.lock().ok().and_then(|mut slot| {
+						let workspace = slot.as_mut()?;
+						if workspace.prop_preview_content_is_current(token, frame.content_revision)
+						{
+							workspace.select_prop_preview(token, key).ok()
+						} else {
+							None
+						}
+					});
 					if let Some(state) = accepted {
 						let _ = self.parent.emit("editor://prop-preview-selection", state);
 						self.dirty = true;
@@ -369,7 +455,12 @@ impl Worker {
 				}
 			}
 			("pointer_move", _, _, Some(point)) => {
-				if let Some((drag, previous)) = navigation.drag.as_mut() {
+				if let Some(drag) = navigation.translation.as_mut() {
+					if drag.update(point).is_err() {
+						navigation.translation = None;
+					}
+					self.dirty = true;
+				} else if let Some((drag, previous)) = navigation.drag.as_mut() {
 					let motion = Vec2::new(
 						(point[0] - previous[0]) as f32,
 						(point[1] - previous[1]) as f32,
@@ -386,9 +477,34 @@ impl Worker {
 					self.dirty = true;
 				}
 			}
+			("pointer_up", Some("left"), _, _) if navigation.translation.is_some() => {
+				let drag = navigation
+					.translation
+					.take()
+					.expect("checked Prop translation");
+				self.dirty = true;
+				if drag.moved() {
+					let updated = self.shared.lock().ok().and_then(|mut slot| {
+						slot.as_mut()?
+							.apply_prop_preview_position(
+								token,
+								drag.revision,
+								&drag.key,
+								drag.position(),
+							)
+							.ok()
+					});
+					if let Some(updated) = updated {
+						let _ = self.parent.emit("editor://prop-draft-changed", &updated);
+					}
+				}
+			}
 			("pointer_up" | "pointer_leave" | "blurred", _, _, _)
-			| ("key_down", _, Some("Escape"), _) => navigation.cancel(),
-			("wheel_lines" | "wheel_pixels", _, _, Some(_)) => {
+			| ("key_down", _, Some("Escape"), _) => {
+				self.dirty |= navigation.captured();
+				navigation.cancel();
+			}
+			("wheel_lines" | "wheel_pixels", _, _, Some(_)) if !navigation.captured() => {
 				if let Some([_, distance]) = delta {
 					let lines = if kind == "wheel_pixels" {
 						distance / (self.dpi * 32.0)
@@ -401,11 +517,35 @@ impl Worker {
 					self.dirty = true;
 				}
 			}
-			("key_down", _, Some("KeyF"), _) if !repeat => {
+			("key_down", _, Some("KeyF"), _) if !repeat && !navigation.captured() => {
 				self.dirty |= self.shared.lock().is_ok_and(|mut slot| {
 					slot.as_mut()
 						.is_some_and(|workspace| workspace.frame_prop_preview(token).is_ok())
 				});
+			}
+			("key_down", _, Some("KeyZ" | "KeyY"), _)
+				if !repeat && self.modifiers.control_key() && frame.editable_source =>
+			{
+				navigation.cancel();
+				self.dirty = true;
+				let undo = code == Some("KeyZ") && !self.modifiers.shift_key();
+				let edit = if undo {
+					PropDraftEdit::Undo
+				} else {
+					PropDraftEdit::Redo
+				};
+				let updated = self.shared.lock().ok().and_then(|mut slot| {
+					let workspace = slot.as_mut()?;
+					let id = workspace
+						.prop_preview_edit_draft(token, frame.content_revision)
+						.ok()?;
+					workspace
+						.edit_prop_draft(&id, frame.content_revision, edit)
+						.ok()
+				});
+				if let Some(updated) = updated {
+					let _ = self.parent.emit("editor://prop-draft-changed", &updated);
+				}
 			}
 			_ => {}
 		}

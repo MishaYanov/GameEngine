@@ -57,7 +57,8 @@ export class PropPreviewService {
         const target: PropPreviewTarget = document.kind === 'source'
             ? {kind: 'source', draft_id: document.draft.draft_id}
             : {kind: 'instance', scene_id: snapshot.active_scene_id, root_key: document.root};
-        const version = document.kind === 'source' ? document.draft.fingerprint : snapshot.scene_revision;
+        // Draft mutations refresh the existing native source preview and preserve its camera.
+        const version = document.kind === 'source' ? null : snapshot.scene_revision;
         return {
             target, generation,
             key: JSON.stringify([target, generation, version, this.retryVersion()]),

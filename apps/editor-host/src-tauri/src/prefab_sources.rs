@@ -8,8 +8,11 @@ use runtime::{
 };
 use serde::Serialize;
 
+#[path = "prefab_sources/draft_history.rs"]
+mod draft_history;
 #[path = "prefab_sources/instances.rs"]
 mod instances;
+use draft_history::DraftHistory;
 
 #[derive(Default)]
 pub(super) struct PrefabSourceDrafts {
@@ -22,6 +25,8 @@ struct Capture {
 	fingerprint: String,
 	revision: u64,
 	generation: u64,
+	saved: Arc<str>,
+	history: DraftHistory,
 }
 #[derive(Serialize)]
 pub struct PrefabSourceDraftDto {
@@ -32,6 +37,18 @@ pub struct PrefabSourceDraftDto {
 	pub asset_id: AssetId,
 	pub fingerprint: String,
 	pub prefab: serde_json::Value,
+	pub draft_revision: u64,
+	pub dirty: bool,
+	pub can_undo: bool,
+	pub can_redo: bool,
+}
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PropDraftEdit {
+	Apply { prefab: serde_json::Value },
+	Undo,
+	Redo,
+	Discard,
 }
 #[derive(Serialize)]
 pub struct PrefabSourceValidationDto {
@@ -86,12 +103,7 @@ impl EditorWorkspace {
 			prefab,
 		})
 	}
-	fn source_dto(
-		&self,
-		id: String,
-		capture: &Capture,
-		prefab: &PrefabData,
-	) -> Result<PrefabSourceDraftDto, String> {
+	fn source_dto(&self, id: String, capture: &Capture) -> Result<PrefabSourceDraftDto, String> {
 		Ok(PrefabSourceDraftDto {
 			draft_id: id,
 			workspace_generation: self.generation,
@@ -99,7 +111,12 @@ impl EditorWorkspace {
 			path: capture.path.clone(),
 			asset_id: capture.source_id.clone(),
 			fingerprint: capture.fingerprint.clone(),
-			prefab: serde_json::from_str(&prefab.to_json()?).map_err(|error| error.to_string())?,
+			prefab: serde_json::from_str(capture.history.document())
+				.map_err(|error| error.to_string())?,
+			draft_revision: capture.history.revision(),
+			dirty: capture.history.document().as_ref() != capture.saved.as_ref(),
+			can_undo: capture.history.can_undo(),
+			can_redo: capture.history.can_redo(),
 		})
 	}
 	pub fn open_prefab_source(
@@ -114,18 +131,29 @@ impl EditorWorkspace {
 		let source = self.prefab_source(path)?;
 		self.scene_output(&source.path, None)?;
 		let id = AssetId::generate().as_str().to_owned();
+		let saved: Arc<str> = source.prefab.to_json()?.into();
 		let capture = Capture {
 			source_id: source.source_id,
 			path: source.path,
 			fingerprint: source.fingerprint,
 			revision,
 			generation: self.generation,
+			saved: Arc::clone(&saved),
+			history: DraftHistory::new(saved),
 		};
-		let dto = self.source_dto(id.clone(), &capture, &source.prefab)?;
+		let dto = self.source_dto(id.clone(), &capture)?;
 		self.prefab_source_drafts.captures.insert(id, capture);
 		Ok(dto)
 	}
 	pub fn close_prefab_source(&mut self, id: &str) -> Result<(), String> {
+		if self
+			.prefab_source_drafts
+			.captures
+			.get(id)
+			.is_some_and(|capture| capture.history.document().as_ref() != capture.saved.as_ref())
+		{
+			return Err("Save or discard the Prop changes before closing its draft".into());
+		}
 		self.prefab_source_drafts.captures.remove(id);
 		Ok(())
 	}
@@ -169,29 +197,131 @@ impl EditorWorkspace {
 	pub(crate) fn reviewed_prop_preview_source(
 		&self,
 		draft_id: &str,
-	) -> Result<LinkedPrefabSource, String> {
+	) -> Result<(LinkedPrefabSource, u64), String> {
 		let capture = self
 			.prefab_source_drafts
 			.captures
 			.get(draft_id)
 			.filter(|capture| capture.generation == self.generation)
 			.ok_or("Prop draft expired or belongs to another workspace")?;
-		let source = self.prefab_source(&capture.path)?;
+		let mut source = self.prefab_source(&capture.path)?;
 		if source.source_id != capture.source_id
 			|| source.path != capture.path
 			|| source.fingerprint != capture.fingerprint
 		{
-			return Err("Prop source changed after opening; reopen its draft to preview the new version".into());
+			return Err(
+				"Prop source changed after opening; reopen its draft to preview the new version"
+					.into(),
+			);
 		}
-		Ok(source)
+		source.prefab = PrefabData::from_json(capture.history.document())?;
+		Ok((source, capture.history.revision()))
 	}
-	pub(crate) fn prop_preview_source_matches(&self, draft_id: &str, fingerprint: &str) -> bool {
+	pub(crate) fn prop_preview_source_matches(
+		&self,
+		draft_id: &str,
+		fingerprint: &str,
+		draft_revision: u64,
+	) -> bool {
 		self.prefab_source_drafts
 			.captures
 			.get(draft_id)
 			.is_some_and(|capture| {
-				capture.generation == self.generation && capture.fingerprint == fingerprint
+				capture.generation == self.generation
+					&& capture.fingerprint == fingerprint
+					&& capture.history.revision() == draft_revision
 			})
+	}
+
+	pub(crate) fn has_dirty_prop_sources(&self) -> bool {
+		self.prefab_source_drafts
+			.captures
+			.values()
+			.any(|capture| capture.history.document().as_ref() != capture.saved.as_ref())
+	}
+
+	fn editable_prop_draft(&self, id: &str, expected: u64) -> Result<&Capture, String> {
+		if self.backend.session().is_playing() || self.backend.session().has_transaction() {
+			return Err(
+				"Stop Play and finish the pending scene edit before modifying a Prop draft".into(),
+			);
+		}
+		let capture = self
+			.prefab_source_drafts
+			.captures
+			.get(id)
+			.filter(|capture| capture.generation == self.generation)
+			.ok_or("Prop draft expired or belongs to another workspace")?;
+		capture.history.check(expected)?;
+		Ok(capture)
+	}
+
+	pub(crate) fn edit_prop_draft(
+		&mut self,
+		id: &str,
+		expected: u64,
+		edit: PropDraftEdit,
+	) -> Result<PrefabSourceDraftDto, String> {
+		let mut next = self.editable_prop_draft(id, expected)?.clone();
+		match edit {
+			PropDraftEdit::Apply { prefab } => {
+				let prefab = PrefabData::from_json(&prefab.to_string())?;
+				next.history.apply(expected, prefab.to_json()?.into())?;
+			}
+			PropDraftEdit::Undo => next.history.undo(expected)?,
+			PropDraftEdit::Redo => next.history.redo(expected)?,
+			PropDraftEdit::Discard => next.history.discard(expected, Arc::clone(&next.saved))?,
+		}
+		self.install_prop_draft(id, next)
+	}
+
+	pub(crate) fn apply_prop_preview_position(
+		&mut self,
+		token: &str,
+		expected: u64,
+		key: &EntityKey,
+		position: [f32; 3],
+	) -> Result<PrefabSourceDraftDto, String> {
+		let id = self.prop_preview_edit_draft(token, expected)?;
+		if !self.prop_preview_selection_matches(key) {
+			return Err("The selected Prop object changed during the gesture".into());
+		}
+		let mut next = self.editable_prop_draft(&id, expected)?.clone();
+		let mut prefab = PrefabData::from_json(next.history.document())?;
+		let entity = prefab
+			.entities
+			.iter_mut()
+			.find(|entity| &entity.key == key)
+			.ok_or("Object does not belong to this Prop draft")?;
+		entity.transform.position = position;
+		next.history.apply(expected, prefab.to_json()?.into())?;
+		self.install_prop_draft(&id, next)
+	}
+
+	fn install_prop_draft(
+		&mut self,
+		id: &str,
+		next: Capture,
+	) -> Result<PrefabSourceDraftDto, String> {
+		let dto = self.source_dto(id.into(), &next)?;
+		let refresh = self.prepare_prop_draft_preview(
+			id,
+			&next.fingerprint,
+			next.history.revision(),
+			next.history.document(),
+		)?;
+		self.prefab_source_drafts.captures.insert(id.into(), next);
+		self.apply_prop_draft_preview(refresh);
+		Ok(dto)
+	}
+
+	pub(crate) fn save_prop_draft(
+		&mut self,
+		id: &str,
+		expected: u64,
+	) -> Result<PrefabSourceSaveDto, String> {
+		let next = self.editable_prop_draft(id, expected)?.clone();
+		self.publish_prop_draft(id, next)
 	}
 	pub fn validate_prefab_source(
 		&self,
@@ -214,27 +344,43 @@ impl EditorWorkspace {
 		value: serde_json::Value,
 		revision: u64,
 	) -> Result<PrefabSourceSaveDto, String> {
-		let capture = self.source_draft(id, revision)?;
-		self.scene_output(&capture.path, None)?;
+		let mut next = self.source_draft(id, revision)?;
+		if next.history.document().as_ref() != next.saved.as_ref() {
+			return Err("Save the accepted Prop draft from its workspace".into());
+		}
 		let prefab = PrefabData::from_json(&value.to_string())?;
-		let prepared = runtime::assets::project_assets::prepare_prefab(
-			&self.asset_root,
-			&capture.path,
-			&prefab,
-		)?;
-		if prepared.asset().id != capture.source_id
-			|| prepared.previous_fingerprint() != Some(capture.fingerprint.as_str())
+		next.history
+			.apply(next.history.revision(), prefab.to_json()?.into())?;
+		self.publish_prop_draft(id, next)
+	}
+
+	fn publish_prop_draft(
+		&mut self,
+		id: &str,
+		mut next: Capture,
+	) -> Result<PrefabSourceSaveDto, String> {
+		self.scene_output(&next.path, None)?;
+		let prefab = PrefabData::from_json(next.history.document())?;
+		let prepared =
+			runtime::assets::project_assets::prepare_prefab(&self.asset_root, &next.path, &prefab)?;
+		if prepared.asset().id != next.source_id
+			|| prepared.previous_fingerprint() != Some(next.fingerprint.as_str())
 		{
 			return Err("Prefab source changed on disk since this draft opened; reopen it to review the changes".into());
 		}
 		let snapshot = self.backend.snapshot().map_err(|error| error.to_string())?;
-		let next = Capture {
-			fingerprint: prepared.asset().fingerprint.clone(),
-			..capture
-		};
-		let draft = self.source_dto(id.into(), &next, &prefab)?;
+		next.fingerprint = prepared.asset().fingerprint.clone();
+		next.saved = Arc::clone(next.history.document());
+		let refresh = self.prepare_prop_draft_preview(
+			id,
+			&next.fingerprint,
+			next.history.revision(),
+			next.history.document(),
+		)?;
+		let draft = self.source_dto(id.into(), &next)?;
 		prepared.publish()?;
 		self.prefab_source_drafts.captures.insert(id.into(), next);
+		self.apply_prop_draft_preview(refresh);
 		Ok(PrefabSourceSaveDto { draft, snapshot })
 	}
 	pub fn create_linked_prefab_source(
@@ -277,14 +423,17 @@ impl EditorWorkspace {
 		}
 		let id = AssetId::generate().as_str().to_owned();
 		let asset = prepared.asset();
+		let saved: Arc<str> = prefab.to_json()?.into();
 		let capture = Capture {
 			source_id: asset.id.clone(),
 			path: asset.path.clone(),
 			fingerprint: asset.fingerprint.clone(),
 			revision,
 			generation: self.generation,
+			saved: Arc::clone(&saved),
+			history: DraftHistory::new(saved),
 		};
-		let draft = self.source_dto(id.clone(), &capture, &prefab)?;
+		let draft = self.source_dto(id.clone(), &capture)?;
 		prepared.publish()?;
 		self.prefab_source_drafts.captures.insert(id, capture);
 		Ok(draft)

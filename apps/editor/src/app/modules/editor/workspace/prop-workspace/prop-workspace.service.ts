@@ -1,13 +1,15 @@
 import {
     afterNextRender, computed, DestroyRef, DOCUMENT, effect, inject, Injectable, Injector, signal, untracked,
 } from '@angular/core';
+import {listen} from '@tauri-apps/api/event';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey, ModelAsset, SceneEntity, SceneId, Transform} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
-import type {PrefabSourceDraft} from '../../../../core/editor/linked-prefabs.models';
+import type {PrefabSourceDraft, PropDraftEdit} from '../../../../core/editor/linked-prefabs.models';
 import {readPrefabSource} from '../prefabs/prefab-source-values';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
+import type {PropObjectEdit} from './prop-object-editor';
 
 export interface PropWorkspaceObject {
     readonly key: EntityKey;
@@ -42,7 +44,7 @@ interface PropObjectRecord {
     readonly components: readonly ComponentRecord[];
 }
 
-/** Owns a single isolated, read-only prop document and its local selection. */
+/** Owns one isolated Prop document, its native draft, and local object selection. */
 @Injectable()
 export class PropWorkspaceService {
     private readonly editor = inject(EditorService);
@@ -54,6 +56,9 @@ export class PropWorkspaceService {
     private readonly selectedKey = signal<EntityKey | null>(null);
     private readonly opening = signal<PropScope | null>(null);
     private readonly failure = signal<string | null>(null);
+    private readonly editingDraft = signal(false);
+    private readonly reviewingClose = signal(false);
+    private closeReview: {readonly promise: Promise<boolean>; readonly resolve: (approved: boolean) => void} | null = null;
     private sourceDraft: PrefabSourceDraft | null = null;
     private focusedBeforeOpen: HTMLElement | null = null;
     private request = 0;
@@ -61,7 +66,18 @@ export class PropWorkspaceService {
 
     readonly error = this.failure.asReadonly();
     readonly pending = computed(() => this.opening() !== null);
-    readonly canOpen = computed(() => this.editing.ready() && !this.pending() && !!this.editor.snapshot());
+    readonly draftPending = this.editingDraft.asReadonly();
+    readonly confirmingClose = this.reviewingClose.asReadonly();
+    readonly canOpen = computed(() => this.editing.ready() && !this.pending() && !this.draftPending() && !!this.editor.snapshot());
+    readonly draft = computed(() => {
+        const tab = this.tab();
+        return tab?.kind === 'source' ? tab.draft : null;
+    });
+    readonly canEditDraft = computed(() => {
+        const snapshot = this.editor.snapshot();
+        return this.draft()?.draft_revision !== undefined && !this.draftPending() && !this.editor.busy() &&
+            snapshot?.mode === 'edit' && snapshot.transaction === null;
+    });
     readonly document = computed<PropWorkspaceDocument | null>(() => {
         const tab = this.tab();
         if (!tab) return null;
@@ -81,7 +97,7 @@ export class PropWorkspaceService {
             .map(([slot, key]) => ({slot, target: names.get(key) ?? 'Missing object'}));
         return {...tab, name: root.name, path: root.linked_prefab.source.path, objects, references};
     });
-    readonly selectedObject = computed(() => {
+    readonly selectedObject = computed<PropWorkspaceObject | null>(() => {
         const objects = this.document()?.objects ?? [];
         return objects.find(item => item.key === this.selectedKey()) ?? objects[0] ?? null;
     });
@@ -93,12 +109,23 @@ export class PropWorkspaceService {
             const document = this.document();
             const opening = this.opening();
             const playing = this.editor.playing();
-            if (tab && (!this.sameScope(tab.scope, scope) || !document)) untracked(() => this.close(false));
+            if (tab && (!scope || tab.scope.generation !== scope.generation ||
+                (tab.kind === 'instance' && tab.scope.sceneId !== scope.sceneId) || !document)) untracked(() => this.close(false));
             if (opening && (playing || !this.sameScope(opening, scope))) untracked(() => this.cancelOpen());
         });
+        let unsubscribe: (() => void) | undefined;
+        if (this.editor.nativeAvailable) {
+            void listen<PrefabSourceDraft>('editor://prop-draft-changed', event => this.acceptDraft(event.payload, true))
+                .then(release => {
+                    if (this.destroyed) release();
+                    else unsubscribe = release;
+                }).catch(() => undefined);
+        }
         inject(DestroyRef).onDestroy(() => {
             this.destroyed = true;
             this.request++;
+            unsubscribe?.();
+            this.finishClose(false);
             this.releaseSource();
         });
     }
@@ -135,11 +162,50 @@ export class PropWorkspaceService {
         if (this.document()?.objects.some(item => item.key === key)) this.selectedKey.set(key);
     }
 
+    editObject(change: PropObjectEdit): Promise<boolean> {
+        const draft = this.draft();
+        if (!draft || !draft.prefab.entities.some(entity => entity.key === change.key)) return Promise.resolve(false);
+        return this.editDraft({type: 'apply', prefab: {
+            ...draft.prefab,
+            entities: draft.prefab.entities.map(entity => entity.key === change.key ? {...entity, ...change} : entity),
+        }});
+    }
+
+    editDraft(edit: PropDraftEdit): Promise<boolean> {
+        return this.runDraft((draft, revision, generation) => this.editor.editPropDraft(draft.draft_id, revision, edit, generation));
+    }
+
+    saveDraft(): Promise<boolean> {
+        return this.runDraft((draft, revision, generation) => this.editor.savePropDraft(draft.draft_id, revision, generation));
+    }
+
+    reviewClose(): Promise<boolean> {
+        if (!this.draft()?.dirty) return Promise.resolve(!this.draftPending());
+        if (this.closeReview) return this.closeReview.promise;
+        let resolve!: (approved: boolean) => void;
+        const promise = new Promise<boolean>(done => (resolve = done));
+        this.closeReview = {promise, resolve};
+        this.failure.set(null);
+        this.reviewingClose.set(true);
+        return promise;
+    }
+
+    async chooseClose(action: 'save' | 'discard'): Promise<void> {
+        if (!this.closeReview) return;
+        const accepted = action === 'save' ? await this.saveDraft() : await this.editDraft({type: 'discard'});
+        if (accepted && !this.draft()?.dirty) this.finishClose(true);
+    }
+
+    cancelClose(): void {
+        if (!this.draftPending()) this.finishClose(false);
+    }
+
     cancelOpening(): void {
         if (this.pending()) this.cancelOpen();
     }
 
     close(restoreFocus = true, fallbackFocus?: () => void): void {
+        this.finishClose(false);
         this.cancelOpen();
         this.tab.set(null);
         this.selectedKey.set(null);
@@ -157,7 +223,8 @@ export class PropWorkspaceService {
         scope: PropScope, revision: number, current: () => boolean,
     ) => Promise<PropTab | null>): Promise<boolean> {
         const scope = this.scope();
-        if (!scope || !this.canOpen()) return false;
+        if (!scope || !this.canOpen() || !await this.reviewClose() ||
+            !this.sameScope(scope, this.scope()) || !this.canOpen()) return false;
         const focused = this.dom.activeElement;
         const request = ++this.request;
         const current = () => !this.destroyed && this.request === request &&
@@ -193,6 +260,53 @@ export class PropWorkspaceService {
     private scope(): PropScope | null {
         const sceneId = this.editor.snapshot()?.active_scene_id;
         return sceneId ? {generation: this.editor.workspaceGeneration(), sceneId} : null;
+    }
+
+    private async runDraft(run: (
+        draft: PrefabSourceDraft, revision: number, generation: number,
+    ) => Promise<PrefabSourceDraft>): Promise<boolean> {
+        const draft = this.draft();
+        if (!this.canEditDraft() || !draft || draft.draft_revision === undefined) return false;
+        const generation = this.editor.workspaceGeneration();
+        this.failure.set(null);
+        this.editingDraft.set(true);
+        try {
+            const accepted = await run(draft, draft.draft_revision, generation);
+            return this.acceptDraft(accepted, false);
+        } catch (error) {
+            if (!this.destroyed && this.draft()?.draft_id === draft.draft_id &&
+                this.editor.workspaceGeneration() === generation) {
+                this.failure.set(error instanceof Error ? error.message : String(error));
+            }
+            return false;
+        } finally {
+            this.editingDraft.set(false);
+        }
+    }
+
+    private acceptDraft(draft: PrefabSourceDraft, newerOnly: boolean): boolean {
+        const tab = this.tab();
+        if (this.destroyed || tab?.kind !== 'source' || tab.scope.generation !== this.editor.workspaceGeneration() ||
+            draft.draft_id !== tab.draft.draft_id || draft.workspace_generation !== tab.draft.workspace_generation ||
+            draft.asset_id !== tab.draft.asset_id || draft.path !== tab.draft.path || draft.draft_revision === undefined ||
+            tab.draft.draft_revision === undefined || draft.draft_revision < tab.draft.draft_revision ||
+            (newerOnly && draft.draft_revision === tab.draft.draft_revision)) return false;
+        try {
+            readPrefabSource(draft.prefab);
+        } catch (error) {
+            this.failure.set(error instanceof Error ? error.message : String(error));
+            return false;
+        }
+        this.sourceDraft = draft;
+        this.tab.set({...tab, draft});
+        return true;
+    }
+
+    private finishClose(approved: boolean): void {
+        const review = this.closeReview;
+        this.closeReview = null;
+        this.reviewingClose.set(false);
+        review?.resolve(approved);
     }
 
     private sameScope(a: PropScope, b: PropScope | null): boolean {

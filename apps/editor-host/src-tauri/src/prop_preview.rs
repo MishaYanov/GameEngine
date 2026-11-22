@@ -2,9 +2,10 @@
 use super::EditorWorkspace;
 use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto};
 use runtime::{
-	Camera, EntityKey, SceneData,
+	editor::PrefabData,
 	scene_catalog::SceneId,
-	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData},
+	scene_data::{CameraData, EntityData, CURRENT_SCHEMA_VERSION},
+	Camera, EntityKey, SceneData,
 };
 use std::{
 	collections::HashSet,
@@ -15,6 +16,7 @@ enum PreviewOwner {
 	Source {
 		draft_id: String,
 		fingerprint: String,
+		draft_revision: u64,
 	},
 	Instance {
 		scene_id: SceneId,
@@ -32,6 +34,15 @@ pub(crate) struct PropPreviewFrame {
 	pub state: PropPreviewStateDto,
 	pub document: Arc<SceneData>,
 	pub frame_request: u64,
+	pub content_revision: u64,
+	pub editable_source: bool,
+}
+
+pub(crate) struct PropDraftPreviewRefresh {
+	token: String,
+	fingerprint: String,
+	revision: u64,
+	document: Option<Arc<SceneData>>,
 }
 
 impl PropPreview {
@@ -45,7 +56,8 @@ impl PropPreview {
 			PreviewOwner::Source {
 				draft_id,
 				fingerprint,
-			} => workspace.prop_preview_source_matches(draft_id, fingerprint),
+				draft_revision,
+			} => workspace.prop_preview_source_matches(draft_id, fingerprint, *draft_revision),
 			PreviewOwner::Instance { scene_id, document } => workspace
 				.backend
 				.session()
@@ -77,15 +89,17 @@ impl EditorWorkspace {
 				"Finish the current scene edit and stop Play before opening a Prop preview".into(),
 			);
 		}
-		let (owner, entities) = match target {
+		let (owner, entities, content_revision) = match target {
 			PropPreviewTargetDto::Source { draft_id } => {
-				let source = self.reviewed_prop_preview_source(&draft_id)?;
+				let (source, draft_revision) = self.reviewed_prop_preview_source(&draft_id)?;
 				(
 					PreviewOwner::Source {
 						draft_id,
 						fingerprint: source.fingerprint,
+						draft_revision,
 					},
 					source.prefab.entities.iter().map(visual_entity).collect(),
+					draft_revision,
 				)
 			}
 			PropPreviewTargetDto::Instance { scene_id, root_key } => {
@@ -97,10 +111,12 @@ impl EditorWorkspace {
 						document: Arc::downgrade(&scene),
 					},
 					entities,
+					0,
 				)
 			}
 		};
 		let document = preview_document(entities)?;
+		let editable_source = matches!(owner, PreviewOwner::Source { .. });
 		let state = PropPreviewStateDto {
 			token: runtime::asset_catalog::AssetId::generate().as_str().into(),
 			workspace_generation: generation,
@@ -116,9 +132,75 @@ impl EditorWorkspace {
 				state: state.clone(),
 				document: Arc::new(document),
 				frame_request: 0,
+				content_revision,
+				editable_source,
 			},
 		});
 		Ok(state)
+	}
+
+	pub(crate) fn prepare_prop_draft_preview(
+		&self,
+		id: &str,
+		fingerprint: &str,
+		revision: u64,
+		prefab: &str,
+	) -> Result<Option<PropDraftPreviewRefresh>, String> {
+		let Some(preview) = self.prop_preview.as_ref().filter(
+			|preview| matches!(&preview.owner, PreviewOwner::Source { draft_id, .. } if draft_id == id),
+		) else {
+			return Ok(None);
+		};
+		let document = if preview.frame.content_revision == revision {
+			None
+		} else {
+			let prefab = PrefabData::from_json(prefab)?;
+			Some(Arc::new(preview_document(
+				prefab.entities.iter().map(visual_entity).collect(),
+			)?))
+		};
+		Ok(Some(PropDraftPreviewRefresh {
+			token: preview.frame.state.token.clone(),
+			fingerprint: fingerprint.into(),
+			revision,
+			document,
+		}))
+	}
+
+	pub(crate) fn apply_prop_draft_preview(&mut self, refresh: Option<PropDraftPreviewRefresh>) {
+		let Some(refresh) = refresh else {
+			return;
+		};
+		let Some(preview) = self
+			.prop_preview
+			.as_mut()
+			.filter(|preview| preview.frame.state.token == refresh.token)
+		else {
+			return;
+		};
+		let PreviewOwner::Source {
+			fingerprint,
+			draft_revision,
+			..
+		} = &mut preview.owner
+		else {
+			return;
+		};
+		*fingerprint = refresh.fingerprint;
+		*draft_revision = refresh.revision;
+		if let Some(document) = refresh.document {
+			if preview
+				.frame
+				.state
+				.selection
+				.as_ref()
+				.is_some_and(|key| !document.entities.iter().any(|entity| &entity.key == key))
+			{
+				preview.frame.state.selection = None;
+			}
+			preview.frame.document = document;
+			preview.frame.content_revision = refresh.revision;
+		}
 	}
 
 	pub(crate) fn close_prop_preview(&mut self, token: &str) -> bool {
@@ -164,6 +246,39 @@ impl EditorWorkspace {
 		self.prop_preview
 			.as_ref()
 			.is_some_and(|preview| preview.frame.state.token == token && preview.belongs_to(self))
+	}
+
+	pub(crate) fn prop_preview_content_is_current(&self, token: &str, revision: u64) -> bool {
+		self.prop_preview.as_ref().is_some_and(|preview| {
+			preview.frame.state.token == token
+				&& preview.frame.content_revision == revision
+				&& preview.belongs_to(self)
+		})
+	}
+
+	pub(crate) fn prop_preview_edit_draft(
+		&self,
+		token: &str,
+		revision: u64,
+	) -> Result<String, String> {
+		if !self.prop_preview_content_is_current(token, revision) {
+			return Err("The Prop changed during the gesture".into());
+		}
+		match &self
+			.prop_preview
+			.as_ref()
+			.expect("checked preview owner")
+			.owner
+		{
+			PreviewOwner::Source { draft_id, .. } => Ok(draft_id.clone()),
+			PreviewOwner::Instance { .. } => Err("Open the Prop source to edit its objects".into()),
+		}
+	}
+
+	pub(crate) fn prop_preview_selection_matches(&self, key: &EntityKey) -> bool {
+		self.prop_preview
+			.as_ref()
+			.is_some_and(|preview| preview.frame.state.selection.as_ref() == Some(key))
 	}
 
 	pub(crate) fn frame_prop_preview(&mut self, token: &str) -> Result<(), String> {

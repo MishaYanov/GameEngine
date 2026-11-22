@@ -122,6 +122,7 @@ impl Worker {
 			self.pending_motion = None;
 			self.pending_fly_motion = [0.0; 2];
 			if let Some(navigation) = &mut self.prop_navigation {
+				self.dirty |= navigation.captured();
 				navigation.cancel();
 				self.update_capture();
 			}

@@ -16,6 +16,7 @@ import {ViewportEditorService} from '../../../../core/editor/viewport-editor.ser
 })
 export class WorkspaceToolbar {
     readonly opening = input(false);
+    readonly sceneActionsVisible = input(true);
     readonly paletteAvailable = input(false);
     readonly paletteRequested = output<void>();
     readonly viewSelected = output<WorkspaceViewKind>();
@@ -47,6 +48,7 @@ export class WorkspaceToolbar {
     canPerform(action: WorkspaceAction): boolean {
         if (action === 'stop') return this.canRunAction() && this.editorService.playing();
         if (!this.canEditScene() || this.sceneEditing?.ready() === false) return false;
+        if (!this.sceneActionsVisible() && action !== 'play') return false;
         switch (action) {
             case 'save':
             case 'saveAll':

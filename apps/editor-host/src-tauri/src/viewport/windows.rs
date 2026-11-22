@@ -622,6 +622,7 @@ impl Worker {
 	}
 	fn cancel_editor(&mut self) {
 		if let Some(navigation) = &mut self.prop_navigation {
+			self.dirty |= navigation.captured();
 			navigation.cancel();
 		}
 		if let Ok(mut workspace) = self.shared.lock() {

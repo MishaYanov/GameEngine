@@ -1,4 +1,5 @@
 <div aria-label="Workspace actions" class="workspace-actions" role="group">
+    @if (sceneActionsVisible()) {
     <div aria-label="Scene edits" class="action-group" role="group">
         <button (click)="dispatch('save')" [disabled]="!canPerform('save')" type="button">
             Save Scene
@@ -23,6 +24,7 @@
             Selection
         </button>
     </div>
+    }
     <div aria-label="Game preview controls" class="action-group" role="group">
         <button (click)="dispatch('play')" [disabled]="!canPerform('play')" class="play-action" type="button">
             <editor-icon name="play"/>

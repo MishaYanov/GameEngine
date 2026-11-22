@@ -30,7 +30,15 @@ export interface PrefabSourceDraft {
 	readonly asset_id: string;
 	readonly fingerprint: string;
 	readonly prefab: PrefabSourceDocument;
+	readonly draft_revision?: number;
+	readonly dirty?: boolean;
+	readonly can_undo?: boolean;
+	readonly can_redo?: boolean;
 }
+
+export type PropDraftEdit =
+    | { readonly type: 'apply'; readonly prefab: PrefabSourceDocument }
+    | { readonly type: 'undo' | 'redo' | 'discard' };
 
 export interface PrefabSourceValidation {
 	readonly draft_id: string;

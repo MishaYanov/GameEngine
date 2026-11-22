@@ -3,8 +3,9 @@
 use super::*;
 use crate::editor::prefab_sources::{
 	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
+	PropDraftEdit,
 };
-use runtime::{EntityKey, linked_prefab::PrefabConflictResolution};
+use runtime::{linked_prefab::PrefabConflictResolution, EntityKey};
 use std::collections::BTreeMap;
 
 #[tauri::command]
@@ -57,6 +58,35 @@ pub async fn editor_prefab_source_save(
 	trusted_window(&window)?;
 	workspace(state, false, Some("prefab_source_save"), move |w| {
 		w.save_prefab_source(&draft_id, prefab, expected_revision)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_prop_draft_edit(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	draft_id: String,
+	expected_draft_revision: u64,
+	edit: PropDraftEdit,
+) -> Result<PrefabSourceDraftDto, String> {
+	trusted_window(&window)?;
+	workspace(state, true, Some("prop_draft_edit"), move |w| {
+		w.edit_prop_draft(&draft_id, expected_draft_revision, edit)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_prop_draft_save(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	draft_id: String,
+	expected_draft_revision: u64,
+) -> Result<PrefabSourceSaveDto, String> {
+	trusted_window(&window)?;
+	workspace(state, true, Some("prop_draft_save"), move |w| {
+		w.save_prop_draft(&draft_id, expected_draft_revision)
 	})
 	.await
 }

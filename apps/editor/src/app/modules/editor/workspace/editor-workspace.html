@@ -1,6 +1,7 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
         <workspace-toolbar (paletteRequested)="openPalette()"
+                           [sceneActionsVisible]="!workspaceView.propView()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
@@ -178,3 +179,16 @@
 <editor-problems-panel (closedPanel)="problemsActive.set(false)" (revealRequested)="revealProblem($event)" [(open)]="problemsOpen"
                        [available]="canRevealReference()"
                        [problems]="problems()"/>
+<editor-dialog title="Unsaved Prop changes" [open]="propWorkspace.confirmingClose()" [renderFields]="false"
+               (openChange)="!$event && propWorkspace.cancelClose()" [closeBlocked]="propWorkspace.draftPending()"
+               closeLabel="Keep Editing">
+    <p>Save or discard the Prop draft to continue.</p>
+    @if (editorService.playing()) {
+        <p role="status">Stop Play before changing the draft.</p>
+    }
+    @if (propWorkspace.error(); as message) {
+        <p role="alert">{{ message }}</p>
+    }
+    <button (click)="propWorkspace.chooseClose('save')" [disabled]="!propWorkspace.canEditDraft()" type="button">Save Prop and Continue</button>
+    <button (click)="propWorkspace.chooseClose('discard')" [disabled]="!propWorkspace.canEditDraft()" type="button">Discard Prop Changes</button>
+</editor-dialog>

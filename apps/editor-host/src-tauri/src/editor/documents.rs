@@ -51,6 +51,9 @@ impl EditorWorkspace {
 		policy: ReloadPolicy,
 	) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
+		if self.has_dirty_prop_sources() {
+			return Err("Save or discard open Prop changes before reloading the project".into());
+		}
 		if self.backend.session().has_transaction()
 			|| (self.backend.session().is_playing() && matches!(policy, ReloadPolicy::RequireClean))
 		{
@@ -94,6 +97,7 @@ impl EditorWorkspace {
 		self.camera_preview = None;
 		self.prop_preview = None;
 		self.prop_preview_request = 0;
+		self.prefab_source_drafts = Default::default();
 		// The replacement owns a fresh journal and scene revision sequence. A
 		// new workspace generation also forces existing viewport caches to resync.
 		self.generation = NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed);

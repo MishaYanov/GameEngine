@@ -3,6 +3,7 @@ import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-a
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import {EditorPane} from '../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../shared/icons/editor-icon';
+import {EditorDialog} from '../../../shared/components/dialog/dialog';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 import {EditorService} from "../../../core/editor/editor.service";
 import {SceneViewport} from "./scene-viewport/scene-viewport";
@@ -46,7 +47,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace,
+        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
@@ -70,10 +71,10 @@ export class EditorWorkspace {
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
     protected readonly batchParentingEnabled = computed(() =>
-        this.editorService.capabilities()?.commands.some(command => command.name === 'reparent_objects') ?? false,
+        this.editorService.capabilities()?.commands?.some(command => command.name === 'reparent_objects') ?? false,
     );
     protected readonly hierarchyFoldersEnabled = computed(() => {
-        const names = new Set(this.editorService.capabilities()?.commands.map(command => command.name));
+        const names = new Set(this.editorService.capabilities()?.commands?.map(command => command.name));
         return (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
             .every(name => names.has(name));
     });
@@ -172,6 +173,17 @@ export class EditorWorkspace {
     protected handleEditorShortcut(event: KeyboardEvent): void {
         if (this.workspaceActionBlocked()) return;
         const id = resolveEditorShortcut(event);
+        if (this.workspaceView.propView() && !this.propWorkspace.confirmingClose()) {
+            if (event.defaultPrevented) return;
+            const closesProp = event.key === 'Escape' && event.target instanceof Element &&
+                event.target.closest('[aria-label="Prop Workspace"]') !== null;
+            if (closesProp || id && this.runPropAction(id)) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (closesProp) void this.closePropWorkspace();
+                return;
+            }
+        }
         if (id && (id === 'palette.open' || this.workspaceView.activeViewKind() === 'scene-viewport') && this.dispatchEditorAction(id)) {
             event.preventDefault();
             event.stopPropagation();
@@ -179,7 +191,12 @@ export class EditorWorkspace {
     }
 
     protected handleNativeShortcut(id: EditorActionId): void {
-        if (this.workspaceActionBlocked() || this.workspaceView.activeViewKind() !== 'scene-viewport') return;
+        if (this.workspaceActionBlocked()) return;
+        if (this.workspaceView.propView()) {
+            if (!this.propWorkspace.confirmingClose()) this.runPropAction(id);
+            return;
+        }
+        if (this.workspaceView.activeViewKind() !== 'scene-viewport') return;
         const state = this.viewportEditor.state();
         if (state?.settings.view === 'scene' && state.focused && state.gesture === null) this.dispatchEditorAction(id);
     }
@@ -207,8 +224,30 @@ export class EditorWorkspace {
         if (this.canRevealReference()) this.usage.set({key, context: this.sceneContext()});
     }
 
-    protected closePropWorkspace(): void {
-        this.propWorkspace.close(true, () => this.workspaceTabs()?.focusTab('scene-viewport'));
+    protected async closePropWorkspace(): Promise<void> {
+        if (await this.reviewPropNavigation()) this.propWorkspace.close(true, () => this.workspaceTabs()?.focusTab('scene-viewport'));
+    }
+
+    reviewPropNavigation(): Promise<boolean> {
+        return this.propWorkspace.reviewClose();
+    }
+
+    private runPropAction(id: EditorActionId): boolean {
+        const draft = this.propWorkspace.draft();
+        if (!draft || draft.draft_revision === undefined) return false;
+        switch (id) {
+            case 'document.save':
+                if (draft.dirty) void this.propWorkspace.saveDraft();
+                return true;
+            case 'document.undo':
+                if (draft.can_undo) void this.propWorkspace.editDraft({type: 'undo'});
+                return true;
+            case 'document.redo':
+                if (draft.can_redo) void this.propWorkspace.editDraft({type: 'redo'});
+                return true;
+            default:
+                return false;
+        }
     }
 
     protected closeUsages(): void {

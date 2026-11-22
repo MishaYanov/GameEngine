@@ -1,5 +1,5 @@
 @if (prop.document(); as document) {
-    <section (keydown)="handleKey($event)" aria-label="Prop Workspace" class="prop-document">
+    <section aria-label="Prop Workspace" class="prop-document">
         <header>
             <nav aria-label="Prop location">
                 <span>{{ document.kind === 'source' ? 'Assets' : 'Scene' }}</span>
@@ -7,14 +7,27 @@
                 <strong aria-current="page">{{ document.name }}</strong>
             </nav>
             <div class="preview-actions">
+                @if (prop.draft(); as draft) {
+                    @if (draft.draft_revision !== undefined) {
+                        <button (click)="prop.editDraft({type: 'undo'})" [disabled]="!draft.can_undo || !prop.canEditDraft()" type="button">Undo Prop</button>
+                        <button (click)="prop.editDraft({type: 'redo'})" [disabled]="!draft.can_redo || !prop.canEditDraft()" type="button">Redo Prop</button>
+                        <button (click)="prop.saveDraft()" [disabled]="!draft.dirty || !prop.canEditDraft()" type="button">Save Prop</button>
+                    }
+                }
                 <button (click)="preview.frame()" [disabled]="!preview.ready()" type="button">Frame Prop</button>
-                <button (click)="closed.emit()" type="button">Close Prop</button>
+                <button (click)="closed.emit()" [disabled]="prop.draftPending()" type="button">Close Prop</button>
             </div>
         </header>
         <div class="prop-heading">
             <h2 #heading tabindex="-1">{{ document.kind === 'source' ? 'Prop source' : 'Pinned Prop instance' }}</h2>
             <small [title]="document.path">{{ document.path }}</small>
+            @if (prop.draft()?.dirty) {
+                <small role="status">Unsaved Prop changes</small>
+            }
         </div>
+        @if (prop.error(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
         @if (preview.loading()) {
             <p role="status">Preparing isolated preview…</p>
         } @else if (preview.error(); as message) {
@@ -40,12 +53,17 @@
                 <h3>Inspector</h3>
                 @if (prop.selectedObject(); as object) {
                     <h4>{{ object.name }}</h4>
+                    @if (prop.draft()?.draft_revision !== undefined) {
+                        <prop-object-editor [object]="object" [objects]="document.objects" [disabled]="!prop.canEditDraft()"
+                                            (edited)="prop.editObject($event)"/>
+                    } @else {
                     <dl class="properties">
                         <dt>Parent</dt><dd>{{ parentName() }}</dd>
                         <dt>Position</dt><dd>{{ object.transform.position.join(', ') }}</dd>
                         <dt>Rotation</dt><dd>{{ object.transform.rotation.join(', ') }}</dd>
                         <dt>Scale</dt><dd>{{ object.transform.scale.join(', ') }}</dd>
                     </dl>
+                    }
                     @if (object.components.length) {
                         <h4>Components</h4>
                         <ul>
