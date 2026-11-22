@@ -29,6 +29,7 @@ import type {
     LinkedPrefabOverrideReview,
     LinkedPrefabProperty,
     LinkedPrefabStatus,
+    LinkedPrefabRecoveryReview,
     PropAddress,
     PrefabSourceDocument,
     PrefabSourceDraft,
@@ -611,6 +612,22 @@ export class EditorService {
         return this.snapshotOperation(
             'editor_update_linked_prop_reviewed', {rootKey, draftId, bindings, resolutions},
             false, {expectedGeneration, expectedRevision},
+        );
+    }
+
+    reviewLinkedPropRecovery(
+        rootKey: EntityKey, path: string, draftId: string, expectedGeneration: number, expectedRevision: number,
+    ): Promise<LinkedPrefabRecoveryReview> {
+        return this.prefabDraftOperation(
+            'editor_review_linked_prop_recovery', {rootKey, path, draftId}, expectedGeneration, expectedRevision,
+        );
+    }
+
+    recoverLinkedProp(
+        rootKey: EntityKey, path: string, draftId: string, expectedGeneration: number, expectedRevision: number,
+    ): Promise<EditorSnapshot> {
+        return this.snapshotOperation(
+            'editor_recover_linked_prop', {rootKey, path, draftId}, false, {expectedGeneration, expectedRevision},
         );
     }
 

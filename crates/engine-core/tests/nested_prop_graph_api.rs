@@ -5,16 +5,18 @@ use engine_core::{
 	command::{
 		EditorCommandDto, EditorCommandRequest, TransformDto, TransformEditDto, TransformSpace,
 	},
+	components::{ComponentId, NativeBehaviorComponent, NativeBehaviorSpec},
 	editor::{EditorSession, PrefabData},
 	scene_data,
 };
 use std::collections::BTreeMap;
 
 use engine_core::linked_prefab::{
-	LinkedPrefabOverrideResolution, LinkedPrefabProperty, LinkedPrefabSource, LinkedPrefabValue,
-	MAX_NESTED_PLACEMENTS, MAX_PROP_NESTING, NestedBinding, NestedPlacement, PinnedAssetVersion,
-	PinnedPropSource, PlacementId, PrefabConflictResolution, PropAddress, PropComposition,
-	override_status, resolve_scene, review_source_overrides,
+	LinkedPrefabInstance, LinkedPrefabOverrideResolution, LinkedPrefabProperty, LinkedPrefabSource,
+	LinkedPrefabValue, MAX_NESTED_PLACEMENTS, MAX_PROP_NESTING, NestedBinding, NestedPlacement,
+	PinnedAssetVersion, PinnedPropSource, PlacementId, PrefabConflictResolution, PropAddress,
+	PropComposition, override_status, resolve_scene, review_recovery_source,
+	review_source_overrides,
 };
 use support::{entity, key, scene};
 
@@ -362,6 +364,338 @@ fn source(name: &str, fingerprint: &str) -> LinkedPrefabSource {
 			composition: PropComposition::default(),
 		},
 	}
+}
+
+fn assembly() -> LinkedPrefabSource {
+	let mut floor = source("floor", "a");
+	floor
+		.prefab
+		.reference_slots
+		.insert("Actor".into(), key("external-actor"));
+	let mut grate = source("grate", "b");
+	grate
+		.prefab
+		.reference_slots
+		.insert("Guide".into(), key("external-guide"));
+	grate.prefab.entities[0]
+		.native_behaviors
+		.push(NativeBehaviorComponent {
+			id: ComponentId::new("spawner").unwrap(),
+			enabled: true,
+			behavior: NativeBehaviorSpec::TimedSpawner {
+				prefab_path: "prefabs/bolt.json".into(),
+				interval_ticks: 10,
+				max_alive: 1,
+				lifetime_ticks: 20,
+				spawn_offset: [0.0; 3],
+				bindings: BTreeMap::from([
+					("local".into(), key("grate")),
+					("guide".into(), key("external-guide")),
+				]),
+			},
+		});
+	let bolt = source("bolt", "c");
+	let bolt_version = PinnedAssetVersion {
+		asset_id: bolt.source_id.clone(),
+		fingerprint: bolt.fingerprint.clone(),
+	};
+	grate.prefab = grate
+		.prefab
+		.with_nested_placement(
+			&grate.source_id,
+			&bolt,
+			placement("bolt", &bolt_version, "grate", 0.5),
+		)
+		.unwrap();
+	let grate_version = PinnedAssetVersion {
+		asset_id: grate.source_id.clone(),
+		fingerprint: grate.fingerprint.clone(),
+	};
+	for (id, x, binding) in [
+		("left", 2.0, NestedBinding::Object { key: key("floor") }),
+		(
+			"right",
+			4.0,
+			NestedBinding::Slot {
+				name: "Actor".into(),
+			},
+		),
+	] {
+		let mut child = placement(id, &grate_version, "floor", x);
+		child.bindings.insert("Guide".into(), binding);
+		floor.prefab = floor
+			.prefab
+			.with_nested_placement(&floor.source_id, &grate, child)
+			.unwrap();
+	}
+	floor
+}
+
+fn assembly_edit(session: &mut EditorSession, command: EditorCommandDto) -> Result<(), String> {
+	session
+		.execute_command(EditorCommandRequest {
+			expected_revision: session.revision(),
+			command,
+		})
+		.map(|_| ())
+}
+
+fn instantiate_assembly(source: LinkedPrefabSource) -> (EditorSession, EntityKey) {
+	let mut session = EditorSession::new(scene(vec![entity("actor", [0.0; 3])])).unwrap();
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::InstantiateLinkedPrefab {
+			source,
+			position: [10.0, 0.0, 0.0],
+			bindings: BTreeMap::from([("Actor".into(), key("actor"))]),
+		},
+	)
+	.unwrap();
+	let anchor = session
+		.authored_document()
+		.entities
+		.iter()
+		.find(|entity| entity.linked_prefab.is_some())
+		.unwrap()
+		.key
+		.clone();
+	(session, anchor)
+}
+
+fn placement_member(
+	link: &LinkedPrefabInstance,
+	placement: &str,
+	entity: Option<&str>,
+) -> EntityKey {
+	let placement_path = vec![PlacementId::new(placement).unwrap()];
+	let address = match entity {
+		Some(entity) => PropAddress::Object {
+			placement_path,
+			source_entity: key(entity),
+		},
+		None => PropAddress::Placement { placement_path },
+	};
+	link.entity_map[&address.materialized_key().unwrap()].clone()
+}
+
+#[test]
+fn duplicate_nested_assembly_remaps_internal_and_preserves_external_references() {
+	let (mut session, root) = instantiate_assembly(assembly());
+	let initial = session.authored_document();
+	let original = initial
+		.entities
+		.iter()
+		.find_map(|entity| entity.linked_prefab.as_ref())
+		.unwrap();
+	let left = placement_member(original, "left", Some("grate"));
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::Rename {
+			key: left.as_str().into(),
+			name: "Left override".into(),
+		},
+	)
+	.unwrap();
+	let before_duplicate = session.authored_document();
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::DuplicateLinkedPrefab {
+			root_key: root.as_str().into(),
+		},
+	)
+	.unwrap();
+	let copy = session.authored_document();
+	let duplicate = copy
+		.entities
+		.iter()
+		.find(|entity| entity.key != root && entity.linked_prefab.is_some())
+		.and_then(|entity| entity.linked_prefab.as_ref())
+		.unwrap();
+	assert_eq!(duplicate.bindings["Actor"], key("actor"));
+	assert_eq!(duplicate.source, original.source);
+	assert!(
+		duplicate
+			.entity_map
+			.iter()
+			.all(|(source, member)| member != &original.entity_map[source])
+	);
+	let left_copy = placement_member(duplicate, "left", Some("grate"));
+	let right_copy = placement_member(duplicate, "right", Some("grate"));
+	for (key, target) in [
+		(&left_copy, &duplicate.entity_map[&key("floor")]),
+		(&right_copy, &key("actor")),
+	] {
+		let member = copy
+			.entities
+			.iter()
+			.find(|entity| &entity.key == key)
+			.unwrap();
+		let NativeBehaviorSpec::TimedSpawner { bindings, .. } =
+			&member.native_behaviors[0].behavior
+		else {
+			panic!("Expected copied spawner");
+		};
+		assert_eq!(&bindings["local"], key);
+		assert_eq!(&bindings["guide"], target);
+	}
+	assert_eq!(duplicate.overrides.len(), 1);
+	assert_eq!(
+		copy.entities
+			.iter()
+			.find(|entity| entity.key == left_copy)
+			.unwrap()
+			.name,
+		"Left override"
+	);
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::Rename {
+			key: left_copy.as_str().into(),
+			name: "Edited duplicate".into(),
+		},
+	)
+	.unwrap();
+	assert_eq!(
+		session
+			.authored_document()
+			.entities
+			.iter()
+			.find(|entity| entity.key == left)
+			.unwrap()
+			.name,
+		"Left override"
+	);
+	assembly_edit(&mut session, EditorCommandDto::Undo).unwrap();
+	assembly_edit(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), before_duplicate);
+}
+
+#[test]
+fn unpack_outer_promotes_direct_placements_and_unpack_all_keeps_runtime_objects() {
+	let (mut session, root) = instantiate_assembly(assembly());
+	let initial = session.authored_document();
+	let link = initial
+		.entities
+		.iter()
+		.find_map(|entity| entity.linked_prefab.as_ref())
+		.unwrap();
+	let left_anchor = placement_member(link, "left", None);
+	let right_anchor = placement_member(link, "right", None);
+	let left_grate = placement_member(link, "left", Some("grate"));
+	for (key, name) in [
+		(&left_anchor, "Left placement"),
+		(&left_grate, "Renamed grate"),
+	] {
+		assembly_edit(
+			&mut session,
+			EditorCommandDto::Rename {
+				key: key.as_str().into(),
+				name: name.into(),
+			},
+		)
+		.unwrap();
+	}
+	let nested = session.authored_document();
+	let runtime = resolve_scene(&nested);
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::UnpackLinkedPrefabOuter {
+			root_key: root.as_str().into(),
+		},
+	)
+	.unwrap();
+	let partially_unpacked = session.authored_document();
+	assert_eq!(resolve_scene(&partially_unpacked), runtime);
+	let promoted: BTreeMap<_, _> = partially_unpacked
+		.entities
+		.iter()
+		.filter_map(|entity| {
+			entity
+				.linked_prefab
+				.as_ref()
+				.map(|link| (&entity.key, link))
+		})
+		.collect();
+	assert_eq!(promoted.len(), 2);
+	let left = promoted[&left_anchor];
+	assert_eq!(left.bindings["Guide"], link.entity_map[&key("floor")]);
+	assert_eq!(promoted[&right_anchor].bindings["Guide"], key("actor"));
+	assert_eq!(left.entity_map[&key("grate")], left_grate);
+	assert_eq!(left.source.prefab.composition.placements.len(), 1);
+	assert_eq!(left.source.prefab.composition.pins.len(), 1);
+	assert_eq!(
+		left.overrides.iter().next().unwrap().source_entity,
+		key("grate")
+	);
+	assert_eq!(
+		override_status(&partially_unpacked, &left_anchor).unwrap()[0].value,
+		LinkedPrefabValue::Name("Renamed grate".into())
+	);
+	assembly_edit(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), nested);
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::UnpackLinkedPrefab {
+			root_key: root.as_str().into(),
+		},
+	)
+	.unwrap();
+	assert_eq!(session.authored_document().as_ref(), &runtime);
+	assembly_edit(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), nested);
+}
+
+#[test]
+fn relink_rejects_incompatible_bytes_then_preserves_runtime_and_undoable_provenance() {
+	let pinned = assembly();
+	let (mut session, root) = instantiate_assembly(pinned.clone());
+	let before = session.authored_document();
+	let mut replacement = pinned.clone();
+	replacement.source_id = asset_catalog::AssetId::generate();
+	replacement.path = "prefabs/recovered-floor.json".into();
+	replacement.fingerprint = "d".repeat(64);
+	let mut incompatible = replacement.clone();
+	incompatible.prefab.entities[0].transform.position[0] = 3.0;
+	let revision = session.revision();
+	assert!(
+		assembly_edit(
+			&mut session,
+			EditorCommandDto::RelinkLinkedPrefab {
+				root_key: root.as_str().into(),
+				source: incompatible,
+			}
+		)
+		.unwrap_err()
+		.contains("replacement differs")
+	);
+	assert_eq!(session.revision(), revision);
+	assert_eq!(session.authored_document(), before);
+	let review = review_recovery_source(&before, &root, &replacement).unwrap();
+	assert_eq!(review.prior_source_id, pinned.source_id);
+	assert_eq!(review.source_id, replacement.source_id);
+	assert_eq!(review.member_count, 9);
+	assert_eq!(review.binding_count, 1);
+	assembly_edit(
+		&mut session,
+		EditorCommandDto::RelinkLinkedPrefab {
+			root_key: root.as_str().into(),
+			source: replacement.clone(),
+		},
+	)
+	.unwrap();
+	let recovered = session.authored_document();
+	assert_eq!(resolve_scene(&recovered), resolve_scene(&before));
+	assert_eq!(
+		recovered
+			.entities
+			.iter()
+			.find_map(|entity| entity.linked_prefab.as_ref())
+			.unwrap()
+			.source,
+		replacement
+	);
+	assembly_edit(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), before);
 }
 
 #[test]

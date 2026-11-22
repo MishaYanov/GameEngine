@@ -156,6 +156,20 @@ export interface LinkedPrefabStatus {
 	readonly source_fingerprint: string;
 	readonly source_changed: boolean;
 	readonly source_error: string | null;
+    readonly direct_placements?: number;
 	readonly bindings: Readonly<Record<string, string>>;
 	readonly overrides: readonly LinkedPrefabOverride[];
+}
+
+export interface LinkedPrefabRecoveryReview {
+    readonly root_key: EntityKey;
+    readonly prior_source_id: string;
+    readonly prior_path: string;
+    readonly prior_fingerprint: string;
+    readonly source_id: string;
+    readonly source_path: string;
+    readonly source_fingerprint: string;
+    readonly member_count: number;
+    readonly binding_count: number;
+    readonly override_count: number;
 }

@@ -563,6 +563,12 @@ impl EditorSession {
 				self.revert_linked_prefab(root_key, property)?
 			}
 			Command::UnpackLinkedPrefab { root_key } => self.unpack_linked_prefab(root_key)?,
+			Command::UnpackLinkedPrefabOuter { root_key } => {
+				self.unpack_linked_prefab_outer(root_key)?
+			}
+			Command::RelinkLinkedPrefab { root_key, source } => {
+				self.relink_linked_prefab(root_key, source)?
+			}
 			Command::SetPlayCameraInput {
 				workspace_generation: _,
 				run_id,

@@ -226,6 +226,16 @@ pub enum EditorCommandDto {
 	UnpackLinkedPrefab {
 		root_key: String,
 	},
+	UnpackLinkedPrefabOuter {
+		root_key: String,
+	},
+	DuplicateLinkedPrefab {
+		root_key: String,
+	},
+	RelinkLinkedPrefab {
+		root_key: String,
+		source: crate::linked_prefab::LinkedPrefabSource,
+	},
 	UpsertLight {
 		light: LightData,
 	},

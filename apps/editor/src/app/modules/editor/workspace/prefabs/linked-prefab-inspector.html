@@ -29,6 +29,12 @@
 				<button type="button" [disabled]="!editable() || !propWorkspace.canOpen()" (click)="openPropWorkspace()">Open Prop Workspace</button>
 			}
 			<button type="button" [disabled]="!canSelectPropAsset()" (click)="selectPropAsset()">Select Prop Asset</button>
+			@if (status.direct_placements !== undefined) {
+				<button type="button" [disabled]="!available()" (click)="duplicate()">Duplicate Assembly</button>
+				@if (status.source_error) {
+					<button type="button" [disabled]="!available()" (click)="beginRecovery()">Recover Source Link…</button>
+				}
+			}
 			<button
 				type="button"
 				[disabled]="!available() || !!status.source_error"
@@ -50,13 +56,18 @@
 			>
 				Revert All Overrides
 			</button>
-			<button type="button" [disabled]="!available()" (click)="unpack()">
-				Unpack Linked Prefab
-			</button>
+			@if (status.direct_placements) {
+				<button type="button" [disabled]="!available()" (click)="unpack(true)">Unpack Outer Link</button>
+				<button type="button" [disabled]="!available()" (click)="unpack()">Unpack All Levels</button>
+			} @else {
+				<button type="button" [disabled]="!available()" (click)="unpack()">Unpack Linked Prefab</button>
+			}
 		</div>
-		<p>
-			Unpack keeps the current objects and removes their source link. Scene Undo can restore it.
-		</p>
+		@if (status.direct_placements) {
+			<p>Unpack Outer Link keeps {{ status.direct_placements }} independent nested links. Unpack All Levels keeps the objects and removes every source link in this assembly. Scene Undo restores the links.</p>
+		} @else {
+			<p>Unpack keeps the current objects and removes their source link. Scene Undo can restore it.</p>
+		}
 		<ul aria-label="Prefab overrides">
 			@for (override of status.overrides; track overrideKey(override)) {
 				<li>
@@ -160,6 +171,45 @@
 	<button dialog-actions type="button" [disabled]="!updateReady()" (click)="update()">
 		Update Linked Instance
 	</button>
+</editor-dialog>
+<editor-dialog
+	[open]="recoveryOpen()"
+	(openChange)="!$event && closeRecovery()"
+	[closeBlocked]="pending()"
+	title="Recover Prop Source Link"
+	[renderFields]="false"
+	[config]="{ width: '36rem' }"
+>
+	<p>Choose a Prop asset with the same saved objects, reference slots and nested versions.</p>
+	<label class="review-choice">Replacement Prop
+		<select #replacement [disabled]="pending()" [value]="recoveryAssetId()"
+			(change)="selectRecoveryAsset(replacement.value)">
+			<option value="">Choose a Prop asset</option>
+			@for (asset of recoveryAssets(); track asset.asset_id) {
+				<option [value]="asset.asset_id">{{ asset.name }} ({{ asset.path }})</option>
+			}
+		</select>
+	</label>
+	@if (!recoveryAssets().length && !pending()) {
+		<p role="status">No Prop assets are available. Add or restore the replacement in this project's Assets.</p>
+	}
+	@if (recoveryReview(); as review) {
+		<dl>
+			<dt>Saved source</dt><dd>{{ review.prior_path }}</dd>
+			<dt>Saved version</dt><dd class="reference">{{ review.prior_fingerprint }}</dd>
+			<dt>Replacement source</dt><dd>{{ review.source_path }}</dd>
+			<dt>Replacement version</dt><dd class="reference">{{ review.source_fingerprint }}</dd>
+			<dt>Objects preserved</dt><dd>{{ review.member_count }}</dd>
+			<dt>Bindings preserved</dt><dd>{{ review.binding_count }}</dd>
+			<dt>Overrides preserved</dt><dd>{{ review.override_count }}</dd>
+		</dl>
+		<p role="status">Relinking keeps the current placement and its saved values.</p>
+	}
+	@if (error(); as message) {
+		<p role="alert" class="error">{{ message }}</p>
+	}
+	<button dialog-actions type="button" [disabled]="!available() || !recoveryAssetId()" (click)="reviewRecovery()">Review Replacement</button>
+	<button dialog-actions type="button" [disabled]="!available() || !recoveryReview()" (click)="recover()">Relink Instance</button>
 </editor-dialog>
 <editor-dialog
 	[open]="applyOpen()"

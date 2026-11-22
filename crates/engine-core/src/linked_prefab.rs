@@ -1,5 +1,6 @@
 //! Pinned authoring links. Runtime scenes consume their materialized
 //! entities; source files are read only by explicit host authoring operations.
+mod assemblies;
 mod composition;
 mod constraints;
 mod overrides;
@@ -11,11 +12,14 @@ use crate::{
 	editor::PrefabData,
 	scene_data::{EntityData, SceneData, validate_model_path},
 };
+pub(crate) use assemblies::independent_placements;
+pub use assemblies::{LinkedPrefabRecoveryReview, review_recovery_source};
 pub use composition::{
 	ComposedProp, MAX_NESTED_PLACEMENTS, MAX_PINNED_PROP_VERSIONS, MAX_PROP_NESTING, NestedBinding,
 	NestedPlacement, PinnedAssetVersion, PinnedPropSource, PlacementId, PropAddress,
 	PropComposition,
 };
+pub(crate) use constraints::is_transform_only_anchor;
 pub use constraints::validate_scene_links;
 pub(crate) use overrides::{
 	apply_value, prepare_linked_source_update, properties, supports_source_override, value,

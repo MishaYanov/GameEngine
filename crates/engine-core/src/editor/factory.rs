@@ -257,7 +257,13 @@ impl CommandFactory {
 				}
 			}
 			EditorCommandDto::RevertLinkedPrefab { root_key, .. }
-			| EditorCommandDto::UnpackLinkedPrefab { root_key } => validate_key(root_key)?,
+			| EditorCommandDto::UnpackLinkedPrefab { root_key }
+			| EditorCommandDto::UnpackLinkedPrefabOuter { root_key }
+			| EditorCommandDto::DuplicateLinkedPrefab { root_key } => validate_key(root_key)?,
+			EditorCommandDto::RelinkLinkedPrefab { root_key, source } => {
+				validate_key(root_key)?;
+				source.validate()?;
+			}
 			EditorCommandDto::AddComponent { key, component }
 			| EditorCommandDto::ReplaceComponent { key, component } => {
 				validate_key(key)?;
@@ -416,6 +422,20 @@ impl CommandFactory {
 			(
 				"unpack_linked_prefab",
 				"Unpack linked prefab",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"unpack_linked_prefab_outer",
+				"Unpack outer Prop link",
+				"prefab",
+				true,
+				false,
+			),
+			(
+				"duplicate_linked_prefab",
+				"Duplicate linked Prop",
 				"prefab",
 				true,
 				false,

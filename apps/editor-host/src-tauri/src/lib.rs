@@ -129,6 +129,8 @@ pub fn run() {
 			editor_review_linked_prop_overrides,
 			editor_update_linked_prop_reviewed,
 			editor_apply_linked_prop_override,
+			editor_review_linked_prop_recovery,
+			editor_recover_linked_prop,
 			editor_create_linked_prefab_source,
 			editor_instantiate_linked_prefab,
 			editor_linked_prefab_status,

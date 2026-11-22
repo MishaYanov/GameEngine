@@ -133,14 +133,23 @@ fn authored_cinder_oath_opens_and_enters_play_through_the_editor_workspace() {
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(
-		workspace.backend.session().project().gameplay_module.as_deref(),
+		workspace
+			.backend
+			.session()
+			.project()
+			.gameplay_module
+			.as_deref(),
 		Some(gameplay_catalog::CINDER_OATH_ID)
 	);
 	run(&mut workspace, Command::StartPlay);
 	assert_eq!(
-		workspace.backend.session().play_scene_id().map(SceneId::as_str),
+		workspace
+			.backend
+			.session()
+			.play_scene_id()
+			.map(SceneId::as_str),
 		Some("intro")
 	);
 	assert!(workspace.backend.play_status().unwrap().gameplay.is_some());
@@ -169,7 +178,10 @@ fn scene_warming_rejects_an_old_workspace_with_the_same_revision() {
 	let snapshot = current
 		.capture_warming_report(current.generation, "test-session".into())
 		.unwrap();
-	assert_eq!(editor::scene_warming::publish_warming_report(&snapshot, &report).unwrap(), 0);
+	assert_eq!(
+		editor::scene_warming::publish_warming_report(&snapshot, &report).unwrap(),
+		0
+	);
 	let original = fs::read(&report).unwrap();
 	assert_eq!(
 		serde_json::from_slice::<bridge::viewport::WarmingSessionReportDto>(&original).unwrap(),
@@ -627,14 +639,16 @@ mod colliders;
 mod documents;
 #[path = "editor_workspace/incremental.rs"]
 mod incremental;
-#[path = "editor_workspace/play.rs"]
-mod play;
-#[path = "editor_workspace/prop_preview.rs"]
-mod prop_preview;
 #[path = "editor_workspace/nested_prop.rs"]
 mod nested_prop;
+#[path = "editor_workspace/play.rs"]
+mod play;
 #[path = "editor_workspace/prop_overrides.rs"]
 mod prop_overrides;
+#[path = "editor_workspace/prop_preview.rs"]
+mod prop_preview;
+#[path = "editor_workspace/prop_recovery.rs"]
+mod prop_recovery;
 
 #[path = "editor_workspace/scene_verification.rs"]
 mod scene_verification;

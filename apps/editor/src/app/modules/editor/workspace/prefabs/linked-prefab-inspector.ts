@@ -15,6 +15,7 @@ import type {
 	LinkedPrefabOverrideResolution,
 	LinkedPrefabOverrideReview,
 	LinkedPrefabOverrideTarget,
+	LinkedPrefabRecoveryReview,
 	LinkedPrefabStatus,
 	LinkedPrefabValue,
 	PrefabSourceDraft,
@@ -44,6 +45,12 @@ interface OverrideApply {
 	readonly change: LinkedPrefabOverride;
 }
 
+interface RecoveryCapture {
+	readonly draft: PrefabSourceDraft;
+	readonly review: LinkedPrefabRecoveryReview;
+	readonly revision: number;
+}
+
 @Component({
 	selector: 'editor-linked-prefab-inspector',
 	imports: [EditorDialog, PrefabSourceEditor, ReferenceBindings],
@@ -65,6 +72,21 @@ export class LinkedPrefabInspector {
 	protected readonly updateOpen = signal(false);
 	protected readonly applyOpen = signal(false);
 	protected readonly applyRequest = signal<OverrideApply | null>(null);
+	protected readonly recoveryOpen = signal(false);
+	protected readonly recoveryAssetId = signal('');
+	protected readonly recoveryAssets = computed(() => (this.editor.modelAssets() ?? [])
+		.filter(asset => asset.kind === 'prefab' && asset.asset_id && asset.fingerprint));
+	private readonly recoveryCapture = signal<RecoveryCapture | null>(null);
+	protected readonly recoveryReview = computed(() => {
+		const capture = this.recoveryCapture();
+		const asset = this.recoveryAssets().find(candidate => candidate.asset_id === this.recoveryAssetId());
+		const status = this.status();
+		return capture && status?.source_error && status.root_key === capture.review.root_key &&
+			status.source_fingerprint === capture.review.prior_fingerprint &&
+			asset?.asset_id === capture.draft.asset_id && asset.fingerprint === capture.draft.fingerprint &&
+			asset.path === capture.draft.path && capture.revision === this.editor.snapshot()?.revision
+			? capture.review : null;
+	});
 	protected readonly savedMessage = signal<string | null>(null);
 	private readonly review = signal<OverrideReview | null>(null);
 	protected readonly choices = signal<ReadonlyMap<string, LinkedPrefabConflictChoice>>(new Map());
@@ -137,6 +159,7 @@ export class LinkedPrefabInspector {
 					this.closeSource();
 					this.closeUpdate();
 					this.closeApply();
+					this.closeRecovery();
 					this.savedMessage.set(null);
 					this.status.set(null);
 					this.error.set(null);
@@ -155,6 +178,7 @@ export class LinkedPrefabInspector {
 			this.closeSource();
 			this.closeUpdate();
 			this.closeApply();
+			this.closeRecovery();
 		});
 	}
 
@@ -352,15 +376,86 @@ export class LinkedPrefabInspector {
 			);
 		});
 	}
-	protected async unpack(): Promise<void> {
+	protected async duplicate(): Promise<void> {
 		const status = this.status();
-		if (!status) return;
+		if (!status || status.direct_placements === undefined) return;
 		await this.run(async (generation, revision) => {
 			await this.editor.execute(
-				{ type: 'unpack_linked_prefab', root_key: status.root_key },
+				{ type: 'duplicate_linked_prefab', root_key: status.root_key }, generation, revision,
+			);
+		});
+	}
+
+	protected async unpack(outer = false): Promise<void> {
+		const status = this.status();
+		if (!status || (outer && !status.direct_placements)) return;
+		await this.run(async (generation, revision) => {
+			await this.editor.execute(
+				{ type: outer ? 'unpack_linked_prefab_outer' : 'unpack_linked_prefab', root_key: status.root_key },
 				generation,
 				revision,
 			);
+		});
+	}
+
+	protected beginRecovery(): void {
+		const status = this.status();
+		if (!this.available() || !status?.source_error || status.direct_placements === undefined) return;
+		this.recoveryOpen.set(true);
+		void this.run(async () => { await this.editor.assets(true); });
+	}
+
+	protected closeRecovery(): void {
+		this.recoveryOpen.set(false);
+		this.selectRecoveryAsset('');
+	}
+
+	protected selectRecoveryAsset(assetId: string): void {
+		this.recoveryAssetId.set(assetId);
+		this.releaseRecoveryCapture();
+	}
+
+	private releaseRecoveryCapture(): void {
+		const capture = this.recoveryCapture();
+		this.recoveryCapture.set(null);
+		if (capture) this.releaseDraft(capture.draft.draft_id);
+	}
+
+	protected async reviewRecovery(): Promise<void> {
+		const status = this.status();
+		const asset = this.recoveryAssets().find(candidate => candidate.asset_id === this.recoveryAssetId());
+		if (!status?.source_error || !asset?.asset_id) return;
+		const assetId = asset.asset_id;
+		await this.run(async (generation, revision, current) => {
+			this.releaseRecoveryCapture();
+			const draft = await this.openReviewedSource(asset.path, assetId, generation, revision, current);
+			if (!draft) return;
+			try {
+				if (draft.fingerprint !== asset.fingerprint) throw new Error('The replacement changed. Refresh Assets and review the current version.');
+				const review = await this.editor.reviewLinkedPropRecovery(status.root_key, draft.path, draft.draft_id, generation, revision);
+				if (!current() || this.recoveryAssetId() !== assetId) return;
+				if (review.root_key !== status.root_key || review.prior_source_id !== status.source_id ||
+					review.prior_fingerprint !== status.source_fingerprint || review.source_id !== draft.asset_id ||
+					review.source_path !== draft.path || review.source_fingerprint !== draft.fingerprint) {
+					throw new Error('The editor returned a different reviewed replacement.');
+				}
+				this.recoveryCapture.set({draft, review, revision});
+			} finally {
+				if (this.recoveryCapture()?.draft.draft_id !== draft.draft_id) this.releaseDraft(draft.draft_id);
+			}
+		});
+	}
+
+	protected async recover(): Promise<void> {
+		const capture = this.recoveryCapture();
+		const review = this.recoveryReview();
+		if (!capture || !review) return;
+		await this.run(async (generation, revision, current) => {
+			if (capture.revision !== revision) throw new Error('The scene changed. Review the replacement again.');
+			await this.editor.recoverLinkedProp(review.root_key, capture.draft.path, capture.draft.draft_id, generation, revision);
+			if (!current()) return;
+			this.closeRecovery();
+			this.savedMessage.set(`Recovered the source link to ${review.source_path}.`);
 		});
 	}
 

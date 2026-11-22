@@ -124,6 +124,60 @@ impl EditorSession {
 		self.commit(next, self.selection.clone(), "Unpack linked prefab")
 	}
 
+	pub fn unpack_linked_prefab_outer(&mut self, root_key: String) -> Result<(), String> {
+		self.require_edit()?;
+		self.require_no_transaction()?;
+		let root = EntityKey::new(root_key)?;
+		let mut next = (*self.data).clone();
+		let anchor = next
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key == root)
+			.ok_or("Linked instance anchor is missing")?;
+		let outer = anchor
+			.linked_prefab
+			.take()
+			.ok_or("Object is not a linked instance")?;
+		let mut placements: BTreeMap<_, _> = linked_prefab::independent_placements(&outer)?
+			.into_iter()
+			.collect();
+		for entity in &mut next.entities {
+			if let Some(link) = placements.remove(&entity.key) {
+				if !linked_prefab::is_transform_only_anchor(entity) {
+					return Err(format!(
+						"{} has components on its placement anchor. Move these edits to a child or use Unpack All Levels.",
+						entity.name
+					));
+				}
+				entity.linked_prefab = Some(link);
+			}
+		}
+		if !placements.is_empty() {
+			return Err("A nested Prop placement is missing from the scene".into());
+		}
+		self.commit(next, self.selection.clone(), "Unpack outer Prop link")
+	}
+
+	pub fn relink_linked_prefab(
+		&mut self,
+		root_key: String,
+		source: LinkedPrefabSource,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.require_no_transaction()?;
+		let root = EntityKey::new(root_key)?;
+		linked_prefab::review_recovery_source(&self.data, &root, &source)?;
+		let mut next = (*self.data).clone();
+		let link = next
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key == root)
+			.and_then(|entity| entity.linked_prefab.as_mut())
+			.ok_or("Select a linked Prop instance")?;
+		link.source = source;
+		self.commit(next, self.selection.clone(), "Recover linked Prop source")
+	}
+
 	pub fn update_linked_prefab(
 		&mut self,
 		root_key: String,

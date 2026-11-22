@@ -7,10 +7,10 @@ mod documents;
 pub(crate) mod prefab_sources;
 #[path = "prop_preview.rs"]
 pub(crate) mod prop_preview;
-#[path = "editor/scene_warming.rs"]
-pub(crate) mod scene_warming;
 #[path = "editor/scene_verification.rs"]
 pub(crate) mod scene_verification;
+#[path = "editor/scene_warming.rs"]
+pub(crate) mod scene_warming;
 
 use crate::project_location::ProjectLocation;
 use assets::PendingAsset;
@@ -247,7 +247,9 @@ impl EditorWorkspace {
 			entities,
 			camera: receipt.changes.camera_changed.then(|| after.camera.clone()),
 			lights: receipt.changes.lights_changed.then(|| after.lights.clone()),
-			organization: receipt.organization_changed.then(|| after.organization.clone()),
+			organization: receipt
+				.organization_changed
+				.then(|| after.organization.clone()),
 			receipt,
 		})
 	}
@@ -285,7 +287,8 @@ impl EditorWorkspace {
 				}
 				Command::InstantiateLinkedPrefab { .. }
 				| Command::UpdateLinkedPrefab { .. }
-				| Command::UpdateLinkedPrefabReviewed { .. } => {
+				| Command::UpdateLinkedPrefabReviewed { .. }
+				| Command::RelinkLinkedPrefab { .. } => {
 					return Err("Linked source changes require the guarded prefab command and a reviewed source draft".into());
 				}
 				Command::AddScene { asset_path, .. } => {

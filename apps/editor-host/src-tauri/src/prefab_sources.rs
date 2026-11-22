@@ -71,6 +71,7 @@ pub struct LinkedPrefabStatusDto {
 	pub source_fingerprint: String,
 	pub source_changed: bool,
 	pub source_error: Option<String>,
+	pub direct_placements: usize,
 	pub bindings: std::collections::BTreeMap<String, EntityKey>,
 	pub overrides: Vec<LinkedPrefabOverrideDto>,
 }

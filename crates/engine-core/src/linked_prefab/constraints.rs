@@ -1,5 +1,14 @@
 use super::*;
 
+pub(crate) fn is_transform_only_anchor(entity: &EntityData) -> bool {
+	!entity.has_mesh_component()
+		&& entity.collider.is_none()
+		&& entity.native_behaviors.is_empty()
+		&& entity.character_controller.is_none()
+		&& entity.animation.is_none()
+		&& entity.interactable.is_none()
+}
+
 pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 	let entities: HashMap<_, _> = scene
 		.entities
@@ -25,13 +34,7 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 		}
 		let link = anchor.linked_prefab.as_ref().expect("filtered link");
 		link.source.validate()?;
-		if anchor.has_mesh_component()
-			|| anchor.collider.is_some()
-			|| !anchor.native_behaviors.is_empty()
-			|| anchor.character_controller.is_some()
-			|| anchor.animation.is_some()
-			|| anchor.interactable.is_some()
-		{
+		if !is_transform_only_anchor(anchor) {
 			return Err(
 				"Linked instance anchors are transform-only objects; edit a member or Unpack first"
 					.into(),

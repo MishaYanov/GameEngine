@@ -276,6 +276,8 @@ export type EditorCommand =
     | { readonly type: 'set_component_enabled'; readonly key: EntityKey; readonly component_id: string; readonly enabled: boolean }
     | { readonly type: 'revert_linked_prefab'; readonly root_key: EntityKey; readonly property?: LinkedPrefabOverrideTarget | null }
     | { readonly type: 'unpack_linked_prefab'; readonly root_key: EntityKey }
+    | { readonly type: 'unpack_linked_prefab_outer'; readonly root_key: EntityKey }
+    | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'upsert_light'; readonly light: Light }
     | { readonly type: 'remove_light'; readonly key: EntityKey }
     | { readonly type: 'set_camera'; readonly camera: Camera }

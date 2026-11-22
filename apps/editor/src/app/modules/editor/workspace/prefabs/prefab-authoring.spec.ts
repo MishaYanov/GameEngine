@@ -8,8 +8,9 @@ import type {
 	PrefabSourceDraft,
 	LinkedPrefabStatus,
 	LinkedPrefabOverrideReview,
+	LinkedPrefabRecoveryReview,
 } from '../../../../core/editor/linked-prefabs.models';
-import type { SceneEntity } from '../../../../core/editor/editor.models';
+import type { ModelAsset, SceneEntity } from '../../../../core/editor/editor.models';
 import { LAYOUT_PREFERENCES_STORAGE } from '../../../../shared/services/layout-preferences-storage';
 import { SceneEditingService } from '../scene-editing.service';
 import { PrefabAuthoring } from './prefab-authoring';
@@ -47,6 +48,16 @@ const source: PrefabSourceDraft = {
 	asset_id: 'source-id',
 	fingerprint: 'original',
 	prefab,
+};
+const replacement: PrefabSourceDraft = {
+	...source, draft_id: 'replacement-draft', asset_id: 'replacement-id',
+	path: 'replacement.json', fingerprint: 'b'.repeat(64),
+};
+const recoveryReview: LinkedPrefabRecoveryReview = {
+	root_key: 'anchor', prior_source_id: source.asset_id, prior_path: source.path,
+	prior_fingerprint: source.fingerprint, source_id: replacement.asset_id,
+	source_path: replacement.path, source_fingerprint: replacement.fingerprint,
+	member_count: 2, binding_count: 1, override_count: 1,
 };
 const linked: LinkedPrefabStatus = {
 	root_key: 'anchor',
@@ -134,8 +145,11 @@ function configure() {
 	const reviewLinkedPropOverrides = vi.fn(async () => structuredClone(reviewedChanges));
 	const updateLinkedPropReviewed = vi.fn(async () => current());
 	const applyLinkedPropOverride = vi.fn(async () => ({ draft: source, snapshot: current() }));
+	const reviewLinkedPropRecovery = vi.fn(async () => structuredClone(recoveryReview));
+	const recoverLinkedProp = vi.fn(async () => current());
 	const execute = vi.fn(async () => current());
 	const assets = vi.fn(async () => []);
+	const modelAssets = signal<readonly ModelAsset[]>([]);
 	TestBed.configureTestingModule({
 		providers: [
 			PropAssetSelection,
@@ -160,7 +174,7 @@ function configure() {
 							},
 						],
 					}),
-					modelAssets: () => [],
+					modelAssets,
 					openPrefabSource,
 					closePrefabSource,
 					validatePrefabSource,
@@ -171,6 +185,8 @@ function configure() {
 					reviewLinkedPropOverrides,
 					updateLinkedPropReviewed,
 					applyLinkedPropOverride,
+					reviewLinkedPropRecovery,
+					recoverLinkedProp,
 					execute,
 					assets,
 				},
@@ -196,6 +212,9 @@ function configure() {
 		reviewLinkedPropOverrides,
 		updateLinkedPropReviewed,
 		applyLinkedPropOverride,
+		reviewLinkedPropRecovery,
+		recoverLinkedProp,
+		modelAssets,
 		execute,
 		assets,
 	};
@@ -504,6 +523,61 @@ describe('typed prefab authoring', () => {
 			1,
 			4,
 		);
+	});
+
+	it('routes duplicate and both unpack depths to the assembly root from a member', async () => {
+		const backend = configure();
+		backend.linkedPrefabStatus.mockResolvedValue({...linked, direct_placements: 2});
+		const fixture = TestBed.createComponent(LinkedPrefabInspector);
+		fixture.componentRef.setInput('entity', entity);
+		fixture.componentRef.setInput('editable', true);
+		await fixture.whenStable();
+		const ui = controls(fixture.nativeElement);
+		for (const [label, type] of [
+			['Duplicate Assembly', 'duplicate_linked_prefab'],
+			['Unpack Outer Link', 'unpack_linked_prefab_outer'],
+			['Unpack All Levels', 'unpack_linked_prefab'],
+		]) {
+			ui.button(label).click();
+			await fixture.whenStable();
+			expect(backend.execute).toHaveBeenLastCalledWith({type, root_key: 'anchor'}, 1, 4);
+		}
+	});
+
+	it('keeps a missing instance pinned until a matching replacement is explicitly reviewed and applied', async () => {
+		const backend = configure();
+		backend.linkedPrefabStatus.mockResolvedValue({...linked, direct_placements: 2, source_error: 'Source missing'});
+		backend.modelAssets.set([{name: 'Replacement', kind: 'prefab', path: replacement.path,
+			asset_id: replacement.asset_id, fingerprint: replacement.fingerprint}]);
+		backend.openPrefabSource.mockResolvedValue(replacement);
+		backend.reviewLinkedPropRecovery.mockRejectedValueOnce(new Error('The replacement differs from the pinned objects.'));
+		const fixture = TestBed.createComponent(LinkedPrefabInspector);
+		fixture.componentRef.setInput('entity', entity);
+		fixture.componentRef.setInput('editable', true);
+		await fixture.whenStable();
+		const root: HTMLElement = fixture.nativeElement;
+		controls(root).button('Recover Source Link…').click();
+		await fixture.whenStable();
+		const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
+		const ui = controls(dialog);
+		expect(ui.button('Relink Instance').disabled).toBe(true);
+		ui.change('Replacement Prop', replacement.asset_id);
+		await fixture.whenStable();
+		ui.button('Review Replacement').click();
+		await fixture.whenStable();
+		expect(dialog.textContent).toContain('The replacement differs');
+		expect(ui.button('Relink Instance').disabled).toBe(true);
+		expect(backend.recoverLinkedProp).not.toHaveBeenCalled();
+		ui.button('Review Replacement').click();
+		await fixture.whenStable();
+		expect(dialog.textContent).toContain('Objects preserved2');
+		expect(dialog.textContent).toContain(replacement.fingerprint);
+		expect(ui.button('Relink Instance').disabled).toBe(false);
+		ui.button('Relink Instance').click();
+		await fixture.whenStable();
+		expect(backend.recoverLinkedProp).toHaveBeenCalledWith('anchor', replacement.path, replacement.draft_id, 1, 4);
+		expect(backend.closePrefabSource).toHaveBeenCalledWith(replacement.draft_id);
+		expect(root.textContent).toContain('Recovered the source link');
 	});
 
 	it('shows linked source provenance and reveals the source asset across distinct instance keys', async () => {

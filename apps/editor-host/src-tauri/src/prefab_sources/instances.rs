@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "instances/recovery.rs"]
+mod recovery;
 #[path = "instances/review.rs"]
 mod review;
 
@@ -56,18 +58,7 @@ impl EditorWorkspace {
 			.find(|entity| entity.key == root)
 			.and_then(|entity| entity.linked_prefab.as_ref())
 			.expect("root resolved");
-		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root);
-		let path = catalog
-			.as_ref()
-			.ok()
-			.and_then(|catalog| catalog.by_id(&link.source.source_id))
-			.map_or_else(|| link.source.path.clone(), |asset| asset.path.clone());
-		let source = self.prefab_source(&path).and_then(|source| {
-			if source.source_id != link.source.source_id {
-				return Err("Linked source identity is unavailable".into());
-			}
-			Ok(source)
-		});
+		let (path, source) = self.current_linked_source(&link.source);
 		let changed = source
 			.as_ref()
 			.is_ok_and(|source| source.fingerprint != link.source.fingerprint);
@@ -79,9 +70,28 @@ impl EditorWorkspace {
 			source_fingerprint: link.source.fingerprint.clone(),
 			source_changed: changed,
 			source_error: error,
+			direct_placements: link.source.prefab.composition.placements.len(),
 			bindings: link.bindings.clone(),
 			overrides: runtime::linked_prefab::override_status(&scene, &root)?,
 		}))
+	}
+	fn current_linked_source(
+		&self,
+		pin: &LinkedPrefabSource,
+	) -> (String, Result<LinkedPrefabSource, String>) {
+		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root);
+		let path = catalog
+			.as_ref()
+			.ok()
+			.and_then(|catalog| catalog.by_id(&pin.source_id))
+			.map_or_else(|| pin.path.clone(), |asset| asset.path.clone());
+		let source = self.prefab_source(&path).and_then(|source| {
+			if source.source_id != pin.source_id {
+				return Err("Linked source identity is unavailable".into());
+			}
+			Ok(source)
+		});
+		(path, source)
 	}
 	pub fn update_linked_source(
 		&mut self,
