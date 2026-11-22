@@ -43,6 +43,7 @@ impl<'de> Deserialize<'de> for AssetId {
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
 	AnimatorGraph,
+	ControlsGraph,
 	InputActions,
 	Model,
 	Prefab,
@@ -102,6 +103,18 @@ impl PersistentAsset {
 		{
 			return Err(
 				"Input Actions catalog entry requires a .input-actions.json asset within 64 KiB"
+					.into(),
+			);
+		}
+		if self.kind == AssetKind::ControlsGraph
+			&& (!self
+				.path
+				.to_ascii_lowercase()
+				.ends_with(crate::input::CONTROL_GRAPH_SUFFIX)
+				|| self.bytes > crate::input::MAX_CONTROL_GRAPH_BYTES as u64)
+		{
+			return Err(
+				"Controls Graph catalog entry requires a .controls.json asset within 128 KiB"
 					.into(),
 			);
 		}

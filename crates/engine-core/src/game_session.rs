@@ -10,6 +10,7 @@ pub struct GameSession {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
 	animator_resolver: Option<crate::animation::AnimatorResolver>,
 	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
+	control_graph_resolver: Option<crate::simulation_session::ControlGraphResolver>,
 	project: Arc<ProjectData>,
 	factory: Arc<dyn GameModuleFactory>,
 	active: SimulationSession,
@@ -58,6 +59,14 @@ impl GameSession {
 	) -> Result<(), String> {
 		self.active.set_input_actions_resolver(&resolver)?;
 		self.input_actions_resolver = Some(resolver);
+		Ok(())
+	}
+	pub fn set_control_graph_resolver(
+		&mut self,
+		resolver: crate::simulation_session::ControlGraphResolver,
+	) -> Result<(), String> {
+		self.active.set_control_graph_resolver(&resolver)?;
+		self.control_graph_resolver = Some(resolver);
 		Ok(())
 	}
 
@@ -165,6 +174,10 @@ impl GameSession {
 			simulation.set_input_actions_resolver(resolver)?;
 		}
 		simulation.require_input_actions_ready()?;
+		if let Some(resolver) = &self.control_graph_resolver {
+			simulation.set_control_graph_resolver(resolver)?;
+		}
+		simulation.require_control_graph_ready()?;
 
 		Ok(PreparedScene {
 			new_run: None,
@@ -193,6 +206,7 @@ impl GameSession {
 			animation_resolver: None,
 			animator_resolver: None,
 			input_actions_resolver: None,
+			control_graph_resolver: None,
 			project,
 			factory,
 			active,
@@ -250,6 +264,10 @@ impl GameSession {
 			next.set_input_actions_resolver(Arc::clone(resolver))?;
 		}
 		next.active.require_input_actions_ready()?;
+		if let Some(resolver) = &self.control_graph_resolver {
+			next.set_control_graph_resolver(Arc::clone(resolver))?;
+		}
+		next.active.require_control_graph_ready()?;
 		let restore_guard = restored_progress
 			.as_ref()
 			.map(|_| (self.active.tick_index(), self.progress_revision()));

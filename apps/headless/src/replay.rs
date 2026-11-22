@@ -244,6 +244,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 	let source_schema = parsed.source_schema_version;
 	let animation_root = asset_root.clone();
 	let input_root = asset_root.clone();
+	let controls_root = asset_root.clone();
 	let animator_root = asset_root.clone();
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
@@ -253,6 +254,9 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 		}))
 		.input_actions_resolver(Arc::new(move |scene| {
 			bridge::input_actions::load_scene(&input_root, scene)
+		}))
+		.control_graph_resolver(Arc::new(move |project, scene, map| {
+			bridge::controls_graph::prepare_scene(&controls_root, project, scene, map)
 		}))
 		.animator_resolver(Arc::new(move |project, scene_id, scene| {
 			bridge::animator_graph::prepare_scene(&animator_root, project, scene_id, scene)

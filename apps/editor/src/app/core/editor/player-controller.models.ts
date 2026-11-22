@@ -8,6 +8,7 @@ export interface PlayerControllerSettings {
     readonly input: InputActionsRef;
     readonly space: PlayerMovementSpace;
     readonly local: boolean;
+    readonly control_graph?: string;
 }
 
 export interface PlayerControllerAttachment {
@@ -17,7 +18,9 @@ export interface PlayerControllerAttachment {
 }
 
 export function validPlayerControllerSettings(value: unknown): value is PlayerControllerSettings {
-    if (!value || typeof value !== 'object' || Object.keys(value).length !== 3 ||
+    if (!value || typeof value !== 'object' ||
+        Object.keys(value).some(key => !['input', 'space', 'local', 'control_graph'].includes(key)) ||
+        ('control_graph' in value && !validInputActionsId(value.control_graph)) ||
         !('space' in value) || (value.space !== 'world' && value.space !== 'camera_relative') ||
         !('local' in value) || typeof value.local !== 'boolean' ||
         !('input' in value) || !value.input || typeof value.input !== 'object') return false;

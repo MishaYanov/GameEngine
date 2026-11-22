@@ -157,6 +157,7 @@ impl SceneEditor {
 		self.finish_gesture()?;
 		if let Some(root) = scene.animation_root().map(std::path::Path::to_path_buf) {
 			let input_root = root.clone();
+			let controls_root = root.clone();
 			let animator_root = root.clone();
 			self.session
 				.as_mut()
@@ -170,6 +171,12 @@ impl SceneEditor {
 				.expect("initialized session")
 				.set_input_actions_resolver(Arc::new(move |data| {
 					bridge::input_actions::load_scene(&input_root, data)
+				}))?;
+			self.session
+				.as_mut()
+				.expect("initialized session")
+				.set_control_graph_resolver(Arc::new(move |project, data, map| {
+					bridge::controls_graph::prepare_scene(&controls_root, project, data, map)
 				}))?;
 			self.session
 				.as_mut()

@@ -51,6 +51,7 @@ pub struct EditorSession {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
 	animator_resolver: Option<crate::animation::AnimatorResolver>,
 	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
+	control_graph_resolver: Option<crate::simulation_session::ControlGraphResolver>,
 	saved: Arc<SceneData>,
 	selection: Vec<EntityKey>,
 	history: History,
@@ -91,6 +92,7 @@ impl EditorSession {
 			animation_resolver: None,
 			animator_resolver: None,
 			input_actions_resolver: None,
+			control_graph_resolver: None,
 			saved: Arc::clone(&data),
 			data,
 			selection: Vec::new(),
@@ -175,6 +177,14 @@ impl EditorSession {
 	) -> Result<(), String> {
 		self.require_edit()?;
 		self.input_actions_resolver = Some(resolver);
+		Ok(())
+	}
+	pub fn set_control_graph_resolver(
+		&mut self,
+		resolver: crate::simulation_session::ControlGraphResolver,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.control_graph_resolver = Some(resolver);
 		Ok(())
 	}
 	pub fn animations(&self) -> Option<&crate::animation::AnimationBank> {

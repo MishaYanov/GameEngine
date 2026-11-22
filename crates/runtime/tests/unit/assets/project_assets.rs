@@ -348,3 +348,58 @@ fn authored_input_actions_keep_identity_and_guard_disk_changes() {
 	assert!(load_input_actions(&root, &moved).is_err());
 	assert!(prepare_move(&root, &moved.id, "other.input-actions.json").is_err());
 }
+
+#[test]
+fn controls_graph_asset_rejects_wrong_kind_invalid_replacements_and_changed_disk_bytes() {
+	use engine_core::input::ControlGraph;
+	let fixture = Fixture::new();
+	let root = fixture.root();
+	let path = "player.controls.json";
+	let mut graph = ControlGraph::from_json(
+		br#"{
+		"schema_version":1,
+		"nodes":[
+			{"id":"walk","data":{"kind":"action","action":"move","value":"vector2"}},
+			{"id":"move","data":{"kind":"move","input":"walk"}}
+		]
+	}"#,
+	)
+	.unwrap();
+	let original = prepare_control_graph(&root, path, None, &graph)
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(original.kind, AssetKind::ControlsGraph);
+	assert_eq!(
+		bridge::controls_graph::load(&root, &original).unwrap(),
+		graph
+	);
+	assert!(prepare_control_graph(&root, path, None, &graph).is_err());
+	let capture = Some((&original.id, original.fingerprint.as_str()));
+	graph.schema_version = 2;
+	assert!(prepare_control_graph(&root, path, capture, &graph).is_err());
+	graph.schema_version = 1;
+	graph.nodes.reverse();
+	let updated = prepare_control_graph(&root, path, capture, &graph)
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(updated.id, original.id);
+	assert_eq!(updated.revision, original.revision + 1);
+	assert!(prepare_control_graph(&root, path, capture, &graph).is_err());
+	assert_eq!(
+		bridge::controls_graph::load(&root, &updated).unwrap(),
+		graph
+	);
+	fs::write(root.join(path), b"{}").unwrap();
+	assert!(bridge::controls_graph::load(&root, &updated).is_err());
+	assert!(
+		prepare_control_graph(
+			&root,
+			path,
+			Some((&updated.id, &updated.fingerprint)),
+			&graph
+		)
+		.is_err()
+	);
+}

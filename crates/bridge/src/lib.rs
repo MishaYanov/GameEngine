@@ -1,5 +1,6 @@
 pub mod animation_asset;
 pub mod animator_graph;
+pub mod controls_graph;
 mod asset_io;
 pub mod input_actions;
 pub mod editor;

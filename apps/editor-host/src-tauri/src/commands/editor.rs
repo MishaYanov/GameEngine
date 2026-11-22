@@ -42,6 +42,8 @@ mod animation;
 pub use animation::*;
 mod animator;
 pub use animator::*;
+mod controls_graph;
+pub use controls_graph::*;
 mod authored_clip;
 pub use authored_clip::*;
 mod clip_timeline;
@@ -155,6 +157,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		scene_warming_supported: cfg!(target_os = "windows"),
 		scene_verification_supported: true,
 		animator_assets: true,
+		controls_graph_assets: true,
 		input_action_assets: true,
 	}
 }

@@ -429,4 +429,6 @@ pub struct EditorCapabilitiesDto {
 	pub scene_verification_supported: bool,
 	pub input_action_assets: bool,
 	pub animator_assets: bool,
+	#[serde(default)]
+	pub controls_graph_assets: bool,
 }

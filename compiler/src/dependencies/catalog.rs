@@ -48,6 +48,9 @@ impl Closure<'_> {
 			AssetKind::InputActions => {
 				engine_core::input::InputActionMap::from_json(&bytes)?;
 			}
+			AssetKind::ControlsGraph => {
+				engine_core::input::ControlGraph::from_json(&bytes)?;
+			}
 			AssetKind::Scene => {
 				let scene = SceneData::from_json(
 					std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,

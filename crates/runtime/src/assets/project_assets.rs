@@ -18,12 +18,14 @@ use std::{
 
 mod animation_clip;
 mod animator;
+mod controls_graph;
 mod input_actions;
 mod migration;
 mod prefab;
 
 pub use animation_clip::{prepare_animation_clip, read_animation_clip};
 pub use animator::prepare_animator;
+pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;

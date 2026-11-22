@@ -2,7 +2,9 @@ use super::*;
 use crate::{
 	InputState, Key,
 	components::{InputActionsRef, PlayerMovementSpace},
-	input::{GameKeyboardInput, HeldGameActions, InputActionMap, PhysicalGamepadSample},
+	input::{
+		ControlButton, GameKeyboardInput, HeldGameActions, InputActionMap, PhysicalGamepadSample,
+	},
 };
 
 #[derive(Clone)]
@@ -20,6 +22,7 @@ pub(super) fn apply_local_player(
 	characters: &mut crate::character_controller::CharacterRuntime,
 	inputs: &InputFrame,
 	camera: &crate::Camera,
+	routed_jump: Option<ControlButton>,
 ) -> Result<(), String> {
 	if !inputs.controller_owned {
 		return Ok(());
@@ -41,6 +44,7 @@ pub(super) fn apply_local_player(
 		&motor.settings.jump_action,
 		controller.settings.space,
 		camera.yaw,
+		routed_jump,
 	);
 	characters.set_controller_intent(
 		&actor.key,
@@ -55,6 +59,7 @@ fn controller_intent(
 	jump_action: &str,
 	space: PlayerMovementSpace,
 	yaw: f32,
+	routed_jump: Option<ControlButton>,
 ) -> PlayerControllerIntent {
 	let [side, forward] = input.controller_movement;
 	let movement = match space {
@@ -69,8 +74,9 @@ fn controller_intent(
 	};
 	PlayerControllerIntent {
 		movement,
-		jump_held: input.action_held(jump_action),
-		jump_pressed: input.action_pressed(jump_action),
+		jump_held: routed_jump.map_or_else(|| input.action_held(jump_action), |jump| jump.held),
+		jump_pressed: routed_jump
+			.map_or_else(|| input.action_pressed(jump_action), |jump| jump.pressed),
 	}
 }
 
@@ -131,9 +137,13 @@ impl SimulationSession {
 	}
 
 	pub fn uses_pointer_look(&self) -> bool {
-		self.input_action_map
-			.as_ref()
-			.is_none_or(InputActionMap::uses_pointer_look)
+		self.input_action_map.as_ref().is_none_or(|map| {
+			if self.control_graph.is_some() {
+				super::control_graph::pointer_action(map).is_some()
+			} else {
+				map.uses_pointer_look()
+			}
+		})
 	}
 
 	pub fn sample_action_keys(
@@ -164,7 +174,7 @@ impl SimulationSession {
 
 	fn sample_input_actions(
 		&mut self,
-		frame: crate::input::ResolvedInputActions,
+		mut frame: crate::input::ResolvedInputActions,
 	) -> Result<(), String> {
 		if self.paused {
 			return Ok(());
@@ -176,8 +186,10 @@ impl SimulationSession {
 			GameKeyboardInput {
 				movement,
 				actions: HeldGameActions {
-					ids: frame.buttons.into_iter().collect(),
-					animation_parameters: frame.animation_parameters.into_iter().collect(),
+					ids: std::mem::take(&mut frame.buttons).into_iter().collect(),
+					animation_parameters: std::mem::take(&mut frame.animation_parameters)
+						.into_iter()
+						.collect(),
 				},
 			},
 		)?;
@@ -186,6 +198,9 @@ impl SimulationSession {
 		} else {
 			[0.0; 2]
 		};
+		if self.control_graph.is_some() {
+			self.inputs.control_sample.update_axes(frame);
+		}
 		Ok(())
 	}
 }

@@ -137,6 +137,7 @@ impl EditorWorkspace {
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
+			.control_graph_resolver(control_graph_resolver(&asset_root))
 			.animator_resolver(animator_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
@@ -180,6 +181,7 @@ impl EditorWorkspace {
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
+			.control_graph_resolver(control_graph_resolver(&asset_root))
 			.animator_resolver(animator_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
@@ -449,6 +451,13 @@ fn animator_resolver(root: &Path) -> runtime::animation::AnimatorResolver {
 fn input_actions_resolver(root: &Path) -> runtime::simulation_session::InputActionsResolver {
 	let root = root.to_path_buf();
 	Arc::new(move |scene| bridge::input_actions::load_scene(&root, scene))
+}
+
+fn control_graph_resolver(root: &Path) -> runtime::simulation_session::ControlGraphResolver {
+	let root = root.to_path_buf();
+	Arc::new(move |project, scene, map| {
+		bridge::controls_graph::prepare_scene(&root, project, scene, map)
+	})
 }
 
 fn animation_resolver(root: &Path) -> runtime::animation::AnimationResolver {

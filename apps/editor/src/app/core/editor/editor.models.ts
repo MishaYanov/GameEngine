@@ -406,6 +406,7 @@ export interface CommandDescriptor {
 export interface EditorCapabilities {
     readonly input_action_assets?: boolean;
     readonly animator_assets?: boolean;
+    readonly controls_graph_assets?: boolean;
     readonly state_machines?: MachineDescriptor;
     readonly protocol_version: number;
     readonly scene_schema_version: number;

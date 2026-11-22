@@ -18,9 +18,11 @@ use std::{collections::HashMap, sync::Arc};
 
 mod animator_graphs;
 mod camera_objects;
+mod control_graph;
 mod gameplay;
 mod input;
 mod player_control;
+pub use control_graph::ControlGraphResolver;
 pub use player_control::InputActionsResolver;
 
 pub use gameplay::{
@@ -83,6 +85,8 @@ pub struct SimulationSession {
 	camera: GameCameraController,
 	camera_objects: camera_objects::CameraObjects,
 	input_action_map: Option<crate::input::InputActionMap>,
+	control_graph: Option<crate::input::CompiledControlGraph>,
+	control_graph_ready: bool,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
 	camera_input: CameraInputLatch,
 	camera_exclusions: Option<CameraExclusions>,
@@ -177,6 +181,7 @@ impl SimulationSession {
 		)?;
 		let camera_input = CameraInputLatch::default();
 		let camera_objects = camera_objects::CameraObjects::new(&world, &lifecycle);
+		let control_graph_ready = control_graph::first_configured_actor(world.data()).is_none();
 
 		Ok(Self {
 			animations: Default::default(),
@@ -201,6 +206,8 @@ impl SimulationSession {
 			camera,
 			camera_objects,
 			input_action_map: None,
+			control_graph: None,
+			control_graph_ready,
 			visibility_capabilities: None,
 			camera_input,
 			camera_exclusions,
@@ -284,6 +291,7 @@ impl SimulationSession {
 				|| !self.inputs.action_presses.is_empty()
 				|| self.inputs.controller_movement != [0.0; 2]
 				|| self.inputs.controller_look != [0.0; 2]
+				|| self.inputs.control_sample.needs_tick()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self.module.needs_tick(&self.inputs))
@@ -304,6 +312,7 @@ impl SimulationSession {
 				|| !self.inputs.action_presses.is_empty()
 				|| self.inputs.controller_movement != [0.0; 2]
 				|| self.inputs.controller_look != [0.0; 2]
+				|| self.inputs.control_sample.needs_tick()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
 				|| self
@@ -560,6 +569,7 @@ impl SimulationSession {
 		}
 		self.require_animation_ready()?;
 		self.require_animators_ready()?;
+		self.require_control_graph_ready()?;
 		let mut outcome = TickOutcome {
 			tick: self.tick,
 			progress_revision: progress.view().revision(),
@@ -638,11 +648,22 @@ impl SimulationSession {
 						ActionWriter { actions: &mut self.actions }.push(SimulationAction::Despawn { handle })?;
 					}
 				}
+				let mut camera_delta = camera_input.take_for_step();
+				let controls = self.evaluate_control_graph(camera_delta);
+				let routed = controls
+					.as_ref()
+					.map(|graph| self.inputs.with_control_output(graph.intent));
+				let step_input = routed.as_ref().unwrap_or(&self.inputs);
+				if let Some(route) = &controls {
+					camera_delta.yaw_delta = f64::from(route.intent.look.delta[0]);
+					camera_delta.pitch_delta = f64::from(route.intent.look.delta[1]);
+				}
+				let look_rate = step_input.controller_look;
 				self.module.plan_with_progress(
 					GameplayContext {
 						world: &self.world,
 						collisions: &self.collisions,
-						input: &self.inputs,
+						input: step_input,
 						camera: camera.camera(),
 						step_seconds: report.step_seconds,
 						progress: progress_transaction.view(),
@@ -656,12 +677,19 @@ impl SimulationSession {
 				player_control::apply_local_player(
 					&self.world,
 					&mut characters,
-					&self.inputs,
+					step_input,
 					camera.camera(),
+					controls.as_ref().map(|graph| graph.intent.jump),
 				)?;
 				// Later catch-up steps see held state only. A rejected tick
 				// rolls back its actions and clears all input on pause.
-				let step_actions = std::mem::take(&mut self.inputs.action_presses);
+				let mut step_actions = std::mem::take(&mut self.inputs.action_presses);
+				self.inputs.control_sample.finish_step();
+				if controls.is_some() {
+					// A routed press requests an action. It does not prove that a
+					// gameplay rule accepted it or that the motor jumped.
+					step_actions.clear();
+				}
 				if self.inputs.controller_owned && !step_actions.is_empty() {
 					let tick = self.tick + u64::from(steps) + 1;
 					let mut edges = step_actions.iter().cloned().collect::<Vec<_>>();
@@ -939,8 +967,8 @@ impl SimulationSession {
 						&lifecycle,
 						report.step_seconds,
 						player_control::step_camera_intent(
-							camera_input.take_for_step(),
-							self.inputs.controller_look,
+							camera_delta,
+							look_rate,
 							report.step_seconds,
 						),
 						camera_tick,
@@ -1042,13 +1070,17 @@ impl SimulationSession {
 						.cloned()
 						.collect();
 					let local_player = characters.local_input_owner(&self.world);
+					let no_cosmetics = std::collections::BTreeMap::new();
+					let cosmetics = controls
+						.as_ref()
+						.map_or(&no_cosmetics, |graph| &graph.presentation);
 					let animated = animations.step_animators(
 						&self.world,
 						&motions,
 						&jumped,
 						local_player,
 						&step_actions,
-						&std::collections::BTreeMap::new(),
+						cosmetics,
 						self.project.fixed_hz,
 					)?;
 					changes.merge(WorldChange {

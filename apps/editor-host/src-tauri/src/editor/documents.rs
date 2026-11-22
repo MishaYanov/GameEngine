@@ -88,6 +88,9 @@ impl EditorWorkspace {
 			.with_scenes(documents)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&self.asset_root))
+			.input_actions_resolver(input_actions_resolver(&self.asset_root))
+			.animator_resolver(animator_resolver(&self.asset_root))
+			.control_graph_resolver(control_graph_resolver(&self.asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 		candidate

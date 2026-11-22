@@ -15,33 +15,43 @@ pub fn prepare_input_actions(
 	{
 		return Err("Input Actions assets use .input-actions.json".into());
 	}
-	let bytes = map.to_json()?;
+	prepare_typed_input_asset(
+		asset_root,
+		destination,
+		previous,
+		map.to_json()?,
+		AssetKind::InputActions,
+		MAX_INPUT_ACTION_MAP_BYTES,
+	)
+}
+
+pub(super) fn prepare_typed_input_asset(
+	asset_root: &Path,
+	destination: &str,
+	previous: Option<(&AssetId, &str)>,
+	bytes: Vec<u8>,
+	kind: AssetKind,
+	limit: usize,
+) -> Result<PreparedAssetChange, String> {
 	let root = root(asset_root)?;
 	let target = asset_path(&root, destination, false)?;
 	let original_catalog = catalog_bytes(&root)?;
 	let mut catalog = load_catalog(&root)?;
 	let old = match previous {
 		Some((id, reviewed)) => {
-			let asset = catalog
-				.by_id(id)
-				.ok_or("Input Actions identity is unavailable")?;
-			if asset.kind != AssetKind::InputActions
-				|| asset.path != destination
-				|| asset.fingerprint != reviewed
-			{
-				return Err(
-					"Input Actions changed after opening; reopen the asset before saving".into(),
-				);
+			let asset = catalog.by_id(id).ok_or("Asset identity is unavailable")?;
+			if asset.kind != kind || asset.path != destination || asset.fingerprint != reviewed {
+				return Err("Asset changed after opening; reopen it before saving".into());
 			}
-			let disk = read(&target, MAX_INPUT_ACTION_MAP_BYTES)?;
-			if fingerprint(&disk) != reviewed {
-				return Err("Input Actions changed on disk; reload it before saving".into());
+			let disk = read(&target, limit)?;
+			if disk.len() as u64 != asset.bytes || fingerprint(&disk) != reviewed {
+				return Err("Asset changed on disk; reload it before saving".into());
 			}
 			Some(asset.clone())
 		}
 		None => {
 			if catalog.by_path(destination).is_some() || target.exists() {
-				return Err("Input Actions destination is already in use".into());
+				return Err("Asset destination is already in use".into());
 			}
 			None
 		}
@@ -51,7 +61,7 @@ pub fn prepare_input_actions(
 			.as_ref()
 			.map_or_else(AssetId::generate, |current| current.id.clone()),
 		path: destination.into(),
-		kind: AssetKind::InputActions,
+		kind,
 		aliases: old
 			.as_ref()
 			.map_or_else(Vec::new, |current| current.aliases.clone()),

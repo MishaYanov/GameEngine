@@ -42,7 +42,7 @@ export interface ComponentDraft {
 	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner' | 'state_machine';
 	machine: MachineDefinition;
 	controller: Record<ControllerNumberKey, string> & { jump_action: string };
-	playerController: {input: InputActionsRef; space: PlayerMovementSpace};
+	playerController: {input: InputActionsRef; space: PlayerMovementSpace; control_graph?: string};
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
     interactable: { action: string; reach: string };
@@ -130,8 +130,8 @@ export function componentDraft(
 	} else if (value.data.kind === 'animation') {
 		draft.animation = structuredClone(value.data.settings);
 	} else if (value.data.kind === 'player_controller') {
-		const {input, space} = value.data.settings;
-		draft.playerController = {input, space};
+		const {input, space, control_graph} = value.data.settings;
+		draft.playerController = {input, space, ...(control_graph ? {control_graph} : {})};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
@@ -259,10 +259,12 @@ export function componentFromDraft(
 			} as unknown as CharacterControllerSettings,
 		};
 	} else if (draft.kind === 'player_controller') {
-		const {input, space} = draft.playerController;
+		const {input, space, control_graph} = draft.playerController;
 		if (space !== 'world' && space !== 'camera_relative') throw new Error('Choose a Player movement space.');
 		const local = original?.data.kind === 'player_controller' && original.data.settings.local;
-		data = {kind: 'player_controller', settings: {input, space, local: draft.enabled && local}};
+		data = {kind: 'player_controller', settings: {
+			input, space, local: draft.enabled && local, ...(control_graph ? {control_graph} : {}),
+		}};
 	} else if (draft.kind === 'animation') {
 		if (!validAnimationSettings(draft.animation))
 			throw new Error(

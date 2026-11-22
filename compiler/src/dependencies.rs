@@ -112,6 +112,14 @@ impl Closure<'_> {
         {
             return Err("Animator asset exceeds 256 KiB".into());
         }
+        if relative
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with(engine_core::input::CONTROL_GRAPH_SUFFIX)
+            && metadata.len() > engine_core::input::MAX_CONTROL_GRAPH_BYTES as u64
+        {
+            return Err("Controls Graph asset exceeds 128 KiB".into());
+        }
         if !metadata.is_file()
             || metadata.len() > 64 * 1024 * 1024
             || (extension == "json" && metadata.len() > 16 * 1024 * 1024)
@@ -227,6 +235,20 @@ impl Closure<'_> {
                 .ok_or("Player Controller Input Actions identity is missing")?;
             if asset.kind != AssetKind::InputActions {
                 return Err("Player Controller requires an Input Actions asset".into());
+            }
+            self.record(asset_id)?;
+        }
+        if let Some(asset_id) = entity
+            .player_controller
+            .as_ref()
+            .and_then(|controller| controller.settings.control_graph.as_ref())
+        {
+            if self
+                .catalog
+                .by_id(asset_id)
+                .is_none_or(|asset| asset.kind != AssetKind::ControlsGraph)
+            {
+                return Err("Player Controller requires a valid Controls Graph asset".into());
             }
             self.record(asset_id)?;
         }

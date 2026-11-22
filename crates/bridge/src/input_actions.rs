@@ -12,10 +12,10 @@ use std::{
 	path::{Path, PathBuf},
 };
 
-fn canonical_root(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn canonical_root(root: &Path) -> Result<PathBuf, String> {
 	let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
 	if !metadata.is_dir() || is_link(&metadata) {
-		return Err("Input Actions asset root must be an ordinary directory".into());
+		return Err("Asset root must be an ordinary directory".into());
 	}
 	root.canonicalize().map_err(|error| error.to_string())
 }
@@ -47,11 +47,14 @@ pub fn load_scene(root: &Path, scene: &SceneData) -> Result<Option<InputActionMa
 		return Ok(None);
 	};
 	let root = canonical_root(root)?;
-	let bytes = read_bounded(&contained_file(&root, CATALOG_FILE)?, MAX_CATALOG_BYTES)?;
-	let catalog =
-		AssetCatalog::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)?;
+	let catalog = read_catalog(&root)?;
 	let asset = catalog
 		.by_id(asset_id)
 		.ok_or("Player Controller Input Actions identity is unavailable")?;
 	load(&root, asset).map(Some)
+}
+
+pub(crate) fn read_catalog(root: &Path) -> Result<AssetCatalog, String> {
+	let bytes = read_bounded(&contained_file(&root, CATALOG_FILE)?, MAX_CATALOG_BYTES)?;
+	AssetCatalog::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)
 }

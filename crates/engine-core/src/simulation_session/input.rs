@@ -14,7 +14,7 @@ pub enum MovementTarget {
 	Entity(EntityKey),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct InputFrame {
 	pub(super) movement: HashMap<EntityKey, [f32; 3]>,
 	pub(super) game_actions: HeldGameActions,
@@ -22,6 +22,7 @@ pub struct InputFrame {
 	pub(super) controller_owned: bool,
 	pub(super) controller_movement: [f32; 2],
 	pub(super) controller_look: [f32; 2],
+	pub(super) control_sample: super::control_graph::ControlSample,
 }
 impl InputFrame {
 	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
@@ -57,6 +58,9 @@ impl SimulationSession {
 		self.inputs.controller_owned = false;
 		self.inputs.controller_movement = [0.0; 2];
 		self.inputs.controller_look = [0.0; 2];
+		self.inputs
+			.control_sample
+			.clear(self.control_graph.is_some());
 		self.clock.reset();
 	}
 	pub fn set_paused(&mut self, paused: bool) {
@@ -149,6 +153,19 @@ impl SimulationSession {
 			}
 		}
 		self.inputs.action_presses.extend(pressed);
+		if self.control_graph.is_some() {
+			let releases = &mut self.inputs.control_sample.releases;
+			let available = MAX_GAME_INPUT_ACTIONS.saturating_sub(releases.len());
+			let mut released: Vec<_> = self
+				.inputs
+				.game_actions
+				.ids
+				.difference(&input.actions.ids)
+				.filter(|id| !releases.contains(*id))
+				.collect();
+			released.sort_unstable();
+			releases.extend(released.into_iter().take(available).cloned());
+		}
 		self.inputs.game_actions = input.actions;
 		Ok(())
 	}

@@ -24,6 +24,10 @@ impl EditorSession {
 			run.set_input_actions_resolver(Arc::clone(resolver))?;
 		}
 		run.active().require_input_actions_ready()?;
+		if let Some(resolver) = &self.control_graph_resolver {
+			run.set_control_graph_resolver(Arc::clone(resolver))?;
+		}
+		run.active().require_control_graph_ready()?;
 		self.play = Some(run);
 		self.scene_revision += 1;
 		self.bump();

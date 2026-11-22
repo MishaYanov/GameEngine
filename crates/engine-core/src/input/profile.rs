@@ -40,7 +40,7 @@ pub struct GameKeyboardInput {
 	pub(crate) actions: HeldGameActions,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct HeldGameActions {
 	pub(crate) ids: HashSet<String>,
 	pub(crate) animation_parameters: HashSet<String>,

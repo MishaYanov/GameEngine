@@ -104,6 +104,8 @@ fn validate_catalog_snapshot(
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result = validate_catalog_scene(scene_targets, root, entry, &packaged, generated)
 			.and_then(|scene| {
+				bridge::controls_graph::prepare_scene(root, &project, &scene, None)
+					.map_err(|cause| scene_error(entry, cause))?;
 				for actor in &scene.entities {
 					if let Some(component) = &actor.animator {
 						bridge::animator_graph::prepare_actor(

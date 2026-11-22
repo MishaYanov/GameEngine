@@ -69,6 +69,7 @@ pub struct EngineBuilder {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
 	animator_resolver: Option<crate::animation::AnimatorResolver>,
 	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
+	control_graph_resolver: Option<crate::simulation_session::ControlGraphResolver>,
 	asset_limits: AssetRegistryLimits,
 }
 impl EngineBuilder {
@@ -81,6 +82,7 @@ impl EngineBuilder {
 			animation_resolver: None,
 			animator_resolver: None,
 			input_actions_resolver: None,
+			control_graph_resolver: None,
 			asset_limits: AssetRegistryLimits::default(),
 		}
 	}
@@ -107,6 +109,13 @@ impl EngineBuilder {
 		resolver: crate::simulation_session::InputActionsResolver,
 	) -> Self {
 		self.input_actions_resolver = Some(resolver);
+		self
+	}
+	pub fn control_graph_resolver(
+		mut self,
+		resolver: crate::simulation_session::ControlGraphResolver,
+	) -> Self {
+		self.control_graph_resolver = Some(resolver);
 		self
 	}
 	pub fn animator_resolver(mut self, resolver: crate::animation::AnimatorResolver) -> Self {
@@ -145,6 +154,11 @@ impl EngineBuilder {
 			session
 				.set_input_actions_resolver(resolver)
 				.map_err(invalid("input_actions_resolver"))?;
+		}
+		if let Some(resolver) = self.control_graph_resolver {
+			session
+				.set_control_graph_resolver(resolver)
+				.map_err(invalid("control_graph_resolver"))?;
 		}
 		if let Some(resolver) = self.animator_resolver {
 			session

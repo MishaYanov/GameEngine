@@ -1,5 +1,6 @@
 mod action_map;
 mod button;
+mod control_graph;
 mod gamepad;
 mod key;
 mod mouse;
@@ -10,6 +11,11 @@ pub use action_map::{
 	MAX_INPUT_ACTION_MAP_BYTES, NamedInputAction, ResolvedInputActions,
 };
 pub use button::InputButton;
+pub use control_graph::{
+	CONTROL_GRAPH_SUFFIX, CompiledControlGraph, ControlActionSource, ControlButton, ControlGraph,
+	ControlGraphFrame, ControlGraphOutput, ControlIntent, ControlLook, ControlNode,
+	ControlNodeData, ControlNodePosition, MAX_CONTROL_GRAPH_BYTES, control_action_types,
+};
 pub use gamepad::{
 	ControllerBindings, FaceButton, GamepadSample, MenuButtons, PhysicalGamepadSample,
 };

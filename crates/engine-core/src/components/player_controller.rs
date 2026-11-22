@@ -1,5 +1,6 @@
 use super::ComponentId;
 use crate::{
+	asset_catalog::AssetId,
 	character_controller::validate_character_body,
 	scene_data::{EntityData, SceneData},
 };
@@ -11,7 +12,7 @@ pub enum InputActionsRef {
 	#[default]
 	ProjectDefault,
 	Asset {
-		asset_id: crate::asset_catalog::AssetId,
+		asset_id: AssetId,
 	},
 }
 
@@ -30,6 +31,8 @@ pub struct PlayerControllerSettings {
 	pub space: PlayerMovementSpace,
 	#[serde(default)]
 	pub local: bool,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub control_graph: Option<AssetId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
