@@ -9,7 +9,7 @@ use runtime::{
 use serde::Serialize;
 
 #[path = "prefab_sources/draft_history.rs"]
-mod draft_history;
+pub(crate) mod draft_history;
 #[path = "prefab_sources/instances.rs"]
 mod instances;
 #[path = "prefab_sources/nested.rs"]

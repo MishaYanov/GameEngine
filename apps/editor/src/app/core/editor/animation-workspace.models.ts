@@ -52,3 +52,19 @@ let nextPreviewRequest = 0;
 export function reserveAnimationPreviewRequest(): number {
     return ++nextPreviewRequest;
 }
+
+export interface ImportedKeyPage {
+    readonly token: string;
+    readonly clip_index: number;
+    readonly track: number;
+    readonly offset: number;
+    readonly total: number;
+    readonly tracks: readonly {
+        readonly index: number;
+        readonly source_node: number;
+        readonly property: string;
+        readonly interpolation: string;
+        readonly key_count: number;
+    }[];
+    readonly keys: readonly {readonly at_seconds: number; readonly value: readonly number[]}[];
+}

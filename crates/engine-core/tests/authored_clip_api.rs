@@ -20,6 +20,7 @@ fn clip(owner: AuthoredClipOwner, target: VisualTargetId) -> AuthoredClip {
 		name: "Lever Turn".into(),
 		owner,
 		duration_ticks: 1_000,
+		markers: Vec::new(),
 		tracks: vec![
 			ScopedTrack {
 				target: target.clone(),
@@ -27,10 +28,12 @@ fn clip(owner: AuthoredClipOwner, target: VisualTargetId) -> AuthoredClip {
 					interpolation: VisualInterpolation::Linear,
 					keys: vec![
 						ClipKey {
+							id: None,
 							at: 0,
 							value: [0.0; 3],
 						},
 						ClipKey {
+							id: None,
 							at: 1000,
 							value: [2.0, 4.0, 0.0],
 						},
@@ -43,10 +46,12 @@ fn clip(owner: AuthoredClipOwner, target: VisualTargetId) -> AuthoredClip {
 					interpolation: VisualInterpolation::Linear,
 					keys: vec![
 						ClipKey {
+							id: None,
 							at: 0,
 							value: [0.0, 0.0, 0.0, 1.0],
 						},
 						ClipKey {
+							id: None,
 							at: 1000,
 							value: [0.0, 1.0, 0.0, 0.0],
 						},

@@ -3,12 +3,13 @@ import {listen} from '@tauri-apps/api/event';
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import {reserveAnimationPreviewRequest} from '../../../../core/editor/animation-workspace.models';
 import type {
-    AuthoredClip, ClipAssetDocument, ClipAssetIndex, ClipOwner, Quaternion, VisualClipPreview, VisualClipTarget,
+    AuthoredClip, ClipAssetDocument, ClipAssetIndex, ClipTimelineDraft, ClipOwner, Quaternion, VisualClipPreview, VisualClipTarget,
 } from '../../../../core/editor/authored-clip.models';
 import type {SceneEntity, Transform, Vec3} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
+import {ClipTimeline} from './timeline';
 import {AnimationWorkspaceService} from './animation-workspace.service';
 
 interface DraftTarget {
@@ -35,6 +36,7 @@ type KeyField = 'fromPosition' | 'toPosition' | 'fromRotation' | 'toRotation';
 
 @Component({
     selector: 'editor-authored-clip-editor',
+    imports: [ClipTimeline],
     templateUrl: './authored-clip-editor.html',
     styleUrl: './animation-workspace.scss',
 })
@@ -48,6 +50,7 @@ export class AuthoredClipEditor {
     protected readonly draft = signal<ClipDraft | null>(null);
     protected readonly preview = signal<VisualClipPreview | null>(null);
     protected readonly busy = signal(false);
+    protected readonly timelineOpen = signal(false);
     protected readonly error = signal<string | null>(null);
     protected readonly message = signal<string | null>(null);
     protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
@@ -134,6 +137,18 @@ export class AuthoredClipEditor {
             this.closePreview();
             unsubscribe?.();
         });
+    }
+
+    protected openTimeline(): void {
+        if (!this.available() || !this.selected()) return;
+        this.closePreview();
+        this.timelineOpen.set(true);
+    }
+
+    protected timelineSaved(draft: ClipTimelineDraft): void {
+        this.selected.set(draft);
+        this.draft.set(openForm(draft));
+        void this.loadLibrary(this.editor.workspaceGeneration());
     }
 
     protected begin(): void {
@@ -228,8 +243,10 @@ export class AuthoredClipEditor {
     protected closePreview(): void {
         const preview = this.preview();
         this.preview.set(null);
-        this.animation.authoredReady.set(false);
-        if (preview) void this.editor.closeAuthoredClipPreview(preview.token).catch(() => undefined);
+        if (preview) {
+            this.animation.authoredReady.set(false);
+            void this.editor.closeAuthoredClipPreview(preview.token).catch(() => undefined);
+        }
     }
 
     private accept(clip: ClipAssetDocument): void {
@@ -249,7 +266,7 @@ export class AuthoredClipEditor {
         }
     }
 
-    private previewScope(owner: ClipOwner): AnimationPreviewDocument | null {
+    protected previewScope(owner: ClipOwner): AnimationPreviewDocument | null {
         const snapshot = this.editor.snapshot();
         if (owner.kind === 'scene' || !snapshot) return null;
         const prop = this.props.document();
@@ -327,6 +344,7 @@ function buildClip(form: ClipDraft): AuthoredClip {
 
 function openForm(document: ClipAssetDocument): ClipDraft | null {
     const clip = document.clip;
+    if (clip.schema_version === 2) return null;
     const position = clip.tracks.find(entry => entry.track.kind === 'local_position'),
         rotation = clip.tracks.find(entry => entry.track.kind === 'local_rotation');
     if (!position || !rotation || clip.tracks.length !== 2 || JSON.stringify(position.target) !== JSON.stringify(rotation.target) ||

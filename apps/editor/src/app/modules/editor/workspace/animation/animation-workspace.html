@@ -59,6 +59,7 @@
                 <output>{{ animation.seconds().toFixed(3) }} / {{ preview.duration_seconds.toFixed(3) }} s</output>
                 <button type="button" (click)="animation.frame()">Frame Animated Object</button>
             </div>
+            <editor-imported-clip-keys [preview]="preview" (seek)="animation.seek($event)"/>
         }
         @if (animation.error(); as message) {
             <p class="error" role="alert">{{ message }}</p>

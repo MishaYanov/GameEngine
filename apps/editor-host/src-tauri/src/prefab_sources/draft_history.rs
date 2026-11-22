@@ -1,6 +1,6 @@
-//! Local document history for an open Prop source.
+//! Local document history for an open authored asset.
 //!
-//! Callers admit only validated, canonical prefab documents. This history has its
+//! Callers admit only validated, canonical asset documents. This history has its
 //! own revision and byte budget and never changes the scene command journal.
 
 use std::{collections::VecDeque, sync::Arc};
@@ -9,7 +9,7 @@ const MAX_DOCUMENTS: usize = 33;
 const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
-pub(super) struct DraftHistory {
+pub(crate) struct DraftHistory {
 	documents: VecDeque<Arc<str>>,
 	cursor: usize,
 	bytes: usize,
@@ -17,7 +17,7 @@ pub(super) struct DraftHistory {
 }
 
 impl DraftHistory {
-	pub(super) fn new(document: Arc<str>) -> Self {
+	pub(crate) fn new(document: Arc<str>) -> Self {
 		Self {
 			bytes: document.len(),
 			documents: VecDeque::from([document]),
@@ -26,23 +26,23 @@ impl DraftHistory {
 		}
 	}
 
-	pub(super) fn revision(&self) -> u64 {
+	pub(crate) fn revision(&self) -> u64 {
 		self.revision
 	}
 
-	pub(super) fn document(&self) -> &Arc<str> {
+	pub(crate) fn document(&self) -> &Arc<str> {
 		&self.documents[self.cursor]
 	}
 
-	pub(super) fn can_undo(&self) -> bool {
+	pub(crate) fn can_undo(&self) -> bool {
 		self.cursor > 0
 	}
 
-	pub(super) fn can_redo(&self) -> bool {
+	pub(crate) fn can_redo(&self) -> bool {
 		self.cursor + 1 < self.documents.len()
 	}
 
-	pub(super) fn apply(&mut self, expected: u64, document: Arc<str>) -> Result<(), String> {
+	pub(crate) fn apply(&mut self, expected: u64, document: Arc<str>) -> Result<(), String> {
 		self.check(expected)?;
 		if self.document().as_ref() == document.as_ref() {
 			return Ok(());
@@ -66,7 +66,7 @@ impl DraftHistory {
 		Ok(())
 	}
 
-	pub(super) fn undo(&mut self, expected: u64) -> Result<(), String> {
+	pub(crate) fn undo(&mut self, expected: u64) -> Result<(), String> {
 		self.check(expected)?;
 		if self.can_undo() {
 			self.revision = self.next_revision()?;
@@ -75,7 +75,7 @@ impl DraftHistory {
 		Ok(())
 	}
 
-	pub(super) fn redo(&mut self, expected: u64) -> Result<(), String> {
+	pub(crate) fn redo(&mut self, expected: u64) -> Result<(), String> {
 		self.check(expected)?;
 		if self.can_redo() {
 			self.revision = self.next_revision()?;
@@ -84,7 +84,7 @@ impl DraftHistory {
 		Ok(())
 	}
 
-	pub(super) fn discard(&mut self, expected: u64, saved: Arc<str>) -> Result<(), String> {
+	pub(crate) fn discard(&mut self, expected: u64, saved: Arc<str>) -> Result<(), String> {
 		self.check(expected)?;
 		if self.documents.len() == 1 && self.document().as_ref() == saved.as_ref() {
 			return Ok(());
@@ -95,7 +95,7 @@ impl DraftHistory {
 		Ok(())
 	}
 
-	pub(super) fn check(&self, expected: u64) -> Result<(), String> {
+	pub(crate) fn check(&self, expected: u64) -> Result<(), String> {
 		if expected != self.revision {
 			return Err("The Prop draft changed. Review its current values and try again.".into());
 		}

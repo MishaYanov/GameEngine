@@ -42,6 +42,8 @@ mod animation;
 pub use animation::*;
 mod authored_clip;
 pub use authored_clip::*;
+mod clip_timeline;
+pub use clip_timeline::*;
 mod camera;
 pub use camera::*;
 mod prop_preview;

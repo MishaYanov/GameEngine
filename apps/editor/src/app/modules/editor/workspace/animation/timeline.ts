@@ -1,0 +1,174 @@
+import {Component, computed, effect, inject, input, linkedSignal, output, signal, untracked} from '@angular/core';
+import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
+import type {ClipAssetDocument, ClipKey, ClipKeyValue, ClipTimelineDraft, Quaternion, TimelineEdit} from '../../../../core/editor/authored-clip.models';
+import type {Vec3} from '../../../../core/editor/editor.models';
+import {TimelineEditService} from './timeline-edit.service';
+
+@Component({
+    selector: 'editor-clip-timeline',
+    providers: [TimelineEditService],
+    templateUrl: './timeline.html',
+    styleUrl: './timeline.scss',
+})
+export class ClipTimeline {
+    readonly asset = input.required<ClipAssetDocument>();
+    readonly scope = input<AnimationPreviewDocument | null>(null);
+    readonly closed = output<void>();
+    readonly saved = output<ClipTimelineDraft>();
+    protected readonly timeline = inject(TimelineEditService);
+    protected readonly track = signal(0);
+    private readonly key = signal('');
+    private readonly marker = signal('');
+    protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
+    protected readonly tracks = computed(() => this.timeline.draft()?.clip.tracks ?? []);
+    protected readonly keys = computed<readonly ClipKey<Vec3 | Quaternion>[]>(() => this.tracks()[this.track()]?.track.keys ?? []);
+    protected readonly selected = computed(() => this.keys().find(key => key.id === this.key()) ?? this.keys()[0] ?? null);
+    protected readonly values = linkedSignal(() => this.selected()?.value.map(String) ?? []);
+    protected readonly markers = computed(() => this.timeline.draft()?.clip.markers ?? []);
+    protected readonly selectedMarker = computed(() => this.markers().find(marker => marker.id === this.marker()) ?? null);
+    protected readonly label = linkedSignal(() => this.selectedMarker()?.label ?? '');
+    protected readonly closing = signal(false);
+
+    constructor() {
+        effect(() => {
+            const asset = this.asset(), scope = this.scope();
+            untracked(() => this.timeline.connect(asset, scope));
+        });
+    }
+
+    protected selectKey(key: ClipKey<Vec3 | Quaternion>): void {
+        if (!key.id) return;
+        this.key.set(key.id);
+        this.timeline.seek(key.at);
+    }
+
+    protected selectTrack(value: number): void {
+        if (this.tracks()[value]) this.track.set(value);
+    }
+
+    protected updateValue(index: number, value: string): void {
+        this.values.update(values => values.map((item, axis) => axis === index ? value : item));
+    }
+
+    protected insert(record: boolean): void {
+        const value = record ? this.keyValue() : null;
+        if (record && !value) return;
+        void this.edit({kind: 'insert_key', track: this.track(), at: this.timeline.playhead(), value});
+    }
+
+    protected setValue(): void {
+        const keyId = this.selected()?.id, value = this.keyValue();
+        if (keyId && value) void this.edit({kind: 'set_key_value', key_id: keyId, value});
+    }
+
+    protected deleteKey(): void {
+        const keyId = this.selected()?.id;
+        if (keyId) void this.edit({kind: 'remove_key', key_id: keyId});
+    }
+
+    protected beginDrag(): void {
+        const key = this.selected();
+        if (key?.id) this.timeline.beginDrag(key.id, key.at);
+    }
+
+    protected dragTo(value: number): void {
+        if (!this.timeline.drag()) this.beginDrag();
+        this.timeline.moveDrag(value);
+    }
+
+    protected selectMarker(id: string, at: number): void {
+        this.marker.set(id);
+        this.timeline.seek(at);
+    }
+
+    protected addMarker(): void {
+        const label = this.label().trim();
+        if (label) void this.edit({kind: 'add_marker', at: this.timeline.playhead(), label});
+    }
+
+    protected renameMarker(): void {
+        const marker = this.selectedMarker(), label = this.label().trim();
+        if (marker && label) void this.edit({kind: 'rename_marker', marker_id: marker.id, label});
+    }
+
+    protected moveMarker(): void {
+        const marker = this.selectedMarker();
+        if (marker) void this.edit({kind: 'move_marker', marker_id: marker.id, at: this.timeline.playhead()});
+    }
+
+    protected removeMarker(): void {
+        const marker = this.selectedMarker();
+        if (marker) void this.edit({kind: 'remove_marker', marker_id: marker.id});
+    }
+
+    protected async save(): Promise<void> {
+        const saved = await this.timeline.save();
+        if (saved) this.saved.emit(saved);
+    }
+
+    protected async close(discard: boolean): Promise<void> {
+        if (!discard && this.timeline.draft()?.dirty) {
+            this.closing.set(true);
+            return;
+        }
+        if (await this.timeline.close(discard)) this.closed.emit();
+    }
+
+    protected onKeys(event: KeyboardEvent): void {
+        if (event.key === 'Escape' && this.timeline.drag()) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.timeline.cancelDrag();
+            return;
+        }
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement ||
+            event.altKey || this.timeline.busy()) return;
+        if (event.ctrlKey || event.metaKey) {
+            if (event.key.toLowerCase() === 'z') {
+                event.preventDefault();
+                event.stopPropagation();
+                void this.timeline.edit({type: event.shiftKey ? 'redo' : 'undo'});
+            }
+            return;
+        }
+        const step = this.timeline.snap() ? 10 : 1;
+        switch (event.key) {
+            case 'ArrowLeft':
+            case 'ArrowRight': {
+                const delta = event.key === 'ArrowLeft' ? -step : step;
+                const key = this.selected();
+                if (event.shiftKey && key?.id) {
+                    const at = Math.min(this.timeline.duration(), Math.max(0, key.at + delta));
+                    void this.edit({kind: 'move_key', key_id: key.id, at});
+                } else this.timeline.seek(this.timeline.playhead() + delta);
+                break;
+            }
+            case 'Insert':
+                this.insert(false);
+                break;
+            case 'Delete':
+                this.deleteKey();
+                break;
+            default:
+                return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    private keyValue(): ClipKeyValue | null {
+        const track = this.tracks()[this.track()]?.track;
+        const values = this.values().map(value => value.trim() ? Number(value) : NaN);
+        if (!track || !values.every(Number.isFinite)) {
+            this.timeline.error.set('Enter finite component values for this key.');
+            return null;
+        }
+        return track.kind === 'local_position'
+            ? {kind: 'position', value: values as unknown as Vec3}
+            : {kind: 'rotation', value: values as unknown as Quaternion};
+    }
+
+    private edit(edit: TimelineEdit): Promise<void> {
+        return this.timeline.edit({type: 'edit', edit});
+    }
+}

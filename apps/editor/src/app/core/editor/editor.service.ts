@@ -27,11 +27,12 @@ import {
     readAnimationReview
 } from './animation.models';
 import {
-    readScopedAnimationPreview, type AnimationWorkspaceTarget, type ScopedAnimationPreview,
+    readScopedAnimationPreview, type AnimationWorkspaceTarget, type ImportedKeyPage, type ScopedAnimationPreview,
 } from './animation-workspace.models';
 import {
     type AuthoredClip, type AuthoredClipPreviewRequest, type ClipAssetDocument, type ClipAssetIndex,
     type ClipAssetSave, type ClipAssetVersion, readAuthoredClipPreview, type VisualClipPreview,
+    type ClipDraftOperation, type ClipTimelineDraft, type ClipTimelinePreviewRequest, type SavedClipTimeline, type TimelineKeyMove,
 } from './authored-clip.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import {isSceneSchemaVersion} from './editor.models';
@@ -788,6 +789,55 @@ export class EditorService {
             this.native<void>('editor_authored_clip_preview_close', {token}));
     }
 
+    openClipTimelineDraft(assetId: string, generation: number, expectedRevision: number): Promise<ClipTimelineDraft> {
+        return this.prefabDraftOperation('editor_clip_timeline_draft_open', {assetId}, generation, expectedRevision);
+    }
+
+    editClipTimelineDraft(
+        draftId: string, expectedDraftRevision: number, operation: ClipDraftOperation, generation: number,
+    ): Promise<ClipTimelineDraft> {
+        return this.enqueue('editor_clip_timeline_draft_edit', () => {
+            this.requireGeneration(generation);
+            return this.native<ClipTimelineDraft>('editor_clip_timeline_draft_edit', {draftId, expectedDraftRevision, operation});
+        }, false, generation);
+    }
+
+    saveClipTimelineDraft(
+        draftId: string, expectedDraftRevision: number, generation: number, expectedRevision: number,
+    ): Promise<ClipTimelineDraft> {
+        return this.enqueue('editor_clip_timeline_draft_save', async () => {
+            this.requireGeneration(generation);
+            const result = await this.native<SavedClipTimeline>('editor_clip_timeline_draft_save', {
+                draftId, expectedDraftRevision, expectedRevision,
+            });
+            this.requireGeneration(generation);
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result.draft;
+        }, true, generation);
+    }
+
+    closeClipTimelineDraft(draftId: string, discard: boolean): Promise<void> {
+        return this.enqueue('editor_clip_timeline_draft_close', () =>
+            this.native<void>('editor_clip_timeline_draft_close', {draftId, discard}));
+    }
+
+    openClipTimelinePreview(request: ClipTimelinePreviewRequest, generation: number): Promise<VisualClipPreview> {
+        return this.enqueue('editor_clip_timeline_preview_open', async () => {
+            this.requireGeneration(generation);
+            return readAuthoredClipPreview(await this.native<unknown>('editor_clip_timeline_preview_open', {...request}));
+        }, false, generation);
+    }
+
+    sampleClipTimelinePreview(
+        token: string, tick: number, drag: TimelineKeyMove | null, generation: number,
+    ): Promise<VisualClipPreview> {
+        return this.enqueue('editor_clip_timeline_preview_sample', async () => {
+            this.requireGeneration(generation);
+            return readAuthoredClipPreview(await this.native<unknown>('editor_clip_timeline_preview_sample', {token, tick, drag}));
+        }, false, generation);
+    }
+
     openAnimationWorkspacePreview(
         target: AnimationWorkspaceTarget,
         clipIndex: number,
@@ -809,6 +859,13 @@ export class EditorService {
             this.requireGeneration(expectedGeneration);
             return readScopedAnimationPreview(await this.native<unknown>('editor_animation_preview_sample', {token, timeSeconds}));
         }, false, expectedGeneration);
+    }
+
+    importedAnimationKeys(token: string, track: number, offset: number, generation: number): Promise<ImportedKeyPage> {
+        return this.enqueue('editor_animation_preview_keys', () => {
+            this.requireGeneration(generation);
+            return this.native<ImportedKeyPage>('editor_animation_preview_keys', {token, track, offset});
+        }, false, generation);
     }
 
     frameAnimationWorkspacePreview(token: string): Promise<void> {

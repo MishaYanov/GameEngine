@@ -9,17 +9,18 @@ export type ClipOwner =
 export type VisualClipTarget =
     | {readonly kind: 'scene'; readonly entity_key: EntityKey}
     | {readonly kind: 'prop'; readonly address: PropAddress};
-type ClipKey<Value> = {readonly at: number; readonly value: Value};
+export type ClipKey<Value> = {readonly id?: string; readonly at: number; readonly value: Value};
 type Interpolation = 'hold' | 'linear';
 type VisualTrack =
     | {readonly kind: 'local_position'; readonly interpolation: Interpolation; readonly keys: readonly ClipKey<Vec3>[]}
     | {readonly kind: 'local_rotation'; readonly interpolation: Interpolation; readonly keys: readonly ClipKey<Quaternion>[]};
 
 export interface AuthoredClip {
-    readonly schema_version: 1;
+    readonly schema_version: 1 | 2;
     readonly name: string;
     readonly owner: ClipOwner;
     readonly duration_ticks: number;
+    readonly markers?: readonly TimelineMarker[];
     readonly tracks: readonly {readonly target: VisualClipTarget; readonly track: VisualTrack}[];
 }
 
@@ -83,4 +84,55 @@ export function readAuthoredClipPreview(value: unknown): VisualClipPreview {
 
 function vector(value: unknown, length: number): boolean {
     return Array.isArray(value) && value.length === length && value.every(Number.isFinite);
+}
+
+export interface TimelineMarker {
+    readonly id: string;
+    readonly at: number;
+    readonly label: string;
+}
+
+export type ClipKeyValue =
+    | {readonly kind: 'position'; readonly value: Vec3}
+    | {readonly kind: 'rotation'; readonly value: Quaternion};
+
+export interface TimelineKeyMove {
+    readonly key_id: string;
+    readonly at: number;
+}
+
+export type TimelineEdit =
+    | ({readonly kind: 'move_key'} & TimelineKeyMove)
+    | {readonly kind: 'insert_key'; readonly track: number; readonly at: number; readonly value: ClipKeyValue | null}
+    | {readonly kind: 'remove_key'; readonly key_id: string}
+    | {readonly kind: 'set_key_value'; readonly key_id: string; readonly value: ClipKeyValue}
+    | {readonly kind: 'add_marker'; readonly at: number; readonly label: string}
+    | {readonly kind: 'move_marker'; readonly marker_id: string; readonly at: number}
+    | {readonly kind: 'rename_marker'; readonly marker_id: string; readonly label: string}
+    | {readonly kind: 'remove_marker'; readonly marker_id: string};
+
+export type ClipDraftOperation =
+    | {readonly type: 'edit'; readonly edit: TimelineEdit}
+    | {readonly type: 'undo' | 'redo' | 'discard'};
+
+export interface ClipTimelineDraft extends ClipAssetDocument {
+    readonly draft_id: string;
+    readonly draft_revision: number;
+    readonly dirty: boolean;
+    readonly can_undo: boolean;
+    readonly can_redo: boolean;
+}
+
+export interface SavedClipTimeline {
+    readonly draft: ClipTimelineDraft;
+    readonly snapshot: EditorSnapshot;
+}
+
+export interface ClipTimelinePreviewRequest {
+    readonly draftId: string;
+    readonly expectedDraftRevision: number;
+    readonly scope: AnimationPreviewDocument | null;
+    readonly expectedRevision: number;
+    readonly expectedGeneration: number;
+    readonly requestId: number;
 }

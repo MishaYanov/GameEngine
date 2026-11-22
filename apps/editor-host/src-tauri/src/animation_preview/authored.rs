@@ -1,4 +1,7 @@
-use super::AnimationPreviewDocument;
+use super::{
+	timeline::{PreviewKeyMove, TimelinePreviewPin},
+	AnimationPreviewDocument,
+};
 use crate::editor::{
 	prop_preview::{preview_document, visual_entity, PropPreviewFrame, VisualPreviewFrame},
 	EditorWorkspace,
@@ -66,6 +69,7 @@ pub(crate) struct AuthoredClipPreview {
 	clip: ResolvedAuthoredClip,
 	scene_id: SceneId,
 	draft: Option<SourceDraftCapture>,
+	timeline: Option<TimelinePreviewPin>,
 }
 
 struct SourceDraftCapture {
@@ -93,6 +97,10 @@ impl AuthoredClipPreview {
 			&& &self.scene_id == session.active_scene_id()
 			&& !session.is_playing()
 			&& !session.has_transaction()
+			&& self
+				.timeline
+				.as_ref()
+				.is_none_or(|owner| workspace.timeline_pin_is_current(owner))
 			&& self.draft.as_ref().is_none_or(|draft| {
 				workspace.prop_preview_source_matches(&draft.id, &draft.fingerprint, draft.revision)
 			})
@@ -204,6 +212,22 @@ impl EditorWorkspace {
 		generation: u64,
 		request_id: u64,
 	) -> Result<AuthoredClipPreviewDto, String> {
+		self.check_authored_preview_open(revision, generation, request_id)?;
+		let asset = self.open_authored_clip_asset(id)?;
+		if asset.asset.fingerprint != expected_fingerprint {
+			return Err("Authored Animation Clip changed. Reopen it before previewing.".into());
+		}
+		self.install_authored_clip_preview(
+			asset.clip, scope, revision, generation, request_id, None,
+		)
+	}
+
+	pub(super) fn check_authored_preview_open(
+		&mut self,
+		revision: u64,
+		generation: u64,
+		request_id: u64,
+	) -> Result<(), String> {
 		if generation != self.generation {
 			return Err("Authored Animation Clip belongs to another workspace".into());
 		}
@@ -211,12 +235,18 @@ impl EditorWorkspace {
 			return Err("Authored Animation Clip request is stale".into());
 		}
 		self.animation_preview_request = request_id;
-		self.authored_clip_edit_context(revision)?;
-		let asset = self.open_authored_clip_asset(id)?;
-		if asset.asset.fingerprint != expected_fingerprint {
-			return Err("Authored Animation Clip changed. Reopen it before previewing.".into());
-		}
-		let clip = asset.clip;
+		self.authored_clip_edit_context(revision)
+	}
+
+	pub(super) fn install_authored_clip_preview(
+		&mut self,
+		clip: AuthoredClip,
+		scope: Option<AnimationPreviewDocument>,
+		revision: u64,
+		generation: u64,
+		request_id: u64,
+		timeline: Option<TimelinePreviewPin>,
+	) -> Result<AuthoredClipPreviewDto, String> {
 		let scene_id = self.backend.session().active_scene_id().clone();
 		let (clip, document, draft) =
 			self.resolve_authored_clip_preview(&clip, scope, &scene_id)?;
@@ -244,6 +274,7 @@ impl EditorWorkspace {
 			clip,
 			scene_id,
 			draft,
+			timeline,
 		};
 		let result = preview.dto(0, poses);
 		self.animation_preview = None;
@@ -258,6 +289,15 @@ impl EditorWorkspace {
 		token: &str,
 		tick: u32,
 	) -> Result<AuthoredClipPreviewDto, String> {
+		self.sample_clip_timeline_preview(token, tick, None)
+	}
+
+	pub fn sample_clip_timeline_preview(
+		&mut self,
+		token: &str,
+		tick: u32,
+		drag: Option<PreviewKeyMove>,
+	) -> Result<AuthoredClipPreviewDto, String> {
 		if !self.authored_clip_aperture_current(token) {
 			return Err("Authored Animation Clip preview has expired".into());
 		}
@@ -271,7 +311,16 @@ impl EditorWorkspace {
 			.as_ref()
 			.and_then(|pose| pose.revision.checked_add(1))
 			.ok_or("Authored Animation Clip sample revision exhausted")?;
-		let poses: Arc<[VisualPose]> = preview.clip.sample(tick)?.into();
+		let poses: Arc<[VisualPose]> = match drag {
+			Some(drag) if preview.timeline.is_some() => {
+				preview.clip.sample_moved_key(tick, drag.key_id, drag.at)?
+			}
+			Some(_) => {
+				return Err("Open the Animation Clip Timeline before previewing a key move".into())
+			}
+			None => preview.clip.sample(tick)?,
+		}
+		.into();
 		preview.frame.visual_pose = Some(VisualPreviewFrame {
 			revision,
 			poses: Arc::clone(&poses),
@@ -330,7 +379,7 @@ impl EditorWorkspace {
 		Ok(())
 	}
 
-	fn authored_clip_edit_context(&self, revision: u64) -> Result<(), String> {
+	pub(super) fn authored_clip_edit_context(&self, revision: u64) -> Result<(), String> {
 		self.check_revision(revision)?;
 		let session = self.backend.session();
 		if session.is_playing() || session.has_transaction() {

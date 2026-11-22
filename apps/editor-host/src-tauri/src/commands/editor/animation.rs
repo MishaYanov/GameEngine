@@ -117,3 +117,18 @@ pub async fn editor_animation_preview_close(
 	})
 	.await
 }
+
+#[tauri::command]
+pub async fn editor_animation_preview_keys(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	token: String,
+	track: usize,
+	offset: usize,
+) -> Result<crate::animation_preview::imported_keys::ImportedKeyPage, String> {
+	trusted_window(&window)?;
+	workspace(state, false, None, move |workspace| {
+		workspace.animation_preview_keys(&token, track, offset)
+	})
+	.await
+}

@@ -1,0 +1,111 @@
+<section aria-label="Clip timeline" class="timeline" (keydown)="onKeys($event)">
+    @if (timeline.draft(); as draft) {
+        <header>
+            <h3>{{ draft.clip.name }} Timeline</h3>
+            @if (draft.dirty) { <span>Unsaved changes</span> }
+            <button type="button" [disabled]="timeline.busy()" (click)="close(false)">Close Timeline</button>
+        </header>
+        <div class="toolbar">
+            <button type="button" [disabled]="timeline.playing() || !timeline.preview()" (click)="timeline.play()">Play Clip</button>
+            <button type="button" [disabled]="!timeline.playing()" (click)="timeline.stop()">Stop Clip</button>
+            <button type="button" [disabled]="timeline.busy() || !draft.can_undo" (click)="timeline.edit({type: 'undo'})">Undo Key Edit</button>
+            <button type="button" [disabled]="timeline.busy() || !draft.can_redo" (click)="timeline.edit({type: 'redo'})">Redo Key Edit</button>
+            <button type="button" [disabled]="timeline.busy() || !draft.dirty" (click)="save()">Save Timeline</button>
+        </div>
+        <div class="toolbar">
+            <label>Playhead (ms)
+                <input #playhead type="number" min="0" [max]="timeline.duration()" [value]="timeline.playhead()"
+                       (change)="timeline.seek(playhead.valueAsNumber)"/>
+            </label>
+            <label><input type="checkbox" [checked]="timeline.snap()" (change)="timeline.snap.set(!timeline.snap())"/> Snap to 10 ms</label>
+            <label>Zoom
+                <input #zoom type="range" min="1" max="8" step="1" [value]="timeline.zoom()" (input)="timeline.zoom.set(zoom.valueAsNumber)"/>
+            </label>
+        </div>
+        <div class="toolbar">
+            <label><input type="checkbox" [checked]="timeline.looping()" [disabled]="timeline.playing()"
+                          (change)="timeline.looping.set(!timeline.looping())"/> Loop</label>
+            <label>Loop start (ms)
+                <input #start type="number" min="0" [max]="timeline.loopEnd() - 1" [value]="timeline.loopStart()"
+                       [disabled]="timeline.playing()" (change)="timeline.setLoopStart(start.valueAsNumber)"/>
+            </label>
+            <label>Loop end (ms)
+                <input #end type="number" [min]="timeline.loopStart() + 1" [max]="timeline.duration()" [value]="timeline.loopEnd()"
+                       [disabled]="timeline.playing()" (change)="timeline.setLoopEnd(end.valueAsNumber)"/>
+            </label>
+        </div>
+        <label>Track
+            <select #trackInput [value]="track()" (change)="selectTrack(+trackInput.value)">
+                @for (item of tracks(); track $index) {
+                    <option [value]="$index">{{ item.track.kind === 'local_position' ? 'Position' : 'Rotation' }}
+                        · {{ item.target.kind === 'scene' ? item.target.entity_key :
+                                item.target.address.kind === 'object' ? item.target.address.source_entity : '' }}</option>
+                }
+            </select>
+        </label>
+        <section class="scroll-lane" aria-label="Timeline keys. Arrow keys scrub, Shift plus arrows move a key, Insert adds a key, Delete removes it."
+                 tabindex="0">
+            <div class="key-lane" [style.width.%]="timeline.zoom() * 100">
+                <label class="playhead-lane">Scrub clip
+                    <input #scrub type="range" min="0" [max]="timeline.duration()" [value]="timeline.playhead()"
+                           (input)="timeline.seek(scrub.valueAsNumber)"/>
+                </label>
+                <ul class="keys">
+                    @for (key of keys(); track key.id ?? key.at) {
+                        <li><button type="button" [attr.aria-pressed]="selected()?.id === key.id" (click)="selectKey(key)">
+                            {{ key.at }} ms
+                        </button></li>
+                    }
+                </ul>
+            </div>
+        </section>
+        @if (selected(); as key) {
+            <label class="playhead-lane">Move selected key (ms)
+                <input #move type="range" min="0" [max]="timeline.duration()" [value]="timeline.drag()?.at ?? key.at"
+                       [disabled]="timeline.busy()" (pointerdown)="beginDrag()" (input)="dragTo(move.valueAsNumber)"
+                       (change)="timeline.acceptDrag()" (pointercancel)="timeline.cancelDrag()"/>
+            </label>
+            <div class="toolbar">
+                @for (value of values(); track $index) {
+                    <label>{{ axes[$index] }} value
+                        <input #field type="number" step="any" [value]="value" (input)="updateValue($index, field.value)"/>
+                    </label>
+                }
+                <button type="button" [disabled]="timeline.busy()" (click)="setValue()">Apply Key Value</button>
+                <button type="button" [disabled]="timeline.busy()" (click)="insert(false)">Insert Key</button>
+                <button type="button" [disabled]="timeline.busy()" (click)="insert(true)">Record Values at Playhead</button>
+                <button type="button" [disabled]="timeline.busy() || keys().length < 2" (click)="deleteKey()">Delete Key</button>
+            </div>
+        }
+        <section aria-label="Timeline bookmarks">
+            <h4>Bookmarks</h4>
+            <ul class="keys">
+                @for (marker of markers(); track marker.id) {
+                    <li><button type="button" [attr.aria-pressed]="selectedMarker()?.id === marker.id"
+                                (click)="selectMarker(marker.id, marker.at)">{{ marker.label }} · {{ marker.at }} ms</button></li>
+                }
+            </ul>
+            <div class="toolbar">
+                <label>Bookmark label <input #labelInput [value]="label()" (input)="label.set(labelInput.value)" maxlength="128"/></label>
+                <button type="button" [disabled]="timeline.busy() || !label().trim()" (click)="addMarker()">Add Bookmark</button>
+                @if (selectedMarker()) {
+                    <button type="button" [disabled]="timeline.busy() || !label().trim()" (click)="renameMarker()">Rename Bookmark</button>
+                    <button type="button" [disabled]="timeline.busy()" (click)="moveMarker()">Move Bookmark to Playhead</button>
+                    <button type="button" [disabled]="timeline.busy()" (click)="removeMarker()">Remove Bookmark</button>
+                }
+            </div>
+        </section>
+        @if (closing()) {
+            <section aria-label="Unsaved Timeline changes" class="toolbar">
+                <p>Save the Timeline before closing or discard its changes.</p>
+                <button type="button" [disabled]="timeline.busy()" (click)="close(true)">Discard and Close Timeline</button>
+                <button type="button" (click)="closing.set(false)">Keep Editing</button>
+            </section>
+        }
+    } @else if (timeline.busy()) {
+        <p role="status">Opening the Timeline…</p>
+    } @else {
+        <button type="button" (click)="close(false)">Close Timeline</button>
+    }
+    @if (timeline.error(); as error) { <p role="alert">{{ error }}</p> }
+</section>

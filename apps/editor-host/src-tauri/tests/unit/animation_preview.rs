@@ -54,6 +54,12 @@ fn scrub_is_native_isolated_pinned_and_rejects_invalid_time_without_losing_pose(
 	let preview = workspace
 		.open_animation_preview(EntityKey::new("player").unwrap(), 1, revision)
 		.unwrap();
+	let key_page = workspace
+		.animation_preview_keys(&preview.token, 0, 0)
+		.unwrap();
+	let key_page = serde_json::to_value(key_page).unwrap();
+	assert_eq!(key_page["clip_index"], 1);
+	assert!(!key_page["keys"].as_array().unwrap().is_empty());
 	let first = workspace.active_animation_preview().unwrap().1;
 	workspace
 		.sample_animation_preview(&preview.token, 0.5)
@@ -380,6 +386,7 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 			asset_id: prop.id.clone(),
 		},
 		duration_ticks: 1_000,
+		markers: Vec::new(),
 		tracks: vec![
 			ScopedTrack {
 				target: target.clone(),
@@ -387,10 +394,12 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 					interpolation: VisualInterpolation::Linear,
 					keys: vec![
 						ClipKey {
+							id: None,
 							at: 0,
 							value: [0.0; 3],
 						},
 						ClipKey {
+							id: None,
 							at: 1000,
 							value: [2.0, 0.0, 0.0],
 						},
@@ -403,10 +412,12 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 					interpolation: VisualInterpolation::Linear,
 					keys: vec![
 						ClipKey {
+							id: None,
 							at: 0,
 							value: [0.0, 0.0, 0.0, 1.0],
 						},
 						ClipKey {
+							id: None,
 							at: 1000,
 							value: [0.0, 1.0, 0.0, 0.0],
 						},
@@ -456,6 +467,122 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 		.is_err());
 	assert!(workspace.close_authored_clip_preview(&preview.token));
 	assert!(workspace.active_prop_preview().is_none());
+
+	use crate::animation_preview::timeline::{ClipDraftOperation, PreviewKeyMove};
+	use runtime::animation::TimelineEdit;
+	let file_path = workspace.asset_root.join("lever-turn.clip.json");
+	let old_bytes = fs::read(&file_path).unwrap();
+	let cursor = workspace.backend.change_cursor();
+	let timeline = workspace
+		.open_clip_timeline_draft(&saved.asset.asset_id, revision)
+		.unwrap();
+	assert_eq!(timeline.clip.schema_version, 2);
+	assert_eq!(fs::read(&file_path).unwrap(), old_bytes);
+	assert_eq!(
+		timeline.draft_id,
+		workspace
+			.open_clip_timeline_draft(&saved.asset.asset_id, revision)
+			.unwrap()
+			.draft_id
+	);
+	let key = match &timeline.clip.tracks[0].track {
+		VisualTrack::LocalPosition { keys, .. } => keys[1].id.clone().unwrap(),
+		_ => panic!("expected position"),
+	};
+	let preview = workspace
+		.open_clip_timeline_preview(&timeline.draft_id, 0, None, revision, generation, 2)
+		.unwrap();
+	let dragged = workspace
+		.sample_clip_timeline_preview(
+			&preview.token,
+			450,
+			Some(PreviewKeyMove {
+				key_id: key.clone(),
+				at: 900,
+			}),
+		)
+		.unwrap();
+	assert_eq!(dragged.poses[0].position, [1.0, 0.0, 0.0]);
+	let cancelled = workspace
+		.sample_clip_timeline_preview(&preview.token, 450, None)
+		.unwrap();
+	assert!((cancelled.poses[0].position[0] - 0.9).abs() < 1.0e-6);
+	assert!(
+		!workspace
+			.open_clip_timeline_draft(&saved.asset.asset_id, revision)
+			.unwrap()
+			.dirty
+	);
+	let moved = ClipDraftOperation::Edit {
+		edit: TimelineEdit::MoveKey {
+			key_id: key.clone(),
+			at: 900,
+		},
+	};
+	let draft = workspace
+		.edit_clip_timeline_draft(&timeline.draft_id, 0, moved)
+		.unwrap();
+	assert_eq!(draft.draft_revision, 1);
+	assert!(draft.can_undo && draft.dirty);
+	assert!(workspace
+		.sample_authored_clip_preview(&preview.token, 0)
+		.is_err());
+	assert!(workspace
+		.edit_clip_timeline_draft(&timeline.draft_id, 0, ClipDraftOperation::Undo)
+		.is_err());
+	let draft = workspace
+		.edit_clip_timeline_draft(&timeline.draft_id, 1, ClipDraftOperation::Undo)
+		.unwrap();
+	assert_eq!(draft.clip, timeline.clip);
+	let draft = workspace
+		.edit_clip_timeline_draft(&timeline.draft_id, 2, ClipDraftOperation::Redo)
+		.unwrap();
+	assert!(draft.dirty);
+	let draft = workspace
+		.edit_clip_timeline_draft(
+			&timeline.draft_id,
+			3,
+			ClipDraftOperation::Edit {
+				edit: TimelineEdit::AddMarker {
+					at: 420,
+					label: "Lever click".into(),
+				},
+			},
+		)
+		.unwrap();
+	let marker = draft.clip.markers[0].id.clone();
+	let draft = workspace
+		.edit_clip_timeline_draft(
+			&timeline.draft_id,
+			4,
+			ClipDraftOperation::Edit {
+				edit: TimelineEdit::RenameMarker {
+					marker_id: marker.clone(),
+					label: "Door click".into(),
+				},
+			},
+		)
+		.unwrap();
+	assert_eq!(draft.clip.markers[0].id, marker);
+	assert!(workspace
+		.close_clip_timeline_draft(&timeline.draft_id, false)
+		.is_err());
+	assert_eq!(workspace.backend.change_cursor(), cursor);
+	assert_eq!(fs::read(&file_path).unwrap(), old_bytes);
+	let committed = workspace
+		.save_clip_timeline_draft(&timeline.draft_id, 5, revision)
+		.unwrap();
+	assert!(!committed.draft.dirty);
+	workspace
+		.close_clip_timeline_draft(&timeline.draft_id, false)
+		.unwrap();
+	let revision = workspace.backend.session().revision();
+	let reopened = workspace
+		.open_clip_timeline_draft(&saved.asset.asset_id, revision)
+		.unwrap();
+	assert_eq!(reopened.clip.markers[0].id, marker);
+	assert_eq!(reopened.clip.markers[0].label, "Door click");
+	assert_eq!(workspace.backend.session().authored_document(), before);
 
 	let mut invalid = clip.clone();
 	if let VisualTrack::LocalPosition { keys, .. } = &mut invalid.tracks[0].track {

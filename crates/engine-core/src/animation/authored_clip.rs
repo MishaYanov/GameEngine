@@ -1,12 +1,14 @@
 use crate::{
-	EntityKey, asset_catalog::AssetId, linked_prefab::PropAddress, scene_catalog::SceneId,
-	scene_data::TransformData,
+	EntityKey, asset_catalog::AssetId, components::ComponentId, linked_prefab::PropAddress,
+	scene_catalog::SceneId, scene_data::TransformData,
 };
 use glam::{EulerRot, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod resolve;
+mod timeline;
+pub use timeline::{ClipKeyValue, MarkerId, TimelineEdit, TimelineMarker};
 
 pub const AUTHORED_CLIP_TICKS_PER_SECOND: u32 = 1_000;
 pub const MAX_AUTHORED_CLIP_TICKS: u32 = 600 * AUTHORED_CLIP_TICKS_PER_SECOND;
@@ -83,6 +85,8 @@ pub enum VisualInterpolation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClipKey<T> {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub id: Option<ComponentId>,
 	pub at: u32,
 	pub value: T,
 }
@@ -118,6 +122,8 @@ pub struct AuthoredClip {
 	pub owner: AuthoredClipOwner,
 	pub duration_ticks: u32,
 	pub tracks: Vec<ScopedTrack>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub markers: Vec<TimelineMarker>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -155,7 +161,7 @@ impl AuthoredClip {
 	}
 
 	pub fn validate(&self) -> Result<(), String> {
-		if self.schema_version != 1 {
+		if !matches!(self.schema_version, 1 | 2) {
 			return Err("Unsupported authored clip schema".into());
 		}
 		if self.name.trim().is_empty()
@@ -183,7 +189,7 @@ impl AuthoredClip {
 				return Err("Authored clip has two tracks for the same target and property".into());
 			}
 		}
-		Ok(())
+		self.validate_timeline_ids()
 	}
 }
 

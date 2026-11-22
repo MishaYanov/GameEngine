@@ -59,6 +59,11 @@ function setup() {
         opened.set(token, preview);
         return preview;
     });
+    const importedAnimationKeys = vi.fn(async (token: string, track: number, offset: number) => ({
+        token, track, offset, clip_index: opened.get(token)?.clip_index ?? 0, total: 2,
+        tracks: [{index: 0, source_node: 2, property: 'Rotation', interpolation: 'Linear', key_count: 2}],
+        keys: [{at_seconds: 0, value: [0, 0, 0, 1]}, {at_seconds: 0.75, value: [0, 1, 0, 0]}],
+    }));
     const inspect = vi.fn(async () => ({
         workspace_generation: 11, revision: revision(),
         metadata: {source: settings.source, mesh_index: 0, nodes: 2, joints: 2, clips},
@@ -102,7 +107,7 @@ function setup() {
                     revision: revision(), transaction: null, mode: playing() ? 'play' : 'edit',
                     active_scene_id: 'arena', document: {entities: entities()},
                 }),
-                inspectAnimation: inspect, openAnimationWorkspacePreview: open,
+                inspectAnimation: inspect, openAnimationWorkspacePreview: open, importedAnimationKeys,
                 sampleAnimationWorkspacePreview: sample, closeAnimationPreview: close, frameAnimationWorkspacePreview: frame,
                 listAuthoredClips, openAuthoredClip, saveAuthoredClip, openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview,
             }},
@@ -141,6 +146,21 @@ describe('Animation workspace', () => {
         const buttons = fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>;
         Array.from(buttons).find(button => button.textContent?.includes('Frame Animated Object'))?.click();
         expect(frame).toHaveBeenCalledWith(workspace.preview()?.token);
+    });
+
+    it('inspects immutable imported keys and scrubs to a listed time', async () => {
+        const {fixture, workspace} = setup();
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const button = (label: string) => Array.from(root.querySelectorAll('button'))
+            .find(button => button.textContent?.trim() === label)!;
+        button('Inspect Imported Keys').click();
+        await fixture.whenStable();
+        expect(root.textContent).toContain('Node 2 · Rotation · Linear');
+        button('0.750 s').click();
+        await fixture.whenStable();
+        expect(workspace.seconds()).toBe(0.75);
+        expect(button('Next Keys').disabled).toBe(true);
     });
 
     it('coalesces scrub inputs and ignores samples after a clip change or tab exit', async () => {

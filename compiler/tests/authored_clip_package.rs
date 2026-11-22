@@ -103,6 +103,7 @@ fn packages_registered_clip_with_its_prop_and_rejects_missing_file_or_object() {
 			asset_id: prop_id.clone(),
 		},
 		duration_ticks: 1_000,
+		markers: Vec::new(),
 		tracks: vec![ScopedTrack {
 			target: VisualTargetId::Prop {
 				address: PropAddress::Object {
@@ -114,10 +115,12 @@ fn packages_registered_clip_with_its_prop_and_rejects_missing_file_or_object() {
 				interpolation: VisualInterpolation::Linear,
 				keys: vec![
 					ClipKey {
+						id: None,
 						at: 0,
 						value: [0.0; 3],
 					},
 					ClipKey {
+						id: None,
 						at: 1000,
 						value: [2.0, 0.0, 0.0],
 					},

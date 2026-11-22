@@ -1,4 +1,8 @@
 <section aria-label="Authored Animation Clips" class="animation">
+    @if (timelineOpen() && selected(); as clip) {
+        <editor-clip-timeline [asset]="clip" [scope]="previewScope(clip.clip.owner)"
+                              (closed)="timelineOpen.set(false)" (saved)="timelineSaved($event)"/>
+    } @else {
     <div class="time-controls">
         <label>
             Clip library
@@ -52,6 +56,7 @@
 
     @if (selected()) {
         <div class="time-controls">
+            <button type="button" [disabled]="!available()" (click)="openTimeline()">Open Timeline</button>
             <button type="button" [disabled]="!available()" (click)="openPreview()">Preview Saved Clip</button>
             @if (preview()) {
                 <button type="button" (click)="closePreview()">Close Clip Preview</button>
@@ -74,5 +79,6 @@
     }
     @if (message(); as notice) {
         <p role="status">{{ notice }}</p>
+    }
     }
 </section>

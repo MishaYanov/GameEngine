@@ -54,6 +54,7 @@ pub struct EditorWorkspace {
 	pub(crate) camera_capture_epoch: u64,
 	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
 	pub(crate) animation_preview_request: u64,
+	pub(crate) clip_timeline_drafts: crate::animation_preview::timeline::ClipTimelineDrafts,
 	pub(crate) authored_clip_preview: Option<crate::animation_preview::authored::AuthoredClipPreview>,
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	pub(crate) prop_preview: Option<prop_preview::PropPreview>,
@@ -402,6 +403,7 @@ impl EditorWorkspace {
 		Self {
 			animation_preview: None,
 			animation_preview_request: 0,
+			clip_timeline_drafts: Default::default(),
 			authored_clip_preview: None,
 			camera_preview: None,
 			prop_preview: None,

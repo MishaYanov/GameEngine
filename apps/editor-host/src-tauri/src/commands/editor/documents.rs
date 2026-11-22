@@ -57,6 +57,9 @@ async fn open_workspace(
 		}))?;
 		let snapshot = {
 			let mut current = shared.lock().map_err(|_| "Editor state lock failed")?;
+			if current.as_ref().is_some_and(EditorWorkspace::has_dirty_clip_timelines) {
+				return Err("Save or discard open Animation Clip changes before opening another project".into());
+			}
 			// Recheck under the installation lock: candidate preparation and native
 			// dialogs must never authorize discarding edits made in the meantime.
 			if let Some(replacement) = replacement {
