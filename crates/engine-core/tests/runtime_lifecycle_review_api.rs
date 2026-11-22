@@ -40,6 +40,7 @@ fn spawner(id: &str, interval: u32, lifetime: u32) -> NativeBehaviorComponent {
 fn prefab(entities: Vec<EntityData>) -> PrefabData {
 	PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities,
 		gameplay: None,
 		reference_slots: BTreeMap::new(),

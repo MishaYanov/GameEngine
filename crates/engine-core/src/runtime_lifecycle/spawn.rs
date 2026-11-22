@@ -75,9 +75,10 @@ impl RuntimeLifecycle {
 		if let Some(request) = &request {
 			self.validate_handle(&request.owner)?;
 		}
+		let sources = prefab.expanded_entities()?;
 		let mut serial = self.next_instance;
 		let keys = loop {
-			let keys = (0..prefab.entities.len())
+			let keys = (0..sources.len())
 				.map(|index| EntityKey::new(format!("runtime-{serial}-{index}")))
 				.collect::<Result<Vec<_>, _>>()?;
 			if keys.iter().all(|key| world.entity_index(key).is_none()) {
@@ -88,8 +89,7 @@ impl RuntimeLifecycle {
 				.filter(|serial| *serial < MAX_COUNTER)
 				.ok_or("Runtime identity counter exhausted")?;
 		};
-		let mapping: HashMap<_, _> = prefab
-			.entities
+		let mapping: HashMap<_, _> = sources
 			.iter()
 			.zip(&keys)
 			.map(|(entity, key)| (entity.key.clone(), key.clone()))
@@ -98,7 +98,8 @@ impl RuntimeLifecycle {
 			.as_ref()
 			.map(|request| request.bindings.clone())
 			.unwrap_or_default();
-		let mut entities = prefab.remap_entities(&mapping, &bindings)?;
+		let mut entities =
+			PrefabData::remap_expanded(&sources, &prefab.reference_slots, &mapping, &bindings)?;
 		for entity in &mut entities {
 			if entity.parent.is_none() {
 				for (value, offset) in entity.transform.position.iter_mut().zip(position) {

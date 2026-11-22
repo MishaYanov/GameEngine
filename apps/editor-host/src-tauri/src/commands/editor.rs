@@ -27,6 +27,8 @@ pub use asset_authoring::*;
 mod feedback_audio;
 pub use feedback_audio::*;
 mod linked_prefabs;
+mod nested_props;
+pub use nested_props::*;
 pub use linked_prefabs::*;
 mod animation;
 pub use animation::*;

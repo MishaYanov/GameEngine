@@ -111,6 +111,7 @@ fn authored_retirement_rejects_atomically_but_spawned_machine_retires_its_instan
 	let mut runtime = session(scene(vec![entity("original", [0.; 3])]));
 	let prefab = PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities: vec![retiring],
 		gameplay: None,
 		reference_slots: BTreeMap::new(),

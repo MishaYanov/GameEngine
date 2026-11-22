@@ -7,7 +7,7 @@ pub(super) fn prefab_dependencies(
 	prefab: &engine_core::editor::PrefabData,
 ) -> Result<Vec<AssetId>, String> {
 	let mut dependencies = HashSet::new();
-	for entity in &prefab.entities {
+	for entity in prefab.expanded_entities()?.iter() {
 		if let Some(animation) = &entity.animation {
 			let asset = catalog
 				.by_id(&animation.settings.source.asset_id)

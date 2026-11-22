@@ -19,7 +19,9 @@ export type PropObjectEdit =
             </label>
             <label>Prop parent
                 <select #parent [value]="object().parent ?? ''" (change)="reparent(parent.value)">
-                    <option value="">Prop root</option>
+                    @if (!requireParent()) {
+                        <option value="">Prop root</option>
+                    }
                     @for (candidate of parents(); track candidate.key) {
                         <option [value]="candidate.key">{{ candidate.name }}</option>
                     }
@@ -62,6 +64,8 @@ export class PropObjectEditor {
     readonly object = input.required<PropWorkspaceObject>();
     readonly objects = input.required<readonly PropWorkspaceObject[]>();
     readonly disabled = input(false);
+    readonly requireParent = input(false);
+    readonly maxNameBytes = input(1_024);
     readonly edited = output<PropObjectEdit>();
 
     protected readonly transform = linkedSignal(() => this.object().transform);
@@ -85,9 +89,9 @@ export class PropObjectEditor {
     protected rename(input: HTMLInputElement): void {
         if (this.disabled()) return;
         const name = input.value.trim();
-        if (!name || /\p{Cc}/u.test(name) || new TextEncoder().encode(name).length > 1_024) {
+        if (!name || /\p{Cc}/u.test(name) || new TextEncoder().encode(name).length > this.maxNameBytes()) {
             input.value = this.object().name;
-            this.error.set('Use a visible object name up to 1,024 UTF-8 bytes.');
+            this.error.set(`Use a visible object name up to ${this.maxNameBytes().toLocaleString()} UTF-8 bytes.`);
             return;
         }
         this.error.set(null);
@@ -95,7 +99,8 @@ export class PropObjectEditor {
     }
 
     protected reparent(parent: string): void {
-        if (this.disabled() || (parent && !this.parents().some(object => object.key === parent))) return;
+        if (this.disabled() || (!parent && this.requireParent()) ||
+            (parent && !this.parents().some(object => object.key === parent))) return;
         const key = parent || null;
         if (key !== this.object().parent) this.edited.emit({key: this.object().key, parent: key});
     }

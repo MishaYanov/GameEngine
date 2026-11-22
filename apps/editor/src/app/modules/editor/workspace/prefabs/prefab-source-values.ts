@@ -24,27 +24,84 @@ function record(value: unknown): value is Record<string, unknown> {
 function vector(value: unknown): boolean {
 	return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
 }
+
+function validTransform(value: unknown): boolean {
+    return record(value) && ['position', 'rotation', 'scale'].every(key => vector(value[key]));
+}
+
 function sourceEntity(value: unknown): boolean {
-	if (!record(value) || !record(value['transform'])) return false;
-	const transform = value['transform'];
+	if (!record(value)) return false;
 	return (
 		typeof value['key'] === 'string' &&
 		typeof value['name'] === 'string' &&
 		(value['parent'] == null || typeof value['parent'] === 'string') &&
-		['position', 'rotation', 'scale'].every((key) => vector(transform[key])) &&
+		validTransform(value['transform']) &&
 		validComponentViews(value['components'])
 	);
+}
+
+function assetVersion(value: unknown): string | null {
+    if (!record(value)) return null;
+    const asset = value['asset_id'], fingerprint = value['fingerprint'];
+    if (typeof asset !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(asset) ||
+        asset === '00000000-0000-0000-0000-000000000000' || typeof fingerprint !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(fingerprint)) return null;
+    return asset + ':' + fingerprint;
+}
+
+function nestedBinding(value: unknown): boolean {
+    return record(value) && (
+        value['kind'] === 'object' && typeof value['key'] === 'string' && value['key'].length > 0 ||
+        value['kind'] === 'slot' && typeof value['name'] === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value['name'])
+    );
+}
+
+function validPlacements(value: unknown, versions: ReadonlySet<string>): boolean {
+    if (!Array.isArray(value) || value.length > 128) return false;
+    const ids = new Set<string>();
+    return value.every((placement: unknown) => {
+        if (!record(placement)) return false;
+        const id = placement['id'], name = placement['name'], target = assetVersion(placement['target']);
+        const bindings = placement['bindings'];
+        if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || ids.has(id) ||
+            typeof name !== 'string' || !name.trim() || /\p{Cc}/u.test(name) ||
+            new TextEncoder().encode(name).length > 256 || !target || !versions.has(target) ||
+            typeof placement['parent'] !== 'string' || !placement['parent'] || !validTransform(placement['local']) ||
+            (bindings !== undefined && (!record(bindings) || Object.keys(bindings).length > 128 ||
+                !Object.values(bindings).every(nestedBinding)))) return false;
+        ids.add(id);
+        return true;
+    });
+}
+
+function validComposition(value: unknown): boolean {
+    if (!record(value) || !Array.isArray(value['pins']) || value['pins'].length > 128) return false;
+    const versions = new Set<string>();
+    const nestedPlacements: unknown[] = [];
+    for (const pin of value['pins']) {
+        if (!record(pin)) return false;
+        const version = assetVersion(pin['version']);
+        const slots = pin['reference_slots'];
+        if (!version || versions.has(version) || typeof pin['path'] !== 'string' ||
+            !Array.isArray(pin['entities']) || pin['entities'].length < 1 || pin['entities'].length > 4_096 ||
+            !pin['entities'].every(record) ||
+            (slots !== undefined && (!record(slots) || !Object.values(slots).every(slot => typeof slot === 'string')))) return false;
+        versions.add(version);
+        if (pin['placements'] !== undefined) nestedPlacements.push(pin['placements']);
+    }
+    return validPlacements(value['placements'], versions) && nestedPlacements.every(items => validPlacements(items, versions));
 }
 
 export function readPrefabSource(value: unknown): PrefabSourceDocument {
 	if (
 		!record(value) ||
-		value['schema_version'] !== 3 ||
+		(value['schema_version'] !== 3 && value['schema_version'] !== 4) ||
 		value['gameplay'] !== null ||
 		!record(value['reference_slots']) ||
 		Object.keys(value).some(
-			(key) => !['schema_version', 'entities', 'gameplay', 'reference_slots'].includes(key),
+			(key) => !['schema_version', 'entities', 'gameplay', 'reference_slots', 'composition'].includes(key),
 		) ||
+		(value['composition'] !== undefined && (value['schema_version'] !== 4 || !validComposition(value['composition']))) ||
 		!Array.isArray(value['entities']) ||
 		value['entities'].length < 1 ||
 		value['entities'].length > 4096 ||

@@ -20,6 +20,7 @@ fn source() -> LinkedPrefabSource {
 		fingerprint: "1".repeat(64),
 		prefab: PrefabData {
 			schema_version: 3,
+			composition: Default::default(),
 			entities: vec![
 				entity("body", [0.0; 3]),
 				entity("child", [1.0, 0.0, 0.0]).with_parent(Some(key("body"))),

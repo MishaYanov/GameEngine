@@ -454,6 +454,7 @@ fn runtime_prefab_blocker_publishes_at_the_same_tick_and_penetrating_spawn_is_at
 	let mut run = simple_game(authored(vec![entity("actor", [0.0; 3])]));
 	let prefab = PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities: vec![box_at("blocker", [0.0; 3], [2.0, 2.0, 0.25])],
 		gameplay: None,
 		reference_slots: BTreeMap::new(),
@@ -522,6 +523,7 @@ fn an_expiring_wall_releases_the_zoomed_arm_on_the_despawn_step() {
 	let request = run.active().pending_runtime_spawns().pop().unwrap();
 	let wall = PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities: vec![box_at("wall", [0.0; 3], [2.0, 2.0, 0.25])],
 		gameplay: None,
 		reference_slots: BTreeMap::new(),

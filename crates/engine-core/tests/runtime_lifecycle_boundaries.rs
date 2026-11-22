@@ -53,6 +53,7 @@ fn emitter(name: &str) -> EntityData {
 fn prefab(entities: Vec<EntityData>) -> PrefabData {
 	PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities,
 		gameplay: None,
 		reference_slots: BTreeMap::new(),

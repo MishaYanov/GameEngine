@@ -45,17 +45,57 @@
                                 <editor-icon name="object"/>
                                 {{ object.name }}
                             </button>
+                            @if (placementsByParent().get(object.key); as placements) {
+                                <ul class="objects nested-objects" [attr.aria-label]="'Nested Props of ' + object.name">
+                                    @for (placement of placements; track placement.id) {
+                                        <li>
+                                            <button (click)="prop.selectPlacement(placement.id)"
+                                                    [style.padding-inline-start.rem]="object.level > 8 ? 6.4 : 0.4 + object.level * 0.75"
+                                                    [attr.aria-pressed]="prop.selectedPlacement()?.id === placement.id"
+                                                    [attr.data-prop-placement]="placement.id" type="button">
+                                                <editor-icon name="layers"/>
+                                                {{ placement.name }} <small>Linked Prop</small>
+                                            </button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
                         </li>
                     }
                 </ul>
             </section>
             <section aria-label="Prop Inspector">
                 <h3>Inspector</h3>
-                @if (prop.selectedObject(); as object) {
+                @if (prop.selectedPlacement(); as placement) {
+                    <h4>{{ placement.name }}</h4>
+                    <dl class="properties">
+                        <dt>Placement ID</dt><dd>{{ placement.id }}</dd>
+                        <dt>Linked source</dt><dd>{{ placementSource()?.path ?? placement.target.asset_id }}</dd>
+                        <dt>Saved version</dt><dd>{{ placement.target.fingerprint }}</dd>
+                    </dl>
+                    <div class="preview-actions">
+                        <button (click)="prop.reorderPlacement(-1)" [disabled]="!mayReorder(-1)" type="button">Move Placement Up</button>
+                        <button (click)="prop.reorderPlacement(1)" [disabled]="!mayReorder(1)" type="button">Move Placement Down</button>
+                    </div>
+                    @if (placementEditable(); as placementObject) {
+                        <prop-object-editor [object]="placementObject" [objects]="document.objects"
+                                            [disabled]="!prop.canEditDraft()" [requireParent]="true" [maxNameBytes]="256"
+                                            (edited)="prop.editPlacement($event)"/>
+                    }
+                    @if (placementBindings().length) {
+                        <h4>Placement bindings</h4>
+                        <dl class="properties">
+                            @for (binding of placementBindings(); track binding.slot) {
+                                <dt>{{ binding.slot }}</dt><dd>{{ binding.target }}</dd>
+                            }
+                        </dl>
+                    }
+                } @else if (prop.selectedObject(); as object) {
                     <h4>{{ object.name }}</h4>
                     @if (prop.draft()?.draft_revision !== undefined) {
                         <prop-object-editor [object]="object" [objects]="document.objects" [disabled]="!prop.canEditDraft()"
                                             (edited)="prop.editObject($event)"/>
+                        <button (click)="beginNested()" [disabled]="!prop.canEditDraft() || !!nestedParent()" type="button">Add Nested Prop…</button>
                     } @else {
                     <dl class="properties">
                         <dt>Parent</dt><dd>{{ parentName() }}</dd>
@@ -83,5 +123,15 @@
                 }
             </section>
         </div>
+        @if (prop.draft(); as draft) {
+            @if (nestedParent(); as parent) {
+                <editor-nested-prop-editor [assets]="prop.assets()" [ownerAssetId]="draft.asset_id"
+                                           [parent]="parent" [objects]="document.objects"
+                                           [outerSlots]="nestedOuterSlots()" [review]="prop.nestedReview()"
+                                           [pending]="prop.nestedReviewPending() || prop.draftPending()"
+                                           (reviewRequested)="prop.reviewNested($event.assetId, $event.fingerprint)"
+                                           (placementRequested)="placeNested($event)" (cancelled)="endNested()"/>
+            }
+        }
     </section>
 }

@@ -37,10 +37,8 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 					.into(),
 			);
 		}
-		let sources: HashMap<_, _> = link
-			.source
-			.prefab
-			.entities
+		let expanded = link.source.prefab.expanded_entities()?;
+		let sources: HashMap<_, _> = expanded
 			.iter()
 			.map(|entity| (&entity.key, entity))
 			.collect();
@@ -94,7 +92,7 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 				);
 			}
 		}
-		let base = materialized(link, &anchor.key)?;
+		let base = materialized_from(link, &expanded, &anchor.key)?;
 		for (source, expected) in &base {
 			let actual = entities[&link.entity_map[source]];
 			if actual.interactable != expected.interactable {

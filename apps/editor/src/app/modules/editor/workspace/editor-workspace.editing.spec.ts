@@ -17,7 +17,7 @@ import type {
     ViewportSceneLoad,
     ViewportStatus
 } from '../../../core/editor/editor.models';
-import type {LinkedPrefabStatus, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
+import type {LinkedPrefabStatus, NestedPropPlacementRequest, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
 import {SceneEditingService} from './scene-editing.service';
@@ -78,6 +78,8 @@ const folderCapabilities = (['create_folder', 'rename_folder', 'move_folder', 'm
     .map(name => ({name, label: name, category: 'hierarchy', undoable: true, available_in_play: false}));
 
 const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
+const nestedAsset = {kind: 'prefab', asset_id: '00000000-0000-0000-0000-000000000001',
+    path: 'grate.prefab.json', name: 'Grate', fingerprint: 'a'.repeat(64)} as const;
 
 function propSource(revision: number): PrefabSourceDraft {
     const transform = {position: [0, 0, 0] as const, rotation: [0, 0, 0] as const, scale: [1, 1, 1] as const};
@@ -139,6 +141,7 @@ describe('Workspace live editing flow', () => {
     let previousProp: PrefabSourceDraft['prefab'] | null;
     let nextProp: PrefabSourceDraft['prefab'] | null;
     let savePropFailure: string | null;
+    let nestedPropFailure: string | null;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -169,6 +172,7 @@ describe('Workspace live editing flow', () => {
         previousProp = null;
         nextProp = null;
         savePropFailure = null;
+        nestedPropFailure = null;
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -249,6 +253,29 @@ describe('Workspace live editing flow', () => {
                 if (savePropFailure) throw new Error(savePropFailure);
                 propDraft = {...propDraft!, dirty: false, draft_revision: expectedDraftRevision + 1, fingerprint: 'new saved fingerprint'};
                 return {draft: propDraft, snapshot: nativeState};
+            }
+            if (operation === 'editor_prop_nested_source') {
+                expect(args).toEqual({assetId: nestedAsset.asset_id, fingerprint: nestedAsset.fingerprint, expectedGeneration: 1});
+                return {asset_id: nestedAsset.asset_id, fingerprint: nestedAsset.fingerprint, slots: ['actor']};
+            }
+            if (operation === 'editor_prop_draft_add_nested') {
+                const {draftId, expectedDraftRevision, placement} =
+                    args as {draftId: string; expectedDraftRevision: number; placement: NestedPropPlacementRequest};
+                const draft = propDraft!;
+                expect(draftId).toBe(draft.draft_id);
+                expect(expectedDraftRevision).toBe(draft.draft_revision);
+                if (nestedPropFailure) throw new Error(nestedPropFailure);
+                const target = {asset_id: placement.asset_id, fingerprint: placement.fingerprint};
+                const existing = draft.prefab.composition?.placements ?? [];
+                previousProp = draft.prefab;
+                propDraft = {...draft, draft_revision: expectedDraftRevision + 1, dirty: true, can_undo: true, prefab: {
+                    ...draft.prefab, schema_version: 4, composition: {
+                        pins: [{version: target, path: nestedAsset.path, entities: draft.prefab.entities}],
+                        placements: [...existing, {id: 'grate-' + (existing.length + 1), target,
+                            name: placement.name, parent: placement.parent, local: placement.local, bindings: placement.bindings}],
+                    },
+                }};
+                return propDraft;
             }
             if (operation === 'editor_prefab_source_close') return undefined;
             if (operation === 'editor_prop_preview_open') {
@@ -1101,6 +1128,68 @@ describe('Workspace live editing flow', () => {
         expect(position()).toBe('5');
         await publish(draft);
         expect(position()).toBe('5');
+        expect(editor.dirty()).toBe(false);
+    });
+
+    it('reviews a nested Prop pin and edits two placements independently with stable IDs', async () => {
+        openPropSource = async revision => ({...propSource(revision), draft_revision: 1, dirty: false, can_undo: false, can_redo: false});
+        assets = [propAsset, nestedAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('prop-object-editor')).not.toBeNull());
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const form = () => root.querySelector<HTMLFormElement>('editor-nested-prop-editor form')!;
+        const changeSelect = (select: HTMLSelectElement, value: string) => {
+            select.value = value;
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        };
+        const placements = () => propDraft?.prefab.composition?.placements ?? [];
+        const add = async (x: string) => {
+            root.querySelector<HTMLButtonElement>('[data-prop-object="arch"]')!.click();
+            await fixture.whenStable();
+            button('Add Nested Prop…').click();
+            await fixture.whenStable();
+            changeSelect(form().querySelector('select')!, nestedAsset.asset_id);
+            await vi.waitFor(() => expect(form().querySelectorAll('select').length).toBe(2));
+            const apply = form().querySelector<HTMLButtonElement>('button[type="submit"]')!;
+            expect(apply.disabled).toBe(true);
+            changeSelect(form().querySelectorAll('select')[1], 'object:arch');
+            const coordinate = form().querySelectorAll<HTMLInputElement>('input')[1];
+            coordinate.value = x;
+            coordinate.dispatchEvent(new Event('input', {bubbles: true}));
+            await fixture.whenStable();
+            expect(apply.disabled).toBe(false);
+            form().dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+        };
+
+        nestedPropFailure = 'The dependency introduces a cycle.';
+        await add('2');
+        await vi.waitFor(() => expect(root.querySelector('editor-prop-workspace [role="alert"]')?.textContent).toContain('cycle'));
+        expect(placements()).toEqual([]);
+        nestedPropFailure = null;
+        form().dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+        await vi.waitFor(() => expect(placements()).toHaveLength(1));
+        await fixture.whenStable();
+        await add('5');
+        await vi.waitFor(() => expect(placements()).toHaveLength(2));
+        await fixture.whenStable();
+        expect(placements().map(item => item.local.position[0])).toEqual([2, 5]);
+        expect(root.querySelectorAll('[data-prop-placement]')).toHaveLength(2);
+        root.querySelector<HTMLButtonElement>('[data-prop-placement="grate-1"]')!.click();
+        await fixture.whenStable();
+        expect(root.querySelector('[aria-label="Prop Inspector"]')?.textContent).toContain('grate.prefab.json');
+        const name = root.querySelector<HTMLInputElement>('prop-object-editor input[type="text"]')!;
+        name.value = 'Left grate';
+        name.dispatchEvent(new Event('change', {bubbles: true}));
+        await vi.waitFor(() => expect(placements()[0].name).toBe('Left grate'));
+        await fixture.whenStable();
+        button('Move Placement Down').click();
+        await vi.waitFor(() => expect(placements().map(item => item.id)).toEqual(['grate-2', 'grate-1']));
+        expect(placements().map(item => item.local.position[0])).toEqual([5, 2]);
+        expect(propDraft?.prefab.composition?.pins).toHaveLength(1);
         expect(editor.dirty()).toBe(false);
     });
 

@@ -75,6 +75,7 @@ fn linked_controller_needs_unpack_and_detach_and_disabled_record_is_preserved() 
 		fingerprint: "a".repeat(64),
 		prefab: PrefabData {
 			schema_version: 3,
+			composition: Default::default(),
 			entities: vec![player()],
 			gameplay: None,
 			reference_slots: Default::default(),

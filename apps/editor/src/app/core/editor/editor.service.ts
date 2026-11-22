@@ -543,6 +543,25 @@ export class EditorService {
         }, false, expectedGeneration);
     }
 
+    reviewNestedProp(assetId: string, fingerprint: string, nativeGeneration: number, expectedGeneration: number): Promise<import('./linked-prefabs.models').NestedPropSource> {
+        return this.enqueue('editor_prop_nested_source', async () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<import('./linked-prefabs.models').NestedPropSource>('editor_prop_nested_source', {
+                assetId, fingerprint, expectedGeneration: nativeGeneration,
+            });
+        }, false, expectedGeneration);
+    }
+
+    addNestedProp(
+        draftId: string, expectedDraftRevision: number, placement: import('./linked-prefabs.models').NestedPropPlacementRequest,
+        expectedGeneration: number,
+    ): Promise<PrefabSourceDraft> {
+        return this.enqueue('editor_prop_draft_add_nested', async () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<PrefabSourceDraft>('editor_prop_draft_add_nested', {draftId, expectedDraftRevision, placement});
+        }, false, expectedGeneration);
+    }
+
     linkedPrefabStatus(rootKey: string, expectedGeneration?: number, expectedRevision?: number): Promise<LinkedPrefabStatus | null> {
         return this.queue.then(async () => {
             this.requireGeneration(expectedGeneration);

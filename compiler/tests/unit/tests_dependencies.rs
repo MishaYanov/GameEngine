@@ -185,6 +185,7 @@ mod model_dependencies {
 		fs::write(source.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 		fs::create_dir(source.join("prefabs")).unwrap();
 		let prefab = PrefabData {
+			composition: Default::default(),
 			reference_slots: Default::default(),
 			schema_version: 1,
 			entities: vec![
@@ -373,6 +374,7 @@ mod prefab_dependencies {
 		let model = model_record(&source, "models/cube.glb", "cube.glb");
 		let prefab = PrefabData {
 			schema_version: 3,
+			composition: Default::default(),
 			entities: vec![
 				EntityData::new(
 					EntityKey::new("prop").unwrap(),
@@ -475,6 +477,7 @@ mod prefab_dependencies {
 		for (file, next) in [("a.json", "b.json"), ("b.json", "a.json")] {
 			let prefab = PrefabData {
 				schema_version: 3,
+				composition: Default::default(),
 				entities: vec![spawner("owner", &format!("prefabs/{next}"))],
 				gameplay: None,
 				reference_slots: Default::default(),
@@ -518,6 +521,7 @@ mod prefab_dependencies {
 		fs::create_dir(source.join("prefabs")).unwrap();
 		let prefab = PrefabData {
 			schema_version: 1,
+			composition: Default::default(),
 			entities: vec![
 				EntityData::new(EntityKey::new("item").unwrap(), "Item", &model.path)
 					.with_asset_id(Some(model.id.clone())),

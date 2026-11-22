@@ -212,6 +212,7 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 		std::collections::HashSet::from([0])
 	);
 	let prefab = runtime::editor::PrefabData {
+		composition: Default::default(),
 		reference_slots: Default::default(),
 		schema_version: 2,
 		entities: secondary.entities.clone(),
@@ -329,6 +330,7 @@ fn direct_prefab_callback_checks_revision_before_expanding_and_rejects_play_edit
 	let fixture = Fixture::new();
 	let mut w = fixture.open();
 	let prefab = runtime::editor::PrefabData {
+		composition: Default::default(),
 		reference_slots: Default::default(),
 		schema_version: 1,
 		gameplay: None,

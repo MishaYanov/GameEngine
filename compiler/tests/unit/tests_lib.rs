@@ -491,6 +491,7 @@ mod preflight {
 		let (project, _) = authored_scene_fixture(&source);
 		fs::create_dir(source.join("prefabs")).unwrap();
 		let prefab = engine_core::editor::PrefabData {
+			composition: Default::default(),
 			reference_slots: Default::default(),
 			schema_version: 1,
 			entities: vec![

@@ -48,6 +48,7 @@ fn uncataloged_prefabs_anywhere_in_assets_stage_with_their_model_dependencies() 
 	fs::copy(&model, fixture.root.join("models/prefab-only.glb")).unwrap();
 	fs::copy(&model, fixture.root.join("models/unreferenced.glb")).unwrap();
 	let prefab = PrefabData {
+		composition: Default::default(),
 		reference_slots: Default::default(),
 		schema_version: 1,
 		entities: vec![EntityData::new(

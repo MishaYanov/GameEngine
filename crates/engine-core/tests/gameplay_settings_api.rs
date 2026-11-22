@@ -67,6 +67,7 @@ fn prefab_scene_settings_share_the_project_payload_budget_before_clone_and_seria
 		nested,
 	] {
 		let mut prefab = PrefabData {
+			composition: Default::default(),
 			reference_slots: Default::default(),
 			schema_version: 2,
 			entities: vec![entity("actor", [0.; 3])],
@@ -88,6 +89,7 @@ fn prefab_scene_settings_share_the_project_payload_budget_before_clone_and_seria
 		);
 	}
 	let mut valid = PrefabData {
+		composition: Default::default(),
 		reference_slots: Default::default(),
 		schema_version: 2,
 		entities: vec![entity("actor", [0.; 3])],

@@ -3,10 +3,16 @@ mod instantiate;
 use super::EditorSession;
 use crate::{
 	EntityKey,
+	asset_catalog::AssetId,
+	linked_prefab::{
+		LinkedPrefabSource, MAX_PINNED_PROP_VERSIONS, NestedPlacement, PinnedAssetVersion,
+		PinnedPropSource, PropAddress, PropComposition,
+	},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData, SceneData, TransformData},
 };
 use serde::{Deserialize, Serialize};
 use std::{
+	borrow::Cow,
 	collections::{BTreeMap, HashMap, HashSet},
 	io::{self, Write},
 };
@@ -24,6 +30,8 @@ pub struct PrefabData {
 	pub gameplay: Option<PrefabGameplay>,
 	#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
 	pub reference_slots: BTreeMap<String, EntityKey>,
+	#[serde(default, skip_serializing_if = "PropComposition::is_empty")]
+	pub composition: PropComposition,
 }
 
 /// A portable gameplay assembly. References into opaque module settings are
@@ -101,17 +109,23 @@ impl PrefabData {
 			entities: &'a [EntityData],
 			gameplay: &'a Option<PrefabGameplay>,
 			reference_slots: &'a BTreeMap<String, EntityKey>,
+			#[serde(skip_serializing_if = "PropComposition::is_empty")]
+			composition: &'a PropComposition,
 		}
 		Stored {
-			schema_version: 3,
+			schema_version: if self.composition.is_empty() { 3 } else { 4 },
 			entities: &self.entities,
 			gameplay: &self.gameplay,
 			reference_slots: &self.reference_slots,
+			composition: &self.composition,
 		}
 		.serialize(serializer)
 	}
 
 	fn validated(self) -> Result<Self, String> {
+		if self.schema_version == 4 {
+			return self.validated_composition();
+		}
 		self.validate_settings()?;
 		if !matches!(self.schema_version, 1..=3)
 			|| self.entities.is_empty()
@@ -119,20 +133,18 @@ impl PrefabData {
 			|| (self.schema_version == 1 && self.gameplay.is_some())
 			|| (self.schema_version < 3 && !self.reference_slots.is_empty())
 			|| (self.schema_version < 3
-			&& self.entities.iter().any(|e| {
-			e.character_controller.is_some()
-				|| e.animation.is_some()
-				|| e.interactable.is_some()
-		})) {
+				&& self.entities.iter().any(|e| {
+					e.character_controller.is_some()
+						|| e.animation.is_some()
+						|| e.interactable.is_some()
+				})) {
 			return Err(
 				"A version-1/2/3 prefab requires 1–4096 entities; gameplay requires version 2 and reference slots version 3".into(),
 			);
 		}
-		// A byte-counting writer checks the owned DTO without allocating a
-		// second JSON document. Direct bridge DTOs use the same size contract.
-		self.serialize_canonical(&mut serde_json::Serializer::new(SizeBudget(0)))
-			.map_err(|error| format!("Prefab size validation failed: {error}"))?;
-		let camera = crate::Camera::default();
+		if !self.composition.is_empty() {
+			return Err("Nested Prop composition requires prefab schema 4".into());
+		}
 		if self
 			.entities
 			.iter()
@@ -140,6 +152,8 @@ impl PrefabData {
 		{
 			return Err("Prefab sources cannot contain linked instances; export a resolved copy or Unpack them first".into());
 		}
+		self.validate_size()?;
+		let camera = crate::Camera::default();
 		if self.reference_slots.len() > 128 {
 			return Err("Prefab exceeds 128 reference slots".into());
 		}
@@ -278,7 +292,149 @@ impl PrefabData {
 			entities: validation.entities,
 			gameplay: self.gameplay,
 			reference_slots: self.reference_slots,
+			composition: PropComposition::default(),
 		})
+	}
+
+	fn validated_composition(mut self) -> Result<Self, String> {
+		if self.gameplay.is_some() {
+			return Err(
+				"Nested Props support component sources with no project gameplay payload".into(),
+			);
+		}
+		if self.composition.is_empty() {
+			self.schema_version = 3;
+			return self.validated();
+		}
+		self.composition
+			.validate(None, &self.entities, &self.reference_slots)?;
+		self.validate_size()?;
+		self.entities = Self::validated_frame(self.entities, &self.reference_slots)?;
+		for pin in &mut self.composition.pins {
+			pin.entities =
+				Self::validated_frame(std::mem::take(&mut pin.entities), &pin.reference_slots)
+					.map_err(|error| format!("Pinned Prop {:?}: {error}", pin.path))?;
+		}
+		let expanded = self.expanded_entities()?.into_owned();
+		Self::validated_frame(expanded, &self.reference_slots)?;
+		Ok(self)
+	}
+
+	fn validated_frame(
+		entities: Vec<EntityData>,
+		slots: &BTreeMap<String, EntityKey>,
+	) -> Result<Vec<EntityData>, String> {
+		Self {
+			schema_version: 3,
+			entities,
+			gameplay: None,
+			reference_slots: slots.clone(),
+			composition: PropComposition::default(),
+		}
+		.validated()
+		.map(|frame| frame.entities)
+	}
+
+	fn validate_size(&self) -> Result<(), String> {
+		// Check the owned DTO without allocating a second JSON document.
+		let result = if self.composition.is_empty() {
+			self.serialize_canonical(&mut serde_json::Serializer::new(SizeBudget(0)))
+		} else {
+			self.serialize_canonical(&mut serde_json::Serializer::pretty(SizeBudget(0)))
+		};
+		result.map_err(|error| format!("Prefab size validation failed: {error}"))
+	}
+
+	pub(crate) fn serialized_entity_bytes(entities: &[EntityData]) -> Result<usize, String> {
+		let mut budget = SizeBudget(0);
+		crate::scene_format::serialize_entities(
+			entities,
+			&mut serde_json::Serializer::new(&mut budget),
+		)
+		.map_err(|error| format!("Expanded Prop exceeds its serialized entity budget: {error}"))?;
+		Ok(budget.0)
+	}
+
+	/// Adopt one reviewed component-source capture into an independent draft.
+	/// Every reachable asset/version has one immutable pin in the resulting table.
+	pub fn with_nested_placement(
+		&self,
+		owner: &AssetId,
+		reviewed: &LinkedPrefabSource,
+		placement: NestedPlacement,
+	) -> Result<Self, String> {
+		self.validate()?;
+		reviewed.validate()?;
+		if self.gameplay.is_some() {
+			return Err("Nested placements require an owning component Prop source".into());
+		}
+		let version = PinnedAssetVersion {
+			asset_id: reviewed.source_id.clone(),
+			fingerprint: reviewed.fingerprint.clone(),
+		};
+		if placement.target != version {
+			return Err("Nested placement does not match the reviewed source version".into());
+		}
+		let mut next = self.clone();
+		let child = PinnedPropSource {
+			version,
+			path: reviewed.path.clone(),
+			entities: reviewed.prefab.entities.clone(),
+			reference_slots: reviewed.prefab.reference_slots.clone(),
+			placements: reviewed.prefab.composition.placements.clone(),
+		};
+		for pin in std::iter::once(child).chain(reviewed.prefab.composition.pins.iter().cloned()) {
+			if let Some(saved) = next
+				.composition
+				.pins
+				.iter()
+				.find(|saved| saved.version == pin.version)
+			{
+				// A project-relative path can move while the identity and captured
+				// authored bytes are unchanged. Retain the previously captured path.
+				if saved.entities != pin.entities
+					|| saved.reference_slots != pin.reference_slots
+					|| saved.placements != pin.placements
+				{
+					return Err(format!(
+						"Conflicting captured contents for pinned Prop {:?}",
+						pin.path,
+					));
+				}
+			} else {
+				if next.composition.pins.len() >= MAX_PINNED_PROP_VERSIONS {
+					return Err("The Prop has reached its pinned source budget".into());
+				}
+				next.composition.pins.push(pin);
+			}
+		}
+		next.composition.placements.push(placement);
+		next.schema_version = 4;
+		next.composition
+			.validate(Some(owner), &next.entities, &next.reference_slots)?;
+		next.validated()
+	}
+
+	/// Materialize one portable hierarchy. Nested members use stable source
+	/// addresses and external slot placeholders remain available for placement.
+	pub fn expanded_entities(&self) -> Result<Cow<'_, [EntityData]>, String> {
+		if self.composition.is_empty() {
+			return Ok(Cow::Borrowed(&self.entities));
+		}
+		self.expanded_composition(None)
+			.map(|result| Cow::Owned(result.entities))
+	}
+
+	pub fn expanded_composition(
+		&self,
+		owner: Option<&AssetId>,
+	) -> Result<crate::linked_prefab::ComposedProp, String> {
+		self.composition.flatten(
+			owner,
+			&self.entities,
+			&self.reference_slots,
+			PropAddress::materialized_key,
+		)
 	}
 
 	/// Pure ownership remapping for editor copies, linked instances and runtime
@@ -289,10 +445,20 @@ impl PrefabData {
 		bindings: &BTreeMap<String, EntityKey>,
 	) -> Result<Vec<EntityData>, String> {
 		self.validate()?;
-		if bindings.len() != self.reference_slots.len()
+		let sources = self.expanded_entities()?;
+		Self::remap_expanded(&sources, &self.reference_slots, keys, bindings)
+	}
+
+	pub(crate) fn remap_expanded(
+		sources: &[EntityData],
+		reference_slots: &BTreeMap<String, EntityKey>,
+		keys: &HashMap<EntityKey, EntityKey>,
+		bindings: &BTreeMap<String, EntityKey>,
+	) -> Result<Vec<EntityData>, String> {
+		if bindings.len() != reference_slots.len()
 			|| bindings
 				.keys()
-				.any(|name| !self.reference_slots.contains_key(name))
+				.any(|name| !reference_slots.contains_key(name))
 		{
 			return Err(
 				"Supply exactly one entity binding for every declared prefab reference slot".into(),
@@ -300,7 +466,7 @@ impl PrefabData {
 		}
 		let mut remap = keys.clone();
 		let mut unique = HashSet::new();
-		for entity in &self.entities {
+		for entity in sources {
 			let key = keys
 				.get(&entity.key)
 				.ok_or("Prefab entity mapping is incomplete")?;
@@ -309,7 +475,7 @@ impl PrefabData {
 				return Err("Prefab mapped entity keys must be distinct".into());
 			}
 		}
-		for (name, placeholder) in &self.reference_slots {
+		for (name, placeholder) in reference_slots {
 			let target = bindings
 				.get(name)
 				.ok_or("A prefab reference slot is unbound")?;
@@ -319,7 +485,7 @@ impl PrefabData {
 			}
 			remap.insert(placeholder.clone(), target.clone());
 		}
-		self.entities
+		sources
 			.iter()
 			.map(|source| {
 				let mut entity = source.clone();
@@ -354,7 +520,7 @@ impl PrefabData {
 			return Err("This selection contains legacy project gameplay. Use Instantiate Copy or convert its gameplay to entity components before creating a linked source".into());
 		}
 		self.gameplay = None;
-		self.schema_version = 3;
+		self.schema_version = if self.composition.is_empty() { 3 } else { 4 };
 		self.validated()
 	}
 }

@@ -248,6 +248,7 @@ fn short_jump_survives_spawn_admission_drain_without_being_replayed() {
 	let mut split = session(data);
 	let item = PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities: vec![entity("item", [0.; 3])],
 		gameplay: None,
 		reference_slots: Default::default(),

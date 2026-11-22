@@ -77,7 +77,7 @@ impl Closure<'_> {
 				}
 			}
 		}
-		self.entities(&prefab.entities)?;
+		self.entities(&prefab.expanded_entities()?)?;
 		self.generate(relative.to_path_buf(), prefab.to_json()?.into_bytes())?;
 		Ok(())
 	}

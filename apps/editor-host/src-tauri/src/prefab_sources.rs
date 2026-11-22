@@ -12,6 +12,8 @@ use serde::Serialize;
 mod draft_history;
 #[path = "prefab_sources/instances.rs"]
 mod instances;
+#[path = "prefab_sources/nested.rs"]
+pub(crate) mod nested;
 use draft_history::DraftHistory;
 
 #[derive(Default)]
@@ -266,6 +268,11 @@ impl EditorWorkspace {
 		match edit {
 			PropDraftEdit::Apply { prefab } => {
 				let prefab = PrefabData::from_json(&prefab.to_string())?;
+				prefab.composition.validate(
+					Some(&next.source_id),
+					&prefab.entities,
+					&prefab.reference_slots,
+				)?;
 				next.history.apply(expected, prefab.to_json()?.into())?;
 			}
 			PropDraftEdit::Undo => next.history.undo(expected)?,

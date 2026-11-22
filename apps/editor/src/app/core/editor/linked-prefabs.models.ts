@@ -16,10 +16,54 @@ export interface PrefabSourceEntity {
 }
 
 export interface PrefabSourceDocument {
-	readonly schema_version: 3;
+	readonly schema_version: 3 | 4;
 	readonly entities: readonly PrefabSourceEntity[];
 	readonly gameplay: null;
 	readonly reference_slots: Readonly<Record<string, string>>;
+	readonly composition?: NestedPropComposition;
+}
+
+export interface PinnedPropVersion {
+    readonly asset_id: string;
+    readonly fingerprint: string;
+}
+
+export type NestedPropBinding =
+    | {readonly kind: 'object'; readonly key: EntityKey}
+    | {readonly kind: 'slot'; readonly name: string};
+
+export interface NestedPropPlacement {
+    readonly id: string;
+    readonly name: string;
+    readonly target: PinnedPropVersion;
+    readonly parent: EntityKey;
+    readonly local: Transform;
+    readonly bindings?: Readonly<Record<string, NestedPropBinding>>;
+}
+
+export interface NestedPropPin {
+    readonly version: PinnedPropVersion;
+    readonly path: string;
+    /** Pinned scene metadata round-trips to the native validator unchanged. */
+    readonly entities: readonly unknown[];
+    readonly reference_slots?: Readonly<Record<string, string>>;
+    readonly placements?: readonly NestedPropPlacement[];
+}
+
+export interface NestedPropComposition {
+    readonly placements: readonly NestedPropPlacement[];
+    readonly pins: readonly NestedPropPin[];
+}
+
+export interface NestedPropSource extends PinnedPropVersion {
+    readonly slots: readonly string[];
+}
+
+export interface NestedPropPlacementRequest extends PinnedPropVersion {
+    readonly name: string;
+    readonly parent: EntityKey;
+    readonly local: Transform;
+    readonly bindings: Readonly<Record<string, NestedPropBinding>>;
 }
 
 export interface PrefabSourceDraft {

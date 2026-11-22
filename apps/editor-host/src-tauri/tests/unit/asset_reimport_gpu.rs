@@ -27,6 +27,7 @@ fn prefab_move_rechecks_unsaved_scene_destination_before_any_publication() {
 	)
 	.unwrap();
 	let prefab = runtime::editor::PrefabData {
+		composition: Default::default(),
 		reference_slots: Default::default(),
 		schema_version: 2,
 		entities: vec![EntityData::new(

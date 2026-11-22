@@ -362,6 +362,7 @@ fn check_animated_spawn_retirement(
 	}];
 	let prefab = runtime::editor::PrefabData {
 		schema_version: 3,
+		composition: Default::default(),
 		entities: vec![entity],
 		gameplay: None,
 		reference_slots: std::collections::BTreeMap::new(),

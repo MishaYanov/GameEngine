@@ -27,7 +27,7 @@ impl EditorSession {
 		let anchor = EntityKey::generate();
 		let map = source
 			.prefab
-			.entities
+			.expanded_entities()?
 			.iter()
 			.map(|entity| (entity.key.clone(), EntityKey::generate()))
 			.collect();
@@ -158,7 +158,7 @@ impl EditorSession {
 			bindings: bindings.unwrap_or_else(|| old.bindings.clone()),
 			overrides: old.overrides.clone(),
 		};
-		for entity in &link.source.prefab.entities {
+		for entity in link.source.prefab.expanded_entities()?.iter() {
 			link.entity_map.insert(
 				entity.key.clone(),
 				old.entity_map

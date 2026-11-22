@@ -122,6 +122,7 @@ fn removed_or_disabled_support_is_cleared_before_publishing_motion() {
 			SimulationSession::with_factory(project(&data), Arc::new(data), &script).unwrap();
 		let item = engine_core::editor::PrefabData {
 			schema_version: 3,
+			composition: Default::default(),
 			entities: vec![box_at("floor", [0., -0.5, 0.], [20., 0.5, 20.])],
 			gameplay: None,
 			reference_slots: Default::default(),

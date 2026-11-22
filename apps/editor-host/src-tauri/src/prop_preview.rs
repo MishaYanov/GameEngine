@@ -98,7 +98,7 @@ impl EditorWorkspace {
 						fingerprint: source.fingerprint,
 						draft_revision,
 					},
-					source.prefab.entities.iter().map(visual_entity).collect(),
+					source.prefab.expanded_entities()?.iter().map(visual_entity).collect(),
 					draft_revision,
 				)
 			}
@@ -156,7 +156,7 @@ impl EditorWorkspace {
 		} else {
 			let prefab = PrefabData::from_json(prefab)?;
 			Some(Arc::new(preview_document(
-				prefab.entities.iter().map(visual_entity).collect(),
+				prefab.expanded_entities()?.iter().map(visual_entity).collect(),
 			)?))
 		};
 		Ok(Some(PropDraftPreviewRefresh {

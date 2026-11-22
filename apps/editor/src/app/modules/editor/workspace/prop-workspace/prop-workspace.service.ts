@@ -5,7 +5,9 @@ import {listen} from '@tauri-apps/api/event';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey, ModelAsset, SceneEntity, SceneId, Transform} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
-import type {PrefabSourceDraft, PropDraftEdit} from '../../../../core/editor/linked-prefabs.models';
+import type {
+    NestedPropPlacement, NestedPropPlacementRequest, NestedPropSource, PrefabSourceDraft, PropDraftEdit,
+} from '../../../../core/editor/linked-prefabs.models';
 import {readPrefabSource} from '../prefabs/prefab-source-values';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
@@ -33,6 +35,7 @@ export type PropWorkspaceDocument = PropTab & {
     readonly name: string;
     readonly path: string;
     readonly objects: readonly PropWorkspaceObject[];
+    readonly placements: readonly NestedPropPlacement[];
     readonly references: readonly {readonly slot: string; readonly target: string}[];
 };
 
@@ -54,10 +57,14 @@ export class PropWorkspaceService {
     private readonly dom = inject(DOCUMENT);
     private readonly tab = signal<PropTab | null>(null);
     private readonly selectedKey = signal<EntityKey | null>(null);
+    private readonly placementId = signal<string | null>(null);
     private readonly opening = signal<PropScope | null>(null);
     private readonly failure = signal<string | null>(null);
     private readonly editingDraft = signal(false);
     private readonly reviewingClose = signal(false);
+    private readonly nestedSource = signal<NestedPropSource | null>(null);
+    private readonly reviewingNestedSource = signal(false);
+    private nestedReviewRequest = 0;
     private closeReview: {readonly promise: Promise<boolean>; readonly resolve: (approved: boolean) => void} | null = null;
     private sourceDraft: PrefabSourceDraft | null = null;
     private focusedBeforeOpen: HTMLElement | null = null;
@@ -67,6 +74,9 @@ export class PropWorkspaceService {
     readonly error = this.failure.asReadonly();
     readonly pending = computed(() => this.opening() !== null);
     readonly draftPending = this.editingDraft.asReadonly();
+    readonly nestedReview = this.nestedSource.asReadonly();
+    readonly nestedReviewPending = this.reviewingNestedSource.asReadonly();
+    readonly assets = computed(() => this.editor.modelAssets() ?? []);
     readonly confirmingClose = this.reviewingClose.asReadonly();
     readonly canOpen = computed(() => this.editing.ready() && !this.pending() && !this.draftPending() && !!this.editor.snapshot());
     readonly draft = computed(() => {
@@ -84,7 +94,7 @@ export class PropWorkspaceService {
         if (tab.kind === 'source') {
             const prefab = tab.draft.prefab;
             const objects = flattenObjects(prefab.entities.map(entity => ({...entity, parent: entity.parent ?? null})));
-            return {...tab, path: tab.draft.path, objects,
+            return {...tab, path: tab.draft.path, objects, placements: prefab.composition?.placements ?? [],
                 references: Object.keys(prefab.reference_slots).map(slot => ({slot, target: 'Assigned on placement'}))};
         }
         const entities = this.editor.document()?.entities;
@@ -95,9 +105,14 @@ export class PropWorkspaceService {
         const names = new Map(entities.map(entity => [entity.key, entity.name]));
         const references = Object.entries(root.linked_prefab.bindings)
             .map(([slot, key]) => ({slot, target: names.get(key) ?? 'Missing object'}));
-        return {...tab, name: root.name, path: root.linked_prefab.source.path, objects, references};
+        return {...tab, name: root.name, path: root.linked_prefab.source.path, objects, references, placements: []};
+    });
+    readonly selectedPlacement = computed<NestedPropPlacement | null>(() => {
+        const id = this.placementId();
+        return this.document()?.placements.find(placement => placement.id === id) ?? null;
     });
     readonly selectedObject = computed<PropWorkspaceObject | null>(() => {
+        if (this.selectedPlacement()) return null;
         const objects = this.document()?.objects ?? [];
         return objects.find(item => item.key === this.selectedKey()) ?? objects[0] ?? null;
     });
@@ -159,7 +174,85 @@ export class PropWorkspaceService {
     }
 
     selectObject(key: EntityKey): void {
-        if (this.document()?.objects.some(item => item.key === key)) this.selectedKey.set(key);
+        if (this.document()?.objects.some(item => item.key === key)) {
+            this.placementId.set(null);
+            this.selectedKey.set(key);
+        }
+    }
+
+    selectPlacement(id: string): void {
+        if (this.document()?.placements.some(placement => placement.id === id)) this.placementId.set(id);
+    }
+
+    async reviewNested(assetId: string, fingerprint: string): Promise<void> {
+        const draft = this.draft();
+        if (!draft || !this.canEditDraft() || !this.assets().some(asset =>
+            asset.kind === 'prefab' && asset.asset_id === assetId && asset.fingerprint === fingerprint) ||
+            assetId === draft.asset_id) return;
+        const request = ++this.nestedReviewRequest;
+        const generation = this.editor.workspaceGeneration();
+        const current = () => request === this.nestedReviewRequest && !this.destroyed &&
+            this.editor.workspaceGeneration() === generation && this.draft()?.draft_id === draft.draft_id;
+        this.failure.set(null);
+        this.nestedSource.set(null);
+        this.reviewingNestedSource.set(true);
+        try {
+            const review = await this.editor.reviewNestedProp(assetId, fingerprint, draft.workspace_generation, generation);
+            if (!current()) return;
+            if (review.asset_id !== assetId || review.fingerprint !== fingerprint || !Array.isArray(review.slots) ||
+                review.slots.length > 128 || new Set(review.slots).size !== review.slots.length ||
+                review.slots.some(slot => typeof slot !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(slot))) {
+                throw new Error('The editor returned a different or invalid nested Prop source.');
+            }
+            this.nestedSource.set(review);
+        } catch (error) {
+            if (current()) this.failure.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            if (current()) this.reviewingNestedSource.set(false);
+        }
+    }
+
+    clearNestedReview(): void {
+        this.nestedReviewRequest++;
+        this.nestedSource.set(null);
+        this.reviewingNestedSource.set(false);
+    }
+
+    async addNested(placement: NestedPropPlacementRequest): Promise<boolean> {
+        const review = this.nestedReview();
+        const document = this.document();
+        if (!review || review.asset_id !== placement.asset_id || review.fingerprint !== placement.fingerprint ||
+            !document?.objects.some(object => object.key === placement.parent)) return false;
+        const previousIds = new Set(document.placements.map(existing => existing.id));
+        const accepted = await this.runDraft((draft, revision, generation) =>
+            this.editor.addNestedProp(draft.draft_id, revision, placement, generation));
+        if (accepted) {
+            const added = this.document()?.placements.find(item => !previousIds.has(item.id));
+            if (added) this.selectPlacement(added.id);
+            this.clearNestedReview();
+        }
+        return accepted;
+    }
+
+    editPlacement(change: PropObjectEdit): Promise<boolean> {
+        const selected = this.selectedPlacement();
+        const composition = this.draft()?.prefab.composition;
+        if (!selected || change.key !== `placement:${selected.id}` || !composition) return Promise.resolve(false);
+        const patch = 'name' in change ? {name: change.name} :
+            'parent' in change ? {parent: change.parent ?? selected.parent} : {local: change.transform};
+        return this.replacePlacements(composition.placements.map(placement =>
+            placement.id === selected.id ? {...placement, ...patch} : placement));
+    }
+
+    async reorderPlacement(offset: -1 | 1): Promise<boolean> {
+        const selected = this.selectedPlacement();
+        const placements = this.draft()?.prefab.composition?.placements;
+        if (!selected || !placements) return false;
+        const siblings = placements.filter(placement => placement.parent === selected.parent);
+        const neighbor = siblings[siblings.findIndex(placement => placement.id === selected.id) + offset];
+        if (!neighbor) return false;
+        return this.replacePlacements(placements.map(placement => placement.id === selected.id ? neighbor :
+            placement.id === neighbor.id ? selected : placement));
     }
 
     editObject(change: PropObjectEdit): Promise<boolean> {
@@ -209,6 +302,8 @@ export class PropWorkspaceService {
         this.cancelOpen();
         this.tab.set(null);
         this.selectedKey.set(null);
+        this.placementId.set(null);
+        this.clearNestedReview();
         this.releaseSource();
         const origin = this.focusedBeforeOpen;
         this.focusedBeforeOpen = null;
@@ -246,6 +341,8 @@ export class PropWorkspaceService {
                 this.sourceDraft = tab.kind === 'source' ? tab.draft : null;
                 this.focusedBeforeOpen = focused instanceof HTMLElement ? focused : null;
                 this.selectedKey.set(null);
+                this.placementId.set(null);
+                this.clearNestedReview();
                 this.tab.set(tab);
                 this.views.selectView('prop-workspace');
                 opened = true;
@@ -260,6 +357,12 @@ export class PropWorkspaceService {
     private scope(): PropScope | null {
         const sceneId = this.editor.snapshot()?.active_scene_id;
         return sceneId ? {generation: this.editor.workspaceGeneration(), sceneId} : null;
+    }
+
+    private replacePlacements(placements: readonly NestedPropPlacement[]): Promise<boolean> {
+        const prefab = this.draft()?.prefab;
+        if (!prefab?.composition) return Promise.resolve(false);
+        return this.editDraft({type: 'apply', prefab: {...prefab, composition: {...prefab.composition, placements}}});
     }
 
     private async runDraft(run: (

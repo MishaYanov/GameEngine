@@ -608,9 +608,17 @@ pub fn prepare_prefab(
 	} else {
 		None
 	};
+	let owner = old
+		.as_ref()
+		.map_or_else(AssetId::generate, |asset| asset.id.clone());
+	if !prefab.composition.is_empty() {
+		prefab
+			.composition
+			.validate(Some(&owner), &prefab.entities, &prefab.reference_slots)?;
+	}
 	// Enroll legacy model references in this same catalog transaction; saving a
 	// prefab must not publish an incomplete dependency graph or rewrite the scene.
-	for entity in &prefab.entities {
+	for entity in prefab.expanded_entities()?.iter() {
 		if catalog
 			.resolve(
 				entity.asset_id.as_ref(),
@@ -642,9 +650,7 @@ pub fn prepare_prefab(
 	}
 	let bytes = prefab.to_json()?.into_bytes();
 	let asset = PersistentAsset {
-		id: old
-			.as_ref()
-			.map_or_else(AssetId::generate, |asset| asset.id.clone()),
+		id: owner,
 		path: destination.into(),
 		kind: AssetKind::Prefab,
 		aliases: old

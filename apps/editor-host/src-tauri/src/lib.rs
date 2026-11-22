@@ -123,6 +123,8 @@ pub fn run() {
 			editor_prefab_source_save,
 			editor_prop_draft_edit,
 			editor_prop_draft_save,
+			editor_prop_nested_source,
+			editor_prop_draft_add_nested,
 			editor_create_linked_prefab_source,
 			editor_instantiate_linked_prefab,
 			editor_linked_prefab_status,

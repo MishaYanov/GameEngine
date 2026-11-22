@@ -1,0 +1,35 @@
+<form (submit)="place($event)" aria-label="Add Nested Prop">
+    <fieldset [disabled]="pending()">
+        <legend>Add Nested Prop to {{ parent().name }}</legend>
+        <label>Source asset
+            <select #asset [value]="selected()" (change)="chooseAsset(asset.value)">
+                <option value="">Choose a Prop</option>
+                @for (item of available(); track item.asset_id) {
+                    <option [value]="item.asset_id">{{ item.path }}</option>
+                }
+            </select>
+        </label>
+        @if (currentReview(); as source) {
+            <label>Placement name <input #label [value]="name()" (input)="name.set(label.value)"/></label>
+            <fieldset>
+                <legend>Local position</legend>
+                @for (axis of axes; track axis; let index = $index) {
+                    <label>{{ axis }} <input #coordinate inputmode="decimal" [value]="position()[index]"
+                        (input)="setPosition(index, coordinate.value)"/></label>
+                }
+            </fieldset>
+            @for (slot of source.slots; track slot) {
+                <label>{{ slot }}
+                    <select #binding [value]="bindings()[slot] ?? ''" (change)="assign(slot, binding.value)">
+                        <option value="">Choose a binding</option>
+                        @for (choice of choices(); track choice.value) {
+                            <option [value]="choice.value">{{ choice.label }}</option>
+                        }
+                    </select>
+                </label>
+            }
+        }
+    </fieldset>
+    <button type="submit" [disabled]="!placement() || pending()">Place Nested Prop</button>
+    <button type="button" [disabled]="pending()" (click)="cancelled.emit()">Cancel</button>
+</form>

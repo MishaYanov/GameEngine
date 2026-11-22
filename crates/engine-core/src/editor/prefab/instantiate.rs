@@ -38,11 +38,12 @@ impl EditorSession {
 			return Err("Prefab position must be finite".into());
 		}
 		let prefab = prefab.validated()?;
+		let sources = prefab.expanded_entities()?;
 		if self
 			.data
 			.entities
 			.len()
-			.checked_add(prefab.entities.len())
+			.checked_add(sources.len())
 			.is_none_or(|count| count > crate::scene_data::MAX_SCENE_ENTITIES)
 		{
 			return Err("Instantiating this prefab would exceed the scene entity limit".into());
@@ -54,8 +55,7 @@ impl EditorSession {
 			.map(|entity| entity.key.clone())
 			.chain(self.data.lights.iter().map(|light| light.key.clone()))
 			.collect();
-		let remap: HashMap<_, _> = prefab
-			.entities
+		let remap: HashMap<_, _> = sources
 			.iter()
 			.map(|entity| {
 				let key = loop {
@@ -67,7 +67,8 @@ impl EditorSession {
 				(entity.key.clone(), key)
 			})
 			.collect();
-		let mut entities = prefab.remap_entities(&remap, bindings)?;
+		let mut entities =
+			PrefabData::remap_expanded(&sources, &prefab.reference_slots, &remap, bindings)?;
 		let mut selection = Vec::new();
 		for entity in &mut entities {
 			if entity.parent.is_none() {

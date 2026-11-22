@@ -187,6 +187,7 @@ impl EditorSession {
 		}
 		PrefabData {
 			schema_version: 3,
+			composition: Default::default(),
 			reference_slots,
 			entities,
 			gameplay: Some(gameplay),

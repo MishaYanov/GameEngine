@@ -1,5 +1,6 @@
-//! Flat, pinned authoring links. Runtime scenes consume their materialized
+//! Pinned authoring links. Runtime scenes consume their materialized
 //! entities; source files are read only by explicit host authoring operations.
+mod composition;
 mod constraints;
 mod overrides;
 
@@ -9,6 +10,11 @@ use crate::{
 	components::{ComponentId, ComponentRecord},
 	editor::PrefabData,
 	scene_data::{EntityData, SceneData, validate_model_path},
+};
+pub use composition::{
+	ComposedProp, MAX_NESTED_PLACEMENTS, MAX_PINNED_PROP_VERSIONS, MAX_PROP_NESTING, NestedBinding,
+	NestedPlacement, PinnedAssetVersion, PinnedPropSource, PlacementId, PropAddress,
+	PropComposition,
 };
 pub use constraints::validate_scene_links;
 pub(crate) use overrides::{apply_value, properties, value};
@@ -85,21 +91,18 @@ impl LinkedPrefabSource {
 					.into(),
 			);
 		}
-		if self
-			.prefab
-			.entities
-			.iter()
-			.any(|entity| entity.linked_prefab.is_some())
-		{
-			return Err(
-				"Linked prefab sources cannot contain nested linked instances; Unpack them first"
-					.into(),
-			);
-		}
 		if self.prefab.gameplay.is_some() {
 			return Err("Linked sources support entity/component assemblies. Use Instantiate Copy for legacy prefab gameplay, or explicitly create a component source after converting its gameplay".into());
 		}
-		self.prefab.validate()
+		self.prefab.validate()?;
+		if !self.prefab.composition.is_empty() {
+			self.prefab.composition.validate(
+				Some(&self.source_id),
+				&self.prefab.entities,
+				&self.prefab.reference_slots,
+			)?;
+		}
+		Ok(())
 	}
 }
 
@@ -147,16 +150,27 @@ pub(crate) fn materialized(
 	link: &LinkedPrefabInstance,
 	anchor: &EntityKey,
 ) -> Result<BTreeMap<EntityKey, EntityData>, String> {
+	let sources = link.source.prefab.expanded_entities()?;
+	materialized_from(link, &sources, anchor)
+}
+
+pub(crate) fn materialized_from(
+	link: &LinkedPrefabInstance,
+	sources: &[EntityData],
+	anchor: &EntityKey,
+) -> Result<BTreeMap<EntityKey, EntityData>, String> {
 	let keys = link
 		.entity_map
 		.iter()
 		.map(|(source, target)| (source.clone(), target.clone()))
 		.collect();
-	let entities = link.source.prefab.remap_entities(&keys, &link.bindings)?;
-	Ok(link
-		.source
-		.prefab
-		.entities
+	let entities = PrefabData::remap_expanded(
+		sources,
+		&link.source.prefab.reference_slots,
+		&keys,
+		&link.bindings,
+	)?;
+	Ok(sources
 		.iter()
 		.zip(entities)
 		.map(|(source, mut entity)| {
