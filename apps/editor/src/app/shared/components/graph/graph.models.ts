@@ -1,3 +1,6 @@
+import {
+    controlPorts, type ControlNodeKind, type ControlValueKind, newControlData, CONTROL_NODE_LABELS,
+} from '../../../core/editor/controls-graph.models';
 import {ANIMATION_NODES} from './animation/animation.nodes';
 import {
     AnimationNodeValues,
@@ -7,7 +10,7 @@ import {
     validTransition,
 } from './animation/animation.models';
 
-export type GraphDomain = 'animation' | 'shader';
+export type GraphDomain = 'animation' | 'shader' | 'controls';
 export type GraphMode = 'pose' | 'stateMachine';
 export type GraphPortType =
     | 'float'
@@ -15,6 +18,10 @@ export type GraphPortType =
     | 'bool'
     | 'trigger'
     | 'vector3'
+    | 'vector2'
+    | 'delta2'
+    | 'button'
+    | 'control_value'
     | 'pose'
     | 'rootMotion'
     | 'events'
@@ -32,6 +39,7 @@ export interface GraphPort {
 }
 
 export interface GraphNodeValues extends AnimationNodeValues {
+    'control.node': {title: string; nodeKind: ControlNodeKind; result: ControlValueKind | ''};
     'animation.clip': { clip: string; speed: number; loop: boolean };
     'animation.blend': { weight: number };
     'animation.speed': { speed: number };
@@ -92,6 +100,10 @@ export interface GraphNodeDefinition<K extends GraphNodeKind = GraphNodeKind> {
 
 export const GRAPH_NODES = {
     ...ANIMATION_NODES,
+    'control.node': {
+        title: 'Control node', domain: 'controls', category: 'Controls',
+        inputs: [], outputs: [], defaults: {title: 'Action', nodeKind: 'action', result: 'button'},
+    },
     'animation.clip': {
         title: 'Animation clip',
         domain: 'animation',
@@ -201,6 +213,11 @@ export function createGraphNode<K extends GraphNodeKind>(
 export function validGraphValues(kind: GraphNodeKind, values: GraphValues): boolean {
     const definition = graphDefinition(kind);
     if (!definition || !values || typeof values !== 'object') return false;
+    if (kind === 'control.node') {
+        const control = values as GraphNodeValues['control.node'];
+        return sameShape(control, definition.defaults) && Object.hasOwn(CONTROL_NODE_LABELS, control.nodeKind) &&
+            ['', 'bool', 'button', 'vector2', 'delta2'].includes(control.result);
+    }
     if (kind === 'animation.locomotion') {
         const loco = values as GraphNodeValues['animation.locomotion'];
         const {machine: _defaultMachine, ...defaults} =
@@ -248,6 +265,13 @@ function sameShape(value: unknown, shape: unknown): boolean {
 export function graphPorts(node: GraphNode, direction: 'input' | 'output'): readonly GraphPort[] {
     const definition = graphDefinition(node.kind);
     const ports = direction === 'input' ? definition.inputs : definition.outputs;
+    if (node.kind === 'control.node') {
+        if (direction === 'output') {
+            const type = node.values.result;
+            return type ? [{id: 'result', label: 'Result', type}] : [];
+        }
+        return controlPorts(newControlData(node.values.nodeKind)).map(port => ({id: port.field, label: port.label, type: port.type}));
+    }
     if (node.kind !== 'animation.locomotion') return ports;
     const values = node.values;
     if (direction === 'input')
@@ -285,7 +309,7 @@ export function graphDocumentError(document: GraphDocument): string | null {
     if (
         !document ||
         document.version !== 1 ||
-        !['animation', 'shader'].includes(document.domain) ||
+        !['animation', 'shader', 'controls'].includes(document.domain) ||
         !['pose', 'stateMachine'].includes(document.kind ?? 'pose') ||
         (document.kind === 'stateMachine' && document.domain !== 'animation') ||
         !Array.isArray(document.nodes) ||
@@ -354,7 +378,9 @@ export function connectionError(
     const output = source && graphPorts(source, 'output').find((port) => port.id === from.port);
     const input = target && graphPorts(target, 'input').find((port) => port.id === to.port);
     if (!output || !input) return 'Connect an output to an input.';
-    if (output.type !== input.type) return `Cannot connect ${output.type} to ${input.type}.`;
+    const anyControlValue = document.domain === 'controls' && input.type === 'control_value' &&
+        ['bool', 'button', 'vector2', 'delta2'].includes(output.type);
+    if (output.type !== input.type && !anyControlValue) return `Cannot connect ${output.type} to ${input.type}.`;
     if (document.kind === 'stateMachine') {
         if (output.type !== 'transition') return 'State machines use transition connections.';
         if (

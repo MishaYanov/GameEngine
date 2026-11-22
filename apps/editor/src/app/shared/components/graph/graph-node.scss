@@ -164,6 +164,8 @@ header editor-icon {
   --port-color: var(--color-graph-float);
 }
 
+[data-type='vector2'],
+[data-type='delta2'],
 [data-type='vector3'] {
   --port-color: var(--color-graph-vector);
 }
@@ -216,6 +218,7 @@ editor-graph-values {
   --port-color: var(--color-text-secondary);
 }
 
+[data-type='button'],
 [data-type='bool'],
 [data-type='trigger'],
 [data-type='events'] {
@@ -224,4 +227,9 @@ editor-graph-values {
 
 [data-type='int'] {
   --port-color: var(--color-graph-float);
+}
+
+:host(.highlighted) {
+    outline: 2px solid var(--color-success, #67c593);
+    outline-offset: 2px;
 }

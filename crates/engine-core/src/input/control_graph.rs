@@ -206,6 +206,16 @@ impl Value {
 	fn boolean(self) -> bool {
 		matches!(self, Self::Boolean(true))
 	}
+
+	fn active(self) -> bool {
+		match self {
+			Self::None => false,
+			Self::Boolean(value) => value,
+			Self::Button(value) => value != ControlButton::default(),
+			Self::Vector(value) => value != [0.0; 2],
+			Self::Look(value) => value != ControlLook::default(),
+		}
+	}
 }
 
 impl CompiledControlGraph {
@@ -214,8 +224,36 @@ impl CompiledControlGraph {
 	}
 
 	pub fn evaluate(&self, source: &impl ControlActionSource) -> ControlGraphOutput {
+		self.evaluate_inner::<false>(source).0
+	}
+
+	pub fn evaluate_with_activity(
+		&self,
+		source: &impl ControlActionSource,
+	) -> (ControlGraphOutput, u128) {
+		self.evaluate_inner::<true>(source)
+	}
+
+	pub fn active_node_ids(&self, mask: u128) -> impl Iterator<Item = &str> {
+		self.order()
+			.enumerate()
+			.filter_map(move |(index, id)| (mask & (1_u128 << index) != 0).then_some(id))
+	}
+
+	pub fn input_kind(&self, action: &str) -> Option<InputActionKind> {
+		self.steps.iter().find_map(|step| match &step.operation {
+			CompiledOperation::Action(id, kind) if id == action => Some(*kind),
+			_ => None,
+		})
+	}
+
+	fn evaluate_inner<const TRACE: bool>(
+		&self,
+		source: &impl ControlActionSource,
+	) -> (ControlGraphOutput, u128) {
 		let mut output = ControlGraphOutput::default();
 		let mut values = [Value::None; MAX_NODES];
+		let mut active = 0_u128;
 		for (index, step) in self.steps.iter().enumerate() {
 			values[index] = match &step.operation {
 				CompiledOperation::Action(id, kind) => match kind {
@@ -266,8 +304,17 @@ impl CompiledControlGraph {
 					Value::None
 				}
 			};
+			if TRACE {
+				let value = match step.operation {
+					CompiledOperation::Output(input, _) => values[input],
+					_ => values[index],
+				};
+				if value.active() {
+					active |= 1_u128 << index;
+				}
+			}
 		}
-		output
+		(output, active)
 	}
 }
 

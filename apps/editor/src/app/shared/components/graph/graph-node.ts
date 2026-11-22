@@ -106,7 +106,7 @@ export class GraphNodeValuesEditor {
             </div>
         } @else if (stateMotion(); as motion) {
             <p class="state-motion">{{ motion }}</p>
-        } @else if (hasValues()) {
+        } @else if (hasValues() && node().kind !== 'control.node') {
 			<editor-graph-values
 				[node]="node()"
 				[title]="definition().title"
@@ -122,6 +122,7 @@ export class GraphNodeValuesEditor {
         '[attr.data-domain]': 'definition().domain',
         '[attr.data-kind]': 'node().kind',
         '[class.selected]': 'selected()',
+        '[class.highlighted]': 'highlighted()',
         '[style.left.px]': 'node().position.x',
         '[style.top.px]': 'node().position.y',
         '(click)': 'selectedChange.emit(node().id)',
@@ -130,6 +131,7 @@ export class GraphNodeValuesEditor {
 export class GraphNodeCard {
     readonly node = input.required<GraphNode>();
     readonly selected = input(false);
+    readonly highlighted = input(false);
     readonly connected = input.required<ReadonlySet<string>>();
     readonly selectedChange = output<string>();
     readonly moveStart = output<PointerEvent>();
@@ -149,6 +151,7 @@ export class GraphNodeCard {
     protected readonly outputs = computed(() => graphPorts(this.node(), 'output'));
     protected readonly title = computed(() => {
         const node = this.node();
+        if (node.kind === 'control.node') return node.values.title;
         return node.kind === 'animation.state' ? node.values.name : this.definition().title;
     });
     protected readonly summary = computed(() => {

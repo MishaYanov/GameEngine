@@ -22,6 +22,17 @@ pub struct RuntimeEntityDto {
 	pub instance_id: Option<String>,
 	pub behavior_states: Vec<RuntimeBehaviorStateDto>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ControlGraphStepDto {
+	pub actor: RuntimeEntityHandle,
+	pub asset_id: crate::asset_catalog::AssetId,
+	pub tick: u64,
+	pub active_node_ids: Vec<String>,
+	pub changed_outputs: Vec<String>,
+	pub output: crate::input::ControlGraphOutput,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeInspectionDto {
 	pub play_session_id: String,
@@ -41,6 +52,8 @@ pub struct RuntimeInspectionDto {
 	pub animations: Vec<crate::animation::AnimationInspection>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub animators: Vec<crate::animation::AnimatorInspection>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub control_graph: Option<ControlGraphStepDto>,
 	pub last_error: Option<String>,
 }
 

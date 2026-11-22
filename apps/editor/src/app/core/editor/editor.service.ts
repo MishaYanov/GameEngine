@@ -1,3 +1,7 @@
+import {
+    type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture, type ControlGraphDocument,
+    type ControlGraphProbe, readControlGraphCatalog, readControlGraphDocument, readControlGraphProbe,
+} from './controls-graph.models';
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import type {UnlistenFn} from '@tauri-apps/api/event';
@@ -437,6 +441,38 @@ export class EditorService {
 
     validateAnimatorActor(entityKey: EntityKey, scope: WorkspaceAssetScope): Promise<AnimatorActorValidation> {
         return this.workspaceAssetOperation('editor_validate_animator_actor', {entityKey}, scope, readAnimatorValidation);
+    }
+
+    async listControlGraphs(scope: WorkspaceAssetScope): Promise<readonly ControlGraphAsset[]> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const entries = await this.native<unknown>('editor_list_control_graphs', {
+            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return readControlGraphCatalog(entries);
+    }
+
+    openControlGraph(assetId: string, scope: WorkspaceAssetScope): Promise<ControlGraphDocument> {
+        return this.workspaceAssetOperation('editor_open_control_graph', {assetId}, scope, readControlGraphDocument);
+    }
+
+    saveControlGraph(
+        destination: string, graph: ControlGraph, capture: ControlGraphCapture | null, scope: WorkspaceAssetScope,
+    ): Promise<ControlGraphDocument> {
+        return this.workspaceAssetOperation('editor_save_control_graph', {destination, graph, capture}, scope, readControlGraphDocument);
+    }
+
+    async probeControlsGraph(
+        graph: ControlGraph, actions: readonly ControlActionSample[], pin: ControlGraphCapture | null,
+        entityKey: EntityKey | null, scope: WorkspaceAssetScope,
+    ): Promise<ControlGraphProbe> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const result = await this.native<unknown>('editor_probe_controls_graph', {
+            graph, actions, assetId: pin?.id ?? null, fingerprint: pin?.fingerprint ?? null, entityKey,
+            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return readControlGraphProbe(result);
     }
 
     private workspaceAssetOperation<T>(

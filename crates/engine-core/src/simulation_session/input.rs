@@ -61,6 +61,7 @@ impl SimulationSession {
 		self.inputs
 			.control_sample
 			.clear(self.control_graph.is_some());
+		self.control_graph_step = None;
 		self.clock.reset();
 	}
 	pub fn set_paused(&mut self, paused: bool) {

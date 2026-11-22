@@ -475,7 +475,8 @@ fn play_routes_motor_and_gameplay_through_one_gate_per_step_and_requires_declare
 	settings.input = InputActionsRef::Asset {
 		asset_id: AssetId::generate(),
 	};
-	settings.control_graph = Some(AssetId::generate());
+	let graph_id = AssetId::generate();
+	settings.control_graph = Some(graph_id.clone());
 	exec(
 		&mut engine,
 		Command::ReplaceComponent {
@@ -530,6 +531,13 @@ fn play_routes_motor_and_gameplay_through_one_gate_per_step_and_requires_declare
 	engine.tick(STEP).unwrap();
 	assert_eq!(position(&engine), origin);
 	assert_eq!(recorder.0.lock().unwrap().last(), Some(&(false, false)));
+	let blocked = engine.runtime_inspection(0, 16).unwrap();
+	let blocked_step = blocked.control_graph.unwrap();
+	assert_eq!(blocked_step.actor.key, actor);
+	assert_eq!(blocked_step.asset_id, graph_id);
+	assert_eq!(blocked_step.tick, blocked.tick);
+	assert!(blocked_step.active_node_ids.contains(&"attack".into()));
+	assert!(!blocked_step.active_node_ids.contains(&"strike".into()));
 	sample(&mut engine, &[]);
 	engine.tick(STEP).unwrap();
 	sample(&mut engine, &["KeyF", "KeyG", "KeyW", "Space"]);
@@ -550,8 +558,45 @@ fn play_routes_motor_and_gameplay_through_one_gate_per_step_and_requires_declare
 		1
 	);
 	assert_eq!(recorder.0.lock().unwrap().last(), Some(&(true, false)));
+	let held = engine
+		.runtime_inspection(0, 16)
+		.unwrap()
+		.control_graph
+		.unwrap();
+	assert_eq!(
+		held.output.intent.attack,
+		ControlButton {
+			held: true,
+			..Default::default()
+		}
+	);
+	assert!(held.active_node_ids.contains(&"strike".into()));
+	sample(&mut engine, &["KeyG"]);
+	engine.tick(STEP).unwrap();
+	let released = engine
+		.runtime_inspection(0, 16)
+		.unwrap()
+		.control_graph
+		.unwrap();
+	assert!(released.output.intent.attack.released);
+	for name in ["move", "jump", "attack"] {
+		assert!(released.changed_outputs.contains(&name.into()));
+	}
 	exec(&mut engine, Command::SetPaused { paused: true }).unwrap();
+	assert!(
+		engine
+			.runtime_inspection(0, 16)
+			.unwrap()
+			.control_graph
+			.is_none()
+	);
 	exec(&mut engine, Command::SetPaused { paused: false }).unwrap();
 	engine.tick(STEP).unwrap();
 	assert_eq!(recorder.0.lock().unwrap().last(), Some(&(false, false)));
+	exec(&mut engine, Command::StopPlay).unwrap();
+	assert!(engine.runtime_inspection(0, 16).is_err());
+	exec(&mut engine, Command::StartPlay).unwrap();
+	let restarted = engine.runtime_inspection(0, 16).unwrap();
+	assert_ne!(blocked.run_id, restarted.run_id);
+	assert!(restarted.control_graph.is_none());
 }

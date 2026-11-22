@@ -92,6 +92,7 @@ export class EditorGraph {
     readonly label = input('Node graph');
     readonly clipAssets = input<readonly AnimationClipAsset[]>([]);
     readonly managed = input(false);
+    readonly activeNodes = input<ReadonlySet<string>>(new Set());
     readonly managedRevision = input(0);
     readonly managedSelection = input<GraphCanvasSelection | null>(null);
     readonly selectedItem = output<GraphCanvasSelection>();
@@ -282,7 +283,7 @@ export class EditorGraph {
     }
 
     protected activateWire(id: string): void {
-        if (this.store.document().kind === 'stateMachine') {
+        if (this.managed() || this.store.document().kind === 'stateMachine') {
             this.store.selectConnection(id);
             if (this.managed()) this.selectedItem.emit({kind: 'connection', id});
         } else this.store.disconnect(id);

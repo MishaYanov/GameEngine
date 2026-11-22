@@ -5,6 +5,7 @@ import {
 	runtimeHandleKey,
 	type RuntimeInspection,
 } from '../../../../core/editor/runtime-inspection';
+import {ControlGraphOutputView} from '../control-graph/control-graph-output';
 import { Drawer } from '../../../../shared/components/drawer/drawer';
 import { EditorPane } from '../../../../shared/components/pane/pane';
 import type { DrawerSettings } from '../../../../shared/components/drawer/drawer-settings';
@@ -12,7 +13,7 @@ import type { Config } from '../../../../shared/models/config.model';
 
 @Component({
 	selector: 'editor-runtime-inspector',
-	imports: [Drawer, EditorPane],
+	imports: [Drawer, EditorPane, ControlGraphOutputView],
 	templateUrl: './runtime-inspector.html',
 	styleUrl: './runtime-inspector.scss',
 })
@@ -59,6 +60,17 @@ export class RuntimeInspector {
 	protected readonly animator = computed(
 		() => this.result()?.animators?.find(item => runtimeHandleKey(item.entity) === this.selected()) ?? null,
 	);
+	private readonly controlsScope = signal<{context: string; selection: string | null} | null>(null);
+    private selectionChange = 0;
+    protected readonly activeControls = computed(() => {
+        const page = this.result();
+        const status = this.viewport.gameStatus();
+        const controls = page?.control_graph;
+        if (!controls || !status || page.run_id !== status.run_id || page.play_session_id !== status.play_session_id ||
+            page.scene_id !== status.scene_id || this.controlsScope()?.context !== this.context() ||
+            this.controlsScope()?.selection !== this.selected()) return null;
+        return runtimeHandleKey(controls.actor) === this.selected() ? controls : null;
+    });
 	private readonly context = computed(() => {
 		const status = this.viewport.gameStatus();
 		if (!status) return null;
@@ -78,6 +90,7 @@ export class RuntimeInspector {
 			this.request++;
 			this.offset.set(0);
 			this.selected.set(null);
+			this.controlsScope.set(null);
 			this.result.set(null);
 			this.error.set(null);
 			this.pending.set(false);
@@ -88,10 +101,18 @@ export class RuntimeInspector {
 		});
 	}
 
+	protected selectEntity(key: string): void {
+        if (key === this.selected()) return;
+        this.selected.set(key);
+        this.selectionChange++;
+        this.controlsScope.set(null);
+    }
+
 	protected async refresh(offset = this.offset()): Promise<void> {
 		const context = this.context();
 		const status = this.viewport.gameStatus();
 		if (!context || !status || !this.available()) return;
+        const selectionChange = this.selectionChange;
 		const request = ++this.request;
 		const current = () => !this.destroyed && this.context() === context && this.request === request;
 		this.pending.set(true);
@@ -110,6 +131,7 @@ export class RuntimeInspector {
 			if (!result.entities.some((entity) => runtimeHandleKey(entity.handle) === this.selected())) {
 				this.selected.set(result.entities[0] ? runtimeHandleKey(result.entities[0].handle) : null);
 			}
+            this.controlsScope.set(selectionChange === this.selectionChange ? {context, selection: this.selected()} : null);
 		} catch (error) {
 			if (current()) this.error.set(error instanceof Error ? error.message : String(error));
 		} finally {

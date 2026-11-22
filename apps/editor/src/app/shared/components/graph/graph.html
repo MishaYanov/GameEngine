@@ -97,6 +97,7 @@
                             (selectedChange)="selectNode($event)"
                             (valuesChange)="!managed() && store.setValues(node.id, $event)"
                             [connected]="connected()"
+                            [highlighted]="activeNodes().has(node.id)"
                             [node]="node"
                             [selected]="store.selected() === node.id"
                     />

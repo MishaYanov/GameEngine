@@ -81,6 +81,52 @@ describe('RuntimeInspector', () => {
 		expect(report.violations.map((violation) => violation.id)).toEqual([]);
 	});
 
+
+    it('shows the inspected player route in Game and clears it on selection, restart and Stop', async () => {
+        const panel = await setup();
+        const controls = {
+            actor: page.entities[0].handle, asset_id: '12345678-1234-4234-8234-123456789012', tick: 12,
+            active_node_ids: ['jump_action', 'jump_out'], changed_outputs: ['jump'],
+            output: {intent: {movement: [0, 0] as const, look: {delta: [0, 0] as const, rate: [0, 0] as const},
+                jump: {held: true, pressed: true, released: false}, attack: {held: false, pressed: false, released: false}},
+                presentation: {}},
+        } as const;
+        const withRoute = {...page, total_entities: 2, entities: [...page.entities, {
+            name: 'Other actor', handle: {...page.entities[0].handle, key: 'other'}, spawned: false,
+            instance_id: null, behavior_states: [],
+        }], control_graph: controls};
+        expect(readRuntimeInspection(withRoute, 32)).toBe(withRoute);
+        expect(() => readRuntimeInspection({...withRoute, control_graph: {...controls, active_node_ids: ['duplicate','duplicate']}}, 32))
+            .toThrow('inspection page');
+        panel.inspectRuntime.mockResolvedValue(withRoute);
+        panel.button('Refresh Runtime').click();
+        await panel.fixture.whenStable();
+        const route = () => panel.root.querySelector('[aria-label="Live Controls Graph route"]');
+        expect(route()?.textContent).toContain('jump_action, jump_out');
+        expect(route()?.textContent).toContain('Pressed, Held');
+        expect(route()?.querySelector('button,input,select,textarea')).toBeNull();
+
+        panel.button('Other actor · Authored').click();
+        await panel.fixture.whenStable();
+        expect(route()).toBeNull();
+        panel.button('Spawned pickup · Spawned').click();
+        await panel.fixture.whenStable();
+        expect(route()).toBeNull();
+        panel.button('Refresh Runtime').click();
+        await panel.fixture.whenStable();
+        expect(route()).not.toBeNull();
+
+        panel.gameStatus.set({...status, run_id: 'run-2'});
+        await panel.fixture.whenStable();
+        expect(route()).toBeNull();
+        panel.button('Refresh Runtime').click();
+        await panel.fixture.whenStable();
+        expect(route()).toBeNull();
+        panel.gameStatus.set(null);
+        await panel.fixture.whenStable();
+        expect(route()).toBeNull();
+    });
+
 	it('pages explicitly and returns to a previous bounded page', async () => {
 		const panel = await setup();
 		panel.inspectRuntime.mockResolvedValue({ ...page, total_entities: 65 });

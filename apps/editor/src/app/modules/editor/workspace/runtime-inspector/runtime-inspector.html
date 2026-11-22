@@ -66,7 +66,7 @@
 							<button
 								type="button"
 								[attr.aria-pressed]="selected() === handleKey(item.handle)"
-								(click)="selected.set(handleKey(item.handle))"
+								(click)="selectEntity(handleKey(item.handle))"
 							>
 								{{ item.name }} · {{ item.spawned ? 'Spawned' : 'Authored' }}
 							</button>
@@ -90,6 +90,15 @@
 							<dt>Instance</dt>
 							<dd>{{ item.instance_id ?? 'None' }}</dd>
 						</dl>
+						@if (activeControls(); as route) {
+                            <section aria-label="Live Controls Graph route">
+                                <h4>Controls Graph at tick {{ route.tick }}</h4>
+                                <p class="reference">{{ route.asset_id }}</p>
+                                <p>Active nodes {{ route.active_node_ids.join(', ') || 'None' }}</p>
+                                <p>Changed outputs {{ route.changed_outputs.join(', ') || 'None' }}</p>
+                                <editor-control-graph-output [result]="route.output"/>
+                            </section>
+                        }
 						<h4>Behavior lifecycle</h4>
 						@if (motion(); as movement) {
 							<h4>Character motion at tick {{ movement.tick }}</h4>

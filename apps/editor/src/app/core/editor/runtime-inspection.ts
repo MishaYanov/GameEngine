@@ -1,3 +1,7 @@
+import {type ControlGraphOutput, MAX_CONTROL_NODES, validControlOutput} from './controls-graph.models';
+import {validGameActionId} from '../game-input/game-input.models';
+import {validInputActionsId} from '../game-input/input-actions.models';
+
 export interface RuntimeHandle {
 	readonly world_id: string;
 	readonly key: string;
@@ -36,7 +40,16 @@ export interface RuntimeInspection {
 	readonly character_motion?: readonly CharacterMotion[];
 	readonly animations?: readonly AnimationInspection[];
 	readonly animators?: readonly AnimatorInspection[];
+	readonly control_graph?: ControlGraphInspection | null;
 	readonly last_error: string | null;
+}
+export interface ControlGraphInspection {
+    readonly actor: RuntimeHandle;
+    readonly asset_id: string;
+    readonly tick: number;
+    readonly active_node_ids: readonly string[];
+    readonly changed_outputs: readonly string[];
+    readonly output: ControlGraphOutput;
 }
 export interface AnimationInspection {
 	readonly entity: RuntimeHandle;
@@ -114,6 +127,21 @@ function animation(value: unknown): boolean {
 	);
 }
 
+function controlGraph(value: unknown, pageTick: unknown): boolean {
+    if (!record(value) || !record(value['actor']) || !integer(value['tick']) || !integer(pageTick) || value['tick'] > pageTick) {
+        return false;
+    }
+    const actor = value['actor'];
+    return text(actor['world_id']) && text(actor['key']) && integer(actor['generation']) &&
+        validInputActionsId(value['asset_id']) && validControlOutput(value['output']) &&
+        Array.isArray(value['active_node_ids']) && value['active_node_ids'].length <= MAX_CONTROL_NODES &&
+        value['active_node_ids'].every(validGameActionId) && new Set(value['active_node_ids']).size === value['active_node_ids'].length &&
+        Array.isArray(value['changed_outputs']) && value['changed_outputs'].length <= MAX_CONTROL_NODES &&
+        new Set(value['changed_outputs']).size === value['changed_outputs'].length &&
+        value['changed_outputs'].every(output => ['move', 'look', 'jump', 'attack'].includes(output) ||
+            typeof output === 'string' && output.startsWith('animator:') && validGameActionId(output.slice(9)));
+}
+
 export function runtimeHandleKey(handle: RuntimeHandle): string {
 	return JSON.stringify([handle.world_id, handle.key, handle.generation]);
 }
@@ -152,6 +180,7 @@ export function readRuntimeInspection(value: unknown, limit: number): RuntimeIns
 				value['animations'].every(animation))) &&
 		(value['animators'] === undefined ||
 			(Array.isArray(value['animators']) && value['animators'].length <= 64 && value['animators'].every(animator))) &&
+		(value['control_graph'] == null || controlGraph(value['control_graph'], value['tick'])) &&
 		Array.isArray(value['entities']) &&
 		value['entities'].length <= limit &&
 		value['entities'].every((entity: unknown) => {

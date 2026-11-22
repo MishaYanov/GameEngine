@@ -134,6 +134,7 @@ pub fn run() {
 			editor_list_control_graphs,
 			editor_open_control_graph,
 			editor_save_control_graph,
+			editor_probe_controls_graph,
 			editor_list_input_actions,
 			editor_open_input_actions,
 			editor_save_input_actions,

@@ -1,13 +1,16 @@
 use super::{InputFrame, SimulationSession};
 use crate::{
-	SceneData,
+	EntityKey, SceneData,
+	asset_catalog::AssetId,
 	camera_input::CameraIntent,
 	input::{
 		ActionBinding, CompiledControlGraph, ControlActionSource, ControlButton,
 		ControlGraphOutput, ControlIntent, ControlLook, InputActionMap, ResolvedInputActions,
 	},
 	project::ProjectData,
+	runtime_lifecycle::{ControlGraphStepDto, RuntimeEntityHandle, RuntimeLifecycle},
 	scene_data::EntityData,
+	world::RuntimeWorld,
 };
 use std::{
 	collections::{BTreeMap, HashSet},
@@ -37,6 +40,62 @@ struct ActionStep<'a> {
 	typed: bool,
 	pointer_action: Option<&'a str>,
 	pointer: [f32; 2],
+}
+
+pub(super) struct CommittedControlStep {
+	actor: RuntimeEntityHandle,
+	asset_id: AssetId,
+	tick: u64,
+	active: u128,
+	changed_outputs: Vec<String>,
+	output: ControlGraphOutput,
+}
+
+impl CommittedControlStep {
+	pub fn capture(
+		world: &RuntimeWorld,
+		lifecycle: &RuntimeLifecycle,
+		owner: &EntityKey,
+		tick: u64,
+		sample: (ControlGraphOutput, u128),
+		previous: Option<&Self>,
+	) -> Option<Self> {
+		let actor = lifecycle.handle(owner)?;
+		let asset_id = world.data().entities[world.entity_index(owner)?]
+			.player_controller
+			.as_ref()?
+			.settings
+			.control_graph
+			.as_ref()?
+			.clone();
+		let (output, active) = sample;
+		let prior = previous.filter(|step| step.actor == actor && step.asset_id == asset_id);
+		let prior_intent = prior.map(|step| step.output.intent).unwrap_or_default();
+		let mut changed_outputs = Vec::new();
+		for (name, changed) in [
+			("move", output.intent.movement != prior_intent.movement),
+			("look", output.intent.look != prior_intent.look),
+			("jump", output.intent.jump != prior_intent.jump),
+			("attack", output.intent.attack != prior_intent.attack),
+		] {
+			if changed {
+				changed_outputs.push(name.into());
+			}
+		}
+		for (parameter, value) in &output.presentation {
+			if prior.and_then(|step| step.output.presentation.get(parameter)) != Some(value) {
+				changed_outputs.push(format!("animator:{parameter}"));
+			}
+		}
+		Some(Self {
+			actor,
+			asset_id,
+			tick,
+			active,
+			changed_outputs,
+			output,
+		})
+	}
 }
 
 impl ControlSample {
@@ -139,6 +198,7 @@ impl SimulationSession {
 		}
 		self.control_graph = candidate;
 		self.control_graph_ready = true;
+		self.control_graph_step = None;
 		self.inputs
 			.control_sample
 			.clear(self.control_graph.is_some());
@@ -160,18 +220,37 @@ impl SimulationSession {
 	pub(super) fn evaluate_control_graph(
 		&self,
 		camera: CameraIntent,
-	) -> Option<ControlGraphOutput> {
+	) -> Option<(ControlGraphOutput, u128)> {
 		let graph = self.control_graph.as_ref()?;
 		let pointer_action = match self.input_action_map.as_ref() {
 			Some(map) => pointer_action(map),
 			None => Some("look"),
 		};
-		Some(graph.evaluate(&ActionStep {
+		Some(graph.evaluate_with_activity(&ActionStep {
 			input: &self.inputs,
 			typed: self.input_action_map.is_some(),
 			pointer_action,
 			pointer: [camera.yaw_delta as f32, camera.pitch_delta as f32],
 		}))
+	}
+
+	pub(super) fn control_graph_inspection(&self) -> Option<ControlGraphStepDto> {
+		let step = self.control_graph_step.as_ref()?;
+		let graph = self.control_graph.as_ref()?;
+		if self.lifecycle.handle(&step.actor.key).as_ref() != Some(&step.actor) {
+			return None;
+		}
+		Some(ControlGraphStepDto {
+			actor: step.actor.clone(),
+			asset_id: step.asset_id.clone(),
+			tick: step.tick,
+			active_node_ids: graph
+				.active_node_ids(step.active)
+				.map(str::to_owned)
+				.collect(),
+			changed_outputs: step.changed_outputs.clone(),
+			output: step.output.clone(),
+		})
 	}
 }
 

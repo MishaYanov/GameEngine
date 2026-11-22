@@ -1,11 +1,11 @@
 //! Confined Controls Graph assets and per-actor semantic input validation.
 use crate::{
-	asset_io::{contained_file, read_bounded},
+	asset_io::{contained_file, optional_contained_file, read_bounded},
 	input_actions::{canonical_root, read_catalog},
 };
 use engine_core::{
 	SceneData,
-	asset_catalog::{AssetCatalog, AssetKind, PersistentAsset},
+	asset_catalog::{AssetCatalog, AssetKind, CATALOG_FILE, PersistentAsset},
 	components::InputActionsRef,
 	input::{
 		CompiledControlGraph, ControlGraph, ControlNodeData, InputActionMap,
@@ -45,7 +45,10 @@ pub fn compile_for_actor(
 	graph: &ControlGraph,
 ) -> Result<CompiledControlGraph, String> {
 	let root = canonical_root(root)?;
-	let catalog = read_catalog(&root)?;
+	let catalog = match optional_contained_file(&root, CATALOG_FILE)? {
+		Some(_) => read_catalog(&root)?,
+		None => AssetCatalog::default(),
+	};
 	compile(&root, &catalog, project, actor, graph, None)
 }
 

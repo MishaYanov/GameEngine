@@ -1,4 +1,4 @@
-import {Component, computed, DOCUMENT, effect, inject, input, output, signal, viewChild} from '@angular/core';
+import {afterNextRender, Component, computed, DOCUMENT, effect, inject, Injector, input, output, signal, viewChild} from '@angular/core';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import {EditorPane} from '../../../shared/components/pane/pane';
@@ -11,6 +11,8 @@ import {WorkspaceViewService} from './scene-viewport/workspace-view.service';
 import {WorkspaceTabs} from "./workspace-tabs/workspace-tabs";
 import {AnimationWorkspace} from './animation/animation-workspace';
 import {AnimatorWorkspace} from './animator/animator-workspace';
+import {ControlGraphWorkspace} from './control-graph/control-graph-workspace';
+import {ControlGraphWorkspaceService} from './control-graph/control-graph-workspace.service';
 import {AnimatorAssets} from './animator/animator-assets.service';
 import {AnimatorWorkspaceService} from './animator/animator-workspace.service';
 import {AnimationWorkspaceService} from './animation/animation-workspace.service';
@@ -50,13 +52,13 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
-        SelectedCameraPreviewService,
-        InputActionsCatalog, AnimatorAssets, AnimatorWorkspaceService,
+        SelectedCameraPreviewService, InputActionsCatalog,
+        AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, EditorDialog,
+        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
@@ -77,6 +79,7 @@ export class EditorWorkspace {
     protected readonly animationPreview = inject(AnimationWorkspaceService);
     protected readonly animatorAssets = inject(AnimatorAssets);
     protected readonly animatorWorkspace = inject(AnimatorWorkspaceService);
+    protected readonly controlsGraph = inject(ControlGraphWorkspaceService);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
     protected readonly selectedCameraPreview = inject(SelectedCameraPreviewService);
     protected readonly missingGameCamera = computed(() => {
@@ -85,6 +88,7 @@ export class EditorWorkspace {
             !document.entities.some(entity => entity.key === document.default_game_camera && entity.camera?.enabled);
     });
     private readonly document = inject(DOCUMENT);
+    private readonly injector = inject(Injector);
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
@@ -105,7 +109,7 @@ export class EditorWorkspace {
         return snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path.split('/').at(-1) ?? 'Scene';
     });
     protected readonly showingViewport = computed(() =>
-        this.workspaceView.animatorView() ? false :
+        this.workspaceView.animatorView() || this.workspaceView.controlsGraphView() ? false :
         this.workspaceView.animationView() ? this.animationPreview.ready() :
         this.workspaceView.propView() ? this.propPreview.ready() :
             this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing()
@@ -179,6 +183,18 @@ export class EditorWorkspace {
     });
 
     constructor() {
+        let previousView = this.workspaceView.activeViewKind();
+        effect(() => {
+            const next = this.workspaceView.activeViewKind();
+            const previous = previousView;
+            previousView = next;
+            if (previous === next || previous !== 'controls-graph' && next !== 'controls-graph') return;
+            afterNextRender(() => {
+                if (this.workspaceView.activeViewKind() === next && this.document.activeElement === this.document.body) {
+                    this.workspaceTabs()?.focusTab(next);
+                }
+            }, {injector: this.injector});
+        });
         effect(() => {
             this.sceneContext();
             this.hierarchyError.set(null);
@@ -252,7 +268,8 @@ export class EditorWorkspace {
     }
 
     async reviewProjectNavigation(): Promise<boolean> {
-        return await this.reviewPropNavigation() && await this.animatorWorkspace.reviewNavigation();
+        return await this.reviewPropNavigation() && await this.animatorWorkspace.reviewNavigation() &&
+            await this.controlsGraph.reviewNavigation();
     }
 
     reviewPropNavigation(): Promise<boolean> {

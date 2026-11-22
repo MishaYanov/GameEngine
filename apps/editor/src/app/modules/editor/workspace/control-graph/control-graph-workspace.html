@@ -1,0 +1,151 @@
+<section class="controls-graph" aria-label="Controls Graph">
+    @if (workspace.error(); as error) { <p class="failure" role="alert">{{ error }}</p> }
+    @if (workspace.graph(); as graph) {
+        <header class="actions">
+            @if (workspace.asset(); as asset) {
+                <strong [title]="asset.path">{{ asset.path }}</strong>
+            } @else {
+                <label>Asset path <input #path [value]="workspace.destination()" maxlength="4096"
+                    (input)="workspace.destination.set(path.value)" [disabled]="workspace.pending()"></label>
+            }
+            @if (workspace.dirty()) { <span role="status">Unsaved changes</span> }
+            <button type="button" (click)="workspace.undo()" [disabled]="!workspace.canUndo()">Undo</button>
+            <button type="button" (click)="workspace.redo()" [disabled]="!workspace.canRedo()">Redo</button>
+            <button type="button" (click)="workspace.save()" [disabled]="!workspace.canSave()">Save Controls Graph</button>
+            <button type="button" (click)="workspace.close()" [disabled]="workspace.pending()">Close Controls Graph</button>
+        </header>
+        <div class="control-editor">
+            @if (graphCanvas(); as canvas) {
+                <editor-graph [graph]="canvas" [managed]="true" [managedRevision]="workspace.revision()"
+                    [managedSelection]="workspace.selection()" [activeNodes]="activeNodes()" label="Controls Graph"
+                    (selectedItem)="workspace.selection.set($event)" (canvasEdited)="canvasEdit($event)"/>
+            }
+            <div class="outline">
+                <fieldset [disabled]="workspace.pending()">
+                    <legend>Nodes</legend>
+                    <div class="field-row">
+                        <label>Node type
+                            <select #nodeKind>
+                                @for (choice of options; track choice[0]) { <option [value]="choice[0]">{{ choice[1] }}</option> }
+                            </select>
+                        </label>
+                        <button data-add-control-node type="button" (click)="addNode(nodeKind.value)"
+                            [disabled]="graph.nodes.length >= maxNodes">Add Node</button>
+                    </div>
+                    <ul aria-label="Controls Graph nodes">
+                        @for (node of graph.nodes; track node.id) {
+                            <li>
+                                <button type="button" [attr.data-control-node]="node.id"
+                                    [attr.aria-pressed]="selectedNode()?.id === node.id"
+                                    (click)="workspace.selection.set({kind: 'node', id: node.id})">{{ label(node.data) }}</button>
+                                @for (issue of issues().get(node.id); track $index) {
+                                    <div class="failure" role="status">{{ issue }}</div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @for (issue of issues().get(null); track $index) {
+                        <p class="failure" role="status">{{ issue }}</p>
+                    }
+                    @if (selectedNode(); as node) {
+                        @let data = node.data;
+                        <div class="fields" aria-label="Selected control node">
+                            @if (data.kind === 'action') {
+                                <label>Action ID <input #action [value]="data.action" maxlength="32"
+                                    (change)="changeAction(node, action.value, data.value)"></label>
+                                <label>Action type
+                                    <select #valueType [value]="data.value"
+                                        (change)="changeAction(node, data.action, valueType.value)">
+                                        <option value="button">Button</option><option value="vector2">Vector2</option><option value="delta2">Look delta</option>
+                                    </select>
+                                </label>
+                            } @else if (data.kind === 'boolean') {
+                                <label><input #state type="checkbox" [checked]="data.value"
+                                    (change)="updateData(node, {kind: 'boolean', value: state.checked})"> Value</label>
+                            } @else if (data.kind === 'animator_bool') {
+                                <label>Animator Boolean ID <input #parameter [value]="data.parameter" maxlength="32"
+                                    (change)="updateData(node, {kind: 'animator_bool', parameter: parameter.value.trim(), input: data.input})"></label>
+                            }
+                            @for (port of ports(data); track port.field) {
+                                <label>{{ port.label }} input · {{ port.type === 'control_value' ? 'Any value' : port.type }}
+                                    <select #source [value]="port.source"
+                                        (change)="source.value ? wire(source.value, node.id, port.field) :
+                                            workspace.edit({kind: 'disconnect', edge: wireId(node.id, port.field)})">
+                                        <option value="" [selected]="!port.source">Unconnected</option>
+                                        @for (output of outputs(); track output.id) {
+                                            @if (output.id !== node.id && (port.type === 'control_value' || port.type === output.type)) {
+                                                <option [value]="output.id" [selected]="output.id === port.source">{{ output.label }} · {{ output.type }}</option>
+                                            }
+                                        }
+                                    </select>
+                                </label>
+                            }
+                            <button type="button" (click)="remove(node.id)">Remove Node</button>
+                        </div>
+                    }
+                    @if (selectedEdge(); as edge) {
+                        <div class="fields">
+                            <span>{{ name(graph, edge.from.node) }} → {{ name(graph, edge.to.node) }} ({{ edge.to.port }})</span>
+                            <button type="button" (click)="workspace.edit({kind: 'disconnect', edge: edge.id})">Disconnect</button>
+                        </div>
+                    }
+                </fieldset>
+                <fieldset [disabled]="workspace.pending() || workspace.probing()">
+                    <legend>Sample Input</legend>
+                    @if (selectedActor(); as actor) { <p>Player Controller on {{ actor }}</p> }
+                    @for (sample of sampleRows(); track sample.action) {
+                        <fieldset class="fields">
+                            <legend>{{ sample.action }}</legend>
+                            @if (sample.kind === 'button') {
+                                <label><input #held type="checkbox" [checked]="sample.held"
+                                    (change)="setButtonSample(sample.action, 'held', held.checked)"> Held</label>
+                                <label><input #pressed type="checkbox" [checked]="sample.pressed"
+                                    (change)="setButtonSample(sample.action, 'pressed', pressed.checked)"> Pressed</label>
+                                <label><input #released type="checkbox" [checked]="sample.released"
+                                    (change)="setButtonSample(sample.action, 'released', released.checked)"> Released</label>
+                            } @else {
+                                <label>{{ sample.kind === 'delta2' ? 'Delta X' : 'X' }}
+                                    <input #x type="number" [value]="sample.value[0]" (change)="setVectorSample(sample.action, sample.kind, 'value', 0, x.valueAsNumber || 0)">
+                                </label>
+                                <label>{{ sample.kind === 'delta2' ? 'Delta Y' : 'Y' }}
+                                    <input #y type="number" [value]="sample.value[1]" (change)="setVectorSample(sample.action, sample.kind, 'value', 1, y.valueAsNumber || 0)">
+                                </label>
+                                @if (sample.kind === 'delta2') {
+                                    <label>Rate X <input #rateX type="number" [value]="sample.rate?.[0] ?? 0"
+                                        (change)="setVectorSample(sample.action, sample.kind, 'rate', 0, rateX.valueAsNumber || 0)"></label>
+                                    <label>Rate Y <input #rateY type="number" [value]="sample.rate?.[1] ?? 0"
+                                        (change)="setVectorSample(sample.action, sample.kind, 'rate', 1, rateY.valueAsNumber || 0)"></label>
+                                }
+                            }
+                        </fieldset>
+                    }
+                    <button type="button" [disabled]="workspace.issues().length !== 0 || !workspace.scope()"
+                        (click)="runProbe()">Simulate Sample</button>
+                    @if (workspace.probing()) { <p role="status">Evaluating sample…</p> }
+                </fieldset>
+                @if (workspace.route(); as route) {
+                    <section aria-label="Sample intent" role="status">
+                        <editor-control-graph-output [result]="route.output"/>
+                        <details>
+                            <summary>Evaluation order</summary>
+                            <p>Active nodes {{ route.active_node_ids.join(', ') || 'None' }}</p>
+                            <ol>@for (id of route.order; track id) { <li>{{ name(graph, id) }}</li> }</ol>
+                        </details>
+                    </section>
+                }
+            </div>
+        </div>
+    } @else {
+        <div class="empty">
+            @if (workspace.pending()) { <p role="status">Opening Controls Graph…</p> }
+            <button type="button" [disabled]="!workspace.scope() || workspace.pending()" (click)="workspace.create()">New Controls Graph</button>
+            <button type="button" [disabled]="!workspace.scope() || workspace.loadingCatalog()"
+                (click)="workspace.refresh()">Refresh Controls Graphs</button>
+            <ul aria-label="Controls Graph assets">
+                @for (asset of workspace.assets(); track asset.id) {
+                    <li><button type="button" [disabled]="workspace.pending()" (click)="workspace.open(asset.id)">{{ asset.path }}</button></li>
+                }
+            </ul>
+        </div>
+    }
+</section>

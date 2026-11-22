@@ -87,6 +87,7 @@ pub struct SimulationSession {
 	input_action_map: Option<crate::input::InputActionMap>,
 	control_graph: Option<crate::input::CompiledControlGraph>,
 	control_graph_ready: bool,
+	control_graph_step: Option<control_graph::CommittedControlStep>,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
 	camera_input: CameraInputLatch,
 	camera_exclusions: Option<CameraExclusions>,
@@ -208,6 +209,7 @@ impl SimulationSession {
 			input_action_map: None,
 			control_graph: None,
 			control_graph_ready,
+			control_graph_step: None,
 			visibility_capabilities: None,
 			camera_input,
 			camera_exclusions,
@@ -534,6 +536,7 @@ impl SimulationSession {
 			character_motion: self.character_motion(),
 			animations: self.animations.inspection(self.paused),
 			animators: self.animations.animator_inspection(),
+			control_graph: self.control_graph_inspection(),
 			play_session_id: play_session_id.into(),
 			run_id: run_id.into(),
 			scene_id: self.scene_id.clone(),
@@ -597,6 +600,7 @@ impl SimulationSession {
 		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
 		let mut accepted_action_presses = Vec::new();
+		let mut control_graph_step = None;
 		let mut trigger_event_bytes = 0usize;
 		let mut changes = ChangeAccumulator::default();
 		let mut actions_applied = 0;
@@ -652,9 +656,9 @@ impl SimulationSession {
 				let controls = self.evaluate_control_graph(camera_delta);
 				let routed = controls
 					.as_ref()
-					.map(|graph| self.inputs.with_control_output(graph.intent));
+					.map(|(graph, _)| self.inputs.with_control_output(graph.intent));
 				let step_input = routed.as_ref().unwrap_or(&self.inputs);
-				if let Some(route) = &controls {
+				if let Some((route, _)) = &controls {
 					camera_delta.yaw_delta = f64::from(route.intent.look.delta[0]);
 					camera_delta.pitch_delta = f64::from(route.intent.look.delta[1]);
 				}
@@ -679,7 +683,7 @@ impl SimulationSession {
 					&mut characters,
 					step_input,
 					camera.camera(),
-					controls.as_ref().map(|graph| graph.intent.jump),
+					controls.as_ref().map(|(graph, _)| graph.intent.jump),
 				)?;
 				// Later catch-up steps see held state only. A rejected tick
 				// rolls back its actions and clears all input on pause.
@@ -1073,7 +1077,7 @@ impl SimulationSession {
 					let no_cosmetics = std::collections::BTreeMap::new();
 					let cosmetics = controls
 						.as_ref()
-						.map_or(&no_cosmetics, |graph| &graph.presentation);
+						.map_or(&no_cosmetics, |(graph, _)| &graph.presentation);
 					let animated = animations.step_animators(
 						&self.world,
 						&motions,
@@ -1088,6 +1092,20 @@ impl SimulationSession {
 						..WorldChange::default()
 					});
 				}
+				control_graph_step = controls.and_then(|sample| {
+					let owner = characters.local_input_owner(&self.world)?;
+					let previous = control_graph_step
+						.as_ref()
+						.or(self.control_graph_step.as_ref());
+					control_graph::CommittedControlStep::capture(
+						&self.world,
+						&lifecycle,
+						owner,
+						camera_tick,
+						sample,
+						previous,
+					)
+				});
 				steps += 1;
 				if requested_scene.is_some() {
 					// A new scene starts at the next step, after the host commits it.
@@ -1135,6 +1153,9 @@ impl SimulationSession {
 		outcome.dropped_seconds = report.dropped_seconds
 			+ f64::from(report.steps - steps - pending_steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();
+		if steps > 0 {
+			self.control_graph_step = control_graph_step;
+		}
 		outcome.requested_scene = requested_scene;
 		self.triggers = triggers;
 		self.inputs

@@ -158,6 +158,7 @@ button {
   stroke-dasharray: 6 3;
 }
 
+.wire[data-type='button'],
 .wire[data-type='bool'],
 .wire[data-type='trigger'],
 .wire[data-type='events'] {
@@ -211,6 +212,8 @@ button {
   stroke: var(--color-graph-float);
 }
 
+.wire[data-type='vector2'],
+.wire[data-type='delta2'],
 .wire[data-type='vector3'] {
   stroke: var(--color-graph-vector);
 }

@@ -7,11 +7,12 @@ import { WorkspaceViewService } from '../scene-viewport/workspace-view.service';
 import { SelectedCameraPreviewService } from '../game-settings/selected-camera-preview.service';
 import { InputActionsCatalog } from '../game-input/input-actions-catalog.service';
 import { AnimatorInspector } from '../animator/animator-inspector';
+import {ControlGraphInspector} from '../control-graph/control-graph-inspector';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 
 @Component({
 	selector: 'editor-scene-component-inspector',
-	imports: [ComponentEditor, AnimatorInspector],
+	imports: [ComponentEditor, AnimatorInspector, ControlGraphInspector],
 	template: `<editor-component-editor
 		[components]="basicComponents()"
 		[types]="types()"
@@ -44,6 +45,9 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
             <button type="button" [disabled]="!canSetDefault()" (click)="setDefaultCamera()">Set as Game Camera</button>
         }
         <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
+    }
+    @if (entity(); as actor) {
+        @if (actor.player_controller) { <editor-control-graph-inspector [actor]="actor" [editable]="editable()"/> }
     }
     @if (supportsPlayerOwnership() && entity()?.player_controller; as player) {
         @if (playerBodyIssue(); as issue) {

@@ -1,7 +1,9 @@
 //! Scene-local runtime ownership. Copies of this state are committed with a tick.
 mod inspection;
 mod spawn;
-pub use inspection::{RuntimeBehaviorStateDto, RuntimeEntityDto, RuntimeInspectionDto};
+pub use inspection::{
+	ControlGraphStepDto, RuntimeBehaviorStateDto, RuntimeEntityDto, RuntimeInspectionDto,
+};
 pub use spawn::PreparedRuntimeSpawn;
 
 use crate::{
