@@ -1,0 +1,62 @@
+.verification {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-block-start: 1px solid var(--color-pane-edge);
+  font-size: var(--font-size-sm);
+}
+
+.verification-controls, label, .scene-visits li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+h3, p, ul {
+  margin: 0;
+}
+
+h3 {
+  font-size: inherit;
+}
+
+ul {
+  padding-inline-start: var(--space-4);
+}
+
+.scene-visits, .issues {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.issue-group {
+  overflow-wrap: anywhere;
+}
+
+.verification-error {
+  color: var(--color-danger);
+}
+
+.verification-preview {
+  margin-block: var(--space-2);
+  padding-inline-start: var(--space-2);
+}
+
+button, select {
+  min-height: 1.75rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+button:enabled:not([aria-disabled="true"]):hover {
+  background: var(--color-control-hover);
+}
+
+button:disabled, button[aria-disabled="true"] {
+  color: var(--color-text-disabled);
+}

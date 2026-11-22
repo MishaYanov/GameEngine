@@ -1,7 +1,8 @@
-"""Publish, verify, or compare relocatable signed Windows release reviews."""
+"""Publish, verify, compare or summarize relocatable signed Windows release reviews."""
 
 import argparse
 from copy import copy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from itertools import islice
@@ -20,11 +21,12 @@ from sign_release_review import MAX_SIGNATURE_BYTES
 from verify_candidate import MAX_PACKAGE_BYTES, MAX_RECEIPT_BYTES, _path_parts, digest_exact
 from verify_host_gates import GATES, MAX_EVIDENCE_BYTES, MAX_RESULT_BYTES
 from verify_release_review_signature import PRINCIPAL
-from verify_release_signoffs import EXIT, MAX_LEDGER_BYTES, ROLES, review_ledger
+from verify_release_signoffs import EXIT, MAX_LEDGER_BYTES, ROLES, require_independent_trust, review_ledger
 
 MAX_ARTIFACTS = 64
 MAX_INDEX_BYTES = 96 * 1024
 MAX_COMPARISON_BYTES = 320 * 1024
+MAX_SUMMARY_BYTES = 96 * 1024
 INDEX = "handoff.json"
 
 
@@ -38,15 +40,6 @@ def handoff_root(root):
     if not stat.S_ISDIR(ordinary_mode(root)):
         raise ValueError("Handoff root must be an ordinary directory")
     return root.resolve(strict=True)
-
-
-def require_independent_trust(args, roots):
-    for trust in (args.profiles, args.role_policy, args.allowed_signers,
-                  args.revoked_signers, args.ssh_keygen):
-        if trust is not None:
-            path = Path(trust).resolve()
-            if any(path.is_relative_to(root) for root in roots):
-                raise ValueError("Use trusted policy files and verification tools outside the handoff")
 
 
 class Inventory:
@@ -178,7 +171,14 @@ def role_inputs(inventory, ledger):
     return inputs
 
 
-def build_index(args, *, now=None):
+@dataclass(frozen=True)
+class _HandoffReview:
+    index: dict
+    packet: dict
+    ledger: dict
+
+
+def _review_handoff(args, *, now=None):
     args = copy(args)
     inventory = Inventory(args.root)
     require_independent_trust(args, (inventory.root,))
@@ -201,6 +201,9 @@ def build_index(args, *, now=None):
         args.playtest = None
     ledger, packet, verified_archive_info = review_ledger(args, now=now)
     if _json_bytes(ledger) != stored_bytes:
+        if any(row["status"] == "expired" for row in ledger["roles"]):
+            raise ValueError("Handoff ledger differs from the current verified evidence. "
+                             "Use the renewal checklist and publish a renewed root")
         raise ValueError("Handoff ledger differs from the current verified evidence")
     if identity(archive_info) != identity(verified_archive_info):
         raise ValueError("Handoff archive changed while checking the ledger")
@@ -222,21 +225,62 @@ def build_index(args, *, now=None):
         inventory.require_digest("playtest/" + EVIDENCE, packet["playtest_evidence_sha256"])
         for name in (TRACE, REPORT):
             inventory.require_digest("playtest/" + name, attachment["files"][name])
-    return {
+    index = {
         "schema_version": 1, "scope": ledger["scope"], "status": ledger["status"],
         "archive_sha256": ledger["archive_sha256"], "packet_sha256": ledger["packet_sha256"],
         "files": inventory.finish(),
     }
+    return _HandoffReview(index, packet, ledger)
 
 
-def verify_index(args, *, now=None):
+def build_index(args, *, now=None):
+    return _review_handoff(args, now=now).index
+
+
+def _verify_handoff(args, *, now=None):
     target = handoff_root(args.root) / INDEX
     Inventory.file_info(target, MAX_INDEX_BYTES)
     _, stored = read_local_json(target, MAX_INDEX_BYTES)
-    index = build_index(args, now=now)
-    if _json_bytes(index) != stored:
+    review = _review_handoff(args, now=now)
+    if _json_bytes(review.index) != stored:
         raise ValueError("Handoff index differs from the current verified artifacts")
-    return index
+    return review
+
+
+def verify_index(args, *, now=None):
+    return _verify_handoff(args, now=now).index
+
+
+def summarize_handoff(args):
+    output = args.output
+    if not stat.S_ISDIR(ordinary_mode(output.parent)):
+        raise ValueError("Summary output parent must be an ordinary directory")
+    output = output.parent.resolve(strict=True) / output.name
+    if output.is_relative_to(handoff_root(args.root)):
+        raise ValueError("Write the summary outside the handoff")
+    if output.exists() or output.is_symlink():
+        raise FileExistsError("Summary output already exists")
+    review = _verify_handoff(args)
+    files = {row["path"]: row for row in review.index["files"]}
+    gates = [
+        {**gate, "evidence": [files["evidence/" + path] for path in sorted(gate["evidence"])]}
+        for gate in review.packet["gates"]
+    ]
+    report = {
+        "schema_version": 1,
+        "scope": review.ledger["scope"],
+        "status": review.ledger["status"],
+        "gate_verdict": review.ledger["gate_verdict"],
+        "archive_sha256": review.ledger["archive_sha256"],
+        "packet_sha256": review.ledger["packet_sha256"],
+        "receipt_sha256": review.packet["receipt_sha256"],
+        "git_revision": review.packet["git_revision"],
+        "source_dirty": review.packet["source_dirty"],
+        "gates": gates,
+        "roles": review.ledger["roles"],
+    }
+    _write_new(output, _json_bytes(report), MAX_SUMMARY_BYTES)
+    return report
 
 
 def compare_indexes(prior, current):
@@ -283,11 +327,13 @@ def main(argv=None):
     publish = commands.add_parser("publish")
     verify = commands.add_parser("verify")
     compare = commands.add_parser("compare")
-    for command in (publish, verify):
+    summarize = commands.add_parser("summarize")
+    for command in (publish, verify, summarize):
         command.add_argument("root", type=Path)
+    summarize.add_argument("output", type=Path)
     for name in ("prior_root", "current_root", "output"):
         compare.add_argument(name, type=Path)
-    for command in (publish, verify, compare):
+    for command in (publish, verify, compare, summarize):
         command.add_argument("--profiles", type=Path, required=True)
         command.add_argument("--role-policy", type=Path, required=True)
         command.add_argument("--allowed-signers", type=Path, required=True)
@@ -299,6 +345,10 @@ def main(argv=None):
             report = compare_handoffs(args)
             print(f"Compared verified release handoffs ({report['prior']['status']} to {report['current']['status']})")
             return 0
+        if args.command == "summarize":
+            report = summarize_handoff(args)
+            print(f"Summarized verified release handoff {report['status']}")
+            return EXIT[report["status"]]
         if args.command == "publish":
             target = handoff_root(args.root) / INDEX
             if target.exists() or target.is_symlink():

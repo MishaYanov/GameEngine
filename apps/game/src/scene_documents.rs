@@ -42,25 +42,7 @@ impl GameApp {
 		Ok(())
 	}
 
-	pub(super) fn prepare_editor(
-		loaded: &mut scene_io::LoadedScene,
-	) -> Result<SceneEditor, String> {
-		if loaded.source_schema_version == 1
-			&& let [left_robot, right_robot, ..] = loaded.entity_ids.as_slice()
-		{
-			loaded.scene.set_binding("robot_a", *left_robot)?;
-			loaded.scene.set_binding("robot_b", *right_robot)?;
-		}
-		let data = loaded.scene.to_data(&loaded.camera)?;
-		let project = ProjectData::for_scene("Game Engine", "scenes/robots.json", &data)?;
-		SceneEditor::for_project(&loaded.scene, &loaded.camera, project)
-	}
-
 	pub(super) fn reload_scene(&mut self) -> Result<(), String> {
-		let old_path = self
-			.scene_path
-			.clone()
-			.ok_or("Scene path is not initialized")?;
 		let asset_root = self
 			.asset_root
 			.as_deref()
@@ -70,21 +52,16 @@ impl GameApp {
 			.as_ref()
 			.map(ProjectData::load)
 			.transpose()?
-			.or_else(|| self.project.clone());
-		let path = match project.as_ref() {
-			Some(project) => asset_root.join(project.startup_scene_path()?),
-			None => old_path,
-		};
+			.or_else(|| self.project.clone())
+			.ok_or("Project configuration is not initialized")?;
+		let path = play::resolve_scene_path(asset_root, project.startup_scene_path()?)?;
 		let renderer = self
 			.renderer
 			.as_ref()
 			.ok_or("Renderer is not initialized")?;
 
 		let mut loaded = scene_io::load(&path, asset_root, renderer)?;
-		let mut editor = Self::prepare_editor(&mut loaded)?;
-		if let Some(project) = project.as_ref() {
-			editor.set_initial_project(project.clone())?;
-		}
+		let mut editor = SceneEditor::for_project(&loaded.scene, &loaded.camera, project.clone())?;
 		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
 		let audio_catalog = bridge::feedback_audio::load(asset_root)?;
 		let playback = editor
@@ -109,7 +86,6 @@ impl GameApp {
 		renderer.wait_idle()?;
 		self.scene = loaded.scene;
 		self.authored = None;
-		self.spawn_template = None;
 		self.tools.templates.clear();
 		self.tools.drag = None;
 		self.tools.saved = Some(saved);
@@ -120,7 +96,7 @@ impl GameApp {
 		self.feedback_audio = audio;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
-		self.project = project;
+		self.project = Some(project);
 		self.scene_path = Some(path.clone());
 		self.finish_mode_change();
 		engine_logger::info!("Reloaded scene: {}", path.display());

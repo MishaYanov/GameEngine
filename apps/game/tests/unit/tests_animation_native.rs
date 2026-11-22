@@ -43,11 +43,10 @@ fn animated_characters_draw_independent_palettes_preview_and_restart() {
 	}
 	impl ApplicationHandler for Check {
 		fn resumed(&mut self, events: &ActiveEventLoop) {
+			let fixture = test_project::ProjectFixture::new("animation-room");
 			let manifest = std::env::var_os("GAME_ENGINE_QA_ANIMATION_PROJECT")
 				.map(PathBuf::from)
-				.unwrap_or_else(|| {
-					PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("animation-demo.json")
-				})
+				.unwrap_or_else(|| fixture.manifest_path())
 				.canonicalize()
 				.unwrap();
 			let project = ProjectData::load(&manifest).unwrap();
@@ -410,3 +409,6 @@ fn check_animated_spawn_retirement(
 		baseline.0, baseline.1
 	);
 }
+
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;

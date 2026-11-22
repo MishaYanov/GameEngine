@@ -238,6 +238,8 @@ fn template_preview_includes_game_assets_and_excludes_historical_demos() {
 	assert!(paths.contains(&"projects/cinder-oath/assets/scene.json"));
 	assert!(paths.contains(&"projects/cinder-oath/assets/prefabs/robot.json"));
 	assert!(paths.contains(&"projects/cinder-oath/assets/soundtrack.wav"));
+	assert!(paths.contains(&"crates/cinder-oath-gameplay/Cargo.toml"));
+	assert!(!paths.iter().any(|path| path.starts_with("crates/courtyard-gameplay/")));
 	assert!(!paths.iter().any(|p| p.ends_with("legacy.json")));
 	assert!(!paths.iter().any(|p| p.ends_with("private.json")));
 	assert!(!root.join("output").exists());

@@ -74,8 +74,6 @@ impl Builder {
 			"crates/gameplay-catalog/src",
 			"crates/cinder-oath-gameplay/Cargo.toml",
 			"crates/cinder-oath-gameplay/src",
-			"crates/courtyard-gameplay/Cargo.toml",
-			"crates/courtyard-gameplay/src",
 		] {
 			let path = source.join(path);
 			walk(&source, &path, &mut files, &mut total)?;
@@ -142,7 +140,7 @@ impl Builder {
 			}
 			fs::write(
 				staging.join("Cargo.toml"),
-				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\",\"crates/gameplay-catalog\",\"crates/cinder-oath-gameplay\",\"crates/courtyard-gameplay\"]\n",
+				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\",\"crates/gameplay-catalog\",\"crates/cinder-oath-gameplay\"]\n",
 			)?;
 			fs::write(
 				staging.join("README.md"),

@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 import re
+import stat
 import subprocess
 from zipfile import BadZipFile
 
 from compare_playtrace import read_local_json
+from rehearse_release import ordinary_mode
 from review_candidate import (
     MAX_DECISION_BYTES, _json_bytes, _write_new, prepare_packet,
     validate_decision, verified_packet_digest,
@@ -22,6 +24,7 @@ from verify_release_review_signature import (
 ROLES = ("release", "qa")
 MAX_ROLE_POLICY_BYTES = 4096
 MAX_LEDGER_BYTES = 8192
+MAX_CHECKLIST_BYTES = 32 * 1024
 MAX_AGE_SECONDS = 31 * 24 * 60 * 60
 FINGERPRINT = re.compile(rb" SHA256:([A-Za-z0-9+/]{43})\s*\Z")
 EXIT = {"accepted": 0, "rejected": 1, "held": 2}
@@ -154,10 +157,49 @@ def build_ledger(args, *, now=None):
     return review_ledger(args, now=now)[0]
 
 
+def require_independent_trust(args, roots):
+    for trust in (args.profiles, args.role_policy, args.allowed_signers,
+                  args.revoked_signers, args.ssh_keygen):
+        if trust is not None and any(Path(trust).resolve().is_relative_to(root) for root in roots):
+            raise ValueError("Use trusted policy files and verification tools outside the handoff and evidence")
+
+
+def renewal_checklist(args, *, now=None):
+    output = args.ledger
+    if not stat.S_ISDIR(ordinary_mode(output.parent)):
+        raise ValueError("Checklist output parent must be an ordinary directory")
+    output = output.parent.resolve(strict=True) / output.name
+    evidence_roots = tuple(root.resolve() for root in (args.evidence_dir, args.playtest) if root is not None)
+    require_independent_trust(args, evidence_roots)
+    if any(output.is_relative_to(root) for root in evidence_roots):
+        raise ValueError("Write the checklist outside the evidence directories")
+    if output.exists() or output.is_symlink():
+        raise FileExistsError("Checklist output already exists")
+    ledger, packet, _ = review_ledger(args, now=now)
+    report = {
+        "schema_version": 1,
+        "scope": ledger["scope"],
+        "status": ledger["status"],
+        "gate_verdict": ledger["gate_verdict"],
+        "archive_sha256": ledger["archive_sha256"],
+        "packet_sha256": ledger["packet_sha256"],
+        "receipt_sha256": packet["receipt_sha256"],
+        "source_dirty": packet["source_dirty"],
+        "outstanding_gates": [gate for gate in packet["gates"] if gate["status"] != "passed"],
+        "roles": ledger["roles"],
+        "roles_requiring_review": [
+            row["role"] for row in ledger["roles"] if row["status"] in {"missing", "expired"}
+        ],
+    }
+    _write_new(output, _json_bytes(report), MAX_CHECKLIST_BYTES)
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in (commands.add_parser("publish"), commands.add_parser("verify")):
+    for command in (commands.add_parser("publish"), commands.add_parser("verify"),
+                    commands.add_parser("checklist")):
         for field in ("receipt", "archive", "evidence_dir", "packet", "ledger"):
             command.add_argument(field, type=Path)
         command.add_argument("--profiles", required=True, type=Path)
@@ -170,6 +212,10 @@ def main(argv=None):
                              metavar=("ROLE", "PRINCIPAL", "DECISION", "SIGNATURE"))
     args = parser.parse_args(argv)
     try:
+        if args.command == "checklist":
+            report = renewal_checklist(args)
+            print(f"Verified release renewal checklist {report['status']}")
+            return EXIT[report["status"]]
         if args.command == "publish" and (args.ledger.exists() or args.ledger.is_symlink()):
             raise FileExistsError(f"Ledger output is already occupied {args.ledger.name}")
         stored = read_local_json(args.ledger, MAX_LEDGER_BYTES)[1] if args.command == "verify" else None

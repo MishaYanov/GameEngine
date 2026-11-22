@@ -1,40 +1,30 @@
 use game::launch::{LaunchMode, LaunchOptions};
 
 #[test]
-fn ordinary_development_runs_preserve_controls_and_installed_projects_default_to_player() {
-	for legacy_demo in [false, true] {
+fn installed_projects_default_to_player() {
+	for (installed, expected) in [(false, LaunchMode::Development), (true, LaunchMode::Player)] {
 		assert_eq!(
-			LaunchOptions::parse(std::iter::empty::<&str>(), false, legacy_demo)
+			LaunchOptions::parse(std::iter::empty::<&str>(), installed)
 				.unwrap()
 				.mode,
-			LaunchMode::Development
-		);
-		assert_eq!(
-			LaunchOptions::parse(std::iter::empty::<&str>(), true, legacy_demo)
-				.unwrap()
-				.mode,
-			LaunchMode::Player
+			expected
 		);
 	}
 }
 
 #[test]
-fn explicit_launch_mode_wins_over_both_installed_discovery_and_legacy_environment() {
+fn explicit_mode_overrides_installed_project_discovery() {
 	for installed in [false, true] {
-		for legacy_demo in [false, true] {
-			assert_eq!(
-				LaunchOptions::parse(["--development"], installed, legacy_demo)
-					.unwrap()
-					.mode,
-				LaunchMode::Development
-			);
-			assert_eq!(
-				LaunchOptions::parse(["--player"], installed, legacy_demo)
-					.unwrap()
-					.mode,
-				LaunchMode::Player
-			);
-		}
+		assert_eq!(
+			LaunchOptions::parse(["--development"], installed)
+				.unwrap()
+				.mode,
+			LaunchMode::Development
+		);
+		assert_eq!(
+			LaunchOptions::parse(["--player"], installed).unwrap().mode,
+			LaunchMode::Player
+		);
 	}
 }
 
@@ -47,7 +37,7 @@ fn unknown_duplicate_and_conflicting_launch_flags_are_rejected() {
 		vec!["--development", "--development"],
 		vec!["--player", "scene.json"],
 	] {
-		assert!(LaunchOptions::parse(arguments, false, false).is_err());
+		assert!(LaunchOptions::parse(arguments, false).is_err());
 	}
 }
 
@@ -70,40 +60,33 @@ fn real_executable_rejects_invalid_launch_arguments_before_creating_platform_res
 #[test]
 fn smoke_mode_is_explicit_and_keeps_launch_selection() {
 	assert!(
-		!LaunchOptions::parse(std::iter::empty::<&str>(), false, false)
+		!LaunchOptions::parse(std::iter::empty::<&str>(), false)
 			.unwrap()
 			.smoke_test
 	);
 	for arguments in [vec!["--smoke-test"], vec!["--smoke-test", "--development"]] {
-		let options = LaunchOptions::parse(arguments, false, false).unwrap();
+		let options = LaunchOptions::parse(arguments, false).unwrap();
 		assert!(options.smoke_test);
 		assert_eq!(options.mode, LaunchMode::Development);
 	}
-	let options = LaunchOptions::parse(["--player", "--smoke-test"], false, false).unwrap();
+	let options = LaunchOptions::parse(["--player", "--smoke-test"], false).unwrap();
 	assert!(options.smoke_test);
 	assert_eq!(options.mode, LaunchMode::Player);
-	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-test"], false, false).is_err());
+	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-test"], false).is_err());
 }
 
 #[test]
 fn playtrace_is_opt_in_and_requires_a_regular_player_run() {
 	use std::path::Path;
 
-	let options = LaunchOptions::parse(["--record-playtrace", "trial.json"], true, false).unwrap();
+	let options = LaunchOptions::parse(["--record-playtrace", "trial.json"], true).unwrap();
 	assert_eq!(
 		options.record_playtrace.as_deref(),
 		Some(Path::new("trial.json"))
 	);
+	assert!(LaunchOptions::parse(["--player", "--record-playtrace", "trial.json"], false).is_ok());
 	assert!(
-		LaunchOptions::parse(
-			["--player", "--record-playtrace", "trial.json"],
-			false,
-			false
-		)
-		.is_ok()
-	);
-	assert!(
-		LaunchOptions::parse(["--player"], true, false)
+		LaunchOptions::parse(["--player"], true)
 			.unwrap()
 			.record_playtrace
 			.is_none()
@@ -120,7 +103,7 @@ fn playtrace_is_opt_in_and_requires_a_regular_player_run() {
 			"again.json",
 		],
 	] {
-		assert!(LaunchOptions::parse(arguments, true, false).is_err());
+		assert!(LaunchOptions::parse(arguments, true).is_err());
 	}
 }
 
@@ -139,10 +122,10 @@ fn scene_cycles_require_bounded_player_smoke() {
 			"3",
 		],
 	] {
-		assert!(LaunchOptions::parse(options, true, false).is_err());
+		assert!(LaunchOptions::parse(options, true).is_err());
 	}
 	assert_eq!(
-		LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "20"], true, false)
+		LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "20"], true)
 			.unwrap()
 			.smoke_scene_cycles,
 		20
@@ -150,10 +133,10 @@ fn scene_cycles_require_bounded_player_smoke() {
 }
 
 #[test]
-fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
-	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-prefetch-probe"], true, false).is_err());
+fn checkpoint_commands_are_excluded_from_the_player_and_prefetch_is_installed_only() {
+	assert!(LaunchOptions::parse(["--smoke-test", "--smoke-prefetch-probe"], true).is_err());
 	assert!(
-		!LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "32"], true, false)
+		!LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "32"], true)
 			.unwrap()
 			.smoke_prefetch_probe
 	);
@@ -163,35 +146,26 @@ fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
 				"--smoke-test",
 				"--smoke-scene-cycles",
 				"32",
-				"--smoke-prefetch-probe",
+				"--smoke-prefetch-probe"
 			],
 			true,
-			false
 		)
 		.unwrap()
 		.smoke_prefetch_probe
 	);
-	assert!(LaunchOptions::parse(["--export-slot", "1", "p.json"], false, false).is_err());
-	assert!(LaunchOptions::parse(["--export-slot", "4", "p.json"], true, false).is_err());
+	for command in [
+		"--export-slot",
+		"--preview-slot-import",
+		"--commit-slot-import",
+		"--export-transfer-history",
+	] {
+		let error = LaunchOptions::parse([command], true).unwrap_err();
+		assert!(error.starts_with("Unknown game argument"));
+	}
+	assert!(LaunchOptions::parse(["--scene-prefetch", "--development"], true).is_err());
+	assert!(LaunchOptions::parse(["--scene-prefetch"], false).is_err());
 	assert!(
-		LaunchOptions::parse(
-			["--export-slot", "1", "p.json", "--smoke-test"],
-			true,
-			false
-		)
-		.is_err()
-	);
-	assert!(
-		LaunchOptions::parse(["--preview-slot-import", "2", "p.json"], true, false)
-			.unwrap()
-			.transfer
-			.is_some()
-	);
-	assert!(LaunchOptions::parse(["--commit-slot-import", "2", "p.json"], true, false).is_err());
-	assert!(LaunchOptions::parse(["--scene-prefetch", "--development"], true, false).is_err());
-	assert!(LaunchOptions::parse(["--scene-prefetch"], false, false).is_err());
-	assert!(
-		LaunchOptions::parse(["--smoke-test", "--scene-prefetch"], true, false)
+		LaunchOptions::parse(["--smoke-test", "--scene-prefetch"], true)
 			.unwrap()
 			.scene_prefetch
 	);
@@ -203,10 +177,10 @@ fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
 
 	let digest = "ab".repeat(32);
 	for command in ["--export-input-preset", "--preview-input-preset"] {
-		assert!(LaunchOptions::parse([command, "preset.json"], false, false).is_err());
-		assert!(LaunchOptions::parse([command, "preset.json", "--player"], true, false).is_err());
+		assert!(LaunchOptions::parse([command, "preset.json"], false).is_err());
+		assert!(LaunchOptions::parse([command, "preset.json", "--player"], true).is_err());
 		assert!(
-			LaunchOptions::parse([command, "preset.json"], true, false)
+			LaunchOptions::parse([command, "preset.json"], true)
 				.unwrap()
 				.input_preset
 				.is_some()
@@ -222,7 +196,6 @@ fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
 			&digest,
 		],
 		true,
-		false,
 	)
 	.unwrap()
 	.input_preset;
@@ -253,52 +226,6 @@ fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
 			&digest,
 		],
 	] {
-		assert!(LaunchOptions::parse(arguments, true, false).is_err());
-	}
-}
-
-#[test]
-fn transfer_history_audit_is_standalone_and_slot_scoped() {
-	use courtyard_gameplay::checkpoint::SaveSlot;
-	use game::launch::CheckpointTransfer;
-	use std::path::PathBuf;
-
-	let all =
-		LaunchOptions::parse(["--export-transfer-history", "audit.json"], true, false).unwrap();
-	assert_eq!(
-		all.transfer,
-		Some(CheckpointTransfer::ExportHistory {
-			path: PathBuf::from("audit.json"),
-			slot: None
-		})
-	);
-	let selected = LaunchOptions::parse(
-		["--export-transfer-history", "audit.json", "--slot", "2"],
-		true,
-		false,
-	)
-		.unwrap();
-	assert_eq!(
-		selected.transfer,
-		Some(CheckpointTransfer::ExportHistory {
-			path: PathBuf::from("audit.json"),
-			slot: Some(SaveSlot::Two)
-		})
-	);
-	assert!(
-		LaunchOptions::parse(["--export-transfer-history", "audit.json"], false, false).is_err()
-	);
-	for arguments in [
-		vec!["--export-transfer-history", "--slot", "2"],
-		vec!["--export-transfer-history", "audit.json", "--slot", "4"],
-		vec![
-			"--export-transfer-history",
-			"audit.json",
-			"--slot",
-			"2",
-			"--player",
-		],
-	] {
-		assert!(LaunchOptions::parse(arguments, true, false).is_err());
+		assert!(LaunchOptions::parse(arguments, true).is_err());
 	}
 }

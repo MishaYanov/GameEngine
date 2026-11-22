@@ -1,4 +1,7 @@
-import {Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, signal} from '@angular/core';
+import {
+    afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, signal,
+    viewChild,
+} from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorSettingsService} from '../../../../core/editor/settings/editor-settings.service';
@@ -7,8 +10,9 @@ import type {EditorWarmingMode} from '../../../../core/editor/viewport-editor.mo
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
+import {SceneVerification} from './scene-verification';
+import {rolesForScene} from '../../../../core/editor/gameplay-modules';
 import type {EditorCommand, SceneId} from '../../../../core/editor/editor.models';
-import {courtyardScene, readCourtyardSettings} from '../game-settings/courtyard-settings';
 
 interface WarmingContext {
     readonly generation: number;
@@ -19,7 +23,7 @@ interface WarmingContext {
 
 @Component({
     selector: 'editor-scene-actions',
-    imports: [EditorDialog, FormField],
+    imports: [EditorDialog, FormField, SceneVerification],
     templateUrl: './scene-actions.html',
     styleUrl: './scene-actions.scss',
 })
@@ -28,7 +32,13 @@ export class SceneActions {
     protected readonly editor = inject(EditorService);
     protected readonly sceneSwitch = inject(SceneSwitchService);
     private readonly editing = inject(SceneEditingService, {optional: true});
-    private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    private readonly injector = inject(Injector);
+    private readonly informationBody = viewChild<ElementRef<HTMLElement>>('informationBody');
+    protected readonly informationOpen = linkedSignal({
+        source: () => this.editor.workspaceGeneration(),
+        computation: () => false,
+    });
+    protected readonly informationConfig = {width: '44rem'};
     private readonly pending = signal(false);
     private readonly viewport = inject(ViewportEditorService);
     private readonly settings = inject(EditorSettingsService);
@@ -102,20 +112,8 @@ export class SceneActions {
     protected readonly unavailableModule = computed(() => this.selectedModuleId() !== '' && !this.selectedModule());
     protected readonly gameplayRoles = computed(() => {
         const module = this.selectedModule();
-        const sceneId = this.editor.snapshot()?.active_scene_id;
-        if (!module || sceneId === undefined) return [];
-        if (module.id === 'courtyard_run') {
-            const settings = readCourtyardSettings(this.editor.snapshot()?.project.gameplay_settings);
-            const configured = settings ? courtyardScene(settings, sceneId) : undefined;
-            if (configured) {
-                const names = configured.kind === 'finish' ? ['player', 'finish'] : ['player', 'key', 'exit'];
-                const descriptors = configured.kind === 'finish'
-                    ? [...Object.values(module.scene_roles).flat(), ...module.default_roles]
-                    : [...module.default_roles, ...Object.values(module.scene_roles).flat()];
-                return names.map(name => descriptors.find(role => role.name === name)).filter(role => role !== undefined);
-            }
-        }
-        return Object.hasOwn(module.scene_roles, sceneId) ? module.scene_roles[sceneId] : module.default_roles;
+        const snapshot = this.editor.snapshot();
+        return module && snapshot ? rolesForScene(module, snapshot.active_scene_id, snapshot.project.gameplay_settings) : [];
     });
 
     constructor() {
@@ -134,12 +132,29 @@ export class SceneActions {
         });
     }
 
+    show(): boolean {
+        if (this.opening() || !this.editor.snapshot()) return false;
+        this.informationOpen.set(true);
+        return true;
+    }
+
     revealBinding(name: string): void {
-        const control = [...this.element.querySelectorAll<HTMLElement>('[data-scene-binding]')]
-                .find(element => element.dataset['sceneBinding'] === name) ??
-            this.element.querySelector<HTMLElement>('[data-gameplay-settings]');
-        control?.scrollIntoView?.({block: 'nearest'});
-        control?.focus({preventScroll: true});
+        const sceneId = this.editor.snapshot()?.active_scene_id;
+        const generation = this.editor.workspaceGeneration();
+        if (!this.show()) return;
+        afterNextRender({
+            read: () => {
+                if (!this.informationOpen() || generation !== this.editor.workspaceGeneration() ||
+                    sceneId !== this.editor.snapshot()?.active_scene_id) return;
+                const body = this.informationBody()?.nativeElement;
+                if (!body?.closest('dialog[open]')) return;
+                const control = [...body.querySelectorAll<HTMLElement>('[data-scene-binding]')]
+                        .find(element => element.dataset['sceneBinding'] === name) ??
+                    body.querySelector<HTMLElement>('[data-gameplay-settings]');
+                control?.scrollIntoView?.({block: 'nearest'});
+                control?.focus({preventScroll: true});
+            },
+        }, {injector: this.injector});
     }
 
     protected switchScene(select: HTMLSelectElement): void {

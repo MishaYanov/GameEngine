@@ -17,16 +17,13 @@ import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.mod
 import {SceneEditingService} from './scene-editing.service';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
-import {CampaignRepairQueue} from './game-settings/campaign-repair-queue';
 import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
 import {ProjectBuild} from './project-build/project-build';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
 import {ViewportAssetDragService} from './viewport-asset-drag.service';
 import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
-import {GameplaySettings} from './game-settings/gameplay-settings';
 import {CameraSettings} from './game-settings/camera-settings';
-import {AudioCueSettings} from './game-settings/audio-cue-settings';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
 import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
 import {CommandPalette} from './command-palette/command-palette';
@@ -39,12 +36,12 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     selector: 'editor-workspace',
     providers: [
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
-        SceneSwitchService, WorkspaceViewService, CampaignRepairQueue,
+        SceneSwitchService, WorkspaceViewService,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        GameplaySettings, CameraSettings, AudioCueSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
+        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
@@ -179,6 +176,10 @@ export class EditorWorkspace {
         if (!this.canOpenPalette() || this.document.querySelector('dialog[open]')) return false;
         this.paletteOpen.set(true);
         return true;
+    }
+
+    openSceneInformation(): boolean {
+        return this.sceneActions()?.show() ?? false;
     }
 
     protected showUsages(key: EntityKey): void {

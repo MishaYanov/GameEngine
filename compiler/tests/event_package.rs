@@ -16,9 +16,10 @@ fn staged_event_scene_preserves_machine_definitions_and_playable_outcome() {
 		}
 	}
 	let _cleanup = Cleanup(path.clone());
+	let project = test_project::ProjectFixture::new("event-lab");
 	let output = Command::new(env!("CARGO_BIN_EXE_compiler"))
 		.arg("--stage")
-		.arg(root.join("apps/game/event-demo.json"))
+		.arg(project.manifest_path())
 		.arg(&path)
 		.output()
 		.unwrap();
@@ -56,3 +57,6 @@ fn staged_event_scene_preserves_machine_definitions_and_playable_outcome() {
 	);
 	assert_eq!(inspection.event_sequence, 6);
 }
+
+#[path = "../../tests/support/project_fixture.rs"]
+mod test_project;

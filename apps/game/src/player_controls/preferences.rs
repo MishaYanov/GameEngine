@@ -2,7 +2,7 @@ use super::{
 	ControlsSettings, Preset,
 	action_keys::{ActionKeyOverride, validate_rows},
 	audio::FeedbackMix,
-	display::DisplaySettings,
+	display::{DisplaySettings, TextSize},
 };
 use crate::local_player_files::{lock, ordinary_file, profile_directory, read_bounded};
 use runtime::{input::ControllerBindings, scene_io::replace_bytes};
@@ -16,7 +16,7 @@ use std::{
 };
 
 const MAX_BYTES: usize = 4 * 1024;
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,27 +39,46 @@ struct RecordV3 {
 	schema_version: u32,
 	movement: Preset,
 	controller: ControllerBindings,
-	display: DisplaySettings,
+	display: LegacyDisplay,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyDisplay {
+	text_size: TextSize,
+	high_contrast: bool,
+	cue_captions: bool,
+}
+
+impl From<LegacyDisplay> for DisplaySettings {
+	fn from(display: LegacyDisplay) -> Self {
+		Self {
+			text_size: display.text_size,
+			high_contrast: display.high_contrast,
+			cue_captions: display.cue_captions,
+			..Self::default()
+		}
+	}
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RecordWithAudio<T> {
+struct RecordWithAudio<T, D> {
 	schema_version: u32,
 	movement: Preset,
 	controller: ControllerBindings,
-	display: DisplaySettings,
+	display: D,
 	actions: Vec<ActionKeyOverride>,
 	audio: T,
 }
 
-impl<T: Into<FeedbackMix>> RecordWithAudio<T> {
+impl<T: Into<FeedbackMix>, D: Into<DisplaySettings>> RecordWithAudio<T, D> {
 	fn into_settings(self) -> Result<ControlsSettings, String> {
 		validate_rows(&self.actions)?;
 		Ok(ControlsSettings {
 			movement: self.movement,
 			controller: self.controller.validate()?,
-			display: self.display,
+			display: self.display.into(),
 			actions: self.actions,
 			audio: self.audio.into().validate()?,
 		})
@@ -86,8 +105,9 @@ impl From<LegacyAudio> for FeedbackMix {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Record {
-	Fifth(RecordWithAudio<FeedbackMix>),
-	Fourth(RecordWithAudio<LegacyAudio>),
+	Sixth(RecordWithAudio<FeedbackMix, DisplaySettings>),
+	Fifth(RecordWithAudio<FeedbackMix, LegacyDisplay>),
+	Fourth(RecordWithAudio<LegacyAudio, LegacyDisplay>),
 	Third(RecordV3),
 	Second(RecordV2),
 	First(RecordV1),
@@ -108,11 +128,12 @@ impl Record {
 			Self::Third(record) if record.schema_version == 3 => Ok(ControlsSettings {
 				movement: record.movement,
 				controller: record.controller.validate()?,
-				display: record.display,
+				display: record.display.into(),
 				..ControlsSettings::default()
 			}),
 			Self::Fourth(record) if record.schema_version == 4 => record.into_settings(),
-			Self::Fifth(record) if record.schema_version == SCHEMA_VERSION => {
+			Self::Fifth(record) if record.schema_version == 5 => record.into_settings(),
+			Self::Sixth(record) if record.schema_version == SCHEMA_VERSION => {
 				record.into_settings()
 			}
 			_ => Err("Saved controls version is unsupported".into()),
@@ -126,7 +147,7 @@ pub(super) struct Preferences {
 }
 
 impl Preferences {
-	pub(super) fn for_project(project: &Path, save_id: Option<&str>) -> Result<Self, String> {
+	pub(super) fn for_project(project: &Path) -> Result<Self, String> {
 		let root = if cfg!(windows) {
 			std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
 		} else {
@@ -142,12 +163,8 @@ impl Preferences {
 		let project = project
 			.canonicalize()
 			.map_err(|_| "Cannot identify the local project")?;
-		// The installation path scopes settings for projects without an authored
-		// save identity. The hash keeps that path out of the filename.
-		let key = match save_id {
-			Some(id) => Sha256::digest(id.as_bytes()),
-			None => Sha256::digest(project.as_os_str().as_encoded_bytes()),
-		};
+		// The canonical installation path scopes settings without appearing in the filename.
+		let key = Sha256::digest(project.as_os_str().as_encoded_bytes());
 		Ok(Self {
 			root,
 			filename: format!("{key:x}.json"),

@@ -1,13 +1,10 @@
-mod checkpoint_controls;
-mod checkpoint_transfer;
-mod checkpoint_transfer_history;
+mod cinder_checkpoint;
 mod editor_panel;
 mod editor_tools;
 mod feedback_audio;
 mod feedback_captions;
 
 mod frame_metrics;
-mod game;
 mod gizmo_overlay;
 mod input_preset_transfer;
 mod local_player_files;
@@ -24,9 +21,9 @@ mod selection_overlay;
 #[cfg(test)]
 use scene_rendering::gameplay_hud_rows;
 
-use courtyard_gameplay as progress;
 use editor_panel::PanelView;
 use editor_tools::EditorTools;
+use runtime::SceneEditor;
 use runtime::scene::Scene;
 use runtime::scene_load_timing::{
 	Outcome as SceneLoadOutcome, SceneLoadTiming, Scope as SceneLoadScope,
@@ -34,7 +31,6 @@ use runtime::scene_load_timing::{
 use runtime::{Camera, CameraController};
 use runtime::{FrameClock, GameContentRect};
 use runtime::{InputState, Key};
-use runtime::{SceneEditor, Transform, model_instance::ModelInstance};
 use selection_overlay::SelectionOverlay;
 
 use ::game::launch::{LaunchMode, LaunchOptions};
@@ -73,7 +69,6 @@ enum SceneCommand {
 	TogglePlay,
 	DeleteSelected,
 	DuplicateSelected,
-	SpawnRobot,
 }
 
 struct AuthoredScene {
@@ -90,7 +85,6 @@ struct GameApp {
 	tools: EditorTools,
 	selection_overlay: Option<SelectionOverlay>,
 	game_hud: Option<renderer::ui::ScreenOverlay>,
-	spawn_template: Option<ModelInstance>,
 	asset_manager: Option<AssetManager>,
 	renderer: Option<WindowRenderer>,
 	window: Option<Arc<Window>>,
@@ -122,10 +116,7 @@ struct GameApp {
 	scene_load_timing: Option<SceneLoadTiming>,
 	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
 	scene_prefetch_enabled: bool,
-	checkpoints: Option<courtyard_gameplay::checkpoint::CheckpointRegistry>,
 	transfer_directory: Option<PathBuf>,
-	checkpoint_base: Option<Arc<runtime::scene_data::SceneData>>,
-	interaction_action: Option<String>,
 	project_path: Option<PathBuf>,
 	installed_project: bool,
 	play_update_error_reported: bool,
@@ -194,7 +185,10 @@ impl GameApp {
 	}
 
 	fn update_project_sound(&mut self) {
-		let focused = self.window.as_ref().is_some_and(|window| window.has_focus());
+		let focused = self
+			.window
+			.as_ref()
+			.is_some_and(|window| window.has_focus());
 		self.set_project_sound_focus(focused);
 	}
 
@@ -352,16 +346,25 @@ impl GameApp {
 
 	fn cinder_victory_animation_active(&self) -> bool {
 		self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Victory)
-			&& self.editor.animations().is_some_and(|bank| bank.has_active_runtime_one_shot())
+			&& self
+			.editor
+			.animations()
+			.is_some_and(|bank| bank.has_active_runtime_one_shot())
 	}
 
 	fn pointer_attack_input(&self) -> Option<InputState> {
-		if !self.standalone_runtime || !self.mouse_captured || !self.cinder_in_duel()
+		if !self.standalone_runtime
+			|| !self.mouse_captured
+			|| !self.cinder_in_duel()
 			|| !self.input.is_held(runtime::input::MouseButton::Left)
 		{
 			return None;
 		}
-		let attack = self.effective_input_profile()?.actions.iter().find(|binding| binding.id == "attack")?;
+		let attack = self
+			.effective_input_profile()?
+			.actions
+			.iter()
+			.find(|binding| binding.id == "attack")?;
 		let mut input = self.input.clone();
 		input.press(attack.key);
 		Some(input)
@@ -424,7 +427,6 @@ impl GameApp {
 			(Key::F6, SceneCommand::TogglePlay),
 			(Key::Delete, SceneCommand::DeleteSelected),
 			(Key::C, SceneCommand::DuplicateSelected),
-			(Key::N, SceneCommand::SpawnRobot),
 		]
 		.into_iter()
 		.find_map(|(key, command)| self.input.just_pressed(key).then_some(command));
@@ -439,9 +441,7 @@ impl GameApp {
 
 		if matches!(
 			command,
-			SceneCommand::DeleteSelected
-				| SceneCommand::DuplicateSelected
-				| SceneCommand::SpawnRobot
+			SceneCommand::DeleteSelected | SceneCommand::DuplicateSelected
 		) {
 			self.update_selection_title();
 		}
@@ -465,7 +465,6 @@ impl GameApp {
 				"duplicate selected entity",
 				self.apply_entity_command(command),
 			),
-			SceneCommand::SpawnRobot => ("spawn robot", self.apply_entity_command(command)),
 		}
 	}
 
@@ -580,15 +579,11 @@ impl GameApp {
 		let audio_catalog = bridge::feedback_audio::load(&asset_root)?;
 		let project_audio = bridge::project_audio::load(&asset_root)?;
 		let size = window.inner_size();
-		let startup_scene = match self.project.as_ref() {
-			Some(project) => project.startup_scene_path()?,
-			None => "scenes/robots.json",
-		};
-		let scene_path = if self.installed_project {
-			play::resolve_scene_path(&asset_root, startup_scene)?
-		} else {
-			asset_root.join(startup_scene)
-		};
+		let project = self
+			.project
+			.clone()
+			.ok_or("Project configuration is not initialized")?;
+		let scene_path = play::resolve_scene_path(&asset_root, project.startup_scene_path()?)?;
 		let parsed = scene_io::load_data(&scene_path)?;
 		if let Some(timing) = &mut self.scene_load_timing {
 			timing.cpu_ready();
@@ -596,25 +591,7 @@ impl GameApp {
 		}
 		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let mut loaded = scene_io::load_parsed(&parsed, &asset_root, &renderer)?;
-		let mut editor = Self::prepare_editor(&mut loaded)?;
-		let project = match self.project.clone() {
-			Some(project) => project,
-			None if self.installed_project => {
-				let mut project = game::legacy_project(
-					&loaded.scene,
-					self.project_name.as_deref().unwrap_or("Legacy Project"),
-					startup_scene,
-				)?;
-				project.gameplay_module = Some(progress::COURTYARD_RUN_ID.to_owned());
-				project
-			}
-			None => ProjectData::for_scene(
-				self.project_name.as_deref().unwrap_or("Game Engine"),
-				startup_scene,
-				&loaded.scene.to_data(&loaded.camera)?,
-			)?,
-		};
-		editor.set_initial_project(project.clone())?;
+		let mut editor = SceneEditor::for_project(&loaded.scene, &loaded.camera, project.clone())?;
 		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
 		let overlay = if !self.standalone_runtime {
 			Some(SelectionOverlay::new(&renderer, &mut loaded.assets)?)
@@ -671,7 +648,6 @@ impl GameApp {
 		self.feedback_audio = feedback_audio;
 		self.project_sound = project_sound::ProjectSound::new(project_audio, !self.smoke_test);
 		self.scene_path = Some(scene_path);
-		self.checkpoint_base = self.checkpoints.is_some().then(|| Arc::new(parsed.data));
 		self.renderer = Some(renderer);
 		self.window = Some(window);
 		self.update_project_sound();
@@ -706,52 +682,8 @@ impl GameApp {
 			SceneCommand::DuplicateSelected => {
 				self.editor.duplicate_selected(&mut self.scene).map(|_| ())
 			}
-			SceneCommand::SpawnRobot => self.spawn_robot(),
 			_ => Err("Expected an entity editing command".to_string()),
 		}
-	}
-
-	fn spawn_robot(&mut self) -> Result<(), String> {
-		if self.spawn_template.is_none() {
-			let existing = self
-				.scene
-				.entity_ids()
-				.find(|id| self.scene.model_path(*id) == Some("props/robot.glb"))
-				.and_then(|id| self.scene.get(id))
-				.cloned();
-			let mut instance = match existing {
-				Some(instance) => instance,
-				None => {
-					let renderer = self
-						.renderer
-						.as_ref()
-						.ok_or("Renderer is not initialized")?;
-					let assets = self
-						.asset_manager
-						.as_mut()
-						.ok_or("Assets are not initialized")?;
-					let model = assets
-						.load_model(renderer, "props/robot.glb")
-						.map_err(|error| error.to_string())?;
-					ModelInstance::new(Arc::new(model), Transform::default())
-				}
-			};
-			*instance.transform_mut() = Transform {
-				scale: [0.7; 3],
-				..Transform::default()
-			};
-			self.spawn_template = Some(instance);
-		}
-		self.editor.spawn(
-			&mut self.scene,
-			"Robot",
-			"props/robot.glb",
-			self.spawn_template
-				.as_ref()
-				.ok_or("Robot template is missing")?
-				.clone(),
-		)?;
-		Ok(())
 	}
 
 	fn pick_entity(&mut self) -> Result<(), String> {
@@ -1258,6 +1190,9 @@ impl ApplicationHandler for GameApp {
 					}
 				}
 			};
+		if self.project_sound.poll_preview(now) {
+			window.request_redraw();
+		}
 		let caption_expired = self.feedback_captions.expire(now);
 		let caption_deadline = if self.standalone_runtime
 			&& self.player_controls.display().cue_captions
@@ -1277,6 +1212,7 @@ impl ApplicationHandler for GameApp {
 			.into_iter()
 			.chain(controller_deadline)
 			.chain(caption_deadline)
+			.chain(self.project_sound.preview_deadline())
 			.min();
 		event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 	}
@@ -1298,7 +1234,6 @@ impl Drop for GameApp {
 					std::mem::take(&mut self.tools),
 					self.selection_overlay.take(),
 					self.game_hud.take(),
-					self.spawn_template.take(),
 					self.asset_manager.take(),
 				))
 				.map_err(std::io::Error::other)
@@ -1335,31 +1270,22 @@ fn run() -> Result<(), String> {
 			));
 		}
 	};
-	let legacy_install = !has_manifest && marker.is_file();
-	app.installed_project = has_manifest || legacy_install;
-	if legacy_install {
-		app.project_name = read_legacy_project_name(&marker);
+	if !has_manifest && marker.is_file() {
+		return Err("The installed Player is missing project.json".into());
 	}
-	app.project_path = if has_manifest {
-		Some(installed_config)
-	} else if legacy_install {
-		None
+	app.installed_project = has_manifest;
+	let project_path = if has_manifest {
+		installed_config
 	} else {
-		Some(
-			Path::new(env!("CARGO_MANIFEST_DIR"))
-				.join("../..")
-				.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
-				.join("project.json"),
-		)
+		Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../..")
+			.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
+			.join("project.json")
 	};
-	app.project = app
-		.project_path
-		.as_ref()
-		.map(ProjectData::load)
-		.transpose()?;
-	if let Some(project) = app.project.as_ref() {
-		app.project_name = Some(project.name.clone());
-	}
+	let project = ProjectData::load(&project_path)?;
+	app.project_name = Some(project.name.clone());
+	app.project_path = Some(project_path);
+	app.project = Some(project);
 	let arguments = std::env::args_os()
 		.skip(1)
 		.map(|argument| {
@@ -1368,15 +1294,8 @@ fn run() -> Result<(), String> {
 				.map_err(|_| "Game arguments must contain valid Unicode".to_owned())
 		})
 		.collect::<Result<Vec<_>, _>>()?;
-	let options = LaunchOptions::parse(
-		arguments,
-		app.installed_project,
-		std::env::var("GAME_ENGINE_NATIVE_EDITOR_DEMO").as_deref() == Ok("1"),
-	)?;
+	let options = LaunchOptions::parse(arguments, app.installed_project)?;
 
-	if let Some(transfer) = options.transfer {
-		return checkpoint_transfer::execute(transfer, app.project.as_ref(), executable_root);
-	}
 	if let Some(command) = options.input_preset {
 		return input_preset_transfer::execute(
 			command,
@@ -1404,17 +1323,8 @@ fn run() -> Result<(), String> {
 			.project
 			.as_ref()
 			.and_then(|project| project.input_profile.as_ref());
-		app.checkpoints = app
-			.project
-			.as_ref()
-			.map(courtyard_gameplay::checkpoint::CheckpointRegistry::from_project)
-			.transpose()?
-			.flatten();
 		if let Some(profile) = app.player_controls.configure(
 			app.project_path.as_deref(),
-			app.checkpoints
-				.as_ref()
-				.map(|registry| registry.project_save_id()),
 			authored,
 			app.input_profile_override.is_some(),
 		) {
@@ -1425,12 +1335,6 @@ fn run() -> Result<(), String> {
 		&& let Some(project) = &app.project
 	{
 		gameplay_catalog::resolve(project)?;
-		if project.gameplay_module.as_deref() == Some(progress::COURTYARD_RUN_ID) {
-			app.interaction_action =
-				progress::settings::InteractionSettings::from_project(project)?
-					.and_then(|settings| settings.route_gate)
-					.map(|route| route.action);
-		}
 	}
 	if let Some(path) = options.record_playtrace {
 		let project = app
@@ -1499,20 +1403,6 @@ fn report_update_result(operation: &'static str, result: Result<(), String>, rep
 	}
 }
 
-fn read_legacy_project_name(path: &Path) -> Option<String> {
-	const MAX_LEGACY_NAME_BYTES: u64 = 80;
-	if !std::fs::symlink_metadata(path).ok()?.is_file() {
-		return None;
-	}
-	let mut name = String::new();
-	File::open(path)
-		.ok()?
-		.take(MAX_LEGACY_NAME_BYTES + 1)
-		.read_to_string(&mut name)
-		.ok()?;
-	(name.len() as u64 <= MAX_LEGACY_NAME_BYTES).then_some(name)
-}
-
 fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
 	let file =
 		File::open(path).map_err(|error| format!("Cannot open input profile {path:?}: {error}"))?;
@@ -1551,10 +1441,6 @@ fn load_input_profile(path: &Path) -> Result<InputProfile, String> {
 mod tests;
 
 #[cfg(all(test, windows))]
-#[path = "../tests/unit/tests_exported_run.rs"]
-mod exported_run_tests;
-
-#[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_performance.rs"]
 mod performance_tests;
 
@@ -1573,15 +1459,3 @@ mod animation_native_tests;
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_camera_native.rs"]
 mod camera_native_tests;
-
-#[cfg(all(test, windows))]
-#[path = "../tests/unit/tests_checkpoint_native.rs"]
-mod checkpoint_native_tests;
-
-#[cfg(all(test, windows))]
-#[path = "../tests/unit/tests_controller_menu_native.rs"]
-mod controller_menu_native_tests;
-
-#[cfg(all(test, windows))]
-#[path = "../tests/unit/tests_playtrace_native.rs"]
-mod playtrace_native_tests;

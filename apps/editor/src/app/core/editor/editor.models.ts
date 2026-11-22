@@ -34,49 +34,6 @@ export type SceneBindingTarget =
     | { readonly kind: 'assign'; readonly key: EntityKey }
     | { readonly kind: 'clear' };
 
-export interface CampaignChapter {
-    readonly id: string;
-    readonly label: string;
-    readonly course_scene: SceneId;
-}
-
-export interface CampaignDefinition {
-    readonly chapters: readonly CampaignChapter[];
-    readonly finish_scene: SceneId;
-}
-
-export interface CampaignDiagnostic {
-    readonly scene_id: SceneId | null;
-    readonly message: string;
-    readonly repair?: CampaignRepairTarget;
-    readonly repair_batch?: readonly CampaignRepairTarget[];
-}
-
-export interface CampaignRepairTarget {
-    readonly scene_id: SceneId;
-    readonly role: 'key_trigger' | 'exit_trigger' | 'finish_trigger';
-    readonly entity_key: EntityKey;
-}
-
-export interface CampaignRepairPreview {
-    readonly target: CampaignRepairTarget;
-    readonly before: Collider;
-    readonly after: Collider;
-}
-
-export interface CampaignRepairBatch {
-    readonly scene_id: SceneId;
-    readonly workspace_generation: number;
-    readonly revision: number;
-    readonly repairs: readonly CampaignRepairPreview[];
-}
-
-export interface CampaignDiagnosticReport {
-    readonly workspace_generation: number;
-    readonly revision: number;
-    readonly issues: readonly CampaignDiagnostic[];
-}
-
 export interface ProjectData {
     readonly schema_version: 3;
     readonly name: string;
@@ -404,6 +361,7 @@ export interface EditorCapabilities {
     readonly history_budget_bytes: number;
     readonly embedded_viewport_supported: boolean;
     readonly scene_warming_supported?: boolean;
+    readonly scene_verification_supported?: boolean;
     readonly incremental_commands?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
     readonly component_types?: readonly ComponentTypeDescriptor[];

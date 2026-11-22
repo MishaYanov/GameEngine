@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use engine_core::{
 	command::GameplayModuleDescriptorDto, project::ProjectData,
-	simulation_session::GameModuleFactory,
+	simulation_session::{GameModuleFactory, resolve_default_gameplay},
 };
 
 pub use cinder_oath_gameplay::{self as cinder_oath, CINDER_OATH_ID};
@@ -18,7 +18,6 @@ pub fn descriptors() -> Vec<GameplayModuleDescriptorDto> {
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
 	match project.gameplay_module.as_deref() {
 		Some(CINDER_OATH_ID) => cinder_oath_gameplay::resolve(project),
-		// The legacy resolver still serves explicitly opened historical fixtures.
-		_ => courtyard_gameplay::resolve(project),
+		_ => resolve_default_gameplay(project),
 	}
 }

@@ -66,6 +66,9 @@ fn generated_workspace_builds_without_source_and_links_history() {
 	assert!(root.join("output/generation-manifest.json").is_file());
 	assert!(!generated.staging.exists());
 	assert!(!root.join("output/apps/admin-dashboard").exists());
+	let workspace = fs::read_to_string(root.join("output/Cargo.toml")).unwrap();
+	assert!(workspace.contains("crates/cinder-oath-gameplay"));
+	assert!(!workspace.contains("courtyard-gameplay"));
 	let manifest: serde_json::Value =
 		serde_json::from_slice(&fs::read(root.join("output/generation-manifest.json")).unwrap())
 			.unwrap();

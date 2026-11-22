@@ -142,9 +142,10 @@ fn timing_summary(samples: &mut [f64]) -> Value {
 #[test]
 #[ignore = "requires native Vulkan, the camera acceptance room and same-profile engine-headless"]
 fn player_camera_route_matches_headless_at_two_extents() {
+	let fixture = test_project::ProjectFixture::new("camera-room");
 	let project = std::env::var_os("GAME_ENGINE_QA_CAMERA_PROJECT")
 		.map(PathBuf::from)
-		.unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("camera-demo.json"));
+		.unwrap_or_else(|| fixture.manifest_path());
 	let dir = evidence_directory("route");
 	let checkpoints = route_checkpoints(&project, &dir);
 	let mut reports = Vec::new();
@@ -210,6 +211,161 @@ fn player_camera_route_matches_headless_at_two_extents() {
 	)
 	.unwrap();
 	println!("Camera route passed: {}\n{report}", dir.display());
+}
+
+#[test]
+#[ignore = "requires native Windows Vulkan"]
+fn cinder_checkpoint_native_controls_import_review_audit_and_continue() {
+	use crate::cinder_checkpoint::{CHECKPOINT_SUFFIX, PracticeStore, audit::AUDIT_SUFFIX};
+	use gameplay_catalog::cinder_oath::{CinderProgress, Phase};
+	use runtime::input::{FaceButton, PhysicalGamepadSample};
+
+	const CHILD: &str = "GAME_ENGINE_QA_CINDER_CHECKPOINT_PROFILE";
+	let Some(profile) = std::env::var_os(CHILD).map(PathBuf::from) else {
+		let profile = evidence_directory("cinder-checkpoint");
+		let output = Command::new(std::env::current_exe().unwrap())
+			.args([
+				"--ignored",
+				"--exact",
+				"camera_native_tests::cinder_checkpoint_native_controls_import_review_audit_and_continue",
+				"--nocapture",
+			])
+			.env(CHILD, &profile)
+			.env("LOCALAPPDATA", &profile)
+			.output()
+			.unwrap();
+		assert!(
+			output.status.success(),
+			"{}\n{}",
+			String::from_utf8_lossy(&output.stdout),
+			String::from_utf8_lossy(&output.stderr),
+		);
+		return;
+	};
+	let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../..")
+		.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
+		.join("project.json");
+	let transfer = profile.join("transfer");
+	fs::create_dir(&transfer).unwrap();
+
+	with_native_window(|events| {
+		let mut app = hidden_player(events, &manifest, [960, 540]);
+		app.transfer_directory = Some(transfer.clone());
+		app.player_controls.configure(Some(&manifest), None, false);
+		let key = |app: &mut GameApp, key| assert!(app.player_controls_key(key));
+		let selected = |app: &GameApp| {
+			app.player_controls_rows(3, 80)
+				.unwrap()
+				.into_iter()
+				.find_map(|line| line.strip_prefix("> ").map(str::to_owned))
+				.unwrap()
+		};
+		let focus = |app: &mut GameApp, label: &str| {
+			for _ in 0..12 {
+				if selected(app).starts_with(label) {
+					return;
+				}
+				key(app, Key::ArrowDown);
+			}
+			panic!("missing Controls action {label}");
+		};
+		let enter = |app: &mut GameApp, label: &str| {
+			focus(app, label);
+			key(app, Key::Enter);
+		};
+
+		app.input.press(Key::Enter);
+		app.tick_play(1.0 / 60.0).unwrap();
+		app.input.release(Key::Enter);
+		app.input.end_frame();
+		assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "arena");
+		app.input.press(Key::F);
+		app.tick_play(1.0 / 60.0).unwrap();
+		app.input.release(Key::F);
+		app.input.end_frame();
+		assert_eq!(
+			app.editor
+				.play_progress::<CinderProgress>()
+				.unwrap()
+				.swings(),
+			1
+		);
+		key(&mut app, Key::Escape);
+		enter(&mut app, "Cinder Oath Checkpoints");
+		enter(&mut app, "Save Arena Entry");
+		enter(&mut app, "Export Checkpoint");
+		assert_eq!(
+			crate::local_player_files::transfer_entries(&transfer, CHECKPOINT_SUFFIX)
+				.unwrap()
+				.len(),
+			1
+		);
+
+		enter(&mut app, "Import Checkpoint");
+		enter(&mut app, "Checkpoint 01");
+		assert_eq!(selected(&app), "Cancel");
+		let store = PracticeStore::new(&profile, &manifest).unwrap();
+		let checkpoint = store.checkpoint().unwrap().unwrap();
+		store.save(checkpoint).unwrap();
+		enter(&mut app, "Replace Practice Slot");
+		assert!(
+			app.player_controls_rows(4, 80)
+				.unwrap()
+				.iter()
+				.any(|row| row == "Practice slot changed")
+		);
+		enter(&mut app, "Recheck Selected File");
+		assert_eq!(selected(&app), "Cancel");
+		enter(&mut app, "Replace Practice Slot");
+		assert!(
+			app.player_controls_rows(4, 80)
+				.unwrap()
+				.iter()
+				.any(|row| row == "Imported into Practice slot")
+		);
+
+		focus(&mut app, "Audit filter");
+		key(&mut app, Key::ArrowLeft);
+		assert_eq!(selected(&app), "Audit filter: Import");
+		enter(&mut app, "Export Audit");
+		assert_eq!(selected(&app), "Cancel");
+		enter(&mut app, "Export Reviewed Audit");
+		assert_eq!(
+			crate::local_player_files::transfer_entries(&transfer, AUDIT_SUFFIX)
+				.unwrap()
+				.len(),
+			1
+		);
+
+		enter(&mut app, "Review Audit File");
+		enter(&mut app, "Audit 01");
+		assert_eq!(selected(&app), "Close");
+		let rows = app.player_controls_rows(10, 80).unwrap();
+		assert!(rows.iter().any(|row| row.contains("Direction: Import")));
+		assert!(rows.iter().any(|row| row.contains("Rows: 1")));
+		let mut sample = PhysicalGamepadSample::default();
+		assert!(!app.player_controls_gamepad(sample));
+		sample.face_buttons[FaceButton::B as usize] = true;
+		assert!(app.player_controls_gamepad(sample));
+		assert_eq!(selected(&app), "Review Audit File");
+		assert_eq!(
+			app.editor
+				.play_progress::<CinderProgress>()
+				.unwrap()
+				.swings(),
+			1
+		);
+		enter(&mut app, "Continue Practice Slot");
+		assert!(!app.player_controls.is_open());
+		let progress = app.editor.play_progress::<CinderProgress>().unwrap();
+		assert_eq!(progress.phase(), Phase::Duel);
+		assert_eq!(progress.swings(), 0);
+		assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "arena");
+		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+		app.restart_player_game().unwrap();
+		assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "intro");
+	});
 }
 
 /// Runs once inside a hidden Winit event loop on a test thread and propagates failure.
@@ -317,6 +473,10 @@ fn cinder_oath_native_player_completes_intro_and_sword_duel() {
 			assert!(app.game_completed());
 			present(&mut app);
 			app.wait_for_gpu().unwrap();
+			app.input.press(Key::F10);
+			app.update_player(1.0 / 60.0);
+			assert_eq!(progress(&app).phase(), Phase::Intro);
+			assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "intro");
 			println!("Cinder Oath rendered the intro, entered the arena, and won in three hits");
 		});
 		return;
@@ -371,7 +531,7 @@ fn game_content_rect_native_images() {
 	if let Ok(width) = std::env::var(CHILD) {
 		let width: u32 = width.parse().unwrap();
 		with_native_window(|events| {
-			let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("project.json");
+			let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/cinder-oath/project.json");
 			let mut app = hidden_player(events, &manifest, [width, 256]);
 			if width == 1024 {
 				app.cursor_position = Some([127.0, 20.0]);
@@ -456,7 +616,7 @@ fn game_content_rect_native_images() {
 		"Expected world geometry below the HUD"
 	);
 	assert!(
-		reference.get_pixel(20, 20) != &background,
+		reference.get_pixel(20, reference.height() - 24) != &background,
 		"HUD must render near the content's left edge"
 	);
 	assert_eq!(portrait.get_pixel(0, 0), &background);
@@ -475,11 +635,11 @@ fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
 	if std::env::var_os(CHILD).is_some() {
 		with_native_window(|events| {
 			let manifest =
-				Path::new(env!("CARGO_MANIFEST_DIR")).join("project.release-learning.json");
+				Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/cinder-oath/project.json");
 			let mut app = hidden_player(events, &manifest, [768, 256]);
 			app.feedback_audio = feedback_audio::FeedbackAudio::default();
 			app.player_controls
-				.configure(Some(&manifest), None, None, false);
+				.configure(Some(&manifest), None, false);
 			for key in [
 				Key::Escape,
 				Key::ArrowUp,
@@ -500,18 +660,10 @@ fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
 			assert_eq!(expected.text_scale, 1.5);
 			assert!(expected.high_contrast);
 			let mut relaunched = player_controls::PlayerControls::default();
-			relaunched.configure(Some(&manifest), None, None, false);
+			relaunched.configure(Some(&manifest), None, false);
 			assert_eq!(relaunched.display().overlay_style(), expected);
 
-			app.input.press(Key::D);
-			for _ in 0..90 {
-				app.tick_play(1.0 / 60.0).unwrap();
-			}
-			assert!(
-				app.feedback_captions
-					.rows(Instant::now())
-					.any(|caption| caption == "Key collected")
-			);
+			assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "intro");
 			assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
 			assert!(app.game_hud.as_ref().and_then(|hud| hud.object()).is_some());
 			app.wait_for_gpu().unwrap();
@@ -551,3 +703,6 @@ fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
 	assert!(panel && glyphs, "expected black panel and white glyphs");
 	println!("Large high-contrast Player screenshot: {}", image.display());
 }
+
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;

@@ -1,130 +1,162 @@
-@if (editor.snapshot(); as snapshot) {
-    <div class="scene-actions">
-        <label>Scene
-            <select #scene (change)="switchScene(scene)" [disabled]="!available()">
-                @for (entry of snapshot.scenes; track entry.id) {
-                    <option [selected]="entry.id === (warmTarget() ?? snapshot.active_scene_id)" [value]="entry.id">
-                        {{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}
-                    </option>
+<editor-dialog [(open)]="informationOpen" [config]="informationConfig" [renderFields]="false"
+               title="Scene Information">
+    @if (editor.snapshot(); as snapshot) {
+        <div #informationBody class="scene-information">
+            <dl class="scene-identity">
+                <dt>Active scene ID</dt>
+                <dd>{{ snapshot.active_scene_id }}</dd>
+            </dl>
+            <div class="scene-actions">
+                <label>Scene
+                    <select #scene (change)="switchScene(scene)" [disabled]="!available()">
+                        @for (entry of snapshot.scenes; track entry.id) {
+                            <option [selected]="entry.id === (warmTarget() ?? snapshot.active_scene_id)"
+                                    [value]="entry.id">
+                                {{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}
+                            </option>
+                        }
+                    </select>
+                </label>
+                <button (click)="toggleWarming()" [attr.aria-pressed]="warming()" [disabled]="!prepareAvailable()"
+                        type="button">Prepare scene
+                </button>
+                @if (warming()) {
+                    <button (click)="openPreparedScene()" [disabled]="!available() || warmTarget() === null"
+                            type="button">Open selected scene
+                    </button>
                 }
-            </select>
-        </label>
-        <button (click)="toggleWarming()" [attr.aria-pressed]="warming()" [disabled]="!prepareAvailable()"
-                type="button">Prepare scene
-        </button>
-        @if (warming()) {
-            <button (click)="openPreparedScene()" [disabled]="!available() || warmTarget() === null"
-                    type="button">Open selected scene
-            </button>
-        }
-        @if (reportAvailable()) {
-            <button (click)="exportWarmingReport()" [disabled]="reportPending()" type="button">Export Warming Report
-            </button>
-        }
-        @if (snapshot.project.startup_scene_id === snapshot.active_scene_id) {
-            <span class="startup">Startup scene</span>
-        } @else {
-            <button type="button" [disabled]="!available()" (click)="setStartup()">Use as Startup</button>
-        }
-        <button (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()" type="button">Scene Files…
-        </button>
-    </div>
-    <p aria-atomic="true" class="warming-result" role="status">
-        @if (warmingResult(); as result) {
-            @for (summary of [result]; track summary.request_id) {
-                <span>
-                    @switch (summary.mode) {
-                        @case ('off') {
-                            Scene warming off for {{ summary.scene_id }}.
-                        }
-                        @case ('references') {
-                            References for {{ summary.scene_id }}:
-                            {{ summary.references_hit ? 'used' : 'loaded on demand' }}.
-                        }
-                        @case ('models') {
-                            {{ summary.scene_id }}: {{ summary.references_hit ? 'cached references' : 'on-demand references' }},
-                            {{ summary.prepared_models }} models prepared, {{ summary.adopted_models }} adopted,
-                            {{ summary.retained_bytes }} bytes reserved.
-                        }
+                @if (reportAvailable()) {
+                    <button (click)="exportWarmingReport()" [disabled]="reportPending()" type="button">Export Warming
+                        Report
+                    </button>
+                }
+                @if (snapshot.project.startup_scene_id === snapshot.active_scene_id) {
+                    <span class="startup">Startup scene</span>
+                } @else {
+                    <button (click)="setStartup()" [disabled]="!available()" type="button">Use as Startup</button>
+                }
+                <button (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()" type="button">Scene Files…
+                </button>
+            </div>
+            <p aria-atomic="true" class="warming-result" role="status">
+                @if (warmingResult(); as result) {
+                    @for (summary of [result]; track summary.request_id) {
+                        <span>
+                            @switch (summary.mode) {
+                                @case ('off') {
+                                    Scene warming off for {{ summary.scene_id }}.
+                                }
+                                @case ('references') {
+                                    References for {{ summary.scene_id }}:
+                                    {{ summary.references_hit ? 'used' : 'loaded on demand' }}.
+                                }
+                                @case ('models') {
+                                    {{ summary.scene_id }}: {{ summary.references_hit ? 'cached references' : 'on-demand references' }},
+                                    {{ summary.prepared_models }} models prepared, {{ summary.adopted_models }} adopted,
+                                    {{ summary.retained_bytes }} bytes reserved.
+                                }
+                            }
+                        </span>
                     }
-                </span>
+                }
+            </p>
+            <p aria-atomic="true" class="warming-result" data-warming-report-status
+               role="status">{{ reportStatus() }}</p>
+            @if (expanded()) {
+                <div aria-label="Scene files" class="scene-files" role="group">
+                    <label>Scene path within Assets
+                        <input [formField]="fields.path" aria-describedby="scene-path-help"
+                               placeholder="scenes/level.json"/>
+                    </label>
+                    <button (click)="sceneFile('register')" [disabled]="!available() || !validPath()" type="button">
+                        Register
+                        Existing Scene
+                    </button>
+                    <button (click)="sceneFile('saveAs')" [disabled]="!available() || !validPath()" type="button">Save
+                        Scene
+                        As
+                    </button>
+                    <p id="scene-path-help">Use a relative .json path. Save As writes a new file and changes this
+                        scene’s path;
+                        existing files are preserved.</p>
+                </div>
             }
-        }
-    </p>
-    <p aria-atomic="true" class="warming-result" data-warming-report-status role="status">{{ reportStatus() }}</p>
-    @if (expanded()) {
-        <div class="scene-files" role="group" aria-label="Scene files">
-            <label>Scene path within Assets
-                <input [formField]="fields.path" placeholder="scenes/level.json" aria-describedby="scene-path-help"/>
-            </label>
-            <button (click)="sceneFile('register')" [disabled]="!available() || !validPath()" type="button">Register
-                Existing Scene
-            </button>
-            <button (click)="sceneFile('saveAs')" [disabled]="!available() || !validPath()" type="button">Save Scene
-                As
-            </button>
-            <p id="scene-path-help">Use a relative .json path. Save As writes a new file and changes this scene’s path;
-                existing files are preserved.</p>
+            <div aria-label="Gameplay settings" class="gameplay-settings" data-gameplay-settings role="group"
+                 tabindex="-1">
+                <label>Gameplay module
+                    <select #gameplayModule (change)="setGameplayModule(gameplayModule)"
+                            [disabled]="!available() || gameplayModules() === undefined" aria-describedby="gameplay-module-help">
+                        <option [selected]="!selectedModuleId()" value="">Configured behaviors only</option>
+                        @if (unavailableModule()) {
+                            <option [value]="selectedModuleId()" selected>{{ selectedModuleId() }}(unavailable)
+                            </option>
+                        }
+                        @for (module of gameplayModules(); track module.id) {
+                            <option [selected]="module.id === selectedModuleId()"
+                                    [value]="module.id">{{ module.label }}
+                            </option>
+                        }
+                    </select>
+                </label>
+                <p id="gameplay-module-help">
+                    @if (gameplayModules() === undefined) {
+                        Gameplay module selection is unavailable in this editor host.
+                    } @else if (unavailableModule()) {
+                        This project's module is unavailable. Choose an available module or Configured behaviors only to repair it.
+                    } @else if (selectedModule(); as module) {
+                        {{ module.description }}
+                    } @else {
+                        Runs the project's configured movement and spin behaviors.
+                    }
+                </p>
+            </div>
+            @if (gameplayRoles().length) {
+                <fieldset [disabled]="!available()" class="gameplay-roles">
+                    <legend>Gameplay Roles</legend>
+
+                    @for (role of gameplayRoles(); track role.name; let index = $index) {
+                        @let boundEntity = roleBinding(role.name);
+                        <div class="gameplay-role">
+                            <label>
+                                {{ role.label }}
+
+                                <select
+                                    #roleSelect
+                                    (change)="setRole(role.name, roleSelect)"
+                                    [attr.aria-describedby]="'gameplay-role-hint-' + index"
+                                    [attr.data-scene-binding]="role.name"
+                                >
+                                    <option [selected]="!boundEntity" value="">Unassigned</option>
+
+                                    @for (entity of snapshot.document.entities; track entity.key) {
+                                        <option [selected]="entity.key === boundEntity" [value]="entity.key">
+                                            {{ entity.name }} ({{ entity.key }})
+                                        </option>
+                                    }
+                                </select>
+                            </label>
+                            <p [id]="'gameplay-role-hint-' + index">{{ role.requirement_hint }}</p>
+                        </div>
+                    }
+                </fieldset>
+            }
+            @if (editor.capabilities()?.scene_verification_supported) {
+                <editor-scene-verification (inspectRole)="revealBinding($event)" [available]="available()"
+                                           [open]="informationOpen()"/>
+            }
+            @if (sceneSwitch.error() ?? error() ?? warmingError(); as failure) {
+                <p class="error" role="alert">{{ failure }}</p>
+            } @else if (sceneSwitch.message() ?? message(); as status) {
+                <p class="status" role="status">{{ status }}</p>
+            }
         </div>
     }
-    <div aria-label="Gameplay settings" class="gameplay-settings" data-gameplay-settings role="group" tabindex="-1">
-        <label>Gameplay module
-            <select #gameplayModule [disabled]="!available() || gameplayModules() === undefined"
-                    aria-describedby="gameplay-module-help" (change)="setGameplayModule(gameplayModule)">
-                <option value="" [selected]="!selectedModuleId()">Configured behaviors only</option>
-                @if (unavailableModule()) {
-                    <option [value]="selectedModuleId()" selected>{{ selectedModuleId() }} (unavailable)</option>
-                }
-                @for (module of gameplayModules(); track module.id) {
-                    <option [value]="module.id" [selected]="module.id === selectedModuleId()">{{ module.label }}</option>
-                }
-            </select>
-        </label>
-        <p id="gameplay-module-help">
-            @if (gameplayModules() === undefined) {
-                Gameplay module selection is unavailable in this editor host.
-            } @else if (unavailableModule()) {
-                This project's module is unavailable. Choose an available module or Configured behaviors only to repair it.
-            } @else if (selectedModule(); as module) {
-                {{ module.description }}
-            } @else {
-                Runs the project's configured movement and spin behaviors.
-            }
-        </p>
-    </div>
-    @if (gameplayRoles().length) {
-    <fieldset class="gameplay-roles" [disabled]="!available()">
-        <legend>Gameplay Roles</legend>
+</editor-dialog>
 
-        @for (role of gameplayRoles(); track role.name; let index = $index) {
-            @let boundEntity = roleBinding(role.name);
-            <div class="gameplay-role">
-            <label>
-                {{ role.label }}
-
-                <select
-                    #roleSelect
-                    [attr.data-scene-binding]="role.name"
-                    (change)="setRole(role.name, roleSelect)"
-                    [attr.aria-describedby]="'gameplay-role-hint-' + index"
-                >
-                    <option [selected]="!boundEntity" value="">Unassigned</option>
-
-                    @for (entity of snapshot.document.entities; track entity.key) {
-                        <option [selected]="entity.key === boundEntity" [value]="entity.key">
-                            {{ entity.name }} ({{ entity.key }})
-                        </option>
-                    }
-                </select>
-            </label>
-            <p [id]="'gameplay-role-hint-' + index">{{ role.requirement_hint }}</p>
-            </div>
-        }
-    </fieldset>
-    }
-    @if (sceneSwitch.error() ?? error() ?? warmingError(); as failure) {
+@if (!informationOpen()) {
+    @if (sceneSwitch.error(); as failure) {
         <p class="error" role="alert">{{ failure }}</p>
-    } @else if (sceneSwitch.message() ?? message(); as status) {
+    } @else if (sceneSwitch.message(); as status) {
         <p class="status" role="status">{{ status }}</p>
     }
 }

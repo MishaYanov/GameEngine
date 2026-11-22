@@ -8,7 +8,6 @@ members = [
     "compiler",
     "crates/bridge",
     "crates/cinder-oath-gameplay",
-    "crates/courtyard-gameplay",
     "crates/engine-core",
     "crates/gameplay-catalog",
     "crates/logger",

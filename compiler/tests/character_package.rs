@@ -17,14 +17,15 @@ fn staged_character_room_preserves_settings_and_source_motion() {
 		}
 	}
 	let _cleanup = Cleanup(path.clone());
-	let source_project = ProjectData::load(root.join("apps/game/controller-demo.json")).unwrap();
+	let fixture = test_project::ProjectFixture::new("controller-room");
+	let source_project = ProjectData::load(fixture.manifest_path()).unwrap();
 	let source_scene = SceneData::from_json(
 		&fs::read_to_string(root.join("apps/game/assets/scenes/controller-room.json")).unwrap(),
 	)
 	.unwrap();
 	let output = Command::new(env!("CARGO_BIN_EXE_compiler"))
 		.arg("--stage")
-		.arg(root.join("apps/game/controller-demo.json"))
+		.arg(fixture.manifest_path())
 		.arg(&path)
 		.output()
 		.unwrap();
@@ -58,3 +59,6 @@ fn staged_character_room_preserves_settings_and_source_motion() {
 	}
 	assert_eq!(source.world().data(), packaged.world().data());
 }
+
+#[path = "../../tests/support/project_fixture.rs"]
+mod test_project;

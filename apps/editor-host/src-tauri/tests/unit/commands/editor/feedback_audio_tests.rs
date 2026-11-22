@@ -7,7 +7,7 @@ use std::{
 };
 
 const WAVE: &[u8] =
-	include_bytes!("../../../../../../game/fixtures/courtyard-audio/assets/audio/cue-gate.wav");
+	include_bytes!("../../../../../../../projects/cinder-oath/assets/audio/blade-hit.wav");
 
 struct Scratch(PathBuf);
 
@@ -78,7 +78,7 @@ fn feedback_publication_preserves_catalog_after_rejected_changes() {
 fn feedback_scope_rejects_another_workspace_and_play() {
 	let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
 	let mut workspace =
-		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
 	assert!(require_editing(&workspace, Some(workspace.generation)).is_ok());
 	assert!(require_editing(&workspace, Some(workspace.generation + 1)).is_err());
 	let request = bridge::editor::EditorCommandRequest {
@@ -109,7 +109,7 @@ fn feedback_catalog_lock_serializes_processes_and_preserves_current_catalog() {
 fn feedback_bus_mix_requires_registered_scenes_before_publication() {
 	let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
 	let workspace =
-		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
 	let project = workspace.backend.session().project();
 	let root = Scratch::new();
 	let mix = |scene: &str| {

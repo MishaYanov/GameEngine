@@ -18,7 +18,7 @@ const EXTENT: [u32; 2] = [800, 600];
 fn camera_room_preview_restores_scene_and_applied_camera_survives_undo_save_and_play() {
 	let temp = Fixture::new(0);
 	let demo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game");
-	let project = runtime::project::ProjectData::load(demo.join("camera-demo.json")).unwrap();
+	let project = runtime::project::ProjectData::from_json(&test_project::manifest("camera-room")).unwrap();
 	let prepared = compiler::prepare_project(&project, &demo.join("assets")).unwrap();
 	let staged =
 		compiler::stage_prepared_project(&prepared, temp.directory.to_str().unwrap()).unwrap();
@@ -566,3 +566,6 @@ mod colliders;
 mod gestures;
 mod navigation;
 mod play;
+
+#[path = "../../../../../../tests/support/project_fixture.rs"]
+mod test_project;

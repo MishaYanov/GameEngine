@@ -70,6 +70,14 @@ pub struct CinderProgress {
 }
 
 impl CinderProgress {
+	/// Start an authored arena entry with a fresh duel and full health.
+	pub fn arena_entry() -> Self {
+		Self {
+			phase: Phase::Duel,
+			..Self::default()
+		}
+	}
+
 	pub fn phase(&self) -> Phase {
 		self.phase
 	}

@@ -7,7 +7,6 @@ use super::{
 	preset_library::{LibraryBackupReview, PresetLibrary, SavedLayout},
 };
 use crate::local_player_files::{ordinary_directory, profile_directory, read_bounded};
-use courtyard_gameplay::checkpoint::CheckpointRegistry;
 use runtime::{
 	Key,
 	input::{ControllerBindings, InputProfile},
@@ -29,7 +28,6 @@ const SCHEMA_VERSION: u32 = 1;
 	deny_unknown_fields
 )]
 enum ProjectIdentity {
-	SaveId(String),
 	ManifestSha256(String),
 }
 
@@ -124,10 +122,8 @@ impl Scope {
 			.ok_or("Input presets require an installed project.json")?;
 		let text = std::str::from_utf8(&bytes).map_err(|_| "Project manifest is not UTF-8")?;
 		let project = ProjectData::from_json(text)?;
-		let project_id = CheckpointRegistry::from_project(&project)?.map_or_else(
-			|| ProjectIdentity::ManifestSha256(encode_digest(&Sha256::digest(&bytes).into())),
-			|registry| ProjectIdentity::SaveId(registry.project_save_id().to_owned()),
-		);
+		let project_id =
+			ProjectIdentity::ManifestSha256(encode_digest(&Sha256::digest(&bytes).into()));
 		let authored = project.input_profile.clone().unwrap_or_default();
 		super::validate_profile(&authored)?;
 		let encoded = serde_json::to_vec(&authored).map_err(|error| error.to_string())?;
@@ -183,11 +179,7 @@ impl PresetTransfer {
 		if running != &current {
 			return Err("The installed project changed. Reopen the Player.".into());
 		}
-		let save_id = match &scope.project {
-			ProjectIdentity::SaveId(id) => Some(id.as_str()),
-			ProjectIdentity::ManifestSha256(_) => None,
-		};
-		let preferences = Preferences::for_project(manifest, save_id)?;
+		let preferences = Preferences::for_project(manifest)?;
 		Ok(Self {
 			manifest: manifest.to_owned(),
 			scope,

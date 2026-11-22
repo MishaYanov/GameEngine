@@ -49,7 +49,8 @@ fn repeated_spawn_collect_replay_has_stable_outcome_and_restart_clears_lifecycle
 		serde_json::to_vec(&json!({"schema_version":1,"actions":actions})).unwrap(),
 	)
 	.unwrap();
-	let project = workspace().join("apps/game/component-demo.json");
+	let fixture = test_project::ProjectFixture::new("component-lab");
+	let project = fixture.manifest_path();
 	let args = [
 		"--project".as_ref(),
 		project.as_os_str(),
@@ -162,3 +163,6 @@ fn host_drains_spawn_boundaries_before_accepting_the_next_fixed_step() {
 	);
 	assert_eq!(combined["dropped_seconds"], 0.0);
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

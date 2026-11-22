@@ -16,6 +16,67 @@ header {
   background: var(--color-surface-raised);
 }
 
+.editor-menus {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.game-trigger,
+.game-menu button {
+  min-height: var(--space-7);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: start;
+}
+
+.game-trigger {
+  anchor-name: --editor-game-trigger;
+}
+
+.game-trigger:hover,
+.game-menu button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+.game-trigger:active,
+.game-menu button:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+.game-trigger:has(+ .game-menu:popover-open) {
+  background: var(--color-selected);
+  box-shadow: inset 0 -2px var(--color-selection-edge);
+}
+
+.game-menu {
+  position: fixed;
+  position-anchor: --editor-game-trigger;
+  inset: auto;
+  top: anchor(bottom);
+  left: anchor(left);
+  min-width: 10rem;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-popover);
+}
+
+.game-menu:popover-open {
+  display: grid;
+}
+
+.game-menu button:disabled {
+  color: var(--color-text-disabled);
+}
+
 .breadcrumb {
   display: flex;
   align-items: center;
@@ -38,15 +99,10 @@ h1 {
   }
 }
 
-h1,
-.scene-name {
+h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.scene-name {
-  max-width: 24ch;
 }
 
 .dirty-label {

@@ -1,127 +1,29 @@
 use super::*;
 
 #[test]
-fn game_status_publishes_progress_only_completion_restart_and_new_play_identity() {
-	use std::sync::Arc;
-	let fixture = Fixture::new(1);
-	let mut workspace = fixture.open();
-	let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game");
-	let project = runtime::project::ProjectData::load(sample.join("project.json")).unwrap();
-	let mut documents = Vec::new();
-	for entry in project.scenes.iter() {
-		let mut document =
-			runtime::scene_io::load_data(&sample.join("assets").join(entry.asset_path()))
-				.unwrap()
-				.data;
-		// Coincident markers exercise the entire objective route without GPU/input timing.
-		if matches!(entry.id().as_str(), "courtyard" | "finish") {
-			for entity in &mut document.entities {
-				entity.transform.position = [0.0; 3];
-			}
-		}
-		documents.push((entry.id().clone(), document));
-	}
-	let startup = documents
-		.iter()
-		.find(|(id, _)| id == &project.startup_scene_id)
-		.unwrap()
-		.1
-		.clone();
-	documents.retain(|(id, _)| id != &project.startup_scene_id);
-	workspace.backend = runtime::EngineBuilder::new(startup, project)
-		.with_scenes(documents)
-		.module_resolver(Arc::new(courtyard_gameplay::resolve))
-		.build()
-		.unwrap();
-	let mut controller = controller(&mut workspace);
-	assert!(controller.state().game_status.is_none());
-	command(&mut workspace, Command::StartPlay);
-	controller.sync(&mut workspace).unwrap();
-	let first = controller.state().game_status.unwrap();
-	assert_eq!(first.gameplay.as_ref().unwrap().score, Some(0));
-	let author_revision = workspace.backend.session().revision();
-	let before = controller.revision();
-	let outcome = workspace.backend.tick(1.0 / 60.0);
-	controller.sync_game_status_after_tick(&workspace, &outcome);
-	let outcome = outcome.unwrap();
-	// Coincident authored sensors collect the key, publish its visual feedback,
-	// and request the unlocked exit in the same accepted step.
-	assert!(outcome.progress_changed && !outcome.changes.is_empty());
-	assert_eq!(outcome.requested_scene.unwrap().as_str(), "finish");
-	assert!(controller.state().revision > before);
-	assert_eq!(
-		controller
-			.state()
-			.game_status
-			.unwrap()
-			.gameplay
-			.unwrap()
-			.score,
-		Some(1)
-	);
-	assert!(!controller.take_document_changed());
-	assert_eq!(
-		controller
-			.state()
-			.game_status
-			.unwrap()
-			.pending_scene_id
-			.unwrap()
-			.as_str(),
-		"finish"
-	);
-	let (prepared, _) = workspace.backend.prepare_pending_play_scene().unwrap();
-	workspace.backend.commit_play_scene(prepared).unwrap();
-	controller.sync_game_status(&workspace);
-	let transitioned = controller.state().game_status.unwrap();
-	assert_eq!(transitioned.scene_id.as_str(), "finish");
-	assert!(transitioned.pending_scene_id.is_none());
-	let outcome = workspace.backend.tick(1.0 / 60.0);
-	controller.sync_game_status_after_tick(&workspace, &outcome);
-	let outcome = outcome.unwrap();
-	assert!(outcome.progress_changed && outcome.changes.is_empty());
-	let completed = controller.state();
-	assert!(completed.game_status.unwrap().gameplay.unwrap().completed);
-	assert!(!workspace.backend.session().needs_tick());
-	assert_eq!(workspace.backend.session().revision(), author_revision);
-	assert!(!controller.take_document_changed());
-	controller.sync(&mut workspace).unwrap();
-	assert_eq!(
-		controller.revision(),
-		completed.revision,
-		"idle status is deduplicated"
-	);
-	let (prepared, _) = workspace
-		.backend
-		.prepare_restart_play(&first.run_id, author_revision)
-		.unwrap();
-	workspace.backend.commit_play_scene(prepared).unwrap();
-	controller.sync_game_status(&workspace);
-	let restarted = controller.state().game_status.unwrap();
-	assert_eq!(restarted.play_session_id, first.play_session_id);
-	assert_ne!(restarted.run_id, first.run_id);
-	assert_eq!(restarted.scene_id.as_str(), "courtyard");
-	assert_eq!(restarted.gameplay.unwrap().score, Some(0));
-	assert!(controller.state().revision > completed.revision);
-	command(&mut workspace, Command::SetPaused { paused: true });
-	controller.sync(&mut workspace).unwrap();
-	assert!(controller.state().game_status.unwrap().paused);
-	command(&mut workspace, Command::StopPlay);
-	command(&mut workspace, Command::StartPlay);
-	// Simulates Stop/Start both arriving between worker wakes.
-	controller.sync(&mut workspace).unwrap();
-	assert_ne!(
-		controller.state().game_status.unwrap().play_session_id,
-		first.play_session_id
-	);
-	command(&mut workspace, Command::StopPlay);
-	controller.sync(&mut workspace).unwrap();
-	assert!(controller.state().game_status.is_none());
-}
-
-#[test]
 fn game_status_projects_only_on_changes_during_steady_ticks() {
-	use courtyard_gameplay::{CampaignProgress, ProgressAction as CampaignAction};
+	#[derive(Clone, PartialEq)]
+	struct TestProgress(i32);
+	impl runtime::game_progress::GameProgress for TestProgress {
+		type Action = i32;
+
+		fn validate(&self) -> Result<(), String> {
+			Ok(())
+		}
+
+		fn retained_bytes(&self) -> usize {
+			std::mem::size_of::<Self>()
+		}
+
+		fn action_bytes(_: &Self::Action) -> usize {
+			std::mem::size_of::<i32>()
+		}
+
+		fn apply(&mut self, action: &Self::Action) -> Result<(), String> {
+			self.0 += action;
+			Ok(())
+		}
+	}
 	use runtime::{
 		game_progress::{ProgressAction, ProgressState, ProgressView},
 		project::ProjectData,
@@ -138,7 +40,7 @@ fn game_status_projects_only_on_changes_during_steady_ticks() {
 	struct CountedStatus(Arc<AtomicU64>);
 	impl GameModuleFactory for CountedStatus {
 		fn create_progress(&self) -> Result<ProgressState, String> {
-			ProgressState::new(CampaignProgress::default())
+			ProgressState::new(TestProgress(0))
 		}
 		fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
 			Ok(Box::new(self.clone()))
@@ -173,8 +75,8 @@ fn game_status_projects_only_on_changes_during_steady_ticks() {
 				objective: "Test objective".into(),
 				detail: None,
 				score: progress
-					.get::<CampaignProgress>()
-					.map(|progress| progress.score),
+					.get::<TestProgress>()
+					.map(|progress| progress.0),
 				completed: false,
 			})
 		}
@@ -204,7 +106,7 @@ fn game_status_projects_only_on_changes_during_steady_ticks() {
 	assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 	let award =
-		ProgressAction::new::<CampaignProgress>(CampaignAction::AwardScore { amount: 2 }).unwrap();
+		ProgressAction::new::<TestProgress>(2).unwrap();
 	workspace.backend.apply_play_progress(&[award]).unwrap();
 	controller.sync(&mut workspace).unwrap();
 	let status = controller.state().game_status.unwrap();

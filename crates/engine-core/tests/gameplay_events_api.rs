@@ -32,7 +32,7 @@ fn fixture() -> (ProjectData, Arc<SceneData>) {
 	))
 	.unwrap();
 	let project =
-		ProjectData::from_json(include_str!("../../../apps/game/event-demo.json")).unwrap();
+		ProjectData::from_json(&test_project::manifest("event-lab")).unwrap();
 	(project, Arc::new(data))
 }
 fn step(session: &mut SimulationSession) {
@@ -234,7 +234,7 @@ fn character_fixture() -> (ProjectData, Arc<SceneData>) {
 	))
 	.unwrap();
 	let project =
-		ProjectData::from_json(include_str!("../../../apps/game/controller-demo.json")).unwrap();
+		ProjectData::from_json(&test_project::manifest("controller-room")).unwrap();
 	let owner = data
 		.entities
 		.iter_mut()
@@ -309,3 +309,6 @@ fn native_replay_distinguishes_hidden_inbox_changes_and_normalizes_random_world_
 		"a-door"
 	);
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

@@ -125,7 +125,6 @@ dependencies = [
  "bridge",
  "commands",
  "compiler",
- "courtyard-gameplay",
  "engine-logger",
  "gameplay-catalog",
  "glam",
@@ -646,7 +645,6 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "bridge",
- "courtyard-gameplay",
  "engine-core",
  "engine-logger",
  "gameplay-catalog",
@@ -748,17 +746,6 @@ dependencies = [
  "bitflags 2.13.1",
  "core-foundation 0.10.1",
  "libc",
-]
-
-[[package]]
-name = "courtyard-gameplay"
-version = "0.1.0"
-dependencies = [
- "engine-core",
- "engine-logger",
- "serde",
- "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -1175,7 +1162,6 @@ version = "0.1.0"
 dependencies = [
  "bridge",
  "compiler",
- "courtyard-gameplay",
  "engine-core",
  "engine-logger",
  "gameplay-catalog",
@@ -1458,7 +1444,6 @@ name = "game"
 version = "0.1.0"
 dependencies = [
  "bridge",
- "courtyard-gameplay",
  "engine-logger",
  "gameplay-catalog",
  "glam",
@@ -1479,7 +1464,6 @@ name = "gameplay-catalog"
 version = "0.1.0"
 dependencies = [
  "cinder-oath-gameplay",
- "courtyard-gameplay",
  "engine-core",
 ]
 

@@ -123,117 +123,22 @@ fn orbit_player() -> (GameApp, [EntityId; 2]) {
 }
 
 #[test]
-fn completed_player_stops_debug_rewards_and_motion_but_keeps_restart_available() {
-	let (mut app, [player, exit]) = fixture();
-	let mut project = app.editor.project().unwrap().clone();
-	project.gameplay_module = Some(progress::COURTYARD_RUN_ID.into());
-	let key = app
-		.scene
-		.spawn_keyed_model(
-			EntityKey::new("course-key").unwrap(),
-			"Key",
-			"props/robot.glb",
-			ModelInstance::new(
-				Arc::new(Model::new(Vec::new())),
-				Transform {
-					position: [100.0, 0.0, 0.0],
-					..Default::default()
-				},
-			),
-		)
-		.unwrap();
-	app.scene.set_binding("player", player).unwrap();
-	app.scene.set_binding("key", key).unwrap();
-	app.scene.set_binding("exit", exit).unwrap();
-	project
-		.scenes
-		.insert(
-			runtime::scene_catalog::SceneDescriptor::new(
-				SceneId::new("finish").unwrap(),
-				"scenes/finish.json",
-			)
-			.unwrap(),
-		)
-		.unwrap();
-	project.input_profile = Some(InputProfile {
-		actions: vec![runtime::input::GameInputBinding {
-			id: "interact".into(),
-			key: Key::F10,
-			animation_parameter: None,
-		}],
-		..InputProfile::default()
-	});
-	app.editor = SceneEditor::for_project(&app.scene, &app.camera, project).unwrap();
-	app.editor
-		.set_module_resolver(Arc::new(progress::resolve))
-		.unwrap();
-	app.editor.start_play(&mut app.scene).unwrap();
-	app.standalone_runtime = true;
-	app.input.reset();
-	app.input.press(Key::F10);
-	app.update_player(1.0 / 60.0);
-	assert!(
-		!app.play_update_error_reported,
-		"F10 belongs to gameplay before completion"
-	);
-	assert!(!app.game_completed());
-	app.input.reset();
-	for action in [
-		progress::ProgressAction::CollectCourtyardKey,
-		progress::ProgressAction::ReachCourtyardExit,
-		progress::ProgressAction::CompleteRun,
-	] {
-		app.editor
-			.apply_play_progress(&[runtime::game_progress::ProgressAction::new::<
-				progress::CampaignProgress,
-			>(action)
-			.unwrap()])
-			.unwrap();
-	}
-	app.update_selection_title();
-	assert!(app.last_window_title.contains("Complete! F10 to restart"));
-	assert!(app.last_window_title.contains("Score: 1"));
-	let completed_scene = snapshot(&app);
-	let camera = app.camera.position;
-	for key in [Key::D, Key::ArrowRight, Key::F7, Key::F8] {
-		app.input.press(key);
-	}
-	app.update_player(0.1);
-	assert_eq!(snapshot(&app), completed_scene);
-	assert_eq!(app.camera.position, camera);
-	assert_eq!(
-		app.editor
-			.play_progress::<progress::CampaignProgress>()
-			.unwrap()
-			.score,
-		1
-	);
-	assert!(!app.needs_continuous_redraw());
-	assert!(!app.play_update_error_reported);
-
-	// No GPU/asset root in this fixture: a failed restart must keep the ending.
-	// The attempted load proves the advertised key overrides its game binding.
-	app.input.reset();
-	app.input.press(Key::F10);
-	app.update_player(0.1);
-	assert!(app.play_update_error_reported);
-	assert!(app.game_completed());
-	assert_eq!(snapshot(&app), completed_scene);
-}
-
-#[test]
 fn helpers_report_missing_configuration_without_mutating_live_state() {
 	let directory = TestDirectory::new();
 	let (mut app, _) = fixture();
 	let before = snapshot(&app);
 	assert!(app.save_scene().unwrap_err().contains("Scene path"));
-	assert!(app.reload_scene().unwrap_err().contains("Scene path"));
-	app.scene_path = Some(directory.0.join("robots.json"));
 	assert!(app.reload_scene().unwrap_err().contains("Asset root"));
 	app.asset_root = Some(directory.0.clone());
+	let project = app.project.take().unwrap();
+	assert!(app.reload_scene().unwrap_err().contains("Project configuration"));
+	let scene_path = directory.0.join(project.startup_scene_path().unwrap());
+	fs::create_dir_all(scene_path.parent().unwrap()).unwrap();
+	fs::write(&scene_path, &before).unwrap();
+	app.project = Some(project);
 	assert!(app.reload_scene().unwrap_err().contains("Renderer"));
 	assert_eq!(snapshot(&app), before);
-	assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+	assert_eq!(fs::read_to_string(&scene_path).unwrap(), before);
 }
 
 #[test]
@@ -267,66 +172,8 @@ fn installed_player_ignores_authoring_shortcuts_while_simulation_and_camera_cont
 }
 
 #[test]
-fn prepare_editor_migrates_legacy_roles_and_accepts_generic_scenes() {
-	fn loaded(version: u32) -> scene_io::LoadedScene {
-		let model = Arc::new(Model::new(Vec::new()));
-		let mut scene = Scene::default();
-		let ids = ["legacy-entity-0", "legacy-entity-1"].map(|key| {
-			scene
-				.spawn_keyed_model(
-					EntityKey::new(key).unwrap(),
-					"Same label",
-					"props/robot.glb",
-					ModelInstance::new(Arc::clone(&model), Transform::default()),
-				)
-				.unwrap()
-		});
-		scene_io::LoadedScene {
-			scene,
-			assets: AssetManager::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"))
-				.unwrap(),
-			camera: Camera::default(),
-			entity_ids: ids.into(),
-			source_schema_version: version,
-		}
-	}
-	let mut legacy = loaded(1);
-	GameApp::prepare_editor(&mut legacy).unwrap();
-	assert_eq!(legacy.scene.binding("robot_a"), Some(legacy.entity_ids[0]));
-	assert_eq!(legacy.scene.binding("robot_b"), Some(legacy.entity_ids[1]));
-	assert_eq!(
-		legacy.scene.to_data(&legacy.camera).unwrap().schema_version,
-		runtime::scene_data::CURRENT_SCHEMA_VERSION
-	);
-	let mut current = loaded(2);
-	GameApp::prepare_editor(&mut current).unwrap();
-	assert_eq!(current.scene.binding("robot_a"), None);
-	current
-		.scene
-		.set_binding("robot_a", current.entity_ids[1])
-		.unwrap();
-	current
-		.scene
-		.set_binding("robot_b", current.entity_ids[0])
-		.unwrap();
-	GameApp::prepare_editor(&mut current).unwrap();
-	assert_eq!(
-		current.scene.binding("robot_a"),
-		Some(current.entity_ids[1])
-	);
-	let mut incomplete = loaded(1);
-	incomplete.entity_ids.pop();
-	GameApp::prepare_editor(&mut incomplete).unwrap();
-	assert_eq!(incomplete.scene.binding("robot_a"), None);
-}
-
-#[test]
 fn structural_shortcuts_obey_priority_consume_the_frame_and_reset_the_clock() {
-	for (keys, expected_count) in [
-		(vec![Key::Delete, Key::C, Key::N], 1), // Delete wins even for a bound demo entity.
-		(vec![Key::C, Key::N], 3),
-		(vec![Key::N], 3),
-	] {
+	for (keys, expected_count) in [(vec![Key::Delete, Key::C], 1), (vec![Key::C], 3)] {
 		let (mut app, _) = fixture();
 		let start = prime_clock(&mut app);
 		for key in keys {
@@ -353,7 +200,7 @@ fn save_has_priority_over_structural_commands_and_keeps_the_original_entity_list
 	app.scene_path = Some(path.clone());
 	app.project_path = Some(directory.0.join("project.json"));
 	let before = snapshot(&app);
-	for key in [Key::F5, Key::Delete, Key::C, Key::N] {
+	for key in [Key::F5, Key::Delete, Key::C] {
 		app.input.press(key);
 	}
 	app.update(1.0);
@@ -492,7 +339,7 @@ fn f6_is_edge_triggered_resets_input_clock_and_blocks_structural_edits_during_pl
 		Duration::ZERO
 	);
 	assert!(!app.input.is_held(Key::F6));
-	for key in [Key::Delete, Key::C, Key::N] {
+	for key in [Key::Delete, Key::C] {
 		let before = snapshot(&app);
 		press(&mut app, &[key], 1.0);
 		assert_eq!(snapshot(&app), before);
@@ -1033,150 +880,6 @@ fn development_stop_after_a_scene_transition_restores_authored_topology_and_undo
 	assert!(app.editor.play_scene_id().is_none());
 	press(&mut app, &[Key::ControlLeft, Key::Z], 0.0);
 	assert_eq!(snapshot(&app), before_delete);
-}
-
-#[cfg(windows)]
-#[test]
-#[ignore = "requires native Vulkan and a window server"]
-#[allow(clippy::field_reassign_with_default)]
-fn player_scene_transitions_reuse_gpu_assets_and_rejected_scenes_preserve_the_run() {
-	use winit::platform::windows::EventLoopBuilderExtWindows;
-
-	#[derive(Default)]
-	struct NativeCacheCheck {
-		completed: bool,
-	}
-	impl ApplicationHandler for NativeCacheCheck {
-		fn resumed(&mut self, events: &ActiveEventLoop) {
-			let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-			let fixture = TestDirectory::new();
-			let asset_root = fixture.0.join("assets");
-			for directory in ["props", "scenes"] {
-				fs::create_dir_all(asset_root.join(directory)).unwrap();
-			}
-			for file in [
-				"props/capsule.glb",
-				"props/cube.glb",
-				"props/sphere.glb",
-				"scenes/courtyard.json",
-				"scenes/finish.json",
-			] {
-				fs::copy(root.join("assets").join(file), asset_root.join(file)).unwrap();
-			}
-			fs::copy(
-				asset_root.join("props/capsule.glb"),
-				asset_root.join("props/candidate.glb"),
-			)
-			.unwrap();
-			let mut rejected = scene_io::load_data(&asset_root.join("scenes/finish.json"))
-				.unwrap()
-				.data;
-			rejected.entities[0].model_path = "props/candidate.glb".into();
-			rejected.entities[1].model_path = "props/missing.glb".into();
-			scene_io::save_data(&asset_root.join("scenes/rejected.json"), &rejected).unwrap();
-			let mut project = ProjectData::load(root.join("project.json")).unwrap();
-			project
-				.scenes
-				.insert(
-					runtime::scene_catalog::SceneDescriptor::new(
-						SceneId::new("rejected").unwrap(),
-						"scenes/rejected.json",
-					)
-					.unwrap(),
-				)
-				.unwrap();
-			let startup_path = asset_root.join(project.startup_scene_path().unwrap());
-			let window = Arc::new(
-				events
-					.create_window(Window::default_attributes().with_visible(false))
-					.unwrap(),
-			);
-			let size = window.inner_size();
-			let renderer =
-				WindowRenderer::new(Arc::clone(&window), size.width, size.height).unwrap();
-			let mut loaded = scene_io::load(&startup_path, &asset_root, &renderer).unwrap();
-			let mut editor = GameApp::prepare_editor(&mut loaded).unwrap();
-			editor.set_initial_project(project).unwrap();
-			editor
-				.set_module_resolver(Arc::new(progress::resolve))
-				.unwrap();
-			editor.start_play(&mut loaded.scene).unwrap();
-			let mut app = GameApp::default();
-			app.scene = loaded.scene;
-			app.camera = loaded.camera;
-			app.editor = editor;
-			app.asset_manager = Some(loaded.assets);
-			app.renderer = Some(renderer);
-			app.window = Some(window);
-			app.asset_root = Some(asset_root);
-			app.scene_path = Some(startup_path);
-			app.standalone_runtime = true;
-			let original = app
-				.asset_manager
-				.as_mut()
-				.unwrap()
-				.load_model_mesh(app.renderer.as_ref().unwrap(), "props/capsule.glb", 0)
-				.unwrap();
-			let created = app
-				.renderer
-				.as_ref()
-				.unwrap()
-				.resource_metrics()
-				.map(|metrics| metrics.totals.created_resources);
-			app.restart_player_game().unwrap();
-			app.switch_player_scene(SceneId::new("finish").unwrap())
-				.unwrap();
-			let reused = app
-				.asset_manager
-				.as_mut()
-				.unwrap()
-				.load_model_mesh(app.renderer.as_ref().unwrap(), "props/capsule.glb", 0)
-				.unwrap();
-			assert!(Arc::ptr_eq(&original, &reused));
-			assert_eq!(
-				app.renderer
-					.as_ref()
-					.unwrap()
-					.resource_metrics()
-					.map(|metrics| metrics.totals.created_resources),
-				created,
-				"restart and transition to shared assets must avoid new GPU allocations"
-			);
-			let scene = app.editor.play_scene_id().cloned();
-			let data = snapshot(&app);
-			let resources = app.asset_manager.as_ref().unwrap().gpu_resource_count();
-			assert!(
-				app.switch_player_scene(SceneId::new("rejected").unwrap())
-					.is_err()
-			);
-			assert_eq!(app.editor.play_scene_id(), scene.as_ref());
-			assert_eq!(snapshot(&app), data);
-			assert_eq!(
-				app.asset_manager.as_ref().unwrap().gpu_resource_count(),
-				resources,
-				"a partial failed candidate must release its unique GPU assets"
-			);
-			drop(original);
-			drop(reused);
-			drop(app);
-			self.completed = true;
-			events.exit();
-		}
-		fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
-	}
-	let mut config = engine_logger::Config::new("native-asset-cache-test");
-	config.console = false;
-	let _logging = engine_logger::init(config).unwrap();
-	let events = EventLoop::builder().with_any_thread(true).build().unwrap();
-	let mut check = NativeCacheCheck::default();
-	events.run_app(&mut check).unwrap();
-	assert!(check.completed);
-	assert!(
-		!engine_logger::snapshot(Default::default())
-			.entries
-			.iter()
-			.any(|entry| entry.level == engine_logger::Level::Error)
-	);
 }
 
 #[path = "tests_app_scene_io/camera_input.rs"]

@@ -12,10 +12,7 @@ impl Fixture {
 		for directory in ["assets/scenes", "assets/characters", "assets/props"] {
 			fs::create_dir_all(root.join(directory)).unwrap();
 		}
-		fs::copy(
-			repository.join("apps/game/animation-demo.json"),
-			root.join("project.json"),
-		)
+		fs::write(root.join("project.json"), test_project::manifest("animation-room"))
 		.unwrap();
 		for file in [
 			"asset-catalog.json",
@@ -114,3 +111,6 @@ fn revision_generation_and_replacement_tokens_invalidate_preview() {
 	assert!(workspace.active_animation_preview().is_none());
 	assert!(workspace.sample_animation_preview(&next.token, 0.).is_err());
 }
+
+#[path = "../../../../../tests/support/project_fixture.rs"]
+mod test_project;

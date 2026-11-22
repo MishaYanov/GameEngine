@@ -176,7 +176,7 @@ fn representative_native_scene_performance_baseline() {
 }
 
 #[test]
-#[ignore = "requires Windows Vulkan and the authored courtyard fixture"]
+#[ignore = "requires Windows Vulkan and the camera room scene fixture"]
 fn native_prepared_scene_references_preserve_scene_and_geometry() {
 	use renderer::{DrawStatus, vulkan::DrawMetrics};
 	use runtime::{
@@ -229,18 +229,18 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 	impl ApplicationHandler for ReferenceProbe {
 		fn resumed(&mut self, events: &ActiveEventLoop) {
 			let asset_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
-			let path = asset_root.join("scenes/courtyard-release-learning.json");
+			let path = asset_root.join("scenes/camera-room.json");
 			let authored = Arc::new(scene_io::load_data(&path).unwrap().data);
 			let references = PreparedSceneReferences::build(Arc::clone(&authored), || false)
 				.unwrap()
-				.expect("The courtyard fits the warming budget");
+				.expect("The camera room fits the warming budget");
 			assert!(references.matches(&authored));
 
 			let mut revised = (*authored).clone();
 			let player = revised
 				.entities
 				.iter_mut()
-				.find(|entity| entity.key.as_str() == "courtyard-player")
+				.find(|entity| entity.key.as_str() == "player-visual")
 				.unwrap();
 			assert_eq!(player.model_path, "props/capsule.glb");
 			player.model_path = "props/cube.glb".into();
@@ -443,91 +443,4 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 	let mut probe = ReferenceProbe::default();
 	events.run_app(&mut probe).unwrap();
 	assert!(probe.completed);
-}
-
-#[test]
-#[ignore = "requires Windows Vulkan and an authored two-chapter manifest"]
-fn chapter_scene_prefetch_native_probe() {
-	struct PrefetchProbe {
-		manifest: PathBuf,
-		enabled: bool,
-		completed: bool,
-	}
-
-	impl ApplicationHandler for PrefetchProbe {
-		#[allow(clippy::field_reassign_with_default)]
-		fn resumed(&mut self, events: &ActiveEventLoop) {
-			let project = ProjectData::load(&self.manifest).unwrap();
-			let asset_root = self.manifest.parent().unwrap().join("assets");
-			let window = Arc::new(
-				events
-					.create_window(
-						Window::default_attributes()
-							.with_visible(false)
-							.with_inner_size(winit::dpi::PhysicalSize::new(1280, 720)),
-					)
-					.unwrap(),
-			);
-			let mut app = GameApp::default();
-			app.project = Some(project);
-			app.project_path = Some(self.manifest.clone());
-			app.installed_project = true;
-			app.standalone_runtime = true;
-			app.smoke_test = true;
-			app.smoke_prefetch_probe = true;
-			app.scene_prefetch_enabled = self.enabled;
-			app.initialize_window(window, asset_root).unwrap();
-			assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
-			app.exercise_scene_loads(32).unwrap();
-			app.wait_for_gpu().unwrap();
-			self.completed = true;
-			events.exit();
-		}
-
-		fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
-	}
-
-	let manifest = PathBuf::from(
-		std::env::var_os("GAME_ENGINE_QA_PREFETCH_PROJECT")
-			.expect("Set path to a chaptered project.json"),
-	);
-	let output = PathBuf::from(
-		std::env::var_os("GAME_ENGINE_QA_PREFETCH_LOG").expect("Set an unused JSONL output path"),
-	);
-	let enabled = std::env::var("GAME_ENGINE_QA_PREFETCH_ENABLED").as_deref() == Ok("1");
-	let mut config = engine_logger::Config::new("native-chapter-prefetch-benchmark");
-	config.console = false;
-	let _logging = engine_logger::init(config).unwrap();
-	let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
-	let mut probe = PrefetchProbe {
-		manifest,
-		enabled,
-		completed: false,
-	};
-	event_loop.run_app(&mut probe).unwrap();
-	assert!(probe.completed);
-
-	use std::io::Write;
-	let mut file = std::io::BufWriter::new(
-		std::fs::OpenOptions::new()
-			.create_new(true)
-			.write(true)
-			.open(output)
-			.unwrap(),
-	);
-	let history = engine_logger::snapshot(engine_logger::SnapshotRequest {
-		limit: 2000,
-		..Default::default()
-	});
-	assert!(
-		!history.history_gap && !history.has_more,
-		"incomplete benchmark log"
-	);
-	for entry in history.entries {
-		if matches!(entry.component.as_str(), "scene_load" | "scene_prefetch") {
-			serde_json::to_writer(&mut file, &entry).unwrap();
-			file.write_all(b"\n").unwrap();
-		}
-	}
-	file.flush().unwrap();
 }

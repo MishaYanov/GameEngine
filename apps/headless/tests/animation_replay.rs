@@ -31,7 +31,8 @@ fn run(path: &std::path::Path, actions: &[Value]) -> Value {
 		serde_json::to_vec(&json!({"schema_version":1,"actions":actions})).unwrap(),
 	)
 	.unwrap();
-	let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game/animation-demo.json");
+	let fixture = test_project::ProjectFixture::new("animation-room");
+	let project = fixture.manifest_path();
 	let output = Command::new(env!("CARGO_BIN_EXE_engine-headless"))
 		.arg("--project")
 		.arg(project)
@@ -156,3 +157,6 @@ fn edit_mode_reports_null_native_state_and_help_describes_cpu_animation_decoding
 	assert!(text.contains("No GPU or window"));
 	assert!(text.contains("opaque"));
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

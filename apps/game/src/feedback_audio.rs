@@ -1,4 +1,4 @@
-//! Prepared audio for committed gameplay cues and Player Controls auditions.
+//! Prepared project cue audio for Player Controls auditions.
 use bridge::feedback_audio::{CueClip, FeedbackBus, FeedbackCue, PreparedCueCatalog};
 use runtime::scene_catalog::SceneId;
 #[cfg(windows)]
@@ -12,27 +12,6 @@ use std::{
 };
 
 use super::player_controls::FeedbackMix;
-
-static GATE_TONE: &[u8] = include_bytes!("gate-open.wav");
-
-#[derive(Clone, Copy)]
-pub(super) struct Facts {
-	pub key: bool,
-	pub gate: bool,
-	pub complete: bool,
-}
-
-impl Facts {
-	pub fn rising(self, after: Self) -> impl Iterator<Item = FeedbackCue> {
-		[
-			(!self.key && after.key, FeedbackCue::KeyCollected),
-			(!self.gate && after.gate, FeedbackCue::GateOpened),
-			(!self.complete && after.complete, FeedbackCue::RunCompleted),
-		]
-		.into_iter()
-		.filter_map(|(changed, cue)| changed.then_some(cue))
-	}
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct CueGainFactors {
@@ -56,7 +35,6 @@ impl CueGainFactors {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CueClipSource {
 	Authored,
-	BuiltIn,
 	Missing,
 }
 
@@ -85,7 +63,6 @@ pub(super) struct AuditionScope {
 #[derive(Default)]
 pub(super) struct FeedbackAudio {
 	catalog: Option<PreparedCueCatalog>,
-	legacy_gate: Option<CueClip>,
 	mix: PreparedMix,
 	scene: Option<SceneId>,
 	#[cfg(windows)]
@@ -99,14 +76,10 @@ impl FeedbackAudio {
 		settings: FeedbackMix,
 		startup: &SceneId,
 	) -> Result<Self, String> {
-		let legacy_gate = catalog
-			.is_none()
-			.then(|| CueClip::from_wave(GATE_TONE.to_vec()).expect("embedded PCM must be valid"));
 		#[cfg(not(windows))]
 		let _ = enabled;
 		let mut audio = Self {
 			catalog,
-			legacy_gate,
 			mix: PreparedMix::default(),
 			scene: Some(startup.clone()),
 			#[cfg(windows)]
@@ -116,17 +89,15 @@ impl FeedbackAudio {
 		audio.commit_mix(prepared);
 		#[cfg(windows)]
 		{
-			audio.worker = enabled.then(Worker::start).flatten();
+			audio.worker = (enabled && audio.catalog.is_some())
+				.then(Worker::start)
+				.flatten();
 		}
 		Ok(audio)
 	}
 
 	fn original_clip(&self, cue: FeedbackCue) -> Option<&CueClip> {
-		match &self.catalog {
-			Some(catalog) => catalog.clip(cue),
-			None if cue == FeedbackCue::GateOpened => self.legacy_gate.as_ref(),
-			None => None,
-		}
+		self.catalog.as_ref()?.clip(cue)
 	}
 
 	pub fn prepare_mix(&self, settings: FeedbackMix) -> Result<Option<PreparedMix>, String> {
@@ -192,7 +163,7 @@ impl FeedbackAudio {
 
 	pub fn commit_scene_mix(&mut self, scene: SceneId, prepared: Option<PreparedMix>) {
 		if self.scene.as_ref() != Some(&scene) {
-			self.invalidate_audition();
+			self.invalidate();
 		}
 		self.scene = Some(scene);
 		self.commit_mix(prepared);
@@ -200,23 +171,17 @@ impl FeedbackAudio {
 
 	pub fn commit_mix(&mut self, prepared: Option<PreparedMix>) {
 		if let Some(mix) = prepared {
-			if self.mix.gains != mix.gains {
-				self.invalidate();
-			} else if self.mix.settings != mix.settings {
-				self.invalidate_audition();
-			}
+			self.invalidate();
 			self.mix = mix;
 		}
 	}
 
 	pub fn cue_details(&self, bus: FeedbackBus) -> CueGainDetails {
 		let cue = cue_for_bus(bus);
-		let clip = if self.original_clip(cue).is_none() {
-			CueClipSource::Missing
-		} else if self.catalog.is_some() {
+		let clip = if self.original_clip(cue).is_some() {
 			CueClipSource::Authored
 		} else {
-			CueClipSource::BuiltIn
+			CueClipSource::Missing
 		};
 		CueGainDetails {
 			factors: self.gain_factors(self.mix.settings, self.scene.as_ref(), bus),
@@ -250,43 +215,10 @@ impl FeedbackAudio {
 		self.mix.clips[cue_slot(cue)].as_ref()
 	}
 
-	#[cfg(all(test, windows))]
-	pub(super) fn test_gain(&self, cue: FeedbackCue) -> u8 {
-		self.mix.gains[cue_slot(cue)]
-	}
-
-	#[cfg(all(test, windows))]
-	pub(super) fn test_audition_counts(&self) -> (u64, u64) {
-		let worker = self.worker.as_ref().unwrap();
-		(
-			worker.epochs.auditions_completed.load(Ordering::Acquire),
-			worker.epochs.auditions_played.load(Ordering::Relaxed),
-		)
-	}
-
-	pub fn emit(&self, cue: FeedbackCue) {
-		if let Some(clip) = self.clip(cue) {
-			#[cfg(windows)]
-			if let Some(worker) = &self.worker {
-				worker.enqueue(clip.clone());
-			}
-			#[cfg(not(windows))]
-			let _ = clip;
-		}
-	}
-
 	pub fn invalidate(&self) {
 		#[cfg(windows)]
 		if let Some(worker) = &self.worker {
-			worker.epochs.gameplay.fetch_add(1, Ordering::Release);
-		}
-		self.invalidate_audition();
-	}
-
-	fn invalidate_audition(&self) {
-		#[cfg(windows)]
-		if let Some(worker) = &self.worker {
-			worker.epochs.audition.fetch_add(1, Ordering::Release);
+			worker.epoch.fetch_add(1, Ordering::Release);
 		}
 	}
 }
@@ -326,17 +258,6 @@ impl Drop for FeedbackAudio {
 }
 
 #[cfg(windows)]
-#[derive(Default)]
-struct PlaybackEpochs {
-	gameplay: AtomicU64,
-	audition: AtomicU64,
-	#[cfg(test)]
-	auditions_completed: AtomicU64,
-	#[cfg(test)]
-	auditions_played: AtomicU64,
-}
-
-#[cfg(windows)]
 struct QueuedAudition {
 	epoch: u64,
 	clip: CueClip,
@@ -345,93 +266,50 @@ struct QueuedAudition {
 
 #[cfg(windows)]
 impl QueuedAudition {
-	fn is_current(&self, epochs: &PlaybackEpochs) -> bool {
-		self.epoch == epochs.audition.load(Ordering::Acquire) && self.menu.strong_count() != 0
+	fn is_current(&self, epoch: &AtomicU64) -> bool {
+		self.epoch == epoch.load(Ordering::Acquire) && self.menu.strong_count() != 0
 	}
 }
 
 #[cfg(windows)]
 struct Worker {
-	output: SyncSender<(u64, CueClip)>,
 	auditions: SyncSender<QueuedAudition>,
-	epochs: Arc<PlaybackEpochs>,
-	wake: SyncSender<()>,
+	epoch: Arc<AtomicU64>,
 }
 
 #[cfg(windows)]
 impl Worker {
 	fn start() -> Option<Self> {
-		let (output, input) = sync_channel::<(u64, CueClip)>(4);
 		let (auditions, previews) = sync_channel::<QueuedAudition>(1);
-		let (wake, ready) = sync_channel(1);
-		let epochs = Arc::new(PlaybackEpochs::default());
-		let worker_epochs = Arc::clone(&epochs);
-		let result = thread::Builder::new().name("game-audio".into()).spawn(move || {
-			let mut gameplay_failed = false;
-			let mut audition_failed = false;
-			loop {
-				if let Ok((queued_epoch, clip)) = input.try_recv() {
-					if queued_epoch == worker_epochs.gameplay.load(Ordering::Acquire)
-						&& !play_clip(&clip)
-						&& !gameplay_failed
-					{
-						gameplay_failed = true;
-						engine_logger::warn!(target: "game::audio", "Gameplay audio device did not play the cue");
-					}
-				} else if let Ok(request) = previews.try_recv() {
-					if request.is_current(&worker_epochs) {
-						let played = play_clip(&request.clip);
-						#[cfg(test)]
-						{
-							if played {
-								worker_epochs.auditions_played.fetch_add(1, Ordering::Relaxed);
-							}
-							worker_epochs.auditions_completed.fetch_add(1, Ordering::Release);
-						}
-						if !played && !audition_failed {
-							audition_failed = true;
-							engine_logger::warn!(target: "game::audio", "Audio device did not play the Controls cue test");
-						}
-					}
-				} else if ready.recv().is_err() {
-					// Each submission signals this mailbox; dropping its sender ends playback.
-					break;
+		let epoch = Arc::new(AtomicU64::new(0));
+		let worker_epoch = Arc::clone(&epoch);
+		let result = thread::Builder::new().name("cue-audition".into()).spawn(move || {
+			let mut reported_failure = false;
+			while let Ok(request) = previews.recv() {
+				if request.is_current(&worker_epoch)
+					&& !play_clip(&request.clip)
+					&& !reported_failure
+				{
+					reported_failure = true;
+					engine_logger::warn!(target: "game::audio", "Audio device did not play the Controls cue test");
 				}
 			}
 		});
 		if result.is_err() {
-			engine_logger::warn!(target: "game::audio", "Could not start gameplay audio worker");
+			engine_logger::warn!(target: "game::audio", "Could not start the Controls cue audition worker");
 			return None;
 		}
-		Some(Self {
-			output,
-			auditions,
-			epochs,
-			wake,
-		})
-	}
-
-	fn enqueue(&self, clip: CueClip) {
-		// A stalled device may drop a new cue. Simulation never waits for audio.
-		let epoch = self.epochs.gameplay.load(Ordering::Acquire);
-		if self.output.try_send((epoch, clip)).is_ok() {
-			let _ = self.wake.try_send(());
-		}
+		Some(Self { auditions, epoch })
 	}
 
 	fn enqueue_audition(&self, clip: CueClip, scope: &AuditionScope) -> bool {
-		let queued = self
-			.auditions
+		self.auditions
 			.try_send(QueuedAudition {
-				epoch: self.epochs.audition.load(Ordering::Acquire),
+				epoch: self.epoch.load(Ordering::Acquire),
 				clip,
 				menu: Arc::downgrade(&scope.menu),
 			})
-			.is_ok();
-		if queued {
-			let _ = self.wake.try_send(());
-		}
-		queued
+			.is_ok()
 	}
 }
 

@@ -1,13 +1,27 @@
 <header>
-    <editor-file-menu
-            (exitRequested)="exitRequested.emit()"
-            (openProjectRequested)="openProjectRequested.emit()"
-            (settingsRequested)="settingsRequested.emit()"
-            [canExit]="canExit()"
-            [canOpen]="canOpen()"
-            [canOpenSettings]="canOpenSettings()"
-            [opening]="opening()"
-    />
+    <div class="editor-menus">
+        <editor-file-menu
+                (exitRequested)="exitRequested.emit()"
+                (openProjectRequested)="openProjectRequested.emit()"
+                (settingsRequested)="settingsRequested.emit()"
+                [canExit]="canExit()"
+                [canOpenSettings]="canOpenSettings()"
+                [canOpen]="canOpen()"
+                [opening]="opening()"
+        />
+
+        <button #gameTrigger class="game-trigger" popovertarget="editor-game-menu" type="button">Game</button>
+        <div #gameMenu class="game-menu" id="editor-game-menu" popover>
+            <button
+                    (click)="gameMenu.hidePopover(); gameTrigger.focus(); sceneInformationRequested.emit()"
+                    [disabled]="opening() || !editorService.snapshot()"
+                    aria-haspopup="dialog"
+                    autofocus
+                    type="button"
+            >Scene Information…
+            </button>
+        </div>
+    </div>
 
     <div class="breadcrumb">
         <span class="workspace-label">Workspace</span>
@@ -17,14 +31,8 @@
             {{ editorService.snapshot()?.project?.name ?? 'Editor' }}
         </h1>
 
-        @if (editorService.snapshot(); as snapshot) {
-            <span [title]="snapshot.active_scene_id" class="scene-name">
-                / {{ snapshot.active_scene_id }}
-            </span>
-
-            @if (snapshot.dirty) {
-                <span class="dirty-label">Unsaved changes</span>
-            }
+        @if (editorService.snapshot()?.dirty) {
+            <span class="dirty-label">Unsaved changes</span>
         }
     </div>
 </header>

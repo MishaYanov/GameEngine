@@ -96,7 +96,7 @@ fn replay_action_and_combined_tick_limits_fail_before_running_commands() {
 #[test]
 fn audio_catalog_is_validated_before_headless_reports_are_published() {
 	const KEY_CLIP: &[u8] =
-		include_bytes!("../../../game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+		include_bytes!("../../../../projects/cinder-oath/assets/audio/blade-hit.wav");
 	let fixture = Fixture::new();
 	let initial = success(fixture.command().arg("--steps").arg("0").output().unwrap());
 	let audio = fixture.root.join("assets/audio");

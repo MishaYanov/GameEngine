@@ -21,18 +21,22 @@ impl Fixture {
 		));
 		fs::create_dir(&root).unwrap();
 		let manifest = root.join("project.json");
-		let mut project =
-			ProjectData::from_json(include_str!("../../project.courtyard-chapters.json")).unwrap();
-		project
-			.input_profile
-			.as_mut()
-			.unwrap()
-			.actions
-			.push(GameInputBinding {
+		let mut project = ProjectData::from_json(include_str!(
+			"../../../../projects/cinder-oath/project.json"
+		))
+			.unwrap();
+		project.input_profile.as_mut().unwrap().actions = vec![
+			GameInputBinding {
+				id: "interact".into(),
+				key: Key::E,
+				animation_parameter: None,
+			},
+			GameInputBinding {
 				id: "extra".into(),
 				key: Key::F,
 				animation_parameter: None,
-			});
+			},
+		];
 		fs::write(&manifest, project.to_json().unwrap()).unwrap();
 		Self { root, manifest }
 	}

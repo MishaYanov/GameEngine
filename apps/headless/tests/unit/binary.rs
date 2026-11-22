@@ -6,14 +6,14 @@ use engine_core::{
 	Engine, EngineBuilder,
 	command::{EditorCommandDto, EditorCommandRequest},
 };
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 #[test]
 #[ignore = "local CPU benchmark; run in release with --ignored --nocapture"]
 fn measure_camera_room_fixed_steps() {
-	let game_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
+	let fixture = test_project::ProjectFixture::new("camera-room");
 	let options = Options {
-		project: Some(game_root.join("camera-demo.json")),
+		project: Some(fixture.manifest_path()),
 		..Default::default()
 	};
 	let Source {
@@ -26,7 +26,7 @@ fn measure_camera_room_fixed_steps() {
 	let step = 1.0 / f64::from(project.fixed_hz);
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
-		.module_resolver(Arc::new(courtyard_gameplay::resolve))
+		.module_resolver(Arc::new(gameplay_catalog::resolve))
 		.animation_resolver(Arc::new(move |scene| {
 			bridge::animation_asset::prepare_scene(&asset_root, scene)
 		}))
@@ -92,3 +92,6 @@ fn measure_camera_room_fixed_steps() {
 		samples[299], samples[569], samples[599]
 	);
 }
+
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;

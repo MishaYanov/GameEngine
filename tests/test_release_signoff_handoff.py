@@ -3,6 +3,7 @@
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from io import StringIO
 import json
 import os
@@ -16,7 +17,7 @@ import test_verify_release_signoffs as fixtures
 from release_signoff_handoff import INDEX, Inventory, build_index, compare_handoffs, main, verify_index
 from review_candidate import _json_bytes
 from test_sign_release_review import has_system_ssh_keygen
-from verify_release_signoffs import build_ledger
+from verify_release_signoffs import build_ledger, renewal_checklist
 
 
 class InventoryTests(unittest.TestCase):
@@ -57,7 +58,10 @@ class HandoffTests(unittest.TestCase):
         self.root.mkdir()
         self.policy = self.fixture.args
 
-    def prepare(self, roles, *, passed=True, now=None, reviewed_at=None):
+    def prepare(self, roles, *, passed=True, now=None, reviewed_at=None, dirty=False):
+        if dirty:
+            self.fixture.receipt["source_dirty"] = True
+            self.policy.receipt.write_bytes(_json_bytes(self.fixture.receipt))
         self.fixture.prepare(passed=passed)
         for role, status in roles:
             updates = {"reviewed_at": reviewed_at} if reviewed_at is not None else {}
@@ -176,14 +180,69 @@ class HandoffTests(unittest.TestCase):
             self.cli("compare", prior, relocated, output)
         self.assertEqual(expired.exception.code, 3)
         self.assertFalse(output.exists())
+        with self.assertRaises(SystemExit) as expired:
+            self.cli("summarize", prior, output)
+        self.assertEqual(expired.exception.code, 3)
+        self.assertFalse(output.exists())
         self.assertEqual((prior / INDEX).read_bytes(), original)
 
     def test_current_rejection_and_later_expiration(self):
         self.prepare([("release", "rejected")])
         self.assertEqual(self.cli("publish"), 1)
         self.assertEqual(self.cli("verify"), 1)
+        output = self.fixture.root / "rejected.json"
+        self.assertEqual(self.cli("summarize", self.root, output), 1)
+        self.assertEqual(json.loads(output.read_bytes())["roles"][0]["status"], "rejected")
+        self.policy.ledger = self.fixture.root / "rejection-checklist.json"
+        report = renewal_checklist(self.policy)
+        self.assertEqual(report["status"], "rejected")
+        self.assertEqual(report["roles_requiring_review"], ["qa"])
         with self.assertRaisesRegex(ValueError, "current verified evidence"):
             build_index(self.args(), now=datetime.now(timezone.utc) + timedelta(hours=2))
+
+    def test_renewal_checklist_checks_dirty_candidate_gates_and_current_role_ages(self):
+        archived_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        self.prepare([("release", "held")], passed=False, now=archived_at,
+                     reviewed_at=archived_at.strftime("%Y-%m-%dT%H:%M:%SZ"), dirty=True)
+        output = self.fixture.root / "pending-checklist.json"
+        self.assertEqual(self.fixture.run_cli("checklist", output), 2)
+        report = json.loads(output.read_bytes())
+        self.assertTrue(report["source_dirty"])
+        self.assertEqual(report["status"], "held")
+        self.assertEqual(report["roles_requiring_review"], ["release", "qa"])
+        self.assertEqual([row["status"] for row in report["roles"]], ["expired", "missing"])
+        self.assertEqual(len(report["outstanding_gates"]), 4)
+        self.assertTrue(all(row["status"] == "pending" for row in report["outstanding_gates"]))
+
+    def test_summary_binds_relative_artifacts_after_relocation_and_leaves_inputs_intact(self):
+        self.prepare([("release", "accepted"), ("qa", "accepted")])
+        self.assertEqual(self.cli("publish"), 0)
+        relocated = self.fixture.root / "relocated"
+        shutil.copytree(self.root, relocated)
+        before = {path: path.read_bytes() for path in relocated.rglob("*") if path.is_file()}
+        output = self.fixture.root / "accepted.json"
+        self.assertEqual(self.cli("summarize", relocated, output), 0)
+        result = json.loads(output.read_bytes())
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(result["packet_sha256"], sha256((relocated / "packet.json").read_bytes()).hexdigest())
+        for gate in result["gates"]:
+            self.assertEqual(gate["status"], "passed")
+            evidence, = gate["evidence"]
+            self.assertEqual(evidence["path"], f"evidence/{gate['id']}.log")
+            self.assertEqual(evidence["sha256"], sha256((relocated / evidence["path"]).read_bytes()).hexdigest())
+        self.assertEqual({path: path.read_bytes() for path in relocated.rglob("*") if path.is_file()}, before)
+        with self.assertRaises(SystemExit) as error:
+            self.cli("summarize", relocated, output)
+        self.assertEqual(error.exception.code, 3)
+        with self.assertRaises(SystemExit) as error:
+            self.cli("summarize", relocated, relocated / "inside.json")
+        self.assertEqual(error.exception.code, 3)
+        (relocated / "evidence" / "headless.log").write_bytes(b"changed")
+        invalid = self.fixture.root / "invalid-summary.json"
+        with self.assertRaises(SystemExit) as error:
+            self.cli("summarize", relocated, invalid)
+        self.assertEqual(error.exception.code, 3)
+        self.assertFalse(invalid.exists())
 
     def test_changed_signature_and_host_log_invalidate_current_acceptance(self):
         self.prepare([("release", "accepted"), ("qa", "accepted")])
@@ -208,6 +267,25 @@ class HandoffTests(unittest.TestCase):
         shutil.copyfile(self.policy.allowed_signers, args.allowed_signers)
         with self.assertRaisesRegex(ValueError, "outside the handoff"):
             build_index(args)
+        self.policy.ledger = self.fixture.root / "checklist-outside.json"
+        profiles = self.policy.evidence_dir / "profiles.json"
+        shutil.copyfile(self.policy.profiles, profiles)
+        self.policy.profiles = profiles
+        with self.assertRaisesRegex(ValueError, "outside the handoff and evidence"):
+            renewal_checklist(self.policy)
+        self.assertFalse(self.policy.ledger.exists())
+
+    def test_summary_keeps_a_dirty_candidate_with_missing_gates_held(self):
+        self.prepare([], passed=False, dirty=True)
+        self.assertEqual(self.cli("publish"), 2)
+        output = self.fixture.root / "held.json"
+        self.assertEqual(self.cli("summarize", self.root, output), 2)
+        result = json.loads(output.read_bytes())
+        self.assertTrue(result["source_dirty"])
+        self.assertEqual(result["status"], "held")
+        self.assertTrue(all(row["status"] == "pending" and row["evidence"] == []
+                            for row in result["gates"]))
+        self.assertEqual([row["status"] for row in result["roles"]], ["missing", "missing"])
 
     def test_comparison_checks_trust_against_both_roots_before_verifying(self):
         current = self.fixture.root / "current"

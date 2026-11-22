@@ -39,7 +39,7 @@ fn restart_rechecks_deadline_revision_run_and_stop_after_preparation() {
 	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
 	let assets = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
 	let mut workspace =
-		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
 	let execute = |workspace: &mut EditorWorkspace, command| {
 		workspace
 			.execute_receipt(EditorCommandRequest {
@@ -172,7 +172,7 @@ fn delayed_authored_packet_cannot_install_after_switch_away_and_back() {
 	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
 	let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
 	let mut workspace =
-		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
 	let alternate = SceneId::new("alternate").unwrap();
 	let document = (*workspace.backend.session().authored_document()).clone();
 	workspace

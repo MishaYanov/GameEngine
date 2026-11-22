@@ -1,7 +1,6 @@
 use engine_core::{
 	EntityKey,
-	project::{BehaviorSpec, ProjectData, SceneBehavior},
-	scene_catalog::{SceneDescriptor, SceneId},
+	project::{BehaviorSpec, ProjectData},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData, SceneData, TransformData},
 };
 use serde_json::{Value, json};
@@ -112,48 +111,6 @@ impl Fixture {
 		)
 		.unwrap();
 		path
-	}
-	fn add_finish(&self, project: &mut ProjectData, source: &SceneData) -> SceneData {
-		let id = SceneId::new("finish").unwrap();
-		project
-			.scenes
-			.insert(SceneDescriptor::new(id.clone(), "scenes/finish.json").unwrap())
-			.unwrap();
-		let player = EntityKey::new("finish-player").unwrap();
-		let marker = EntityKey::new("finish-marker").unwrap();
-		let mut finish = source.clone();
-		finish.bindings = [
-			("player".into(), player.clone()),
-			("finish".into(), marker.clone()),
-		]
-		.into();
-		finish.entities = vec![
-			EntityData::new(
-				player.clone(),
-				"Destination player",
-				"models/not-loaded.glb",
-			),
-			EntityData::new(marker, "Finish marker", "models/not-loaded.glb").with_transform(
-				TransformData {
-					position: [1.0, 0.0, 0.0],
-					..Default::default()
-				},
-			),
-		];
-		project.behaviors.push(SceneBehavior {
-			scene_id: id,
-			behavior: BehaviorSpec::ControlledMove {
-				entity: player,
-				speed: 2.0,
-				space: Default::default(),
-			},
-		});
-		fs::write(
-			self.root.join("assets/scenes/finish.json"),
-			finish.to_json().unwrap(),
-		)
-		.unwrap();
-		finish
 	}
 }
 impl Drop for Fixture {
@@ -472,8 +429,6 @@ fn thousand_and_ten_thousand_entity_runs_report_bounded_incremental_work_without
 
 #[path = "cli/camera.rs"]
 mod camera;
-#[path = "cli/campaign.rs"]
-mod campaign;
 #[path = "cli/scenes.rs"]
 mod scenes;
 #[path = "cli/validation.rs"]

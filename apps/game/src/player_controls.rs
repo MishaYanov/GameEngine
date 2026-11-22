@@ -2,6 +2,7 @@
 
 mod action_keys;
 mod audio;
+mod checkpoint_menu;
 #[cfg(any(windows, test))]
 mod controller_menu_input;
 mod display;
@@ -9,14 +10,13 @@ pub(super) mod input_labels;
 pub(crate) mod input_preset;
 mod input_preset_menu;
 mod keyboard_menu;
+mod listening_check;
 mod preferences;
 mod preset_library;
 mod preset_library_menu;
-mod save_menu;
 
 #[cfg(windows)]
 use controller_menu_input::ControllerMenuInput;
-use courtyard_gameplay::checkpoint::ContinueAvailability;
 #[cfg(windows)]
 use runtime::input::PhysicalGamepadSample;
 use runtime::{
@@ -26,15 +26,16 @@ use runtime::{
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use super::{GameApp, feedback_audio::FeedbackAudio};
+use super::{GameApp, feedback_audio::FeedbackAudio, project_sound::ProjectSound};
 use action_keys::ActionKeyOverride;
 pub(crate) use audio::FeedbackMix;
 use audio::{AudioAction, AudioMenu};
-use display::{DisplayAction, DisplayMenu, DisplaySettings};
+use checkpoint_menu::{CheckpointMenu, MenuAction as CheckpointAction};
+use display::{DisplayAction, DisplayMenu};
+pub(super) use display::DisplaySettings;
 use input_preset_menu::{PresetAction, PresetMenu};
 use keyboard_menu::{KeyboardAction, KeyboardMenu};
 use preferences::Preferences;
-use save_menu::{Intent, SaveMenu};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,11 +84,10 @@ enum Row {
 	#[default]
 	Layout,
 	Apply,
-	Save,
-	Continue,
 	Controller,
 	Keyboard,
 	Presets,
+	Checkpoints,
 	Audio,
 	Display,
 	Back,
@@ -95,31 +95,30 @@ enum Row {
 
 impl Row {
 	fn available(
-		checkpoints: bool,
 		presets: bool,
+		checkpoints: bool,
 	) -> impl DoubleEndedIterator<Item = Self> + Clone {
 		[
 			Self::Layout,
 			Self::Apply,
-			Self::Save,
-			Self::Continue,
 			Self::Controller,
 			Self::Keyboard,
 			Self::Presets,
+			Self::Checkpoints,
 			Self::Audio,
 			Self::Display,
 			Self::Back,
 		]
 		.into_iter()
 		.filter(move |row| match row {
-			Self::Save | Self::Continue => checkpoints,
 			Self::Presets => presets,
+			Self::Checkpoints => checkpoints,
 			_ => true,
 		})
 	}
 
-	fn adjacent(self, forward: bool, checkpoints: bool, presets: bool) -> Self {
-		let mut rows = Self::available(checkpoints, presets);
+	fn adjacent(self, forward: bool, presets: bool, checkpoints: bool) -> Self {
+		let mut rows = Self::available(presets, checkpoints);
 		if forward {
 			let first = rows.clone().next().unwrap_or_default();
 			rows.find(|row| *row == self)
@@ -192,15 +191,15 @@ enum Page {
 	Display(DisplayMenu),
 	Keyboard(KeyboardMenu),
 	Presets(Box<PresetMenu>),
+	Checkpoints(Box<CheckpointMenu>),
 	Audio(AudioMenu),
-	Saves(SaveMenu),
 }
 
 struct Menu {
 	focus: Row,
 	draft: Preset,
-	checkpoints: bool,
 	presets: bool,
+	checkpoints: bool,
 	page: Page,
 }
 
@@ -222,13 +221,12 @@ impl PlayerControls {
 	pub(super) fn configure(
 		&mut self,
 		project: Option<&Path>,
-		save_id: Option<&str>,
 		authored: Option<&InputProfile>,
 		override_active: bool,
 	) -> Option<InputProfile> {
 		self.override_active = override_active;
 		let project = project?;
-		let settings = Preferences::for_project(project, save_id);
+		let settings = Preferences::for_project(project);
 		match settings {
 			Ok(preferences) => {
 				let choice = preferences.load();
@@ -297,12 +295,15 @@ impl PlayerControls {
 		self.applied.display
 	}
 
-	pub(super) fn feedback_mix(&self) -> FeedbackMix {
-		self.applied.audio
+	pub(super) fn caption_preview_style(&self) -> Option<renderer::ui::ScreenOverlayStyle> {
+		match &self.menu.as_ref()?.page {
+			Page::Display(display) => display.preview_style(),
+			_ => None,
+		}
 	}
 
-	pub(super) fn prompt_device(&self) -> PromptDevice {
-		self.prompt_device
+	pub(super) fn feedback_mix(&self) -> FeedbackMix {
+		self.applied.audio
 	}
 
 	pub(super) fn set_prompt_device(&mut self, device: PromptDevice) -> bool {
@@ -334,7 +335,7 @@ impl PlayerControls {
 
 	#[cfg(test)]
 	pub(super) fn rows_with_layout(&self, capacity: usize, columns: usize) -> Option<Vec<String>> {
-		self.rows_with_feedback(capacity, columns, &FeedbackAudio::default())
+		self.rows_with_feedback(capacity, columns, &FeedbackAudio::default(), &ProjectSound::default())
 	}
 
 	pub(super) fn rows_with_feedback(
@@ -342,6 +343,7 @@ impl PlayerControls {
 		capacity: usize,
 		columns: usize,
 		audio: &FeedbackAudio,
+		project_sound: &ProjectSound,
 	) -> Option<Vec<String>> {
 		let menu = self.menu.as_ref()?;
 		let (title, actions, focus) = match &menu.page {
@@ -358,8 +360,8 @@ impl PlayerControls {
 			Page::Display(display) => display.rows(),
 			Page::Keyboard(keyboard) => keyboard.rows(columns),
 			Page::Presets(presets) => presets.rows(),
-			Page::Audio(menu) => menu.rows(audio, self.applied.display.cue_captions),
-			Page::Saves(saves) => saves.rows(),
+			Page::Checkpoints(checkpoints) => checkpoints.rows(),
+			Page::Audio(menu) => menu.rows(audio, project_sound, self.applied.audio, self.applied.display.cue_captions),
 			Page::Main => self.main_rows(menu),
 		};
 		let help = if self.captures_action_key() {
@@ -382,18 +384,17 @@ impl PlayerControls {
 		} else {
 			menu.draft.label()
 		};
-		let available = Row::available(menu.checkpoints, menu.presets);
+		let available = Row::available(menu.presets, menu.checkpoints);
 		let rows = available
 			.clone()
 			.map(|row| match row {
 				Row::Layout => format!("Movement: {layout}"),
 				Row::Apply if self.override_active => "Apply disabled".into(),
 				Row::Apply => "Apply".into(),
-				Row::Save => "Save checkpoint".into(),
-				Row::Continue => "Continue from slot".into(),
 				Row::Controller => "Controller".into(),
 				Row::Keyboard => "Keyboard".into(),
 				Row::Presets => "Input presets".into(),
+				Row::Checkpoints => "Cinder Oath Checkpoints".into(),
 				Row::Display => "Accessibility".into(),
 				Row::Audio => "Feedback Audio".into(),
 				Row::Back => "Back".into(),
@@ -475,7 +476,7 @@ impl GameApp {
 		columns: usize,
 	) -> Option<Vec<String>> {
 		self.player_controls
-			.rows_with_feedback(capacity, columns, &self.feedback_audio)
+			.rows_with_feedback(capacity, columns, &self.feedback_audio, &self.project_sound)
 	}
 
 	pub(super) fn player_controls_key(&mut self, key: Key) -> bool {
@@ -512,12 +513,11 @@ impl GameApp {
 		}
 		self.player_controls.menu_device = device;
 		let Some(mut menu) = self.player_controls.menu.take() else {
-			let checkpoints = self.checkpoints.is_some();
 			self.player_controls.menu = Some(Menu {
 				focus: Row::Layout,
 				draft: self.player_controls.applied.movement,
-				checkpoints,
 				presets: self.installed_project && self.project_path.is_some(),
+				checkpoints: self.supports_checkpoint_transfer(),
 				page: Page::Main,
 			});
 			self.clear_controls_input();
@@ -551,6 +551,15 @@ impl GameApp {
 				}
 				false
 			}
+			Page::Checkpoints(checkpoints) => match checkpoints.key(self, key) {
+				CheckpointAction::Stay => false,
+				CheckpointAction::Back => {
+					self.player_controls.message = None;
+					menu.page = Page::Main;
+					false
+				}
+				CheckpointAction::Resume => true,
+			},
 			Page::Display(display) => {
 				if self.display_menu_key(display, key) {
 					menu.page = Page::Main;
@@ -559,12 +568,6 @@ impl GameApp {
 			}
 			Page::Audio(audio) => {
 				if self.audio_menu_key(audio, key) {
-					menu.page = Page::Main;
-				}
-				false
-			}
-			Page::Saves(saves) => {
-				if !saves.key(self, key) {
 					menu.page = Page::Main;
 				}
 				false
@@ -584,9 +587,7 @@ impl GameApp {
 				return true;
 			}
 			Key::ArrowUp | Key::ArrowDown => {
-				menu.focus =
-					menu.focus
-						.adjacent(key == Key::ArrowDown, menu.checkpoints, menu.presets);
+				menu.focus = menu.focus.adjacent(key == Key::ArrowDown, menu.presets, menu.checkpoints);
 			}
 			Key::ArrowLeft | Key::ArrowRight
 				if !self.player_controls.override_active && matches!(menu.focus, Row::Layout) =>
@@ -615,14 +616,6 @@ impl GameApp {
 					}
 					Err(error) => self.player_controls.message = Some(error),
 				}
-			}
-			Key::Enter if matches!(menu.focus, Row::Save) => {
-				self.player_controls.message = None;
-				menu.page = Page::Saves(SaveMenu::new(self, Intent::Save));
-			}
-			Key::Enter if matches!(menu.focus, Row::Continue) => {
-				self.player_controls.message = None;
-				menu.page = Page::Saves(SaveMenu::new(self, Intent::Continue));
 			}
 			Key::Enter if matches!(menu.focus, Row::Controller) => {
 				self.player_controls.message = None;
@@ -658,13 +651,23 @@ impl GameApp {
 				}
 				Err(error) => self.player_controls.message = Some(error),
 			},
+			Key::Enter if matches!(menu.focus, Row::Checkpoints) => match CheckpointMenu::new(self) {
+				Ok(checkpoints) => {
+					self.player_controls.message = None;
+					menu.page = Page::Checkpoints(Box::new(checkpoints));
+				}
+				Err(error) => self.player_controls.message = Some(error),
+			},
 			Key::Enter if matches!(menu.focus, Row::Display) => {
 				self.player_controls.message = None;
 				menu.page = Page::Display(DisplayMenu::new(self.player_controls.display()));
 			}
 			Key::Enter if matches!(menu.focus, Row::Audio) => {
 				self.player_controls.message = None;
-				menu.page = Page::Audio(AudioMenu::new(self.player_controls.feedback_mix()));
+				let cinder = self.project.as_ref().is_some_and(|project| {
+					project.gameplay_module.as_deref() == Some(gameplay_catalog::CINDER_OATH_ID)
+				});
+				menu.page = Page::Audio(AudioMenu::new(self.player_controls.feedback_mix(), cinder));
 			}
 			_ => {}
 		}
@@ -749,7 +752,7 @@ impl GameApp {
 	}
 
 	fn audio_menu_key(&mut self, menu: &mut AudioMenu, key: Key) -> bool {
-		match menu.key(key) {
+		match menu.key(key, &self.project_sound) {
 			AudioAction::Back => {
 				self.player_controls.message = None;
 				true
@@ -763,6 +766,16 @@ impl GameApp {
 					Some(menu.audition(&self.feedback_audio, bus).into());
 				false
 			}
+			AudioAction::ProjectAudition(cue) => {
+				self.project_sound.audition(cue, self.player_controls.feedback_mix(), std::time::Instant::now());
+				false
+			}
+			AudioAction::ResetPreview => {
+				self.project_sound.reset_preview();
+				self.player_controls.message = None;
+				false
+			}
+			AudioAction::CloseCheck => unreachable!("the audio menu consumes its internal back action"),
 			AudioAction::Apply(mix) => {
 				// The running mix changes only once the matching local preferences are saved.
 				match self.feedback_audio.prepare_mix(mix).and_then(|prepared| {
@@ -771,6 +784,7 @@ impl GameApp {
 				}) {
 					Ok(prepared) => {
 						self.feedback_audio.commit_mix(prepared);
+						self.project_sound.reset_preview();
 						self.player_controls.message = Some("Feedback audio saved".into());
 						true
 					}
@@ -871,16 +885,6 @@ fn focused_rows(
 
 fn advance_row(index: usize, count: usize, key: Key) -> usize {
 	(index + if key == Key::ArrowDown { 1 } else { count - 1 }) % count
-}
-
-fn continue_label(availability: ContinueAvailability) -> &'static str {
-	match availability {
-		ContinueAvailability::Empty => "No saved checkpoint",
-		ContinueAvailability::Current => "Ready",
-		ContinueAvailability::CompatibleEarlierRelease => "Earlier release",
-		ContinueAvailability::IncompatibleRelease => "Incompatible with this release",
-		ContinueAvailability::Unreadable => "Unreadable save",
-	}
 }
 
 pub(super) fn validate_profile(profile: &InputProfile) -> Result<(), String> {

@@ -1,4 +1,4 @@
-import type {GameplayModuleDescriptor, GameplayRoleDescriptor} from './editor.models';
+import type {GameplayModuleDescriptor, GameplayRoleDescriptor, SceneId} from './editor.models';
 
 function record(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -6,6 +6,25 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function visibleText(value: unknown): value is string {
     return typeof value === 'string' && value.trim().length > 0 && !/\p{Cc}/u.test(value);
+}
+
+/** Cinder Oath route settings can give the intro and arena custom scene IDs. */
+export function rolesForScene(
+    module: GameplayModuleDescriptor,
+    sceneId: SceneId,
+    settings: unknown,
+): readonly GameplayRoleDescriptor[] {
+    let roleScene = sceneId;
+    if (module.id === 'cinder_oath' && record(settings)) {
+        const intro = settings['intro_scene'];
+        const arena = settings['arena_scene'];
+        if (visibleText(intro) && visibleText(arena) && intro !== arena) {
+            if (sceneId === intro) roleScene = 'intro';
+            else if (sceneId === arena) roleScene = 'arena';
+            else return module.default_roles;
+        }
+    }
+    return Object.hasOwn(module.scene_roles, roleScene) ? module.scene_roles[roleScene] : module.default_roles;
 }
 
 function roles(value: unknown): value is readonly GameplayRoleDescriptor[] {

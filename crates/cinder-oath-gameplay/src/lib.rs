@@ -161,6 +161,15 @@ pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, Stri
 	}))
 }
 
+/// Return the authored intro and its arena for a Cinder Oath project.
+pub fn intro_route(project: &ProjectData) -> Result<Option<(SceneId, SceneId)>, String> {
+	if project.gameplay_module.as_deref() != Some(CINDER_OATH_ID) {
+		return Ok(None);
+	}
+	let settings = Settings::from_project(project)?;
+	Ok(Some((settings.intro_scene, settings.arena_scene)))
+}
+
 pub fn descriptor() -> GameplayModuleDescriptorDto {
 	let roles = |items: &[(&str, &str, &str)]| {
 		items

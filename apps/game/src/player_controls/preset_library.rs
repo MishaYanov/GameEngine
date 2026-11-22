@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const BACKUP_VERSION: u32 = 1;
 const MAX_PRESETS: usize = 8;
 const MAX_LIBRARY_BYTES: usize = 40 * 1024;
@@ -20,8 +20,9 @@ pub(super) const BACKUP_SUFFIX: &str = ".input-library.json";
 #[serde(deny_unknown_fields)]
 pub(super) struct SavedLayout {
 	pub(super) label: String,
-	id: u64,
+	pub(super) id: u64,
 	revision: u64,
+	pub(super) favorite: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -39,17 +40,70 @@ struct Record {
 	entries: Vec<Entry>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyLayout {
+	label: String,
+	id: u64,
+	revision: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyEntry {
+	layout: LegacyLayout,
+	preset: PortablePreset,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRecord {
+	schema_version: u32,
+	next_id: u64,
+	entries: Vec<LegacyEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredRecord {
+	Current(Record),
+	Legacy(LegacyRecord),
+}
+
 impl Record {
 	fn load(path: &Path) -> Result<Self, String> {
-		let Some(bytes) = read_bounded(path, MAX_LIBRARY_BYTES)? else {
+		let bytes = read_bounded(path, MAX_LIBRARY_BYTES)?;
+		Self::decode(bytes.as_deref())
+	}
+
+	fn decode(bytes: Option<&[u8]>) -> Result<Self, String> {
+		let Some(bytes) = bytes else {
 			return Ok(Self::empty());
 		};
-		let record: Self = serde_json::from_slice(&bytes)
+		let stored: StoredRecord = serde_json::from_slice(bytes)
 			.map_err(|error| format!("Saved layouts are invalid: {error}"))?;
-		if record.schema_version != VERSION
-			|| record.next_id == 0
-			|| record.entries.len() > MAX_PRESETS
-		{
+		let record = match stored {
+			StoredRecord::Current(record) if record.schema_version == VERSION => record,
+			StoredRecord::Legacy(record) if record.schema_version == 1 => Self {
+				schema_version: VERSION,
+				next_id: record.next_id,
+				entries: record
+					.entries
+					.into_iter()
+					.map(|entry| Entry {
+						layout: SavedLayout {
+							label: entry.layout.label,
+							id: entry.layout.id,
+							revision: entry.layout.revision,
+							favorite: false,
+						},
+						preset: entry.preset,
+					})
+					.collect(),
+			},
+			_ => return Err("Unsupported saved layout library".into()),
+		};
+		if record.next_id == 0 || record.entries.len() > MAX_PRESETS {
 			return Err("Unsupported saved layout library".into());
 		}
 		for (index, entry) in record.entries.iter().enumerate() {
@@ -87,6 +141,7 @@ impl Record {
 				label,
 				id,
 				revision: 1,
+				favorite: false,
 			},
 			preset,
 		});
@@ -160,36 +215,97 @@ impl LibraryBackup {
 		}
 		Ok((backup, source_sha256))
 	}
-
-	fn split(self, record: &Record) -> (Vec<BackupEntry>, Vec<BackupEntry>) {
-		self.entries.into_iter().partition(|candidate| {
-			record
-				.entries
-				.iter()
-				.all(|entry| entry.layout.label != candidate.label)
-		})
-	}
 }
 
+/// A restore plan owns the editable choices for one exact source and destination.
 #[derive(Debug)]
 pub(super) struct LibraryBackupReview {
 	backup_sha256: [u8; 32],
 	destination_sha256: [u8; 32],
-	pub(super) additions: Vec<String>,
-	pub(super) conflicts: Vec<String>,
+	local_labels: Vec<String>,
+	pub(super) rows: Vec<RestoreRow>,
 	pub(super) available: usize,
+}
+
+#[derive(Debug)]
+pub(super) struct RestoreRow {
+	pub(super) source_label: String,
+	pub(super) conflict: bool,
+	choice: RestoreChoice,
+}
+
+#[derive(Debug)]
+enum RestoreChoice {
+	UseLabel(String),
+	Skip,
+}
+
+impl RestoreRow {
+	pub(super) fn label(&self) -> Option<&str> {
+		match &self.choice {
+			RestoreChoice::UseLabel(label) => Some(label),
+			RestoreChoice::Skip => None,
+		}
+	}
 }
 
 impl LibraryBackupReview {
 	pub(super) fn blocked(&self) -> Option<&'static str> {
-		if self.additions.is_empty() {
+		let count = self.retained();
+		if count == 0 {
 			Some("No new layouts to restore")
-		} else if self.additions.len() > self.available {
+		} else if count > self.available {
 			Some("Library capacity exceeded")
 		} else {
 			None
 		}
 	}
+
+	pub(super) fn retained(&self) -> usize {
+		self.rows.iter().filter(|row| row.label().is_some()).count()
+	}
+
+	pub(super) fn skip(&mut self, index: usize) {
+		self.rows[index].choice = RestoreChoice::Skip;
+	}
+
+	pub(super) fn use_label(&mut self, index: usize, label: &str) -> Result<(), String> {
+		let label = normalize_label(label)?;
+		if !self.label_available(index, &label) {
+			return Err("A local or incoming layout already uses that name".into());
+		}
+		self.rows[index].choice = RestoreChoice::UseLabel(label);
+		Ok(())
+	}
+
+	pub(super) fn suggestion(&self, index: usize) -> String {
+		let base = &self.rows[index].source_label;
+		for suffix in 2..=MAX_PRESETS * 2 + 1 {
+			let suffix = format!(" {suffix}");
+			let stem = base[..base.len().min(MAX_LABEL_BYTES - suffix.len())].trim_end();
+			let candidate = format!("{stem}{suffix}");
+			if self.label_available(index, &candidate) {
+				return candidate;
+			}
+		}
+		// Eight destination labels and seven other proposals leave at least one
+		// of the sixteen candidates above free.
+		unreachable!("bounded layout review exhausted its suggestions")
+	}
+
+	fn label_available(&self, index: usize, label: &str) -> bool {
+		self.local_labels.iter().all(|existing| existing != label)
+			&& self
+			.rows
+			.iter()
+			.enumerate()
+			.all(|(other, row)| other == index || row.label() != Some(label))
+	}
+}
+
+pub(super) enum OrganizeLayout<'a> {
+	SetFavorite(bool),
+	MoveAdjacent(&'a SavedLayout),
 }
 
 pub(super) struct PresetLibrary<'a> {
@@ -202,12 +318,14 @@ impl<'a> PresetLibrary<'a> {
 	}
 
 	pub(super) fn layouts(&self) -> Result<Vec<SavedLayout>, String> {
-		Ok(self
+		let mut layouts: Vec<_> = self
 			.read()?
 			.into_iter()
 			.flat_map(|record| record.entries)
 			.map(|entry| entry.layout)
-			.collect())
+			.collect();
+		layouts.sort_by_key(|layout| !layout.favorite);
+		Ok(layouts)
 	}
 
 	pub(super) fn save(&self, label: &str, preset: PortablePreset) -> Result<(), String> {
@@ -262,15 +380,42 @@ impl<'a> PresetLibrary<'a> {
 		validate: impl Fn(&PortablePreset) -> Result<(), String>,
 	) -> Result<LibraryBackupReview, String> {
 		let (backup, backup_sha256) = LibraryBackup::read(path, &validate)?;
-		let record = self.read()?.unwrap_or_else(Record::empty);
-		let destination_sha256 = self.destination_digest(&record)?;
-		let (additions, conflicts) = backup.split(&record);
+		let bytes = self
+			.preferences
+			.preset_library_path()?
+			.map(|path| read_bounded(&path, MAX_LIBRARY_BYTES))
+			.transpose()?
+			.flatten();
+		let record = Record::decode(bytes.as_deref())?;
+		let destination_sha256 = self.destination_digest(bytes.as_deref())?;
+		let local_labels: Vec<_> = record
+			.entries
+			.into_iter()
+			.map(|entry| entry.layout.label)
+			.collect();
+		let rows = backup
+			.entries
+			.into_iter()
+			.map(|entry| {
+				let conflict = local_labels.contains(&entry.label);
+				let choice = if conflict {
+					RestoreChoice::Skip
+				} else {
+					RestoreChoice::UseLabel(entry.label.clone())
+				};
+				RestoreRow {
+					source_label: entry.label,
+					conflict,
+					choice,
+				}
+			})
+			.collect();
 		Ok(LibraryBackupReview {
 			backup_sha256,
 			destination_sha256,
-			additions: additions.into_iter().map(|entry| entry.label).collect(),
-			conflicts: conflicts.into_iter().map(|entry| entry.label).collect(),
-			available: MAX_PRESETS - record.entries.len(),
+			available: MAX_PRESETS - local_labels.len(),
+			local_labels,
+			rows,
 		})
 	}
 
@@ -284,24 +429,71 @@ impl<'a> PresetLibrary<'a> {
 		if let Some(reason) = review.blocked() {
 			return Err(reason.into());
 		}
-		self.update(|record| {
+		self.update_with_bytes(|record, bytes| {
 			verify_scope()?;
 			let (backup, source_sha256) = LibraryBackup::read(path, &validate)?;
 			if source_sha256 != review.backup_sha256 {
 				return Err("Input library backup changed. Review it again.".into());
 			}
-			if self.destination_digest(record)? != review.destination_sha256 {
+			if self.destination_digest(bytes)? != review.destination_sha256 {
 				return Err("Local saved layouts changed. Review the backup again.".into());
 			}
-			let (additions, _) = backup.split(record);
+			if backup.entries.len() != review.rows.len() {
+				return Err("Backup rows changed. Review the backup again.".into());
+			}
+			let mut additions = Vec::new();
+			for (entry, row) in backup.entries.into_iter().zip(&review.rows) {
+				if entry.label != row.source_label {
+					return Err("Backup rows changed. Review the backup again.".into());
+				}
+				if let Some(label) = row.label() {
+					let label = normalize_label(label)?;
+					record.require_unique_label(&label, None)?;
+					if additions.iter().any(|(other, _)| other == &label) {
+						return Err("Two incoming layouts use the same name".into());
+					}
+					additions.push((label, entry.preset));
+				}
+			}
 			let count = additions.len();
 			if count == 0 || count > MAX_PRESETS - record.entries.len() {
 				return Err("The reviewed layouts no longer fit the local library".into());
 			}
-			for entry in additions {
-				record.insert(entry.label, entry.preset)?;
+			for (label, preset) in additions {
+				record.insert(label, preset)?;
 			}
 			Ok(count)
+		})
+	}
+
+	pub(super) fn organize(
+		&self,
+		reviewed: &SavedLayout,
+		action: OrganizeLayout<'_>,
+	) -> Result<(), String> {
+		self.update(|record| {
+			let index = record.index(reviewed)?;
+			match action {
+				OrganizeLayout::SetFavorite(favorite) => {
+					let layout = &mut record.entries[index].layout;
+					layout.favorite = favorite;
+					layout.advance_revision()?;
+				}
+				OrganizeLayout::MoveAdjacent(neighbor) => {
+					let other = record.index(neighbor)?;
+					if index == other
+						|| reviewed.favorite != neighbor.favorite
+						|| record.entries[index.min(other) + 1..index.max(other)]
+						.iter()
+						.any(|entry| entry.layout.favorite == reviewed.favorite)
+					{
+						return Err("Layout order changed. Review the list again.".into());
+					}
+					record.entries[index].layout.advance_revision()?;
+					record.entries.swap(index, other);
+				}
+			}
+			Ok(())
 		})
 	}
 
@@ -312,10 +504,7 @@ impl<'a> PresetLibrary<'a> {
 			record.require_unique_label(&label, Some(reviewed.id))?;
 			let layout = &mut record.entries[index].layout;
 			if layout.label != label {
-				layout.revision = layout
-					.revision
-					.checked_add(1)
-					.ok_or("Saved layout revision is exhausted")?;
+				layout.advance_revision()?;
 				layout.label = label;
 			}
 			Ok(())
@@ -344,23 +533,41 @@ impl<'a> PresetLibrary<'a> {
 			.transpose()
 	}
 
-	fn destination_digest(&self, record: &Record) -> Result<[u8; 32], String> {
+	fn destination_digest(&self, bytes: Option<&[u8]>) -> Result<[u8; 32], String> {
 		self.preferences
-			.library_review_digest(&encode_library(record)?)
+			.library_review_digest(bytes.unwrap_or_default())
 	}
 
 	fn update<T>(
 		&self,
 		change: impl FnOnce(&mut Record) -> Result<T, String>,
 	) -> Result<T, String> {
+		self.update_with_bytes(|record, _| change(record))
+	}
+
+	fn update_with_bytes<T>(
+		&self,
+		change: impl FnOnce(&mut Record, Option<&[u8]>) -> Result<T, String>,
+	) -> Result<T, String> {
 		self.preferences.with_record_lock(true, |_, controls| {
 			let path = controls.with_extension("preset-library.json");
-			let mut record = Record::load(&path)?;
-			let result = change(&mut record)?;
+			let bytes = read_bounded(&path, MAX_LIBRARY_BYTES)?;
+			let mut record = Record::decode(bytes.as_deref())?;
+			let result = change(&mut record, bytes.as_deref())?;
 			ordinary_file(&path)?;
 			replace_bytes(&path, &encode_library(&record)?)?;
 			Ok(result)
 		})
+	}
+}
+
+impl SavedLayout {
+	fn advance_revision(&mut self) -> Result<(), String> {
+		self.revision = self
+			.revision
+			.checked_add(1)
+			.ok_or("Saved layout revision is exhausted")?;
+		Ok(())
 	}
 }
 

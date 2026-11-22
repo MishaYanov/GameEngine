@@ -14,6 +14,7 @@ export class EditorHeader {
     readonly canExit = input(false);
     readonly opening = input(false);
     readonly openProjectRequested = output<void>();
+    readonly sceneInformationRequested = output<void>();
     readonly settingsRequested = output<void>();
     readonly exitRequested = output<void>();
 

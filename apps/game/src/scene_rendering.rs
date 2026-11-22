@@ -2,8 +2,6 @@ use super::*;
 use gameplay_catalog::cinder_oath::Phase;
 use renderer::ui::{ScreenOverlay, ScreenOverlayLayout};
 
-use super::player_controls::input_labels::compact_key_name;
-
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
 		let result = self.render_frame();
@@ -60,14 +58,22 @@ impl GameApp {
 			.as_ref()
 			.map_or(1.0, |window| window.scale_factor());
 		let display = self.player_controls.display();
-		let style = display.overlay_style();
+		let style = self
+			.player_controls
+			.caption_preview_style()
+			.unwrap_or_else(|| display.overlay_style());
 		let mut hud_rows = Vec::new();
 		if self.standalone_runtime {
 			let capacity = ScreenOverlay::capacity_with_style(content_extent, scale, style);
 			if capacity.rows > 0 {
 				hud_rows = self
 					.player_controls
-					.rows_with_feedback(capacity.rows, capacity.columns, &self.feedback_audio)
+					.rows_with_feedback(
+						capacity.rows,
+						capacity.columns,
+						&self.feedback_audio,
+						&self.project_sound,
+					)
 					.unwrap_or_else(|| {
 						let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
 						if cinder_phase.is_some() {
@@ -78,42 +84,27 @@ impl GameApp {
 							return rows;
 						}
 						if cinder_duel {
-							rows.push(if mouse_captured {
-								"WASD Move  /  Mouse Aim"
-							} else {
-								"Click to aim  /  WASD Move"
-							}.into());
+							rows.push(
+								if mouse_captured {
+									"WASD Move  /  Mouse Aim"
+								} else {
+									"Click to aim  /  WASD Move"
+								}
+									.into(),
+							);
 							rows.push("LMB or F Strike".into());
 						}
 						if cinder_phase == Some(Phase::Defeat) {
 							rows.push("F10 to restart".into());
 						}
-						let mut required = usize::from(!rows.is_empty());
-						if let Some(prompt) = rows
-							.iter()
-							.position(|row| *row == "Use Interact to open the route gate")
-						{
-							rows[prompt] = interact_hint_for_columns(
-								self.input_profile_override
-									.as_ref()
-									.or_else(|| self.project.as_ref()?.input_profile.as_ref()),
-								self.interaction_action.as_deref(),
-								self.player_controls.controller(),
-								self.player_controls.prompt_device(),
-								capacity.columns,
-							);
-							required = (prompt + 1).min(capacity.rows);
-							if prompt >= capacity.rows {
-								rows.swap(capacity.rows - 1, prompt);
-							}
-						}
 						rows.truncate(capacity.rows);
 						if display.cue_captions {
+							let required = usize::from(!rows.is_empty());
 							insert_captions(
 								&mut rows,
 								required,
 								capacity.rows,
-								self.feedback_captions.rows(Instant::now()),
+								self.feedback_captions.rows(Instant::now(), display),
 							);
 						}
 						if rows.len() < capacity.rows
@@ -237,52 +228,6 @@ impl GameApp {
 		match game_rect {
 			Some(rect) => renderer.draw_in_rect(&camera_uniform, &objects, rect.pixels()),
 			None => renderer.draw(&camera_uniform, &objects),
-		}
-	}
-}
-
-#[cfg(test)]
-pub(super) fn interact_hint(
-	profile: Option<&InputProfile>,
-	action: Option<&str>,
-	bindings: runtime::input::ControllerBindings,
-	device: PromptDevice,
-) -> String {
-	interact_hint_for_columns(profile, action, bindings, device, usize::MAX)
-}
-
-fn interact_hint_for_columns(
-	profile: Option<&InputProfile>,
-	action: Option<&str>,
-	bindings: runtime::input::ControllerBindings,
-	device: PromptDevice,
-	columns: usize,
-) -> String {
-	let binding =
-		action.and_then(|action| profile?.actions.iter().find(|binding| binding.id == action));
-	let Some(binding) = binding else {
-		let full = "Interact is unbound in the active profile";
-		return if full.len() <= columns {
-			full
-		} else {
-			"Interact unbound"
-		}
-			.into();
-	};
-	let (key, source) = if device == PromptDevice::Controller && binding.id == "interact" {
-		(format!("{:?}", bindings.interact).into(), "Controller")
-	} else {
-		(compact_key_name(binding.key), "Keyboard")
-	};
-	let full = format!("Press {key} ({source}) to open the route gate");
-	if full.len() <= columns {
-		full
-	} else {
-		let compact = format!("{key}: Open gate");
-		if compact.len() <= columns {
-			compact
-		} else {
-			key.into_owned()
 		}
 	}
 }

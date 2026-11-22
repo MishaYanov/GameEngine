@@ -51,26 +51,16 @@ impl ReplayMarker {
 	pub(super) fn capture(engine: &Engine, label: String) -> Result<Self, String> {
 		let session = engine.session();
 		let scene_id = session.play_scene_id().ok_or("mark requires Play mode")?;
-		let courtyard = session.play_progress::<courtyard_gameplay::CampaignProgress>();
-		let gameplay = courtyard
-			.is_none()
-			.then(|| engine.play_status().and_then(|status| status.gameplay))
-			.flatten();
+		let gameplay = engine.play_status().and_then(|status| status.gameplay);
 		Ok(Self {
 			label,
 			scene_id: scene_id.clone(),
-			chapter_id: courtyard
-				.and_then(|facts| facts.chapter_id(scene_id))
-				.map(str::to_owned),
+			chapter_id: None,
 			simulation_tick: session.simulation_stats().map_or(0, |stats| stats.0),
-			completed: courtyard
-				.map(|facts| facts.completed)
-				.or_else(|| gameplay.as_ref().map(|status| status.completed)),
-			score: courtyard
-				.map(|facts| facts.score)
-				.or_else(|| gameplay.and_then(|status| status.score)),
-			has_courtyard_key: courtyard.map(|facts| facts.scene_facts(scene_id).has_key),
-			route_gate_open: courtyard.map(|facts| facts.scene_facts(scene_id).gate_open),
+			completed: gameplay.as_ref().map(|status| status.completed),
+			score: gameplay.and_then(|status| status.score),
+			has_courtyard_key: None,
+			route_gate_open: None,
 		})
 	}
 }

@@ -1,0 +1,105 @@
+<section #body aria-label="Scene verification" class="verification">
+    <div class="verification-controls">
+        <h3>Scene verification</h3>
+        <button (click)="check()" [attr.aria-disabled]="!canCheck()" type="button">Check Scenes</button>
+    </div>
+    <p role="status">
+        @if (busy()) {
+            Checking or updating scenes…
+        } @else if (summary(); as checked) {
+            {{ checked.sceneIssues }} {{ checked.sceneIssues === 1 ? 'scene' : 'scenes' }} with issues,
+            {{ checked.projectIssues }} {{ checked.projectIssues === 1 ? 'project issue' : 'project issues' }}.
+            {{ checked.passed }} of {{ checked.scenes.length }} scenes passed during a visit at revision {{ checked.revision }}.
+        } @else if (checkedBefore()) {
+            Needs check. Check Scenes to refresh the results.
+        } @else {
+            Check gameplay setup for all scenes. Visit each scene to verify it while open.
+        }
+    </p>
+    @if (error(); as failure) {
+        <p class="verification-error" role="alert">{{ failure }}</p>
+    }
+    @if (summary(); as checked) {
+        <ul aria-label="Scene visit results" class="scene-visits">
+            @for (scene of checked.scenes; track scene.id) {
+                <li>
+                    <span>{{ scene.id }} · {{ scene.result }}</span>
+                    @if (scene.id !== activeScene()) {
+                        <button (click)="visit(scene.id)" [attr.data-verification-key]="scene.id" [disabled]="!canCheck()"
+                                data-verification-action="visit" type="button">Visit and check {{ scene.id }}
+                        </button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+    @if (checkedBefore()) {
+        <div class="verification-controls">
+            <label>Issue scope
+                <select #scopeControl (change)="setScope(scopeControl.value)" [value]="scope()" data-verification-scope>
+                    @for (option of scopes; track option.id) {
+                        <option [selected]="scope() === option.id" [value]="option.id">{{ option.label }}</option>
+                    }
+                </select>
+            </label>
+            <label>
+                <input #actionableControl (change)="setActionableOnly(actionableControl.checked)" [checked]="actionableOnly()"
+                       type="checkbox"/>
+                Actionable only
+            </label>
+        </div>
+    }
+    @if (report(); as current) {
+        <p role="status">{{ visible().length }} of {{ current.issues.length }} issues shown.</p>
+        @if (projectIssues().length) {
+            <ul aria-label="Project issues" class="issues">
+                @for (issue of projectIssues(); track $index) {
+                    <li>{{ issue.message }}</li>
+                }
+            </ul>
+        }
+        @for (group of issueGroups(); track group.id) {
+            <div [attr.aria-label]="'Issues in ' + group.id" class="issue-group" role="group">
+                <strong>{{ group.id }}</strong>
+                <ul class="issues">
+                    @for (issue of group.issues; track issueKey(issue)) {
+                        <li>
+                            {{ issue.message }}
+                            @if (group.id === activeScene() && issue.role) {
+                                <div class="verification-controls">
+                                    <button (click)="inspect(issue)" [disabled]="!canCheck()" type="button">
+                                        Inspect {{ issue.role }} in {{ group.id }}
+                                    </button>
+                                    @if (issue.suggestion) {
+                                        <button (click)="review(issue)" [attr.data-verification-key]="issueKey(issue)"
+                                                [disabled]="!canCheck()"
+                                                data-verification-action="review" type="button">
+                                            Review {{ issue.role }} assignment in {{ group.id }}
+                                        </button>
+                                    }
+                                </div>
+                                @if (pendingSuggestion() === issue) {
+                                    <div aria-label="Review gameplay role assignment" class="verification-preview"
+                                         role="group">
+                                        <p>Assign {{ issue.role }} to {{ issue.suggestion?.entity_name }}
+                                            ({{ issue.suggestion?.entity_key }})?</p>
+                                        <div class="verification-controls">
+                                            <button (click)="apply(issue)" [disabled]="!canCheck()" type="button">
+                                                Apply assignment
+                                            </button>
+                                            <button (click)="cancel(issue)" [attr.data-verification-key]="issueKey(issue)"
+                                                    data-verification-action="cancel"
+                                                    type="button">
+                                                Cancel assignment
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+    }
+</section>

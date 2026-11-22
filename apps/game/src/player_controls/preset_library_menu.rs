@@ -4,7 +4,9 @@ use super::{
 	GameApp, Key, advance_row,
 	input_preset::{PresetPreview, PresetTransfer},
 	input_preset_menu::{PresetAction, apply_to_player, review_length, review_rows},
-	preset_library::{BACKUP_SUFFIX, LibraryBackupReview, MAX_LABEL_BYTES, SavedLayout},
+	preset_library::{
+		BACKUP_SUFFIX, LibraryBackupReview, MAX_LABEL_BYTES, OrganizeLayout, SavedLayout,
+	},
 };
 use crate::local_player_files::{transfer_entries, transfer_label};
 use std::{
@@ -21,7 +23,60 @@ enum Page {
 	Review(Result<PresetPreview, String>, usize),
 	Delete(usize),
 	Backups,
-	BackupReview(Result<LibraryBackupReview, String>, usize),
+	BackupReview(Result<LibraryBackupReview, String>, RestorePage),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LayoutAction {
+	Review,
+	Rename,
+	Delete,
+	SetFavorite(bool),
+	MoveEarlier,
+	MoveLater,
+	Back,
+}
+
+impl LayoutAction {
+	fn label(self) -> &'static str {
+		match self {
+			Self::Review => "Review layout",
+			Self::Rename => "Rename layout",
+			Self::Delete => "Delete layout",
+			Self::SetFavorite(true) => "Favorite layout",
+			Self::SetFavorite(false) => "Remove favorite",
+			Self::MoveEarlier => "Move earlier",
+			Self::MoveLater => "Move later",
+			Self::Back => "Back",
+		}
+	}
+}
+
+fn layout_actions(layouts: &[SavedLayout], index: usize) -> Vec<LayoutAction> {
+	let favorite = layouts[index].favorite;
+	let mut actions = vec![
+		LayoutAction::Review,
+		LayoutAction::Rename,
+		LayoutAction::Delete,
+		LayoutAction::SetFavorite(!favorite),
+	];
+	if index > 0 && layouts[index - 1].favorite == favorite {
+		actions.push(LayoutAction::MoveEarlier);
+	}
+	if layouts
+		.get(index + 1)
+		.is_some_and(|next| next.favorite == favorite)
+	{
+		actions.push(LayoutAction::MoveLater);
+	}
+	actions.push(LayoutAction::Back);
+	actions
+}
+
+enum RestorePage {
+	Summary(usize),
+	Choices { row: usize, focus: usize },
+	Name { row: usize, edit: NameEditor },
 }
 
 struct BackupFile {
@@ -69,7 +124,13 @@ impl LibraryMenu {
 				let mut rows: Vec<_> = self
 					.layouts
 					.iter()
-					.map(|entry| entry.label.clone())
+					.map(|entry| {
+						if entry.favorite {
+							format!("[Favorite] {}", entry.label)
+						} else {
+							entry.label.clone()
+						}
+					})
 					.collect();
 				rows.extend([
 					"Export Library".into(),
@@ -80,12 +141,10 @@ impl LibraryMenu {
 			}
 			Page::Actions(focus) => (
 				self.layouts[self.focus].label.clone(),
-				vec![
-					"Review layout".into(),
-					"Rename layout".into(),
-					"Delete layout".into(),
-					"Back".into(),
-				],
+				layout_actions(&self.layouts, self.focus)
+					.into_iter()
+					.map(|action| action.label().into())
+					.collect(),
 				*focus,
 			),
 			Page::Name(edit) => edit.rows(),
@@ -109,10 +168,11 @@ impl LibraryMenu {
 				rows.push("Back".into());
 				(title.into(), rows, self.backup_focus)
 			}
-			Page::BackupReview(review, focus) => (
-				self.backups[self.backup_focus].label.clone(),
-				backup_review_rows(review, disabled),
-				*focus,
+			Page::BackupReview(review, page) => restore_rows(
+				&self.backups[self.backup_focus].label,
+				review,
+				page,
+				disabled,
 			),
 		}
 	}
@@ -149,22 +209,71 @@ impl LibraryMenu {
 				Key::Enter => return PresetAction::Back,
 				_ => {}
 			},
-			Page::Actions(focus) => match key {
-				Key::Escape | Key::Enter if key == Key::Escape || *focus == 3 => {
-					self.page = Page::List
+			Page::Actions(focus) => {
+				let actions = layout_actions(&self.layouts, self.focus);
+				match key {
+					Key::Escape => self.page = Page::List,
+					Key::ArrowUp | Key::ArrowDown => {
+						*focus = advance_row(*focus, actions.len(), key)
+					}
+					Key::Enter => {
+						let action = actions[*focus];
+						let layout = &self.layouts[self.focus];
+						app.player_controls.message = None;
+						match action {
+							LayoutAction::Review => {
+								self.page = Page::Review(owner.preview_layout(layout), 0)
+							}
+							LayoutAction::Rename => {
+								self.page = Page::Name(NameEditor::new(layout.label.clone(), true))
+							}
+							LayoutAction::Delete => self.page = Page::Delete(0),
+							LayoutAction::Back => self.page = Page::List,
+							LayoutAction::SetFavorite(_)
+							| LayoutAction::MoveEarlier
+							| LayoutAction::MoveLater => {
+								let change = match action {
+									LayoutAction::SetFavorite(favorite) => {
+										OrganizeLayout::SetFavorite(favorite)
+									}
+									LayoutAction::MoveEarlier => {
+										OrganizeLayout::MoveAdjacent(&self.layouts[self.focus - 1])
+									}
+									LayoutAction::MoveLater => {
+										OrganizeLayout::MoveAdjacent(&self.layouts[self.focus + 1])
+									}
+									_ => unreachable!(),
+								};
+								let result = owner.library().organize(layout, change);
+								let id = layout.id;
+								let retain = result.is_ok().then_some(match action {
+									LayoutAction::SetFavorite(favorite) => {
+										LayoutAction::SetFavorite(!favorite)
+									}
+									_ => action,
+								});
+								let message = result
+									.map(|()| "Saved layout order".into())
+									.unwrap_or_else(|error| error);
+								self.refresh(app, owner, &message);
+								if let Some(index) =
+									self.layouts.iter().position(|item| item.id == id)
+								{
+									self.focus = index;
+									if let Some(action) = retain
+										&& let Some(focus) = layout_actions(&self.layouts, index)
+										.iter()
+										.position(|item| *item == action)
+									{
+										self.page = Page::Actions(focus);
+									}
+								}
+							}
+						}
+					}
+					_ => {}
 				}
-				Key::ArrowUp | Key::ArrowDown => *focus = advance_row(*focus, 4, key),
-				Key::Enter => {
-					let layout = &self.layouts[self.focus];
-					self.page = match *focus {
-						0 => Page::Review(owner.preview_layout(layout), 0),
-						1 => Page::Name(NameEditor::new(layout.label.clone(), true)),
-						_ => Page::Delete(0),
-					};
-					app.player_controls.message = None;
-				}
-				_ => {}
-			},
+			}
 			Page::Name(edit) => match edit.key(key) {
 				NameAction::Stay => {}
 				NameAction::Cancel if edit.rename => self.page = Page::Actions(1),
@@ -230,30 +339,28 @@ impl LibraryMenu {
 					let path = &self.backups[self.backup_focus].path;
 					let result = check_backup_folder(app, owner, path)
 						.and_then(|()| owner.preview_library_backup(path));
-					self.page = Page::BackupReview(result, 0);
+					self.page = Page::BackupReview(result, RestorePage::Summary(0));
 					app.player_controls.message = None;
 				}
 				_ => {}
 			},
-			Page::BackupReview(review, focus) => {
-				let blocked = app.input_preset_apply_blocked();
-				let length = review.as_ref().map_or(2, |review| {
-					3 + review.additions.len() + review.conflicts.len()
-				});
-				match key {
-					Key::Escape | Key::Enter if key == Key::Escape || *focus == 0 => {
+			Page::BackupReview(review, page) => {
+				match restore_key(
+					review.as_mut().ok(),
+					page,
+					key,
+					&mut app.player_controls.message,
+				) {
+					RestoreAction::Stay => {}
+					RestoreAction::Back => {
 						self.page = Page::Backups;
 						app.player_controls.message = None;
 					}
-					Key::ArrowUp | Key::ArrowDown => *focus = advance_row(*focus, length, key),
-					Key::Enter if *focus + 1 == length => {
+					RestoreAction::Commit => {
 						let Ok(review) = review else {
 							return PresetAction::Stay;
 						};
-						if review.blocked().is_some() {
-							return PresetAction::Stay;
-						}
-						if let Some(reason) = blocked {
+						if let Some(reason) = app.input_preset_apply_blocked() {
 							app.player_controls.message = Some(reason.replace("Apply", "Restore"));
 							return PresetAction::Stay;
 						}
@@ -264,10 +371,11 @@ impl LibraryMenu {
 							Ok(count) => {
 								self.refresh(app, owner, &format!("Restored {count} layouts"))
 							}
-							Err(error) => self.page = Page::BackupReview(Err(error), 0),
+							Err(error) => {
+								self.page = Page::BackupReview(Err(error), RestorePage::Summary(0))
+							}
 						}
 					}
-					_ => {}
 				}
 			}
 		}
@@ -325,25 +433,31 @@ fn check_backup_folder(app: &GameApp, owner: &PresetTransfer, path: &Path) -> Re
 	Ok(())
 }
 
-fn backup_review_rows(
+fn restore_rows(
+	title: &str,
 	review: &Result<LibraryBackupReview, String>,
+	page: &RestorePage,
 	disabled: Option<&str>,
-) -> Vec<String> {
-	let mut rows = vec!["Keep Current".into()];
-	match review {
-		Ok(review) => {
-			rows.push(format!(
-				"Add {} / {} free",
-				review.additions.len(),
-				review.available
-			));
-			rows.extend(review.additions.iter().map(|label| format!("Add: {label}")));
-			rows.extend(
-				review
-					.conflicts
-					.iter()
-					.map(|label| format!("Conflict: {label}")),
-			);
+) -> (String, Vec<String>, usize) {
+	let Ok(review) = review else {
+		return (
+			title.into(),
+			vec!["Keep Current".into(), review.as_ref().unwrap_err().clone()],
+			0,
+		);
+	};
+	match page {
+		RestorePage::Summary(focus) => {
+			let mut rows = vec![
+				"Keep Current".into(),
+				format!("Add {} / {} free", review.retained(), review.available),
+			];
+			rows.extend(review.rows.iter().map(|row| match row.label() {
+				Some(label) if row.conflict => format!("Rename: {} to {label}", row.source_label),
+				Some(label) => format!("Add: {label}"),
+				None if row.conflict => format!("Conflict: {} (skip)", row.source_label),
+				None => format!("Skip: {}", row.source_label),
+			}));
 			rows.push(if let Some(reason) = review.blocked() {
 				reason.into()
 			} else if let Some(reason) = disabled {
@@ -351,10 +465,128 @@ fn backup_review_rows(
 			} else {
 				"Restore Layouts".into()
 			});
+			(title.into(), rows, *focus)
 		}
-		Err(error) => rows.push(error.clone()),
+		RestorePage::Choices { row, focus } => {
+			let row = &review.rows[*row];
+			let rows = if row.conflict {
+				vec![
+					format!("Current: {} (keep)", row.source_label),
+					"Rename incoming".into(),
+					"Skip incoming".into(),
+					"Back".into(),
+				]
+			} else {
+				vec!["Add incoming".into(), "Skip incoming".into(), "Back".into()]
+			};
+			(format!("Incoming: {}", row.source_label), rows, *focus)
+		}
+		RestorePage::Name { edit, .. } => {
+			let (title, mut rows, focus) = edit.rows();
+			rows[0] = format!("Use {}", edit.label);
+			(title, rows, focus)
+		}
 	}
-	rows
+}
+
+enum RestoreAction {
+	Stay,
+	Back,
+	Commit,
+}
+
+fn restore_key(
+	review: Option<&mut LibraryBackupReview>,
+	page: &mut RestorePage,
+	key: Key,
+	message: &mut Option<String>,
+) -> RestoreAction {
+	let Some(review) = review else {
+		return if matches!(key, Key::Escape | Key::Enter) {
+			RestoreAction::Back
+		} else {
+			RestoreAction::Stay
+		};
+	};
+	match page {
+		RestorePage::Summary(focus) => {
+			let length = 3 + review.rows.len();
+			match key {
+				Key::Escape | Key::Enter if key == Key::Escape || *focus == 0 => {
+					return RestoreAction::Back;
+				}
+				Key::ArrowUp | Key::ArrowDown => {
+					*focus = advance_row(*focus, length, key);
+					*message = None;
+				}
+				Key::Enter if *focus + 1 == length && review.blocked().is_none() => {
+					return RestoreAction::Commit;
+				}
+				Key::Enter if (2..length - 1).contains(focus) => {
+					let row = *focus - 2;
+					*page = RestorePage::Choices {
+						row,
+						focus: usize::from(review.rows[row].conflict),
+					};
+				}
+				_ => {}
+			}
+		}
+		RestorePage::Choices { row, focus } => {
+			let conflict = review.rows[*row].conflict;
+			let count = if conflict { 4 } else { 3 };
+			match key {
+				Key::Escape | Key::Enter if key == Key::Escape || *focus + 1 == count => {
+					*page = RestorePage::Summary(*row + 2);
+					*message = None;
+				}
+				Key::ArrowUp | Key::ArrowDown => *focus = advance_row(*focus, count, key),
+				Key::Enter if *focus + 2 == count => {
+					review.skip(*row);
+					*page = RestorePage::Summary(*row + 2);
+					*message = None;
+				}
+				Key::Enter if conflict && *focus == 1 => {
+					let label = review.rows[*row]
+						.label()
+						.map_or_else(|| review.suggestion(*row), str::to_owned);
+					*page = RestorePage::Name {
+						row: *row,
+						edit: NameEditor::new(label, false),
+					};
+				}
+				Key::Enter if !conflict => {
+					let source = review.rows[*row].source_label.clone();
+					match review.use_label(*row, &source) {
+						Ok(()) => {
+							*page = RestorePage::Summary(*row + 2);
+							*message = None;
+						}
+						Err(error) => *message = Some(error),
+					}
+				}
+				_ => {}
+			}
+		}
+		RestorePage::Name { row, edit } => match edit.key(key) {
+			NameAction::Stay => {}
+			NameAction::Cancel => {
+				*page = RestorePage::Choices {
+					row: *row,
+					focus: 1,
+				};
+				*message = None;
+			}
+			NameAction::Save => match review.use_label(*row, &edit.label) {
+				Ok(()) => {
+					*page = RestorePage::Summary(*row + 2);
+					*message = None;
+				}
+				Err(error) => *message = Some(error),
+			},
+		},
+	}
+	RestoreAction::Stay
 }
 
 enum NameAction {

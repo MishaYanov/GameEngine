@@ -114,10 +114,8 @@ fn camera_room_sensor_doorway_lintel_and_rotated_proxy_match_the_authored_geomet
 #[test]
 fn camera_room_source_and_package_agree_at_each_checkpoint_and_across_tick_partitions() {
 	let scratch = Scratch::new();
-	let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("../game/camera-demo.json")
-		.canonicalize()
-		.unwrap();
+	let fixture = test_project::ProjectFixture::new("camera-room");
+	let source = fixture.manifest_path();
 	let project = ProjectData::load(&source).unwrap();
 	let prepared =
 		compiler::prepare_project(&project, &source.parent().unwrap().join("assets")).unwrap();
@@ -192,3 +190,6 @@ fn camera_room_source_and_package_agree_at_each_checkpoint_and_across_tick_parti
 	assert_eq!(batched["fixed_steps"], turned["fixed_steps"]);
 	assert_same_state(&turned, &batched);
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

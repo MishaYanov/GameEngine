@@ -4,6 +4,7 @@ import {vi} from 'vitest';
 import axe from 'axe-core';
 import type {EditorSnapshot, GameplayModuleDescriptor, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import type {SceneIssue, SceneVerificationReport} from '../../../../core/editor/scene-verification.models';
 import {EditorSettingsService} from '../../../../core/editor/settings/editor-settings.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {EditorWarmingMode, SceneWarmingResult} from '../../../../core/editor/viewport-editor.models';
@@ -12,8 +13,8 @@ import {SceneEditingService} from '../scene-editing.service';
 import {SceneActions} from './scene-actions';
 import {SceneSwitchService} from './scene-switch.service';
 
-const courtyard: GameplayModuleDescriptor = {
-    id: 'courtyard_run', label: 'Courtyard Run', description: 'Collect the key and reach the finish.',
+const sampleModule: GameplayModuleDescriptor = {
+    id: 'sample_module', label: 'Sample module', description: 'A test module with per-scene role metadata.',
     default_roles: [
         {name: 'player', label: 'Player', requirement_hint: 'Choose a movable player.'},
         {name: 'key', label: 'Key', requirement_hint: 'Choose the key marker.'},
@@ -50,7 +51,7 @@ function snapshot(): EditorSnapshot {
         ],
         project: {
             schema_version: 3, name: 'Scene actions fixture', startup_scene_id: 'main',
-            gameplay_module: courtyard.id,
+            gameplay_module: sampleModule.id,
             scenes: [{id: 'main', asset_path: 'scenes/main.json'}, {id: 'second', asset_path: 'scenes/second.json'}],
             fixed_hz: 60, max_catchup_steps: 8, behaviors: [], behavior_definitions: [],
         },
@@ -62,7 +63,11 @@ function snapshot(): EditorSnapshot {
     };
 }
 
-async function createActions(initial = snapshot(), modules: readonly GameplayModuleDescriptor[] | undefined = [courtyard]) {
+async function createActions(
+    initial = snapshot(),
+    modules: readonly GameplayModuleDescriptor[] | undefined = [sampleModule],
+    openInformation = true,
+) {
     const current = signal(initial);
     const busy = signal(false);
     const generation = signal(1);
@@ -71,7 +76,8 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
     const mode = signal<EditorWarmingMode>('references');
     const capabilities = signal<{
         gameplay_modules: readonly GameplayModuleDescriptor[] | undefined;
-        scene_warming_supported?: boolean
+        scene_warming_supported?: boolean;
+        scene_verification_supported?: boolean;
     }>({
         gameplay_modules: modules, scene_warming_supported: true,
     });
@@ -91,6 +97,7 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
     const setSceneWarmingMode = vi.fn<EditorService['setSceneWarmingMode']>(async selected =>
         selected === 'models' ? 2 : selected === 'references' ? 1 : 0);
     const exportWarmingReport = vi.fn<EditorService['exportWarmingReport']>(async () => 3);
+    const checkScenes = vi.fn<EditorService['checkScenes']>();
     const registerScene = vi.fn(async (_path: string) => current());
     const saveSceneAs = vi.fn(async (_path: string) => current());
     const execute = vi.fn<EditorService['execute']>(async () => current());
@@ -119,6 +126,7 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
                 warmScene,
                 setSceneWarmingMode,
                 exportWarmingReport,
+                checkScenes,
                 save,
                 registerScene,
                 saveSceneAs,
@@ -135,7 +143,13 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
     const root: HTMLElement = fixture.nativeElement;
     const button = (text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
         .find(value => value.textContent?.trim() === text)!;
-    await vi.waitFor(() => expect(button('Prepare scene').disabled).toBe(false));
+    const openDialog = (title: string) => [...root.querySelectorAll<HTMLDialogElement>('dialog[open]')]
+        .find(dialog => dialog.querySelector('h2')?.textContent?.trim() === title);
+    if (openInformation) {
+        expect(fixture.componentInstance.show()).toBe(true);
+        await fixture.whenStable();
+        await vi.waitFor(() => expect(button('Prepare scene').disabled).toBe(false));
+    }
     const expand = async () => {
         button('Scene Files…').click();
         await fixture.whenStable();
@@ -157,17 +171,59 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
         warmScene,
         setSceneWarmingMode,
         exportWarmingReport,
+        checkScenes,
         save,
         registerScene,
         saveSceneAs,
         execute,
         withCommittedEdit,
         button,
+        openDialog,
         expand
     };
 }
 
+const prototype = HTMLDialogElement.prototype;
+const originalShow = Object.getOwnPropertyDescriptor(prototype, 'showModal');
+const originalClose = Object.getOwnPropertyDescriptor(prototype, 'close');
+
+beforeAll(() => {
+    Object.defineProperty(prototype, 'showModal', {
+        configurable: true,
+        value(this: HTMLDialogElement) {
+            this.setAttribute('open', '');
+        },
+    });
+    Object.defineProperty(prototype, 'close', {
+        configurable: true,
+        value(this: HTMLDialogElement) {
+            this.removeAttribute('open');
+            this.dispatchEvent(new Event('close'));
+        },
+    });
+});
+
+afterAll(() => {
+    if (originalShow) Object.defineProperty(prototype, 'showModal', originalShow);
+    else Reflect.deleteProperty(prototype, 'showModal');
+    if (originalClose) Object.defineProperty(prototype, 'close', originalClose);
+    else Reflect.deleteProperty(prototype, 'close');
+});
+
 describe('SceneActions', () => {
+    it('opens Scene Information on demand and closes it when the workspace changes', async () => {
+        const {fixture, root, generation, openDialog} = await createActions(snapshot(), [sampleModule], false);
+        expect(root.querySelector('dialog[open]')).toBeNull();
+        expect(fixture.componentInstance.show()).toBe(true);
+        await fixture.whenStable();
+        const information = openDialog('Scene Information');
+        expect(information?.querySelector<HTMLSelectElement>('.scene-actions select')?.value).toBe('main');
+
+        generation.update(value => value + 1);
+        await fixture.whenStable();
+        expect(openDialog('Scene Information')).toBeUndefined();
+    });
+
     it('warms the selected scene before an explicit open and cancels a pending selection', async () => {
         const {fixture, root, button, warmScene, switchScene, current} = await createActions();
         button('Prepare scene').click();
@@ -368,33 +424,6 @@ describe('SceneActions', () => {
         expect(exportButton.disabled).toBe(false);
     });
 
-    const prototype = HTMLDialogElement.prototype;
-    const originalShow = Object.getOwnPropertyDescriptor(prototype, 'showModal');
-    const originalClose = Object.getOwnPropertyDescriptor(prototype, 'close');
-
-    beforeAll(() => {
-        Object.defineProperty(prototype, 'showModal', {
-            configurable: true,
-            value(this: HTMLDialogElement) {
-                this.setAttribute('open', '');
-            },
-        });
-        Object.defineProperty(prototype, 'close', {
-            configurable: true,
-            value(this: HTMLDialogElement) {
-                this.removeAttribute('open');
-                this.dispatchEvent(new Event('close'));
-            },
-        });
-    });
-
-    afterAll(() => {
-        if (originalShow) Object.defineProperty(prototype, 'showModal', originalShow);
-        else Reflect.deleteProperty(prototype, 'showModal');
-        if (originalClose) Object.defineProperty(prototype, 'close', originalClose);
-        else Reflect.deleteProperty(prototype, 'close');
-    });
-
     it('keeps the authoritative selected scene while a switch is pending or fails', async () => {
         const {fixture, root, switchScene} = await createActions();
         let fail!: (error: Error) => void;
@@ -437,8 +466,9 @@ describe('SceneActions', () => {
         expect(sceneSwitch.loading()).toBeNull();
     });
 
-    it('saves only the outgoing scene before switching when the user chooses Save and Open', async () => {
-        const {fixture, root, current, sceneSwitch, save, switchScene, button} = await createActions();
+    it('saves only the outgoing scene from a switch confirmation while Scene Information is closed', async () => {
+        const {fixture, root, current, sceneSwitch, save, switchScene, button, openDialog} =
+            await createActions(snapshot(), [sampleModule], false);
         current.update(value => ({
             ...value, dirty: true, project_dirty: true,
             scenes: value.scenes.map(scene => ({...scene, dirty: true})),
@@ -447,7 +477,8 @@ describe('SceneActions', () => {
         switchScene.mockImplementationOnce(() => new Promise(resolve => complete = resolve));
         const request = sceneSwitch.request('second');
         await fixture.whenStable();
-        expect(root.querySelector('dialog[open]')?.textContent).toContain('scenes/main.json');
+        expect(openDialog('Scene Information')).toBeUndefined();
+        expect(openDialog('Save changes before opening scene?')?.textContent).toContain('scenes/main.json');
         expect(save).not.toHaveBeenCalled();
         expect(switchScene).not.toHaveBeenCalled();
 
@@ -460,10 +491,15 @@ describe('SceneActions', () => {
         expect(current().project_dirty).toBe(true);
         complete({...current(), active_scene_id: 'second', scene_revision: 2});
         expect(await request).toBe(true);
+        await fixture.whenStable();
+        expect(openDialog('Scene Information')).toBeUndefined();
+        expect([...root.querySelectorAll('[role="status"]')].some(
+            status => status.textContent?.includes('Opened scenes/second.json.')
+        )).toBe(true);
     });
 
     it('cancels the pending switch or keeps the outgoing draft without writing it', async () => {
-        const {fixture, root, current, sceneSwitch, save, switchScene, button} = await createActions();
+        const {fixture, current, sceneSwitch, save, switchScene, button, openDialog} = await createActions();
         current.update(value => ({
             ...value, dirty: true,
             scenes: value.scenes.map(scene => ({...scene, dirty: scene.id === 'main'})),
@@ -473,7 +509,8 @@ describe('SceneActions', () => {
         button('Cancel').click();
         expect(await canceled).toBe(false);
         await fixture.whenStable();
-        expect(root.querySelector('dialog[open]')).toBeNull();
+        expect(openDialog('Save changes before opening scene?')).toBeUndefined();
+        expect(openDialog('Scene Information')).toBeDefined();
         expect(current().active_scene_id).toBe('main');
         expect(switchScene).not.toHaveBeenCalled();
 
@@ -602,7 +639,7 @@ describe('SceneActions', () => {
         const {fixture, root, current} = await createActions({
             ...initial,
             project: {...initial.project, gameplay_module: module.id},
-        }, [courtyard, module]);
+        }, [sampleModule, module]);
         const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
         expect(selector.value).toBe('race');
         expect(root.querySelector('.gameplay-settings')?.textContent).toContain('Cross the checkpoint.');
@@ -632,30 +669,13 @@ describe('SceneActions', () => {
         expect(labels()).toEqual(['Player', 'Finish']);
     });
 
-    it('shows Finish authoring for a configured destination with a custom scene ID', async () => {
-        const initial = snapshot();
-        const {fixture, root, current} = await createActions({
-            ...initial,
-            active_scene_id: 'ending',
-            project: {...initial.project, gameplay_settings: {
-                schema_version: 1, scenes: {ending: {kind: 'finish', finish_trigger: 'goal-sensor'}},
-            }},
-        });
-        const labels = () => [...root.querySelectorAll('.gameplay-roles label')]
-            .map(label => label.firstChild?.textContent?.trim());
-        expect(labels()).toEqual(['Player', 'Finish']);
-        current.update(value => ({...value, active_scene_id: 'main'}));
-        await fixture.whenStable();
-        expect(labels()).toEqual(['Player', 'Key', 'Exit']);
-    });
-
     it('treats a prototype-named role as unassigned and restores it after rejection', async () => {
         const initial = snapshot();
         const {fixture, root, execute} = await createActions({
             ...initial,
             document: {...initial.document, entities: [entity('actor')]},
         }, [{
-            ...courtyard,
+            ...sampleModule,
             default_roles: [{name: 'constructor', label: 'Builder', requirement_hint: 'Choose the builder.'}],
         }]);
         const role = root.querySelector<HTMLSelectElement>('.gameplay-roles select')!;
@@ -682,7 +702,7 @@ describe('SceneActions', () => {
         await fixture.whenStable();
         expect(selector.disabled).toBe(true);
         expect(root.querySelector('#gameplay-module-help')?.textContent).toContain('unavailable in this editor host');
-        choose(selector, courtyard.id);
+        choose(selector, sampleModule.id);
         await fixture.whenStable();
         expect(execute).not.toHaveBeenCalled();
     });
@@ -759,7 +779,7 @@ describe('SceneActions', () => {
         execute.mockRejectedValueOnce(new Error('Project changed elsewhere.'));
         choose(selector, '');
         await fixture.whenStable();
-        expect(selector.value).toBe(courtyard.id);
+        expect(selector.value).toBe(sampleModule.id);
         expect(root.querySelector('[role="alert"]')?.textContent).toContain('Project changed elsewhere.');
 
         let reject!: (reason: Error) => void;
@@ -893,5 +913,208 @@ describe('SceneActions', () => {
         await expand();
         const report = await axe.run(root, {rules: {'color-contrast': {enabled: false}}});
         expect(report.violations.map(violation => violation.id)).toEqual([]);
+    });
+});
+
+const reviewIssue: SceneIssue = {
+    scope: 'intro', scene_id: 'main', message: 'Choose the player role.', role: 'player',
+    suggestion: {entity_key: 'actor', entity_name: 'Actor'},
+};
+const manualIssue: SceneIssue = {
+    scope: 'intro', scene_id: 'main', message: 'Choose the key role.', role: 'key', suggestion: null,
+};
+const arenaIssue: SceneIssue = {
+    scope: 'arena', scene_id: 'second', message: 'Check the arena camera.', role: null, suggestion: null,
+};
+const projectIssue: SceneIssue = {
+    scope: 'project', scene_id: null, message: 'Check project settings.', role: null, suggestion: null,
+};
+
+function verification(revision: number, sceneId: string, issues: readonly SceneIssue[] = []): SceneVerificationReport {
+    return {
+        generation: 17, revision, active_scene_id: sceneId,
+        scenes: [
+            {id: 'main', content_stamp: '0000000000000000-1111111111111111', checked: true},
+            {id: 'second', content_stamp: '0000000000000000-2222222222222222', checked: true},
+        ],
+        issues,
+    };
+}
+
+async function createVerification(initial = snapshot(), modules = [sampleModule]) {
+    const actions = await createActions(initial, modules);
+    actions.capabilities.update(value => ({...value, scene_verification_supported: true}));
+    await actions.fixture.whenStable();
+    const section = actions.root.querySelector<HTMLElement>('editor-scene-verification')!;
+    const check = async () => {
+        actions.button('Check Scenes').click();
+        await actions.fixture.whenStable();
+    };
+    return {...actions, section, check};
+}
+
+describe('Scene Information verification', () => {
+    it('filters issues without changing the report summary or issuing native commands', async () => {
+        const {button, check, checkScenes, execute, fixture, section, switchScene} = await createVerification();
+        checkScenes.mockResolvedValue(verification(1, 'main', [reviewIssue, manualIssue, arenaIssue, projectIssue]));
+        await check();
+
+        expect(section.textContent?.replace(/\s+/g, ' ')).toContain('2 scenes with issues, 1 project issue.');
+        expect(section.textContent).toContain('4 of 4 issues shown.');
+        expect(section.querySelectorAll('button[data-verification-action="visit"]')).toHaveLength(1);
+        const filter = section.querySelector<HTMLSelectElement>('select')!;
+        filter.focus();
+        choose(filter, 'arena');
+        await fixture.whenStable();
+        expect(section.textContent).toContain('Check the arena camera.');
+        expect(section.textContent).not.toContain('Check project settings.');
+        expect(section.textContent).toContain('1 of 4 issues shown.');
+
+        const actionable = section.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+        actionable.click();
+        await fixture.whenStable();
+        expect(section.textContent).toContain('0 of 4 issues shown.');
+        choose(filter, 'intro');
+        await fixture.whenStable();
+        expect(section.textContent).toContain('2 of 4 issues shown.');
+        expect(section.textContent?.replace(/\s+/g, ' ')).toContain('2 scenes with issues, 1 project issue.');
+        expect(document.activeElement).toBe(filter);
+        expect(checkScenes).toHaveBeenCalledExactlyOnceWith('main', 1, 17);
+        expect(execute).not.toHaveBeenCalled();
+        expect(switchScene).not.toHaveBeenCalled();
+        expect(button('Review player assignment in main')).toBeDefined();
+        const access = await axe.run(section, {rules: {'color-contrast': {enabled: false}}});
+        expect(access.violations).toEqual([]);
+    });
+
+    it('reviews a role assignment, restores focus on cancel, and rechecks after a confirmed repair', async () => {
+        const {button, check, checkScenes, current, execute, fixture, section} = await createVerification();
+        checkScenes
+            .mockResolvedValueOnce(verification(1, 'main', [reviewIssue]))
+            .mockResolvedValueOnce(verification(2, 'main'));
+        execute.mockImplementation(async () => {
+            current.update(value => ({...value, revision: 2}));
+            return current();
+        });
+        await check();
+        const review = button('Review player assignment in main');
+        review.click();
+        await fixture.whenStable();
+        const cancel = button('Cancel assignment');
+        expect(document.activeElement).toBe(cancel);
+        expect(section.textContent).toContain('Assign player to Actor (actor)?');
+        expect(execute).not.toHaveBeenCalled();
+        cancel.click();
+        await fixture.whenStable();
+        expect(document.activeElement).toBe(review);
+
+        review.click();
+        await fixture.whenStable();
+        button('Apply assignment').click();
+        await fixture.whenStable();
+        expect(execute).toHaveBeenCalledExactlyOnceWith(
+            {type: 'set_scene_binding', scene_id: 'main', name: 'player', target: {kind: 'assign', key: 'actor'}},
+            1, 1,
+        );
+        expect(checkScenes).toHaveBeenLastCalledWith('main', 2, 17);
+        expect(section.textContent).toContain('main · Passed');
+        expect(section.textContent).toContain('0 of 0 issues shown.');
+        expect(document.activeElement).toBe(section.querySelector('select'));
+
+        current.update(value => ({...value, revision: 3}));
+        await fixture.whenStable();
+        expect(section.textContent).toContain('Needs check.');
+        expect(section.textContent).not.toContain('main · Passed');
+    });
+
+    it('keeps remapped Cinder Oath role controls available when the snapshot is replaced', async () => {
+        const initial = snapshot();
+        const configured = {
+            ...initial,
+            project: {
+                ...initial.project,
+                gameplay_module: 'cinder_oath',
+                gameplay_settings: {intro_scene: 'main', arena_scene: 'second'},
+            },
+        };
+        const descriptor = {
+            ...sampleModule, id: 'cinder_oath', default_roles: [],
+            scene_roles: {intro: sampleModule.default_roles, arena: sampleModule.scene_roles['finish']},
+        };
+        const {button, check, checkScenes, current, fixture, root} = await createVerification(configured, [descriptor]);
+        checkScenes.mockResolvedValueOnce(verification(1, 'main', [reviewIssue]));
+        await check();
+        button('Inspect player in main').click();
+        await fixture.whenStable();
+        const role = root.querySelector<HTMLSelectElement>('[data-scene-binding="player"]');
+        expect(role).toBeDefined();
+        expect(document.activeElement).toBe(role);
+
+        current.update(value => ({...value, project: structuredClone(value.project), revision: 2}));
+        await fixture.whenStable();
+        expect(root.querySelector('[data-scene-binding="player"]')).toBe(role);
+    });
+
+    it('checks a scene only after navigation accepts the dirty-scene confirmation', async () => {
+        const initial = snapshot();
+        const dirty = {...initial, scenes: [{...initial.scenes[0], dirty: true}, initial.scenes[1]]};
+        const {button, check, checkScenes, fixture, openDialog, section, switchScene} = await createVerification(dirty);
+        checkScenes
+            .mockResolvedValueOnce(verification(1, 'main'))
+            .mockResolvedValueOnce(verification(1, 'second'));
+        await check();
+        expect(section.textContent).toContain('main · Passed');
+        expect(section.textContent).toContain('second · Needs visit');
+
+        button('Visit and check second').click();
+        await fixture.whenStable();
+        expect(openDialog('Save changes before opening scene?')).toBeDefined();
+        button('Cancel').click();
+        await fixture.whenStable();
+        expect(checkScenes).toHaveBeenCalledTimes(1);
+        expect(switchScene).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(button('Visit and check second'));
+
+        button('Visit and check second').click();
+        await fixture.whenStable();
+        button('Keep Edits and Open').click();
+        await fixture.whenStable();
+        expect(checkScenes).toHaveBeenLastCalledWith('second', 1, 17);
+        expect(section.textContent).toContain('2 of 2 scenes passed during a visit');
+        expect(section.textContent).toContain('second · Passed');
+    });
+
+    it('ignores delayed results after a revision or workspace changes and drops actions for unregistered scenes', async () => {
+        const {button, check, checkScenes, current, fixture, generation, section} = await createVerification();
+        let resolve!: (value: SceneVerificationReport) => void;
+        checkScenes.mockImplementationOnce(() => new Promise(accept => {
+            resolve = accept;
+        }));
+        button('Check Scenes').click();
+        current.update(value => ({...value, revision: 2}));
+        resolve(verification(1, 'main', [reviewIssue]));
+        await fixture.whenStable();
+        expect(section.textContent).not.toContain('Review player assignment');
+
+        checkScenes.mockResolvedValueOnce(verification(2, 'main', [reviewIssue]));
+        await check();
+        expect(section.textContent).toContain('Review player assignment');
+        current.update(value => ({...value, scenes: [value.scenes[0]]}));
+        await fixture.whenStable();
+        expect(section.textContent).toContain('Needs check.');
+        expect(section.textContent).not.toContain('Review player assignment');
+
+        current.update(value => ({...snapshot(), revision: value.revision}));
+        checkScenes.mockImplementationOnce(() => new Promise(accept => {
+            resolve = accept;
+        }));
+        button('Check Scenes').click();
+        generation.set(2);
+        resolve(verification(2, 'main', [reviewIssue]));
+        await fixture.whenStable();
+        expect(fixture.componentInstance.show()).toBe(true);
+        await fixture.whenStable();
+        expect(section.textContent).not.toContain('Review player assignment');
+        expect(section.textContent).not.toContain('Needs check.');
     });
 });

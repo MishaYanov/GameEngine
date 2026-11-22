@@ -494,7 +494,7 @@ mod prefab_dependencies {
 	fn component_demo_exports_recursive_runtime_prefabs_in_canonical_format() {
 		let fixture = AssetFixture::new();
 		let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game");
-		let project = ProjectData::load(root.join("component-demo.json")).unwrap();
+		let project = ProjectData::from_json(&test_project::manifest("component-lab")).unwrap();
 		let prepared = prepare_project(&project, &root.join("assets")).unwrap();
 		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
 		validate_export_snapshot(&staged, None).unwrap();
@@ -560,3 +560,6 @@ mod prefab_dependencies {
 		validate_export_snapshot(&staged, None).unwrap();
 	}
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

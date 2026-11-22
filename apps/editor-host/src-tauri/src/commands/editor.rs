@@ -36,6 +36,8 @@ mod build;
 pub use build::*;
 mod documents;
 pub use documents::*;
+mod scene_verification;
+pub use scene_verification::*;
 mod viewport;
 pub use viewport::*;
 
@@ -129,6 +131,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		history_budget_bytes: 16 * 1024 * 1024,
 		embedded_viewport_supported: cfg!(target_os = "windows"),
 		scene_warming_supported: cfg!(target_os = "windows"),
+		scene_verification_supported: true,
 	}
 }
 

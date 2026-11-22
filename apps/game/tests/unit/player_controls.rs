@@ -49,33 +49,13 @@ fn controls_owns_keyboard_until_cancel() {
 #[test]
 fn command_line_override_cannot_be_changed_in_controls() {
 	let mut app = GameApp::default();
-	assert!(
-		app.player_controls
-			.configure(None, None, None, true)
-			.is_none()
-	);
+	assert!(app.player_controls.configure(None, None, true).is_none());
 	app.player_controls_key(Key::Escape);
 	app.player_controls_key(Key::ArrowRight);
 	app.player_controls_key(Key::ArrowDown);
 	app.player_controls_key(Key::Enter);
 	assert!(app.player_controls.is_open());
 	assert!(app.player_controls.rows().unwrap()[2].contains("Apply disabled"));
-}
-
-#[test]
-fn continue_actions_have_stable_availability_labels() {
-	use ContinueAvailability::*;
-
-	for (availability, label, enabled) in [
-		(Empty, "No saved checkpoint", false),
-		(Current, "Ready", true),
-		(CompatibleEarlierRelease, "Earlier release", true),
-		(IncompatibleRelease, "Incompatible with this release", false),
-		(Unreadable, "Unreadable save", false),
-	] {
-		assert_eq!(continue_label(availability), label);
-		assert_eq!(availability.can_continue(), enabled);
-	}
 }
 
 #[test]
@@ -129,34 +109,6 @@ fn menu_help_follows_accepted_input_and_preserves_the_focus_marker() {
 		["> Back"]
 	);
 	assert!(app.player_controls.rows_with_capacity(2).unwrap()[1].starts_with("Arrows"));
-}
-
-#[test]
-fn gate_labels_follow_the_device_and_only_the_bound_logical_action() {
-	let mut profile = InputProfile::default();
-	profile.actions.push(GameInputBinding {
-		id: "interact".into(),
-		key: Key::E,
-		animation_parameter: None,
-	});
-	let map = ControllerBindings {
-		jump: FaceButton::A,
-		interact: FaceButton::B,
-	};
-	let hint = |device| {
-		crate::scene_rendering::interact_hint(Some(&profile), Some("interact"), map, device)
-	};
-	assert!(hint(PromptDevice::Controller).starts_with("Press B"));
-	assert!(hint(PromptDevice::Keyboard).starts_with("Press E"));
-	assert!(
-		crate::scene_rendering::interact_hint(
-			None,
-			Some("interact"),
-			map,
-			PromptDevice::Controller
-		)
-		.contains("unbound")
-	);
 }
 
 #[test]
@@ -368,7 +320,7 @@ fn stale_overrides_keep_settings_available_while_using_authored_keys() {
 fn capture_cancel_conflict_and_short_rows_do_not_change_the_live_binding() {
 	let authored = authored_keyboard_fixture();
 	let project = runtime::project::ProjectData::from_json(include_str!(
-		"../../project.release-learning.json"
+		"../../../../projects/cinder-oath/project.json"
 	))
 		.unwrap();
 	let mut app = GameApp::default();
@@ -438,7 +390,7 @@ fn capture_cancel_conflict_and_short_rows_do_not_change_the_live_binding() {
 fn controller_starts_and_cancels_keyboard_capture_without_assigning_a_face_button() {
 	let mut app = GameApp::default();
 	let mut project = runtime::project::ProjectData::from_json(include_str!(
-		"../../project.release-learning.json"
+		"../../../../projects/cinder-oath/project.json"
 	))
 		.unwrap();
 	project.input_profile = Some(authored_keyboard_fixture());

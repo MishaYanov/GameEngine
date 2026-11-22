@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use courtyard_gameplay::{COURTYARD_RUN_ID, CampaignDefinition, settings::InteractionSettings};
+use gameplay_catalog::cinder_oath::intro_route;
 use runtime::{
 	project::ProjectData,
 	scene_catalog::SceneId,
@@ -19,19 +19,15 @@ const TARGET: &str = "scene_prefetch";
 pub(super) struct PlayerPrefetch {
 	worker: ScenePrefetch,
 	root: PathBuf,
-	route: CampaignDefinition,
+	intro: SceneId,
+	arena: SceneId,
 	generation: u64,
-	scheduled: Option<SceneId>,
+	scheduled: bool,
 }
 
 impl PlayerPrefetch {
 	pub fn new(project: &ProjectData, root: &Path) -> Result<Option<Self>, String> {
-		if project.gameplay_module.as_deref() != Some(COURTYARD_RUN_ID) {
-			return Ok(None);
-		}
-		let Some(route) =
-			InteractionSettings::from_project(project)?.and_then(|settings| settings.campaign)
-		else {
+		let Some((intro, arena)) = intro_route(project)? else {
 			return Ok(None);
 		};
 		let worker = match ScenePrefetch::new() {
@@ -44,27 +40,25 @@ impl PlayerPrefetch {
 		Ok(Some(Self {
 			worker,
 			root: root.canonicalize().map_err(|error| error.to_string())?,
-			route,
+			intro,
+			arena,
 			generation: 0,
-			scheduled: None,
+			scheduled: false,
 		}))
 	}
 
 	pub fn prime(&mut self, current: &SceneId, project: &ProjectData) {
-		if self.scheduled.as_ref() == Some(current) {
+		if self.scheduled || current != &self.intro {
 			return;
 		}
-		let Some(successor) = self.route.successor(current) else {
-			return;
-		};
-		let path = project.scene_path(successor).map(PathBuf::from);
+		let path = project.scene_path(&self.arena).map(PathBuf::from);
 		// Retry only a contended mailbox. The real loader diagnoses bad sources.
 		if let Ok(path) = path
-			&& !self.worker.queue(self.key(successor), path)
+			&& !self.worker.queue(self.key(&self.arena), path)
 		{
 			return;
 		}
-		self.scheduled = Some(current.clone());
+		self.scheduled = true;
 	}
 
 	pub fn load(
@@ -85,7 +79,7 @@ impl PlayerPrefetch {
 	pub fn invalidate(&mut self) {
 		self.worker.cancel();
 		self.generation = self.generation.wrapping_add(1);
-		self.scheduled = None;
+		self.scheduled = false;
 	}
 
 	fn key(&self, scene: &SceneId) -> PrefetchKey {

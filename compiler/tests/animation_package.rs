@@ -43,7 +43,7 @@ fn simulation(root: &Path, project: ProjectData, scene: SceneData) -> Simulation
 fn staged_animation_preserves_pins_clips_geometry_and_native_outcome() {
 	let fixture = Fixture::new();
 	let source = source();
-	let project = ProjectData::load(source.join("animation-demo.json")).unwrap();
+	let project = ProjectData::from_json(&test_project::manifest("animation-room")).unwrap();
 	let prepared = compiler::prepare_project(&project, &source.join("assets")).unwrap();
 	let staged = compiler::stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
 	let root = staged.path().join("assets");
@@ -101,7 +101,7 @@ fn export_rejects_invalid_controller_and_stale_animation_before_output() {
 	] {
 		fs::copy(source.join("assets").join(file), assets.join(file)).unwrap();
 	}
-	let project = ProjectData::load(source.join("animation-demo.json")).unwrap();
+	let project = ProjectData::from_json(&test_project::manifest("animation-room")).unwrap();
 	let mut scene = SceneData::from_json(
 		&fs::read_to_string(source.join("assets/scenes/animation-room.json")).unwrap(),
 	)
@@ -170,7 +170,7 @@ fn moved_animation_model_keeps_reserved_path_alias_in_runtime_and_export() {
 		serde_json::to_vec_pretty(&catalog).unwrap(),
 	)
 	.unwrap();
-	let project = ProjectData::load(source.join("animation-demo.json")).unwrap();
+	let project = ProjectData::from_json(&test_project::manifest("animation-room")).unwrap();
 	let scene = SceneData::from_json(
 		&fs::read_to_string(assets.join("scenes/animation-room.json")).unwrap(),
 	)
@@ -204,3 +204,6 @@ fn moved_animation_model_keeps_reserved_path_alias_in_runtime_and_export() {
 		exported.animations().replay_state()
 	);
 }
+
+#[path = "../../tests/support/project_fixture.rs"]
+mod test_project;

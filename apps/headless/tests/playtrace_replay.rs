@@ -60,7 +60,7 @@ impl Drop for Scratch {
 
 fn project() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-		.join("../game/project.release-learning.json")
+		.join("../../projects/cinder-oath/project.json")
 		.canonicalize()
 		.unwrap()
 }
@@ -80,48 +80,6 @@ fn report(output: Output) -> Value {
 		String::from_utf8_lossy(&output.stderr)
 	);
 	serde_json::from_slice(&output.stdout).unwrap()
-}
-
-fn marked_route() -> Vec<Value> {
-	let fixture: Value =
-		serde_json::from_str(include_str!("fixtures/controller/courtyard.replay.json")).unwrap();
-	let inputs = fixture["actions"].as_array().unwrap();
-	let mut actions = inputs[..5].to_vec();
-	actions.extend([mark("before-gate"), mark("same-tick")]);
-	actions.extend_from_slice(&inputs[5..8]);
-	actions.push(mark("after-gate"));
-	actions.extend_from_slice(&inputs[8..]);
-	actions.push(mark("finish"));
-	actions
-}
-
-#[test]
-fn marked_routes_are_repeatable_and_gate_is_the_first_changed_fact() {
-	let actions = marked_route();
-	let first = report(Scratch::new().invoke(5, &actions, &[]));
-	let second = report(Scratch::new().invoke(5, &actions, &[]));
-	assert_eq!(first["markers"], second["markers"]);
-	let expected = first["markers"].as_array().unwrap();
-	assert_eq!(expected[0]["scene_id"], "courtyard");
-	assert_eq!(
-		expected[0]["simulation_tick"],
-		expected[1]["simulation_tick"]
-	);
-	assert_eq!(expected[0]["has_courtyard_key"], true);
-	assert_eq!(expected[0]["route_gate_open"], false);
-	assert_eq!(expected[2]["label"], "after-gate");
-	assert_eq!(expected[2]["route_gate_open"], true);
-	assert_eq!(expected[3]["scene_id"], "finish");
-	assert_eq!(expected[3]["completed"], true);
-	assert_eq!(expected[3]["score"], 1);
-
-	let mut missed = actions;
-	missed.retain(|action| action.get("interact").and_then(Value::as_bool) != Some(true));
-	let observed = report(Scratch::new().invoke(5, &missed, &[]));
-	let observed = observed["markers"].as_array().unwrap();
-	assert_eq!(&observed[..2], &expected[..2]);
-	assert_eq!(observed[2]["label"], "after-gate");
-	assert_eq!(observed[2]["route_gate_open"], false);
 }
 
 #[test]
@@ -174,15 +132,4 @@ fn malformed_or_out_of_context_marks_fail_before_publishing_report() {
 		assert!(String::from_utf8_lossy(&output.stderr).contains(expected));
 		assert!(!scratch.0.join("report.json").exists());
 	}
-}
-
-#[test]
-fn authored_lever_fixture_replays_an_explicit_controller_press() {
-	let manifest = project().with_file_name("project.courtyard-interactables.json");
-	let trace = marked_route();
-	let report = report(Scratch::new().invoke_for(manifest, 5, &trace, &[]));
-	assert_eq!(report["project"], "Courtyard Interactable Learning");
-	assert_eq!(report["markers"][0]["route_gate_open"], false);
-	assert_eq!(report["markers"][2]["route_gate_open"], true);
-	assert_eq!(report["markers"][3]["completed"], true);
 }

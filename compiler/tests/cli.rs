@@ -156,7 +156,7 @@ fn legacy_names_starting_with_a_hyphen_reach_project_validation() {
 #[test]
 fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
 	const KEY_CLIP: &[u8] =
-		include_bytes!("../../apps/game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+		include_bytes!("../../projects/cinder-oath/assets/audio/blade-hit.wav");
 	let fixture = Fixture::new();
 	let authoring = fixture.0.join("audio-authoring");
 	let assets = authoring.join("assets");
@@ -251,76 +251,4 @@ fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
 	let missing = stage();
 	assert!(!missing.status.success());
 	assert!(!destination.join("Rejected audio stage").exists());
-}
-
-#[test]
-fn campaign_diagnostics_name_the_same_garden_role_as_editor_preparation() {
-	use engine_core::scene_data::ColliderData;
-	let fixture = Fixture::new();
-	let authoring = fixture.0.join("campaign");
-	let assets = authoring.join("assets");
-	let output = fixture.0.join("exports");
-	fs::create_dir_all(assets.join("scenes")).unwrap();
-	fs::create_dir(assets.join("props")).unwrap();
-	fs::create_dir(&output).unwrap();
-	let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/game");
-	let manifest = authoring.join("project.json");
-	fs::copy(source.join("project.courtyard-chapters.json"), &manifest).unwrap();
-	let project = ProjectData::load(&manifest).unwrap();
-	for scene in project.scenes.iter() {
-		fs::copy(
-			source.join("assets").join(scene.asset_path()),
-			assets.join(scene.asset_path()),
-		)
-		.unwrap();
-	}
-	for model in ["capsule.glb", "cube.glb", "sphere.glb"] {
-		fs::copy(
-			source.join("assets/props").join(model),
-			assets.join("props").join(model),
-		)
-		.unwrap();
-	}
-	let path = assets.join("scenes/chapter-garden.json");
-	let original = fs::read_to_string(&path).unwrap();
-	let mut garden = SceneData::from_json(&original).unwrap();
-	let trigger = garden
-		.entities
-		.iter_mut()
-		.find(|entity| entity.key.as_str() == "garden-exit-trigger")
-		.unwrap();
-	match trigger.collider.as_mut().unwrap() {
-		ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
-			interaction.sensor = false;
-		}
-	}
-	fs::write(&path, garden.to_json().unwrap()).unwrap();
-	let stage = || {
-		fixture
-			.command()
-			.arg("--stage")
-			.arg(&manifest)
-			.arg(&output)
-			.output()
-			.unwrap()
-	};
-	let rejected = stage();
-	assert!(!rejected.status.success());
-	let os_error = String::from_utf8_lossy(&rejected.stderr);
-	assert!(
-		os_error.contains(
-			r#"Scene "garden" ("scenes/chapter-garden.json"): Exit trigger needs an enabled sensor collider"#
-		),
-		"{os_error}"
-	);
-	assert!(fs::read_dir(&output).unwrap().next().is_none());
-
-	fs::write(&path, original).unwrap();
-	let accepted = stage();
-	assert!(
-		accepted.status.success(),
-		"{}",
-		String::from_utf8_lossy(&accepted.stderr)
-	);
-	assert!(output.join("Courtyard Chapters/project.json").is_file());
 }

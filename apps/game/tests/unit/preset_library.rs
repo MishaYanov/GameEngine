@@ -1,4 +1,5 @@
 use super::*;
+use crate::player_controls::preset_library::OrganizeLayout;
 use std::{
 	fs,
 	process::{Command, Stdio},
@@ -23,7 +24,7 @@ impl Fixture {
 		let manifest = root.join("project.json");
 		fs::write(
 			&manifest,
-			include_str!("../../project.courtyard-chapters.json"),
+			include_str!("../../../../projects/cinder-oath/project.json"),
 		)
 			.unwrap();
 		let owner = test_owner(&root);
@@ -121,8 +122,8 @@ fn named_layout_review_rechecks_entry_revision_and_destination_under_shared_lock
 	let owner = &fixture.owner;
 	let layout = ControlsSettings {
 		actions: vec![ActionKeyOverride {
-			action_id: "interact".into(),
-			key: Key::F,
+			action_id: "attack".into(),
+			key: Key::G,
 		}],
 		..ControlsSettings::default()
 	};
@@ -130,8 +131,8 @@ fn named_layout_review_rechecks_entry_revision_and_destination_under_shared_lock
 	let library = owner.library();
 	let original = library.layouts().unwrap().remove(0);
 	let review = owner.preview_layout(&original).unwrap();
-	assert_eq!(review.actions[0].keys.current, Key::E);
-	assert_eq!(review.actions[0].keys.proposed, Key::F);
+	assert_eq!(review.actions[0].keys.current, Key::F);
+	assert_eq!(review.actions[0].keys.proposed, Key::G);
 
 	library.rename(&original, "Temporary").unwrap();
 	let renamed = library.layouts().unwrap().remove(0);
@@ -154,9 +155,9 @@ fn named_layout_review_rechecks_entry_revision_and_destination_under_shared_lock
 	let fresh = owner.preview_layout(&current).unwrap();
 	let (applied, profile) = owner.apply_layout(&current, &fresh).unwrap();
 	assert!(applied.display.high_contrast);
-	assert_eq!(profile.actions[0].key, Key::F);
+	assert_eq!(profile.actions[0].key, Key::G);
 	let reopened = owner.preferences.load().unwrap();
-	assert_eq!(reopened.actions[0].key, Key::F);
+	assert_eq!(reopened.actions[0].key, Key::G);
 	assert!(reopened.display.high_contrast);
 }
 
@@ -209,8 +210,8 @@ fn portable_library_restore_rejects_stale_reviews_and_merges_with_fresh_identiti
 	let backup = source.root.join("saved.input-library.json");
 	let different = ControlsSettings {
 		actions: vec![ActionKeyOverride {
-			action_id: "interact".into(),
-			key: Key::F,
+			action_id: "attack".into(),
+			key: Key::G,
 		}],
 		..settings.clone()
 	};
@@ -243,8 +244,9 @@ fn portable_library_restore_rejects_stale_reviews_and_merges_with_fresh_identiti
 	assert!(owner.restore_library_backup(&backup, &stale).is_err());
 
 	let reviewed = owner.preview_library_backup(&backup).unwrap();
-	assert_eq!(reviewed.additions, ["EXTRA"]);
-	assert_eq!(reviewed.conflicts, ["SHARED"]);
+	assert_eq!(reviewed.rows[0].label(), Some("EXTRA"));
+	assert!(reviewed.rows[1].conflict);
+	assert_eq!(reviewed.rows[1].source_label, "SHARED");
 	let original = fs::read(&backup).unwrap();
 	fs::write(&backup, [original.as_slice(), b"\n"].concat()).unwrap();
 	assert!(
@@ -281,9 +283,9 @@ fn portable_library_restore_rejects_stale_reviews_and_merges_with_fresh_identiti
 	assert_eq!(record["entries"][1]["layout"]["id"], 3);
 	assert!(reopened.preferences.load().unwrap().actions.is_empty());
 	let shared = reopened.preview_layout(&layouts[0]).unwrap();
-	assert_eq!(shared.actions[0].keys.proposed, Key::E);
+	assert_eq!(shared.actions[0].keys.proposed, Key::F);
 	let extra = reopened.preview_layout(&layouts[1]).unwrap();
-	assert_eq!(extra.actions[0].keys.proposed, Key::F);
+	assert_eq!(extra.actions[0].keys.proposed, Key::G);
 	assert_eq!(
 		reopened
 			.apply_layout(&layouts[1], &extra)
@@ -291,7 +293,7 @@ fn portable_library_restore_rejects_stale_reviews_and_merges_with_fresh_identiti
 			.1
 			.actions[0]
 			.key,
-		Key::F
+		Key::G
 	);
 }
 
@@ -334,4 +336,210 @@ fn portable_library_review_validates_scope_duplicate_labels_and_capacity() {
 			.unwrap_err()
 			.contains("different authored input profile")
 	);
+}
+
+#[test]
+fn restore_decisions_reject_collisions_and_can_skip_down_to_capacity() {
+	let source = Fixture::new();
+	let destination = Fixture::new();
+	let settings = ControlsSettings::default();
+	let backup = source.root.join("choices.input-library.json");
+	for label in ["Shared", "Second", "Extra"] {
+		source.owner.save_layout(label, &settings).unwrap();
+	}
+	source.owner.export_library(&backup).unwrap();
+	for label in ["Shared", "Second", "Extra", "Four", "Five", "Six", "Seven"] {
+		destination.owner.save_layout(label, &settings).unwrap();
+	}
+	let owner = &destination.owner;
+	let path = owner.preferences.preset_library_path().unwrap().unwrap();
+	let original = fs::read(&path).unwrap();
+	let mut reviewed = owner.preview_library_backup(&backup).unwrap();
+	assert_eq!(reviewed.blocked(), Some("No new layouts to restore"));
+	assert!(owner.restore_library_backup(&backup, &reviewed).is_err());
+	assert_eq!(fs::read(&path).unwrap(), original);
+	assert!(reviewed.use_label(0, "  shared  ").is_err());
+	assert!(reviewed.use_label(0, "no/").is_err());
+	assert_eq!(reviewed.suggestion(0), "EXTRA 2");
+	reviewed.use_label(0, " incoming    one ").unwrap();
+	assert!(reviewed.use_label(1, "INCOMING ONE").is_err());
+	reviewed.use_label(1, "incoming two").unwrap();
+	assert_eq!(reviewed.blocked(), Some("Library capacity exceeded"));
+	assert!(owner.restore_library_backup(&backup, &reviewed).is_err());
+	reviewed.skip(1);
+
+	let changed = [original.as_slice(), b"\n"].concat();
+	fs::write(&path, &changed).unwrap();
+	assert!(owner.restore_library_backup(&backup, &reviewed).is_err());
+	assert_eq!(fs::read(&path).unwrap(), changed);
+	fs::write(&path, original).unwrap();
+	assert_eq!(owner.restore_library_backup(&backup, &reviewed).unwrap(), 1);
+	let layouts = owner.library().layouts().unwrap();
+	assert_eq!(layouts[7].label, "INCOMING ONE");
+	assert!(!layouts[7].favorite);
+	assert_eq!(owner.preferences.load().unwrap(), settings);
+}
+
+#[test]
+fn legacy_layout_order_migrates_and_movement_preserves_portable_pairs() {
+	let fixture = Fixture::new();
+	let owner = &fixture.owner;
+	let library = owner.library();
+	for label in ["Early", "Middle", "Late", "Last"] {
+		owner
+			.save_layout(label, &ControlsSettings::default())
+			.unwrap();
+	}
+	let path = owner.preferences.preset_library_path().unwrap().unwrap();
+	let mut old = serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
+	old["schema_version"] = 1.into();
+	for entry in old["entries"].as_array_mut().unwrap() {
+		entry["layout"].as_object_mut().unwrap().remove("favorite");
+	}
+	let old = serde_json::to_vec(&old).unwrap();
+	fs::write(&path, &old).unwrap();
+	let initial = library.layouts().unwrap();
+	assert_eq!(
+		initial
+			.iter()
+			.map(|layout| layout.label.as_str())
+			.collect::<Vec<_>>(),
+		["EARLY", "MIDDLE", "LATE", "LAST"]
+	);
+	assert!(initial.iter().all(|layout| !layout.favorite));
+	assert_eq!(fs::read(&path).unwrap(), old);
+
+	let before = fixture.root.join("before.input-library.json");
+	owner.export_library(&before).unwrap();
+	library
+		.organize(&initial[2], OrganizeLayout::SetFavorite(true))
+		.unwrap();
+	library
+		.organize(&initial[3], OrganizeLayout::SetFavorite(true))
+		.unwrap();
+	let pinned = library.layouts().unwrap();
+	assert_eq!(pinned[0].id, initial[2].id);
+	assert_eq!(pinned[1].id, initial[3].id);
+	library
+		.organize(&pinned[1], OrganizeLayout::MoveAdjacent(&pinned[0]))
+		.unwrap();
+	let reopened_owner = test_owner(&fixture.root);
+	let reopened = reopened_owner.library().layouts().unwrap();
+	assert_eq!(
+		reopened
+			.iter()
+			.map(|layout| layout.label.as_str())
+			.collect::<Vec<_>>(),
+		["LAST", "LATE", "EARLY", "MIDDLE"]
+	);
+	let stored = fs::read(&path).unwrap();
+	assert!(
+		library
+			.organize(&pinned[0], OrganizeLayout::MoveAdjacent(&pinned[1]))
+			.is_err()
+	);
+	assert!(
+		library
+			.organize(&reopened[1], OrganizeLayout::MoveAdjacent(&reopened[2]))
+			.is_err()
+	);
+	assert_eq!(fs::read(&path).unwrap(), stored);
+	assert_eq!(
+		serde_json::from_slice::<serde_json::Value>(&stored).unwrap()["schema_version"],
+		2
+	);
+
+	let after = fixture.root.join("after.input-library.json");
+	owner.export_library(&after).unwrap();
+	assert_eq!(fs::read(before).unwrap(), fs::read(after).unwrap());
+}
+
+#[cfg(windows)]
+#[test]
+fn installed_layout_actions_restore_stable_focus_with_keyboard_and_controller() {
+	use crate::GameApp;
+	use runtime::input::{MenuButtons, PhysicalGamepadSample};
+
+	const PROFILE: &str = "GAME_ENGINE_TEST_LAYOUT_MENU_PROFILE";
+	let Some(root) = std::env::var_os(PROFILE) else {
+		let fixture = Fixture::new();
+		let output = Command::new(std::env::current_exe().unwrap())
+			.args(["--exact", "player_controls::input_preset::library_tests::installed_layout_actions_restore_stable_focus_with_keyboard_and_controller"])
+			.env(PROFILE, &fixture.root)
+			.env("LOCALAPPDATA", &fixture.root)
+			.output().unwrap();
+		assert!(
+			output.status.success(),
+			"{}{}",
+			String::from_utf8_lossy(&output.stdout),
+			String::from_utf8_lossy(&output.stderr)
+		);
+		assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+		return;
+	};
+
+	let root = PathBuf::from(root);
+	let manifest = root.join("project.json");
+	let (_, project) = Scope::read(&manifest).unwrap();
+	let owner = PresetTransfer::new(&manifest, &project).unwrap();
+	let settings = ControlsSettings::default();
+	for label in ["Alpha", "Beta", "Gamma"] {
+		owner.save_layout(label, &settings).unwrap();
+	}
+	let mut app = GameApp::default();
+	app.project = Some(project);
+	app.project_path = Some(manifest);
+	app.installed_project = true;
+	let focus = |app: &GameApp, label| {
+		app.player_controls.rows_with_capacity(1).unwrap()[0] == format!("> {label}")
+	};
+	let find_key = |app: &mut GameApp, label| {
+		for _ in 0..16 {
+			if focus(app, label) {
+				return;
+			}
+			assert!(app.player_controls_key(Key::ArrowDown));
+		}
+		panic!("Menu row {label} is unavailable");
+	};
+	let press = |app: &mut GameApp, key| {
+		app.player_controls_gamepad(PhysicalGamepadSample::default());
+		assert!(app.player_controls_gamepad(PhysicalGamepadSample {
+			menu: MenuButtons {
+				down: key == Key::ArrowDown,
+				..MenuButtons::default()
+			},
+			face_buttons: [key == Key::Enter, key == Key::Escape, false, false],
+			..PhysicalGamepadSample::default()
+		}));
+	};
+	app.player_controls_key(Key::Escape);
+	for label in ["Input presets", "Saved Layouts", "GAMMA", "Favorite layout"] {
+		find_key(&mut app, label);
+		assert!(app.player_controls_key(Key::Enter));
+	}
+	assert!(focus(&app, "Remove favorite"));
+	assert!(app.player_controls_key(Key::Escape));
+	assert!(focus(&app, "[Favorite] GAMMA"));
+
+	for label in ["ALPHA", "Favorite layout", "Move later"] {
+		for _ in 0..16 {
+			if focus(&app, label) {
+				break;
+			}
+			press(&mut app, Key::ArrowDown);
+		}
+		assert!(focus(&app, label), "Menu row {label} is unavailable");
+		press(&mut app, Key::Enter);
+	}
+	assert!(focus(&app, "[Favorite] ALPHA"));
+	let rows = owner.library().layouts().unwrap();
+	assert_eq!(
+		rows.iter()
+			.map(|row| row.label.as_str())
+			.collect::<Vec<_>>(),
+		["GAMMA", "ALPHA", "BETA"]
+	);
+	assert!(rows[0].favorite && rows[1].favorite && !rows[2].favorite);
+	assert_eq!(owner.preferences.load().unwrap(), settings);
 }

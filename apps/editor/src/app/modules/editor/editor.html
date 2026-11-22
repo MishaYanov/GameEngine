@@ -2,6 +2,7 @@
     <editor-header
             (exitRequested)="exitEditor()"
             (openProjectRequested)="openProject()"
+            (sceneInformationRequested)="workspace.openSceneInformation()"
             (settingsRequested)="settings.setOpen(true)"
             [canExit]="canExit()"
             [canOpen]="canOpenProject()"
@@ -21,7 +22,7 @@
         </div>
     }
 
-    <editor-workspace
+    <editor-workspace #workspace
             (openProjectRequested)="openProject()"
             [canOpenProject]="canOpenProject()"
             [opening]="opening()"

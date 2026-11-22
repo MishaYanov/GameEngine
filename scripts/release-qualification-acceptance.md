@@ -1,4 +1,4 @@
-# Courtyard release acceptance
+# Cinder Oath release acceptance
 
 ## Build the candidate
 
@@ -6,7 +6,7 @@ Use Python 3.11 or later. On the Windows builder, start from a clean checkout wi
 Vulkan available. Run from the repository root with a fresh evidence directory.
 
 ~~~powershell
-python -B scripts/qualify_release.py --require-clean apps/game/project.release-learning.json target/release-qualification/build-123
+python -B scripts/qualify_release.py --require-clean projects/cinder-oath/project.json target/release-qualification/build-123
 ~~~
 
 The manual Jenkins builder uses `ci/jenkins/Jenkinsfile.windows-release` on an `engine-windows-vulkan` worker in an
@@ -43,7 +43,7 @@ workers. Run source checks at the exact receipt revision.
 
 | Gate                | Observation to record                                                                                                                                                                                     |
 |---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `headless`          | Run the Courtyard route replay and semantic controller checks from the candidate's verified project against the matching headless build. Retain the report and command log.                               |
+| `headless`          | Replay the Cinder Oath intro and duel against the verified manifest with the matching headless build. Retain the report and command log.                                                                  |
 | `editor`            | Run native editor acceptance from the same clean source revision on the assigned Windows Vulkan editor worker. Retain the workspace test results and the in-window Game view and transition observations. |
 | `clean_player`      | Collect the three files from the independent probe.                                                                                                                                                       |
 | `manual_controller` | Run the physical test below on its assigned Windows host. Retain its row-by-row observations.                                                                                                             |
@@ -78,18 +78,17 @@ Run the delivered Player from an unrelated working directory and a disposable `L
 Git revision, Windows build, GPU, driver, controller model, connection type, tester, and observed result for every row.
 Use physical hardware for controller tests.
 
-| Check                                                                                                                                                           | Observation | Result |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
-| Keyboard opens Controls, navigates, applies and persists a movement preset                                                                                      |             |        |
-| Menu, D-pad, A and B open Controls, remap Interact, and apply with visible focus                                                                                |             |        |
-| The remap persists after relaunch and the small window keeps the focused row visible                                                                            |             |        |
-| Closing Controls with a remapped B cannot interact until B is released and pressed again                                                                        |             |        |
-| Focus loss and unplug clear ownership. Holding a button through reconnect needs release and a fresh press                                                       |             |        |
-| Escape cancels Replace after disconnect. Held A on reconnect does not confirm                                                                                   |             |        |
-| Save to Slots 1 and 2. Relaunch and Continue both checkpoints independently                                                                                     |             |        |
-| Cancelling Replace leaves the slot bytes unchanged. Explicit Replace creates the prior generation                                                               |             |        |
-| With the Player closed, corrupt only the disposable Slot 1 primary. Continue rejects it, Recover restores the prior generation, and Slot 2 bytes stay unchanged |             |        |
-| An approved prior release slot loads without changing its bytes until Save. A separate incompatible save is rejected and preserved                              |             |        |
+| Check                                                                                                                | Observation | Result |
+|----------------------------------------------------------------------------------------------------------------------|-------------|--------|
+| Keyboard opens Controls, navigates, applies and persists a movement preset                                           |             |        |
+| Menu, D-pad, A and B open Controls, remap Attack, and apply with visible focus                                       |             |        |
+| The remap persists after relaunch and the small window keeps the focused row visible                                 |             |        |
+| Closing Controls with a remapped B requires a fresh press before the next attack                                     |             |        |
+| Focus loss and unplug clear ownership. Holding a button through reconnect needs release and a fresh press            |             |        |
+| Escape cancels a pending import after disconnect. Reconnect with A held, then release it and press again to confirm  |             |        |
+| Reach the arena and save its practice entry. Relaunch and resume the practice slot at the start of the duel          |             |        |
+| Export the practice checkpoint and preview it in a second disposable profile. Cancel once, then review and import it |             |        |
+| Inspect the exported audit. Record the transfer scope, outcome and UTC completion time                               |             |        |
 
 Record the physical gate as `passed` after all rows are observed, `failed` if a required row fails, or `not_run` when
 the assigned hardware is unavailable. Keep the notes in `manual-controller.txt` within the evidence directory. Save
@@ -254,8 +253,73 @@ python -B scripts/release_signoff_handoff.py verify $renewedRoot @policy
 $verifyStatus = $LASTEXITCODE
 ~~~
 
+## Generate a renewal checklist
+
+Use the receipt, archive, gate directory, packet and any signed role decisions explicitly selected from the previous
+review. Supply trusted profiles, signer policy and verification tools from outside the evidence and playtest folders.
+Record any rejected role or failed gate
+first, then collect decisions for roles listed in `roles_requiring_review`. A dirty source is recorded in
+`source_dirty`.
+The checklist is a local diagnostic file. An expired publication must go through the renewal steps above.
+
+~~~powershell
+$reviewInputs = @($receipt, $archive, $gates, $packet)
+python -B scripts/verify_release_signoffs.py checklist @reviewInputs $checklist @policy @roleInputs
+$checklistStatus = $LASTEXITCODE
+~~~
+
+Write the checklist to a fresh path outside the gate and playtest evidence folders. A successful write returns the
+verified verdict exit code. A held review with an expired release decision and missing QA decision lists both roles.
+A rejected review preserves the rejection even when the other role is missing.
+
+## Summarize a current verified handoff
+
+~~~powershell
+python -B scripts/release_signoff_handoff.py summarize $relocatedHandoff $summary @policy
+$summaryStatus = $LASTEXITCODE
+~~~
+
+Write the summary outside the handoff in an existing ordinary directory. Schema 1 includes the archive, packet and
+receipt SHA-256 hashes, source revision and dirty flag, role states, gate verdict and overall status. Each gate lists
+its
+trusted profile, result-record SHA-256, and any case files as path, byte size and SHA-256. Resolve each case path from
+the
+verified handoff root. An absent gate is `pending` and has an empty evidence list.
+
+~~~powershell
+$report = Get-Content -Raw -LiteralPath $summary | ConvertFrom-Json
+foreach ($gate in $report.gates) {
+    foreach ($case in $gate.evidence) {
+        $actual = (Get-FileHash -LiteralPath (Join-Path $relocatedHandoff $case.path)).Hash.ToLowerInvariant()
+        if ($actual -ne $case.sha256) { throw "Case changed at $($case.path)" }
+    }
+}
+~~~
+
+Exit 0 means accepted, 1 rejected, 2 held, and 3 invalid. A dirty candidate with missing gates yields a held summary.
+An active rejection yields a rejected summary even when another role has yet to sign. A changed file or an index that
+no longer matches current role freshness prevents summary creation. Keep the report local to the operator.
+
+## Rehearse the renewal locally
+
+Run the disposable OpenSSH fixture suite from the repository root. It recreates an archived approval, renews one role
+and then both roles, verifies the relocated result, and confirms that the expired comparison returns 3 and leaves the
+prior handoff intact. The fixtures provision their own profiles, keys and policy.
+
+~~~powershell
+$env:PYTHONPATH = 'scripts'
+python -B -m unittest discover -s tests -p test_release_signoff_handoff.py
+$fixtureExit = $LASTEXITCODE
+~~~
+
+For a local Windows rehearsal, create a disposable working directory and qualify Cinder Oath without
+`--require-clean`. Build a packet for the actual receipt using a local host profile map. Use disposable signers or
+leave roles explicitly missing. Write rehearsal notes alongside the outputs with the receipt and packet SHA-256
+values, verified gate statuses, command exit codes, verdict, and policy origin. Keep key paths and credentials out of
+the notes. Repeat using approved operator policy and independent workers when collecting real release evidence.
+
 ## Relevant information and resources
 
-- [Native two-process rehearsal](release-rehearsal-checklist.md) · [Approved predecessor evidence](../apps/game/fixtures/courtyard-release-learning/save-upgrade-evidence.md)
+- [Native two-process rehearsal](release-rehearsal-checklist.md) · [Cinder Oath project manifest](../projects/cinder-oath/project.json)
 - [Candidate verifier](verify_candidate.py) · [Installed Player probe](probe_installed_candidate.py) · [Gate verifier](verify_host_gates.py)
 - [Windows builder](../ci/jenkins/Jenkinsfile.windows-release) · [Host evidence job](../ci/jenkins/Jenkinsfile.windows-host-gates) · [Jenkins artifact archives and fingerprints](https://www.jenkins.io/doc/pipeline/steps/core/#archiveartifacts-archive-the-artifacts)

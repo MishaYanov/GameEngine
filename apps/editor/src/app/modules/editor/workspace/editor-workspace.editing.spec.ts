@@ -64,6 +64,14 @@ function initialSnapshot(): EditorSnapshot {
     };
 }
 
+const gameplayModule = {
+    id: 'fixture_game',
+    label: 'Fixture Game',
+    description: 'A test game with a player role.',
+    default_roles: [{name: 'player', label: 'Player', requirement_hint: 'Choose the player.'}],
+    scene_roles: {},
+};
+
 describe('Workspace live editing flow', () => {
     const dialogPrototype = HTMLDialogElement.prototype;
     const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
@@ -138,6 +146,7 @@ describe('Workspace live editing flow', () => {
                 protocol_version: 2, scene_schema_version: 3, incremental_commands: true,
                 commands: [], embedded_viewport_supported: true,
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
+                gameplay_modules: [gameplayModule],
             };
             if (operation === 'editor_open_project') {
                 nativeState = {...initialSnapshot(), revision: nativeState.revision + 1,
@@ -338,6 +347,49 @@ describe('Workspace live editing flow', () => {
         button.click();
         await fixture.whenStable();
         expect(root.querySelector('editor-problems-panel dialog[open]')?.textContent).toContain('No reference problems');
+    });
+
+    it('opens Scene Information and focuses a gameplay role from Find Usages or Problems', async () => {
+        await editor.loadCapabilities();
+        const root: HTMLElement = fixture.nativeElement;
+        const setPlayer = async (key: string) => {
+            nativeState = {
+                ...nativeState,
+                revision: nativeState.revision + 1,
+                scene_revision: nativeState.scene_revision + 1,
+                project: {...nativeState.project, gameplay_module: gameplayModule.id},
+                document: {...nativeState.document, bindings: {player: key}},
+            };
+            await editor.refresh();
+            await fixture.whenStable();
+        };
+        const sceneDialog = () => root.querySelector<HTMLDialogElement>('editor-scene-actions dialog[open]');
+        const focusedRole = () => expect(document.activeElement)
+            .toBe(sceneDialog()?.querySelector('[data-scene-binding="player"]'));
+
+        await setPlayer('robot');
+        const hierarchy = fixture.debugElement.query(By.directive(SceneEntitiesPanel)).injector.get(SceneEntitiesPanel);
+        hierarchy.usagesRequested.emit('robot');
+        await fixture.whenStable();
+        const usage = root.querySelector<HTMLElement>('editor-find-usages [role="treeitem"][aria-level="2"]')!;
+        expect(usage.textContent).toContain('Scene · player');
+        usage.click();
+        await fixture.whenStable();
+        expect(root.querySelector('editor-find-usages dialog[open]')).toBeNull();
+        expect(sceneDialog()?.querySelector('h2')?.textContent?.trim()).toBe('Scene Information');
+        focusedRole();
+
+        sceneDialog()!.close();
+        await setPlayer('missing');
+        root.querySelector<HTMLButtonElement>('.problems-button')!.click();
+        await fixture.whenStable();
+        const problem = root.querySelector<HTMLButtonElement>('editor-problems-panel dialog[open] li button')!;
+        expect(problem.textContent).toContain('Entity “missing” does not exist in this scene.');
+        problem.click();
+        await fixture.whenStable();
+        expect(root.querySelector('editor-problems-panel dialog[open]')).toBeNull();
+        focusedRole();
+        expect(commands).toEqual([]);
     });
 
     it('opens the palette from the hierarchy shortcut and dispatches Save Scene through the existing toolbar', async () => {

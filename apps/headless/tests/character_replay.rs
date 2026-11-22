@@ -38,7 +38,8 @@ fn character_fixture_replays_jump_and_restart_with_stable_motion() {
 		serde_json::to_vec(&json!({"schema_version":1,"actions":actions})).unwrap(),
 	)
 	.unwrap();
-	let project = root.join("apps/game/controller-demo.json");
+	let fixture = test_project::ProjectFixture::new("controller-room");
+	let project = fixture.manifest_path();
 	let a = run(&project, &replay);
 	let b = run(&project, &replay);
 	assert_eq!(a["native_components_hash_scope"], "native_components_v1");
@@ -85,3 +86,6 @@ fn character_fixture_replays_jump_and_restart_with_stable_motion() {
 	);
 	fs::remove_dir_all(directory).unwrap();
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

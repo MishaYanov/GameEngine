@@ -4,7 +4,11 @@ use bridge::feedback_audio::FeedbackBus;
 use runtime::Key;
 use serde::{Deserialize, Serialize};
 
-use crate::feedback_audio::{AuditionScope, CueAuditionOutcome, CueClipSource, FeedbackAudio};
+use super::listening_check::ListeningCheck;
+use crate::{
+	feedback_audio::{AuditionScope, CueAuditionOutcome, CueClipSource, FeedbackAudio},
+	project_sound::{CombatCue, ProjectSound},
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +100,7 @@ enum Row {
 	Apply,
 	Test(FeedbackBus),
 	CueDetails,
+	ListeningCheck,
 	Back,
 }
 
@@ -103,6 +108,8 @@ pub(super) struct AudioMenu {
 	focus: usize,
 	draft: FeedbackMix,
 	details: Option<CueDetailsMenu>,
+	listening: Option<ListeningCheck>,
+	cinder: bool,
 	audition: AuditionScope,
 }
 
@@ -122,20 +129,47 @@ impl AudioMenu {
 		Row::Back,
 	];
 
-	pub(super) fn new(draft: FeedbackMix) -> Self {
+	const CINDER_ROWS: [Row; 9] = [
+		Row::Volume,
+		Row::Mute,
+		Row::Bus(FeedbackBus::Collection),
+		Row::Bus(FeedbackBus::Mechanisms),
+		Row::Bus(FeedbackBus::Completion),
+		Row::RestoreDefaults,
+		Row::Apply,
+		Row::ListeningCheck,
+		Row::Back,
+	];
+
+	pub(super) fn new(draft: FeedbackMix, cinder: bool) -> Self {
 		Self {
 			focus: 0,
 			draft,
 			details: None,
+			listening: None,
+			cinder,
 			audition: AuditionScope::default(),
+		}
+	}
+
+	fn actions(&self) -> &[Row] {
+		if self.cinder {
+			&Self::CINDER_ROWS
+		} else {
+			&Self::ROWS
 		}
 	}
 
 	pub(super) fn rows(
 		&self,
 		audio: &FeedbackAudio,
+		project: &ProjectSound,
+		applied: FeedbackMix,
 		captions_enabled: bool,
 	) -> (String, Vec<String>, usize) {
+		if let Some(listening) = &self.listening {
+			return listening.rows(project.preview_status(), applied);
+		}
 		match &self.details {
 			Some(details) => details.rows(audio, captions_enabled),
 			None => self.settings_rows(),
@@ -146,18 +180,24 @@ impl AudioMenu {
 		let mute = if self.draft.muted { "On" } else { "Off" };
 		(
 			"Feedback Audio".into(),
-			Self::ROWS
-				.into_iter()
+			self.actions()
+				.iter()
+				.copied()
 				.map(|row| match row {
 					Row::Volume => format!("Volume: {}%", self.draft.level_percent),
 					Row::Mute => format!("Mute: {mute}"),
 					Row::Bus(bus) => {
-						format!("{}: {}%", bus_label(bus), self.draft.category_percent(bus))
+						format!(
+							"{}: {}%",
+							self.category_label(bus),
+							self.draft.category_percent(bus)
+						)
 					}
 					Row::RestoreDefaults => "Restore Category Defaults".into(),
 					Row::Apply => "Apply".into(),
 					Row::Test(bus) => format!("Test {}", bus_label(bus)),
 					Row::CueDetails => "Cue Details".into(),
+					Row::ListeningCheck => "Start Audio Check".into(),
 					Row::Back => "Back".into(),
 				})
 				.collect(),
@@ -175,18 +215,26 @@ impl AudioMenu {
 		}
 	}
 
-	pub(super) fn key(&mut self, key: Key) -> AudioAction {
+	pub(super) fn key(&mut self, key: Key, project: &ProjectSound) -> AudioAction {
+		if let Some(check) = &mut self.listening {
+			let action = check.key(key, project.preview_status());
+			if matches!(action, AudioAction::CloseCheck) {
+				self.listening = None;
+				return AudioAction::ResetPreview;
+			}
+			return action;
+		}
 		if let Some(details) = &mut self.details {
 			if details.back_requested(key) {
 				self.details = None;
 			}
 			return AudioAction::Stay;
 		}
-		let row = Self::ROWS[self.focus];
+		let row = self.actions()[self.focus];
 		match key {
 			Key::Escape => return AudioAction::Back,
 			Key::ArrowUp | Key::ArrowDown => {
-				self.focus = super::advance_row(self.focus, Self::ROWS.len(), key);
+				self.focus = super::advance_row(self.focus, self.actions().len(), key);
 			}
 			Key::ArrowLeft | Key::ArrowRight => {
 				let step = if key == Key::ArrowRight { 10 } else { -10 };
@@ -205,12 +253,27 @@ impl AudioMenu {
 				Row::Apply => return AudioAction::Apply(self.draft),
 				Row::Test(bus) => return AudioAction::Audition(bus),
 				Row::CueDetails => self.details = Some(CueDetailsMenu::default()),
+				Row::ListeningCheck => {
+					self.listening = Some(ListeningCheck::new(project.configured_cues()));
+					return AudioAction::ResetPreview;
+				}
 				Row::Back => return AudioAction::Back,
 				_ => {}
 			},
 			_ => {}
 		}
 		AudioAction::Stay
+	}
+	fn category_label(&self, bus: FeedbackBus) -> &'static str {
+		if self.cinder {
+			match bus {
+				FeedbackBus::Collection => "Sword actions",
+				FeedbackBus::Mechanisms => "Damage taken",
+				FeedbackBus::Completion => "Duel outcome",
+			}
+		} else {
+			bus_label(bus)
+		}
 	}
 }
 
@@ -233,7 +296,6 @@ impl CueDetailsMenu {
 		let details = audio.cue_details(bus);
 		let clip = match details.clip {
 			CueClipSource::Authored => "Authored",
-			CueClipSource::BuiltIn => "Built-in",
 			CueClipSource::Missing => "Missing",
 		};
 		let captions = if captions_enabled { "On" } else { "Off" };
@@ -285,6 +347,9 @@ pub(super) enum AudioAction {
 	Stay,
 	Apply(FeedbackMix),
 	Audition(FeedbackBus),
+	ProjectAudition(CombatCue),
+	ResetPreview,
+	CloseCheck,
 	Back,
 }
 

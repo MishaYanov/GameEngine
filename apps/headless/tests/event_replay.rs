@@ -26,7 +26,8 @@ impl Drop for Scratch {
 	}
 }
 fn run(replay: &std::path::Path) -> Value {
-	let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game/event-demo.json");
+	let fixture = test_project::ProjectFixture::new("event-lab");
+	let project = fixture.manifest_path();
 	let output = Command::new(env!("CARGO_BIN_EXE_engine-headless"))
 		.arg("--project")
 		.arg(project)
@@ -165,3 +166,6 @@ fn native_projection_contains_all_machines_beyond_the_inspection_page() {
 		1
 	);
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

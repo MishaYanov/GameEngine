@@ -4,21 +4,25 @@ use super::*;
 fn labels_expire_on_monotonic_deadlines_and_repeats_replace_the_old_entry() {
 	let now = Instant::now();
 	let mut captions = FeedbackCaptions::default();
-	captions.push(FeedbackCue::KeyCollected, now);
-	captions.push(FeedbackCue::GateOpened, now + Duration::from_millis(200));
-	captions.push(FeedbackCue::RunCompleted, now + Duration::from_millis(300));
-	captions.push(FeedbackCue::KeyCollected, now + Duration::from_millis(400));
+	captions.push(CombatCue::Swing, now);
+	captions.push(CombatCue::Hit, now + Duration::from_millis(200));
+	captions.push(CombatCue::Victory, now + Duration::from_millis(300));
+	captions.push(CombatCue::Swing, now + Duration::from_millis(400));
 	assert_eq!(captions.entries.len(), 3);
 	assert_eq!(
 		captions
-			.rows(now + Duration::from_millis(400))
+			.rows(now + Duration::from_millis(400), DisplaySettings::default())
 			.collect::<Vec<_>>(),
-		["Key collected", "Run completed", "Gate opened"]
+		["Sword swing", "Victory", "Sword impact"]
 	);
 	let first_expiry = now + Duration::from_millis(2200);
 	assert_eq!(captions.next_expiry(), Some(first_expiry));
 	assert!(captions.expire(first_expiry));
-	assert!(!captions.rows(first_expiry).any(|row| row == "Gate opened"));
+	assert!(
+		!captions
+			.rows(first_expiry, DisplaySettings::default())
+			.any(|row| row == "Sword impact")
+	);
 	assert!(captions.expire(now + Duration::from_millis(2400)));
 	assert!(captions.next_expiry().is_none());
 }
@@ -27,9 +31,9 @@ fn labels_expire_on_monotonic_deadlines_and_repeats_replace_the_old_entry() {
 fn new_run_can_clear_all_visible_feedback_without_waiting() {
 	let mut captions = FeedbackCaptions::default();
 	let now = Instant::now();
-	captions.push(FeedbackCue::RunCompleted, now);
+	captions.push(CombatCue::Victory, now);
 	captions.clear();
-	assert_eq!(captions.rows(now).next(), None);
+	assert_eq!(captions.rows(now, DisplaySettings::default()).next(), None);
 	assert_eq!(captions.next_expiry(), None);
 }
 
@@ -48,7 +52,7 @@ fn zero_audio_gain_still_allows_gameplay_captions() {
 		None,
 		false,
 		mix,
-		&SceneId::new("courtyard").unwrap(),
+		&SceneId::new("intro").unwrap(),
 	)
 		.unwrap();
 	assert_eq!(
@@ -57,17 +61,74 @@ fn zero_audio_gain_still_allows_gameplay_captions() {
 	);
 	let now = Instant::now();
 	let mut captions = FeedbackCaptions::default();
-	let before = crate::feedback_audio::Facts {
-		key: false,
-		gate: false,
-		complete: false,
-	};
-	let after = crate::feedback_audio::Facts {
-		gate: true,
-		..before
-	};
-	for cue in before.rising(after) {
+	captions.push(CombatCue::Hit, now);
+	assert_eq!(
+		captions
+			.rows(now, DisplaySettings::default())
+			.collect::<Vec<_>>(),
+		["Sword impact"]
+	);
+}
+
+#[test]
+fn disabled_categories_filter_projection_and_remaining_cues_keep_expiry_order() {
+	let display: DisplaySettings = serde_json::from_value(serde_json::json!({
+		"text_size": "standard",
+		"high_contrast": false,
+		"cue_captions": true,
+		"caption_categories": {"sword": true, "damage": false, "outcome": true}
+	}))
+		.unwrap();
+	let mut captions = FeedbackCaptions::default();
+	let now = Instant::now();
+	captions.push(CombatCue::Swing, now);
+	captions.push(CombatCue::Hurt, now + Duration::from_millis(100));
+	captions.push(CombatCue::Defeat, now + Duration::from_millis(200));
+	assert_eq!(
+		captions
+			.rows(now + Duration::from_millis(200), display)
+			.collect::<Vec<_>>(),
+		["Defeat", "Sword swing"]
+	);
+	assert_eq!(
+		captions.rows(now + LIFETIME, display).collect::<Vec<_>>(),
+		["Defeat"]
+	);
+	assert_eq!(
+		captions
+			.rows(now + LIFETIME + Duration::from_millis(200), display)
+			.next(),
+		None
+	);
+}
+
+#[test]
+fn a_hidden_cue_cannot_displace_three_live_visible_captions() {
+	let display: DisplaySettings = serde_json::from_value(serde_json::json!({
+		"text_size": "standard",
+		"high_contrast": false,
+		"cue_captions": true,
+		"caption_categories": {"sword": true, "damage": true, "outcome": false}
+	}))
+		.unwrap();
+	let mut captions = FeedbackCaptions::default();
+	let now = Instant::now();
+	for cue in [
+		CombatCue::Swing,
+		CombatCue::Hit,
+		CombatCue::Hurt,
+		CombatCue::Victory,
+	] {
 		captions.push(cue, now);
 	}
-	assert_eq!(captions.rows(now).collect::<Vec<_>>(), ["Gate opened"]);
+	assert_eq!(
+		captions.rows(now, display).collect::<Vec<_>>(),
+		["Hit by the Warden", "Sword impact", "Sword swing"]
+	);
+	assert_eq!(
+		captions
+			.rows(now, DisplaySettings::default())
+			.collect::<Vec<_>>(),
+		["Victory", "Hit by the Warden", "Sword impact"]
+	);
 }

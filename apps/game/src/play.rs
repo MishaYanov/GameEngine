@@ -49,26 +49,6 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if self.play_trace.is_none()
-			&& !self.installed_project
-			&& self.player_shortcut_pressed(Key::F7)
-			&& self
-				.editor
-				.play_progress::<progress::CampaignProgress>()
-				.is_some()
-		{
-			let result = runtime::game_progress::ProgressAction::new::<progress::CampaignProgress>(
-				progress::ProgressAction::AwardScore { amount: 1 },
-			)
-			.and_then(|action| self.editor.apply_play_progress(&[action]));
-			report_update_result(
-				"player_progress",
-				result,
-				&mut self.play_update_error_reported,
-			);
-			self.clock.reset();
-			return;
-		}
 		self.update_keyboard_camera(delta_seconds);
 		let result = self.tick_play(delta_seconds);
 		report_update_result(
@@ -80,15 +60,11 @@ impl GameApp {
 
 	pub(super) fn tick_play(&mut self, delta_seconds: f32) -> Result<(), String> {
 		let result = self.advance_play(delta_seconds);
-		if self
-			.orbit_capture
-			.as_ref()
-			.is_some_and(|owner| {
-				!self.editor.owns_camera_input(owner)
-					|| self.game_completed()
-					|| self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Defeat)
-			})
-		{
+		if self.orbit_capture.as_ref().is_some_and(|owner| {
+			!self.editor.owns_camera_input(owner)
+				|| self.game_completed()
+				|| self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Defeat)
+		}) {
 			self.set_mouse_capture(false);
 		}
 		result
@@ -113,11 +89,12 @@ impl GameApp {
 		}
 		let pad = self.logical_gamepad();
 		let was_paused = self.editor.simulation_paused();
-		let mut before = self.feedback_facts();
 		let mut prior_combat = self.combat_sound_facts();
 		let pointer_input = self.pointer_attack_input();
 		let input = pointer_input.as_ref().unwrap_or(&self.input);
-		let mut outcome = self.editor.update_play_with_gamepad(&mut self.scene, input, pad, delta_seconds)?;
+		let mut outcome =
+			self.editor
+				.update_play_with_gamepad(&mut self.scene, input, pad, delta_seconds)?;
 		let paused = self.editor.simulation_paused();
 		if paused != was_paused {
 			self.reset_gamepad_input();
@@ -137,16 +114,13 @@ impl GameApp {
 			if outcome.steps > 0
 				&& let (Some(prior), Some(after)) = (prior_combat, self.combat_sound_facts())
 			{
-				self.project_sound.emit_combat_change(prior, after);
-			}
-			if outcome.steps > 0
-				&& let (Some(prior), Some(after)) = (before, self.feedback_facts())
-			{
-				for cue in prior.rising(after) {
-					if self.standalone_runtime && self.player_controls.display().cue_captions {
-						self.feedback_captions.push(cue, Instant::now());
-					}
-					self.feedback_audio.emit(cue);
+				if let Some(cue) = self.project_sound.emit_combat_change(
+					prior, after, self.player_controls.feedback_mix(),
+				)
+					&& self.standalone_runtime
+					&& self.player_controls.display().cue_captions
+				{
+					self.feedback_captions.push(cue, Instant::now());
 				}
 			}
 			if let Some(trace) = self.play_trace.as_mut() {
@@ -179,21 +153,10 @@ impl GameApp {
 					.ok_or("Renderer is unavailable")?
 					.wait_idle()?;
 			}
-			before = self.feedback_facts();
 			prior_combat = self.combat_sound_facts();
 			outcome = self.editor.drain_play(&mut self.scene)?;
 		}
 		Ok(())
-	}
-
-	fn feedback_facts(&self) -> Option<feedback_audio::Facts> {
-		let progress = self.editor.play_progress::<progress::CampaignProgress>()?;
-		let course = progress.scene_facts(self.editor.play_scene_id()?);
-		Some(feedback_audio::Facts {
-			key: course.has_key,
-			gate: course.gate_open,
-			complete: progress.completed,
-		})
 	}
 
 	fn combat_sound_facts(&self) -> Option<project_sound::CombatSound> {
@@ -424,15 +387,12 @@ impl GameApp {
 			.ok_or("Project configuration is unavailable")?;
 		let startup = project.startup_scene_id.clone();
 		let route = if self.smoke_prefetch_probe {
-			progress::settings::InteractionSettings::from_project(project)?
-				.and_then(|settings| settings.campaign)
+			gameplay_catalog::cinder_oath::intro_route(project)?
 		} else {
 			None
 		};
 		let alternate = route
-			.as_ref()
-			.and_then(|route| route.successor(&startup))
-			.cloned()
+			.and_then(|(intro, arena)| (intro == startup).then_some(arena))
 			.or_else(|| {
 				project
 					.scenes
@@ -530,22 +490,15 @@ impl GameApp {
 			self.editor
 				.prepare_play_scene(scene_id, Arc::clone(&document))?
 		};
-		self.adopt_prepared_scene_checked(&document, prepared, scene_path, timing, |_| Ok(()))?;
-		if self.checkpoints.is_some() {
-			self.checkpoint_base = Some(document);
-		}
-		Ok(())
+		self.adopt_prepared_scene(&document, prepared, scene_path, timing)
 	}
 
-	pub(super) fn adopt_prepared_scene_checked(
+	pub(super) fn adopt_prepared_scene(
 		&mut self,
 		document: &runtime::scene_data::SceneData,
 		prepared: runtime::scene_editor::PreparedScene,
 		scene_path: PathBuf,
 		timing: &mut SceneLoadTiming,
-		before_commit: impl FnOnce(
-			Option<&courtyard_gameplay::checkpoint::CheckpointRegistry>,
-		) -> Result<(), String>,
 	) -> Result<(), String> {
 		let scene_id = prepared.scene_id().clone();
 		let mix = self
@@ -567,7 +520,6 @@ impl GameApp {
 		// Completion also makes cache-only allocations from rejected loads safe to prune.
 		renderer.wait_idle()?;
 		let installed = candidate.and_then(|(scene, camera)| {
-			before_commit(self.checkpoints.as_ref())?;
 			self.editor
 				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
 			// No fallible operations between committing the CPU world and its view.

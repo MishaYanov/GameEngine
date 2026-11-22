@@ -9,7 +9,7 @@ use engine_core::scene_catalog::{SceneCatalog, SceneDescriptor, SceneId};
 use serde_json::{Value, json};
 
 const TONE: &[u8] =
-	include_bytes!("../../../apps/game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+	include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
 
 struct Folder(PathBuf);
 

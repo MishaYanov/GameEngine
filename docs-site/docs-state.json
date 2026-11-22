@@ -1,5 +1,5 @@
 {
-  "last_checked_commit": "98ea86fb5df2017a9989566c9cad0532f501008c",
+  "last_checked_commit": "48e678c122e48f0acdeddcc724374bb6e86b54d7",
   "last_checked_date": "2026-11-22",
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
@@ -5842,5 +5842,27 @@
       "scope": "Local future M10-M12 teaching guides; proposed code was reviewed but not compiled or implemented.",
       "local_report": "target/m79-guides-verification.json"
     }
+  },
+  "editor_authoring_roadmap_70_109": {
+    "date": "2026-11-22",
+    "inspected_head": "48e678c122e48f0acdeddcc724374bb6e86b54d7",
+    "scope": "Local design for Milestones 70 through 109. The roadmap covers hierarchy folders, reusable Props, isolated editing, Camera and Player Controller objects, Animation, Animator and Controls Graph, Audio Source, Sky and standalone verification.",
+    "roadmap": ".learning-guides/roadmap-70-109/README.md",
+    "verification": {
+      "local_links": 227,
+      "external_links": 19,
+      "snippets": 40,
+      "milestones": 40,
+      "site_tests": 8,
+      "site_pages": 65
+    },
+    "worktree_inspection": "Inspected Git history from the previous documentation baseline and reviewed relevant staged, unstaged and untracked editor, engine, player and compiler source.",
+    "verification_limits": [
+      "Roadmap snippets describe proposed APIs. Feature code, native acceptance and performance measurements are future work.",
+      "The static documentation check rebuilt the existing docs and designs in a temporary copy. The local roadmap lives in the Git-ignored learning guides."
+    ],
+    "pending_documentation_changes": [
+      "Record implemented authoring contracts and actual verification evidence as future milestones land."
+    ]
   }
 }

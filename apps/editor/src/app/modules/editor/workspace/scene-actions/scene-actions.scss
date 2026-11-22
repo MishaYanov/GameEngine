@@ -1,4 +1,32 @@
 :host { display: block; flex: none; }
+
+.scene-information {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.scene-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.scene-identity dt {
+  font-weight: var(--font-weight-medium);
+}
+
+.scene-identity dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+}
+
 .scene-actions, .scene-files, .gameplay-settings, .gameplay-roles {
   display: flex;
   flex-wrap: wrap;

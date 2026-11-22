@@ -367,4 +367,6 @@ pub struct EditorCapabilitiesDto {
 	pub embedded_viewport_supported: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub scene_warming_supported: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub scene_verification_supported: bool,
 }

@@ -11,11 +11,10 @@ fn component_lab_retires_spawned_resources_and_restarts_in_native_player() {
 	}
 	impl ApplicationHandler for Check {
 		fn resumed(&mut self, events: &ActiveEventLoop) {
+			let fixture = test_project::ProjectFixture::new("component-lab");
 			let manifest = std::env::var_os("GAME_ENGINE_QA_COMPONENT_PROJECT")
 				.map(PathBuf::from)
-				.unwrap_or_else(|| {
-					PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("component-demo.json")
-				})
+				.unwrap_or_else(|| fixture.manifest_path())
 				.canonicalize()
 				.unwrap();
 			let project = ProjectData::load(&manifest).unwrap();
@@ -116,3 +115,6 @@ fn component_lab_retires_spawned_resources_and_restarts_in_native_player() {
 	events.run_app(&mut check).unwrap();
 	assert!(check.complete);
 }
+
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;

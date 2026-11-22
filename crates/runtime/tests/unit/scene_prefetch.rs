@@ -2,7 +2,7 @@ use super::*;
 use std::{sync::mpsc, time::Duration};
 
 const SCENE: &[u8] =
-	include_bytes!("../../../../apps/game/assets/scenes/courtyard-release-learning.json");
+	include_bytes!("../../../../apps/game/assets/scenes/camera-room.json");
 const WAIT: Duration = Duration::from_secs(4);
 
 fn fixture(bytes: &[u8]) -> PrefetchedScene {
@@ -59,8 +59,8 @@ fn newer_generation_cancels_an_in_flight_document_and_claims_once() {
 	})
 		.unwrap();
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-	let first = key(root, "courtyard", 1);
-	let second = key(root, "courtyard", 2);
+	let first = key(root, "camera-room", 1);
+	let second = key(root, "camera-room", 2);
 	queue_when_ready(&worker, first, PathBuf::from("first.json"));
 	started_rx.recv_timeout(WAIT).unwrap();
 	queue_when_ready(&worker, second.clone(), PathBuf::from("second.json"));
@@ -72,7 +72,7 @@ fn newer_generation_cancels_an_in_flight_document_and_claims_once() {
 
 #[test]
 fn fresh_bytes_are_compared_before_a_warm_result_is_used() {
-	let dir = std::env::temp_dir().join(format!("courtyard-prefetch-test-{}", std::process::id()));
+	let dir = std::env::temp_dir().join(format!("scene-prefetch-test-{}", std::process::id()));
 	fs::create_dir(&dir).unwrap();
 	let path = dir.join("scene.json");
 	let result = (|| {

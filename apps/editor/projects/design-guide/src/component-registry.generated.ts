@@ -25,6 +25,12 @@ export const componentRegistry: readonly ComponentSection[] = [
     {id: "portal", title: "Portal", requiredInputs: []},
     {id: "row", title: "Row", requiredInputs: [], load: async () => { const [module, preview] = await Promise.all([import("../../../src/app/shared/components/row/row"), import("./previews/row.design")]); const options: ComponentPreview = preview.default; return {requiredInputs: options.component ? [] : [], ...options, component: options.component ?? module["EditorRow"]}; }},
     {id: "scene-viewport", title: "Scene Viewport", requiredInputs: [], load: () => import("./previews/scene-viewport.design").then(preview => preview.default)},
+    {
+        id: "search-picker",
+        title: "Search Picker",
+        requiredInputs: ["label", "options"],
+        load: () => import("../../../src/app/shared/components/search-picker/search-picker").then(module => ({component: module["EditorSearchPicker"]}))
+    },
     {id: "splitter", title: "Splitter", requiredInputs: [], load: () => import("../../../src/app/shared/components/splitter/splitter").then(module => ({component: module["Splitter"]}))},
     {id: "subject", title: "Subject", requiredInputs: [], load: () => import("./previews/subject.design").then(preview => preview.default)},
     {

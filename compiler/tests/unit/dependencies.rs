@@ -7,8 +7,7 @@ fn duplicate_uri_edges_read_once_and_later_source_changes_still_reject_staging()
 	fs::create_dir(&root).unwrap();
 	let root = root.canonicalize().unwrap();
 	let project =
-		ProjectData::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game/project.json"))
-			.unwrap();
+		ProjectData::from_json(&test_project::manifest("event-lab")).unwrap();
 	let model = serde_json::json!({
 		"asset": { "version": "2.0" },
 		"buffers": (0..128).map(|index| serde_json::json!({ "uri": if cfg!(windows) && index % 2 == 1 { "SHARED.BIN" } else { "shared.bin" }, "byteLength": 36 })).collect::<Vec<_>>(),
@@ -78,8 +77,7 @@ fn duplicate_uri_edges_read_once_and_later_source_changes_still_reject_staging()
 #[test]
 fn uri_work_budget_rejects_before_reading_another_dependency() {
 	let project =
-		ProjectData::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game/project.json"))
-			.unwrap();
+		ProjectData::from_json(&test_project::manifest("event-lab")).unwrap();
 	let mut closure = Closure {
 		root: Path::new(env!("CARGO_MANIFEST_DIR")),
 		project: &project,
@@ -109,3 +107,6 @@ fn uri_work_budget_rejects_before_reading_another_dependency() {
 	assert_eq!(closure.file_reads, 0);
 	assert!(closure.files.is_empty());
 }
+
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;

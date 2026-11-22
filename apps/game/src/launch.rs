@@ -1,131 +1,10 @@
 use std::path::PathBuf;
 
-use courtyard_gameplay::checkpoint::{ImportIntent, ImportReview, SaveSlot};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchMode {
 	#[default]
 	Development,
 	Player,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CheckpointTransfer {
-	ExportHistory {
-		path: PathBuf,
-		slot: Option<SaveSlot>,
-	},
-	Export {
-		slot: SaveSlot,
-		path: PathBuf,
-	},
-	Preview {
-		slot: SaveSlot,
-		path: PathBuf,
-	},
-	Commit {
-		slot: SaveSlot,
-		path: PathBuf,
-		review: ImportReview,
-		intent: ImportIntent,
-	},
-}
-
-impl CheckpointTransfer {
-	fn matches(option: &str) -> bool {
-		matches!(
-			option,
-			"--export-slot"
-				| "--preview-slot-import"
-				| "--commit-slot-import"
-				| "--export-transfer-history"
-		)
-	}
-
-	fn parse(
-		option: &str,
-		args: impl Iterator<Item = impl AsRef<str>>,
-	) -> Result<Option<Self>, String> {
-		if !Self::matches(option) {
-			return Ok(None);
-		}
-		let mut args = args;
-		if option == "--export-transfer-history" {
-			let argument = args
-				.next()
-				.ok_or("Transfer history export requires a file path")?;
-			let path = argument.as_ref();
-			if path.is_empty() || path.starts_with("--") {
-				return Err("Transfer history export requires a file path".into());
-			}
-			let slot = match args.next().as_ref().map(AsRef::as_ref) {
-				None => None,
-				Some("--slot") => Some(transfer_slot(args.next().as_ref().map(AsRef::as_ref))?),
-				_ => {
-					return Err(
-						"Transfer history export accepts only a path and optional --slot".into(),
-					);
-				}
-			};
-			if args.next().is_some() {
-				return Err("Transfer history export accepts one slot filter".into());
-			}
-			return Ok(Some(Self::ExportHistory {
-				path: PathBuf::from(path),
-				slot,
-			}));
-		}
-		let slot = transfer_slot(args.next().as_ref().map(AsRef::as_ref))?;
-		let value = args
-			.next()
-			.ok_or("Checkpoint transfer requires a file path")?;
-		let path = value.as_ref();
-		if path.is_empty() || path.starts_with("--") {
-			return Err("Checkpoint transfer requires a file path".into());
-		}
-		let path = PathBuf::from(path);
-		if option != "--commit-slot-import" {
-			if args.next().is_some() {
-				return Err("Export and preview accept only a slot number and file path".into());
-			}
-			return Ok(Some(if option == "--export-slot" {
-				Self::Export { slot, path }
-			} else {
-				Self::Preview { slot, path }
-			}));
-		}
-		let mut archive = None;
-		let mut generation = None;
-		let mut intent = ImportIntent::EmptyOnly;
-		while let Some(flag) = args.next() {
-			match flag.as_ref() {
-				"--archive-sha256" if archive.is_none() => archive = args.next(),
-				"--slot-generation" if generation.is_none() => generation = args.next(),
-				"--replace" if intent == ImportIntent::EmptyOnly => {
-					intent = ImportIntent::ReplaceCurrent
-				}
-				_ => return Err("Unexpected or duplicate checkpoint import option".into()),
-			}
-		}
-		let archive = archive.ok_or("Provide --archive-sha256 from preview")?;
-		let generation = generation.ok_or("Provide --slot-generation from preview")?;
-		let review = ImportReview::from_hex(archive.as_ref(), generation.as_ref())?;
-		Ok(Some(Self::Commit {
-			slot,
-			path,
-			review,
-			intent,
-		}))
-	}
-}
-
-fn transfer_slot(argument: Option<&str>) -> Result<SaveSlot, String> {
-	match argument {
-		Some("1") => Ok(SaveSlot::One),
-		Some("2") => Ok(SaveSlot::Two),
-		Some("3") => Ok(SaveSlot::Three),
-		_ => Err("Checkpoint transfer requires a slot number from 1 to 3".into()),
-	}
 }
 
 /// Standalone installed-Player operations. These never create a viewport.
@@ -205,7 +84,6 @@ fn parse_digest(value: &str) -> Result<[u8; 32], String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchOptions {
 	pub mode: LaunchMode,
-	pub transfer: Option<CheckpointTransfer>,
 	pub input_preset: Option<InputPresetCommand>,
 	pub transfer_directory: Option<PathBuf>,
 	pub input_profile: Option<PathBuf>,
@@ -221,38 +99,22 @@ pub struct LaunchOptions {
 
 impl LaunchOptions {
 	/// `installed_project` is supplied by the executable's validated project
-	/// marker/manifest discovery. An explicit argument always wins over the
-	/// old environment switch; installed builds default to Player.
+	/// manifest discovery. Installed builds default to Player.
 	pub fn parse(
 		arguments: impl IntoIterator<Item = impl AsRef<str>>,
 		installed_project: bool,
-		legacy_editor_demo: bool,
 	) -> Result<Self, String> {
 		let mut args = arguments.into_iter().peekable();
 		if let Some(argument) = args.peek()
-			&& (CheckpointTransfer::matches(argument.as_ref())
-			|| InputPresetCommand::matches(argument.as_ref()))
+			&& InputPresetCommand::matches(argument.as_ref())
 		{
-			let option = args.next().expect("peeked transfer option");
-			let option = option.as_ref();
-			let presets = InputPresetCommand::matches(option);
+			let option = args.next().expect("peeked input preset option");
 			if !installed_project {
-				return Err(if presets {
-					"Input presets require an installed Player"
-				} else {
-					"Checkpoint transfer requires an installed Player"
-				}
-				.into());
+				return Err("Input presets require an installed Player".into());
 			}
-			let (transfer, input_preset) = if presets {
-				(None, Some(InputPresetCommand::parse(option, args)?))
-			} else {
-				(CheckpointTransfer::parse(option, args)?, None)
-			};
 			return Ok(Self {
 				mode: LaunchMode::Player,
-				transfer,
-				input_preset,
+				input_preset: Some(InputPresetCommand::parse(option.as_ref(), args)?),
 				transfer_directory: None,
 				input_profile: None,
 				record_playtrace: None,
@@ -334,8 +196,7 @@ impl LaunchOptions {
 						"Unknown game argument {argument:?}; supported arguments are \
                      --development, --player, --input-profile <path>, --transfer-directory <path>, \
                      --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, \
-                     or a standalone --export-slot, --preview-slot-import, --commit-slot-import, --export-transfer-history, \
-                     --export-input-preset, --preview-input-preset, or --apply-input-preset command"
+                     or a standalone --export-input-preset, --preview-input-preset, or --apply-input-preset command"
 					));
 				}
 			}
@@ -344,8 +205,6 @@ impl LaunchOptions {
 		let mode = explicit.unwrap_or_else(|| {
 			if installed_project {
 				LaunchMode::Player
-			} else if legacy_editor_demo {
-				LaunchMode::Development
 			} else {
 				LaunchMode::default()
 			}
@@ -373,7 +232,6 @@ impl LaunchOptions {
 		}
 		Ok(Self {
 			mode,
-			transfer: None,
 			input_preset: None,
 			transfer_directory,
 			input_profile,

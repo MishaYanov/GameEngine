@@ -3,19 +3,12 @@ use std::collections::HashSet;
 
 use engine_core::{
 	project::BehaviorSpec,
-	scene_catalog::{SceneDescriptor, SceneId},
+	scene_catalog::SceneDescriptor,
 	scene_data::SceneData,
 };
 
 use super::export::{install_staged_player, publish_player};
 use super::preflight::{OMISSION_NOTICE, append_scene_error, prepared_asset_path, read_scene_file};
-fn legacy_courtyard_project(name: &str) -> (ProjectData, PathBuf) {
-	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game");
-	let mut project = ProjectData::load(directory.join("project.json")).unwrap();
-	project.name = name.into();
-	(project, directory.join("assets"))
-}
-
 #[path = "tests_dependencies.rs"]
 mod dependency_tests;
 struct AssetFixture(PathBuf);
@@ -252,7 +245,7 @@ mod staging {
 		let fixture = AssetFixture::new();
 		let source = fixture.0.join("source");
 		let (mut project, _) = authored_scene_fixture(&source);
-		project.gameplay_module = Some("courtyard_run".into());
+		project.input_profile = Some(engine_core::input::InputProfile::default());
 		fs::write(source.join("payload.bin"), b"snapshot bytes").unwrap();
 		attach_payload_dependency(&source, "../payload.bin", 14);
 		let prepared = prepare_project(&project, &source).unwrap();
@@ -274,7 +267,7 @@ mod staging {
 		.unwrap();
 		fs::write(source.join("payload.bin"), b"changed data").unwrap();
 		project.name = "New authoring project name".into();
-		project.gameplay_module = None;
+		project.input_profile = None;
 		fs::write(fixture.0.join("project.json"), project.to_json().unwrap()).unwrap();
 		let player = fixture.0.join("compiled-player.bin");
 		fs::write(&player, b"compiled fixture; never execute").unwrap();
@@ -305,7 +298,7 @@ mod staging {
 	#[test]
 	fn staged_audio_snapshot_installs_only_validated_declared_wave_files() {
 		const CLIP: &[u8] =
-			include_bytes!("../../../apps/game/fixtures/courtyard-audio/assets/audio/cue-key.wav");
+			include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
 		let fixture = AssetFixture::new();
 		let source = fixture.0.join("source");
 		let (project, _) = authored_scene_fixture(&source);
@@ -461,169 +454,6 @@ mod staging {
 		}
 	}
 
-	#[test]
-	fn exported_courtyard_plays_and_restarts_like_the_authoring_preview() {
-		use courtyard_gameplay::CampaignProgress;
-		use engine_core::{
-			EngineBuilder,
-			command::{EditorCommandDto as Command, EditorCommandRequest},
-			game_session::GameSession,
-		};
-
-		let fixture = AssetFixture::new();
-		let (project, asset_root) = legacy_courtyard_project("Courtyard parity");
-		let prepared = prepare_project(&project, &asset_root).unwrap();
-		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
-		validate_export_snapshot(&staged, None).unwrap();
-		let exported_project = ProjectData::load(staged.path().join("project.json")).unwrap();
-		let exported_assets = staged.path().join("assets");
-		assert_eq!(exported_project, project);
-		for relative in [
-			"props/capsule.glb",
-			"props/cube.glb",
-			"props/sphere.glb",
-			"scenes/courtyard.json",
-			"scenes/finish.json",
-		] {
-			assert_eq!(
-				fs::read(exported_assets.join(relative)).unwrap(),
-				fs::read(asset_root.join(relative)).unwrap(),
-				"{relative}"
-			);
-		}
-
-		let startup = project.startup_scene_id.clone();
-		let authored =
-			read_authored_scene(&asset_root, project.startup_scene_path().unwrap()).unwrap();
-		let retained_scenes = project
-			.scenes
-			.iter()
-			.filter(|entry| entry.id() != &startup)
-			.map(|entry| {
-				(
-					entry.id().clone(),
-					read_authored_scene(&asset_root, entry.asset_path()).unwrap(),
-				)
-			})
-			.collect();
-		let mut preview = EngineBuilder::new(authored.clone(), project.clone())
-			.with_scenes(retained_scenes)
-			.module_resolver(Arc::new(courtyard_gameplay::resolve))
-			.build()
-			.unwrap();
-		preview
-			.execute(EditorCommandRequest {
-				expected_revision: preview.session().revision(),
-				command: Command::StartPlay,
-			})
-			.unwrap();
-
-		let exported_document = |scene_id: &SceneId| {
-			let path = exported_project.scene_path(scene_id).unwrap();
-			Arc::new(read_authored_scene(&exported_assets, path).unwrap())
-		};
-		let mut player = GameSession::with_factory_for_scene(
-			Arc::new(exported_project.clone()),
-			startup.clone(),
-			exported_document(&startup),
-			courtyard_gameplay::resolve(&exported_project).unwrap(),
-		)
-		.unwrap();
-		let progress = |state: &CampaignProgress| {
-			(
-				state.score,
-				state.has_courtyard_key,
-				state.courtyard_exit_reached,
-				state.completed,
-			)
-		};
-		let step = 1.0 / f64::from(project.fixed_hz);
-		for (x, count, scene_id, expected) in [
-			(-1.0, 90, "courtyard", (0, false, false, false)),
-			(1.0, 190, "courtyard", (1, true, false, false)),
-			(-1.0, 240, "finish", (1, true, true, false)),
-			(1.0, 90, "finish", (1, true, true, true)),
-		] {
-			let movement = [x, 0.0, 0.0];
-			preview
-				.execute(EditorCommandRequest {
-					expected_revision: preview.session().revision(),
-					command: Command::SetPlayInput { movement },
-				})
-				.unwrap();
-			player.active_mut().set_controlled_input(movement).unwrap();
-			for _ in 0..count {
-				let preview_tick = preview.tick(step).unwrap();
-				let player_tick = player.tick(step).unwrap();
-				assert_eq!(preview_tick.requested_scene, player_tick.requested_scene);
-				if let Some(destination) = player_tick.requested_scene {
-					let (candidate, _) = preview.prepare_pending_play_scene().unwrap();
-					preview.commit_play_scene(candidate).unwrap();
-					let candidate = player
-						.prepare_pending_scene(exported_document(&destination))
-						.unwrap();
-					player.commit_scene(candidate).unwrap();
-				}
-			}
-			assert_eq!(
-				preview.session().play_scene_id(),
-				Some(player.active().scene_id())
-			);
-			assert_eq!(player.active().scene_id().as_str(), scene_id);
-			assert_eq!(
-				progress(player.progress::<CampaignProgress>().unwrap()),
-				expected
-			);
-			assert_eq!(
-				progress(
-					preview
-						.session()
-						.play_progress::<CampaignProgress>()
-						.unwrap()
-				),
-				expected
-			);
-			assert_eq!(
-				preview.session().render_document(),
-				player.active().document()
-			);
-		}
-
-		let startup_doc = preview.session().scene_document(&startup).unwrap();
-		let preview_restart = preview
-			.session()
-			.prepare_new_game(startup.clone(), startup_doc)
-			.unwrap();
-		let player_restart = player
-			.prepare_new_game(startup.clone(), exported_document(&startup))
-			.unwrap();
-		preview.commit_play_scene(preview_restart).unwrap();
-		player.commit_scene(player_restart).unwrap();
-		assert_eq!(preview.session().play_scene_id(), Some(&startup));
-		assert_eq!(player.active().scene_id(), &startup);
-		assert_eq!(preview.session().render_document().as_ref(), &authored);
-		assert_eq!(player.active().document().as_ref(), &authored);
-		for state in [
-			preview
-				.session()
-				.play_progress::<CampaignProgress>()
-				.unwrap(),
-			player.progress::<CampaignProgress>().unwrap(),
-		] {
-			assert_eq!(progress(state), (0, false, false, false));
-		}
-		preview
-			.execute(EditorCommandRequest {
-				expected_revision: preview.session().revision(),
-				command: Command::StopPlay,
-			})
-			.unwrap();
-		let snapshot = preview.snapshot().unwrap();
-		assert_eq!(snapshot.active_scene_id, startup);
-		assert_eq!(snapshot.document, authored);
-		assert!(!snapshot.dirty);
-		validate_export_snapshot(&staged, None).unwrap();
-	}
 }
 
 mod preflight {
@@ -1050,25 +880,4 @@ mod preflight {
 		assert_eq!(error, "Asset must be a regular file");
 	}
 
-	#[test]
-	fn export_rejects_missing_campaign_finish_binding_before_creating_output() {
-		let fixture = AssetFixture::new();
-		let (project, original_assets) = legacy_courtyard_project("Incomplete courtyard");
-		let authored_assets = fixture.0.join("source");
-		copy_assets(&original_assets, &authored_assets).unwrap();
-		let path = Path::new("scenes/finish.json");
-		let mut finish = read_authored_scene(&authored_assets, path.to_str().unwrap()).unwrap();
-		finish.bindings.remove("finish");
-		fs::write(authored_assets.join(path), finish.to_json().unwrap()).unwrap();
-
-		let error =
-			install_authored_project(&project, &authored_assets, fixture.0.to_str().unwrap())
-				.unwrap_err();
-		assert!(
-			error.contains(r#"Scene "finish" ("scenes/finish.json")"#),
-			"{error}"
-		);
-		assert!(error.contains(r#"requires a "finish" binding"#), "{error}");
-		assert!(!fixture.0.join(&project.name).exists());
-	}
 }

@@ -5,7 +5,7 @@ const WAIT: Duration = Duration::from_secs(5);
 
 fn document() -> SceneData {
 	SceneData::from_json(include_str!(
-		"../../../../game/assets/scenes/courtyard-release-learning.json"
+		"../../../../game/assets/scenes/camera-room.json"
 	))
 	.unwrap()
 }
@@ -17,7 +17,7 @@ fn key(scene: &str, revision: u64) -> WarmKey {
 		scene: SceneId::new(scene).unwrap(),
 		asset_generation: 0,
 		mode: SceneWarmingMode::References,
-		origin: SceneId::new("courtyard").unwrap(),
+		origin: SceneId::new("camera-room").unwrap(),
 	}
 }
 
@@ -179,7 +179,7 @@ fn warming_history_is_bounded_to_completed_presentations_in_the_workspace() {
 	assert_eq!(report.rows.last().unwrap().result.scene_revision, 33);
 	let json = serde_json::to_value(&report).unwrap();
 	assert_eq!(json["session_id"], "session");
-	assert_eq!(json["rows"][0]["source_scene_id"], "courtyard");
+	assert_eq!(json["rows"][0]["source_scene_id"], "camera-room");
 	assert_eq!(json["rows"][0]["workspace_generation"], 1);
 	assert_eq!(json["rows"][0]["pre_switch_cache"]["asset_generation"], 1);
 	let replacement = SceneWarming::default();
@@ -193,7 +193,7 @@ fn completed_row(generation: u64, result: SceneWarmingResultDto) -> WarmingSessi
 	};
 	WarmingSessionRowDto {
 		identity: WarmingLoadIdentityDto {
-			source_scene_id: Some(SceneId::new("courtyard").unwrap()),
+			source_scene_id: Some(SceneId::new("camera-room").unwrap()),
 			workspace_generation: generation,
 			pre_switch_cache: WarmingCacheDto {
 				state: WarmingCacheState::Retained,

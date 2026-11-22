@@ -5,6 +5,7 @@ import {EditorClientError} from './editor-client-error';
 import {applyEditorUpdate} from './editor-updates';
 import {ViewportAttachment} from './viewport/viewport-attachment';
 import {validGameplayModules} from './gameplay-modules';
+import {type SceneVerificationReport, validSceneVerification} from './scene-verification.models';
 import {validComponentTypes} from './editor-components';
 import {CameraPreviewController, readCameraPreview} from './camera-preview';
 import {validMachineDescriptor} from './state-machine.models';
@@ -32,11 +33,6 @@ import type {
 import type {
     AssetOperation,
     BuildLaunchResult,
-    CampaignDefinition,
-    CampaignDiagnosticReport,
-    CampaignRepairBatch,
-    CampaignRepairPreview,
-    CampaignRepairTarget,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -205,6 +201,18 @@ export class EditorService {
         return this.native<number>('editor_set_scene_warming_mode', {mode, expectedGeneration});
     }
 
+    async checkScenes(sceneId: SceneId, expectedRevision: number, expectedGeneration: number | null): Promise<SceneVerificationReport> {
+        const result = await this.native<unknown>('editor_check_scenes', {
+            sceneId,
+            expectedRevision,
+            expectedGeneration
+        });
+        if (!validSceneVerification(result)) {
+            throw new EditorClientError('backend', 'editor_check_scenes', 'The native scene verification report was invalid.');
+        }
+        return result;
+    }
+
     exportWarmingReport(expectedGeneration: number): Promise<number | null> {
         return this.native<number | null>('editor_export_warming_report', {expectedGeneration});
     }
@@ -324,101 +332,6 @@ export class EditorService {
             true,
             expectedGeneration,
         );
-    }
-
-    campaignGeneration(expectedGeneration: number, expectedRevision: number): Promise<number> {
-        return this.enqueue('editor_campaign_generation', () => {
-            this.requireGeneration(expectedGeneration);
-            return this.native<number>('editor_campaign_generation', {expectedRevision});
-        }, false, expectedGeneration);
-    }
-
-    diagnoseCampaign(
-        campaign: CampaignDefinition,
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<CampaignDiagnosticReport> {
-        const operation = 'editor_diagnose_campaign';
-        return this.enqueue(operation, async () => {
-            this.requireGeneration(expectedGeneration);
-            const report = await this.native<CampaignDiagnosticReport>(operation, {
-                campaign, expectedGeneration: expectedNativeGeneration, expectedRevision,
-            });
-            this.requireGeneration(expectedGeneration);
-            return report;
-        }, false, expectedGeneration);
-    }
-
-    applyCampaign(
-        campaign: CampaignDefinition,
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_apply_campaign', {
-            campaign, expectedGeneration: expectedNativeGeneration,
-        }, false, {expectedGeneration, expectedRevision});
-    }
-
-    previewCampaignRepair(
-        target: CampaignRepairTarget,
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<CampaignRepairPreview> {
-        const operation = 'editor_preview_campaign_repair';
-        return this.enqueue(operation, async () => {
-            this.requireGeneration(expectedGeneration);
-            const preview = await this.native<CampaignRepairPreview>(operation, {
-                target, expectedGeneration: expectedNativeGeneration, expectedRevision,
-            });
-            this.requireGeneration(expectedGeneration);
-            return preview;
-        }, false, expectedGeneration);
-    }
-
-    applyCampaignRepair(
-        preview: CampaignRepairPreview,
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_apply_campaign_repair', {
-            target: preview.target, expectedCollider: preview.before,
-            expectedGeneration: expectedNativeGeneration,
-        }, false, {expectedGeneration, expectedRevision});
-    }
-
-    previewCampaignRepairBatch(
-        scene: SceneId,
-        targets: readonly CampaignRepairTarget[],
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<CampaignRepairBatch> {
-        const operation = 'editor_preview_campaign_repair_batch';
-        return this.enqueue(operation, async () => {
-            this.requireGeneration(expectedGeneration);
-            const batch = await this.native<CampaignRepairBatch>(operation, {
-                scene, targets, expectedGeneration: expectedNativeGeneration, expectedRevision,
-            });
-            this.requireGeneration(expectedGeneration);
-            return batch;
-        }, false, expectedGeneration);
-    }
-
-    applyCampaignRepairBatch(
-        scene: SceneId,
-        rows: readonly CampaignRepairPreview[],
-        expectedGeneration: number,
-        expectedNativeGeneration: number,
-        expectedRevision: number,
-    ): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_apply_campaign_repair_batch', {
-            scene, expected: rows.map(({target, before}) => ({target, before})),
-            expectedGeneration: expectedNativeGeneration,
-        }, false, {expectedGeneration, expectedRevision});
     }
 
     save(): Promise<EditorSnapshot> {

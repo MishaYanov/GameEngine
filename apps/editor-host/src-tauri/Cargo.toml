@@ -23,7 +23,6 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 compiler = { path = "../../../compiler" }
-courtyard-gameplay = { path = "../../../crates/courtyard-gameplay" }
 gameplay-catalog = { path = "../../../crates/gameplay-catalog" }
 engine-logger = { path = "../../../crates/logger" }
 serde_json = "1.0"
