@@ -3,8 +3,9 @@
 mod camera;
 use camera::{camera_forward, camera_right, dolly, frame_selection, orbit};
 mod entities;
-use entities::{duplicate, fresh_key, reparent};
+use entities::{duplicate, fresh_key};
 mod organization;
+mod parenting;
 mod transform;
 use std::collections::{HashMap, HashSet};
 use transform::{
@@ -227,7 +228,16 @@ pub(super) fn apply(
 			key,
 			parent,
 			keep_world,
-		} => reparent(data, &key, parent.as_deref(), keep_world)?,
+		} => {
+			let key = EntityKey::new(key)?;
+			let parent = parent.map(EntityKey::new).transpose()?;
+			parenting::reparent_roots(data, &[key], parent.as_ref(), keep_world)?;
+		}
+		EditorCommandDto::ReparentObjects {
+			keys,
+			parent,
+			keep_world,
+		} => parenting::reparent_roots(data, &keys, parent.as_ref(), keep_world)?,
 		EditorCommandDto::CreateFolder { name, parent } => {
 			organization::create(&mut data.organization, name, parent)?
 		}

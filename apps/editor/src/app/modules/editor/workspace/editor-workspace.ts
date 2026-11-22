@@ -63,6 +63,9 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
+    protected readonly batchParentingEnabled = computed(() =>
+        this.editorService.capabilities()?.commands.some(command => command.name === 'reparent_objects') ?? false,
+    );
     protected readonly hierarchyFoldersEnabled = computed(() => {
         const names = new Set(this.editorService.capabilities()?.commands.map(command => command.name));
         return (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
@@ -237,7 +240,9 @@ export class EditorWorkspace {
         this.hierarchyError.set(null);
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             if (context !== this.sceneContext()) return;
-            await this.editorService.execute(CommandBuilder.reparent(request.key, request.parent, true));
+            await this.editorService.execute(request.keys && this.batchParentingEnabled()
+                ? {type: 'reparent_objects', keys: request.keys, parent: request.parent, keep_world: request.keepWorld ?? true}
+                : CommandBuilder.reparent(request.key, request.parent, true));
         });
         if (!accepted && context === this.sceneContext()) this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit and try changing the parent again.');
     }

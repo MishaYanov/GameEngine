@@ -147,6 +147,11 @@ pub enum EditorCommandDto {
 		parent: Option<String>,
 		keep_world: bool,
 	},
+	ReparentObjects {
+		keys: Vec<EntityKey>,
+		parent: Option<EntityKey>,
+		keep_world: bool,
+	},
 	CreateFolder {
 		name: String,
 		parent: Option<FolderId>,

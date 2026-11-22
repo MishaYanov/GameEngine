@@ -145,9 +145,11 @@ function searchMatches({items, rowParents}: HierarchyForest, query: string): Rea
     return matches;
 }
 
-export function hierarchySubtreeKeys({children}: HierarchyForest, root: EntityKey): ReadonlySet<EntityKey> {
+export function hierarchySubtreeKeys(
+    {children}: HierarchyForest, roots: EntityKey | readonly EntityKey[],
+): ReadonlySet<EntityKey> {
     const subtree = new Set<EntityKey>();
-    const stack = [root];
+    const stack = typeof roots === 'string' ? [roots] : [...roots];
     while (stack.length) {
         const key = stack.pop()!;
         if (subtree.has(key)) continue;

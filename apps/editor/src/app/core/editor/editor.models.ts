@@ -255,6 +255,12 @@ export type EditorCommand =
     readonly keep_world: boolean;
 }
     | {
+    readonly type: 'reparent_objects';
+    readonly keys: readonly EntityKey[];
+    readonly parent: EntityKey | null;
+    readonly keep_world: boolean;
+}
+    | {
     readonly type: 'set_material';
     readonly key: EntityKey;
     readonly material: MaterialOverride | null;

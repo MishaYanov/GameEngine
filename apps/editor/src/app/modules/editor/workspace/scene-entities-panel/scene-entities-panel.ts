@@ -43,7 +43,9 @@ import {
 
 export interface HierarchyReparentRequest {
     readonly key: EntityKey;
-    readonly parent: EntityKey | null
+    readonly parent: EntityKey | null;
+    readonly keys?: readonly EntityKey[];
+    readonly keepWorld?: boolean;
 }
 
 interface EntityMenuContext {
@@ -77,6 +79,7 @@ export class SceneEntitiesPanel {
     readonly selectedKeys = input<readonly EntityKey[]>([]);
     readonly disabled = input(false);
     readonly foldersEnabled = input(false);
+    readonly batchParentingEnabled = input(false);
     readonly sceneLabel = input('Scene');
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
@@ -92,6 +95,7 @@ export class SceneEntitiesPanel {
     protected readonly collapsed = signal<ReadonlySet<HierarchyKey>>(new Set());
     protected readonly focusKey = signal<HierarchyKey | null>(null);
     protected readonly parentingChild = signal<EntityKey | null>(null);
+    protected readonly keepWorld = signal(true);
     protected readonly dragKey = signal<EntityKey | null>(null);
     protected readonly dropTarget = signal<HierarchyDrop | null>(null);
     protected readonly search = signal('');
@@ -165,7 +169,7 @@ export class SceneEntitiesPanel {
     });
     private readonly forbiddenParents = computed(() => {
         const source = this.dragKey() ?? this.parentingChild();
-        return source ? hierarchySubtreeKeys(this.forest(), source) : new Set<EntityKey>();
+        return source ? hierarchySubtreeKeys(this.forest(), this.parentingKeys(source)) : new Set<EntityKey>();
     });
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
@@ -184,7 +188,7 @@ export class SceneEntitiesPanel {
             .run(context => this.usagesRequested.emit(context.key)).build())
         .separator()
         .submenu('entity.parenting', 'Parenting', menu => menu
-            .action(ContextActionBuilder.create<EntityMenuContext>('entity.set-parent', 'Set Parent…')
+            .action(ContextActionBuilder.create<EntityMenuContext>('entity.set-parent', 'Make Child Of…')
                 .enabledWhen(context => this.canUseEntityMenu(context))
                 .run(context => this.beginParenting(context.key)).build())
             .action(ContextActionBuilder.create<EntityMenuContext>('entity.move-to-root', 'Move to Root')
@@ -434,13 +438,20 @@ export class SceneEntitiesPanel {
         this.parentingChild.set(child.key);
         this.dragKey.set(null);
         this.localError.set(null);
-        this.status.set(`Choose a parent for ${child.name}, then press Enter. Escape cancels.`);
+        this.keepWorld.set(true);
+        const count = this.parentingKeys(child.key).length;
+        const description = count > 1 ? `${count} selected objects` : child.name;
+        this.status.set(`Choose a parent for ${description}, then press Enter. Escape cancels.`);
         this.focus(entityHierarchyKey(child.key));
     }
 
     protected moveToRoot(): void {
         const key = this.parentingChild() ?? this.primary()?.key;
         if (key) this.requestDropOnRoot(key);
+    }
+
+    protected setKeepWorld(event: Event): void {
+        if (event.target instanceof HTMLInputElement) this.keepWorld.set(event.target.checked);
     }
 
     protected cancelParenting(): void {
@@ -457,6 +468,7 @@ export class SceneEntitiesPanel {
         }
         this.folderEdit.set(null);
         this.parentingChild.set(null);
+        this.keepWorld.set(true);
         this.localError.set(null);
         this.dragSession = {context: this.contextKey(), roots: [...this.dragSelection(key)]};
         this.dragKey.set(key);
@@ -684,8 +696,18 @@ export class SceneEntitiesPanel {
 
     private canReparent(key: EntityKey, parent: EntityKey | null): boolean {
         if (this.disabled()) return false;
-        return canReparentEntity(this.forest(), key, parent, candidate =>
-            (this.dragKey() === key || this.parentingChild() === key) && this.forbiddenParents().has(candidate));
+        const forest = this.forest();
+        const keys = this.parentingKeys(key);
+        if ((this.dragKey() === key || this.parentingChild() === key) &&
+            parent !== null && this.forbiddenParents().has(parent)) return false;
+        return keys.every(candidate => forest.byKey.has(candidate) &&
+            (forest.parents.get(candidate) === parent ||
+                canReparentEntity(forest, candidate, parent, () => false))) &&
+            keys.some(candidate => forest.parents.get(candidate) !== parent);
+    }
+
+    private parentingKeys(key: EntityKey): readonly EntityKey[] {
+        return this.batchParentingEnabled() ? this.dragSelection(key) : [key];
     }
 
     private requestReparent(key: EntityKey, parent: EntityKey | null): void {
@@ -695,8 +717,12 @@ export class SceneEntitiesPanel {
             return;
         }
         this.localError.set(null);
+        const keepWorld = !this.parentingChild() || this.keepWorld();
         this.parentingChild.set(null);
-        this.reparentRequested.emit({key, parent});
-        this.status.set(parent ? 'Parent change requested. The world pose will be preserved.' : 'Move to Scene root requested. The world pose will be preserved.');
+        this.reparentRequested.emit(this.batchParentingEnabled()
+            ? {key, parent, keys: this.parentingKeys(key), keepWorld}
+            : {key, parent});
+        this.status.set(keepWorld ? 'Parent change requested. The world pose will be preserved.'
+            : 'Parent change requested. The local transform will be preserved.');
     }
 }

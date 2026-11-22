@@ -141,6 +141,22 @@ impl CommandFactory {
 					validate_key(parent)?;
 				}
 			}
+			EditorCommandDto::ReparentObjects { keys, parent, .. } => {
+				target_count(keys.len())?;
+				if keys.is_empty() {
+					return Err("Select one or more objects to reparent".into());
+				}
+				let mut unique = HashSet::with_capacity(keys.len());
+				for key in keys {
+					validate_key(key.as_str())?;
+					if !unique.insert(key) {
+						return Err("A reparent command may target each object only once".into());
+					}
+				}
+				if let Some(parent) = parent {
+					validate_key(parent.as_str())?;
+				}
+			}
 			EditorCommandDto::CreateFolder { name, .. }
 			| EditorCommandDto::RenameFolder { name, .. } => FolderRecord::validate_name(name)?,
 			EditorCommandDto::MoveRootsToFolder { roots, .. } => {
@@ -440,6 +456,13 @@ impl CommandFactory {
 			),
 			("delete_selection", "Delete group", "entity", true, false),
 			("reparent", "Change parent", "hierarchy", true, false),
+			(
+				"reparent_objects",
+				"Change object parents",
+				"hierarchy",
+				true,
+				false,
+			),
 			("create_folder", "Create folder", "hierarchy", true, false),
 			("rename_folder", "Rename folder", "hierarchy", true, false),
 			("move_folder", "Move folder", "hierarchy", true, false),

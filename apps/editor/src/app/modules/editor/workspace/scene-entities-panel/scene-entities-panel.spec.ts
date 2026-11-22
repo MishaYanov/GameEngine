@@ -307,7 +307,7 @@ describe('SceneEntitiesPanel hierarchy', () => {
 
     it('provides keyboard parent selection and an explicit Move to Root alternative', async () => {
         await open(nested, ['child']);
-        action('Set Parent…').click(); await fixture.whenStable();
+        action('Make Child Of…').click(); await fixture.whenStable();
         await keydown('End'); await keydown('Enter');
         expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: 'other'});
         expect(requested).not.toHaveBeenCalled();
@@ -315,8 +315,24 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: null});
     });
 
+    it('parents several selected objects in one action and offers a keep-local option', async () => {
+        fixture.componentRef.setInput('batchParentingEnabled', true);
+        await open([...floors, entity('parent')], ['floor1', 'floor2']);
+        action('Make Child Of…').click();
+        await fixture.whenStable();
+        const keepWorld = root.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+        expect(keepWorld.checked).toBe(true);
+        keepWorld.click();
+        await fixture.whenStable();
+        row('parent').click();
+        await fixture.whenStable();
+        expect(reparented).toHaveBeenCalledExactlyOnceWith({
+            key: 'floor1', keys: ['floor1', 'floor2'], parent: 'parent', keepWorld: false,
+        });
+    });
+
     it('cancels keyboard parenting with Escape', async () => {
-        await open(nested, ['child']); action('Set Parent…').click(); await fixture.whenStable();
+        await open(nested, ['child']); action('Make Child Of…').click(); await fixture.whenStable();
         await keydown('Escape'); await keydown('End'); await keydown('Enter');
         expect(reparented).not.toHaveBeenCalled();
         expect(requested).toHaveBeenLastCalledWith('other');
