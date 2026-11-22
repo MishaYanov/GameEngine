@@ -147,3 +147,5 @@ fn controller_replay_requires_version_four_and_signed_16_bit_axes() {
 
 #[path = "../../../tests/support/project_fixture.rs"]
 mod test_project;
+#[path = "controller_replay/yard.rs"]
+mod yard;

@@ -112,6 +112,58 @@ fn camera_room_sensor_doorway_lintel_and_rotated_proxy_match_the_authored_geomet
 }
 
 #[test]
+fn practice_yard_camera_object_preserves_its_target_and_frozen_obstruction() {
+	use engine_core::{SceneData, camera_preview::FrozenOrbitPreview};
+	use std::sync::Arc;
+	let scene = SceneData::from_json(include_str!(
+		"fixtures/authoring-controller/assets/scenes/practice-yard.json"
+	))
+	.unwrap();
+	let key = scene.default_game_camera.as_ref().unwrap();
+	assert_eq!(key.as_str(), "yard-camera");
+	let definition = scene
+		.object_camera(key, &scene.world_matrices().unwrap())
+		.unwrap();
+	let orbit = definition.orbit.as_ref().unwrap();
+	assert_eq!(orbit.target.as_str(), "yard-player");
+	let preview = |scene| {
+		FrozenOrbitPreview::from_document(
+			Arc::new(scene),
+			orbit.clone(),
+			definition.to_camera(),
+			1.0 / 60.0,
+		)
+		.unwrap()
+	};
+	let blocked = preview(scene.clone());
+	assert_eq!(
+		blocked
+			.orbit_state()
+			.obstruction
+			.as_ref()
+			.unwrap()
+			.blocker
+			.as_str(),
+		"yard-wall"
+	);
+	assert!(blocked.orbit_state().effective_distance < orbit.initial_distance);
+	let mut clear = scene;
+	clear
+		.entities
+		.iter_mut()
+		.find(|entity| entity.key == orbit.target)
+		.unwrap()
+		.transform
+		.position[0] = 3.0;
+	let clear = preview(clear);
+	assert!(clear.orbit_state().obstruction.is_none());
+	assert_eq!(
+		clear.orbit_state().effective_distance,
+		orbit.initial_distance
+	);
+}
+
+#[test]
 fn camera_room_source_and_package_agree_at_each_checkpoint_and_across_tick_partitions() {
 	let scratch = Scratch::new();
 	let fixture = test_project::ProjectFixture::new("camera-room");

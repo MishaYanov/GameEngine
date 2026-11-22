@@ -1,0 +1,450 @@
+{
+  "schema_version": 7,
+  "bindings": {
+    "player": "yard-player"
+  },
+  "entities": [
+    {
+      "key": "yard-player",
+      "name": "Player",
+      "transform": {
+        "position": [
+          0,
+          0.901,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "body",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.35,
+                0.9,
+                0.35
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "id": "character",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "character_controller",
+            "settings": {
+              "walk_speed": 4,
+              "ground_acceleration": 30,
+              "air_acceleration": 8,
+              "gravity": 20,
+              "max_fall_speed": 30,
+              "jump_speed": 7,
+              "ground_probe": 0.02,
+              "step_height": 0.25,
+              "coyote_ticks": 5,
+              "jump_buffer_ticks": 5,
+              "jump_action": "jump"
+            }
+          }
+        },
+        {
+          "id": "player",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "player_controller",
+            "settings": {
+              "input": {
+                "kind": "asset",
+                "asset_id": "90000000-0000-4000-8000-000000000002"
+              },
+              "space": "camera_relative",
+              "local": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-player-visual",
+      "name": "Player body",
+      "transform": {
+        "position": [
+          0,
+          -0.14,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.66,
+          1.46,
+          0.56
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19,
+                0.54,
+                0.78,
+                1.0
+              ]
+            }
+          }
+        }
+      ],
+      "parent": "yard-player"
+    },
+    {
+      "key": "yard-player-head",
+      "name": "Player head",
+      "transform": {
+        "position": [
+          0,
+          0.71,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.48,
+          0.34,
+          0.44
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.35,
+                0.73,
+                0.86,
+                1.0
+              ]
+            }
+          }
+        }
+      ],
+      "parent": "yard-player"
+    },
+    {
+      "key": "yard-camera",
+      "name": "Orbit Camera",
+      "transform": {
+        "position": [
+          0,
+          2.05,
+          5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "camera",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "camera",
+            "settings": {
+              "lens": {
+                "vertical_fov": 1.0471976,
+                "near": 0.1,
+                "far": 100
+              },
+              "rig": {
+                "mode": "orbit",
+                "settings": {
+                  "target": "yard-player",
+                  "pivot_offset": [
+                    0,
+                    0.65,
+                    0
+                  ],
+                  "initial_yaw": 0,
+                  "initial_pitch": -0.1,
+                  "initial_distance": 5,
+                  "min_distance": 0.5,
+                  "max_distance": 12,
+                  "min_pitch": -1.3,
+                  "max_pitch": 0.9,
+                  "follow_seconds": 0.1,
+                  "recovery_seconds": 0.22,
+                  "teleport_distance": 8,
+                "probe_radius": 0.25,
+                  "obstruction_mask": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-floor",
+      "name": "Stone floor",
+      "transform": {
+        "position": [
+          0,
+          -0.1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          16,
+          0.2,
+          16
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.32,
+                0.36,
+                0.41,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-wall",
+      "name": "Camera wall",
+      "transform": {
+        "position": [
+          0,
+          1.4,
+          2.3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2.4,
+          2.8,
+          0.35
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.57,
+                0.35,
+                0.25,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-step",
+      "name": "Jump step",
+      "transform": {
+        "position": [
+          2.95,
+          0.2,
+          -1.35
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.25,
+          0.4,
+          1.3
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.72,
+                0.57,
+                0.25,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "default_game_camera": "yard-camera",
+  "lights": [
+    {
+      "key": "yard-sun",
+      "name": "Sun",
+      "kind": "directional",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1,
+        1,
+        1
+      ],
+      "intensity": 0.75,
+      "range": 10
+    }
+  ]
+}

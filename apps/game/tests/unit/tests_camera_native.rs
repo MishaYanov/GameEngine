@@ -214,6 +214,88 @@ fn player_camera_route_matches_headless_at_two_extents() {
 }
 
 #[test]
+#[ignore = "requires native Windows Vulkan and the Controller Practice Yard project"]
+fn practice_yard_player_moves_jumps_orbits_and_restarts() {
+	let manifest = std::env::var_os("GAME_ENGINE_QA_CONTROLLER_PROJECT")
+		.map(PathBuf::from)
+		.unwrap_or_else(|| {
+			Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("../headless/tests/fixtures/authoring-controller/project.json")
+		});
+	with_native_window(|events| {
+		let mut app = hidden_player(events, &manifest, [960, 540]);
+		let actor = runtime::EntityKey::new("yard-player").unwrap();
+		let position = |app: &GameApp| {
+			let id = app.scene.entity_by_key(&actor).unwrap();
+			app.scene.get(id).unwrap().transform().position
+		};
+		let camera = |app: &GameApp| app.editor.camera_replay_state().unwrap().unwrap();
+		let start = camera(&app);
+		assert_eq!(
+			start.orbit.unwrap().obstruction.unwrap().blocker.as_str(),
+			"yard-wall"
+		);
+		let base = position(&app);
+		let mut frames = RouteTimes::default();
+		frames.steps(&mut app, 16);
+		app.input.press(Key::ArrowRight);
+		frames.steps(&mut app, 48);
+		app.input.release(Key::ArrowRight);
+		frames.steps(&mut app, 120);
+		assert!(position(&app)[0] > 2.5);
+		let clear = camera(&app).orbit.unwrap();
+		assert!(clear.obstruction.is_none());
+		assert_eq!(clear.effective_distance, 5.0);
+		app.input.press(Key::ArrowUp);
+		app.input.press(Key::J);
+		frames.steps(&mut app, 16);
+		assert!(position(&app)[1] > 1.4);
+		app.input.release(Key::J);
+		frames.steps(&mut app, 16);
+		app.input.release(Key::ArrowUp);
+		frames.steps(&mut app, 80);
+		assert!((position(&app)[1] - 1.3).abs() < 0.02);
+
+		let owner = app.editor.camera_input_owner().unwrap();
+		app.editor
+			.submit_camera_input(
+				&owner,
+				CameraIntent {
+					yaw_delta: 0.3,
+					..CameraIntent::default()
+				},
+			)
+			.unwrap();
+		frames.steps(&mut app, 4);
+		let turned = camera(&app).pose.yaw;
+		assert!((turned - 0.3).abs() < 1e-5);
+
+		let window_id = app.window.as_ref().unwrap().id();
+		let released = position(&app);
+		app.input.press(Key::ArrowRight);
+		app.input.press(Key::F);
+		app.editor
+			.submit_camera_input(
+				&owner,
+				CameraIntent {
+					yaw_delta: 0.2,
+					..CameraIntent::default()
+				},
+			)
+			.unwrap();
+		app.window_event(events, window_id, WindowEvent::Focused(false));
+		app.window_event(events, window_id, WindowEvent::Focused(true));
+		frames.steps(&mut app, 8);
+		assert_eq!(position(&app), released);
+		assert_eq!(camera(&app).pose.yaw, turned);
+		app.restart_player_game().unwrap();
+		assert_eq!(position(&app), base);
+		assert_eq!(camera(&app).pose.yaw, 0.0);
+		app.wait_for_gpu().unwrap();
+	});
+}
+
+#[test]
 #[ignore = "requires native Windows Vulkan"]
 fn cinder_checkpoint_native_controls_import_review_audit_and_continue() {
 	use crate::cinder_checkpoint::{CHECKPOINT_SUFFIX, PracticeStore, audit::AUDIT_SUFFIX};
@@ -531,7 +613,8 @@ fn game_content_rect_native_images() {
 	if let Ok(width) = std::env::var(CHILD) {
 		let width: u32 = width.parse().unwrap();
 		with_native_window(|events| {
-			let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/cinder-oath/project.json");
+			let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("../../projects/cinder-oath/project.json");
 			let mut app = hidden_player(events, &manifest, [width, 256]);
 			if width == 1024 {
 				app.cursor_position = Some([127.0, 20.0]);
@@ -634,12 +717,11 @@ fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
 	const CHILD: &str = "GAME_ENGINE_QA_ACCESSIBLE_CAPTURE";
 	if std::env::var_os(CHILD).is_some() {
 		with_native_window(|events| {
-			let manifest =
-				Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/cinder-oath/project.json");
+			let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("../../projects/cinder-oath/project.json");
 			let mut app = hidden_player(events, &manifest, [768, 256]);
 			app.feedback_audio = feedback_audio::FeedbackAudio::default();
-			app.player_controls
-				.configure(Some(&manifest), None, false);
+			app.player_controls.configure(Some(&manifest), None, false);
 			for key in [
 				Key::Escape,
 				Key::ArrowUp,

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "90000000-0000-4000-8000-000000000002",
+      "path": "controls/yard.input-actions.json",
+      "kind": "input_actions",
+      "revision": 1,
+      "fingerprint": "15647b8b751acb3f97b9f2dbd366f78a642d376ee8a74349995782038edd8d97",
+      "bytes": 1216
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000001",
+      "path": "models/cube.glb",
+      "kind": "model",
+      "revision": 1,
+      "fingerprint": "14bbbf8651fe679f39b8c6c46cad49233d4f686fdf97b84545460a9cd68febdb",
+      "bytes": 1916,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "cube",
+          "primitives": 1
+        }
+      ]
+    }
+  ]
+}
