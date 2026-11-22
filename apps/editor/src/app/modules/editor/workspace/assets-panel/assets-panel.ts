@@ -15,6 +15,7 @@ import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
 import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-selection';
+import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -55,6 +56,7 @@ export class AssetsPanel {
     };
     private readonly editor = inject(EditorService);
     private readonly propAssetSelection = inject(PropAssetSelection, {optional: true});
+    protected readonly propWorkspace = inject(PropWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
@@ -73,6 +75,7 @@ export class AssetsPanel {
                 : !this.editor.busy() && snapshot.transaction === null);
     });
     protected readonly canLoadModels = this.canRunAction;
+    protected readonly canOpenProp = computed(() => this.canRunAction() && this.propWorkspace?.canOpen() === true);
     private catalogWorkspace: number | null = null;
     private readonly scenes = computed(() => this.editor.snapshot()?.scenes);
     private readonly entries = computed<readonly AssetEntry[]>(() => [
@@ -151,6 +154,14 @@ export class AssetsPanel {
             .run(async context => {
                 const file = this.menuFile(context);
                 if (file?.kind === 'model') await this.addModelFile(file);
+            }).build())
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.open-prop', 'Open Prop Workspace')
+            .icon('object')
+            .when(context => context.file.kind === 'prefab' && !!this.propWorkspace)
+            .enabledWhen(context => this.menuFile(context) !== null && this.canOpenProp())
+            .run(async context => {
+                const file = this.menuFile(context);
+                if (file) await this.openProp(file);
             }).build())
         .action(ContextActionBuilder.create<AssetMenuContext>('asset.place-linked-prop', 'Place Linked Prop…')
             .icon('plus')
@@ -258,6 +269,15 @@ export class AssetsPanel {
         this.selected.set(file);
         this.error.set(null);
         this.status.set(null);
+    }
+
+    protected async openProp(file: AssetEntry): Promise<void> {
+        if (file.kind !== 'prefab' || !this.canOpenProp() || !this.propWorkspace) return;
+        const generation = this.editor.workspaceGeneration();
+        const scene = this.editor.snapshot()?.active_scene_id;
+        this.error.set(null);
+        if (!await this.propWorkspace.openSource(file) && this.editor.workspaceGeneration() === generation &&
+            this.editor.snapshot()?.active_scene_id === scene) this.error.set(this.propWorkspace.error());
     }
 
     protected canDrag(file: AssetEntry): boolean {

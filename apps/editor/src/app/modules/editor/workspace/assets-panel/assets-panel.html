@@ -41,6 +41,7 @@
                                     [editorContextMenuLabel]="file.name + ' actions'"
                                     [editorContextMenu]="assetMenu(file)"
                                     (click)="selectFile(file)"
+                                    (dblclick)="openProp(file)"
                                     (pointerdown)="beginAssetDrag(file, $event)"
                                     [attr.aria-pressed]="isSelected(file)"
                                     [attr.data-asset-id]="file.kind === 'scene' ? null : file.asset_id"
@@ -74,6 +75,9 @@
                                 Open Scene
                             </button>
                         } @else {
+                            @if (file.kind === 'prefab' && propWorkspace) {
+                                <button (click)="openProp(file)" [disabled]="!canOpenProp()" type="button">Open Prop Workspace</button>
+                            }
                             <button (click)="addModel()" [disabled]="!canRunAction()" type="button">{{ file.kind === 'prefab' ? 'Place as Copy' : 'Add to Scene' }}</button>
                         }
                     </section>

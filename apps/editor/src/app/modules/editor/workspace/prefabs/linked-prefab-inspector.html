@@ -25,6 +25,9 @@
 			<p>{{ status.source_changed ? 'Source update available.' : 'Source is current.' }}</p>
 		}
 		<div class="actions">
+			@if (propWorkspace) {
+				<button type="button" [disabled]="!editable() || !propWorkspace.canOpen()" (click)="openPropWorkspace()">Open Prop Workspace</button>
+			}
 			<button type="button" [disabled]="!canSelectPropAsset()" (click)="selectPropAsset()">Select Prop Asset</button>
 			<button
 				type="button"
@@ -79,6 +82,8 @@
 			}
 		</ul>
 	</section>
+} @else if (propWorkspace && entity()?.linked_prefab) {
+	<button type="button" [disabled]="!editable() || !propWorkspace.canOpen()" (click)="openPropWorkspace()">Open Prop Workspace</button>
 }
 @if (error(); as message) {
 	<p role="alert" class="error">{{ message }}</p>

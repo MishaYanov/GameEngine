@@ -11,6 +11,7 @@ interface WorkspaceTabDefinition {
 const WORKSPACE_TABS: readonly WorkspaceTabDefinition[] = [
     {kind: 'scene-viewport', label: 'Scene', icon: 'cube'},
     {kind: 'game-preview', label: 'Game', icon: 'play'},
+    {kind: 'prop-workspace', label: 'Prop', icon: 'object'},
 ];
 
 let nextWorkspaceTabsId = 0;
@@ -23,10 +24,11 @@ let nextWorkspaceTabsId = 0;
 })
 export class WorkspaceTabs {
     readonly activeViewKind = input<WorkspaceViewKind>('scene-viewport');
+    readonly propAvailable = input(false);
     readonly viewSelected = output<WorkspaceViewKind>();
 
     readonly tabs = computed(() =>
-        WORKSPACE_TABS.map(tab => ({
+        WORKSPACE_TABS.filter(tab => tab.kind !== 'prop-workspace' || this.propAvailable()).map(tab => ({
             ...tab,
             active: tab.kind === this.activeViewKind(),
         })),
@@ -40,6 +42,10 @@ export class WorkspaceTabs {
 
     protected buttonId(kind: WorkspaceViewKind): string {
         return `${this.panelId}-tab-${kind}`;
+    }
+
+    focusTab(kind: WorkspaceViewKind): void {
+        this.tabButtons().find(button => button.nativeElement.id === this.buttonId(kind))?.nativeElement.focus();
     }
 
     protected selectView(kind: WorkspaceViewKind): void {
@@ -91,10 +97,6 @@ export class WorkspaceTabs {
         event.preventDefault();
         this.selectView(next.kind);
 
-        this.tabButtons()
-            .find(button =>
-                button.nativeElement.id === this.buttonId(next.kind),
-            )
-            ?.nativeElement.focus();
+        this.focusTab(next.kind);
     }
 }

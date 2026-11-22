@@ -22,6 +22,7 @@ import { PrefabSourceEditor } from './prefab-source-editor';
 import { ReferenceBindings } from './reference-bindings';
 import { readPrefabSource } from './prefab-source-values';
 import { PropAssetSelection } from './prop-asset-selection';
+import { PropWorkspaceService } from '../prop-workspace/prop-workspace.service';
 
 @Component({
 	selector: 'editor-linked-prefab-inspector',
@@ -35,6 +36,7 @@ export class LinkedPrefabInspector {
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
 	private readonly propAssets = inject(PropAssetSelection, { optional: true });
+	protected readonly propWorkspace = inject(PropWorkspaceService, { optional: true });
 	protected readonly status = signal<LinkedPrefabStatus | null>(null);
 	protected readonly error = signal<string | null>(null);
 	protected readonly pending = signal(false);
@@ -142,6 +144,12 @@ export class LinkedPrefabInspector {
 			workspaceGeneration: this.editor.workspaceGeneration(),
 			sceneId: snapshot.active_scene_id,
 		});
+	}
+
+	protected async openPropWorkspace(): Promise<void> {
+		const prop = this.propWorkspace, entity = this.entity(), context = this.context();
+		if (!prop || !entity?.linked_prefab || !this.editable() || !prop.canOpen()) return;
+		if (!await prop.openInstance(entity.key) && context === this.context()) this.error.set(prop.error());
 	}
 
 	protected async openSource(update: boolean): Promise<void> {

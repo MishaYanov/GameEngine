@@ -1,4 +1,4 @@
-import {computed, effect, inject, Injectable, signal} from '@angular/core';
+import {computed, effect, inject, Injectable, signal, untracked} from '@angular/core';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {ViewportView} from '../../../../core/editor/viewport-editor.models';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
@@ -8,6 +8,7 @@ import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspac
 @Injectable()
 export class WorkspaceViewService {
     readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
+    readonly propView = computed(() => this.activeViewKind() === 'prop-workspace');
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService);
     readonly gameStatus = this.viewport.gameStatus;
@@ -30,13 +31,27 @@ export class WorkspaceViewService {
             ? failure.message : this.viewport.state()?.error ?? null;
     });
     private requestedView: ViewportView | null = null;
+    private returnFromPlay: WorkspaceViewKind = 'scene-viewport';
+    private wasPlaying = false;
 
     constructor() {
-        effect(() => this.activeView.set(this.editor.playing() ? 'game-preview' : 'scene-viewport'));
+        effect(() => {
+            const playing = this.editor.playing();
+            untracked(() => {
+                if (playing) {
+                    this.returnFromPlay = this.propView() ? 'prop-workspace' : 'scene-viewport';
+                    this.activeView.set('game-preview');
+                } else if (this.wasPlaying) {
+                    this.activeView.set(this.returnFromPlay);
+                }
+                this.wasPlaying = playing;
+            });
+        });
         effect(() => {
             const state = this.viewport.state();
+            if (!state || this.propView()) return;
             const view = this.gameView() ? 'game' : 'scene';
-            if (!state || state.settings.view === view || this.requestedView === view) return;
+            if (state.settings.view === view || this.requestedView === view) return;
             this.requestedView = view;
             void this.viewport.action({type: 'set_view', view}).catch(() => undefined).finally(() => {
                 if (this.requestedView === view) this.requestedView = null;
@@ -45,7 +60,13 @@ export class WorkspaceViewService {
     }
 
     selectView(kind: WorkspaceViewKind): void {
+        if (kind === 'prop-workspace' && this.editor.playing()) return;
         this.activeView.set(kind);
+    }
+
+    closePropView(): void {
+        if (this.returnFromPlay === 'prop-workspace') this.returnFromPlay = 'scene-viewport';
+        if (this.propView()) this.activeView.set('scene-viewport');
     }
 
     async restartRun(blocked: boolean): Promise<void> {

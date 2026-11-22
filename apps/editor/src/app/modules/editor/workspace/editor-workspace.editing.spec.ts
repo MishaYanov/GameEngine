@@ -11,11 +11,13 @@ import type {
     EditorCommand,
     EditorCommandRequest,
     EditorSnapshot,
+    ModelAsset,
     ProjectData,
     SceneDocument,
     ViewportSceneLoad,
     ViewportStatus
 } from '../../../core/editor/editor.models';
+import type {LinkedPrefabStatus, PrefabSourceDraft} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
 import {SceneEditingService} from './scene-editing.service';
@@ -75,6 +77,20 @@ const gameplayModule = {
 const folderCapabilities = (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
     .map(name => ({name, label: name, category: 'hierarchy', undoable: true, available_in_play: false}));
 
+const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
+
+function propSource(revision: number): PrefabSourceDraft {
+    const transform = {position: [0, 0, 0] as const, rotation: [0, 0, 0] as const, scale: [1, 1, 1] as const};
+    return {
+        draft_id: 'arch-draft', workspace_generation: 1, revision,
+        path: propAsset.path, asset_id: propAsset.asset_id, fingerprint: 'arch-fingerprint',
+        prefab: {schema_version: 3, gameplay: null, reference_slots: {actor: 'external-actor'}, entities: [
+            {key: 'arch', name: 'Arch root', transform, components: []},
+            {key: 'stone', name: 'Stone', parent: 'arch', transform, components: []},
+        ]},
+    };
+}
+
 describe('Workspace live editing flow', () => {
     const dialogPrototype = HTMLDialogElement.prototype;
     const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
@@ -115,6 +131,9 @@ describe('Workspace live editing flow', () => {
     let viewportEditorState: ViewportEditorState;
     let viewportStateListener: ((event: TauriEvent<ViewportEditorState>) => void) | undefined;
     let restartReply: (() => Promise<ViewportEditorState>) | undefined;
+    let assets: readonly ModelAsset[];
+    let linkedStatus: LinkedPrefabStatus | null;
+    let openPropSource: (revision: number) => Promise<PrefabSourceDraft>;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -137,6 +156,9 @@ describe('Workspace live editing flow', () => {
         };
         restartReply = undefined;
         viewportStateListener = undefined;
+        assets = [];
+        linkedStatus = null;
+        openPropSource = async revision => propSource(revision);
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -170,7 +192,12 @@ describe('Workspace live editing flow', () => {
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
-            if (operation === 'editor_assets') return [];
+            if (operation === 'editor_assets') return assets;
+            if (operation === 'editor_prefab_source_open') {
+                return openPropSource((args as {expectedRevision: number}).expectedRevision);
+            }
+            if (operation === 'editor_prefab_source_close') return undefined;
+            if (operation === 'editor_linked_prefab_status') return linkedStatus;
             if (operation === 'editor_viewport_bounds') return viewportStatus;
             if (operation === 'editor_viewport_editor_state') return viewportEditorState;
             if (operation === 'editor_viewport_action') {
@@ -860,6 +887,85 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         expect(robot.getAttribute('aria-level')).toBe('1');
         expect(editor.selection()).toEqual(['robot', 'crate']);
+    });
+
+    it('opens a source Prop from Assets, keeps the same viewport mounted, and restores the source of focus', async () => {
+        await selectRobot();
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const viewport = root.querySelector('scene-viewport');
+        const asset = root.querySelector<HTMLButtonElement>('[data-asset-id="arch-id"]')!;
+        asset.focus();
+        asset.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Prop'));
+        await fixture.whenStable();
+        const panel = root.querySelector<HTMLElement>('editor-prop-workspace')!;
+        expect(root.querySelector('scene-viewport')).toBe(viewport);
+        expect(viewport?.hasAttribute('hidden')).toBe(true);
+        expect(panel.textContent).toContain('arch.prefab.json');
+        panel.querySelector<HTMLButtonElement>('[data-prop-object="stone"]')!.click();
+        await fixture.whenStable();
+        expect(panel.querySelector('[aria-label="Prop Inspector"]')?.textContent).toContain('Stone');
+        expect(editor.selection()).toEqual(['robot']);
+        panel.querySelector('button')!.click();
+        await fixture.whenStable();
+        expect(root.querySelector('editor-prop-workspace')).toBeNull();
+        expect(root.querySelector('scene-viewport')).toBe(viewport);
+        expect(document.activeElement).toBe(asset);
+        expect(invoke).toHaveBeenCalledWith('editor_prefab_source_close', {draftId: 'arch-draft'});
+    });
+
+    it('opens a pinned instance with unavailable source and restores its read-only tab after Play', async () => {
+        const prefab = {source: {source_id: 'missing-id', path: 'missing.json'}, bindings: {actor: 'crate'}};
+        nativeState = {...nativeState, document: {...nativeState.document, entities: nativeState.document.entities.map(entity =>
+            entity.key === 'robot' ? {...entity, linked_prefab: prefab, component_views: []} : {...entity, parent: 'robot'})}};
+        linkedStatus = {root_key: 'robot', source_id: 'missing-id', source_path: 'missing.json', source_fingerprint: 'stored',
+            source_changed: false, source_error: 'Source file missing', bindings: prefab.bindings, overrides: []};
+        await editor.refresh();
+        await fixture.whenStable();
+        await selectRobot();
+        await vi.waitFor(() => expect(fixture.nativeElement.textContent).toContain('Source file missing'));
+        const root: HTMLElement = fixture.nativeElement;
+        const open = [...root.querySelectorAll<HTMLButtonElement>('editor-linked-prefab-inspector button')]
+            .find(button => button.textContent?.trim() === 'Open Prop Workspace')!;
+        open.click();
+        await vi.waitFor(() => expect(root.querySelector('editor-prop-workspace')?.textContent).toContain('Pinned Prop instance'));
+        const propText = () => root.querySelector('editor-prop-workspace')?.textContent;
+        expect(propText()).toContain('missing.json');
+        expect(propText()).toContain('crate');
+        await editing.select('crate');
+        await fixture.whenStable();
+        expect(propText()).toContain('Pinned Prop instance');
+        action('Play').click();
+        await vi.waitFor(() => expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Game'));
+        expect(root.querySelector('editor-prop-workspace')).toBeNull();
+        action('Stop').click();
+        await vi.waitFor(() => expect(propText()).toContain('Pinned Prop instance'));
+        expect(editor.selection()).toEqual(['crate']);
+        expect(invoke).not.toHaveBeenCalledWith('editor_prefab_source_open', expect.anything());
+    });
+
+    it('closes a late source reply when opening another project without mounting its Prop tab', async () => {
+        let resolveDraft!: (draft: PrefabSourceDraft) => void;
+        openPropSource = () => new Promise(resolve => (resolveDraft = resolve));
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(resolveDraft).toBeTypeOf('function'));
+        fixture.componentRef.setInput('opening', true);
+        fixture.detectChanges();
+        const nextProject = editor.openProject('other/project.json');
+        resolveDraft(propSource(nativeState.revision));
+        await nextProject;
+        fixture.componentRef.setInput('opening', false);
+        await fixture.whenStable();
+        expect(invoke).toHaveBeenCalledWith('editor_prefab_source_close', {draftId: 'arch-draft'});
+        expect(root.querySelector('editor-prop-workspace')).toBeNull();
+        expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Scene');
     });
 
     it('reports a rejected parent change and clears its error when another project opens', async () => {

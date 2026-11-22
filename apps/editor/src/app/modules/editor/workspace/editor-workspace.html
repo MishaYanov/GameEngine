@@ -1,6 +1,6 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
-        <workspace-toolbar (paletteRequested)="openPalette()" (viewSelected)="workspaceView.selectView($event)"
+        <workspace-toolbar (paletteRequested)="openPalette()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
@@ -47,6 +47,7 @@
         }
     </div>
     <workspace-tabs #tabs (viewSelected)="workspaceView.selectView($event)"
+                    [propAvailable]="!!propWorkspace.document() && !editorService.playing()"
                     [activeViewKind]="workspaceView.activeViewKind()"/>
 
     <div class="workspace-main">
@@ -67,7 +68,7 @@
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
-            @if (!workspaceView.gameView() && !previewingCamera()) {
+            @if (!workspaceView.gameView() && !workspaceView.propView() && !previewingCamera()) {
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
@@ -77,9 +78,9 @@
                     role="tabpanel"
                     tabindex="0"
             >
-                <editor-pane [icon]="workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
-                    @if (sceneProgress(); as progress) {
+                <editor-pane [icon]="workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
+                             [title]="workspaceView.propView() ? 'Prop Workspace' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
+                    @if (!workspaceView.propView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
                             <progress
@@ -98,9 +99,9 @@
                               role="status">{{
                                 workspaceView.gameKeyboardCaptured() ? 'Game keyboard active · Esc releases' : 'Click Game to capture the keyboard'
                             }}</span>
-                    } @else if (!workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
+                    } @else if (!workspaceView.propView() && !workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
                         <span class="viewport-keyboard-hint" pane-actions role="status">WASD to move · Mouse to look · Esc exits</span>
-                    } @else if (!workspaceView.gameView() && assetDrag.message(); as message) {
+                    } @else if (!workspaceView.propView() && !workspaceView.gameView() && assetDrag.message(); as message) {
                         <span [title]="message" class="viewport-keyboard-hint" pane-actions
                               role="status">{{ message }}</span>
                     }
@@ -111,7 +112,9 @@
                                 [hidden]="!showingViewport()"
                                 [label]="workspaceView.gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
                         />
-                        @if (!showingViewport()) {
+                        @if (workspaceView.propView()) {
+                            <editor-prop-workspace (closed)="closePropWorkspace()"/>
+                        } @else if (!showingViewport()) {
                             <div class="empty-scene">
                                 <div class="empty-content">
                                     <h3>{{ workspaceView.gameView() ? 'Game preview is stopped' : 'Game preview is running' }}</h3>
@@ -144,7 +147,7 @@
         </section>
         @if (workspaceView.gameView() && editorService.playing()) {
             <editor-runtime-inspector [opening]="workspaceActionBlocked()"/>
-        } @else {
+        } @else if (!workspaceView.propView()) {
         <inspector-panel
                 data-editor-shortcut-scope="inspector"
                 [entity]="sceneEditing.entity()"

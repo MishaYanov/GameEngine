@@ -1,0 +1,60 @@
+@if (prop.document(); as document) {
+    <section (keydown)="handleKey($event)" aria-label="Prop Workspace" class="prop-document">
+        <header>
+            <nav aria-label="Prop location">
+                <span>{{ document.kind === 'source' ? 'Assets' : 'Scene' }}</span>
+                <span aria-hidden="true">/</span>
+                <strong aria-current="page">{{ document.name }}</strong>
+            </nav>
+            <button (click)="closed.emit()" type="button">Close Prop</button>
+        </header>
+        <div class="prop-heading">
+            <h2 #heading tabindex="-1">{{ document.kind === 'source' ? 'Prop source' : 'Pinned Prop instance' }}</h2>
+            <small [title]="document.path">{{ document.path }}</small>
+        </div>
+        <div class="document-panes">
+            <section aria-labelledby="prop-objects-heading">
+                <h3 id="prop-objects-heading">Objects</h3>
+                <ul aria-labelledby="prop-objects-heading" class="objects">
+                    @for (object of document.objects; track object.key) {
+                        <li>
+                            <button (click)="prop.selectObject(object.key)" [style.padding-inline-start.rem]="object.level > 9 ? 6.4 : 0.4 + (object.level - 1) * 0.75"
+                                    [attr.aria-pressed]="prop.selectedObject()?.key === object.key" [attr.data-prop-object]="object.key" type="button">
+                                <editor-icon name="object"/>
+                                {{ object.name }}
+                            </button>
+                        </li>
+                    }
+                </ul>
+            </section>
+            <section aria-label="Prop Inspector">
+                <h3>Inspector</h3>
+                @if (prop.selectedObject(); as object) {
+                    <h4>{{ object.name }}</h4>
+                    <dl class="properties">
+                        <dt>Parent</dt><dd>{{ parentName() }}</dd>
+                        <dt>Position</dt><dd>{{ object.transform.position.join(', ') }}</dd>
+                        <dt>Rotation</dt><dd>{{ object.transform.rotation.join(', ') }}</dd>
+                        <dt>Scale</dt><dd>{{ object.transform.scale.join(', ') }}</dd>
+                    </dl>
+                    @if (object.components.length) {
+                        <h4>Components</h4>
+                        <ul>
+                            @for (component of object.components; track component.id) {
+                                <li class="component-type">{{ componentLabel(component) }}</li>
+                            }
+                        </ul>
+                    }
+                }
+                @if (document.references.length) {
+                    <h4>External references</h4>
+                    <dl class="properties">
+                        @for (reference of document.references; track reference.slot) {
+                            <dt>{{ reference.slot }}</dt><dd>{{ reference.target }}</dd>
+                        }
+                    </dl>
+                }
+            </section>
+        </div>
+    </section>
+}

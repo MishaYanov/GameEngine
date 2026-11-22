@@ -8,6 +8,8 @@ import {EditorService} from "../../../core/editor/editor.service";
 import {SceneViewport} from "./scene-viewport/scene-viewport";
 import {WorkspaceViewService} from './scene-viewport/workspace-view.service';
 import {WorkspaceTabs} from "./workspace-tabs/workspace-tabs";
+import {PropWorkspace} from './prop-workspace/prop-workspace';
+import {PropWorkspaceService} from './prop-workspace/prop-workspace.service';
 import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
@@ -38,12 +40,12 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     selector: 'editor-workspace',
     providers: [
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
-        SceneSwitchService, WorkspaceViewService, PropAssetSelection,
+        SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel,
+        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
@@ -59,6 +61,7 @@ export class EditorWorkspace {
     protected readonly viewportEditor = inject(ViewportEditorService);
     protected readonly assetDrag = inject(ViewportAssetDragService);
     protected readonly workspaceView = inject(WorkspaceViewService);
+    protected readonly propWorkspace = inject(PropWorkspaceService);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
     private readonly document = inject(DOCUMENT);
     private readonly contextMenu = inject(ContextMenuService);
@@ -78,7 +81,8 @@ export class EditorWorkspace {
         return snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path.split('/').at(-1) ?? 'Scene';
     });
     protected readonly showingViewport = computed(() =>
-        this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing()
+        !this.workspaceView.propView() &&
+        (this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing())
     );
     private readonly sceneSwitch = inject(SceneSwitchService);
     protected readonly sceneProgress = computed(() => {
@@ -98,6 +102,7 @@ export class EditorWorkspace {
         });
     });
     private readonly sceneToolbar = viewChild(ViewportToolbar);
+    private readonly workspaceTabs = viewChild(WorkspaceTabs);
     private readonly workspaceToolbar = viewChild(WorkspaceToolbar);
     private readonly hierarchy = viewChild(SceneEntitiesPanel);
     private readonly inspector = viewChild(InspectorPanel);
@@ -157,6 +162,9 @@ export class EditorWorkspace {
             this.problemsActive.set(false);
         });
         effect(() => this.sceneEditing.blocked.set(this.opening() || this.viewportEditor.authoringGesture()));
+        effect(() => {
+            if (this.workspaceActionBlocked()) this.propWorkspace.cancelOpening();
+        });
     }
 
     protected handleEditorShortcut(event: KeyboardEvent): void {
@@ -195,6 +203,10 @@ export class EditorWorkspace {
 
     protected showUsages(key: EntityKey): void {
         if (this.canRevealReference()) this.usage.set({key, context: this.sceneContext()});
+    }
+
+    protected closePropWorkspace(): void {
+        this.propWorkspace.close(true, () => this.workspaceTabs()?.focusTab('scene-viewport'));
     }
 
     protected closeUsages(): void {
