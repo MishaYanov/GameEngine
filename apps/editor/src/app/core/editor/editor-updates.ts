@@ -1,7 +1,7 @@
 import {
     type EditorCommandUpdate, type EditorSnapshot, type SceneEntity, isSceneSchemaVersion,
 } from './editor.models';
-import {validComponentViews} from './editor-components';
+import {validCameraComponentSettings, validComponentViews} from './editor-components';
 
 const maxSceneFolders = 1_024;
 const maxFolderDepth = 32;
@@ -43,7 +43,7 @@ function camera(value: unknown, schema: unknown): boolean {
     return (
         record(value) &&
         validFollow &&
-        (schema === 5 || schema === 6
+        (isSceneSchemaVersion(schema) && schema >= 5
             ? (value['orbit'] == null || (follow == null && orbitCamera(value['orbit'])))
             : !('orbit' in value)) &&
         vector(value['position'], 3) &&
@@ -59,6 +59,8 @@ function entity(value: unknown): value is SceneEntity {
         typeof value['name'] === 'string' &&
         typeof value['model_path'] === 'string' &&
         typeof value['renderable'] === 'boolean' &&
+        (value['camera'] == null || (record(value['camera']) && typeof value['camera']['id'] === 'string' &&
+            typeof value['camera']['enabled'] === 'boolean' && validCameraComponentSettings(value['camera']['settings']))) &&
         (value['component_views'] === undefined || validComponentViews(value['component_views'])) &&
         (value['linked_prefab'] == null || linkedPrefab(value['linked_prefab'])) &&
         ['position', 'rotation', 'scale'].every((key) => vector(transform[key], 3))
@@ -133,7 +135,9 @@ function validDocument(value: unknown): boolean {
         value['entities'].every(entity) &&
         new Set(value['entities'].map((item) => item.key)).size === value['entities'].length &&
         (value['organization'] === undefined ||
-            (value['schema_version'] === 6 && validOrganization(value['organization'], value['entities'])))
+            (value['schema_version'] >= 6 && validOrganization(value['organization'], value['entities']))) &&
+        (value['default_game_camera'] == null || (value['schema_version'] === 7 &&
+            value['entities'].some(item => item.key === value['default_game_camera'] && item.camera?.enabled === true)))
     );
 }
 
@@ -265,7 +269,7 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
             });
     if (replaced !== replacements.size) return invalid();
     if (update.organization !== undefined &&
-        (previous.document.schema_version !== 6 || !validOrganization(update.organization, entities))) {
+        (previous.document.schema_version < 6 || !validOrganization(update.organization, entities))) {
         return invalid();
     }
     const document =

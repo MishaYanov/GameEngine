@@ -107,11 +107,12 @@ impl EditorSession {
 	) -> Result<(), String> {
 		let mut staged = self.drafts.clone();
 		let mut unique = HashSet::new();
-		for (id, data) in documents {
+		for (id, mut data) in documents {
 			if !unique.insert(id.clone()) || id == self.active_scene_id || staged.contains_key(&id)
 			{
 				return Err("A loaded scene ID must be distinct and inactive".into());
 			}
+			data.refresh_game_camera_projection()?;
 			self.project.validate_scene_for(&id, &data)?;
 			let data = Arc::new(data);
 			staged.insert(

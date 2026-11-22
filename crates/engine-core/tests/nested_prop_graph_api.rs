@@ -317,11 +317,64 @@ fn saved_nested_sources_link_and_reopen_with_distinct_scene_member_keys() {
 			})
 			.unwrap();
 	}
+	let document = session.authored_document();
+	let member = document
+		.entities
+		.iter()
+		.find(|entity| entity.name == "grate")
+		.unwrap();
+	session
+		.execute_command(EditorCommandRequest {
+			expected_revision: session.revision(),
+			command: EditorCommandDto::Rename {
+				key: member.key.as_str().into(),
+				name: "Locally labeled grate".into(),
+			},
+		})
+		.unwrap();
 	let authored = session.authored_document();
 	let reopened = scene_data::parse_json(&authored.to_json().unwrap())
 		.unwrap()
 		.data;
 	assert_eq!(authored.as_ref(), &reopened);
+	let mut previous = reopened.clone();
+	let folder = scene_data::FolderId::new("props").unwrap();
+	previous
+		.organization
+		.folders
+		.push(scene_data::FolderRecord {
+			id: folder.clone(),
+			name: "Props".into(),
+			parent: None,
+		});
+	let anchor = previous
+		.entities
+		.iter()
+		.find(|entity| entity.linked_prefab.is_some())
+		.unwrap();
+	previous
+		.organization
+		.root_membership
+		.insert(anchor.key.clone(), folder);
+	assert!(anchor.linked_prefab.as_ref().unwrap().overrides.len() == 1);
+	let mut previous_wire: serde_json::Value =
+		serde_json::from_str(&previous.to_json().unwrap()).unwrap();
+	previous_wire["schema_version"] = 6.into();
+	let migrated = scene_data::parse_json(&previous_wire.to_string())
+		.unwrap()
+		.data;
+	assert_eq!(migrated.organization, previous.organization);
+	assert_eq!(
+		&migrated.entities[..previous.entities.len()],
+		previous.entities
+	);
+	assert!(migrated.default_game_camera.is_some());
+	assert_eq!(
+		scene_data::parse_json(&migrated.to_json().unwrap())
+			.unwrap()
+			.data,
+		migrated
+	);
 	let maps: Vec<_> = reopened
 		.entities
 		.iter()
@@ -344,7 +397,7 @@ fn saved_nested_sources_link_and_reopen_with_distinct_scene_member_keys() {
 		.entities
 		.iter()
 		.zip(matrices)
-		.filter(|(entity, _)| entity.name == "grate")
+		.filter(|(entity, _)| matches!(entity.name.as_str(), "grate" | "Locally labeled grate"))
 		.map(|(_, matrix)| matrix.w_axis.x)
 		.collect();
 	grates.sort_by(f32::total_cmp);

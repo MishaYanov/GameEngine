@@ -26,6 +26,7 @@ pub const NATIVE_TYPE: &str = "engine.native_behavior";
 pub const CHARACTER_TYPE: &str = "engine.character_controller";
 pub const ANIMATION_TYPE: &str = "engine.animation";
 pub const INTERACTABLE_TYPE: &str = "engine.interactable";
+pub const CAMERA_TYPE: &str = "engine.camera";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -62,6 +63,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	Camera {
+		settings: crate::game_camera::CameraSettings,
+	},
 	CharacterController {
 		settings: crate::character_controller::CharacterControllerSettings,
 	},
@@ -98,6 +102,7 @@ pub struct ComponentRecord {
 impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
+			ComponentData::Camera { .. } => CAMERA_TYPE,
 			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
 			ComponentData::Animation { .. } => ANIMATION_TYPE,
 			ComponentData::Interactable { .. } => INTERACTABLE_TYPE,
@@ -112,6 +117,7 @@ impl ComponentRecord {
 			return Err("Unsupported component schema version".into());
 		}
 		match &self.data {
+			ComponentData::Camera { settings } => settings.validate(),
 			ComponentData::CharacterController { settings } => settings.validate(),
 			ComponentData::Animation { settings } => settings.validate(),
 			ComponentData::Interactable { settings } => settings.validate(),
@@ -152,6 +158,13 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			CAMERA_TYPE,
+			"camera",
+			"Camera",
+			"Perspective lens and Fixed, Follow or Orbit game camera.",
+			1,
+		),
 		(
 			CHARACTER_TYPE,
 			"character_controller",

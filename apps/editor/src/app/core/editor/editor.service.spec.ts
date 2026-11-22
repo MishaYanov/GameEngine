@@ -130,6 +130,36 @@ it('rejects a cyclic organization before accepting a version six snapshot', () =
     expect(() => applyEditorUpdate(snapshot(1), commandUpdate({...next, document}))).toThrow('inconsistent');
 });
 
+it('preserves a migrated Camera object alongside scene folders and the native game-camera projection', () => {
+    const next = snapshot(2);
+    const camera: SceneEntity = {
+        key: 'scene-camera',
+        name: 'Camera',
+        model_path: '__no_mesh__.glb',
+        renderable: false,
+        transform: {position: [0, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1]},
+        camera: {
+            id: 'scene-camera-component',
+            enabled: true,
+            settings: {
+                lens: {vertical_fov: 1, near: 0.1, far: 100},
+                rig: {mode: 'fixed'},
+            },
+        },
+    };
+    const document = {
+        ...next.document,
+        schema_version: 7 as const,
+        default_game_camera: camera.key,
+        entities: [camera],
+        organization: {folders: [{id: 'floor', name: 'Floor'}], root_membership: {}},
+    };
+    expect(applyEditorUpdate(snapshot(1), commandUpdate({...next, document})).document).toEqual(document);
+    expect(() => applyEditorUpdate(snapshot(1), commandUpdate({
+        ...next, document: {...document, default_game_camera: 'removed-camera'},
+    }))).toThrow('inconsistent');
+});
+
 function delta(
     next: EditorSnapshot,
     entities: readonly SceneEntity[] = [],

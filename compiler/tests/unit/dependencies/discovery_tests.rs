@@ -21,6 +21,7 @@ impl Fixture {
 		))
 		.unwrap();
 		scene.entities.clear();
+		scene.default_game_camera = None;
 		scene.bindings.clear();
 		scene.camera.follow = None;
 		fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();

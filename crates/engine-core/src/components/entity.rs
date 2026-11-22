@@ -3,6 +3,14 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(camera) = &self.camera {
+			bytes = bytes
+				.saturating_add(camera.id.as_str().len())
+				.saturating_add(std::mem::size_of_val(camera.as_ref()));
+			if let Some(target) = camera.settings.rig.target() {
+				bytes = bytes.saturating_add(target.as_str().len());
+			}
+		}
 		if let Some(component) = &self.character_controller {
 			bytes = bytes
 				.saturating_add(component.id.as_str().len())
@@ -67,6 +75,16 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		if let Some(camera) = &self.camera {
+			records.push(ComponentRecord {
+				id: camera.id.clone(),
+				schema_version: 1,
+				enabled: camera.enabled,
+				data: ComponentData::Camera {
+					settings: camera.settings.clone(),
+				},
+			});
+		}
 		if let Some(component) = &self.character_controller {
 			records.push(ComponentRecord {
 				id: component.id.clone(),
@@ -187,6 +205,13 @@ impl EntityData {
 			return Err("Object component count exceeds its limit".into());
 		}
 		match component.data {
+			ComponentData::Camera { settings } => {
+				self.camera = Some(Box::new(crate::game_camera::CameraComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::CharacterController { settings } => {
 				self.character_controller =
 					Some(crate::character_controller::CharacterControllerComponent {
@@ -254,6 +279,7 @@ impl EntityData {
 			.find(|record| &record.id == id)
 			.ok_or("Component does not exist")?;
 		match record.data {
+			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,
 			ComponentData::Animation { .. } => self.animation = None,
 			ComponentData::Interactable { .. } => self.interactable = None,
@@ -289,6 +315,9 @@ impl EntityData {
 		&mut self,
 		remap: &HashMap<EntityKey, EntityKey>,
 	) -> Result<(), String> {
+		if let Some(camera) = &mut self.camera {
+			camera.settings.rig.remap_target(remap);
+		}
 		for component in &mut self.native_behaviors {
 			component.behavior.remap_entity_references(remap);
 		}

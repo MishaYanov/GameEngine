@@ -77,6 +77,7 @@ fn arena(enemy_z: f32, wall: bool) -> SceneData {
 	SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: BTreeMap::from([
 			("player".into(), entity_key("player")),
 			("enemy".into(), entity_key("warden")),
@@ -99,6 +100,7 @@ fn intro() -> SceneData {
 	SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: BTreeMap::from([
 			("camera_track".into(), entity_key("track")),
 			("knight".into(), entity_key("knight")),
@@ -121,7 +123,7 @@ fn session(scene: SceneData, startup: &str) -> Engine {
 		format!("scenes/{startup}.json"),
 		&scene,
 	)
-		.unwrap();
+	.unwrap();
 	let other = if startup == "intro" { "arena" } else { "intro" };
 	project
 		.scenes

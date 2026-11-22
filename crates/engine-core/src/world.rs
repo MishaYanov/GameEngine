@@ -27,8 +27,14 @@ pub struct RuntimeWorld {
 	matrix_updates: u64,
 }
 impl RuntimeWorld {
-	pub fn new(document: Arc<SceneData>) -> Result<Self, String> {
+	pub fn new(mut document: Arc<SceneData>) -> Result<Self, String> {
 		let matrices = document.validated_world_matrices()?;
+		if let Some(key) = &document.default_game_camera {
+			let camera = document.object_camera(key, &matrices)?;
+			if camera != document.camera {
+				Arc::make_mut(&mut document).camera = camera;
+			}
+		}
 		let indices: HashMap<_, _> = document
 			.entities
 			.iter()
@@ -72,7 +78,8 @@ impl RuntimeWorld {
 		let mut data = self.data().clone();
 		data.entities.retain(|entity| !keys.contains(&entity.key));
 		data.bindings.retain(|_, key| !keys.contains(key));
-		data.camera.clear_removed_targets(keys);
+		data.remove_camera_targets(keys);
+		data.refresh_game_camera_projection()?;
 		for entity in &mut data.entities {
 			entity.native_behaviors.retain(|component| {
 				component

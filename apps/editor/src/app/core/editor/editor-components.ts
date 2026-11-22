@@ -1,4 +1,4 @@
-import type { Collider, MaterialOverride, Vec3 } from './editor.models';
+import type { CameraComponentSettings, Collider, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
 	validControllerSettings,
@@ -56,6 +56,7 @@ export type ComponentData =
 	| { readonly kind: 'collider'; readonly collider: Collider }
 	| { readonly kind: 'character_controller'; readonly settings: CharacterControllerSettings }
 	| { readonly kind: 'animation'; readonly settings: AnimationSettings }
+	| { readonly kind: 'camera'; readonly settings: CameraComponentSettings }
     | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
 
@@ -105,6 +106,28 @@ function vector(value: unknown, size: number, min: number, max: number): boolean
 function nullableText(value: unknown): boolean {
 	return value === null || nonempty(value);
 }
+
+export function validCameraComponentSettings(value: unknown): value is CameraComponentSettings {
+	if (!record(value) || !record(value['lens']) || !record(value['rig'])) return false;
+	const {lens, rig} = value;
+	if (typeof lens['vertical_fov'] !== 'number' || !(lens['vertical_fov'] > 0 && lens['vertical_fov'] < Math.PI) ||
+		typeof lens['near'] !== 'number' || typeof lens['far'] !== 'number' ||
+		!Number.isFinite(Math.fround(lens['near'])) || !Number.isFinite(Math.fround(lens['far'])) ||
+		!(lens['near'] > 0 && lens['far'] > lens['near'])) return false;
+	if (rig['mode'] === 'fixed') return rig['settings'] === undefined;
+	const settings = rig['settings'];
+	if (!record(settings) || !nonempty(settings['target'])) return false;
+	if (rig['mode'] === 'follow') return vector(settings['offset'], 3, -Infinity, Infinity) &&
+		vector(settings['look_offset'], 3, -Infinity, Infinity) &&
+		typeof settings['smoothing_seconds'] === 'number' &&
+		settings['smoothing_seconds'] >= 0 && settings['smoothing_seconds'] <= 10;
+	return rig['mode'] === 'orbit' &&
+		vector(settings['pivot_offset'], 3, -Infinity, Infinity) &&
+		['initial_yaw', 'initial_pitch', 'initial_distance', 'min_distance', 'max_distance', 'min_pitch', 'max_pitch',
+			'follow_seconds', 'recovery_seconds', 'teleport_distance', 'probe_radius'].every(
+			key => typeof settings[key] === 'number' && Number.isFinite(Math.fround(settings[key])),
+		) && integer(settings['obstruction_mask'], 1, 0xffff_ffff);
+}
 function collider(value: unknown): boolean {
 	if (!record(value) || !vector(value['offset'], 3, -Infinity, Infinity)) return false;
 	const interaction = value['interaction'];
@@ -148,6 +171,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
 	if (data['kind'] === 'animation') return validAnimationSettings(data['settings']);
+	if (data['kind'] === 'camera') return validCameraComponentSettings(data['settings']);
     if (data['kind'] === 'interactable') {
         const settings = data['settings'];
         return Object.keys(data).length === 2 && record(settings) && Object.keys(settings).length === 2 &&
@@ -201,6 +225,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'collider').length <= 1 &&
 		value.filter((component) => component.data.kind === 'character_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
+		value.filter((component) => component.data.kind === 'camera').length <= 1 &&
         value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
 	);
@@ -219,6 +244,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'native_behavior',
 					'character_controller',
 					'animation',
+					'camera',
                     'interactable',
 				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&

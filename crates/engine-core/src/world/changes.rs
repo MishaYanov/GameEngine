@@ -71,7 +71,8 @@ impl WorldChange {
 		let old: HashMap<_, _> = before.entities.iter().map(|e| (&e.key, e)).collect();
 		let new: HashMap<_, _> = after.entities.iter().map(|e| (&e.key, e)).collect();
 		let mut change = Self {
-			camera_changed: before.camera != after.camera,
+			camera_changed: before.camera != after.camera
+				|| before.default_game_camera != after.default_game_camera,
 			lights_changed: before.lights != after.lights,
 			..Self::default()
 		};

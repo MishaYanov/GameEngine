@@ -7,6 +7,7 @@ fn selection_operations_preserve_hierarchy_error_order_before_mutation_or_noop()
 	let original = SceneData {
 		schema_version: crate::scene_data::CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: Default::default(),
 		entities: vec![
 			EntityData::new(key("a"), "A", "model.glb"),

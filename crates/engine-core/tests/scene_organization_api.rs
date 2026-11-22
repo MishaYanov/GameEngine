@@ -76,10 +76,17 @@ fn folders_preserve_runtime_world_and_legacy_camera() {
 	assert_eq!(migrated.source_schema_version, 5);
 	assert!(migrated.data.organization.is_empty());
 	assert_eq!(migrated.data.camera, scene.camera);
-	assert_eq!(migrated.data.entities, scene.entities);
+	assert_eq!(
+		&migrated.data.entities[..scene.entities.len()],
+		scene.entities
+	);
+	assert_eq!(migrated.data.entities.len(), scene.entities.len() + 1);
 	let left = RuntimeWorld::new(Arc::new(migrated.data)).unwrap();
 	let right = RuntimeWorld::new(Arc::new(scene)).unwrap();
-	assert_eq!(left.world_matrices(), right.world_matrices());
+	assert_eq!(
+		&left.world_matrices()[..right.world_matrices().len()],
+		right.world_matrices()
+	);
 	assert!(!left.data().to_json().unwrap().contains("\"organization\""));
 
 	legacy["organization"] = json!({});

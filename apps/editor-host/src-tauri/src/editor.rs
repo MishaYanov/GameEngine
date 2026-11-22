@@ -220,6 +220,7 @@ impl EditorWorkspace {
 			|| receipt.project_changed
 			|| (document_changed
 				&& (before.bindings != after.bindings
+					|| before.default_game_camera != after.default_game_camera
 					|| !before
 						.entities
 						.iter()

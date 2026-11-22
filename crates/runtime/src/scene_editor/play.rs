@@ -55,8 +55,10 @@ impl SceneEditor {
 	pub fn play_rig_camera(&self) -> Option<Camera> {
 		let session = self.session.as_ref()?;
 		let world = session.render_world()?;
-		(session.orbit_state().is_some() || world.data().camera.follow.is_some())
-			.then(|| session.render_camera())
+		(world.data().default_game_camera.is_some()
+			|| session.orbit_state().is_some()
+			|| world.data().camera.follow.is_some())
+		.then(|| session.render_camera())
 	}
 	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
 		self.session

@@ -246,9 +246,10 @@ impl SceneVerificationInput {
 		role: &str,
 		factory: &Arc<dyn GameModuleFactory>,
 	) -> Option<BindingSuggestion> {
+		let camera = document.authored_game_camera().ok()?;
 		let key = match (scope, role) {
-			(SceneScope::Intro, "camera_track") => &document.camera.follow.as_ref()?.target,
-			(SceneScope::Arena, "player") => &document.camera.orbit.as_ref()?.target,
+			(SceneScope::Intro, "camera_track") => &camera.follow.as_ref()?.target,
+			(SceneScope::Arena, "player") => &camera.orbit.as_ref()?.target,
 			_ => return None,
 		};
 		let entity = document.entities.iter().find(|entity| &entity.key == key)?;

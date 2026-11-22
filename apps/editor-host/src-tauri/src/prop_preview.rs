@@ -368,6 +368,7 @@ fn preview_document(entities: Vec<EntityData>) -> Result<SceneData, String> {
 	let document = SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: Default::default(),
 		entities,
 		lights: Vec::new(),

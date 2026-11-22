@@ -96,7 +96,8 @@ pub fn instantiate_with_warming(
 		return Ok(None);
 	}
 	let animations = bridge::animation_asset::prepare_scene_with_pins(assets.root(), data, &pins)?;
-	scene.synchronize_camera_settings(&data.camera);
+	let authored_camera = data.authored_game_camera()?;
+	scene.synchronize_camera_settings(&authored_camera, &data.default_game_camera);
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
 	let mut render_objects = 0usize;
@@ -202,14 +203,7 @@ pub fn instantiate_with_warming(
 	scene.set_lights(data.lights.clone());
 	scene.set_organization(&data.organization);
 
-	let camera = Camera {
-		position: data.camera.position,
-		yaw: data.camera.yaw,
-		pitch: data.camera.pitch,
-		vertical_fov: data.camera.vertical_fov,
-		near: data.camera.near_plane,
-		far: data.camera.far_plane,
-	};
+	let camera = authored_camera.to_camera();
 
 	Ok(Some((scene, camera)))
 }

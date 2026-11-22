@@ -25,6 +25,68 @@ fn followed() -> engine_core::SceneData {
 }
 
 #[test]
+fn migrated_camera_drives_play_and_legacy_edits_read_and_write_the_object() {
+	let legacy = followed();
+	let mut wire: serde_json::Value = serde_json::from_str(&legacy.to_json().unwrap()).unwrap();
+	wire["schema_version"] = 5.into();
+	let migrated = engine_core::SceneData::from_json(&wire.to_string()).unwrap();
+	let default_key = migrated.default_game_camera.clone().unwrap();
+	let mut standalone = migrated.clone();
+	standalone.camera.follow = None;
+	standalone.camera.position = [100.0; 3];
+	let world = RuntimeWorld::new(Arc::new(standalone)).unwrap();
+	assert_eq!(
+		GameCameraController::new(&world).unwrap().camera().position,
+		[3.0, 2.0, 5.0]
+	);
+	let project = ProjectData::for_scene("Camera", "scenes/main.json", &migrated).unwrap();
+	let mut engine = EngineBuilder::new(migrated.clone(), project)
+		.build()
+		.unwrap();
+	let run = |engine: &mut engine_core::Engine, command| {
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: engine.session().revision(),
+				command,
+			})
+			.unwrap();
+	};
+	let mut camera = migrated.camera.clone();
+	camera.position = [4.0, 1.0, 8.0];
+	camera.vertical_fov = 0.9;
+	run(&mut engine, Command::SetCamera { camera });
+	let edited = engine.session().authored_document();
+	let object = edited.entities.last().unwrap();
+	assert_eq!(object.key, default_key);
+	assert_eq!(object.transform.position, [4.0, 1.0, 8.0]);
+	assert_eq!(
+		object.camera.as_ref().unwrap().settings.lens.vertical_fov,
+		0.9
+	);
+	run(
+		&mut engine,
+		Command::Select {
+			keys: vec![default_key.as_str().into()],
+		},
+	);
+	run(&mut engine, Command::DeleteSelection);
+	assert!(
+		engine
+			.session()
+			.authored_document()
+			.default_game_camera
+			.is_none()
+	);
+	run(&mut engine, Command::Undo);
+	assert_eq!(
+		engine.session().authored_document().as_ref(),
+		edited.as_ref()
+	);
+	run(&mut engine, Command::Undo);
+	assert_eq!(engine.session().authored_document().as_ref(), &migrated);
+}
+
+#[test]
 fn authored_follow_settings_roundtrip_and_reject_missing_or_degenerate_targets() {
 	let original = followed();
 	assert_eq!(

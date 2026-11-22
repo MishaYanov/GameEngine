@@ -350,6 +350,7 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 			fs::write(&catalog_file, catalog.to_json().unwrap()).unwrap();
 			let mut document = (*authored).clone();
 			document.bindings.clear();
+			document.default_game_camera = None;
 			document.camera.follow = None;
 			document.camera.orbit = None;
 			document.entities = vec![

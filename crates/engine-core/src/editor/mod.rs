@@ -71,7 +71,8 @@ impl EditorSession {
 		let project = ProjectData::for_scene("Untitled", "scenes/scene.json", &data)?;
 		Self::for_project(data, project)
 	}
-	pub fn for_project(data: SceneData, project: ProjectData) -> Result<Self, String> {
+	pub fn for_project(mut data: SceneData, project: ProjectData) -> Result<Self, String> {
+		data.refresh_game_camera_projection()?;
 		project.validate_scene(&data)?;
 		let active_scene_id = project.startup_scene_id.clone();
 		let saved_path = Some(project.startup_scene_path()?.to_owned());
@@ -189,9 +190,10 @@ impl EditorSession {
 	/// a fresh saved baseline and clears transient simulation and history.
 	pub fn replace_project_document(
 		&mut self,
-		data: SceneData,
+		mut data: SceneData,
 		project: ProjectData,
 	) -> Result<(), String> {
+		data.refresh_game_camera_projection()?;
 		project.validate_scene(&data)?;
 		self.require_no_transaction()?;
 		self.ensure_revision_capacity()?;
@@ -309,15 +311,7 @@ impl EditorSession {
 		if let Some(play) = &self.play {
 			return play.active().camera().clone();
 		}
-		let camera = &self.data.camera;
-		crate::Camera {
-			position: camera.position,
-			yaw: camera.yaw,
-			pitch: camera.pitch,
-			vertical_fov: camera.vertical_fov,
-			near: camera.near_plane,
-			far: camera.far_plane,
-		}
+		self.data.camera.to_camera()
 	}
 	pub fn set_play_visibility_capabilities(
 		&mut self,
@@ -654,6 +648,7 @@ impl EditorSession {
 		label: &str,
 	) -> Result<(), String> {
 		crate::linked_prefab::capture_overrides(&self.data, &mut next)?;
+		next.refresh_game_camera_projection()?;
 		self.validate_project_documents(&project, &self.active_scene_id, &next)?;
 		Self::document_budget(
 			&self.active_scene_id,

@@ -1,11 +1,13 @@
 //! Authored game camera modes and the fixed-step controller that publishes their runtime pose.
 mod follow;
+mod object;
 mod obstruction;
 mod orbit;
 
 use crate::{Camera, world::RuntimeWorld};
 
 pub use follow::FollowCameraSettings;
+pub use object::{CameraComponent, CameraRig, CameraSettings, PerspectiveLens};
 pub(crate) use obstruction::obstruction_query;
 pub use orbit::{
 	CameraTargetSnapshot, MAX_GAME_ASPECT, OrbitArmLimit, OrbitCameraSettings, OrbitRuntimeState,
@@ -20,15 +22,7 @@ pub struct GameCameraController {
 
 impl GameCameraController {
 	fn template(world: &RuntimeWorld) -> Camera {
-		let authored = &world.data().camera;
-		Camera {
-			position: authored.position,
-			yaw: authored.yaw,
-			pitch: authored.pitch,
-			vertical_fov: authored.vertical_fov,
-			near: authored.near_plane,
-			far: authored.far_plane,
-		}
+		world.data().camera.to_camera()
 	}
 
 	fn fixed_or_follow(world: &RuntimeWorld) -> Result<Self, String> {

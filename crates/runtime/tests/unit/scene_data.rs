@@ -11,6 +11,7 @@ fn valid_data() -> SceneData {
 	SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: btm,
 		entities: [-0.8, 0.8]
 			.into_iter()
@@ -216,12 +217,20 @@ fn camera_boundaries_match_runtime_pitch_and_valid_projection_ranges() {
 fn bundled_scene_remains_valid_and_binds_demo_roles_to_persistent_keys() {
 	let source = include_str!("../../../../apps/game/assets/scenes/robots.json");
 	let data = SceneData::from_json(source).unwrap();
-	assert_eq!(data.entities.len(), 2);
+	assert_eq!(data.entities.len(), 3);
 	assert_eq!(data.entities[0].name, "Left Robot");
 	assert_eq!(data.entities[1].name, "Right Robot");
 	assert_eq!(data.bindings["robot_a"], data.entities[0].key);
 	assert_eq!(data.bindings["robot_b"], data.entities[1].key);
-	for entity in &data.entities {
+	assert_eq!(
+		data.default_game_camera.as_ref(),
+		Some(&data.entities[2].key)
+	);
+	for entity in data
+		.entities
+		.iter()
+		.filter(|entity| entity.has_mesh_component())
+	{
 		let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
 			.join("../../apps/game/assets")
 			.join(&entity.model_path);
@@ -262,7 +271,16 @@ fn legacy_json_migrates_deterministically_and_saves_as_current_version() {
 	assert_eq!(parsed.source_schema_version, 1);
 	assert_eq!(parsed.data.schema_version, CURRENT_SCHEMA_VERSION);
 	assert!(parsed.data.bindings.is_empty());
-	for (index, entity) in parsed.data.entities.iter().enumerate() {
+	let legacy_entities = legacy["entities"].as_array().unwrap();
+	assert_eq!(parsed.data.entities.len(), legacy_entities.len() + 1);
+	assert!(parsed.data.default_game_camera.is_some());
+	for (index, entity) in parsed
+		.data
+		.entities
+		.iter()
+		.take(legacy_entities.len())
+		.enumerate()
+	{
 		assert!(entity.collision_enabled);
 		assert!(entity.renderable);
 		assert!(entity.asset_id.is_none());

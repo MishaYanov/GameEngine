@@ -25,6 +25,7 @@ pub(super) struct Patch {
 	changes: Vec<Change>,
 	project: Option<(ProjectData, ProjectData)>,
 	camera: Option<(CameraData, CameraData)>,
+	default_game_camera: Option<(Option<EntityKey>, Option<EntityKey>)>,
 	lights: Option<(Vec<LightData>, Vec<LightData>)>,
 	bindings: Option<(
 		std::collections::BTreeMap<String, EntityKey>,
@@ -84,6 +85,13 @@ impl Patch {
 		}
 		let camera =
 			(before.camera != after.camera).then(|| (before.camera.clone(), after.camera.clone()));
+		let default_game_camera =
+			(before.default_game_camera != after.default_game_camera).then(|| {
+				(
+					before.default_game_camera.clone(),
+					after.default_game_camera.clone(),
+				)
+			});
 		let lights =
 			(before.lights != after.lights).then(|| (before.lights.clone(), after.lights.clone()));
 		let bindings = (before.bindings != after.bindings)
@@ -122,6 +130,11 @@ impl Patch {
 				if let Some(orbit) = &camera.orbit {
 					bytes = bytes.saturating_add(orbit.target.as_str().len());
 				}
+			}
+		}
+		if let Some((a, b)) = &default_game_camera {
+			for key in a.iter().chain(b) {
+				bytes = bytes.saturating_add(key.as_str().len());
 			}
 		}
 		for selection in [selection_before, selection_after] {
@@ -197,6 +210,7 @@ impl Patch {
 			project,
 			changes,
 			camera,
+			default_game_camera,
 			lights,
 			bindings,
 			organization,
@@ -209,6 +223,7 @@ impl Patch {
 		self.changes.is_empty()
 			&& self.project.is_none()
 			&& self.camera.is_none()
+			&& self.default_game_camera.is_none()
 			&& self.lights.is_none()
 			&& self.bindings.is_none()
 			&& self.organization.is_none()
@@ -281,6 +296,7 @@ impl Patch {
 			bindings: current.bindings.clone(),
 			entities,
 			camera: current.camera.clone(),
+			default_game_camera: current.default_game_camera.clone(),
 			lights: current.lights.clone(),
 		};
 		if let Some((a, b)) = &self.camera {
@@ -288,6 +304,12 @@ impl Patch {
 				return Err("Undo camera state no longer matches".into());
 			}
 			next.camera = if forward { b } else { a }.clone();
+		}
+		if let Some((a, b)) = &self.default_game_camera {
+			if &current.default_game_camera != if forward { a } else { b } {
+				return Err("Undo Game Camera assignment no longer matches".into());
+			}
+			next.default_game_camera = if forward { b } else { a }.clone();
 		}
 		if let Some((a, b)) = &self.lights {
 			if &current.lights != if forward { a } else { b } {

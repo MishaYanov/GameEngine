@@ -1,3 +1,6 @@
+use engine_core::game_camera::{
+	CameraComponent, CameraRig, FollowCameraSettings, OrbitCameraSettings,
+};
 use std::{
 	cell::{Ref, RefCell},
 	collections::{BTreeMap, HashMap, HashSet},
@@ -40,6 +43,7 @@ struct SceneEntry {
 	animation: Option<engine_core::animation::AnimationComponent>,
 	interactable: Option<engine_core::components::InteractableComponent>,
 	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
+	camera: Option<Box<CameraComponent>>,
 }
 
 impl SceneEntry {
@@ -76,6 +80,7 @@ impl SceneEntry {
 		self.interactable.clone_from(&entity.interactable);
 		self.character_controller
 			.clone_from(&entity.character_controller);
+		self.camera.clone_from(&entity.camera);
 	}
 }
 
@@ -84,7 +89,10 @@ pub struct EntitySnapshot {
 	entry: SceneEntry,
 	index: usize,
 	bindings: BTreeMap<String, EntityKey>,
-	orbit_target_settings: Option<Box<engine_core::game_camera::OrbitCameraSettings>>,
+	follow_target_settings: Option<Box<FollowCameraSettings>>,
+	orbit_target_settings: Option<Box<OrbitCameraSettings>>,
+	camera_rig_targets: Vec<(EntityKey, CameraRig)>,
+	was_game_camera: bool,
 	folder: Option<FolderId>,
 }
 
@@ -114,8 +122,9 @@ pub struct Scene {
 	organization: SceneOrganization,
 	next_id: u64,
 	lights: Vec<LightData>,
-	camera_follow: Option<engine_core::game_camera::FollowCameraSettings>,
-	camera_orbit: Option<engine_core::game_camera::OrbitCameraSettings>,
+	camera_follow: Option<FollowCameraSettings>,
+	camera_orbit: Option<OrbitCameraSettings>,
+	default_game_camera: Option<EntityKey>,
 	id_indices: HashMap<EntityId, usize>,
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
@@ -184,6 +193,7 @@ impl Scene {
 			self.camera_orbit = None;
 		}
 		self.camera_follow = follow;
+		self.update_game_camera_rig();
 	}
 	pub fn camera_orbit(&self) -> Option<&engine_core::game_camera::OrbitCameraSettings> {
 		self.camera_orbit.as_ref()
@@ -196,10 +206,32 @@ impl Scene {
 			self.camera_follow = None;
 		}
 		self.camera_orbit = orbit;
+		self.update_game_camera_rig();
 	}
-	pub(crate) fn synchronize_camera_settings(&mut self, camera: &CameraData) {
+	fn update_game_camera_rig(&mut self) {
+		if let Some(id) = self
+			.default_game_camera
+			.as_ref()
+			.and_then(|key| self.entity_by_key(key))
+			&& let Some(camera) = &mut self.entries[self.id_indices[&id]].camera
+		{
+			camera.settings.rig = if let Some(follow) = &self.camera_follow {
+				CameraRig::Follow(follow.clone())
+			} else if let Some(orbit) = &self.camera_orbit {
+				CameraRig::Orbit(orbit.clone())
+			} else {
+				CameraRig::Fixed
+			};
+		}
+	}
+	pub(crate) fn synchronize_camera_settings(
+		&mut self,
+		camera: &CameraData,
+		default: &Option<EntityKey>,
+	) {
 		self.camera_follow.clone_from(&camera.follow);
 		self.camera_orbit.clone_from(&camera.orbit);
+		self.default_game_camera.clone_from(default);
 	}
 	pub(crate) fn retain_entity(&self, id: EntityId) -> Result<RetainedEntity, String> {
 		let index = self
@@ -227,6 +259,7 @@ impl Scene {
 		self.bindings == data.bindings
 			&& self.organization == data.organization
 			&& self.lights == data.lights
+			&& self.default_game_camera == data.default_game_camera
 			&& self.camera_follow == data.camera.follow
 			&& self.camera_orbit == data.camera.orbit
 			&& self.entries.len() == data.entities.len()
@@ -255,6 +288,7 @@ impl Scene {
 						&& entry.animation == saved.animation
 						&& entry.character_controller == saved.character_controller
 						&& entry.interactable == saved.interactable
+						&& entry.camera == saved.camera
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -284,6 +318,23 @@ impl Scene {
 				.as_ref()
 				.filter(|orbit| Some(&orbit.target) == entry.key.as_ref())
 				.map(|orbit| Box::new(orbit.clone())),
+			follow_target_settings: self
+				.camera_follow
+				.as_ref()
+				.filter(|follow| Some(&follow.target) == entry.key.as_ref())
+				.map(|follow| Box::new(follow.clone())),
+			camera_rig_targets: entry.key.as_ref().map_or_else(Vec::new, |key| {
+				self.entries
+					.iter()
+					.filter_map(|candidate| {
+						let target = candidate.key.as_ref()?;
+						let rig = &candidate.camera.as_ref()?.settings.rig;
+						(target != key && rig.target() == Some(key))
+							.then(|| (target.clone(), rig.clone()))
+					})
+					.collect()
+			}),
+			was_game_camera: entry.key.is_some() && entry.key == self.default_game_camera,
 			entry,
 			index,
 			bindings,
@@ -318,11 +369,31 @@ impl Scene {
 				));
 			}
 		}
-		if snapshot.orbit_target_settings.is_some()
+		if (snapshot.orbit_target_settings.is_some() || snapshot.follow_target_settings.is_some())
 			&& (self.camera_orbit.is_some() || self.camera_follow.is_some())
 		{
-			return Err("Cannot restore orbit target: another camera rig is configured".into());
+			return Err("Cannot restore camera target: another camera rig is configured".into());
 		}
+		if snapshot.was_game_camera && self.default_game_camera.is_some() {
+			return Err("Cannot restore Game Camera: another object is assigned".into());
+		}
+		let rig_indices = snapshot
+			.camera_rig_targets
+			.iter()
+			.map(|(key, _)| {
+				let id = self
+					.entity_by_key(key)
+					.ok_or("Cannot restore camera rig: its owner is missing")?;
+				if self.entries[self.id_indices[&id]]
+					.camera
+					.as_ref()
+					.is_none_or(|camera| camera.settings.rig != CameraRig::Fixed)
+				{
+					return Err("Cannot restore camera rig: its owner changed");
+				}
+				Ok(id)
+			})
+			.collect::<Result<Vec<_>, _>>()?;
 		if let Some(folder) = &snapshot.folder
 			&& !self
 				.organization
@@ -354,6 +425,21 @@ impl Scene {
 		self.bindings.extend(snapshot.bindings.clone());
 		if let Some(orbit) = snapshot.orbit_target_settings.as_deref() {
 			self.camera_orbit = Some(orbit.clone());
+		}
+		if let Some(follow) = snapshot.follow_target_settings.as_deref() {
+			self.camera_follow = Some(follow.clone());
+		}
+		if snapshot.was_game_camera {
+			self.default_game_camera.clone_from(&entry.key);
+		}
+		for (id, (_, rig)) in rig_indices.into_iter().zip(&snapshot.camera_rig_targets) {
+			self.entries[self.id_indices[&id]]
+				.camera
+				.as_mut()
+				.expect("checked camera owner")
+				.settings
+				.rig
+				.clone_from(rig);
 		}
 		self.authored_children = None;
 		self.next_id = self.next_id.max(next_id);
@@ -461,6 +547,7 @@ impl Scene {
 			animation: None,
 			interactable: None,
 			character_controller: None,
+			camera: None,
 		});
 		self.authored_children = None;
 
@@ -502,6 +589,25 @@ impl Scene {
 				.is_some_and(|orbit| &orbit.target == key)
 			{
 				self.camera_orbit = None;
+			}
+			if self
+				.camera_follow
+				.as_ref()
+				.is_some_and(|follow| &follow.target == key)
+			{
+				self.camera_follow = None;
+			}
+			if self.default_game_camera.as_ref() == Some(key) {
+				self.default_game_camera = None;
+			}
+			for camera in self
+				.entries
+				.iter_mut()
+				.filter_map(|entry| entry.camera.as_mut())
+			{
+				if camera.settings.rig.target() == Some(key) {
+					camera.settings.rig = CameraRig::Fixed;
+				}
 			}
 		}
 
@@ -553,12 +659,14 @@ impl Scene {
 				animation: entry.animation.clone(),
 				interactable: entry.interactable.clone(),
 				character_controller: entry.character_controller.clone(),
+				camera: entry.camera.clone(),
 			});
 		}
 
-		let data = SceneData {
+		let mut data = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
 			organization: self.organization.clone(),
+			default_game_camera: self.default_game_camera.clone(),
 			bindings: self.bindings.clone(),
 			entities,
 			camera: CameraData {
@@ -574,6 +682,7 @@ impl Scene {
 			lights: self.lights.clone(),
 		};
 		data.validate()?;
+		data.camera = data.authored_game_camera()?;
 		Ok(data)
 	}
 
@@ -700,6 +809,7 @@ impl Scene {
 		entry.animation = source_metadata.animation;
 		entry.character_controller = source_metadata.character_controller;
 		entry.interactable = source_metadata.interactable;
+		entry.camera = source_metadata.camera;
 		Ok(id)
 	}
 

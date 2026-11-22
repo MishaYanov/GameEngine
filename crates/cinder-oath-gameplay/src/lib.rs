@@ -42,9 +42,9 @@ impl Settings {
 		if settings.schema_version != 1
 			|| settings.intro_scene == settings.arena_scene
 			|| settings
-			.intro_camera_travel
-			.iter()
-			.any(|delta| !delta.is_finite() || delta.abs() > 20.0)
+				.intro_camera_travel
+				.iter()
+				.any(|delta| !delta.is_finite() || delta.abs() > 20.0)
 		{
 			return Err(
 				"Cinder Oath requires distinct intro and arena scenes and a bounded camera move"
@@ -76,16 +76,16 @@ impl GameModuleFactory for Factory {
 		config: PreparedModuleConfig<'_>,
 	) -> Result<Box<dyn GameModule>, String> {
 		let document = config.document();
+		let camera = document.authored_game_camera()?;
 		if config.scene_id() == &self.settings.intro_scene {
 			let track = role(document, "camera_track")?;
 			let knight = role(document, "knight")?;
 			if track.key == knight.key
 				|| !is_visual_root(track)
-				|| document
-				.camera
-				.follow
-				.as_ref()
-				.is_none_or(|rig| rig.target != track.key)
+				|| camera
+					.follow
+					.as_ref()
+					.is_none_or(|rig| rig.target != track.key)
 			{
 				return Err(
 					"Follow the separate Camera Track entity in the Cinder Oath intro".into(),
@@ -110,17 +110,16 @@ impl GameModuleFactory for Factory {
 			}
 			if !is_visual_root(sword)
 				|| document
-				.entities
-				.iter()
-				.any(|entity| entity.parent.as_ref() == Some(&sword.key))
+					.entities
+					.iter()
+					.any(|entity| entity.parent.as_ref() == Some(&sword.key))
 			{
 				return Err(
 					"The first-person Sword must be a root visual with no children or collider"
 						.into(),
 				);
 			}
-			if document
-				.camera
+			if camera
 				.orbit
 				.as_ref()
 				.is_none_or(|rig| rig.target != player.key)
@@ -134,10 +133,10 @@ impl GameModuleFactory for Factory {
 				.iter()
 				.find_map(|behavior| match &behavior.settings {
 					BehaviorSettings::ControlledMove { speed, .. }
-					if behavior.entity == player.key && *speed > 0.0 =>
-						{
-							Some(*speed)
-						}
+						if behavior.entity == player.key && *speed > 0.0 =>
+					{
+						Some(*speed)
+					}
 					_ => None,
 				})
 				.ok_or("Assign a positive Controlled Move speed to the arena Player")?;
@@ -185,8 +184,8 @@ pub fn descriptor() -> GameplayModuleDescriptorDto {
 		id: CINDER_OATH_ID.into(),
 		label: "Cinder Oath".into(),
 		description:
-		"A cinematic knight reveal followed by a first-person duel with the Cinder Warden."
-			.into(),
+			"A cinematic knight reveal followed by a first-person duel with the Cinder Warden."
+				.into(),
 		default_roles: Vec::new(),
 		scene_roles: BTreeMap::from([
 			(
@@ -243,14 +242,14 @@ fn is_visual_root(entity: &EntityData) -> bool {
 fn is_fighter_root(entity: &EntityData) -> bool {
 	entity.parent.is_none()
 		&& entity
-		.character_controller
-		.as_ref()
-		.is_none_or(|component| !component.enabled)
+			.character_controller
+			.as_ref()
+			.is_none_or(|component| !component.enabled)
 		&& entity.collision_enabled
 		&& entity
-		.collider
-		.as_ref()
-		.is_some_and(|collider| !collider.interaction().sensor)
+			.collider
+			.as_ref()
+			.is_some_and(|collider| !collider.interaction().sensor)
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ mod support;
 use engine_core::{
 	Engine, SceneData,
 	command::{EditorCommandDto as Command, EditorCommandRequest},
-	game_camera::{FollowCameraSettings, OrbitCameraSettings, required_probe_radius},
+	game_camera::{CameraRig, FollowCameraSettings, OrbitCameraSettings, required_probe_radius},
 	project::ProjectData,
 	scene_data::{CURRENT_SCHEMA_VERSION, parse_json},
 };
@@ -52,6 +52,40 @@ fn disk(document: &SceneData) -> Value {
 	serde_json::from_str(&document.to_json().unwrap()).unwrap()
 }
 
+fn assert_migrated(source: &SceneData, migrated: &SceneData, expected_key: &str) {
+	assert_eq!(migrated.default_game_camera, Some(key(expected_key)));
+	assert_eq!(&migrated.entities[..source.entities.len()], source.entities);
+	assert_eq!(migrated.entities.len(), source.entities.len() + 1);
+	let object = migrated.entities.last().unwrap();
+	assert_eq!(object.key, key(expected_key));
+	assert_eq!(object.parent, None);
+	assert!(!object.renderable && !object.has_mesh_component());
+	assert_eq!(object.camera.as_ref().unwrap().id.as_str(), "camera");
+	assert_eq!(migrated.camera.follow, source.camera.follow);
+	assert_eq!(migrated.camera.orbit, source.camera.orbit);
+	for aspect in [0.75, 1.0, 1.7778] {
+		let expected = source.camera.to_camera().view_projection(aspect).unwrap();
+		let actual = migrated
+			.authored_game_camera()
+			.unwrap()
+			.to_camera()
+			.view_projection(aspect)
+			.unwrap();
+		assert!(
+			actual.abs_diff_eq(expected, 2.0e-4),
+			"{actual:?}\n{expected:?}"
+		);
+	}
+	let canonical = disk(migrated);
+	assert!(canonical.get("camera").is_none());
+	assert_eq!(canonical["default_game_camera"], expected_key);
+	assert_eq!(
+		canonical["entities"][source.entities.len()]["components"][0]["data"]["kind"],
+		"camera"
+	);
+	assert_eq!(parse_json(&canonical.to_string()).unwrap().data, *migrated);
+}
+
 #[test]
 fn orbit_survives_disk_and_editor_projection_without_changing_fallback_pose() {
 	let document = orbit_scene();
@@ -80,14 +114,123 @@ fn schema_four_fixed_and_follow_migrate_from_canonical_disk_and_flat_editor_proj
 			assert!(historical["camera"].get("orbit").is_none());
 			let migrated = parse_json(&historical.to_string()).unwrap();
 			assert_eq!(migrated.source_schema_version, 4);
-			assert_eq!(migrated.data, document);
-			assert_eq!(disk(&migrated.data)["schema_version"], CURRENT_SCHEMA_VERSION);
+			assert_migrated(&document, &migrated.data, "legacy-game-camera");
+			assert_eq!(
+				disk(&migrated.data)["schema_version"],
+				CURRENT_SCHEMA_VERSION
+			);
 			assert_eq!(
 				serde_json::from_value::<SceneData>(historical).unwrap(),
-				document
+				migrated.data
 			);
 		}
 	}
+}
+
+#[test]
+fn v5_fixed_follow_and_orbit_become_deterministic_camera_objects() {
+	for (follow, orbit, pitch) in [
+		(None, None, 89.0_f32.to_radians()),
+		(Some(follow()), None, -0.35),
+		(None, Some(orbit()), 0.38),
+	] {
+		let mut document = orbit_scene();
+		document
+			.entities
+			.push(entity("legacy-game-camera", [1.0, 0.0, 0.0]));
+		document.camera.follow = follow;
+		document.camera.orbit = orbit;
+		document.camera.position = [2.4, 4.7, -3.8];
+		document.camera.yaw = 2.7;
+		document.camera.pitch = pitch;
+		let mut historical = disk(&document);
+		historical["schema_version"] = json!(5);
+		let bytes = historical.to_string();
+		let saved = parse_json(&bytes).unwrap();
+		assert_eq!(saved.source_schema_version, 5);
+		assert_migrated(&document, &saved.data, "legacy-game-camera-1");
+		assert_eq!(
+			parse_json(&bytes).unwrap().data.default_game_camera,
+			saved.data.default_game_camera
+		);
+		assert_eq!(
+			serde_json::from_value::<SceneData>(serde_json::to_value(&saved.data).unwrap())
+				.unwrap(),
+			saved.data
+		);
+	}
+}
+
+#[test]
+fn canonical_camera_validates_default_target_lens_and_world_up() {
+	let mut historical = disk(&orbit_scene());
+	historical["schema_version"] = json!(5);
+	let migrated = parse_json(&historical.to_string()).unwrap().data;
+	let mut invalid = migrated.clone();
+	invalid.default_game_camera = Some(key("actor"));
+	assert!(invalid.validate().unwrap_err().contains("enabled Camera"));
+	invalid.default_game_camera = migrated.default_game_camera.clone();
+	invalid.entities.last_mut().unwrap().transform.rotation[2] = 0.10;
+	assert!(invalid.validate().unwrap_err().contains("without roll"));
+	let mut wire = disk(&migrated);
+	let index = migrated.entities.len() - 1;
+	wire["entities"][index]["components"][0]["data"]["settings"]["lens"]["near"] = json!(0.0);
+	assert!(
+		parse_json(&wire.to_string())
+			.unwrap_err()
+			.contains("near plane")
+	);
+	let mut wire = disk(&migrated);
+	wire["entities"][index]["components"][0]["data"]["settings"]["rig"]["settings"]["target"] =
+		json!("missing");
+	assert!(
+		parse_json(&wire.to_string())
+			.unwrap_err()
+			.contains("missing entity")
+	);
+	let mut older = disk(&migrated);
+	older["schema_version"] = json!(6);
+	assert!(
+		parse_json(&older.to_string())
+			.unwrap_err()
+			.contains("schema 7")
+	);
+	let rig = &migrated.entities[index]
+		.camera
+		.as_ref()
+		.unwrap()
+		.settings
+		.rig;
+	assert!(matches!(rig, CameraRig::Orbit(settings) if settings.target == key("actor")));
+}
+
+#[test]
+fn oversized_camera_migration_keeps_a_valid_preexisting_scene_readable() {
+	use engine_core::scene_data::{EntityData, MAX_SCENE_BYTES};
+	const PATH: &str = engine_core::components::NO_MESH_PATH;
+	// Each old object receives a fixed authored-space charge plus four JSON strings.
+	let object_charge = 2048 + 4 * 2 + "e00000".len() + "Object".len() + PATH.len();
+	let count = (MAX_SCENE_BYTES - 4096 - 1) / object_charge;
+	let entities = (0..count)
+		.map(|index| {
+			EntityData::new(key(&format!("e{index:05}")), "Object", PATH).with_renderable(false)
+		})
+		.collect();
+	let mut original = scene(entities);
+	original.schema_version = 6;
+	let legacy = serde_json::to_string(&original).unwrap();
+	let mut parsed = parse_json(&legacy).unwrap().data;
+	assert_eq!(parsed.entities.len(), count);
+	assert!(parsed.default_game_camera.is_none());
+	assert_eq!(parsed.camera, original.camera);
+	assert!(
+		parsed
+			.to_json()
+			.unwrap_err()
+			.contains("Free scene space before saving")
+	);
+	parsed.entities.pop();
+	assert!(parsed.to_json().is_ok());
 }
 
 #[test]

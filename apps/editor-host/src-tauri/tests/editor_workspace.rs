@@ -45,6 +45,7 @@ impl Fixture {
 		let data = runtime::scene_data::SceneData {
 			schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 			organization: Default::default(),
+			default_game_camera: None,
 			bindings: Default::default(),
 			entities: vec![EntityData::new(
 				EntityKey::new("a").unwrap(),
@@ -121,6 +122,45 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 	)
 	.unwrap();
 	(fixture, project, second)
+}
+
+#[test]
+fn legacy_scene_opens_without_writing_and_explicit_save_publishes_its_camera_object() {
+	let fixture = Fixture::new();
+	let path = fixture.0.join("scenes/main.json");
+	let mut wire: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+	wire["schema_version"] = 5.into();
+	let historical = serde_json::to_vec_pretty(&wire).unwrap();
+	fs::write(&path, &historical).unwrap();
+	let mut workspace = fixture.open();
+	let camera = workspace
+		.backend
+		.session()
+		.authored_document()
+		.default_game_camera
+		.clone()
+		.unwrap();
+	assert_eq!(fs::read(&path).unwrap(), historical);
+	workspace
+		.save(workspace.backend.session().revision())
+		.unwrap();
+	let published: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+	assert_eq!(
+		published["schema_version"],
+		runtime::scene_data::CURRENT_SCHEMA_VERSION
+	);
+	assert!(published.get("camera").is_none());
+	assert_eq!(published["default_game_camera"], camera.as_str());
+	let reopened = fixture.open();
+	assert_eq!(
+		reopened
+			.backend
+			.session()
+			.authored_document()
+			.default_game_camera
+			.as_ref(),
+		Some(&camera)
+	);
 }
 
 #[test]

@@ -1,11 +1,7 @@
 use super::*;
 use std::collections::HashSet;
 
-use engine_core::{
-	project::BehaviorSpec,
-	scene_catalog::SceneDescriptor,
-	scene_data::SceneData,
-};
+use engine_core::{project::BehaviorSpec, scene_catalog::SceneDescriptor, scene_data::SceneData};
 
 use super::export::{install_staged_player, publish_player};
 use super::preflight::{OMISSION_NOTICE, append_scene_error, prepared_asset_path, read_scene_file};
@@ -40,6 +36,7 @@ fn authored_scene_fixture(source: &Path) -> (ProjectData, SceneData) {
 	let scene = SceneData {
 		schema_version: engine_core::scene_data::CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		entities: vec![],
 		bindings: Default::default(),
 		lights: vec![],
@@ -454,7 +451,6 @@ mod staging {
 			}
 		}
 	}
-
 }
 
 mod preflight {
@@ -881,5 +877,4 @@ mod preflight {
 			prepared_asset_path(prepared.asset_root(), directory, &packaged_directory).unwrap_err();
 		assert_eq!(error, "Asset must be a regular file");
 	}
-
 }

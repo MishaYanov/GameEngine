@@ -27,6 +27,7 @@ fn fixture() -> (Fixture, EditorWorkspace) {
 		"props/cube.glb",
 	)];
 	scene.bindings.clear();
+	scene.default_game_camera = None;
 	scene.camera.follow = None;
 	std::fs::write(
 		root.join("assets/scenes/main.json"),

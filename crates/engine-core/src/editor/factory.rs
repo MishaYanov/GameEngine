@@ -212,6 +212,7 @@ impl CommandFactory {
 				SceneData {
 					schema_version: CURRENT_SCHEMA_VERSION,
 					organization: Default::default(),
+					default_game_camera: None,
 					bindings: BTreeMap::new(),
 					entities: Vec::new(),
 					camera: CameraData {

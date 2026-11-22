@@ -116,9 +116,10 @@ pub(super) fn frame_selection(
 		.max(radius + data.camera.near_plane * 2.0);
 	finite_scalar(distance, "Camera framing distance")?;
 	let position = center - camera_forward(&data.camera) * distance;
-	data.camera.position = finite_result(position, "Camera framing position")?.to_array();
-	data.camera.far_plane = data.camera.far_plane.max((distance + radius) * 1.2);
-	Ok(())
+	let mut camera = data.camera.clone();
+	camera.position = finite_result(position, "Camera framing position")?.to_array();
+	camera.far_plane = camera.far_plane.max((distance + radius) * 1.2);
+	data.set_authored_game_camera(camera)
 }
 
 pub(super) fn orbit(
@@ -139,18 +140,15 @@ pub(super) fn orbit(
 		.max(data.camera.near_plane * 2.0);
 	finite_scalar(distance, "Orbit distance")?;
 	// Reduce delta before addition to avoid overflowing two individually finite angles.
-	data.camera.yaw = (data.camera.yaw.rem_euclid(std::f32::consts::TAU)
+	let mut camera = data.camera.clone();
+	camera.yaw = (camera.yaw.rem_euclid(std::f32::consts::TAU)
 		+ yaw.rem_euclid(std::f32::consts::TAU))
 	.rem_euclid(std::f32::consts::TAU);
 	let limit = 89.0_f32.to_radians();
-	data.camera.pitch =
-		((data.camera.pitch as f64 + pitch as f64).clamp(-limit as f64, limit as f64)) as f32;
-	data.camera.position = finite_result(
-		pivot - camera_forward(&data.camera) * distance,
-		"Orbit position",
-	)?
-	.to_array();
-	Ok(())
+	camera.pitch = ((camera.pitch as f64 + pitch as f64).clamp(-limit as f64, limit as f64)) as f32;
+	camera.position =
+		finite_result(pivot - camera_forward(&camera) * distance, "Orbit position")?.to_array();
+	data.set_authored_game_camera(camera)
 }
 
 pub(super) fn dolly(
@@ -173,7 +171,7 @@ pub(super) fn dolly(
 	let distance =
 		((old_distance as f64 - distance as f64).max(data.camera.near_plane as f64 * 2.0)) as f32;
 	finite_scalar(distance, "Dolly result distance")?;
-	data.camera.position =
-		finite_result(pivot + direction * distance, "Dolly position")?.to_array();
-	Ok(())
+	let mut camera = data.camera.clone();
+	camera.position = finite_result(pivot + direction * distance, "Dolly position")?.to_array();
+	data.set_authored_game_camera(camera)
 }

@@ -26,6 +26,7 @@ fn animation_64_instances_300_ticks_cpu_and_palette_bytes() {
 		})
 		.collect();
 	scene.bindings.clear();
+	scene.default_game_camera = None;
 	scene.camera.follow = None;
 	scene.lights.clear();
 	let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/game/assets");

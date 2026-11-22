@@ -7,6 +7,7 @@ pub(crate) fn is_transform_only_anchor(entity: &EntityData) -> bool {
 		&& entity.character_controller.is_none()
 		&& entity.animation.is_none()
 		&& entity.interactable.is_none()
+		&& entity.camera.is_none()
 }
 
 pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
@@ -98,6 +99,9 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 		let base = materialized_from(link, &expanded, &anchor.key)?;
 		for (source, expected) in &base {
 			let actual = entities[&link.entity_map[source]];
+			if actual.camera != expected.camera {
+				return Err("Linked Camera is owned by the Prop source; edit the source or Unpack first".into());
+			}
 			if actual.interactable != expected.interactable {
 				return Err("Linked Interactable is owned by the prefab source; edit the source or Unpack first".into());
 			}

@@ -45,6 +45,7 @@ fn check_runtime_visibility(assets: &mut AssetManager, renderer: &WindowRenderer
 		.with_renderable(false),
 	];
 	data.bindings.clear();
+	data.default_game_camera = None;
 	data.camera.follow = None;
 	for missing in [false, true] {
 		if missing {

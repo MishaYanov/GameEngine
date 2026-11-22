@@ -19,6 +19,7 @@ fn prefab_move_rechecks_unsaved_scene_destination_before_any_publication() {
 		runtime::SceneData::from_json(include_str!("../../../../game/assets/scenes/robots.json"))
 			.unwrap();
 	scene.entities.clear();
+	scene.default_game_camera = None;
 	scene.bindings.clear();
 	scene.camera.follow = None;
 	std::fs::write(
@@ -106,6 +107,7 @@ fn publication_rejects_stale_workspace_or_revision_without_replacing_files() {
 		runtime::SceneData::from_json(include_str!("../../../../game/assets/scenes/robots.json"))
 			.unwrap();
 	scene.entities.clear();
+	scene.default_game_camera = None;
 	scene.bindings.clear();
 	scene.camera.follow = None;
 	std::fs::write(

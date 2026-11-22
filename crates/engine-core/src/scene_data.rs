@@ -13,21 +13,20 @@ pub use organization::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
 pub const MAX_SCENE_LIGHTS: usize = 16;
 pub const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneData {
 	pub schema_version: u32,
 	pub bindings: BTreeMap<String, EntityKey>,
 	pub entities: Vec<EntityData>,
+	/// Compatibility projection of the default Camera for existing editor clients.
 	pub camera: CameraData,
-	#[serde(default)]
+	pub default_game_camera: Option<EntityKey>,
 	pub lights: Vec<LightData>,
-	#[serde(skip_serializing_if = "SceneOrganization::is_empty")]
 	pub organization: SceneOrganization,
 }
 
@@ -64,6 +63,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub interactable: Option<crate::components::InteractableComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub camera: Option<Box<crate::game_camera::CameraComponent>>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
@@ -91,6 +92,7 @@ impl EntityData {
 			character_controller: None,
 			animation: None,
 			interactable: None,
+			camera: None,
 			linked_prefab: None,
 		}
 	}
@@ -156,6 +158,8 @@ struct EntityProjection {
 	#[serde(default)]
 	interactable: Option<crate::components::InteractableComponent>,
 	#[serde(default)]
+	camera: Option<Box<crate::game_camera::CameraComponent>>,
+	#[serde(default)]
 	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 	/// A read-only transport projection; commands never take this as mutation authority.
 	#[serde(default)]
@@ -189,6 +193,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			character_controller: value.character_controller,
 			animation: value.animation,
 			interactable: value.interactable,
+			camera: value.camera,
 			linked_prefab: value.linked_prefab,
 		})
 	}
@@ -232,6 +237,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.interactable {
 			map.serialize_entry("interactable", value)?;
+		}
+		if let Some(value) = &self.camera {
+			map.serialize_entry("camera", value)?;
 		}
 		if let Some(value) = &self.linked_prefab {
 			map.serialize_entry("linked_prefab", value)?;
@@ -349,6 +357,22 @@ pub struct CameraData {
 	pub near_plane: f32,
 	#[serde(rename = "far")]
 	pub far_plane: f32,
+}
+
+impl Default for CameraData {
+	fn default() -> Self {
+		let camera = crate::Camera::default();
+		Self {
+			follow: None,
+			orbit: None,
+			position: camera.position,
+			yaw: camera.yaw,
+			pitch: camera.pitch,
+			vertical_fov: camera.vertical_fov,
+			near_plane: camera.near,
+			far_plane: camera.far,
+		}
+	}
 }
 #[derive(Debug)]
 pub struct ParsedScene {
@@ -472,16 +496,19 @@ impl SceneData {
 				return Err(format!("{context}: mesh index exceeds supported limit"));
 			}
 		}
-		if let Some(follow) = &self.camera.follow {
-			charge(256, &[follow.target.as_str()])?;
-			if !keys.contains(follow.target.as_str()) {
-				return Err("Follow camera target must reference an entity in this scene".into());
-			}
-		}
-		if let Some(orbit) = &self.camera.orbit {
-			charge(256, &[orbit.target.as_str()])?;
-			if !keys.contains(orbit.target.as_str()) {
-				return Err("Orbit camera target must reference an entity in this scene".into());
+		if self.default_game_camera.is_none() {
+			self.camera.validate()?;
+			if let Some(target) = self
+				.camera
+				.follow
+				.as_ref()
+				.map(|camera| &camera.target)
+				.or_else(|| self.camera.orbit.as_ref().map(|camera| &camera.target))
+			{
+				charge(256, &[target.as_str()])?;
+				if !keys.contains(target.as_str()) {
+					return Err("Camera target must reference an entity in this scene".into());
+				}
 			}
 		}
 		for (name, key) in &self.bindings {
@@ -510,6 +537,24 @@ impl SceneData {
 		}
 		// Iterative traversal rejects cycles without recursive stack growth.
 		let world = self.world_matrices()?;
+		if let Some(key) = &self.default_game_camera {
+			charge(64, &[key.as_str()])?;
+			self.camera_index(key)?;
+		}
+		for (entity, matrix) in self.entities.iter().zip(&world) {
+			if let Some(camera) = &entity.camera {
+				if let Some(target) = camera.settings.rig.target() {
+					charge(256, &[target.as_str()])?;
+					if !keys.contains(target.as_str()) {
+						return Err(format!("Camera {:?} targets a missing entity", entity.name));
+					}
+				}
+				camera
+					.settings
+					.from_world_matrix(*matrix)
+					.map_err(|error| format!("Camera {:?}: {error}", entity.name))?;
+			}
+		}
 		for light in &self.lights {
 			charge(1024, &[light.key.as_str(), &light.name])?;
 			light.key.validate()?;
@@ -551,7 +596,6 @@ impl SceneData {
 		}
 		crate::components::validate_scene_components(self)?;
 		crate::linked_prefab::validate_scene_links(self)?;
-		self.camera.validate()?;
 		crate::scene_format::validate_authored_size(self)?;
 		Ok(world)
 	}
@@ -663,14 +707,7 @@ impl CameraData {
 		if self.far_plane <= self.near_plane {
 			return Err("Camera far plane must be greater than the near plane".into());
 		}
-		let camera = crate::Camera {
-			position: self.position,
-			yaw: self.yaw,
-			pitch: self.pitch,
-			vertical_fov: self.vertical_fov,
-			near: self.near_plane,
-			far: self.far_plane,
-		};
+		let camera = self.to_camera();
 		if (glam::Vec3::from_array(camera.target()) - glam::Vec3::from_array(camera.position))
 			.try_normalize()
 			.is_none()

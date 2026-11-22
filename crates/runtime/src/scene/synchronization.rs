@@ -5,6 +5,7 @@ use super::{
 	validate_animation_placement, validate_animation_placements,
 };
 use crate::{EntityKey, SceneData, model_instance::ModelInstance};
+use engine_core::scene_data::CameraData;
 
 impl Scene {
 	/// Update CPU draw state without retiring GPU models when topology and model
@@ -12,14 +13,15 @@ impl Scene {
 	pub fn synchronize(&mut self, data: &SceneData) -> Result<bool, String> {
 		let world = data.validated_world_matrices()?;
 		validate_animation_placements(data, &world)?;
-		if !self.synchronize_entries(data) {
+		let camera = resolved_camera(data, &world)?;
+		if !self.synchronize_entries(data, &camera) {
 			return Ok(false);
 		}
 		*self.world_cache.get_mut() = Some(world);
 		Ok(true)
 	}
 
-	fn synchronize_entries(&mut self, data: &SceneData) -> bool {
+	fn synchronize_entries(&mut self, data: &SceneData, camera: &CameraData) -> bool {
 		if self.entries.len() != data.entities.len()
 			|| !self
 				.entries
@@ -38,7 +40,7 @@ impl Scene {
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
 		self.set_organization(&data.organization);
-		self.synchronize_camera_settings(&data.camera);
+		self.synchronize_camera_settings(camera, &data.default_game_camera);
 		true
 	}
 
@@ -166,7 +168,10 @@ impl Scene {
 			self.lights.clone_from(&data.lights);
 		}
 		if changes.camera_changed {
-			self.synchronize_camera_settings(&data.camera);
+			self.synchronize_camera_settings(
+				&data.authored_game_camera()?,
+				&data.default_game_camera,
+			);
 		}
 		Ok(true)
 	}
@@ -184,7 +189,7 @@ impl Scene {
 			|| !changes.removed_entities.is_empty()
 			|| self.entries.len() != world.data().entities.len()
 		{
-			if !self.synchronize_entries(world.data()) {
+			if !self.synchronize_entries(world.data(), &world.data().camera) {
 				let all_prepared = world.data().entities.iter().all(|entity| {
 					self.entity_by_key(&entity.key).is_some_and(|id| {
 						let entry = &self.entries[self.id_indices[&id]];
@@ -241,7 +246,10 @@ impl Scene {
 			self.lights.clone_from(&world.data().lights);
 		}
 		if changes.camera_changed {
-			self.synchronize_camera_settings(&world.data().camera);
+			self.synchronize_camera_settings(
+				&world.data().camera,
+				&world.data().default_game_camera,
+			);
 		}
 		Ok(true)
 	}
@@ -256,7 +264,8 @@ impl Scene {
 	) -> Result<(), String> {
 		let world = data.validated_world_matrices()?;
 		validate_animation_placements(data, &world)?;
-		if self.synchronize_entries(data) {
+		let camera = resolved_camera(data, &world)?;
+		if self.synchronize_entries(data, &camera) {
 			*self.world_cache.get_mut() = Some(world);
 			return Ok(());
 		}
@@ -268,7 +277,7 @@ impl Scene {
 			organization: data.organization.clone(),
 			..Scene::default()
 		};
-		next.synchronize_camera_settings(&data.camera);
+		next.synchronize_camera_settings(&camera, &data.default_game_camera);
 		let mut object_count = 0usize;
 		for entity in &data.entities {
 			let existing = self
@@ -326,6 +335,7 @@ impl Scene {
 					animation: entity.animation.clone(),
 					interactable: entity.interactable.clone(),
 					character_controller: entity.character_controller.clone(),
+					camera: entity.camera.clone(),
 				}
 			};
 			entry.parent.clone_from(&entity.parent);
@@ -345,5 +355,12 @@ impl Scene {
 		*next.world_cache.get_mut() = Some(world);
 		*self = next;
 		Ok(())
+	}
+}
+
+fn resolved_camera(data: &SceneData, world: &[glam::Mat4]) -> Result<CameraData, String> {
+	match &data.default_game_camera {
+		Some(key) => data.object_camera(key, world),
+		None => Ok(data.camera.clone()),
 	}
 }

@@ -253,6 +253,7 @@ fn orbit_document() -> Arc<SceneData> {
 	Arc::new(SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
+		default_game_camera: None,
 		bindings: Default::default(),
 		lights: vec![],
 		entities: vec![EntityData::new(

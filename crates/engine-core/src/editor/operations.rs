@@ -229,7 +229,7 @@ pub(super) fn apply(
 				.root_membership
 				.retain(|key, _| !removed.contains(key));
 			data.bindings.retain(|_, key| !removed.contains(key));
-			data.camera.clear_removed_targets(&removed);
+			data.remove_camera_targets(&removed);
 			selection.clear();
 		}
 		EditorCommandDto::Reparent {
@@ -335,10 +335,7 @@ pub(super) fn apply(
 				.ok_or_else(|| format!("Light key {key:?} does not exist"))?;
 			data.lights.remove(index);
 		}
-		EditorCommandDto::SetCamera { camera } => {
-			camera.validate()?;
-			data.camera = camera;
-		}
+		EditorCommandDto::SetCamera { camera } => data.set_authored_game_camera(camera)?,
 		EditorCommandDto::FrameSelection => frame_selection(data, selection, bounds)?,
 		EditorCommandDto::OrbitCamera { yaw, pitch } => orbit(data, selection, bounds, yaw, pitch)?,
 		EditorCommandDto::PanCamera { right, up } => {
@@ -349,7 +346,9 @@ pub(super) fn apply(
 			let vertical = horizontal.cross(forward);
 			let position =
 				Vec3::from_array(data.camera.position) + horizontal * right + vertical * up;
-			data.camera.position = finite_result(position, "Camera pan")?.to_array();
+			let mut camera = data.camera.clone();
+			camera.position = finite_result(position, "Camera pan")?.to_array();
+			data.set_authored_game_camera(camera)?;
 		}
 		EditorCommandDto::DollyCamera { distance } => dolly(data, selection, bounds, distance)?,
 		EditorCommandDto::SetSceneBinding { name, target, .. } => match target {

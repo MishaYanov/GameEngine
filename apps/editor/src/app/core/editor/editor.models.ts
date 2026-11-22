@@ -101,6 +101,14 @@ export interface FollowCamera {
     readonly smoothing_seconds: number;
 }
 
+export interface CameraComponentSettings {
+    readonly lens: Pick<Camera, 'vertical_fov' | 'near' | 'far'>;
+    readonly rig:
+        | {readonly mode: 'fixed'}
+        | {readonly mode: 'follow'; readonly settings: FollowCamera}
+        | {readonly mode: 'orbit'; readonly settings: OrbitCamera};
+}
+
 export interface MaterialOverride {
     readonly base_color_factor: Vec4;
 }
@@ -132,6 +140,7 @@ export interface SceneEntity {
     readonly native_behaviors?: readonly NativeBehaviorAttachment[];
     readonly character_controller?: CharacterControllerAttachment | null;
     readonly animation?: AnimationAttachment | null;
+    readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
 
@@ -146,10 +155,10 @@ export interface Light {
     readonly range: number;
 }
 
-export type SceneSchemaVersion = 3 | 4 | 5 | 6;
+export type SceneSchemaVersion = 3 | 4 | 5 | 6 | 7;
 
 export function isSceneSchemaVersion(value: unknown): value is SceneSchemaVersion {
-    return value === 3 || value === 4 || value === 5 || value === 6;
+    return value === 3 || value === 4 || value === 5 || value === 6 || value === 7;
 }
 
 export type FolderId = string;
@@ -170,6 +179,7 @@ export interface SceneDocument {
     readonly bindings: Readonly<Record<string, EntityKey>>;
     readonly entities: readonly SceneEntity[];
     readonly camera: Camera;
+    readonly default_game_camera?: EntityKey | null;
     readonly lights: readonly Light[];
     readonly organization?: SceneOrganization;
 }

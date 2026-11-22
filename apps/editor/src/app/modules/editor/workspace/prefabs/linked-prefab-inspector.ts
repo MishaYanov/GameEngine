@@ -510,6 +510,7 @@ export class LinkedPrefabInspector {
 		if (data.kind === 'animation')
 			return `${enabled} · ${data.settings.playback.kind.replaceAll('_', ' ')} · ${data.settings.source.asset_id}`;
         if (data.kind === 'interactable') return [enabled, data.settings.action, data.settings.reach + ' m'].join(' · ');
+		if (data.kind === 'camera') return `${enabled} · ${data.settings.rig.mode} Camera`;
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;
 	}
 
