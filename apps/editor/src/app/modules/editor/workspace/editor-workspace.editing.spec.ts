@@ -12,12 +12,16 @@ import type {
     EditorCommandRequest,
     EditorSnapshot,
     CameraComponentSettings,
+    Collider,
     ModelAsset,
     ProjectData,
     SceneDocument,
     ViewportSceneLoad,
     ViewportStatus
 } from '../../../core/editor/editor.models';
+import type {ComponentRecord} from '../../../core/editor/editor-components';
+import type {CharacterControllerSettings} from '../../../core/editor/character-controller.models';
+import type {PlayerControllerSettings} from '../../../core/editor/player-controller.models';
 import type {LinkedPrefabStatus, NestedPropPlacementRequest, PrefabSourceDraft, PropDraftEdit} from '../../../core/editor/linked-prefabs.models';
 import {EditorWorkspace} from './editor-workspace';
 import {SceneViewport} from './scene-viewport/scene-viewport';
@@ -83,6 +87,14 @@ const cameraCapabilities = (['create_camera', 'align_camera_to_scene_view', 'set
 const cameraSettings: CameraComponentSettings = {
     lens: {vertical_fov: Math.fround(Math.PI / 3), near: 0.1, far: 100},
     rig: {mode: 'fixed'},
+};
+const playerCapabilities = (['create_player', 'set_local_player'] as const)
+    .map(name => ({name, label: name, category: 'player', undoable: true, available_in_play: false}));
+const playerSettings: PlayerControllerSettings = {input: {kind: 'project_default'}, space: 'camera_relative', local: false};
+const playerCollider: Collider = {kind: 'box', half_extents: [0.35, 0.9, 0.35], offset: [0, 0, 0]};
+const playerMotor: CharacterControllerSettings = {
+    walk_speed: 4, ground_acceleration: 30, air_acceleration: 10, gravity: 20, max_fall_speed: 30,
+    jump_speed: 7, ground_probe: 0.02, step_height: 0.25, coyote_ticks: 6, jump_buffer_ticks: 6, jump_action: 'jump',
 };
 
 const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
@@ -211,8 +223,12 @@ describe('Workspace live editing flow', () => {
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
                 protocol_version: 2, scene_schema_version: 3, incremental_commands: true,
-                commands: [...folderCapabilities, ...cameraCapabilities], embedded_viewport_supported: true,
-                component_types: [{type_id: 'engine.camera', kind: 'camera', label: 'Camera', description: 'Authored camera', max_per_object: 1}],
+                commands: [...folderCapabilities, ...cameraCapabilities, ...playerCapabilities], embedded_viewport_supported: true,
+                component_types: [
+                    {type_id: 'engine.camera', kind: 'camera', label: 'Camera', description: 'Authored camera', max_per_object: 1},
+                    {type_id: 'engine.player_controller', kind: 'player_controller', label: 'Player Controller', description: 'Local input', max_per_object: 1},
+                    {type_id: 'engine.character_controller', kind: 'character_controller', label: 'Character Controller', description: 'Physics motor', max_per_object: 1},
+                ],
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
                 gameplay_modules: [gameplayModule],
             };
@@ -412,15 +428,54 @@ describe('Workspace live editing flow', () => {
                     nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
                         document: {...nativeState.document, default_game_camera: command.key}};
                     break;
-                case 'replace_component': {
-                    const {component, key} = command;
-                    if (component.data.kind !== 'camera') throw new Error('Expected Camera fixture component');
-                    const details = {id: component.id, enabled: component.enabled, settings: component.data.settings};
+                case 'create_player': {
+                    expect(nativeState.transaction).toBeNull();
+                    const key = `player-${nativeState.document.entities.filter(entity => entity.player_controller).length + 1}`;
+                    const controller = {id: 'player', enabled: true, settings: playerSettings};
+                    const motor = {id: 'character', enabled: true, settings: playerMotor};
+                    const component_views: ComponentRecord[] = [
+                        {schema_version: 1, id: 'body', enabled: true, data: {kind: 'collider', collider: playerCollider}},
+                        {schema_version: 1, id: 'player', enabled: true, data: {kind: 'player_controller', settings: playerSettings}},
+                        {schema_version: 1, id: 'character', enabled: true, data: {kind: 'character_controller', settings: playerMotor}},
+                    ];
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, selection: [key], dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, schema_version: 7, entities: [...nativeState.document.entities, {
+                            key, name: 'Player', model_path: '__no_mesh__', renderable: false, collider: playerCollider,
+                            transform: {position: [0, 0.9, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+                            player_controller: controller, character_controller: motor, component_views,
+                        }]}};
+                    break;
+                }
+                case 'set_local_player': {
+                    const {key} = command;
                     undo.push(nativeState.document);
                     redo = [];
                     nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
-                        document: {...nativeState.document, entities: nativeState.document.entities.map(entity =>
-                            entity.key === key ? {...entity, camera: details, component_views: [component]} : entity)}};
+                        document: {...nativeState.document, entities: nativeState.document.entities.map(entity => {
+                            if (!entity.player_controller) return entity;
+                            const settings = {...entity.player_controller.settings, local: entity.key === key};
+                            return {...entity, player_controller: {...entity.player_controller, settings},
+                                component_views: entity.component_views?.map(component => component.data.kind === 'player_controller'
+                                    ? {...component, data: {...component.data, settings}} : component)};
+                        })}};
+                    break;
+                }
+                case 'replace_component': {
+                    const {component, key} = command;
+                    const data = component.data;
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, entities: nativeState.document.entities.map(entity => {
+                            if (entity.key !== key) return entity;
+                            const component_views = entity.component_views?.map(existing => existing.id === component.id ? component : existing);
+                            const details = {id: component.id, enabled: component.enabled};
+                            if (data.kind === 'camera') return {...entity, camera: {...details, settings: data.settings}, component_views};
+                            if (data.kind === 'player_controller') return {...entity, player_controller: {...details, settings: data.settings}, component_views};
+                            throw new Error('Expected Camera or Player Controller fixture component');
+                        })}};
                     break;
                 }
                 case 'begin_transaction':
@@ -635,6 +690,60 @@ describe('Workspace live editing flow', () => {
         expect(root.textContent).not.toContain('Select an enabled Camera in the Hierarchy');
         action('Undo').click();
         await vi.waitFor(() => expect(editor.document()?.default_game_camera).toBeNull());
+    });
+
+    it('creates a complete Player, routes local input explicitly, and restores prior ownership through Undo', async () => {
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const menu = TestBed.inject(ContextMenuService);
+        const create = async (key: string) => {
+            button('Create').click();
+            const player = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Player');
+            expect(player).toBeDefined();
+            menu.execute(player!);
+            await vi.waitFor(() => expect(editor.selection()).toEqual([key]));
+            await fixture.whenStable();
+        };
+        const entity = (key: string) => editor.document()?.entities.find(item => item.key === key);
+        const localPlayer = () => editor.document()?.entities.find(item => item.player_controller?.settings.local)?.key;
+        await create('player-1');
+        expect(entity('player-1')?.character_controller?.enabled).toBe(true);
+        expect(entity('player-1')?.collider?.kind).toBe('box');
+        expect(root.textContent).toContain('Input source: Project Input');
+        expect(localPlayer()).toBeUndefined();
+        button('Set Local Player').click();
+        await vi.waitFor(() => expect(localPlayer()).toBe('player-1'));
+        await create('player-2');
+        expect(localPlayer()).toBe('player-1');
+        expect(root.querySelector('[data-key="player-2"]')?.getAttribute('aria-selected')).toBe('true');
+        button('Set Local Player').click();
+        await vi.waitFor(() => expect(localPlayer()).toBe('player-2'));
+        expect(entity('player-1')?.player_controller?.settings.local).toBe(false);
+
+        root.querySelector<HTMLButtonElement>('button[aria-label="Edit Player Controller"]')!.click();
+        await fixture.whenStable();
+        const label = [...root.querySelectorAll('editor-component-editor label')].find(
+            item => item.firstChild?.textContent?.trim() === 'Movement space',
+        )!;
+        const space = label.querySelector('select')!;
+        space.value = 'world';
+        space.dispatchEvent(new Event('change', {bubbles: true}));
+        space.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        button('Apply Component').click();
+        await vi.waitFor(() => expect(entity('player-2')?.player_controller?.settings.space).toBe('world'));
+        expect(localPlayer()).toBe('player-2');
+        button('Clear Local Player').click();
+        await vi.waitFor(() => expect(localPlayer()).toBeUndefined());
+        action('Undo').click();
+        await vi.waitFor(() => expect(localPlayer()).toBe('player-2'));
+        action('Undo').click();
+        await vi.waitFor(() => expect(entity('player-2')?.player_controller?.settings.space).toBe('camera_relative'));
+        action('Undo').click();
+        await vi.waitFor(() => expect(localPlayer()).toBe('player-1'));
     });
 
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {

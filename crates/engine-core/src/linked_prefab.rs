@@ -100,6 +100,7 @@ impl LinkedPrefabSource {
 		if self.prefab.gameplay.is_some() {
 			return Err("Linked sources support entity/component assemblies. Use Instantiate Copy for legacy prefab gameplay, or explicitly create a component source after converting its gameplay".into());
 		}
+		self.prefab.validate_linked_player_components()?;
 		self.prefab.validate()?;
 		if !self.prefab.composition.is_empty() {
 			self.prefab.composition.validate(

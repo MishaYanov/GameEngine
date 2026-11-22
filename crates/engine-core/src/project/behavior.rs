@@ -332,11 +332,42 @@ impl ProjectData {
 			.iter()
 			.map(|entity| entity.key.as_str())
 			.collect();
+		let player_actors: HashSet<_> = scene
+			.entities
+			.iter()
+			.filter(|entity| {
+				entity
+					.player_controller
+					.as_ref()
+					.is_some_and(|controller| controller.enabled)
+			})
+			.map(|entity| &entity.key)
+			.collect();
 		for (index, behavior) in self.behaviors_for(id).enumerate() {
 			if !keys.contains(behavior.entity().as_str()) {
 				return Err(format!(
 					"Behavior {index} targets missing entity {:?}",
 					behavior.entity().as_str()
+				));
+			}
+			if player_actors.contains(behavior.entity()) {
+				return Err("Player Controller owns this Character Controller's body; remove its configured movement or spin behavior".into());
+			}
+		}
+		if let Some(actor) = scene.local_player() {
+			let jump = &actor
+				.character_controller
+				.as_ref()
+				.expect("validated local controller")
+				.settings
+				.jump_action;
+			if self
+				.input_profile
+				.as_ref()
+				.is_none_or(|profile| !profile.actions.iter().any(|action| &action.id == jump))
+			{
+				return Err(format!(
+					"Local Player jump action {jump:?} is absent from Game Input"
 				));
 			}
 		}

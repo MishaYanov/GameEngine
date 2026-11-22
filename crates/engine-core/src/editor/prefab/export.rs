@@ -97,6 +97,7 @@ impl EditorSession {
 			}
 			let mut entity = entity.clone();
 			entity.linked_prefab = None;
+			entity.clear_local_player();
 			if entity
 				.parent
 				.as_ref()

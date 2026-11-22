@@ -19,6 +19,7 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[models]="models()"
 		[gameActions]="gameActions()"
 		[interactablePinned]="interactablePinned()"
+		[playerBodyIssue]="playerBodyIssue()"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[pending]="pending()"
@@ -36,6 +37,19 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
             <button type="button" [disabled]="!canSetDefault()" (click)="setDefaultCamera()">Set as Game Camera</button>
         }
         <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
+    }
+    @if (supportsPlayerOwnership() && entity()?.player_controller; as player) {
+        @if (playerBodyIssue(); as issue) {
+            <p role="status">{{ issue }}</p>
+        } @else if (!player.enabled) {
+            <p role="status">Enable the Player Controller to assign local input.</p>
+        }
+        @if (player.settings.local) {
+            <button type="button" [disabled]="!available()" (click)="setLocalPlayer(false)">Clear Local Player</button>
+        } @else {
+            <button type="button" [disabled]="!available() || !player.enabled || !!playerBodyIssue()"
+                    (click)="setLocalPlayer(true)">Set Local Player</button>
+        }
     }`,
 })
 export class SceneComponentInspector {
@@ -86,6 +100,9 @@ export class SceneComponentInspector {
 		(this.editor.capabilities()?.commands?.some(command => command.name === 'align_camera_to_scene_view') ?? false));
 	protected readonly supportsDefaultCamera = computed(() =>
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') ?? false);
+	protected readonly supportsPlayerOwnership = computed(() =>
+		this.editor.capabilities()?.commands?.some(command => command.name === 'set_local_player') ?? false);
+	protected readonly playerBodyIssue = computed(() => playerBodyIssue(this.entity()));
 	protected readonly isDefaultCamera = computed(() => {
 		const key = this.entity()?.key;
 		return !!key && this.editor.document()?.default_game_camera === key;
@@ -174,6 +191,32 @@ export class SceneComponentInspector {
 		}
 	}
 
+	protected async setLocalPlayer(assign: boolean): Promise<void> {
+		const entity = this.entity();
+		if (!this.supportsPlayerOwnership() || !this.available() || !entity?.player_controller ||
+			assign === entity.player_controller.settings.local ||
+			(assign && (!entity.player_controller.enabled || playerBodyIssue(entity)))) return;
+		const context = this.context();
+		const generation = this.editor.workspaceGeneration();
+		this.pending.set(true);
+		this.error.set(null);
+		try {
+			const accepted = await this.editing.withCommittedEdit(async () => {
+				const snapshot = this.editor.snapshot();
+				if (context !== this.context() || snapshot?.mode !== 'edit') return;
+				const latest = snapshot.document.entities.find(item => item.key === entity.key);
+				if (!latest?.player_controller || latest.player_controller.settings.local === assign ||
+					(assign && (!latest.player_controller.enabled || playerBodyIssue(latest)))) return;
+				await this.editor.execute({type: 'set_local_player', key: assign ? entity.key : null}, generation, snapshot.revision);
+			});
+			if (!accepted && context === this.context()) this.error.set(this.editing.error() ?? 'Finish the current edit before changing local input ownership.');
+		} catch (error) {
+			if (context === this.context()) this.error.set(error instanceof Error ? error.message : String(error));
+		} finally {
+			this.pending.set(false);
+		}
+	}
+
 	protected async apply(intent: ComponentEditIntent): Promise<void> {
 		const entity = this.entity();
 		const context = this.context();
@@ -241,4 +284,24 @@ export class SceneComponentInspector {
 			this.pending.set(false);
 		}
 	}
+}
+
+function playerBodyIssue(entity: SceneEntity | null): string | null {
+	if (!entity) return null;
+	if (entity.parent || entity.linked_prefab) return 'Use an independent scene-root object for the Player Controller.';
+	const motor = entity.character_controller;
+	if (!motor?.enabled) return 'Enable a Character Controller on this object before assigning player input.';
+	if (entity.transform.rotation.some(axis => Math.abs(axis) > 1e-6) ||
+		entity.transform.scale.some(axis => Math.abs(axis - 1) > 1e-6)) {
+		return 'Set the Player body to zero rotation and unit scale.';
+	}
+	const collider = entity.collider;
+	if (collider?.kind !== 'box' || collider.interaction?.sensor || entity.collision_enabled === false) {
+		return 'Add an enabled box collider and turn off Sensor.';
+	}
+	if (motor.settings.ground_probe >= Math.min(...collider.half_extents) ||
+		motor.settings.step_height >= 2 * collider.half_extents[1]) {
+		return 'Adjust the ground probe or step height to fit the box collider.';
+	}
+	return null;
 }

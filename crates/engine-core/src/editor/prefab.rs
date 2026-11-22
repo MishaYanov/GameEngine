@@ -72,6 +72,17 @@ impl PrefabData {
 		self.validate_settings()?;
 		self.clone().validated().map(|_| ())
 	}
+	pub fn validate_linked_player_components(&self) -> Result<(), String> {
+		if self
+			.entities
+			.iter()
+			.chain(self.composition.pins.iter().flat_map(|pin| &pin.entities))
+			.any(|entity| entity.player_controller.is_some())
+		{
+			return Err("Linked Props cannot contain a Player Controller; keep the Player on a scene root and link its visual child".into());
+		}
+		Ok(())
+	}
 	fn validate_settings(&self) -> Result<(), String> {
 		if let Some(settings) = self
 			.gameplay
@@ -137,6 +148,7 @@ impl PrefabData {
 					e.character_controller.is_some()
 						|| e.animation.is_some()
 						|| e.interactable.is_some()
+						|| e.player_controller.is_some()
 				})) {
 			return Err(
 				"A version-1/2/3 prefab requires 1–4096 entities; gameplay requires version 2 and reference slots version 3".into(),
@@ -151,6 +163,11 @@ impl PrefabData {
 			.any(|entity| entity.linked_prefab.is_some())
 		{
 			return Err("Prefab sources cannot contain linked instances; export a resolved copy or Unpack them first".into());
+		}
+		if self.entities.iter().any(EntityData::is_local_player) {
+			return Err(
+				"A Prop source cannot own scene-local input; assign a Player in the scene".into(),
+			);
 		}
 		self.validate_size()?;
 		let camera = crate::Camera::default();

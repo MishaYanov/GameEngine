@@ -16,8 +16,15 @@ pub fn validate_scene_components_with_slots(
 		.map(|entity| (entity.key.as_str(), entity))
 		.collect();
 	let mut active = 0usize;
+	let mut local_player = None;
 	for entity in &scene.entities {
 		entity.validate_components()?;
+		entity
+			.validate_player_controller()
+			.map_err(|error| format!("Player Controller on {:?}: {error}", entity.name))?;
+		if entity.is_local_player() && local_player.replace(&entity.key).is_some() {
+			return Err("A scene can assign local input to only one Player Controller".into());
+		}
 		for component in &entity.native_behaviors {
 			for target in component.behavior.entity_references() {
 				if !keys.contains(target) {

@@ -8,6 +8,8 @@ mod entities;
 use entities::{duplicate, fresh_key};
 mod organization;
 mod parenting;
+mod player;
+pub(super) use player::create_player;
 mod transform;
 use std::collections::{HashMap, HashSet};
 use transform::{
@@ -66,6 +68,7 @@ pub(super) fn apply(
 		EditorCommandDto::CreateCamera => {
 			*selection = vec![create_camera(data)?];
 		}
+		EditorCommandDto::SetLocalPlayer { key } => player::set_local_player(data, key.as_ref())?,
 		EditorCommandDto::AlignCameraToSceneView {
 			key,
 			position,

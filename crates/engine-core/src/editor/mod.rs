@@ -501,6 +501,13 @@ impl EditorSession {
 					"Configure project",
 				)?;
 			}
+			Command::CreatePlayer => {
+				self.require_edit()?;
+				let mut next = (*self.data).clone();
+				let mut project = (*self.project).clone();
+				let key = operations::create_player(&mut next, &mut project)?;
+				self.commit_project(next, project, vec![key], "Create Player")?;
+			}
 			Command::StartPlay => self.start_play()?,
 			Command::StopPlay => self.stop_play(),
 			Command::SetPaused { paused } => self.set_paused(paused)?,

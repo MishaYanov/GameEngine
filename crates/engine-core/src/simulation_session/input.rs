@@ -112,14 +112,17 @@ impl SimulationSession {
 		// Route each target once so the legacy path cannot overwrite character Z.
 		match target {
 			MovementTarget::AllControlled => {
+				let local = self.characters.local_input_owner(&self.world).cloned();
 				self.characters.sample_keyboard(
 					&self.world,
-					None,
+					local.as_ref(),
 					input.movement,
 					&input.actions,
 				)?;
-				for entity in &self.controlled_targets {
-					Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
+				if local.is_none() {
+					for entity in &self.controlled_targets {
+						Self::apply_input(&mut self.inputs, &mut self.clock, entity, [x, y, 0.0]);
+					}
 				}
 			}
 			MovementTarget::Entity(entity) if self.characters.contains(entity) => {
@@ -165,7 +168,23 @@ impl SimulationSession {
 
 	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
 		let movement = normalized_input(movement)?;
-		let character_keys = self.characters.keys().cloned().collect::<Vec<_>>();
+		if let Some(local) = self.characters.local_input_owner(&self.world).cloned() {
+			self.characters
+				.set_movement(&local, [movement[0], movement[2]])?;
+			return Ok(true);
+		}
+		let character_keys = self
+			.characters
+			.keys()
+			.filter(|key| {
+				self.world.entity_index(key).is_some_and(|index| {
+					self.world.data().entities[index]
+						.player_controller
+						.is_none()
+				})
+			})
+			.cloned()
+			.collect::<Vec<_>>();
 		for key in &character_keys {
 			self.characters
 				.set_movement(key, [movement[0], movement[2]])?;

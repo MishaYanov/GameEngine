@@ -54,6 +54,7 @@ pub(super) fn duplicate(
 		.collect();
 	for index in indices {
 		let mut copy = data.entities[index].clone();
+		copy.clear_local_player();
 		if !linked_members.contains(&copy.key) {
 			copy.name.push_str(" Copy");
 		}

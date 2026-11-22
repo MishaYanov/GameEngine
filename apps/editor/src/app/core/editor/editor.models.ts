@@ -139,6 +139,7 @@ export interface SceneEntity {
     readonly component_ids?: Readonly<Record<string, string>>;
     readonly native_behaviors?: readonly NativeBehaviorAttachment[];
     readonly character_controller?: CharacterControllerAttachment | null;
+    readonly player_controller?: import('./player-controller.models').PlayerControllerAttachment | null;
     readonly animation?: AnimationAttachment | null;
     readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
@@ -289,6 +290,8 @@ export type EditorCommand =
     | { readonly type: 'unpack_linked_prefab_outer'; readonly root_key: EntityKey }
     | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'create_camera' }
+    | { readonly type: 'create_player' }
+    | { readonly type: 'set_local_player'; readonly key: EntityKey | null }
     | { readonly type: 'set_default_game_camera'; readonly key: EntityKey }
     | { readonly type: 'align_camera_to_scene_view'; readonly key: EntityKey; readonly position: Vec3; readonly yaw: number; readonly pitch: number }
     | { readonly type: 'upsert_light'; readonly light: Light }

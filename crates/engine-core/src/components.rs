@@ -2,6 +2,7 @@
 mod entity;
 mod interactable;
 mod native_behavior;
+mod player_controller;
 mod scene_validation;
 
 use crate::{
@@ -13,6 +14,9 @@ pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
+pub use player_controller::{
+	InputActionsRef, PlayerControllerComponent, PlayerControllerSettings, PlayerMovementSpace,
+};
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -27,6 +31,7 @@ pub const CHARACTER_TYPE: &str = "engine.character_controller";
 pub const ANIMATION_TYPE: &str = "engine.animation";
 pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const CAMERA_TYPE: &str = "engine.camera";
+pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -63,6 +68,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	PlayerController {
+		settings: PlayerControllerSettings,
+	},
 	Camera {
 		settings: crate::game_camera::CameraSettings,
 	},
@@ -102,6 +110,7 @@ pub struct ComponentRecord {
 impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
+			ComponentData::PlayerController { .. } => PLAYER_CONTROLLER_TYPE,
 			ComponentData::Camera { .. } => CAMERA_TYPE,
 			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
 			ComponentData::Animation { .. } => ANIMATION_TYPE,
@@ -117,6 +126,10 @@ impl ComponentRecord {
 			return Err("Unsupported component schema version".into());
 		}
 		match &self.data {
+			ComponentData::PlayerController { settings } if settings.local && !self.enabled => {
+				Err("A disabled Player Controller cannot own local input".into())
+			}
+			ComponentData::PlayerController { .. } => Ok(()),
 			ComponentData::Camera { settings } => settings.validate(),
 			ComponentData::CharacterController { settings } => settings.validate(),
 			ComponentData::Animation { settings } => settings.validate(),
@@ -158,6 +171,13 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			PLAYER_CONTROLLER_TYPE,
+			"player_controller",
+			"Player Controller",
+			"Routes local input to a scene-root Character Controller.",
+			1,
+		),
 		(
 			CAMERA_TYPE,
 			"camera",

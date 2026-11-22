@@ -121,6 +121,10 @@ pub enum EditorCommandDto {
 		entity: EntitySpecDto,
 	},
 	CreateCamera,
+	CreatePlayer,
+	SetLocalPlayer {
+		key: Option<EntityKey>,
+	},
 	AlignCameraToSceneView {
 		key: EntityKey,
 		position: [f32; 3],

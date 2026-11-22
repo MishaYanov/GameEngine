@@ -44,6 +44,7 @@ struct SceneEntry {
 	interactable: Option<engine_core::components::InteractableComponent>,
 	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
 	camera: Option<Box<CameraComponent>>,
+	player_controller: Option<Box<engine_core::components::PlayerControllerComponent>>,
 }
 
 impl SceneEntry {
@@ -81,6 +82,7 @@ impl SceneEntry {
 		self.character_controller
 			.clone_from(&entity.character_controller);
 		self.camera.clone_from(&entity.camera);
+		self.player_controller.clone_from(&entity.player_controller);
 	}
 }
 
@@ -289,6 +291,7 @@ impl Scene {
 						&& entry.character_controller == saved.character_controller
 						&& entry.interactable == saved.interactable
 						&& entry.camera == saved.camera
+						&& entry.player_controller == saved.player_controller
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -343,6 +346,20 @@ impl Scene {
 
 	pub fn restore(&mut self, snapshot: &EntitySnapshot) -> Result<EntityId, String> {
 		let entry = &snapshot.entry;
+		if entry
+			.player_controller
+			.as_ref()
+			.is_some_and(|controller| controller.enabled && controller.settings.local)
+			&& self.entries.iter().any(|entry| {
+				entry
+					.player_controller
+					.as_ref()
+					.is_some_and(|controller| controller.enabled && controller.settings.local)
+			}) {
+			return Err(
+				"Cannot restore a local Player while another Player Controller owns input".into(),
+			);
+		}
 		if entry
 			.parent
 			.as_ref()
@@ -548,6 +565,7 @@ impl Scene {
 			interactable: None,
 			character_controller: None,
 			camera: None,
+			player_controller: None,
 		});
 		self.authored_children = None;
 
@@ -660,6 +678,7 @@ impl Scene {
 				interactable: entry.interactable.clone(),
 				character_controller: entry.character_controller.clone(),
 				camera: entry.camera.clone(),
+				player_controller: entry.player_controller.clone(),
 			});
 		}
 
@@ -810,6 +829,10 @@ impl Scene {
 		entry.character_controller = source_metadata.character_controller;
 		entry.interactable = source_metadata.interactable;
 		entry.camera = source_metadata.camera;
+		entry.player_controller = source_metadata.player_controller;
+		if let Some(controller) = &mut entry.player_controller {
+			controller.settings.local = false;
+		}
 		Ok(id)
 	}
 

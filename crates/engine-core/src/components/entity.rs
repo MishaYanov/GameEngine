@@ -3,6 +3,11 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(controller) = &self.player_controller {
+			bytes = bytes
+				.saturating_add(controller.id.as_str().len())
+				.saturating_add(std::mem::size_of_val(controller.as_ref()));
+		}
 		if let Some(camera) = &self.camera {
 			bytes = bytes
 				.saturating_add(camera.id.as_str().len())
@@ -75,6 +80,16 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		if let Some(controller) = &self.player_controller {
+			records.push(ComponentRecord {
+				id: controller.id.clone(),
+				schema_version: 1,
+				enabled: controller.enabled,
+				data: ComponentData::PlayerController {
+					settings: controller.settings.clone(),
+				},
+			});
+		}
 		if let Some(camera) = &self.camera {
 			records.push(ComponentRecord {
 				id: camera.id.clone(),
@@ -205,6 +220,13 @@ impl EntityData {
 			return Err("Object component count exceeds its limit".into());
 		}
 		match component.data {
+			ComponentData::PlayerController { settings } => {
+				self.player_controller = Some(Box::new(PlayerControllerComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::Camera { settings } => {
 				self.camera = Some(Box::new(crate::game_camera::CameraComponent {
 					id: component.id,
@@ -279,6 +301,7 @@ impl EntityData {
 			.find(|record| &record.id == id)
 			.ok_or("Component does not exist")?;
 		match record.data {
+			ComponentData::PlayerController { .. } => self.player_controller = None,
 			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,
 			ComponentData::Animation { .. } => self.animation = None,
@@ -309,6 +332,9 @@ impl EntityData {
 			.find(|record| &record.id == id)
 			.ok_or("Component does not exist")?;
 		record.enabled = enabled;
+		if !enabled && let ComponentData::PlayerController { settings } = &mut record.data {
+			settings.local = false;
+		}
 		self.put_component(record, true)
 	}
 	pub fn remap_component_references(

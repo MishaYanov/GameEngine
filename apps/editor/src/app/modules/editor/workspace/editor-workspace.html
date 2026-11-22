@@ -59,7 +59,7 @@
                 [disabled]="!sceneEditing.ready()"
                 [foldersEnabled]="hierarchyFoldersEnabled()"
                 [batchParentingEnabled]="batchParentingEnabled()"
-                [cameraCreationEnabled]="cameraCreationEnabled()"
+                [creationCommands]="hierarchyCreation()"
                 [sceneLabel]="sceneLabel()"
                 [contextKey]="sceneContext()"
                 [actionError]="hierarchyError()"
@@ -67,7 +67,7 @@
                 (selectionSetRequested)="sceneEditing.selectMany($event)"
                 (reparentRequested)="reparentEntity($event)"
                 (folderRequested)="editHierarchyFolder($event)"
-                (cameraRequested)="createCamera()"
+                (creationRequested)="createHierarchyObject($event)"
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">

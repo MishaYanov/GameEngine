@@ -7,6 +7,7 @@ import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
 import {cameraComponentDraft, cameraComponentFromDraft, type CameraComponentDraft} from './camera-component-draft';
+import type {InputActionsRef, PlayerMovementSpace} from '../../../../core/editor/player-controller.models';
 import {
 	defaultMachine,
 	machineError,
@@ -41,6 +42,7 @@ export interface ComponentDraft {
 	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner' | 'state_machine';
 	machine: MachineDefinition;
 	controller: Record<ControllerNumberKey, string> & { jump_action: string };
+	playerController: {input: InputActionsRef; space: PlayerMovementSpace};
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
     interactable: { action: string; reach: string };
@@ -81,6 +83,7 @@ export function componentDraft(
 			) as Record<ControllerNumberKey, string>),
 			jump_action: 'jump',
 		},
+		playerController: {input: {kind: 'project_default'}, space: 'camera_relative'},
 		animation: null,
 		camera: cameraComponentDraft(),
         interactable: {action: 'interact', reach: '1'},
@@ -126,6 +129,9 @@ export function componentDraft(
 		};
 	} else if (value.data.kind === 'animation') {
 		draft.animation = structuredClone(value.data.settings);
+	} else if (value.data.kind === 'player_controller') {
+		const {input, space} = value.data.settings;
+		draft.playerController = {input, space};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
@@ -252,6 +258,11 @@ export function componentFromDraft(
 				jump_action: draft.controller.jump_action,
 			} as unknown as CharacterControllerSettings,
 		};
+	} else if (draft.kind === 'player_controller') {
+		const {input, space} = draft.playerController;
+		if (space !== 'world' && space !== 'camera_relative') throw new Error('Choose a Player movement space.');
+		const local = original?.data.kind === 'player_controller' && original.data.settings.local;
+		data = {kind: 'player_controller', settings: {input, space, local: draft.enabled && local}};
 	} else if (draft.kind === 'animation') {
 		if (!validAnimationSettings(draft.animation))
 			throw new Error(

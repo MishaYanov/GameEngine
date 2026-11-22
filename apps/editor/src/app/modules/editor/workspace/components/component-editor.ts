@@ -58,6 +58,7 @@ export class ComponentEditor {
 	readonly models = input<readonly ModelAsset[]>([]);
     readonly gameActions = input<readonly string[]>([]);
     readonly interactablePinned = input(false);
+    readonly playerBodyIssue = input<string | null>(null);
 	readonly ownerKey = input('');
 	readonly contextKey = input('');
 	readonly editable = input(false);
@@ -127,6 +128,9 @@ export class ComponentEditor {
 		? null : this.candidate().error);
 	protected readonly candidate = computed(() => {
 		try {
+			const draft = this.draft();
+			const bodyIssue = this.playerBodyIssue();
+			if (draft.kind === 'player_controller' && draft.enabled && bodyIssue) throw new Error(bodyIssue);
 			if (this.animationPending()) throw new Error('Wait for animation preparation to finish.');
 			if (this.colliderInvalid()) throw new Error('Finish or discard the invalid collider value.');
 			return {
@@ -192,6 +196,7 @@ export class ComponentEditor {
 
 	protected label(component: ComponentRecord): string {
 		if (component.data.kind === 'camera') return 'Camera';
+		if (component.data.kind === 'player_controller') return 'Player Controller';
 		if (component.data.kind === 'native_behavior')
 			return {
 				key_door: 'Key and Door',

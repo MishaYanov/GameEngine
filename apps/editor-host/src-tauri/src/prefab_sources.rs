@@ -269,6 +269,7 @@ impl EditorWorkspace {
 		match edit {
 			PropDraftEdit::Apply { prefab } => {
 				let prefab = PrefabData::from_json(&prefab.to_string())?;
+				prefab.validate_linked_player_components()?;
 				prefab.composition.validate(
 					Some(&next.source_id),
 					&prefab.entities,
@@ -339,6 +340,7 @@ impl EditorWorkspace {
 	) -> Result<PrefabSourceValidationDto, String> {
 		self.source_draft(id, revision)?;
 		let prefab = PrefabData::from_json(&value.to_string())?;
+		prefab.validate_linked_player_components()?;
 		let bytes = prefab.to_json()?.len();
 		Ok(PrefabSourceValidationDto {
 			draft_id: id.into(),
@@ -369,6 +371,7 @@ impl EditorWorkspace {
 	) -> Result<PrefabSourceSaveDto, String> {
 		self.scene_output(&next.path, None)?;
 		let prefab = PrefabData::from_json(next.history.document())?;
+		prefab.validate_linked_player_components()?;
 		let prepared =
 			runtime::assets::project_assets::prepare_prefab(&self.asset_root, &next.path, &prefab)?;
 		if prepared.asset().id != next.source_id
@@ -422,6 +425,7 @@ impl EditorWorkspace {
 			.session()
 			.export_prefab_with_slots_at(reference_slots, pivot)?
 			.into_component_source()?;
+		prefab.validate_linked_player_components()?;
 		let prepared =
 			runtime::assets::project_assets::prepare_prefab(&self.asset_root, path, &prefab)?;
 		if prepared.previous_fingerprint().is_some() {

@@ -2,6 +2,7 @@ import {
     type EditorCommandUpdate, type EditorSnapshot, type SceneEntity, isSceneSchemaVersion,
 } from './editor.models';
 import {validCameraComponentSettings, validComponentViews} from './editor-components';
+import {validPlayerControllerSettings} from './player-controller.models';
 
 const maxSceneFolders = 1_024;
 const maxFolderDepth = 32;
@@ -54,6 +55,7 @@ function camera(value: unknown, schema: unknown): boolean {
 function entity(value: unknown): value is SceneEntity {
     if (!record(value) || !record(value['transform'])) return false;
     const transform = value['transform'];
+    const controller = value['player_controller'];
     return (
         typeof value['key'] === 'string' &&
         typeof value['name'] === 'string' &&
@@ -61,6 +63,9 @@ function entity(value: unknown): value is SceneEntity {
         typeof value['renderable'] === 'boolean' &&
         (value['camera'] == null || (record(value['camera']) && typeof value['camera']['id'] === 'string' &&
             typeof value['camera']['enabled'] === 'boolean' && validCameraComponentSettings(value['camera']['settings']))) &&
+        (controller == null || (record(controller) && typeof controller['id'] === 'string' &&
+            typeof controller['enabled'] === 'boolean' && validPlayerControllerSettings(controller['settings']) &&
+            (controller['enabled'] || !controller['settings'].local))) &&
         (value['component_views'] === undefined || validComponentViews(value['component_views'])) &&
         (value['linked_prefab'] == null || linkedPrefab(value['linked_prefab'])) &&
         ['position', 'rotation', 'scale'].every((key) => vector(transform[key], 3))
@@ -133,12 +138,23 @@ function validDocument(value: unknown): boolean {
         value['lights'].every(light) &&
         Array.isArray(value['entities']) &&
         value['entities'].every(entity) &&
+        atMostOneLocalPlayer(value['entities']) &&
         new Set(value['entities'].map((item) => item.key)).size === value['entities'].length &&
         (value['organization'] === undefined ||
             (value['schema_version'] >= 6 && validOrganization(value['organization'], value['entities']))) &&
         (value['default_game_camera'] == null || (value['schema_version'] === 7 &&
             value['entities'].some(item => item.key === value['default_game_camera'] && item.camera?.enabled === true)))
     );
+}
+
+function atMostOneLocalPlayer(entities: readonly SceneEntity[]): boolean {
+    let assigned = false;
+    for (const entity of entities) {
+        if (!entity.player_controller?.settings.local) continue;
+        if (assigned) return false;
+        assigned = true;
+    }
+    return true;
 }
 
 function project(value: unknown): boolean {
@@ -259,15 +275,22 @@ export function applyEditorUpdate(previous: EditorSnapshot, value: unknown): Edi
     )
         return invalid();
     let replaced = 0;
+    let localPlayerChanged = false;
     const entities =
         replacements.size === 0
             ? previous.document.entities
             : previous.document.entities.map((item) => {
                 const replacement = replacements.get(item.key);
-                if (replacement) replaced++;
+                if (replacement) {
+                    replaced++;
+                    if (!!item.player_controller?.settings.local !== !!replacement.player_controller?.settings.local) {
+                        localPlayerChanged = true;
+                    }
+                }
                 return replacement ?? item;
             });
     if (replaced !== replacements.size) return invalid();
+    if (localPlayerChanged && !atMostOneLocalPlayer(entities)) return invalid();
     if (update.organization !== undefined &&
         (previous.document.schema_version < 6 || !validOrganization(update.organization, entities))) {
         return invalid();

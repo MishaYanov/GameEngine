@@ -4,6 +4,8 @@ mod authoring;
 mod input;
 #[path = "character_controller_api/motion.rs"]
 mod motion;
+#[path = "character_controller_api/player.rs"]
+mod player_authoring;
 mod support;
 use engine_core::{
 	Key,

@@ -177,6 +177,14 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 	if version < 7 && scene.entities.iter().any(|entity| entity.camera.is_some()) {
 		return Err("Camera objects require scene schema 7".into());
 	}
+	if version < 7
+		&& scene
+			.entities
+			.iter()
+			.any(|entity| entity.player_controller.is_some())
+	{
+		return Err("Player Controller requires scene schema 7".into());
+	}
 	scene.refresh_game_camera_projection()?;
 	Ok(scene)
 }

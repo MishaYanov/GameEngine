@@ -109,6 +109,11 @@ impl CommandFactory {
 				validate_key(key)?;
 				validate_name(name, 1024)?;
 			}
+			EditorCommandDto::SetLocalPlayer { key } => {
+				if let Some(key) = key {
+					validate_key(key.as_str())?;
+				}
+			}
 			EditorCommandDto::AlignCameraToSceneView {
 				key,
 				position,
@@ -361,6 +366,7 @@ impl CommandFactory {
 				.validate()?;
 			}
 			EditorCommandDto::CreateCamera
+			| EditorCommandDto::CreatePlayer
 			| EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
 			| EditorCommandDto::CommitTransaction
@@ -376,6 +382,14 @@ impl CommandFactory {
 
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
+			("create_player", "Create Player", "player", true, false),
+			(
+				"set_local_player",
+				"Set Local Player",
+				"player",
+				true,
+				false,
+			),
 			("create_camera", "Create Camera", "camera", true, false),
 			(
 				"align_camera_to_scene_view",

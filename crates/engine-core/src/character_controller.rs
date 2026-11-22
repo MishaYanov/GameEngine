@@ -89,6 +89,38 @@ pub struct CharacterControllerComponent {
 	pub enabled: bool,
 	pub settings: CharacterControllerSettings,
 }
+
+pub(crate) fn validate_character_body(
+	entity: &EntityData,
+	settings: &CharacterControllerSettings,
+) -> Result<(), String> {
+	if entity.parent.is_some()
+		|| entity.transform.rotation.iter().any(|v| v.abs() > 1e-6)
+		|| entity
+			.transform
+			.scale
+			.iter()
+			.any(|v| (*v - 1.).abs() > 1e-6)
+	{
+		return Err("Character body must be an upright unit-scale scene root; Unpack then detach linked members".into());
+	}
+	let Some(ColliderData::Box {
+		half_extents,
+		interaction,
+		..
+	}) = &entity.collider
+	else {
+		return Err("Character body requires an enabled non-sensor box collider".into());
+	};
+	if !entity.collision_enabled
+		|| interaction.sensor
+		|| settings.ground_probe >= half_extents.iter().copied().fold(f32::INFINITY, f32::min)
+		|| settings.step_height >= half_extents[1] * 2.
+	{
+		return Err("Character collider/probe/step dimensions are unsupported".into());
+	}
+	Ok(())
+}
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CharacterState {
 	pub velocity: [f32; 3],
@@ -154,32 +186,7 @@ impl CharacterRuntime {
 			if keys.len() == MAX_CONTROLLERS {
 				return Err("Character controller count exceeds 64".into());
 			}
-			if entity.parent.is_some()
-				|| entity.transform.rotation.iter().any(|v| v.abs() > 1e-6)
-				|| entity
-					.transform
-					.scale
-					.iter()
-					.any(|v| (*v - 1.).abs() > 1e-6)
-			{
-				return Err("Character body must be an upright unit-scale scene root; Unpack then detach linked members".into());
-			}
-			let Some(ColliderData::Box {
-				half_extents,
-				interaction,
-				..
-			}) = &entity.collider
-			else {
-				return Err("Character body requires an enabled non-sensor box collider".into());
-			};
-			if !entity.collision_enabled
-				|| interaction.sensor
-				|| component.settings.ground_probe
-					>= half_extents.iter().copied().fold(f32::INFINITY, f32::min)
-				|| component.settings.step_height >= half_extents[1] * 2.
-			{
-				return Err("Character collider/probe/step dimensions are unsupported".into());
-			}
+			validate_character_body(entity, &component.settings)?;
 			for child in world.subtree_indices(index)? {
 				if child != index
 					&& world.data().entities[child].collider.is_some()
@@ -210,6 +217,13 @@ impl CharacterRuntime {
 	}
 	pub fn keys(&self) -> impl Iterator<Item = &EntityKey> {
 		self.states.keys()
+	}
+	pub fn local_input_owner(&self, world: &RuntimeWorld) -> Option<&EntityKey> {
+		self.states.keys().find(|key| {
+			world
+				.entity_index(key)
+				.is_some_and(|index| world.data().entities[index].is_local_player())
+		})
 	}
 	pub fn contains(&self, key: &EntityKey) -> bool {
 		self.states.contains_key(key)
@@ -299,11 +313,11 @@ impl CharacterRuntime {
 			let index = world
 				.entity_index(&key)
 				.ok_or("Character input owner missing")?;
-			let settings = &world.data().entities[index]
-				.character_controller
-				.as_ref()
-				.unwrap()
-				.settings;
+			let entity = &world.data().entities[index];
+			if target.is_none() && entity.player_controller.is_some() {
+				continue;
+			}
+			let settings = &entity.character_controller.as_ref().unwrap().settings;
 			self.set_input(
 				&key,
 				[movement[0], -movement[1]],

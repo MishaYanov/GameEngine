@@ -12,7 +12,7 @@ import {WorkspaceTabs} from "./workspace-tabs/workspace-tabs";
 import {PropWorkspace} from './prop-workspace/prop-workspace';
 import {PropWorkspaceService} from './prop-workspace/prop-workspace.service';
 import {PropPreviewService} from './prop-workspace/prop-preview.service';
-import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
+import type {HierarchyCreateCommand, HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
@@ -78,9 +78,9 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
-    protected readonly cameraCreationEnabled = computed(() =>
-        this.editorService.capabilities()?.commands?.some(command => command.name === 'create_camera') ?? false,
-    );
+    protected readonly hierarchyCreation = computed(() => (['create_camera', 'create_player'] as const).filter(
+        type => this.editorService.capabilities()?.commands?.some(command => command.name === type),
+    ));
     protected readonly batchParentingEnabled = computed(() =>
         this.editorService.capabilities()?.commands?.some(command => command.name === 'reparent_objects') ?? false,
     );
@@ -326,21 +326,21 @@ export class EditorWorkspace {
         }
     }
 
-    protected async createCamera(): Promise<void> {
-        if (!this.cameraCreationEnabled() || this.workspaceActionBlocked()) return;
+    protected async createHierarchyObject(type: HierarchyCreateCommand): Promise<void> {
+        if (!this.hierarchyCreation().includes(type) || this.workspaceActionBlocked()) return;
         const context = this.sceneContext();
         this.hierarchyError.set(null);
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             if (context !== this.sceneContext() || this.workspaceActionBlocked()) return;
             const current = this.editorService.snapshot();
             if (!current) return;
-            const snapshot = await this.editorService.execute({type: 'create_camera'}, this.editorService.workspaceGeneration(), current.revision);
+            const snapshot = await this.editorService.execute({type}, this.editorService.workspaceGeneration(), current.revision);
             if (context !== this.sceneContext()) return;
             const key = snapshot.selection[0];
             if (key) this.hierarchy()?.revealEntity(key);
         });
         if (!accepted && context === this.sceneContext()) {
-            this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating a Camera.');
+            this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
         }
     }
 }

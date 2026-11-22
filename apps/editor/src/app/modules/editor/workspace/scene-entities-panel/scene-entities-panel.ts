@@ -49,6 +49,9 @@ export interface HierarchyReparentRequest {
     readonly keepWorld?: boolean;
 }
 
+export type HierarchyCreateCommand = 'create_camera' | 'create_player';
+interface CreationMenuContext {readonly contextKey: string}
+
 interface EntityMenuContext {
     readonly key: EntityKey;
     readonly contextKey: string;
@@ -81,7 +84,7 @@ export class SceneEntitiesPanel {
     readonly disabled = input(false);
     readonly foldersEnabled = input(false);
     readonly batchParentingEnabled = input(false);
-    readonly cameraCreationEnabled = input(false);
+    readonly creationCommands = input<readonly HierarchyCreateCommand[]>([]);
     readonly sceneLabel = input('Scene');
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
@@ -90,7 +93,7 @@ export class SceneEntitiesPanel {
     readonly usagesRequested = output<EntityKey>();
     readonly reparentRequested = output<HierarchyReparentRequest>();
     readonly folderRequested = output<HierarchyFolderCommand>();
-    readonly cameraRequested = output<void>();
+    readonly creationRequested = output<HierarchyCreateCommand>();
 
     protected readonly rowHeight = 28;
     protected readonly treeId = `editor-hierarchy-${nextHierarchyId++}`;
@@ -177,14 +180,10 @@ export class SceneEntitiesPanel {
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
     protected readonly contextMenu = inject(ContextMenuService);
-    protected readonly canCreateCamera = computed(() => this.cameraCreationEnabled() && this.scene().projectOpen && !this.disabled());
-    private readonly createCameraAction = ContextActionBuilder.create<{readonly contextKey: string}>('hierarchy.create.camera', 'Camera')
-        .when(() => this.cameraCreationEnabled())
-        .enabledWhen(context => this.canCreateCamera() && context.contextKey === this.contextKey())
-        .run(context => {
-            if (this.canCreateCamera() && context.contextKey === this.contextKey()) this.cameraRequested.emit();
-        }).build();
-    private readonly createMenuBuilder = ContextMenuBuilder.create<{readonly contextKey: string}>().action(this.createCameraAction);
+    protected readonly canCreate = computed(() => this.creationCommands().length > 0 && this.scene().projectOpen && !this.disabled());
+    private readonly createCameraAction = this.creationAction('create_camera', 'Camera');
+    private readonly createPlayerAction = this.creationAction('create_player', 'Player');
+    private readonly createMenuBuilder = this.creationMenu(ContextMenuBuilder.create<CreationMenuContext>());
     protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey()});
     private readonly entityMenuBuilder = ContextMenuBuilder.create<EntityMenuContext>()
         .action(ContextActionBuilder.create<EntityMenuContext>('entity.select', 'Select')
@@ -212,7 +211,7 @@ export class SceneEntitiesPanel {
             .when(() => this.foldersEnabled())
             .enabledWhen(context => this.canUseEntityMenu(context) && this.canOrganize(this.dragSelection(context.key)))
             .run(context => this.beginMoveObjects(this.dragSelection(context.key))).build())
-        .submenu('entity.create', 'Create', items => items.action(this.createCameraAction));
+        .submenu('entity.create', 'Create', items => this.creationMenu(items));
     private readonly folderMenuBuilder = ContextMenuBuilder.create<FolderMenuContext>()
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.create', 'New Subfolder…')
             .icon('folder')
@@ -227,7 +226,7 @@ export class SceneEntitiesPanel {
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.remove', 'Remove Folder')
             .enabledWhen(context => this.canUseFolderMenu(context))
             .run(context => this.submitFolderEdit({type: 'remove_folder', id: context.id})).build())
-        .submenu('folder.create-object', 'Create', items => items.action(this.createCameraAction));
+        .submenu('folder.create-object', 'Create', items => this.creationMenu(items));
     protected readonly activeItemMenu = (): readonly ContextMenuItem[] => {
         const key = this.activeKey();
         const item = key ? this.forest().items.get(key) : undefined;
@@ -242,7 +241,7 @@ export class SceneEntitiesPanel {
     }
 
     protected openCreateMenu(button: HTMLButtonElement): void {
-        if (!this.canCreateCamera()) return;
+        if (!this.canCreate()) return;
         if (this.contextMenu.request()?.owner === button) {
             this.contextMenu.close();
             return;
@@ -252,6 +251,20 @@ export class SceneEntitiesPanel {
             items: this.createMenu(), label: 'Create scene object', x: bounds.left, y: bounds.bottom,
             owner: button, returnFocus: button,
         });
+    }
+
+    private creationAction(command: HierarchyCreateCommand, label: string) {
+        const allowed = (context: CreationMenuContext) => this.canCreate() &&
+            this.creationCommands().includes(command) && context.contextKey === this.contextKey();
+        return ContextActionBuilder.create<CreationMenuContext>('hierarchy.' + command, label)
+            .when(() => this.creationCommands().includes(command))
+            .enabledWhen(allowed)
+            .run(context => { if (allowed(context)) this.creationRequested.emit(command); })
+            .build();
+    }
+
+    private creationMenu<T extends CreationMenuContext>(menu: ContextMenuBuilder<T>): ContextMenuBuilder<T> {
+        return menu.action(this.createCameraAction).action(this.createPlayerAction);
     }
 
     private canUseEntityMenu(context: EntityMenuContext): boolean {
