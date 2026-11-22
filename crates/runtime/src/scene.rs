@@ -4,6 +4,7 @@ use engine_core::game_camera::{
 use std::{
 	cell::{Ref, RefCell},
 	collections::{BTreeMap, HashMap, HashSet},
+	sync::Arc,
 };
 
 use crate::entity_key::EntityKey;
@@ -133,6 +134,7 @@ pub struct Scene {
 	id_indices: HashMap<EntityId, usize>,
 	key_ids: HashMap<EntityKey, EntityId>,
 	world_cache: RefCell<Option<Vec<glam::Mat4>>>,
+	presentation_matrices: Arc<BTreeMap<EntityKey, glam::Mat4>>,
 	authored_children: Option<Vec<Vec<usize>>>,
 	animation_root: Option<std::path::PathBuf>,
 }
@@ -145,6 +147,9 @@ impl Scene {
 		self.animation_root.as_deref()
 	}
 	pub fn restore_authored_animation(&mut self) {
+		if !self.presentation_matrices.is_empty() {
+			self.presentation_matrices = Arc::default();
+		}
 		for entry in &mut self.entries {
 			entry.instance.restore_authored_animation();
 		}
@@ -184,6 +189,7 @@ impl Scene {
 				.instance
 				.set_animation_pose(pose, true)?;
 		}
+		self.presentation_matrices = bank.visual_matrices_snapshot();
 		Ok(())
 	}
 

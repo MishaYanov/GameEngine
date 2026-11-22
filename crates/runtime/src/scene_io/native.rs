@@ -85,10 +85,8 @@ pub fn instantiate_with_warming(
 		.entities
 		.iter()
 		.filter_map(|entity| {
-			entity
-				.animation
-				.as_ref()
-				.and_then(|c| assets.cached_animation(&c.settings.source))
+			bridge::animation_asset::skinned_source(entity)
+				.and_then(|source| assets.cached_animation(source))
 				.map(|asset| (entity.key.clone(), asset))
 		})
 		.collect();
@@ -154,12 +152,25 @@ pub fn instantiate_with_warming(
 		};
 		let mut instance = ModelInstance::new(model, transform);
 		if let Some(asset) = animations.get(&entity.key) {
-			let component = entity.animation.as_ref().unwrap();
-			let clip_index = match component.settings.playback {
-				engine_core::animation::AnimationPlayback::SingleClip { clip_index, .. } => {
-					clip_index
-				}
-				engine_core::animation::AnimationPlayback::Locomotion3 { idle, .. } => idle,
+			let component = entity.animation.as_ref().filter(|_| {
+				entity
+					.animator
+					.as_ref()
+					.is_none_or(|animator| !animator.enabled)
+					|| matches!(
+						entity
+							.animator
+							.as_ref()
+							.map(|animator| &animator.settings.binding),
+						Some(engine_core::animation::AnimatorBinding::Visual { .. })
+					)
+			});
+			let clip_index = match component.map(|component| &component.settings.playback) {
+				Some(engine_core::animation::AnimationPlayback::SingleClip {
+					clip_index, ..
+				}) => *clip_index,
+				Some(engine_core::animation::AnimationPlayback::Locomotion3 { idle, .. }) => *idle,
+				None => 0,
 			};
 			let mut pose = engine_core::animation::sample_pose(
 				asset.clone(),
@@ -168,7 +179,7 @@ pub fn instantiate_with_warming(
 				glam::Mat4::IDENTITY,
 				0,
 			)?;
-			if !component.enabled {
+			if component.is_none_or(|component| !component.enabled) {
 				pose.local = asset.nodes.iter().map(|n| n.rest).collect();
 				pose.globals = engine_core::animation::global_pose(asset, &pose.local)?;
 				pose.palette = engine_core::animation::mesh_local_palette(asset, &pose.globals)?;

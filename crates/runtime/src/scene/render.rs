@@ -43,6 +43,12 @@ impl Scene {
 
 		let world_matrices = self.cached_world_matrices()?;
 		for (entry, matrix) in self.entries.iter().zip(world_matrices.iter().copied()) {
+			let matrix = entry
+				.key
+				.as_ref()
+				.and_then(|key| self.presentation_matrices.get(key))
+				.copied()
+				.unwrap_or(matrix);
 			let instance = &entry.instance;
 			if instance.animation_palette().is_some() {
 				validate_animation_placement(&entry.name, matrix)?;

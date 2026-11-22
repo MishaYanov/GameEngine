@@ -157,6 +157,14 @@ impl SceneEditor {
 		self.finish_gesture()?;
 		if let Some(root) = scene.animation_root().map(std::path::Path::to_path_buf) {
 			let input_root = root.clone();
+			let animator_root = root.clone();
+			self.session
+				.as_mut()
+				.expect("initialized session")
+				.set_animator_resolver(Arc::new(move |project, scene_id, scene| {
+					bridge::animator_graph::prepare_scene(&animator_root, project, scene_id, scene)
+				}))?;
+
 			self.session
 				.as_mut()
 				.expect("initialized session")

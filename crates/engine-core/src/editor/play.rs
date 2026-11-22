@@ -16,6 +16,10 @@ impl EditorSession {
 			run.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		run.active().require_animation_ready()?;
+		if let Some(resolver) = &self.animator_resolver {
+			run.set_animator_resolver(Arc::clone(resolver))?;
+		}
+		run.active().require_animators_ready()?;
 		if let Some(resolver) = &self.input_actions_resolver {
 			run.set_input_actions_resolver(Arc::clone(resolver))?;
 		}

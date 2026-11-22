@@ -194,6 +194,30 @@ impl AuthoredClip {
 }
 
 impl ResolvedAuthoredClip {
+	pub fn retained_bytes(&self) -> usize {
+		let key_bytes = self
+			.clip
+			.tracks
+			.iter()
+			.map(|track| match &track.track {
+				VisualTrack::LocalPosition { keys, .. } => {
+					keys.capacity() * (std::mem::size_of::<ClipKey<[f32; 3]>>() + 128)
+				}
+				VisualTrack::LocalRotation { keys, .. } => {
+					keys.capacity() * (std::mem::size_of::<ClipKey<[f32; 4]>>() + 128)
+				}
+			})
+			.sum::<usize>();
+		key_bytes + self.clip.tracks.len() * 1024 + self.clip.markers.len() * 512
+	}
+
+	pub fn duration_millis(&self) -> u32 {
+		self.clip.duration_ticks
+	}
+	pub fn target_keys(&self) -> impl Iterator<Item = &EntityKey> {
+		self.bindings.values().map(|pose| &pose.entity_key)
+	}
+
 	pub fn duration_ticks(&self) -> u32 {
 		self.clip.duration_ticks
 	}

@@ -140,12 +140,46 @@ fn one_animator_asset_validates_each_actors_visual_children() {
 	workspace
 		.save_all(workspace.backend.session().revision())
 		.unwrap();
-	let error = workspace
+	let authored = fs::read(&scene_path).unwrap();
+	let prepared = workspace
 		.prepare_build(workspace.backend.session().revision())
-		.err()
 		.unwrap();
-	assert!(
-		error.contains("actor-a") && error.contains("fixed-step Animator evaluator"),
-		"{error}"
-	);
+	let output = fixture.0.parent().unwrap().join("animator-package");
+	fs::create_dir(&output).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, output.to_str().unwrap()).unwrap();
+	let project = runtime::project::ProjectData::load(&staged.path().join("project.json")).unwrap();
+	let root = staged.path().join("assets");
+	let packaged_scene = runtime::scene_io::load_data(&root.join("scenes/main.json"))
+		.unwrap()
+		.data;
+	let mut headless = runtime::simulation_session::SimulationSession::new(
+		project,
+		std::sync::Arc::new(packaged_scene),
+	)
+	.unwrap();
+	headless
+		.set_animator_resolver(std::sync::Arc::new(move |project, id, scene| {
+			bridge::animator_graph::prepare_scene(&root, project, id, scene)
+		}))
+		.unwrap();
+	run(&mut workspace, Command::StartPlay);
+	let step = 1.0 / 60.0;
+	for _ in 0..4 {
+		workspace.backend.tick(step * 4.0).unwrap();
+	}
+	for _ in 0..16 {
+		headless.tick(step).unwrap();
+	}
+	let editor_bank = workspace.backend.session().animations().unwrap();
+	let native_bank = headless.animations();
+	assert_eq!(editor_bank.visual_matrices(), native_bank.visual_matrices());
+	let actual = editor_bank.animator_inspection();
+	assert_eq!(actual.len(), 2);
+	assert!(actual
+		.iter()
+		.all(|entry| entry.state_id == "walk" && entry.state_ticks == 7));
+	assert!(editor_bank.visual_matrices()[&key("arm-a")].w_axis.y > 0.1);
+	assert_eq!(headless.document().entities, document.entities);
+	run(&mut workspace, Command::StopPlay);
+	assert_eq!(fs::read(&scene_path).unwrap(), authored);
 }

@@ -3,9 +3,9 @@ use crate::asset_io::{contained_file, is_link, read_bounded};
 use engine_core::{
 	SceneData,
 	animation::{
-		AnimationAsset, AnimationClipRef, AnimationPlayback, AnimationSettings, AnimatorBinding,
-		AnimatorGraph, AnimatorSettings, AuthoredClip, MAX_ANIMATOR_GRAPH_BYTES,
-		MAX_AUTHORED_CLIP_BYTES, ResolvedAuthoredClip,
+		AnimationClipRef, AnimationPlayback, AnimationSettings, AnimatorBinding, AnimatorGraph,
+		AnimatorSettings, AuthoredClip, MAX_ANIMATOR_GRAPH_BYTES, MAX_AUTHORED_CLIP_BYTES,
+		ResolvedAuthoredClip,
 	},
 	asset_catalog::{
 		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset,
@@ -22,15 +22,8 @@ use std::{
 	sync::Arc,
 };
 
-pub struct PreparedAnimator {
-	pub graph: Arc<AnimatorGraph>,
-	pub clips: PreparedAnimatorClips,
-}
-
-pub enum PreparedAnimatorClips {
-	Imported(Arc<AnimationAsset>),
-	Visual(Vec<ResolvedAuthoredClip>),
-}
+use engine_core::animation::PreparedAnimatorBindings;
+pub use engine_core::animation::{PreparedAnimator, PreparedAnimatorClips};
 
 fn root(root: &Path) -> Result<PathBuf, String> {
 	let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
@@ -164,4 +157,36 @@ pub fn prepare_actor(
 		}
 	};
 	Ok(PreparedAnimator { graph, clips })
+}
+
+pub fn prepare_scene(
+	root: &Path,
+	project: &ProjectData,
+	scene_id: &SceneId,
+	scene: &SceneData,
+) -> Result<PreparedAnimatorBindings, String> {
+	let mut bindings = PreparedAnimatorBindings::new();
+	let mut retained = 0usize;
+	for actor in &scene.entities {
+		let Some(component) = actor.animator.as_ref().filter(|animator| animator.enabled) else {
+			continue;
+		};
+		if bindings.len() == 64 {
+			return Err("A Play scene supports at most 64 Animator actors".into());
+		}
+		let prepared = prepare_actor(root, project, scene_id, scene, actor, &component.settings)
+			.map_err(|error| format!("Animator on {:?}: {error}", actor.key.as_str()))?;
+		let bytes = match &prepared.clips {
+			PreparedAnimatorClips::Imported(asset) => asset.retained_bytes(),
+			PreparedAnimatorClips::Visual(clips) => {
+				clips.iter().map(|clip| clip.retained_bytes()).sum()
+			}
+		};
+		retained = retained
+			.checked_add(bytes)
+			.filter(|bytes| *bytes <= 128 * 1024 * 1024)
+			.ok_or("Animator CPU assets exceed the 128 MiB scene budget")?;
+		bindings.insert(actor.key.clone(), Arc::new(prepared));
+	}
+	Ok(bindings)
 }

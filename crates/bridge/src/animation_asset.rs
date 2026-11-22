@@ -99,6 +99,22 @@ pub fn load_path(root: &Path, relative: &str) -> Result<Arc<AnimationAsset>, Str
 	let bytes = read_bounded(&contained_file(&root, relative)?, MAX_ANIMATION_BYTES)?;
 	decode(&bytes).map(Arc::new)
 }
+pub fn skinned_source(entity: &engine_core::scene_data::EntityData) -> Option<&AnimationSourceRef> {
+	if let Some(animator) = entity
+		.animator
+		.as_ref()
+		.filter(|component| component.enabled)
+		&& let engine_core::animation::AnimatorBinding::Imported { source } =
+			&animator.settings.binding
+	{
+		return Some(source);
+	}
+	entity
+		.animation
+		.as_ref()
+		.map(|component| &component.settings.source)
+}
+
 pub fn prepare_scene(root: &Path, scene: &SceneData) -> Result<PreparedAnimationBindings, String> {
 	prepare_scene_with_pins(root, scene, &BTreeMap::new())
 }
@@ -112,19 +128,41 @@ pub fn prepare_scene_with_pins(
 ) -> Result<PreparedAnimationBindings, String> {
 	let mut bindings = BTreeMap::new();
 	let mut shared: BTreeMap<(AssetId, String), Arc<AnimationAsset>> = BTreeMap::new();
-	if !scene.entities.iter().any(|e| e.animation.is_some()) {
+	if !scene
+		.entities
+		.iter()
+		.any(|entity| skinned_source(entity).is_some())
+	{
 		return Ok(bindings);
 	}
 	let (_, catalog) = root_and_catalog(root)?;
 	let mut retained = 0usize;
 	for entity in &scene.entities {
-		let Some(component) = &entity.animation else {
+		let Some(source) = skinned_source(entity) else {
 			continue;
 		};
 		if bindings.len() >= MAX_ANIMATION_INSTANCES {
 			return Err("Scene exceeds 64 animated instances".into());
 		}
-		let s = &component.settings;
+		let default;
+		let s = if let Some(component) = entity
+			.animation
+			.as_ref()
+			.filter(|component| &component.settings.source == source)
+		{
+			&component.settings
+		} else {
+			default = engine_core::animation::AnimationSettings {
+				source: source.clone(),
+				playback: engine_core::animation::AnimationPlayback::SingleClip {
+					clip_index: 0,
+					looping: false,
+				},
+				speed_numerator: 1,
+				speed_denominator: 1,
+			};
+			&default
+		};
 		let entry = catalog
 			.by_path(&entity.model_path)
 			.ok_or("Animated mesh is not catalogued")?;

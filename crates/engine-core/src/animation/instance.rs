@@ -57,6 +57,8 @@ struct Instance {
 #[derive(Clone, Default)]
 pub struct AnimationBank {
 	instances: BTreeMap<EntityKey, Instance>,
+	animators: AnimatorBank,
+	visual_matrices: Arc<BTreeMap<EntityKey, Mat4>>,
 	revision: u64,
 }
 
@@ -80,6 +82,13 @@ impl AnimationBank {
 			}
 		}
 		for (index, entity) in world.data().entities.iter().enumerate() {
+			if entity
+				.animator
+				.as_ref()
+				.is_some_and(|component| component.enabled)
+			{
+				continue;
+			}
 			let Some(component) = entity.animation.as_ref() else {
 				continue;
 			};
@@ -170,30 +179,43 @@ impl AnimationBank {
 		}).collect())
 	}
 	pub fn needs_tick(&self) -> bool {
-		self.instances
-			.values()
-			.any(|i| i.active || i.fade.is_some())
+		!self.animators.is_empty()
+			|| self
+				.instances
+				.values()
+				.any(|i| i.active || i.fade.is_some())
 	}
 	pub fn has_active_runtime_one_shot(&self) -> bool {
 		self.instances.values().any(|instance| {
-			instance.active && instance.runtime_playback.is_some_and(|(_, looping)| !looping)
+			instance.active
+				&& instance
+					.runtime_playback
+					.is_some_and(|(_, looping)| !looping)
 		})
 	}
 	pub fn is_empty(&self) -> bool {
-		self.instances.is_empty()
+		self.instances.is_empty() && self.animators.is_empty()
 	}
 	pub fn revision(&self) -> u64 {
 		self.revision
 	}
 	pub fn poses(&self) -> impl Iterator<Item = (&EntityKey, &AnimationPose)> {
-		self.instances.iter().map(|(k, i)| (k, &i.pose))
+		self.instances
+			.iter()
+			.map(|(k, i)| (k, &i.pose))
+			.chain(self.animators.poses())
 	}
 	pub fn pose(&self, key: &EntityKey) -> Option<&AnimationPose> {
-		self.instances.get(key).map(|i| &i.pose)
+		self.instances.get(key).map(|i| &i.pose).or_else(|| {
+			self.animators
+				.poses()
+				.find_map(|(owner, pose)| (owner == key).then_some(pose))
+		})
 	}
 	pub fn prune(&mut self, world: &RuntimeWorld) {
 		self.instances
 			.retain(|k, _| world.entity_index(k).is_some());
+		self.animators.prune(world);
 	}
 	pub fn preserve_existing(&mut self, previous: &Self) {
 		for (key, instance) in &mut self.instances {
@@ -205,6 +227,75 @@ impl AnimationBank {
 			}
 		}
 		self.revision = previous.revision;
+		self.animators.preserve_existing(&previous.animators);
+	}
+
+	pub(crate) fn install_animators(
+		&mut self,
+		world: &RuntimeWorld,
+		bindings: &PreparedAnimatorBindings,
+		handles: &BTreeMap<EntityKey, RuntimeEntityHandle>,
+		fixed_hz: u32,
+	) -> Result<(), String> {
+		let mut next = AnimatorBank::new(world, bindings, handles, fixed_hz)?;
+		next.preserve_existing(&self.animators);
+		let matrices = next.visual_matrices(world)?;
+		self.animators = next;
+		self.visual_matrices = Arc::new(matrices);
+		Ok(())
+	}
+
+	pub fn has_animators(&self) -> bool {
+		!self.animators.is_empty()
+	}
+
+	pub fn animator_inspection(&self) -> Vec<AnimatorInspection> {
+		self.animators.inspection()
+	}
+
+	pub fn visual_matrices_snapshot(&self) -> Arc<BTreeMap<EntityKey, Mat4>> {
+		Arc::clone(&self.visual_matrices)
+	}
+
+	pub fn visual_matrices(&self) -> &BTreeMap<EntityKey, Mat4> {
+		&self.visual_matrices
+	}
+
+	pub(crate) fn step_animators(
+		&mut self,
+		world: &RuntimeWorld,
+		motions: &BTreeMap<EntityKey, AnimationMotion>,
+		jumped: &std::collections::HashSet<EntityKey>,
+		local_player: Option<&EntityKey>,
+		accepted_actions: &std::collections::HashSet<String>,
+		cosmetic: &BTreeMap<String, bool>,
+		fixed_hz: u32,
+	) -> Result<Vec<EntityKey>, String> {
+		if self.animators.is_empty() {
+			return Ok(Vec::new());
+		}
+		let revision = self
+			.revision
+			.checked_add(1)
+			.ok_or("Animation revision overflow")?;
+		let changes = self.animators.step(
+			world,
+			motions,
+			jumped,
+			local_player,
+			accepted_actions,
+			cosmetic,
+			fixed_hz,
+			revision,
+		)?;
+		let matrices = self.animators.visual_matrices(world)?;
+		if matrices != *self.visual_matrices {
+			self.visual_matrices = Arc::new(matrices);
+		}
+		if !changes.is_empty() {
+			self.revision = revision;
+		}
+		Ok(changes)
 	}
 
 	pub(crate) fn play_clip(
@@ -292,10 +383,10 @@ impl AnimationBank {
 						MotionMode::Air
 					} else if motion.planar_speed
 						> if instance.pose.mode == MotionMode::Walk {
-						0.05
-					} else {
-						0.1
-					} {
+							0.05
+						} else {
+							0.1
+						} {
 						MotionMode::Walk
 					} else {
 						MotionMode::Idle
@@ -361,7 +452,7 @@ impl AnimationBank {
 		Ok(changed)
 	}
 }
-fn make_pose(
+pub(super) fn make_pose(
 	asset: Arc<AnimationAsset>,
 	local: Vec<LocalTrs>,
 	placement: Mat4,

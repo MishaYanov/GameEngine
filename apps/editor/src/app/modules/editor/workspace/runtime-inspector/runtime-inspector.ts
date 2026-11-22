@@ -56,6 +56,9 @@ export class RuntimeInspector {
 				(item) => runtimeHandleKey(item.entity) === this.selected(),
 			) ?? null,
 	);
+	protected readonly animator = computed(
+		() => this.result()?.animators?.find(item => runtimeHandleKey(item.entity) === this.selected()) ?? null,
+	);
 	private readonly context = computed(() => {
 		const status = this.viewport.gameStatus();
 		if (!status) return null;

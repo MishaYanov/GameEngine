@@ -39,6 +39,8 @@ pub struct RuntimeInspectionDto {
 	pub stale_events_discarded: u64,
 	pub character_motion: Vec<crate::character_controller::CommittedMotion>,
 	pub animations: Vec<crate::animation::AnimationInspection>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub animators: Vec<crate::animation::AnimatorInspection>,
 	pub last_error: Option<String>,
 }
 

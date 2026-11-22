@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 pub struct GameSession {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
+	animator_resolver: Option<crate::animation::AnimatorResolver>,
 	input_actions_resolver: Option<crate::simulation_session::InputActionsResolver>,
 	project: Arc<ProjectData>,
 	factory: Arc<dyn GameModuleFactory>,
@@ -42,6 +43,15 @@ impl GameSession {
 		self.animation_resolver = Some(resolver);
 		Ok(())
 	}
+	pub fn set_animator_resolver(
+		&mut self,
+		resolver: crate::animation::AnimatorResolver,
+	) -> Result<(), String> {
+		self.active.set_animator_resolver(Arc::clone(&resolver))?;
+		self.animator_resolver = Some(resolver);
+		Ok(())
+	}
+
 	pub fn set_input_actions_resolver(
 		&mut self,
 		resolver: crate::simulation_session::InputActionsResolver,
@@ -147,6 +157,10 @@ impl GameSession {
 			simulation.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		simulation.require_animation_ready()?;
+		if let Some(resolver) = &self.animator_resolver {
+			simulation.set_animator_resolver(Arc::clone(resolver))?;
+		}
+		simulation.require_animators_ready()?;
 		if let Some(resolver) = &self.input_actions_resolver {
 			simulation.set_input_actions_resolver(resolver)?;
 		}
@@ -177,6 +191,7 @@ impl GameSession {
 
 		Ok(Self {
 			animation_resolver: None,
+			animator_resolver: None,
 			input_actions_resolver: None,
 			project,
 			factory,
@@ -227,6 +242,10 @@ impl GameSession {
 			next.set_animation_resolver(Arc::clone(resolver))?;
 		}
 		next.active.require_animation_ready()?;
+		if let Some(resolver) = &self.animator_resolver {
+			next.set_animator_resolver(Arc::clone(resolver))?;
+		}
+		next.active.require_animators_ready()?;
 		if let Some(resolver) = &self.input_actions_resolver {
 			next.set_input_actions_resolver(Arc::clone(resolver))?;
 		}

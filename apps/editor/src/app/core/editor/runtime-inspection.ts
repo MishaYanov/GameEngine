@@ -35,6 +35,7 @@ export interface RuntimeInspection {
 	readonly stale_events_discarded?: number;
 	readonly character_motion?: readonly CharacterMotion[];
 	readonly animations?: readonly AnimationInspection[];
+	readonly animators?: readonly AnimatorInspection[];
 	readonly last_error: string | null;
 }
 export interface AnimationInspection {
@@ -45,6 +46,15 @@ export interface AnimationInspection {
 	readonly mode: 'idle' | 'walk' | 'air';
 	readonly playing: boolean;
 	readonly blending: boolean;
+}
+export interface AnimatorInspection {
+	readonly entity: RuntimeHandle;
+	readonly component_id: string;
+	readonly state_id: string;
+	readonly state_ticks: number;
+	readonly transition: string | null;
+	readonly blend_age: number | null;
+	readonly blend_ticks: number | null;
 }
 export interface CharacterMotion {
 	readonly entity: RuntimeHandle;
@@ -109,6 +119,18 @@ export function runtimeHandleKey(handle: RuntimeHandle): string {
 }
 
 /** Bound and validate a read-only page before making it visible in the editor. */
+function animator(value: unknown): boolean {
+	if (!record(value) || !record(value['entity'])) return false;
+	const entity = value['entity'];
+	const age = value['blend_age'];
+	const duration = value['blend_ticks'];
+	return text(entity['world_id']) && text(entity['key']) && integer(entity['generation']) &&
+		text(value['component_id']) && text(value['state_id']) && integer(value['state_ticks']) &&
+		(value['transition'] === null || text(value['transition'])) &&
+		((age === null && duration === null) ||
+			(integer(age) && integer(duration) && duration > 0 && duration <= 3600 && age < duration));
+}
+
 export function readRuntimeInspection(value: unknown, limit: number): RuntimeInspection {
 	const valid =
 		record(value) &&
@@ -128,6 +150,8 @@ export function readRuntimeInspection(value: unknown, limit: number): RuntimeIns
 			(Array.isArray(value['animations']) &&
 				value['animations'].length <= 64 &&
 				value['animations'].every(animation))) &&
+		(value['animators'] === undefined ||
+			(Array.isArray(value['animators']) && value['animators'].length <= 64 && value['animators'].every(animator))) &&
 		Array.isArray(value['entities']) &&
 		value['entities'].length <= limit &&
 		value['entities'].every((entity: unknown) => {

@@ -121,6 +121,18 @@
 								</dd>
 							</dl>
 						}
+						@if (animator(); as graph) {
+							<dl aria-label="Animator state">
+								<dt>State</dt><dd>{{ graph.state_id }}</dd>
+								<dt>State ticks</dt><dd>{{ graph.state_ticks }}</dd>
+								@if (graph.transition) {
+									<dt>Transition</dt><dd>{{ graph.transition }}</dd>
+								}
+								@if (graph.blend_ticks !== null) {
+									<dt>Blend</dt><dd>{{ graph.blend_age }} / {{ graph.blend_ticks }} ticks</dd>
+								}
+							</dl>
+						}
 						<ul aria-label="Runtime behavior states">
 							@for (behavior of item.behavior_states; track behavior.component_id) {
 								<li>

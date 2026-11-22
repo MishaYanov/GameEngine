@@ -292,6 +292,8 @@ fn check_animated_import(renderer: &WindowRenderer, source_root: &std::path::Pat
 	let mut scene = scene_io::load_data(&source_root.join("scenes/animation-room.json"))
 		.unwrap()
 		.data;
+	// This reduced import fixture uses the compatibility camera and one actor.
+	scene.default_game_camera = None;
 	scene.entities.retain(|e| e.key.as_str() == "clip-demo");
 	scene.bindings.clear();
 	scene.camera.follow = None;

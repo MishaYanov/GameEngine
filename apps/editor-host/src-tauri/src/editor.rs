@@ -137,6 +137,7 @@ impl EditorWorkspace {
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
+			.animator_resolver(animator_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -179,6 +180,7 @@ impl EditorWorkspace {
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
+			.animator_resolver(animator_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
 
@@ -437,6 +439,11 @@ fn file_operation<T>(operation: &'static str, result: Result<T, String>) -> Resu
 	result.inspect_err(|_| {
 		engine_logger::error!(target: "editor", "Editor file operation failed: operation={operation}");
 	})
+}
+
+fn animator_resolver(root: &Path) -> runtime::animation::AnimatorResolver {
+	let root = root.to_path_buf();
+	Arc::new(move |project, scene_id, scene| bridge::animator_graph::prepare_scene(&root, project, scene_id, scene))
 }
 
 fn input_actions_resolver(root: &Path) -> runtime::simulation_session::InputActionsResolver {
