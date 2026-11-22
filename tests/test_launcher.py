@@ -60,7 +60,7 @@ class LauncherTests(unittest.TestCase):
 	def test_engine_and_rust_checks_target_the_workspace(self):
 		directory, commands = launcher.launch_plan("engine")
 		self.assertEqual(directory, self.root)
-		self.assertEqual(commands, [[self.tools["cargo"], "run", "-p", "game"]])
+		self.assertEqual(commands, [[self.tools["cargo"], "run", "-p", "game", "--", "--player"]])
 		_, commands = launcher.launch_plan("check")
 		self.assertEqual(commands, [[self.tools["cargo"], "check", "--workspace", "--all-targets"],
 									[self.tools["cargo"], "clippy", "--workspace", "--all-targets"]])

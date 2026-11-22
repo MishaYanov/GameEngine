@@ -18,7 +18,7 @@ pub use profile::{
 
 use std::collections::HashSet;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct InputState {
 	held: HashSet<InputButton>,
 	pressed: HashSet<InputButton>,

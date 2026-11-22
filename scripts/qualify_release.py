@@ -1,4 +1,4 @@
-"""Build and verify a Windows Courtyard release candidate."""
+"""Build and verify a Windows game release candidate."""
 
 import argparse
 import json

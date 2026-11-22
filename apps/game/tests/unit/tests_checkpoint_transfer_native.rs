@@ -52,9 +52,19 @@ fn checkpoint_transfer_menu_spans_profiles() {
 	let imported = target.join("slot-2.json");
 	assert!(!imported.exists());
 	run("chapters-transfer-menu-import", &destination);
-	assert_history(&destination.0, "import", "garden_entry");
+	let mixed = history_rows(&destination.0);
+	assert_eq!(mixed.len(), 2);
+	assert_eq!(mixed[0]["direction"], "import");
+	assert_eq!(mixed[1]["direction"], "export");
+	assert!(
+		mixed
+			.iter()
+			.all(|row| row["slot"] == 2 && row["checkpoint_id"] == "garden_entry")
+	);
 	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
 	run("chapters-transfer-continue", &destination);
+	run("chapters-transfer-history-manage", &destination);
+	run("chapters-transfer-history-relaunch", &destination);
 	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
 	for name in ["slot.json", "slot-2.previous.json", "slot-3.json"] {
 		assert!(!target.join(name).exists(), "unexpected file {name}");
@@ -64,13 +74,17 @@ fn checkpoint_transfer_menu_spans_profiles() {
 }
 
 fn assert_history(profile: &Path, direction: &str, checkpoint: &str) {
-	let file = profile.join(CHAPTER_PROFILE).join("transfer-history.json");
-	let record: serde_json::Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
-	let entries = record["entries"].as_array().unwrap();
+	let entries = history_rows(profile);
 	assert_eq!(entries.len(), 1);
 	assert_eq!(entries[0]["slot"], 2);
 	assert_eq!(entries[0]["direction"], direction);
 	assert_eq!(entries[0]["checkpoint_id"], checkpoint);
+}
+
+fn history_rows(profile: &Path) -> Vec<serde_json::Value> {
+	let file = profile.join(CHAPTER_PROFILE).join("transfer-history.json");
+	let record: serde_json::Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+	record["entries"].as_array().unwrap().clone()
 }
 
 #[test]
@@ -194,6 +208,34 @@ fn packaged_checkpoint_transfer_spans_profiles() {
 	assert_eq!(fs::read(source_dir.join("slot-2.json")).unwrap(), garden);
 	assert_eq!(fs::read(source_dir.join("slot.json")).unwrap(), courtyard);
 
+	let all = source.0.join("all-history.json");
+	let slot = source.0.join("slot-2-history.json");
+	let all_command = ["--export-transfer-history", all.to_str().unwrap()];
+	assert!(execute(&source, &all_command).status.success());
+	assert!(
+		execute(
+			&source,
+			&[
+				"--export-transfer-history",
+				slot.to_str().unwrap(),
+				"--slot",
+				"2"
+			]
+		)
+			.status
+			.success()
+	);
+	let all_bytes = fs::read(&all).unwrap();
+	let all_history: serde_json::Value = serde_json::from_slice(&all_bytes).unwrap();
+	let slot_history: serde_json::Value = serde_json::from_slice(&fs::read(slot).unwrap()).unwrap();
+	assert_eq!(all_history["entries"].as_array().unwrap().len(), 2);
+	assert_eq!(all_history["entries"][0]["slot"], 1);
+	assert_eq!(all_history["entries"][1]["slot"], 2);
+	assert_eq!(slot_history["entries"].as_array().unwrap().len(), 1);
+	assert_eq!(slot_history["entries"][0], all_history["entries"][1]);
+	assert!(!execute(&source, &all_command).status.success());
+	assert_eq!(fs::read(all).unwrap(), all_bytes);
+
 	let invalid_history = b"incomplete checkpoint history";
 	fs::write(&source_history, invalid_history).unwrap();
 	let extra = source.0.join("after-history-failure.json");
@@ -249,6 +291,11 @@ pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
 			menu_keys(app, &[Key::ArrowUp, Key::ArrowUp, Key::Enter]);
 			assert_eq!(
 				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Filter: All"]
+			);
+			menu_keys(app, &[Key::ArrowDown]);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
 				["> Imported garden_entry (now)"]
 			);
 			menu_keys(app, &[Key::Enter]);
@@ -256,7 +303,36 @@ pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
 				app.player_controls.rows_with_capacity(1).unwrap(),
 				["> Imported garden_entry (now)"]
 			);
-			menu_keys(app, &[Key::ArrowDown]);
+			menu_keys(app, &[Key::ArrowRight, Key::ArrowDown]);
+			assert_menu_rows(app, &["Filter: Exports", "> No matching transfers"]);
+			menu_keys(
+				app,
+				&[Key::ArrowRight, Key::ArrowDown, Key::ArrowDown, Key::Enter],
+			);
+			assert_menu_rows(
+				app,
+				&["Slot 2 audit preview", "> Cancel", "Export 1 history rows"],
+			);
+			menu_keys(app, &[Key::Enter]);
+			assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+			menu_keys(app, &[Key::Enter, Key::ArrowRight, Key::Enter]);
+			assert_menu_rows(app, &["Exported 1 history rows"]);
+			let audit = fs::read_dir(&directory)
+				.unwrap()
+				.map(|entry| entry.unwrap().path())
+				.find(|path| {
+					path.file_name()
+						.unwrap()
+						.to_string_lossy()
+						.starts_with("history-slot-2-")
+				})
+				.unwrap();
+			let audit: serde_json::Value =
+				serde_json::from_slice(&fs::read(audit).unwrap()).unwrap();
+			assert_eq!(audit["entries"].as_array().unwrap().len(), 1);
+			assert_eq!(audit["entries"][0]["direction"], "import");
+
+			menu_keys(app, &[Key::ArrowDown, Key::ArrowDown, Key::ArrowDown]);
 			assert_eq!(
 				app.player_controls.rows_with_capacity(1).unwrap(),
 				["> Back"]
@@ -266,10 +342,142 @@ pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
 				app.player_controls.rows_with_capacity(1).unwrap(),
 				["> Transfer history"]
 			);
+			let second = directory.join("second-export");
+			fs::create_dir(&second).unwrap();
+			app.transfer_directory = Some(second);
+			assert!(
+				app.export_checkpoint_transfer(SaveSlot::Two)
+					.unwrap()
+					.starts_with("Exported slot-2-")
+			);
+			menu_keys(app, &[Key::Enter]);
+			let rows = app.player_controls.rows().unwrap();
+			assert!(rows[2].starts_with("  Exported garden_entry"));
+			assert!(rows[3].starts_with("  Imported garden_entry"));
+			menu_keys(app, &[Key::ArrowRight]);
+			let rows = app.player_controls.rows().unwrap();
+			assert!(rows[2].contains("Exported garden_entry"));
+			assert!(!rows.iter().any(|row| row.contains("Imported garden_entry")));
+			menu_keys(app, &[Key::ArrowRight]);
+			let rows = app.player_controls.rows().unwrap();
+			assert!(rows[2].contains("Imported garden_entry"));
+			assert!(!rows.iter().any(|row| row.contains("Exported garden_entry")));
+		}
+		"chapters-transfer-history-manage" => {
+			exercise_history_management(app, &profile, &directory)
+		}
+		"chapters-transfer-history-relaunch" => {
+			open_slot_actions(app, false, SaveSlot::Two);
+			menu_keys(app, &[Key::ArrowUp, Key::ArrowUp, Key::Enter]);
+			assert_menu_rows(app, &["No matching transfers", "Retention: 16"]);
 		}
 		_ => panic!("unknown checkpoint transfer phase {phase}"),
 	}
 	close_checkpoint_menu(app);
+}
+
+fn exercise_history_management(app: &mut GameApp, profile: &Path, directory: &Path) {
+	use crate::checkpoint_transfer_history::Direction;
+	app.with_checkpoint_history(|history| {
+		for index in 0..17 {
+			history.append(SaveSlot::Two, Direction::Import, format!("garden_{index}"))?;
+		}
+		history.append(SaveSlot::One, Direction::Export, "courtyard".into())
+	})
+		.unwrap();
+	let history = profile.join(CHAPTER_PROFILE).join("transfer-history.json");
+	let original = fs::read(&history).unwrap();
+	let prior_audits: Vec<_> = fs::read_dir(directory)
+		.unwrap()
+		.map(|entry| entry.unwrap().path())
+		.filter(|path| {
+			path.file_name()
+				.unwrap()
+				.to_string_lossy()
+				.starts_with("history-slot-")
+		})
+		.collect();
+
+	open_slot_actions(app, false, SaveSlot::Two);
+	menu_keys(app, &[Key::ArrowUp, Key::ArrowUp, Key::Enter]);
+	select_history_row(app, "> Retention: 64");
+	select_history_row(app, "> Keep 16 entries");
+	assert_menu_rows(app, &["> Keep History", "Remove 4 oldest entries"]);
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(fs::read(&history).unwrap(), original);
+	select_history_row(app, "> Keep 16 entries");
+	menu_keys(app, &[Key::ArrowRight, Key::Enter]);
+	assert_menu_rows(app, &["Keeping 16; removed 4"]);
+	assert!(
+		app.player_controls
+			.rows_with_capacity(72)
+			.unwrap()
+			.iter()
+			.any(|row| row.ends_with("Retention: 16"))
+	);
+	select_history_row(app, "> Export history audit");
+	menu_keys(app, &[Key::ArrowRight, Key::Enter]);
+	let audit = fs::read_dir(directory)
+		.unwrap()
+		.map(|entry| entry.unwrap().path())
+		.find(|path| {
+			path.file_name()
+				.unwrap()
+				.to_string_lossy()
+				.starts_with("history-slot-")
+				&& !prior_audits.contains(path)
+		})
+		.unwrap();
+	let audit_bytes = fs::read(&audit).unwrap();
+	let reviewed: serde_json::Value = serde_json::from_slice(&audit_bytes).unwrap();
+	assert_eq!(reviewed["entries"].as_array().unwrap().len(), 15);
+	assert_eq!(reviewed["entries"][0]["checkpoint_id"], "garden_16");
+
+	select_history_row(app, "> Review Clear History");
+	assert_eq!(
+		app.player_controls.rows_with_capacity(1).unwrap(),
+		["> Keep History"]
+	);
+	select_history_row(app, "> Slot 2");
+	assert_menu_rows(
+		app,
+		&[
+			"Slot 2: 15 entries",
+			"> Keep History",
+			"Clear Reviewed Entries",
+		],
+	);
+	let before_clear = fs::read(&history).unwrap();
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(fs::read(&history).unwrap(), before_clear);
+	select_history_row(app, "> Slot 2");
+	menu_keys(app, &[Key::ArrowRight, Key::Enter]);
+	assert_menu_rows(
+		app,
+		&["No matching transfers", "Cleared 15 transfer entries"],
+	);
+	let entries = history_rows(profile);
+	assert_eq!(entries.len(), 1);
+	assert_eq!(entries[0]["slot"], 1);
+
+	select_history_row(app, "> Review Clear History");
+	select_history_row(app, "> Current project");
+	assert_menu_rows(app, &["Current project: 1 entries", "> Keep History"]);
+	menu_keys(app, &[Key::ArrowRight, Key::Enter]);
+	assert_menu_rows(app, &["Cleared 1 transfer entries"]);
+	assert!(history_rows(profile).is_empty());
+	assert_eq!(fs::read(audit).unwrap(), audit_bytes);
+}
+
+fn select_history_row(app: &mut GameApp, label: &str) {
+	for _ in 0..70 {
+		if app.player_controls.rows_with_capacity(1).unwrap() == [label] {
+			menu_keys(app, &[Key::Enter]);
+			return;
+		}
+		menu_keys(app, &[Key::ArrowDown]);
+	}
+	panic!("History row {label} unavailable");
 }
 
 fn assert_menu_rows(app: &GameApp, expected: &[&str]) {

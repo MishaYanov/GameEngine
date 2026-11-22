@@ -21,6 +21,17 @@
   padding-inline-end: 0;
 }
 
+.warming-setting {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
+}
+
+.warming-setting p {
+  margin: 0;
+}
+
 .keymap-section {
   margin-block-end: var(--space-4);
 }

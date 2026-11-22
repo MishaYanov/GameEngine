@@ -14,7 +14,9 @@ use runtime::{SceneData, project::ProjectData, scene_catalog::SceneId};
 use super::{
 	GameApp,
 	checkpoint_controls::storage_root,
-	checkpoint_transfer_history::{Direction, HistoryEntry, TransferHistory},
+	checkpoint_transfer_history::{
+		Direction, HistoryEntry, TransferHistory, publish_audit, slot_number,
+	},
 	local_player_files::{
 		ordinary_directory, ordinary_transfer, profile_directory, transfer_entries,
 		transfer_label as visible_file_label,
@@ -220,11 +222,32 @@ impl GameApp {
 		))
 	}
 
-	pub(super) fn checkpoint_transfer_history(
+	pub(super) fn with_checkpoint_history<T>(
+		&self,
+		operation: impl FnOnce(TransferHistory<'_>) -> Result<T, String>,
+	) -> Result<T, String> {
+		let registry = self
+			.checkpoints
+			.as_ref()
+			.ok_or("Checkpoints are unavailable")?;
+		operation(TransferHistory::new(&storage_root()?, registry))
+	}
+
+	pub(super) fn export_checkpoint_history<'a>(
 		&self,
 		slot: SaveSlot,
-	) -> Result<Vec<HistoryEntry>, String> {
-		self.transfer_owner()?.history().slot(slot)
+		entries: impl IntoIterator<Item=&'a HistoryEntry>,
+	) -> Result<String, String> {
+		let stamp = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.map_err(|error| error.to_string())?
+			.as_millis();
+		let name = format!("history-slot-{}-{stamp}.json", slot_number(slot));
+		let directory = self
+			.checkpoint_transfer_directory(true)?
+			.ok_or("Checkpoint transfer folder is unavailable")?;
+		let count = publish_audit(&directory.join(&name), entries)?;
+		Ok(format!("Exported {count} history rows"))
 	}
 
 	fn check_transfer_selection(&self, file: &TransferFile) -> Result<(), String> {
@@ -256,6 +279,11 @@ pub(super) fn execute(
 		assets: &assets,
 	};
 	match command {
+		CheckpointTransfer::ExportHistory { path, slot } => {
+			let entries = owner.history().snapshot(slot)?;
+			let count = publish_audit(&path, &entries)?;
+			println!("Exported {count} history rows");
+		}
 		CheckpointTransfer::Export { slot, path } => {
 			let history = owner.export(slot, &path)?;
 			println!("Exported {}", slot.label());
@@ -283,12 +311,7 @@ pub(super) fn execute(
 }
 
 fn export_name(slot: SaveSlot, seconds: u64) -> String {
-	let number = match slot {
-		SaveSlot::One => 1,
-		SaveSlot::Two => 2,
-		SaveSlot::Three => 3,
-	};
-	format!("slot-{number}-{seconds}{SUFFIX}")
+	format!("slot-{}-{seconds}{SUFFIX}", slot_number(slot))
 }
 
 fn files_in(directory: &Path) -> Result<Vec<TransferFile>, String> {

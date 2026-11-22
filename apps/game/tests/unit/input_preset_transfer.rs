@@ -86,10 +86,10 @@ fn reviewed_swap_changes_only_input_and_keeps_the_portable_file() {
 			high_contrast: true,
 			..DisplaySettings::default()
 		},
-		audio: FeedbackMix {
-			level_percent: 60,
-			muted: true,
-		},
+		audio: serde_json::from_str::<FeedbackMix>(
+			r#"{"level_percent":60,"muted":true,"bus_percent":{"collection":25,"mechanisms":75,"completion":0}}"#,
+		)
+			.unwrap(),
 		..ControlsSettings::default()
 	};
 	destination.preferences.save(&saved).unwrap();

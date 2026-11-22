@@ -172,6 +172,88 @@ complete stored ledger. Exit 0 means accepted, 1 means rejected, 2 means held, a
 missing or expired role keeps a pending decision held. A current rejection or a rejected gate takes precedence.
 Acceptance requires both current approvals and all of the existing clean-build and independent-host gates.
 
+## Publish or verify a movable release handoff
+
+Copy `qualification.json`, `candidate.zip`, `packet.json` and `ledger.json` into an ordinary handoff root. Copy gate
+records and the files they reference into `evidence/`, keeping the relative paths from each gate record. For every role
+in the ledger with evidence, add its exact files as `signoffs/release-decision.json`, `signoffs/release-decision.sig`,
+`signoffs/qa-decision.json` or `signoffs/qa-decision.sig`. If the packet binds an attached replay, copy the three
+verified playtest files into `playtest/`.
+
+Supply the host profiles, role policy, allowed signers and optional revocations independently of the handoff. Keep each
+of those files and all private signing keys outside the handoff directory. When the policy has a revocation list, pass
+its path as `--revoked-signers` to both commands. Publish creates a fresh `handoff.json` with the relative names, sizes
+and SHA-256 hashes of up to 64 retained artifacts. Verification repeats the current ledger checks and compares the
+complete index.
+
+~~~powershell
+$policy = @('--profiles', $profiles, '--role-policy', $rolePolicy, '--allowed-signers', $allowedSigners)
+python -B scripts/release_signoff_handoff.py publish $handoff @policy
+$publishStatus = $LASTEXITCODE
+python -B scripts/release_signoff_handoff.py verify $relocatedHandoff @policy
+$verificationStatus = $LASTEXITCODE
+~~~
+
+At the destination, preserve the relative paths listed in `handoff.json` and copy that index alongside them. Create an
+empty `evidence/` directory when the review contains no gate records. Exit 0 means accepted, 1 rejected, 2 held, and 3
+invalid or changed evidence. A current rejection still takes precedence over a missing role. If a decision expires after
+publication, reconstruct the current ledger and publish a fresh handoff from reviewed evidence.
+
+## Compare current handoffs
+
+Supply both roots under the independently provisioned policy. The comparison reconstructs both indexes and rechecks
+each ledger at the same UTC instant. It writes a new JSON file outside both roots with candidate and packet SHA-256
+values, both verdicts, and sorted lists of added, removed, and changed files. Each file includes its relative path,
+byte count, and SHA-256. A comparison exit of 0 means both inputs verified and the report was written. Read the
+verdicts inside the report before making a release decision. Exit 3 means the report could not be written or an
+input failed verification, including expiration.
+
+~~~powershell
+python -B scripts/release_signoff_handoff.py compare $priorHandoff $currentHandoff $comparison @policy
+$comparisonStatus = $LASTEXITCODE
+~~~
+
+## Renew release and QA decisions
+
+1. Retain the original handoff for the audit. Create a fresh ordinary directory with exact copies of the candidate
+   and its qualification receipt. Collect current gate records and their referenced evidence in its `evidence/`
+   directory. Use the same trusted host profiles, signer policy, and role policy for every verification command.
+2. Prepare a fresh packet and review the gate results. Use the same optional `--playtest` argument throughout when
+   attaching verified playback evidence. Each reviewer records a current decision for that packet and signs it
+   with their independently provisioned key. Set `$releaseStatus` and `$qaStatus` to their actual decisions.
+3. Publish a fresh ledger using the decision and signature pairs available now. Provide one `--signoff` group for
+   each completed role. Release acceptance requires both current approvals and all qualifying gate results. A
+   missing approval leaves an otherwise passing review held.
+4. Publish and verify the new handoff. Check the verdict again from the relocated directory if someone will receive
+   the evidence there. If current evidence changes or another decision expires, repeat renewal in another directory.
+
+~~~powershell
+$receipt = Join-Path $renewedRoot 'qualification.json'
+$archive = Join-Path $renewedRoot 'candidate.zip'
+$gates = Join-Path $renewedRoot 'evidence'
+$packet = Join-Path $renewedRoot 'packet.json'
+$ledger = Join-Path $renewedRoot 'ledger.json'
+$signoffs = New-Item -ItemType Directory -Path (Join-Path $renewedRoot 'signoffs')
+$releaseDecision = Join-Path $signoffs.FullName 'release-decision.json'
+$releaseSignature = Join-Path $signoffs.FullName 'release-decision.sig'
+$qaDecision = Join-Path $signoffs.FullName 'qa-decision.json'
+$qaSignature = Join-Path $signoffs.FullName 'qa-decision.sig'
+$reviewInputs = @($receipt, $archive, $gates, $packet)
+python -B scripts/review_candidate.py prepare @reviewInputs --profiles $profiles
+python -B scripts/review_candidate.py decide @reviewInputs $releaseDecision --profiles $profiles --scope windows-player --status $releaseStatus --reviewer $releaseReviewer --reason $releaseReason
+python -B scripts/sign_release_review.py @reviewInputs $releaseDecision $releaseSignature --profiles $profiles --key $releaseKey
+python -B scripts/review_candidate.py decide @reviewInputs $qaDecision --profiles $profiles --scope windows-player --status $qaStatus --reviewer $qaReviewer --reason $qaReason
+python -B scripts/sign_release_review.py @reviewInputs $qaDecision $qaSignature --profiles $profiles --key $qaKey
+$roleInputs = @('--signoff', 'release', $releasePrincipal, $releaseDecision, $releaseSignature,
+    '--signoff', 'qa', $qaPrincipal, $qaDecision, $qaSignature)
+python -B scripts/verify_release_signoffs.py publish @reviewInputs $ledger @policy @roleInputs
+$ledgerStatus = $LASTEXITCODE
+python -B scripts/release_signoff_handoff.py publish $renewedRoot @policy
+$publishStatus = $LASTEXITCODE
+python -B scripts/release_signoff_handoff.py verify $renewedRoot @policy
+$verifyStatus = $LASTEXITCODE
+~~~
+
 ## Relevant information and resources
 
 - [Native two-process rehearsal](release-rehearsal-checklist.md) · [Approved predecessor evidence](../apps/game/fixtures/courtyard-release-learning/save-upgrade-evidence.md)

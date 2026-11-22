@@ -15,7 +15,7 @@ use crate::asset_io::{contained_file, is_link, optional_contained_file, read_bou
 const CATALOG: &str = "audio/cues.json";
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
 const MAX_SCENE_MIXES: usize = 16;
-const HEADER_BYTES: usize = 44;
+pub(crate) const HEADER_BYTES: usize = 44;
 const MAX_PCM_BYTES: usize = 16_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -191,7 +191,7 @@ pub struct CueClip(Arc<[u8]>);
 
 impl CueClip {
 	pub fn from_wave(bytes: Vec<u8>) -> Result<Self, &'static str> {
-		validate_wave(&bytes)?;
+		validate_wave(&bytes, MAX_PCM_BYTES)?;
 		Ok(Self(bytes.into()))
 	}
 
@@ -461,8 +461,8 @@ fn valid_slug(slug: &str) -> bool {
 			.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn validate_wave(wave: &[u8]) -> Result<(), &'static str> {
-	if !(HEADER_BYTES + 2..=HEADER_BYTES + MAX_PCM_BYTES).contains(&wave.len()) {
+pub(crate) fn validate_wave(wave: &[u8], max_pcm_bytes: usize) -> Result<(), &'static str> {
+	if !(HEADER_BYTES + 2..=HEADER_BYTES + max_pcm_bytes).contains(&wave.len()) {
 		return Err("Cue WAV has an invalid byte length");
 	}
 	let u16_at = |at| u16::from_le_bytes([wave[at], wave[at + 1]]);

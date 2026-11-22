@@ -301,3 +301,38 @@ pub async fn editor_apply_campaign_repair(
 	})
 	.await
 }
+
+#[tauri::command]
+pub async fn editor_preview_campaign_repair_batch(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	scene: runtime::scene_catalog::SceneId,
+	targets: Vec<courtyard_gameplay::authoring_repairs::CampaignRepairTarget>,
+) -> Result<
+	courtyard_gameplay::authoring_repairs::CampaignRepairBatch,
+	crate::editor::campaign_authoring::CampaignAuthoringError,
+> {
+	trusted_window(&window)?;
+	workspace_with_error(state, false, None, move |w| {
+		w.preview_campaign_repair_batch(expected_generation, expected_revision, &scene, &targets)
+	})
+		.await
+}
+
+#[tauri::command]
+pub async fn editor_apply_campaign_repair_batch(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	scene: runtime::scene_catalog::SceneId,
+	expected: Vec<courtyard_gameplay::authoring_repairs::CampaignRepairExpectation>,
+) -> Result<EditorSnapshotDto, crate::editor::campaign_authoring::CampaignAuthoringError> {
+	trusted_window(&window)?;
+	workspace_with_error(state, true, None, move |w| {
+		w.apply_campaign_repair_batch(expected_generation, expected_revision, &scene, &expected)
+	})
+		.await
+}

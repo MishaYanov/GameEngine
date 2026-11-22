@@ -10,6 +10,8 @@ pub(crate) mod input_preset;
 mod input_preset_menu;
 mod keyboard_menu;
 mod preferences;
+mod preset_library;
+mod preset_library_menu;
 mod save_menu;
 
 #[cfg(windows)]
@@ -24,9 +26,10 @@ use runtime::{
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use super::GameApp;
+use super::{GameApp, feedback_audio::FeedbackAudio};
 use action_keys::ActionKeyOverride;
-use audio::{AudioAction, AudioMenu, FeedbackMix};
+pub(crate) use audio::FeedbackMix;
+use audio::{AudioAction, AudioMenu};
 use display::{DisplayAction, DisplayMenu, DisplaySettings};
 use input_preset_menu::{PresetAction, PresetMenu};
 use keyboard_menu::{KeyboardAction, KeyboardMenu};
@@ -329,7 +332,17 @@ impl PlayerControls {
 		self.rows_with_layout(capacity, usize::MAX)
 	}
 
+	#[cfg(test)]
 	pub(super) fn rows_with_layout(&self, capacity: usize, columns: usize) -> Option<Vec<String>> {
+		self.rows_with_feedback(capacity, columns, &FeedbackAudio::default())
+	}
+
+	pub(super) fn rows_with_feedback(
+		&self,
+		capacity: usize,
+		columns: usize,
+		audio: &FeedbackAudio,
+	) -> Option<Vec<String>> {
 		let menu = self.menu.as_ref()?;
 		let (title, actions, focus) = match &menu.page {
 			Page::Controller { focus, draft } => (
@@ -345,7 +358,7 @@ impl PlayerControls {
 			Page::Display(display) => display.rows(),
 			Page::Keyboard(keyboard) => keyboard.rows(columns),
 			Page::Presets(presets) => presets.rows(),
-			Page::Audio(audio) => audio.rows(),
+			Page::Audio(menu) => menu.rows(audio, self.applied.display.cue_captions),
 			Page::Saves(saves) => saves.rows(),
 			Page::Main => self.main_rows(menu),
 		};
@@ -455,6 +468,16 @@ impl PlayerControls {
 }
 
 impl GameApp {
+	#[cfg(test)]
+	pub(super) fn player_controls_rows(
+		&self,
+		capacity: usize,
+		columns: usize,
+	) -> Option<Vec<String>> {
+		self.player_controls
+			.rows_with_feedback(capacity, columns, &self.feedback_audio)
+	}
+
 	pub(super) fn player_controls_key(&mut self, key: Key) -> bool {
 		self.handle_player_controls(key, PromptDevice::Keyboard)
 	}
@@ -731,16 +754,21 @@ impl GameApp {
 				self.player_controls.message = None;
 				true
 			}
-			AudioAction::Stay => false,
+			AudioAction::Stay => {
+				self.player_controls.message = None;
+				false
+			}
+			AudioAction::Audition(bus) => {
+				self.player_controls.message =
+					Some(menu.audition(&self.feedback_audio, bus).into());
+				false
+			}
 			AudioAction::Apply(mix) => {
 				// The running mix changes only once the matching local preferences are saved.
-				match self
-					.feedback_audio
-					.prepare_mix(mix.effective_percent())
-					.and_then(|prepared| {
-						self.player_controls.apply_audio(mix)?;
-						Ok(prepared)
-					}) {
+				match self.feedback_audio.prepare_mix(mix).and_then(|prepared| {
+					self.player_controls.apply_audio(mix)?;
+					Ok(prepared)
+				}) {
 					Ok(prepared) => {
 						self.feedback_audio.commit_mix(prepared);
 						self.player_controls.message = Some("Feedback audio saved".into());

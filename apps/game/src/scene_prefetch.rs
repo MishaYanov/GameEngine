@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use courtyard_gameplay::{CampaignDefinition, settings::InteractionSettings};
+use courtyard_gameplay::{COURTYARD_RUN_ID, CampaignDefinition, settings::InteractionSettings};
 use runtime::{
 	project::ProjectData,
 	scene_catalog::SceneId,
@@ -26,6 +26,9 @@ pub(super) struct PlayerPrefetch {
 
 impl PlayerPrefetch {
 	pub fn new(project: &ProjectData, root: &Path) -> Result<Option<Self>, String> {
+		if project.gameplay_module.as_deref() != Some(COURTYARD_RUN_ID) {
+			return Ok(None);
+		}
 		let Some(route) =
 			InteractionSettings::from_project(project)?.and_then(|settings| settings.campaign)
 		else {

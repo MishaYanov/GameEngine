@@ -17,6 +17,10 @@
                     type="button">Open selected scene
             </button>
         }
+        @if (reportAvailable()) {
+            <button (click)="exportWarmingReport()" [disabled]="reportPending()" type="button">Export Warming Report
+            </button>
+        }
         @if (snapshot.project.startup_scene_id === snapshot.active_scene_id) {
             <span class="startup">Startup scene</span>
         } @else {
@@ -25,6 +29,29 @@
         <button (click)="expanded.set(!expanded())" [attr.aria-expanded]="expanded()" type="button">Scene Files…
         </button>
     </div>
+    <p aria-atomic="true" class="warming-result" role="status">
+        @if (warmingResult(); as result) {
+            @for (summary of [result]; track summary.request_id) {
+                <span>
+                    @switch (summary.mode) {
+                        @case ('off') {
+                            Scene warming off for {{ summary.scene_id }}.
+                        }
+                        @case ('references') {
+                            References for {{ summary.scene_id }}:
+                            {{ summary.references_hit ? 'used' : 'loaded on demand' }}.
+                        }
+                        @case ('models') {
+                            {{ summary.scene_id }}: {{ summary.references_hit ? 'cached references' : 'on-demand references' }},
+                            {{ summary.prepared_models }} models prepared, {{ summary.adopted_models }} adopted,
+                            {{ summary.retained_bytes }} bytes reserved.
+                        }
+                    }
+                </span>
+            }
+        }
+    </p>
+    <p aria-atomic="true" class="warming-result" data-warming-report-status role="status">{{ reportStatus() }}</p>
     @if (expanded()) {
         <div class="scene-files" role="group" aria-label="Scene files">
             <label>Scene path within Assets
@@ -95,7 +122,7 @@
         }
     </fieldset>
     }
-    @if (sceneSwitch.error() ?? error(); as failure) {
+    @if (sceneSwitch.error() ?? error() ?? warmingError(); as failure) {
         <p class="error" role="alert">{{ failure }}</p>
     } @else if (sceneSwitch.message() ?? message(); as status) {
         <p class="status" role="status">{{ status }}</p>

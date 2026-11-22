@@ -1,13 +1,54 @@
 //! Local feedback audio preferences and the draft shown in Player Controls.
 
+use bridge::feedback_audio::FeedbackBus;
 use runtime::Key;
 use serde::{Deserialize, Serialize};
+
+use crate::feedback_audio::{AuditionScope, CueAuditionOutcome, CueClipSource, FeedbackAudio};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LocalBusLevels {
+	collection: u8,
+	mechanisms: u8,
+	completion: u8,
+}
+
+impl Default for LocalBusLevels {
+	fn default() -> Self {
+		Self {
+			collection: 100,
+			mechanisms: 100,
+			completion: 100,
+		}
+	}
+}
+
+impl LocalBusLevels {
+	fn percent(self, bus: FeedbackBus) -> u8 {
+		match bus {
+			FeedbackBus::Collection => self.collection,
+			FeedbackBus::Mechanisms => self.mechanisms,
+			FeedbackBus::Completion => self.completion,
+		}
+	}
+
+	fn adjust(&mut self, bus: FeedbackBus, step: i16) {
+		let level = match bus {
+			FeedbackBus::Collection => &mut self.collection,
+			FeedbackBus::Mechanisms => &mut self.mechanisms,
+			FeedbackBus::Completion => &mut self.completion,
+		};
+		*level = adjust_percent(*level, step);
+	}
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FeedbackMix {
 	pub(super) level_percent: u8,
 	pub(super) muted: bool,
+	pub(super) bus_percent: LocalBusLevels,
 }
 
 impl Default for FeedbackMix {
@@ -15,21 +56,34 @@ impl Default for FeedbackMix {
 		Self {
 			level_percent: 100,
 			muted: false,
+			bus_percent: LocalBusLevels::default(),
 		}
 	}
 }
 
 impl FeedbackMix {
-	pub(super) fn validate(self) -> Result<Self, &'static str> {
-		if self.level_percent <= 100 {
+	pub(crate) fn validate(self) -> Result<Self, &'static str> {
+		let LocalBusLevels {
+			collection,
+			mechanisms,
+			completion,
+		} = self.bus_percent;
+		if [self.level_percent, collection, mechanisms, completion]
+			.into_iter()
+			.all(|level| level <= 100)
+		{
 			Ok(self)
 		} else {
-			Err("Feedback volume must be from 0 to 100")
+			Err("Feedback audio levels must be from 0 to 100")
 		}
 	}
 
 	pub(crate) fn effective_percent(self) -> u8 {
 		if self.muted { 0 } else { self.level_percent }
+	}
+
+	pub(crate) fn category_percent(self, bus: FeedbackBus) -> u8 {
+		self.bus_percent.percent(bus)
 	}
 }
 
@@ -37,61 +91,122 @@ impl FeedbackMix {
 enum Row {
 	Volume,
 	Mute,
+	Bus(FeedbackBus),
+	RestoreDefaults,
 	Apply,
+	Test(FeedbackBus),
+	CueDetails,
 	Back,
 }
 
 pub(super) struct AudioMenu {
-	focus: Row,
+	focus: usize,
 	draft: FeedbackMix,
+	details: Option<CueDetailsMenu>,
+	audition: AuditionScope,
 }
 
 impl AudioMenu {
+	const ROWS: [Row; 12] = [
+		Row::Volume,
+		Row::Mute,
+		Row::Bus(FeedbackBus::Collection),
+		Row::Bus(FeedbackBus::Mechanisms),
+		Row::Bus(FeedbackBus::Completion),
+		Row::RestoreDefaults,
+		Row::Apply,
+		Row::Test(FeedbackBus::Collection),
+		Row::Test(FeedbackBus::Mechanisms),
+		Row::Test(FeedbackBus::Completion),
+		Row::CueDetails,
+		Row::Back,
+	];
+
 	pub(super) fn new(draft: FeedbackMix) -> Self {
 		Self {
-			focus: Row::Volume,
+			focus: 0,
 			draft,
+			details: None,
+			audition: AuditionScope::default(),
 		}
 	}
 
-	pub(super) fn rows(&self) -> (String, Vec<String>, usize) {
+	pub(super) fn rows(
+		&self,
+		audio: &FeedbackAudio,
+		captions_enabled: bool,
+	) -> (String, Vec<String>, usize) {
+		match &self.details {
+			Some(details) => details.rows(audio, captions_enabled),
+			None => self.settings_rows(),
+		}
+	}
+
+	fn settings_rows(&self) -> (String, Vec<String>, usize) {
 		let mute = if self.draft.muted { "On" } else { "Off" };
 		(
 			"Feedback Audio".into(),
-			vec![
-				format!("Volume: {}%", self.draft.level_percent),
-				format!("Mute: {mute}"),
-				"Apply".into(),
-				"Back".into(),
-			],
-			self.focus as usize,
+			Self::ROWS
+				.into_iter()
+				.map(|row| match row {
+					Row::Volume => format!("Volume: {}%", self.draft.level_percent),
+					Row::Mute => format!("Mute: {mute}"),
+					Row::Bus(bus) => {
+						format!("{}: {}%", bus_label(bus), self.draft.category_percent(bus))
+					}
+					Row::RestoreDefaults => "Restore Category Defaults".into(),
+					Row::Apply => "Apply".into(),
+					Row::Test(bus) => format!("Test {}", bus_label(bus)),
+					Row::CueDetails => "Cue Details".into(),
+					Row::Back => "Back".into(),
+				})
+				.collect(),
+			self.focus,
 		)
 	}
 
+	pub(super) fn audition(&self, audio: &FeedbackAudio, bus: FeedbackBus) -> &'static str {
+		match audio.audition(bus, &self.audition) {
+			#[cfg(windows)]
+			CueAuditionOutcome::Submitted => "Cue test submitted",
+			CueAuditionOutcome::SilentMix => "Cue gain is zero",
+			CueAuditionOutcome::MissingClip => "No clip assigned",
+			CueAuditionOutcome::OutputUnavailable => "Queue unavailable",
+		}
+	}
+
 	pub(super) fn key(&mut self, key: Key) -> AudioAction {
+		if let Some(details) = &mut self.details {
+			if details.back_requested(key) {
+				self.details = None;
+			}
+			return AudioAction::Stay;
+		}
+		let row = Self::ROWS[self.focus];
 		match key {
 			Key::Escape => return AudioAction::Back,
 			Key::ArrowUp | Key::ArrowDown => {
-				let rows = [Row::Volume, Row::Mute, Row::Apply, Row::Back];
-				self.focus = rows[super::advance_row(self.focus as usize, rows.len(), key)];
+				self.focus = super::advance_row(self.focus, Self::ROWS.len(), key);
 			}
-			Key::ArrowLeft | Key::ArrowRight => match self.focus {
-				Row::Volume => {
-					let volume = self.draft.level_percent;
-					self.draft.level_percent = if key == Key::ArrowRight {
-						volume.saturating_add(10).min(100)
-					} else {
-						volume.saturating_sub(10)
-					};
+			Key::ArrowLeft | Key::ArrowRight => {
+				let step = if key == Key::ArrowRight { 10 } else { -10 };
+				match row {
+					Row::Volume => {
+						self.draft.level_percent = adjust_percent(self.draft.level_percent, step);
+					}
+					Row::Mute => self.draft.muted = !self.draft.muted,
+					Row::Bus(bus) => self.draft.bus_percent.adjust(bus, step),
+					_ => {}
 				}
+			}
+			Key::Enter => match row {
 				Row::Mute => self.draft.muted = !self.draft.muted,
-				Row::Apply | Row::Back => {}
-			},
-			Key::Enter => match self.focus {
-				Row::Volume => {}
-				Row::Mute => self.draft.muted = !self.draft.muted,
+				Row::RestoreDefaults => self.draft.bus_percent = LocalBusLevels::default(),
 				Row::Apply => return AudioAction::Apply(self.draft),
+				Row::Test(bus) => return AudioAction::Audition(bus),
+				Row::CueDetails => self.details = Some(CueDetailsMenu::default()),
 				Row::Back => return AudioAction::Back,
+				_ => {}
 			},
 			_ => {}
 		}
@@ -99,9 +214,77 @@ impl AudioMenu {
 	}
 }
 
+#[derive(Default)]
+struct CueDetailsMenu {
+	focus: usize,
+	category: usize,
+}
+
+impl CueDetailsMenu {
+	const CATEGORIES: [FeedbackBus; 3] = [
+		FeedbackBus::Collection,
+		FeedbackBus::Mechanisms,
+		FeedbackBus::Completion,
+	];
+	const ROW_COUNT: usize = 9;
+
+	fn rows(&self, audio: &FeedbackAudio, captions_enabled: bool) -> (String, Vec<String>, usize) {
+		let bus = Self::CATEGORIES[self.category];
+		let details = audio.cue_details(bus);
+		let clip = match details.clip {
+			CueClipSource::Authored => "Authored",
+			CueClipSource::BuiltIn => "Built-in",
+			CueClipSource::Missing => "Missing",
+		};
+		let captions = if captions_enabled { "On" } else { "Off" };
+		let rows: [String; Self::ROW_COUNT] = [
+			format!("Category: {}", bus_label(bus)),
+			format!("Master: {}%", details.factors.master_percent),
+			format!("Local: {}%", details.factors.local_percent),
+			format!("Project: {}%", details.factors.project_percent),
+			format!("Scene: {}%", details.factors.scene_percent),
+			format!("Resolved: {}%", details.resolved_percent),
+			format!("Clip: {clip}"),
+			format!("Cue captions: {captions}"),
+			"Back".into(),
+		];
+		("Cue Details".into(), rows.into(), self.focus)
+	}
+
+	fn back_requested(&mut self, key: Key) -> bool {
+		match key {
+			Key::Escape => return true,
+			Key::Enter if self.focus == Self::ROW_COUNT - 1 => return true,
+			Key::ArrowUp | Key::ArrowDown => {
+				self.focus = super::advance_row(self.focus, Self::ROW_COUNT, key);
+			}
+			Key::ArrowLeft | Key::ArrowRight | Key::Enter if self.focus == 0 => {
+				let count = Self::CATEGORIES.len();
+				let step = if key == Key::ArrowLeft { count - 1 } else { 1 };
+				self.category = (self.category + step) % count;
+			}
+			_ => {}
+		}
+		false
+	}
+}
+
+fn adjust_percent(level: u8, step: i16) -> u8 {
+	(i16::from(level) + step).clamp(0, 100) as u8
+}
+
+fn bus_label(bus: FeedbackBus) -> &'static str {
+	match bus {
+		FeedbackBus::Collection => "Collection",
+		FeedbackBus::Mechanisms => "Mechanisms",
+		FeedbackBus::Completion => "Completion",
+	}
+}
+
 pub(super) enum AudioAction {
 	Stay,
 	Apply(FeedbackMix),
+	Audition(FeedbackBus),
 	Back,
 }
 

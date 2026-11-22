@@ -120,9 +120,13 @@ fn feedback_audio_apply_persists_level_beneath_mute_without_changing_other_prefe
 	for _ in 0..7 {
 		app.player_controls_key(Key::ArrowLeft);
 	}
-	for key in [Key::ArrowDown, Key::Enter, Key::ArrowDown, Key::Enter] {
+	for key in [Key::ArrowDown, Key::Enter] {
 		app.player_controls_key(key);
 	}
+	for _ in 0..5 {
+		app.player_controls_key(Key::ArrowDown);
+	}
+	app.player_controls_key(Key::Enter);
 
 	let prefs = app.player_controls.preferences.as_ref().unwrap();
 	let saved = prefs.load().unwrap();
@@ -137,12 +141,62 @@ fn feedback_audio_apply_persists_level_beneath_mute_without_changing_other_prefe
 
 	let mut malformed =
 		serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
-	assert_eq!(malformed["schema_version"], 4);
+	assert_eq!(malformed["schema_version"], 5);
 	malformed["audio"]["level_percent"] = 101.into();
 	let malformed = serde_json::to_vec(&malformed).unwrap();
 	fs::write(&path, &malformed).unwrap();
 	assert!(prefs.load().is_err());
 	assert_eq!(fs::read(&path).unwrap(), malformed);
+}
+
+#[test]
+fn v4_migrates_bus_levels_only_when_applied_and_v5_requires_three_valid_values() {
+	use bridge::feedback_audio::FeedbackBus;
+
+	let root = Scratch::new();
+	let prefs = Preferences::test_profile(root.path());
+	let path = prefs.folder(true).unwrap().unwrap().join(&prefs.filename);
+	let legacy = br#"{"schema_version":4,"movement":"arrows","controller":{"jump":"a","interact":"b"},"display":{"text_size":"large","high_contrast":false,"cue_captions":true},"actions":[],"audio":{"level_percent":73,"muted":true}}"#;
+	fs::write(&path, legacy).unwrap();
+
+	let mut settings = prefs.load().unwrap();
+	assert_eq!(fs::read(&path).unwrap(), legacy);
+	assert_eq!(settings.audio.level_percent, 73);
+	assert!(settings.audio.muted);
+	for bus in [
+		FeedbackBus::Collection,
+		FeedbackBus::Mechanisms,
+		FeedbackBus::Completion,
+	] {
+		assert_eq!(settings.audio.category_percent(bus), 100);
+	}
+
+	settings.audio = serde_json::from_value(serde_json::json!({
+		"level_percent": 73,
+		"muted": true,
+		"bus_percent": { "collection": 0, "mechanisms": 90, "completion": 40 }
+	}))
+		.unwrap();
+	prefs.save(&settings).unwrap();
+	assert_eq!(prefs.load().unwrap(), settings);
+
+	let persisted: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+	assert_eq!(persisted["schema_version"], 5);
+	assert_eq!(persisted["audio"]["bus_percent"]["collection"], 0);
+	assert_eq!(persisted["audio"]["bus_percent"]["mechanisms"], 90);
+	assert_eq!(persisted["audio"]["bus_percent"]["completion"], 40);
+
+	let mut invalid = persisted.clone();
+	invalid["audio"]["bus_percent"]["completion"] = 101.into();
+	fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+	assert!(prefs.load().is_err());
+	let mut missing = persisted;
+	missing["audio"]["bus_percent"]
+		.as_object_mut()
+		.unwrap()
+		.remove("completion");
+	fs::write(&path, serde_json::to_vec(&missing).unwrap()).unwrap();
+	assert!(prefs.load().is_err());
 }
 
 #[test]
@@ -174,7 +228,7 @@ fn reads_v1_without_rewriting_and_v2_persists_a_remap() {
 }
 
 #[test]
-fn display_settings_promote_v2_to_v4_only_on_apply_and_preserve_other_fields() {
+fn display_settings_promote_v2_to_current_only_on_apply_and_preserve_other_fields() {
 	use super::super::{PlayerControls, display::TextSize};
 	use runtime::input::FaceButton;
 
@@ -212,7 +266,7 @@ fn display_settings_promote_v2_to_v4_only_on_apply_and_preserve_other_fields() {
 	assert_eq!(prefs.load().unwrap().movement, Preset::Arrows);
 	assert_eq!(prefs.load().unwrap().controller, controller);
 	let mut bad = serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
-	assert_eq!(bad["schema_version"], 4);
+	assert_eq!(bad["schema_version"], 5);
 	bad["display"]["text_size"] = "huge".into();
 	let bad = serde_json::to_vec(&bad).unwrap();
 	fs::write(&path, &bad).unwrap();
@@ -221,7 +275,7 @@ fn display_settings_promote_v2_to_v4_only_on_apply_and_preserve_other_fields() {
 }
 
 #[test]
-fn v3_loads_unchanged_and_explicit_keyboard_apply_persists_a_v4_draft() {
+fn v3_loads_unchanged_and_explicit_keyboard_apply_persists_the_current_record() {
 	use super::super::{GameApp, Key};
 	let root = Scratch::new();
 	let prefs = Preferences {
@@ -271,7 +325,7 @@ fn v3_loads_unchanged_and_explicit_keyboard_apply_persists_a_v4_draft() {
 	);
 	let persisted = fs::read(&path).unwrap();
 	let record: serde_json::Value = serde_json::from_slice(&persisted).unwrap();
-	assert_eq!(record["schema_version"], 4);
+	assert_eq!(record["schema_version"], 5);
 	assert_eq!(record["actions"][0]["action_id"], "interact");
 	assert_eq!(record["display"]["text_size"], "extra_large");
 	assert_eq!(record["controller"]["interact"], "b");

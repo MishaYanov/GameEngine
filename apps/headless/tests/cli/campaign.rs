@@ -83,8 +83,8 @@ fn authored_chapters_advance_independently_and_restart_from_the_first_course() {
 }
 
 #[test]
-fn renamed_and_repaired_campaign_replays_identically_after_compiler_staging() {
-	use courtyard_gameplay::authoring_repairs::sensor_repairs;
+fn renamed_and_repaired_campaign_batch_replays_identically_after_compiler_staging() {
+	use courtyard_gameplay::authoring_repairs::distinct_sensor_repairs;
 	use engine_core::{scene_catalog::SceneId, scene_data::ColliderData};
 
 	let fixture = Fixture::new();
@@ -111,24 +111,31 @@ fn renamed_and_repaired_campaign_replays_identically_after_compiler_staging() {
 	}
 	let garden_path = assets.join("scenes/chapter-garden.json");
 	let mut garden = SceneData::from_json(&fs::read_to_string(&garden_path).unwrap()).unwrap();
-	let trigger = garden
-		.entities
-		.iter()
-		.position(|entity| entity.key.as_str() == "garden-exit-trigger")
-		.unwrap();
-	match garden.entities[trigger].collider.as_mut().unwrap() {
-		ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
-			interaction.sensor = false;
+	for key in ["garden-key-trigger", "garden-exit-trigger"] {
+		let entity = garden
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key.as_str() == key)
+			.unwrap();
+		match entity.collider.as_mut().unwrap() {
+			ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+				interaction.sensor = false;
+			}
 		}
 	}
 	fs::write(&garden_path, garden.to_json().unwrap()).unwrap();
 	assert!(compiler::prepare_project(&authored, &assets).is_err());
 	let garden_id = SceneId::new("garden").unwrap();
-	let repair = sensor_repairs(&authored, &garden_id, &garden)
-		.next()
-		.unwrap();
-	assert_eq!(garden.entities[trigger].key, repair.target.entity_key);
-	garden.entities[trigger].collider = Some(repair.after);
+	let repairs = distinct_sensor_repairs(&authored, &garden_id, &garden);
+	assert_eq!(repairs.len(), 2);
+	for repair in repairs {
+		let entity = garden
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key == repair.target.entity_key)
+			.unwrap();
+		entity.collider = Some(repair.after);
+	}
 	fs::write(&garden_path, garden.to_json().unwrap()).unwrap();
 	let prepared = compiler::prepare_project(&authored, &assets).unwrap();
 	let staged =

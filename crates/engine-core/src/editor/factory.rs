@@ -9,8 +9,8 @@ use crate::camera_input::CameraIntent;
 use crate::{
 	EntityKey,
 	command::{
-		CommandDescriptorDto, EditorCommandDto, EditorCommandRequest, SceneBindingTarget,
-		TransformDto,
+		CommandDescriptorDto, EditorCommandDto, EditorCommandRequest, MAX_COLLIDER_UPDATES,
+		SceneBindingTarget, TransformDto,
 	},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, SceneData, validate_model_path},
 };
@@ -154,6 +154,21 @@ impl CommandFactory {
 				validate_key(key)?;
 				if let Some(collider) = collider {
 					collider.validate()?;
+				}
+			}
+			EditorCommandDto::SetColliders { updates } => {
+				if !(2..=MAX_COLLIDER_UPDATES).contains(&updates.len()) {
+					return Err(format!(
+						"Collider updates need two to {MAX_COLLIDER_UPDATES} existing colliders"
+					));
+				}
+				let mut targets = HashSet::with_capacity(updates.len());
+				for update in updates {
+					validate_key(&update.key)?;
+					if !targets.insert(&update.key) {
+						return Err("Collider updates must target distinct entities".into());
+					}
+					update.collider.validate()?;
 				}
 			}
 			EditorCommandDto::UpsertLight { light } => {
@@ -414,6 +429,13 @@ impl CommandFactory {
 				false,
 			),
 			("set_collider", "Set collider", "collision", true, false),
+			(
+				"set_colliders",
+				"Update colliders",
+				"collision",
+				true,
+				false,
+			),
 			(
 				"set_scene_binding",
 				"Set scene binding",

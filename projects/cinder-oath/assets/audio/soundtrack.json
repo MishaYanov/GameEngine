@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "music": "audio/the-vault.wav",
+  "effects": {
+    "swing": "audio/blade-swing.wav",
+    "hit": "audio/blade-hit.wav",
+    "hurt": "audio/blade-hurt.wav",
+    "victory": "audio/blade-victory.wav",
+    "defeat": "audio/blade-defeat.wav"
+  }
+}

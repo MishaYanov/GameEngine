@@ -5,6 +5,7 @@ import {vi} from 'vitest';
 import type {
     CampaignDefinition,
     CampaignDiagnosticReport,
+    CampaignRepairBatch,
     CampaignRepairPreview,
     CampaignRepairTarget,
     EditorCommand,
@@ -20,6 +21,7 @@ import {ViewportEditorService} from '../../../../core/editor/viewport-editor.ser
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
+import {CampaignRepairQueue} from './campaign-repair-queue';
 import {CameraSettings} from './camera-settings';
 import {GameplaySettings} from './gameplay-settings';
 
@@ -125,6 +127,25 @@ describe('game settings dialogs', () => {
             current.update(value => ({...value, revision: value.revision + 1, dirty: true}));
             return current();
         });
+        const previewCampaignRepairBatch = vi.fn(async (
+            scene: string, targets: readonly CampaignRepairTarget[], _generation: number, nativeGeneration: number, revision: number,
+        ): Promise<CampaignRepairBatch> => ({
+            scene_id: scene, workspace_generation: nativeGeneration, revision,
+            repairs: targets.map(target => ({
+                target,
+                before: {kind: 'sphere', radius: 0.5, offset: [0, 0, 0]},
+                after: {
+                    kind: 'sphere', radius: 0.5, offset: [0, 0, 0],
+                    interaction: {sensor: true, layers: 1, mask: 4294967295}
+                },
+            })),
+        }));
+        const applyCampaignRepairBatch = vi.fn(async (
+            _scene: string, _repairs: readonly CampaignRepairPreview[], _generation: number, _native: number, _revision: number,
+        ) => {
+            current.update(value => ({...value, revision: value.revision + 1, dirty: true}));
+            return current();
+        });
         const applyCampaign = vi.fn(async (
             definition: CampaignDefinition, _generation: number, _nativeGeneration: number, _revision: number,
         ) => {
@@ -150,6 +171,7 @@ describe('game settings dialogs', () => {
             close: vi.fn(async (_: string) => undefined),
         };
         TestBed.configureTestingModule({providers: [
+                CampaignRepairQueue,
             {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
             {provide: EditorService, useValue: {
                 nativeAvailable: true, snapshot: current, workspaceGeneration: generation, busy: signal(false),
@@ -160,6 +182,8 @@ describe('game settings dialogs', () => {
                     applyCampaign,
                     previewCampaignRepair,
                     applyCampaignRepair,
+                    previewCampaignRepairBatch,
+                    applyCampaignRepairBatch,
                     cameraPreview: new CameraPreviewController(previewApi),
             }},
                 {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 42})}},
@@ -207,6 +231,8 @@ describe('game settings dialogs', () => {
             diagnoseCampaign,
             previewCampaignRepair,
             applyCampaignRepair,
+            previewCampaignRepairBatch,
+            applyCampaignRepairBatch,
             switchScene,
             applyCampaign
         };
@@ -405,6 +431,85 @@ describe('game settings dialogs', () => {
         expect(panel.applyCampaign).not.toHaveBeenCalled();
     });
 
+    it('keeps distinct registered campaign scenes in order and resets on workspace replacement', async () => {
+        const panel = await setup('campaign');
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [
+                {scene_id: 'garden', message: 'First problem'},
+                {scene_id: 'missing', message: 'Missing scene'},
+                {scene_id: 'main', message: 'Second problem'},
+                {scene_id: null, message: 'Project problem'},
+                {scene_id: 'garden', message: 'Additional problem'},
+            ],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        const queue = () => panel.root.querySelector('section[aria-label="Campaign repair queue"]');
+        const entries = [...queue()!.querySelectorAll('li')].map(row => row.textContent.trim());
+        expect(entries).toHaveLength(2);
+        expect(entries[0]).toContain('scenes/main.json');
+        expect(entries[1]).toContain('scenes/garden.json');
+        panel.current.update(value => ({
+            ...value,
+            scenes: value.scenes.filter(scene => scene.id !== 'garden'),
+        }));
+        await panel.fixture.whenStable();
+        expect(queue()!.querySelectorAll('button')).toHaveLength(0);
+        panel.generation.set(2);
+        await panel.fixture.whenStable();
+        expect(queue()).toBeNull();
+    });
+
+    it('restores the campaign draft after a canceled queued switch and checks freshly after opening', async () => {
+        const panel = await setup('campaign');
+        const target: CampaignRepairTarget = {scene_id: 'garden', role: 'exit_trigger', entity_key: 'garden-exit'};
+        const issue = {scene_id: 'garden', message: 'Exit needs a sensor', repair: target};
+        await panel.change('Chapter label', 'Keep this draft');
+        panel.diagnoseCampaign.mockResolvedValueOnce({workspace_generation: 42, revision: 7, issues: [issue]});
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+
+        panel.switchScene.mockResolvedValueOnce(false);
+        panel.button('Check in scene').click();
+        await panel.fixture.whenStable();
+        panel.button('Discard Draft and Inspect').click();
+        await panel.fixture.whenStable();
+        expect(panel.field('Chapter label').value).toBe('Keep this draft');
+        expect(panel.current().active_scene_id).toBe('main');
+        expect(panel.diagnoseCampaign).toHaveBeenCalledTimes(1);
+        expect(panel.button('Review Repair')).toBeUndefined();
+
+        panel.switchScene.mockImplementationOnce(async sceneId => {
+            panel.current.update(value => ({...value, active_scene_id: sceneId, revision: 8}));
+            return true;
+        });
+        panel.diagnoseCampaign.mockResolvedValueOnce({workspace_generation: 42, revision: 8, issues: [issue]});
+        panel.button('Check in scene').click();
+        await panel.fixture.whenStable();
+        panel.button('Discard Draft and Inspect').click();
+        await panel.fixture.whenStable();
+        expect(panel.field('Chapter label').value).toBe('Main');
+        expect(panel.campaignGeneration).toHaveBeenLastCalledWith(1, 8);
+        expect(panel.diagnoseCampaign).toHaveBeenLastCalledWith(expect.any(Object), 1, 42, 8);
+        await vi.waitFor(() => expect(panel.button('Review Repair')).toBeDefined());
+        panel.button('Review Repair').click();
+        await panel.fixture.whenStable();
+        expect(panel.previewCampaignRepair).toHaveBeenCalledExactlyOnceWith(target, 1, 42, 8);
+        let finishCheck!: (report: CampaignDiagnosticReport) => void;
+        panel.diagnoseCampaign.mockReturnValueOnce(new Promise(resolve => {
+            finishCheck = resolve;
+        }));
+        panel.button('Apply Repair').click();
+        await vi.waitFor(() => {
+            expect(panel.diagnoseCampaign).toHaveBeenLastCalledWith(expect.any(Object), 1, 42, 9);
+            expect(panel.button('Check Campaign').disabled).toBe(true);
+        });
+        finishCheck({workspace_generation: 42, revision: 9, issues: []});
+        await vi.waitFor(() => expect(document.activeElement).toBe(panel.button('Check Campaign')));
+        expect(panel.root.textContent).toContain('No queued scenes.');
+    });
+
     it('previews a typed sensor repair with safe focus and applies exactly once after confirmation', async () => {
         const panel = await setup('campaign');
         const target: CampaignRepairTarget = {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'};
@@ -451,6 +556,73 @@ describe('game settings dialogs', () => {
         expect(panel.applyCampaign).not.toHaveBeenCalled();
         expect(document.activeElement).toBe(panel.button('Check Campaign'));
         expect(panel.root.textContent).toContain('Trigger repaired.');
+    });
+
+    it('reviews both trigger colliders and sends one batch from the accessible confirmation', async () => {
+        const panel = await setup('campaign');
+        const targets: CampaignRepairTarget[] = [
+            {scene_id: 'main', role: 'key_trigger', entity_key: 'key-sensor'},
+            {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'},
+        ];
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [{scene_id: 'main', message: 'Both triggers need sensors.', repair_batch: targets}],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        panel.button('Review Repairs').click();
+        await panel.fixture.whenStable();
+        const dialog = panel.root.querySelector<HTMLDialogElement>('dialog[open]')!;
+        const review = dialog.querySelector('section[aria-label="Review campaign repair"]')!;
+        expect(document.activeElement).toBe(panel.button('Keep Current'));
+        expect(review.textContent).toContain('Key trigger (key-sensor)');
+        expect(review.textContent).toContain('Exit trigger (exit-sensor)');
+        expect(review.querySelectorAll('ul[aria-label="Reviewed triggers"] > li')).toHaveLength(2);
+        expect((await axe.run(dialog, {rules: {'color-contrast': {enabled: false}}})).violations).toEqual([]);
+        panel.button('Keep Current').click();
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaignRepairBatch).not.toHaveBeenCalled();
+        panel.button('Review Repairs').click();
+        await panel.fixture.whenStable();
+        panel.button('Apply Repairs').click();
+        await panel.fixture.whenStable();
+        expect(panel.previewCampaignRepairBatch).toHaveBeenLastCalledWith('main', targets, 1, 42, 7);
+        expect(panel.applyCampaignRepairBatch).toHaveBeenCalledOnce();
+        const [scene, repairs, local, native, revision] = panel.applyCampaignRepairBatch.mock.calls[0];
+        expect([scene, local, native, revision]).toEqual(['main', 1, 42, 7]);
+        expect(repairs.map(row => row.target)).toEqual(targets);
+        expect(panel.applyCampaignRepair).not.toHaveBeenCalled();
+        expect(panel.current().revision).toBe(8);
+        expect(document.activeElement).toBe(panel.button('Check Campaign'));
+    });
+
+    it('keeps a mismatched batch response out of confirmation and focuses the review error', async () => {
+        const panel = await setup('campaign');
+        const targets: CampaignRepairTarget[] = [
+            {scene_id: 'main', role: 'key_trigger', entity_key: 'key-sensor'},
+            {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'},
+        ];
+        const collider = {kind: 'sphere', radius: 0.5, offset: [0, 0, 0]} as const;
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [{scene_id: 'main', message: 'Both triggers need sensors.', repair_batch: targets}],
+        });
+        panel.previewCampaignRepairBatch.mockResolvedValueOnce({
+            scene_id: 'main', workspace_generation: 42, revision: 7,
+            repairs: [...targets].reverse().map(target => ({target, before: collider, after: collider})),
+        });
+
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        panel.button('Review Repairs').click();
+        await panel.fixture.whenStable();
+
+        const failure = panel.root.querySelector('dialog [role="alert"]');
+        expect(failure?.textContent).toContain('The repair preview does not match the reviewed triggers.');
+        expect(document.activeElement).toBe(failure);
+        expect(panel.button('Apply Repairs')).toBeUndefined();
+        expect(panel.applyCampaignRepairBatch).not.toHaveBeenCalled();
+        expect(panel.current().revision).toBe(7);
     });
 
     it('keeps the campaign draft when a delayed repair preview is stale', async () => {

@@ -69,7 +69,7 @@ impl Closure<'_> {
 				module_project.gameplay_module = gameplay.module.clone();
 				module_project.gameplay_settings = None;
 				let references =
-					courtyard_gameplay::resolve(&module_project)?.prefab_references(settings)?;
+					gameplay_catalog::resolve(&module_project)?.prefab_references(settings)?;
 				if references.entities != gameplay.entity_references
 					|| references.scenes != gameplay.scene_references
 				{

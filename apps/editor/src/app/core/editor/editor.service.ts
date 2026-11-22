@@ -34,6 +34,7 @@ import type {
     BuildLaunchResult,
     CampaignDefinition,
     CampaignDiagnosticReport,
+    CampaignRepairBatch,
     CampaignRepairPreview,
     CampaignRepairTarget,
     CollisionSnapshot,
@@ -200,8 +201,21 @@ export class EditorService {
         });
     }
 
-    warmScene(sceneId: SceneId | null, expectedRevision: number, expectedGeneration: number): Promise<void> {
-        return this.native<void>('editor_warm_scene', {sceneId, expectedRevision, expectedGeneration});
+    setSceneWarmingMode(mode: import('./viewport-editor.models').EditorWarmingMode, expectedGeneration: number): Promise<number> {
+        return this.native<number>('editor_set_scene_warming_mode', {mode, expectedGeneration});
+    }
+
+    exportWarmingReport(expectedGeneration: number): Promise<number | null> {
+        return this.native<number | null>('editor_export_warming_report', {expectedGeneration});
+    }
+
+    warmScene(sceneId: SceneId | null, expectedRevision: number, expectedGeneration: number, expectedModeRevision: number): Promise<void> {
+        return this.native<void>('editor_warm_scene', {
+            sceneId,
+            expectedRevision,
+            expectedGeneration,
+            expectedModeRevision
+        });
     }
 
     switchScene(sceneId: SceneId): Promise<EditorSnapshot> {
@@ -372,6 +386,37 @@ export class EditorService {
     ): Promise<EditorSnapshot> {
         return this.snapshotOperation('editor_apply_campaign_repair', {
             target: preview.target, expectedCollider: preview.before,
+            expectedGeneration: expectedNativeGeneration,
+        }, false, {expectedGeneration, expectedRevision});
+    }
+
+    previewCampaignRepairBatch(
+        scene: SceneId,
+        targets: readonly CampaignRepairTarget[],
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<CampaignRepairBatch> {
+        const operation = 'editor_preview_campaign_repair_batch';
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(expectedGeneration);
+            const batch = await this.native<CampaignRepairBatch>(operation, {
+                scene, targets, expectedGeneration: expectedNativeGeneration, expectedRevision,
+            });
+            this.requireGeneration(expectedGeneration);
+            return batch;
+        }, false, expectedGeneration);
+    }
+
+    applyCampaignRepairBatch(
+        scene: SceneId,
+        rows: readonly CampaignRepairPreview[],
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_apply_campaign_repair_batch', {
+            scene, expected: rows.map(({target, before}) => ({target, before})),
             expectedGeneration: expectedNativeGeneration,
         }, false, {expectedGeneration, expectedRevision});
     }

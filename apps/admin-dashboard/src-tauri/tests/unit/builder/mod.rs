@@ -11,6 +11,8 @@ fn fixture(label: &str) -> (PathBuf, PathBuf) {
 		("crates/runtime", "runtime"),
 		("crates/bridge", "bridge"),
 		("crates/engine-core", "engine-core"),
+		("crates/gameplay-catalog", "gameplay-catalog"),
+		("crates/cinder-oath-gameplay", "cinder-oath-gameplay"),
 		("crates/courtyard-gameplay", "courtyard-gameplay"),
 	] {
 		fs::create_dir_all(source.join(folder).join("src")).unwrap();
@@ -32,9 +34,10 @@ fn fixture(label: &str) -> (PathBuf, PathBuf) {
 		)
 		.unwrap();
 	}
-	fs::create_dir_all(source.join("apps/game/assets")).unwrap();
-	fs::write(source.join("apps/game/assets/sample.png"), b"fixture").unwrap();
-	fs::write(source.join("apps/game/assets/.env"), b"excluded").unwrap();
+	let assets = source.join("projects/cinder-oath/assets");
+	fs::create_dir_all(&assets).unwrap();
+	fs::write(assets.join("sample.png"), b"fixture").unwrap();
+	fs::write(assets.join(".env"), b"excluded").unwrap();
 	fs::create_dir_all(source.join("crates/renderer/shaders")).unwrap();
 	fs::write(source.join("crates/renderer/build.rs"), "fn main() {}").unwrap();
 	(root, source)

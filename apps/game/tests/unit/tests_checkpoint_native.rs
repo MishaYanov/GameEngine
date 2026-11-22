@@ -209,6 +209,48 @@ fn chapter_feedback_mix_follows_scene_commit_and_checkpoint_restore() {
 	run_isolated_phase(TEST, "chapters-audio-continue", &profile, Some(&manifest));
 }
 
+#[test]
+#[ignore = "requires native Windows Vulkan and a chaptered fixture with a version 2 feedback catalog"]
+fn local_feedback_categories_persist_through_scene_changes_and_restore() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str = "checkpoint_native_tests::local_feedback_categories_persist_through_scene_changes_and_restore";
+	let manifest = std::env::var_os("GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT")
+		.map(PathBuf::from)
+		.expect("set GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT to the chaptered fixture project.json");
+	let profile = ProfileDir::new();
+	for phase in [
+		"chapters-audio-levels-save",
+		"chapters-audio-levels-continue",
+	] {
+		run_isolated_phase(TEST, phase, &profile, Some(&manifest));
+	}
+}
+
+#[test]
+#[ignore = "requires native Windows Vulkan and a chaptered fixture with a version 2 feedback catalog"]
+fn feedback_diagnostics_and_auditions_use_the_committed_garden_mix() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str =
+		"checkpoint_native_tests::feedback_diagnostics_and_auditions_use_the_committed_garden_mix";
+	let manifest = std::env::var_os("GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT")
+		.map(PathBuf::from)
+		.expect("set GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT to the chaptered fixture project.json");
+	let profile = ProfileDir::new();
+	for phase in ["chapters-audio-levels-save", "chapters-audio-audition"] {
+		run_isolated_phase(TEST, phase, &profile, Some(&manifest));
+	}
+	println!(
+		"{}",
+		fs::read_to_string(profile.0.join("cue-audition-evidence.txt")).unwrap()
+	);
+}
+
 struct NativePhase {
 	phase: String,
 	completed: bool,
@@ -260,7 +302,8 @@ impl ApplicationHandler for NativePhase {
 		app.input_profile_override = input_profile_override;
 		app.standalone_runtime = true;
 		app.installed_project = true;
-		app.smoke_test = self.phase.starts_with("chapters-audio-");
+		app.smoke_test =
+			self.phase.starts_with("chapters-audio-") && self.phase != "chapters-audio-audition";
 		app.initialize_window(window, assets).unwrap();
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
 		match self.phase.as_str() {
@@ -275,14 +318,21 @@ impl ApplicationHandler for NativePhase {
 			"deny" => reject_unlisted_slot(&mut app),
 			"slots-save" => save_independent_slots(&mut app),
 			"slots-restore" => restore_independent_slots(&mut app),
-			"chapters-save" => save_chapter_slots(&mut app),
+			"chapters-save" => save_chapter_slots(&mut app, |_| {}),
 			"chapters-audio-save" | "chapters-audio-continue" => {
 				check_chapter_audio(&mut app, &self.phase);
 			}
+			"chapters-audio-levels-save" | "chapters-audio-levels-continue" => {
+				check_player_bus_levels(&mut app, self.phase == "chapters-audio-levels-save");
+			}
+			"chapters-audio-audition" => check_player_cue_diagnostics(&mut app),
 			"chapters-transfer-continue" => {
 				checkpoint_transfer_native::continue_imported_garden(&mut app)
 			}
-			"chapters-transfer-menu-export" | "chapters-transfer-menu-import" => {
+			"chapters-transfer-menu-export"
+			| "chapters-transfer-menu-import"
+			| "chapters-transfer-history-manage"
+			| "chapters-transfer-history-relaunch" => {
 				checkpoint_transfer_native::run_menu_phase(&mut app, &self.phase)
 			}
 			"chapters-continue" => continue_chapter_slots(&mut app, false),
@@ -297,7 +347,15 @@ impl ApplicationHandler for NativePhase {
 			| "trace-keyboard-record"
 			| "preset-export"
 			| "preset-apply"
-			| "preset-relaunch" => super::playtrace_native_tests::run_phase(&mut app, &self.phase),
+			| "preset-relaunch"
+			| "preset-library-save"
+			| "preset-library-review"
+			| "preset-library-relaunch"
+			| "preset-library-backup-export"
+			| "preset-library-backup-restore"
+			| "preset-library-backup-relaunch" => {
+				super::playtrace_native_tests::run_phase(&mut app, &self.phase)
+			}
 			_ => panic!("Unknown checkpoint verification phase"),
 		}
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
@@ -553,7 +611,7 @@ fn check_chapter_audio(app: &mut GameApp, phase: &str) {
 		let missing = SceneId::new("missing").unwrap();
 		assert!(app.switch_player_scene(missing).is_err());
 		assert_eq!(app.feedback_audio.test_gain(gate), 80);
-		save_chapter_slots(app);
+		save_chapter_slots(app, |_| {});
 	} else {
 		open_slot_actions(app, false, SaveSlot::Two);
 		menu_keys(app, &[Key::Enter]);
@@ -569,7 +627,238 @@ fn check_chapter_audio(app: &mut GameApp, phase: &str) {
 	}
 }
 
-fn save_chapter_slots(app: &mut GameApp) {
+fn check_player_bus_levels(app: &mut GameApp, save: bool) {
+	use bridge::feedback_audio::FeedbackCue;
+	let gains = |app: &GameApp| FeedbackCue::ALL.map(|cue| app.feedback_audio.test_gain(cue));
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
+
+	if save {
+		assert_eq!(gains(app), [100, 80, 100]);
+		set_native_audio_categories(app);
+		assert_eq!(gains(app), [0, 32, 48]);
+		let missing = SceneId::new("missing").unwrap();
+		assert!(app.switch_player_scene(missing).is_err());
+		assert_eq!(gains(app), [0, 32, 48]);
+		save_chapter_slots(app, |app| {
+			assert_eq!(gains(app), [0, 16, 48]);
+			assert!(
+				app.feedback_captions
+					.rows(Instant::now())
+					.any(|row| row == "Key collected")
+			);
+		});
+	} else {
+		assert_eq!(gains(app), [0, 32, 48]);
+		assert_eq!(
+			app.player_controls.display().overlay_style().text_scale,
+			1.5
+		);
+		open_slot_actions(app, false, SaveSlot::Two);
+		menu_keys(app, &[Key::Enter]);
+		close_checkpoint_menu(app);
+		assert_eq!(progress(app).score, 2);
+	}
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "garden");
+	assert_eq!(gains(app), [0, 16, 48]);
+	if !save {
+		move_for(app, Key::D, 90);
+		assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "finish");
+		assert_eq!(gains(app), [0, 32, 48]);
+		move_for(app, Key::D, 90);
+		assert!(progress(app).completed);
+		assert!(
+			app.feedback_captions
+				.rows(Instant::now())
+				.any(|row| row == "Run completed")
+		);
+	}
+}
+
+fn focus_audio_control(app: &mut GameApp, label: &str, dpad: bool) {
+	use runtime::input::MenuButtons;
+
+	let prefix = format!("> {label}");
+	for _ in 0..12 {
+		if app.player_controls_rows(1, 22).unwrap()[0].starts_with(&prefix) {
+			return;
+		}
+		if dpad {
+			press_audio_gamepad(
+				app,
+				MenuButtons {
+					down: true,
+					..MenuButtons::default()
+				},
+				[false; 4],
+			);
+		} else {
+			menu_keys(app, &[Key::ArrowDown]);
+		}
+	}
+	panic!("Missing Controls row {label}");
+}
+
+fn press_audio_gamepad(
+	app: &mut GameApp,
+	menu: runtime::input::MenuButtons,
+	face_buttons: [bool; 4],
+) {
+	use runtime::input::PhysicalGamepadSample;
+
+	assert!(!app.player_controls_gamepad(PhysicalGamepadSample::default()));
+	let sample = PhysicalGamepadSample {
+		menu,
+		face_buttons,
+		..PhysicalGamepadSample::default()
+	};
+	assert!(app.player_controls_gamepad(sample));
+	assert!(!app.player_controls_gamepad(sample));
+}
+
+fn check_player_cue_diagnostics(app: &mut GameApp) {
+	use renderer::ui::ScreenOverlay;
+	use runtime::input::MenuButtons;
+	use std::{thread, time::Duration};
+
+	open_slot_actions(app, false, SaveSlot::Two);
+	menu_keys(app, &[Key::Enter]);
+	close_checkpoint_menu(app);
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "garden");
+	assert_eq!(progress(app).score, 2);
+	let garden_progress = progress(app).clone();
+	let style = app.player_controls.display().overlay_style();
+	assert_eq!(style.text_scale, 1.5);
+	let capacity = ScreenOverlay::capacity_with_style([800, 450], 1.0, style);
+
+	menu_keys(app, &[Key::Escape]);
+	focus_audio_control(app, "Feedback Audio", false);
+	menu_keys(app, &[Key::Enter, Key::ArrowLeft]);
+	focus_audio_control(app, "Test Collection", false);
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(
+		app.player_controls_rows(2, 22).unwrap()[1],
+		"Cue gain is zero"
+	);
+	focus_audio_control(app, "Cue Details", false);
+	menu_keys(app, &[Key::Enter, Key::ArrowRight]);
+	for row in [
+		"Category: Mechanisms",
+		"Master: 80%",
+		"Local: 50%",
+		"Project: 80%",
+		"Scene: 50%",
+		"Resolved: 16%",
+		"Clip: Authored",
+		"Cue captions: On",
+	] {
+		focus_audio_control(app, row, false);
+		let rows = app
+			.player_controls_rows(capacity.rows, capacity.columns)
+			.unwrap();
+		assert!(rows.contains(&format!("> {row}")), "{rows:?}");
+	}
+	assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+	let diagnostic = "Garden with Extra large text: Master 80%, Local 50%, Project 80%, Scene 50%, Resolved 16%, Clip Authored, Cue captions On.";
+	menu_keys(app, &[Key::Escape, Key::Escape, Key::Enter]);
+
+	// Enable Collection after proving zero gain and checking the committed, undrafted master.
+	focus_audio_control(app, "Collection", false);
+	menu_keys(app, &[Key::ArrowRight]);
+	focus_audio_control(app, "Apply", false);
+	menu_keys(app, &[Key::Enter, Key::Enter]);
+
+	let profile = app
+		.editor
+		.project()
+		.unwrap()
+		.input_profile
+		.clone()
+		.unwrap_or_default();
+	let path = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+	let trace_path = path.join("cue-audition-trace.json");
+	app.play_trace =
+		Some(playtrace::PlayTrace::new(trace_path.clone(), &profile, &profile).unwrap());
+	let mut submitted = 0;
+	for controller in [false, true] {
+		for label in ["Test Collection", "Test Mechanisms", "Test Completion"] {
+			focus_audio_control(app, label, controller);
+			if controller {
+				press_audio_gamepad(app, MenuButtons::default(), [true, false, false, false]);
+			} else {
+				menu_keys(app, &[Key::Enter]);
+			}
+			assert_eq!(
+				app.player_controls_rows(2, 22).unwrap()[1],
+				"Cue test submitted"
+			);
+			submitted += 1;
+			let deadline = Instant::now() + Duration::from_secs(3);
+			while app.feedback_audio.test_audition_counts().0 < submitted {
+				assert!(Instant::now() < deadline, "Worker did not consume {label}");
+				thread::sleep(Duration::from_millis(10));
+			}
+		}
+	}
+	let (completed, played) = app.feedback_audio.test_audition_counts();
+	assert_eq!(completed, 6);
+	assert!(*progress(app) == garden_progress);
+	assert!(app.feedback_captions.rows(Instant::now()).next().is_none());
+	app.play_trace.take().unwrap().finish().unwrap();
+	let trace: serde_json::Value = serde_json::from_slice(&fs::read(trace_path).unwrap()).unwrap();
+	assert_eq!(trace["actions"].as_array().unwrap().len(), 1);
+	menu_keys(app, &[Key::Escape, Key::Escape]);
+	move_for(app, Key::D, 90);
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "finish");
+	move_for(app, Key::D, 90);
+	assert!(progress(app).completed);
+	assert!(
+		app.feedback_captions
+			.rows(Instant::now())
+			.any(|row| row == "Run completed")
+	);
+	assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+
+	fs::write(
+		path.join("cue-audition-evidence.txt"),
+		format!(
+			"{diagnostic}\nKeyboard and controller submitted three tests each. Windows playback succeeded for {played} of {completed} queued tests.\nGameplay rendered the Run completed caption. Auditions left gameplay progress, captions and replay unchanged.\n"
+		),
+	)
+		.unwrap();
+}
+
+fn set_native_audio_categories(app: &mut GameApp) {
+	menu_keys(app, &[Key::Escape]);
+	focus_audio_control(app, "Accessibility", false);
+	menu_keys(app, &[Key::Enter, Key::ArrowRight, Key::ArrowRight]);
+	focus_audio_control(app, "Apply", false);
+	menu_keys(app, &[Key::Enter]);
+	assert_eq!(
+		app.player_controls.display().overlay_style().text_scale,
+		1.5
+	);
+
+	focus_audio_control(app, "Feedback Audio", false);
+	menu_keys(app, &[Key::Enter]);
+	for (label, steps) in [
+		("Volume", 2),
+		("Collection", 10),
+		("Mechanisms", 5),
+		("Completion", 4),
+	] {
+		focus_audio_control(app, label, false);
+		for _ in 0..steps {
+			menu_keys(app, &[Key::ArrowLeft]);
+		}
+	}
+	focus_audio_control(app, "Collection: 0%", false);
+	assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+	focus_audio_control(app, "Apply", false);
+	menu_keys(app, &[Key::Enter, Key::Escape]);
+	assert!(!app.player_controls.is_open());
+}
+
+fn save_chapter_slots(app: &mut GameApp, after_garden_key: impl FnOnce(&GameApp)) {
 	move_for(app, Key::D, 90);
 	move_for(app, Key::A, 84);
 	keys(app, Some(Key::E));
@@ -591,6 +880,7 @@ fn save_chapter_slots(app: &mut GameApp) {
 	close_checkpoint_menu(app);
 	move_for(app, Key::A, 90);
 	assert_eq!(progress(app).score, 2);
+	after_garden_key(app);
 	move_for(app, Key::D, 90);
 	open_slot_actions(app, true, SaveSlot::Two);
 	menu_keys(app, &[Key::Enter, Key::ArrowRight, Key::Enter]);

@@ -77,6 +77,7 @@ pub(super) fn run_phase(app: &mut GameApp, phase: &str) {
 		"trace-remap" => remap(app),
 		"trace-record" => record(app),
 		phase if phase.starts_with("trace-keyboard-") => native_keyboard_profile_phase(app, phase),
+		phase if phase.starts_with("preset-library-") => native_library_phase(app, phase),
 		phase if phase.starts_with("preset-") => native_preset_phase(app, phase),
 		_ => panic!("Unknown player trace phase"),
 	}
@@ -379,6 +380,192 @@ fn native_input_preset_transfers_across_player_profiles() {
 	run_isolated_phase(TEST, "preset-apply", &destination, None);
 	run_isolated_phase(TEST, "preset-relaunch", &destination, None);
 	assert_eq!(fs::read(preset).unwrap(), exported);
+}
+
+#[test]
+#[ignore = "requires the release fixture and native Windows Vulkan support"]
+fn native_named_layout_library_round_trips() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str = "playtrace_native_tests::native_named_layout_library_round_trips";
+	let profile = ProfileDir::new();
+	for phase in [
+		"preset-library-save",
+		"preset-library-review",
+		"preset-library-relaunch",
+	] {
+		run_isolated_phase(TEST, phase, &profile, None);
+	}
+}
+
+#[test]
+#[ignore = "requires the release fixture and native Windows Vulkan support"]
+fn native_layout_library_backup_restores_without_applying_controls() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str =
+		"playtrace_native_tests::native_layout_library_backup_restores_without_applying_controls";
+	let rehearsal = ProfileDir::new();
+	let source = ProfileDir(rehearsal.0.join("source"));
+	let destination = ProfileDir(rehearsal.0.join("destination"));
+	let backups = rehearsal.0.join("presets");
+	for path in [&source.0, &destination.0, &backups] {
+		fs::create_dir(path).unwrap();
+	}
+	run_isolated_phase(TEST, "preset-library-save", &source, None);
+	run_isolated_phase(TEST, "preset-library-backup-export", &source, None);
+	let backup = fs::read_dir(&backups)
+		.unwrap()
+		.next()
+		.unwrap()
+		.unwrap()
+		.path();
+	assert!(backup.to_string_lossy().ends_with(".input-library.json"));
+	let bytes = fs::read(&backup).unwrap();
+	run_isolated_phase(TEST, "preset-library-backup-restore", &destination, None);
+	run_isolated_phase(TEST, "preset-library-backup-relaunch", &destination, None);
+	assert_eq!(fs::read(backup).unwrap(), bytes);
+}
+
+fn native_library_phase(app: &mut GameApp, phase: &str) {
+	let authored = app.project.as_ref().unwrap().input_profile.clone().unwrap();
+	let effective =
+		|app: &GameApp| app.effective_input_profile().unwrap_or(&authored).actions[0].key;
+	if phase.starts_with("preset-library-backup-") {
+		let profile = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+		app.transfer_directory = Some(profile.parent().unwrap().join("presets"));
+		select_preset_row(app, "> Input presets");
+		select_preset_row(app, "> Saved Layouts");
+	}
+	match phase {
+		"preset-library-backup-export" => {
+			select_preset_row(app, "> Export Library");
+			let rows = app.player_controls.rows().unwrap().join("\n");
+			for text in ["LAYOUT 1", "LAYOUT 2", "Exported 2 layouts"] {
+				assert!(rows.contains(text), "{rows}");
+			}
+		}
+		"preset-library-backup-restore" => {
+			assert_eq!(effective(app), Key::E);
+			let file = fs::read_dir(app.transfer_directory.as_ref().unwrap())
+				.unwrap()
+				.next()
+				.unwrap()
+				.unwrap();
+			let name = file.file_name();
+			let choice = format!(
+				"> {}",
+				crate::local_player_files::transfer_label(
+					"Backup",
+					1,
+					name.to_str().unwrap(),
+					".input-library.json",
+				)
+			);
+			select_preset_row(app, "> Review Backup");
+			select_preset_row(app, &choice);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Keep Current"]
+			);
+			select_preset_row(app, "> Keep Current");
+			assert!(app.player_controls_key(Key::Escape));
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.iter()
+					.any(|row| row.contains("No saved layouts"))
+			);
+			select_preset_row(app, "> Review Backup");
+			select_preset_row(app, &choice);
+			select_preset_row(app, "> Restore Layouts");
+			assert_eq!(effective(app), Key::E);
+			select_preset_row(app, "> LAYOUT 2");
+			select_preset_row(app, "> Review layout");
+			select_preset_row(app, "> Apply preset");
+			assert_eq!(effective(app), Key::F);
+		}
+		"preset-library-backup-relaunch" => {
+			assert_eq!(effective(app), Key::F);
+			let rows = app.player_controls.rows().unwrap().join("\n");
+			for text in ["LAYOUT 1", "LAYOUT 2"] {
+				assert!(rows.contains(text), "{rows}");
+			}
+		}
+		"preset-library-save" => {
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Save Current Layout");
+			select_preset_row(app, "> Save LAYOUT 1");
+			for _ in 0..3 {
+				assert!(app.player_controls_key(Key::Escape));
+			}
+			native_keyboard_profile_phase(app, "trace-keyboard-remap");
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Save Current Layout");
+			select_preset_row(app, "> Save LAYOUT 2");
+			assert_eq!(effective(app), Key::F);
+		}
+		"preset-library-review" => {
+			assert_eq!(effective(app), Key::F);
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Saved Layouts");
+			select_preset_row(app, "> LAYOUT 1");
+			select_preset_row(app, "> Review layout");
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Keep current"]
+			);
+			select_preset_row(app, "> Keep current");
+			assert_eq!(effective(app), Key::F);
+			select_preset_row(app, "> Rename layout");
+			select_preset_row(app, "> Erase last character");
+			select_preset_row(app, "> Add A");
+			select_preset_row(app, "> Save LAYOUT A");
+			select_preset_row(app, "> LAYOUT 2");
+			select_preset_row(app, "> Delete layout");
+			select_preset_row(app, "> Keep layout");
+			select_preset_row(app, "> Delete layout");
+			select_preset_row(app, "> Delete layout");
+			select_preset_row(app, "> LAYOUT A");
+			select_preset_row(app, "> Review layout");
+			select_preset_row(app, "> Apply preset");
+			assert_eq!(effective(app), Key::E);
+		}
+		"preset-library-relaunch" => {
+			assert_eq!(effective(app), Key::E);
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Saved Layouts");
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.iter()
+					.any(|row| row == "> LAYOUT A")
+			);
+			assert!(
+				!app.player_controls
+					.rows()
+					.unwrap()
+					.iter()
+					.any(|row| row.contains("LAYOUT 2"))
+			);
+			for _ in 0..3 {
+				assert!(app.player_controls_key(Key::Escape));
+			}
+			move_for(app, Key::D, 90);
+			move_for(app, Key::A, 84);
+			tap(app, Key::F);
+			assert!(!progress(app).route_gate_open);
+			tap(app, Key::E);
+			assert!(progress(app).route_gate_open);
+		}
+		_ => panic!("Unknown named layout phase"),
+	}
 }
 
 fn native_preset_phase(app: &mut GameApp, phase: &str) {

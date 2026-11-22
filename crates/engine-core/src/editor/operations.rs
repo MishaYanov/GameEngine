@@ -247,6 +247,24 @@ pub(super) fn apply(
 			}
 			data.entities[index].collider = collider;
 		}
+		EditorCommandDto::SetColliders { updates } => {
+			let targets = updates
+				.iter()
+				.map(|update| {
+					let index = entity_index(data, &update.key)?;
+					if data.entities[index].collider.is_none() {
+						return Err(format!(
+							"Entity {:?} needs an existing collider",
+							update.key
+						));
+					}
+					Ok(index)
+				})
+				.collect::<Result<Vec<_>, String>>()?;
+			for (index, update) in targets.into_iter().zip(updates) {
+				data.entities[index].collider = Some(update.collider);
+			}
+		}
 		EditorCommandDto::AddComponent { key, component } => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].put_component(component, false)?;

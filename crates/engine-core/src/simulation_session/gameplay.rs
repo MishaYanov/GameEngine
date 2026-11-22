@@ -45,6 +45,16 @@ pub enum SimulationAction {
 		entity: EntityKey,
 		material: Option<MaterialOverrideData>,
 	},
+	/// Select a clip on an enabled, prepared animation for this Play run.
+	PlayAnimation {
+		entity: EntityKey,
+		clip_index: u32,
+		looping: bool,
+	},
+	/// Place a root visual at the final camera pose after movement and look input.
+	AttachToView {
+		entity: EntityKey,
+	},
 }
 pub struct ActionWriter<'a> {
 	pub(super) actions: &'a mut Vec<SimulationAction>,
@@ -104,6 +114,8 @@ pub struct GameplayContext<'a> {
 	pub world: &'a RuntimeWorld,
 	pub collisions: &'a CollisionWorld,
 	pub input: &'a InputFrame,
+	/// The camera committed by the previous fixed step.
+	pub camera: &'a crate::Camera,
 	pub step_seconds: f32,
 	pub progress: ProgressView<'a>,
 	/// Edges sampled before this fixed step's actions. Exit precedes Enter.

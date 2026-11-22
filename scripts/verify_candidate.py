@@ -13,6 +13,7 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 MAX_RECEIPT_BYTES = 4 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * 1024 * 1024 * 1024
+MAX_ZIP_DIRECTORY_READ_BYTES = 16 * 1024 * 1024
 MAX_MEMBERS = 8192
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
@@ -111,9 +112,30 @@ def digest_exact(stream, size):
     return digest.hexdigest()
 
 
+class _DirectoryReader:
+    """Bound metadata reads before ZipFile can allocate its directory inventory."""
+
+    def __init__(self, stream, size):
+        self.stream = stream
+        self.size = size
+        self.remaining = MAX_ZIP_DIRECTORY_READ_BYTES
+
+    def read(self, size=-1):
+        if self.remaining is None:
+            return self.stream.read(size)
+        amount = max(0, self.size - self.stream.tell()) if size < 0 else size
+        if amount > self.remaining:
+            raise ValueError("Candidate ZIP directory exceeds its read budget")
+        data = self.stream.read(amount)
+        self.remaining -= len(data)
+        return data
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 @contextmanager
-def verified_package(archive, receipt):
-    """Yield the same open ZIP whose receipt, archive and member hashes matched."""
+def _verified_archive(archive, receipt):
     expected = _package_files(receipt)
     with archive.open("rb") as stream:
         metadata = os.fstat(stream.fileno())
@@ -122,7 +144,8 @@ def verified_package(archive, receipt):
         if digest_exact(stream, metadata.st_size) != receipt["archive_sha256"]:
             raise ValueError("Unexpected archive hash")
         stream.seek(0)
-        with ZipFile(stream) as package:
+        reader = _DirectoryReader(stream, metadata.st_size)
+        with ZipFile(reader) as package:
             members = package.infolist()
             if len(members) != len(expected) or {m.filename for m in members} != expected.keys():
                 raise ValueError("Unexpected ZIP inventory")
@@ -141,19 +164,35 @@ def verified_package(archive, receipt):
                 total_bytes += member.file_size
                 if total_bytes > MAX_PACKAGE_BYTES:
                     raise ValueError("Unpacked ZIP exceeds its size limit")
+            reader.remaining = None
             for member in members:
                 with package.open(member) as payload:
                     actual = file_digest(payload, "sha256").hexdigest()
                 if actual != expected[member.filename]:
                     raise ValueError(f"Unexpected member hash for {member.filename!r}")
 
-            yield package
+            completed = os.fstat(stream.fileno())
+            if (completed.st_size, completed.st_mtime_ns) != (metadata.st_size, metadata.st_mtime_ns):
+                raise ValueError("Candidate ZIP changed during verification")
+            yield package, completed
+
+
+@contextmanager
+def verified_package(archive, receipt):
+    """Yield the same open ZIP whose receipt, archive and member hashes matched."""
+    with _verified_archive(archive, receipt) as (package, _):
+        yield package
+
+
+def verified_archive_stat(archive, receipt):
+    """Return metadata from the same open archive whose bytes and members matched."""
+    with _verified_archive(archive, receipt) as (_, metadata):
+        return metadata
 
 
 def verify_candidate(archive, receipt):
     """Check receipt metadata, archive digest, and every regular file in the ZIP."""
-    with verified_package(archive, receipt):
-        pass
+    verified_archive_stat(archive, receipt)
 
 
 def main(argv=None):

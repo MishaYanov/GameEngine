@@ -38,6 +38,12 @@ pub struct ScreenOverlayCapacity {
 	pub columns: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenOverlayLayout {
+	Standard,
+	Compact { bottom: bool, aim: bool },
+}
+
 struct OverlayLayout {
 	size: [f32; 2],
 	width: f32,
@@ -84,23 +90,52 @@ impl OverlayLayout {
 		})
 	}
 
-	fn draw(&self, rows: &[String], style: ScreenOverlayStyle) -> ScreenCanvas {
+	fn draw(
+		&self,
+		rows: &[String],
+		style: ScreenOverlayStyle,
+		layout: ScreenOverlayLayout,
+	) -> ScreenCanvas {
 		let mut canvas = ScreenCanvas::new(self.size);
 		if !rows.is_empty() {
-			let (background, text) = style.colors();
-			canvas.rect(
-				[
-					Self::MARGIN,
-					Self::MARGIN,
-					self.width,
-					rows.len() as f32 * self.row_height + Self::VERTICAL_PADDING,
-				],
-				background,
-			);
+			let (mut background, mut text) = style.colors();
+			let height = rows.len() as f32 * self.row_height + Self::VERTICAL_PADDING;
+			let (width, top) = match layout {
+				ScreenOverlayLayout::Standard => (self.width, Self::MARGIN),
+				ScreenOverlayLayout::Compact { bottom, .. } => {
+					let longest = rows
+						.iter()
+						.map(|row| row.chars().count())
+						.max()
+						.unwrap_or(0);
+					let width = (longest as f32 * COLUMN_WIDTH * style.text_scale
+						+ 2.0 * Self::SIDE_PADDING)
+						.min(self.width);
+					if !style.high_contrast {
+						background = [0.025, 0.032, 0.043];
+						text = [0.99, 0.94, 0.84];
+					}
+					let top = if bottom {
+						self.size[1] - Self::MARGIN - height
+					} else {
+						Self::MARGIN
+					};
+					(width, top)
+				}
+			};
+			canvas.rect([Self::MARGIN, top, width, height], background);
+			if matches!(layout, ScreenOverlayLayout::Compact { .. }) {
+				let accent = if style.high_contrast {
+					[1.0; 3]
+				} else {
+					[0.80, 0.50, 0.24]
+				};
+				canvas.rect([Self::MARGIN, top, 2.0, height], accent);
+			}
 			for (index, row) in rows.iter().enumerate() {
 				canvas.text_scaled(
 					Self::MARGIN + Self::SIDE_PADDING,
-					Self::MARGIN + Self::TOP_PADDING + index as f32 * self.row_height,
+					top + Self::TOP_PADDING + index as f32 * self.row_height,
 					row,
 					text,
 					style.text_scale,
@@ -116,6 +151,7 @@ struct OverlayKey {
 	extent: [u32; 2],
 	dpi_bits: u64,
 	style: ScreenOverlayStyle,
+	layout: ScreenOverlayLayout,
 }
 
 struct PreparedOverlay {
@@ -186,12 +222,33 @@ impl ScreenOverlay {
 		rows: &[String],
 		style: ScreenOverlayStyle,
 	) -> Result<(), String> {
+		self.prepare_with_layout(
+			renderer,
+			extent,
+			dpi,
+			rows,
+			style,
+			ScreenOverlayLayout::Standard,
+		)
+	}
+
+	/// Draw a compact gameplay panel and optional center aiming mark.
+	pub fn prepare_with_layout(
+		&mut self,
+		renderer: &WindowRenderer,
+		extent: [u32; 2],
+		dpi: f64,
+		rows: &[String],
+		style: ScreenOverlayStyle,
+		screen_layout: ScreenOverlayLayout,
+	) -> Result<(), String> {
 		let layout = OverlayLayout::new(extent, dpi, style)
 			.ok_or("Overlay requires finite DPI geometry and a text scale from 1 to 1.5")?;
 		let key = OverlayKey {
 			extent,
 			dpi_bits: dpi.to_bits(),
 			style,
+			layout: screen_layout,
 		};
 		let rows = &rows[..layout.capacity.rows.min(rows.len())];
 		let columns = layout.capacity.columns;
@@ -207,7 +264,17 @@ impl ScreenOverlay {
 			.iter()
 			.map(|row| row.chars().take(columns).collect::<String>())
 			.collect::<Vec<_>>();
-		let draw = layout.draw(&rows, style);
+		let mut draw = layout.draw(&rows, style, screen_layout);
+		if matches!(
+			screen_layout,
+			ScreenOverlayLayout::Compact { aim: true, .. }
+		) {
+			let [x, y] = layout.size.map(|value| value * 0.5);
+			draw.rect([x - 7.0, y - 1.5, 14.0, 3.0], [0.06, 0.045, 0.032]);
+			draw.rect([x - 1.5, y - 7.0, 3.0, 14.0], [0.06, 0.045, 0.032]);
+			draw.rect([x - 6.0, y - 0.6, 12.0, 1.2], [1.0, 0.86, 0.62]);
+			draw.rect([x - 0.6, y - 6.0, 1.2, 12.0], [1.0, 0.86, 0.62]);
+		}
 		renderer.write_dynamic_mesh(&mut self.mesh, draw.vertices(), draw.indices())?;
 		self.prepared = Some(PreparedOverlay { key, rows });
 		Ok(())

@@ -11,6 +11,8 @@ use std::{
 };
 
 const LIMIT: u64 = 512 * 1024 * 1024;
+const PROJECT_MANIFEST: &str = "projects/cinder-oath/project.json";
+const PROJECT_ASSETS: &str = "projects/cinder-oath/assets";
 
 impl Builder {
 	pub fn prepare_preview(request: PreviewPreparation) -> io::Result<PreparedPreview> {
@@ -55,7 +57,7 @@ impl Builder {
 		for path in [
 			"apps/game/Cargo.toml",
 			"apps/game/src",
-			"apps/game/assets",
+			PROJECT_ASSETS,
 			"crates/logger/Cargo.toml",
 			"crates/logger/src",
 			"crates/renderer/Cargo.toml",
@@ -68,16 +70,20 @@ impl Builder {
 			"crates/bridge/src",
 			"crates/engine-core/Cargo.toml",
 			"crates/engine-core/src",
+			"crates/gameplay-catalog/Cargo.toml",
+			"crates/gameplay-catalog/src",
+			"crates/cinder-oath-gameplay/Cargo.toml",
+			"crates/cinder-oath-gameplay/src",
 			"crates/courtyard-gameplay/Cargo.toml",
 			"crates/courtyard-gameplay/src",
 		] {
 			let path = source.join(path);
 			walk(&source, &path, &mut files, &mut total)?;
 		}
-		let project = source.join("apps/game/project.json");
+		let project = source.join(PROJECT_MANIFEST);
 		if project.exists() {
 			walk(&source, &project, &mut files, &mut total)?;
-			validate_project_template(&source, &project)?;
+			validate_project_template(&project)?;
 		}
 		files.sort_by(|a, b| a.path.cmp(&b.path));
 		let preview = Preview {
@@ -136,16 +142,13 @@ impl Builder {
 			}
 			fs::write(
 				staging.join("Cargo.toml"),
-				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\",\"crates/courtyard-gameplay\"]\n",
+				"[workspace]\nresolver=\"2\"\nmembers=[\"apps/game\",\"crates/logger\",\"crates/renderer\",\"crates/runtime\",\"crates/bridge\",\"crates/engine-core\",\"crates/gameplay-catalog\",\"crates/cinder-oath-gameplay\",\"crates/courtyard-gameplay\"]\n",
 			)?;
-			let main = staging.join("apps/game/src/main.rs");
-			let text = fs::read_to_string(&main)?.replace("PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"assets\")", "std::env::current_exe().expect(\"game executable path\").parent().expect(\"game executable folder\").join(\"../../apps/game/assets\")");
-			fs::write(main, text)?;
 			fs::write(
 				staging.join("README.md"),
 				format!(
-					"# {}\n\nNative game template v1. Requires Rust 1.89+ and Vulkan SDK (glslc).\n\nRun from this workspace: `cargo run -p game`.\nAssets stay under apps/game/assets; retain the workspace layout when moving output.\nRuntime logging works independently of Engine Admin.\n",
-					plan.input.name
+					"# {}\n\nNative game template v1. Requires Rust 1.89+ and Vulkan SDK (glslc).\n\nRun from this workspace with `cargo run -p game -- --player`.\nKeep the project manifest and its assets together under projects/cinder-oath.\nRuntime logging works independently of Engine Admin.\n",
+					plan.input.name,
 				),
 			)?;
 			let git_source = crate::comparable_path(&source)
@@ -273,16 +276,21 @@ fn walk_bounded(
 			.and_then(|e| e.to_str())
 			.unwrap_or("")
 			.to_ascii_lowercase();
-		let project_json = relative == "apps/game/project.json";
-		let asset_json = relative.starts_with("apps/game/assets/") && extension == "json";
+		let project_json = relative == PROJECT_MANIFEST;
+		let project_asset = relative
+			.strip_prefix(PROJECT_ASSETS)
+			.is_some_and(|suffix| suffix.starts_with('/'));
+		let asset_json = project_asset && extension == "json";
 		let allowed = relative.ends_with(".rs")
 			|| relative.ends_with("Cargo.toml")
 			|| relative.ends_with(".vert")
 			|| relative.ends_with(".frag")
 			|| project_json
-			|| (relative.starts_with("apps/game/assets/")
-				&& ["png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json"]
-					.contains(&extension.as_str()));
+			|| (project_asset
+			&& [
+			"png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json", "wav",
+		]
+			.contains(&extension.as_str()));
 		if allowed {
 			if relative.len() > 1024 {
 				return Err(io::Error::other("Template path is too long"));
@@ -312,9 +320,13 @@ fn walk_bounded(
 	}
 	Ok(())
 }
-fn validate_project_template(source: &Path, manifest: &Path) -> io::Result<()> {
+fn validate_project_template(manifest: &Path) -> io::Result<()> {
 	let project = engine_core::project::ProjectData::load(manifest).map_err(io::Error::other)?;
-	let root = source.join("apps/game/assets").canonicalize()?;
+	let root = manifest
+		.parent()
+		.ok_or_else(|| io::Error::other("Project manifest has no parent directory"))?
+		.join("assets")
+		.canonicalize()?;
 	for entry in project.scenes.iter() {
 		let mut path = root.clone();
 		for component in Path::new(entry.asset_path()).components() {

@@ -11,6 +11,10 @@ pub enum LaunchMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckpointTransfer {
+	ExportHistory {
+		path: PathBuf,
+		slot: Option<SaveSlot>,
+	},
 	Export {
 		slot: SaveSlot,
 		path: PathBuf,
@@ -28,23 +32,50 @@ pub enum CheckpointTransfer {
 }
 
 impl CheckpointTransfer {
+	fn matches(option: &str) -> bool {
+		matches!(
+			option,
+			"--export-slot"
+				| "--preview-slot-import"
+				| "--commit-slot-import"
+				| "--export-transfer-history"
+		)
+	}
+
 	fn parse(
 		option: &str,
 		args: impl Iterator<Item = impl AsRef<str>>,
 	) -> Result<Option<Self>, String> {
-		if !matches!(
-			option,
-			"--export-slot" | "--preview-slot-import" | "--commit-slot-import"
-		) {
+		if !Self::matches(option) {
 			return Ok(None);
 		}
 		let mut args = args;
-		let slot = match args.next().as_ref().map(AsRef::as_ref) {
-			Some("1") => SaveSlot::One,
-			Some("2") => SaveSlot::Two,
-			Some("3") => SaveSlot::Three,
-			_ => return Err("Checkpoint transfer requires a slot number from 1 to 3".into()),
-		};
+		if option == "--export-transfer-history" {
+			let argument = args
+				.next()
+				.ok_or("Transfer history export requires a file path")?;
+			let path = argument.as_ref();
+			if path.is_empty() || path.starts_with("--") {
+				return Err("Transfer history export requires a file path".into());
+			}
+			let slot = match args.next().as_ref().map(AsRef::as_ref) {
+				None => None,
+				Some("--slot") => Some(transfer_slot(args.next().as_ref().map(AsRef::as_ref))?),
+				_ => {
+					return Err(
+						"Transfer history export accepts only a path and optional --slot".into(),
+					);
+				}
+			};
+			if args.next().is_some() {
+				return Err("Transfer history export accepts one slot filter".into());
+			}
+			return Ok(Some(Self::ExportHistory {
+				path: PathBuf::from(path),
+				slot,
+			}));
+		}
+		let slot = transfer_slot(args.next().as_ref().map(AsRef::as_ref))?;
 		let value = args
 			.next()
 			.ok_or("Checkpoint transfer requires a file path")?;
@@ -85,6 +116,15 @@ impl CheckpointTransfer {
 			review,
 			intent,
 		}))
+	}
+}
+
+fn transfer_slot(argument: Option<&str>) -> Result<SaveSlot, String> {
+	match argument {
+		Some("1") => Ok(SaveSlot::One),
+		Some("2") => Ok(SaveSlot::Two),
+		Some("3") => Ok(SaveSlot::Three),
+		_ => Err("Checkpoint transfer requires a slot number from 1 to 3".into()),
 	}
 }
 
@@ -190,10 +230,8 @@ impl LaunchOptions {
 	) -> Result<Self, String> {
 		let mut args = arguments.into_iter().peekable();
 		if let Some(argument) = args.peek()
-			&& (matches!(
-				argument.as_ref(),
-				"--export-slot" | "--preview-slot-import" | "--commit-slot-import"
-			) || InputPresetCommand::matches(argument.as_ref()))
+			&& (CheckpointTransfer::matches(argument.as_ref())
+			|| InputPresetCommand::matches(argument.as_ref()))
 		{
 			let option = args.next().expect("peeked transfer option");
 			let option = option.as_ref();
@@ -296,7 +334,7 @@ impl LaunchOptions {
 						"Unknown game argument {argument:?}; supported arguments are \
                      --development, --player, --input-profile <path>, --transfer-directory <path>, \
                      --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, \
-                     or a standalone --export-slot, --preview-slot-import, --commit-slot-import, \
+                     or a standalone --export-slot, --preview-slot-import, --commit-slot-import, --export-transfer-history, \
                      --export-input-preset, --preview-input-preset, or --apply-input-preset command"
 					));
 				}

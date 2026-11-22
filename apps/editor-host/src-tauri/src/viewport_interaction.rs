@@ -103,6 +103,7 @@ pub(crate) struct ViewportInteraction {
 	game_status_revision: Option<(u64, u64)>,
 	game_status: Option<bridge::editor::PlayStatusDto>,
 	orbit_status: Option<OrbitStatusDto>,
+	scene_warming_result: Option<SceneWarmingResultDto>,
 	last_extent: [u32; 2],
 	last_dpi: f64,
 	hovered: Option<String>,
@@ -144,6 +145,7 @@ impl Default for ViewportInteraction {
 			game_status_revision: None,
 			game_status: None,
 			orbit_status: None,
+			scene_warming_result: None,
 			last_extent: [0; 2],
 			last_dpi: 1.0,
 			hovered: None,
@@ -196,6 +198,7 @@ impl ViewportInteraction {
 			transform_preview: self.preview.clone(),
 			game_status: self.game_status.clone(),
 			orbit_status: self.orbit_status.clone(),
+			scene_warming_result: self.scene_warming_result.clone(),
 		}
 	}
 
@@ -219,6 +222,17 @@ impl ViewportInteraction {
 			workspace,
 			self.settings.colliders && self.settings.view == ViewportView::Scene,
 		) {
+			self.changed();
+		}
+	}
+
+	pub(crate) fn sync_scene_warming(&mut self, workspace: &EditorWorkspace) {
+		let session = workspace.backend.session();
+		let latest = workspace
+			.scene_warming
+			.latest(session.active_scene_id().as_str(), session.scene_revision());
+		if self.scene_warming_result.as_ref() != latest {
+			self.scene_warming_result = latest.cloned();
 			self.changed();
 		}
 	}
@@ -288,6 +302,7 @@ impl ViewportInteraction {
 		if self.game_status_revision != Some((generation, workspace.backend.session().revision())) {
 			self.sync_game_status(workspace);
 		}
+		self.sync_scene_warming(workspace);
 		self.sync_colliders(workspace);
 		Ok(())
 	}

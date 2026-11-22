@@ -221,9 +221,12 @@ impl SaveMenu {
 				}
 			}
 			Page::History(history) => {
-				if !history.key(key) {
+				if !history.key(app, key) {
 					app.player_controls.message = None;
-					let focus = 2 + usize::from(snapshot.recovery_checkpoint_id.is_some());
+					let focus = 2 + usize::from(
+						matches!(self.intent, Intent::Continue)
+							&& snapshot.recovery_checkpoint_id.is_some(),
+					);
 					self.page = Page::Actions { focus };
 				}
 			}

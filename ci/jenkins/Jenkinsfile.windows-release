@@ -16,7 +16,7 @@ pipeline {
                 powershell encoding: 'UTF-8', script: '''
                     $ErrorActionPreference = 'Stop'
                     $candidate = Join-Path 'target/release-qualification' "build-$env:BUILD_NUMBER"
-                    python -B scripts/qualify_release.py --require-clean apps/game/project.release-learning.json $candidate
+                    python -B scripts/qualify_release.py --require-clean projects/cinder-oath/project.json $candidate
                     $qualificationExit = $LASTEXITCODE
                     if (Test-Path -LiteralPath $candidate -PathType Container) {
                         @(
@@ -39,7 +39,7 @@ pipeline {
         always {
             script {
                 def root = "target/release-qualification/build-${env.BUILD_NUMBER}"
-                archiveArtifacts artifacts: "$root/export.log,$root/player-default.log,$root/player-arrows.log,$root/worker.log,$root/staging/courtyard-*/stage-a.log,$root/staging/courtyard-*/stage-b.log,$root/staging/courtyard-*/release.log,$root/staging/courtyard-*/occupied-stage.log",
+                archiveArtifacts artifacts: "$root/export.log,$root/player-default.log,$root/player-arrows.log,$root/worker.log,$root/staging/game-*/stage-a.log,$root/staging/game-*/stage-b.log,$root/staging/game-*/release.log,$root/staging/game-*/occupied-stage.log",
                                  allowEmptyArchive: true, followSymlinks: false
             }
         }

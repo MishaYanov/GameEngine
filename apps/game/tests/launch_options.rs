@@ -256,3 +256,49 @@ fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
 		assert!(LaunchOptions::parse(arguments, true, false).is_err());
 	}
 }
+
+#[test]
+fn transfer_history_audit_is_standalone_and_slot_scoped() {
+	use courtyard_gameplay::checkpoint::SaveSlot;
+	use game::launch::CheckpointTransfer;
+	use std::path::PathBuf;
+
+	let all =
+		LaunchOptions::parse(["--export-transfer-history", "audit.json"], true, false).unwrap();
+	assert_eq!(
+		all.transfer,
+		Some(CheckpointTransfer::ExportHistory {
+			path: PathBuf::from("audit.json"),
+			slot: None
+		})
+	);
+	let selected = LaunchOptions::parse(
+		["--export-transfer-history", "audit.json", "--slot", "2"],
+		true,
+		false,
+	)
+		.unwrap();
+	assert_eq!(
+		selected.transfer,
+		Some(CheckpointTransfer::ExportHistory {
+			path: PathBuf::from("audit.json"),
+			slot: Some(SaveSlot::Two)
+		})
+	);
+	assert!(
+		LaunchOptions::parse(["--export-transfer-history", "audit.json"], false, false).is_err()
+	);
+	for arguments in [
+		vec!["--export-transfer-history", "--slot", "2"],
+		vec!["--export-transfer-history", "audit.json", "--slot", "4"],
+		vec![
+			"--export-transfer-history",
+			"audit.json",
+			"--slot",
+			"2",
+			"--player",
+		],
+	] {
+		assert!(LaunchOptions::parse(arguments, true, false).is_err());
+	}
+}

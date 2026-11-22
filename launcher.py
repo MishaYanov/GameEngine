@@ -35,7 +35,7 @@ ACTIONS = (
 	Action("all", "Start all apps", "Editor + Engine Admin + game", ("client", "dashboard", "engine")),
 	Action("client", "Editor", "Editor desktop application", browser_url="http://localhost:4200", browser_id="engine-editor"),
 	Action("dashboard", "Engine Admin", "Independent administration app", browser_url="http://127.0.0.1:4301/?preview", browser_id="engine-admin"),
-	Action("engine", "Game", "Native game / Vulkan renderer"),
+	Action("engine", "Game", "Play Cinder Oath"),
 	Action("vulkan-probe", "Vulkan probe", "Vulkan device diagnostics"),
 	Action("check", "Rust checks", "Cargo check, then Clippy"),
 )
@@ -119,7 +119,7 @@ def launch_plan(key: str) -> tuple[Path, list[list[str]]]:
 		directory = frontend if key == "dashboard" else ROOT / "apps" / "editor-host"
 		return directory, [command]
 	if key == "engine":
-		return ROOT, [[cargo, "run", "-p", "game"]]
+		return ROOT, [[cargo, "run", "-p", "game", "--", "--player"]]
 	if key == "vulkan-probe":
 		return ROOT, [[cargo, "run", "-p", "renderer", "--example", "vulkan_probe"]]
 	if key == "check":

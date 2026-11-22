@@ -208,19 +208,23 @@ fn preparation_leaves_service_available_and_blocks_workspace_reconfiguration() {
 }
 
 #[test]
-fn template_preview_includes_valid_scene_and_prefab_json_only_under_game_assets() {
+fn template_preview_includes_game_assets_and_excludes_historical_demos() {
 	let (root, source) = fixture("asset-json");
-	fs::create_dir(source.join("apps/game/assets/prefabs")).unwrap();
+	let assets = source.join("projects/cinder-oath/assets");
+	fs::create_dir(assets.join("prefabs")).unwrap();
 	fs::write(
-		source.join("apps/game/assets/scene.json"),
+		assets.join("scene.json"),
 		r#"{"schema_version":3,"entities":[],"lights":[]}"#,
 	)
 	.unwrap();
 	fs::write(
-		source.join("apps/game/assets/prefabs/robot.json"),
+		assets.join("prefabs/robot.json"),
 		r#"{"schema_version":1,"entities":[]}"#,
 	)
 	.unwrap();
+	fs::write(assets.join("soundtrack.wav"), b"fixture").unwrap();
+	fs::create_dir_all(source.join("apps/game/assets")).unwrap();
+	fs::write(source.join("apps/game/assets/legacy.json"), "{}").unwrap();
 	fs::write(source.join("crates/runtime/src/private.json"), "{}").unwrap();
 	let mut builder = Builder::new(&root.join("admin"));
 	let plan = builder
@@ -231,8 +235,10 @@ fn template_preview_includes_valid_scene_and_prefab_json_only_under_game_assets(
 		.iter()
 		.map(|f| f.path.as_str())
 		.collect::<Vec<_>>();
-	assert!(paths.contains(&"apps/game/assets/scene.json"));
-	assert!(paths.contains(&"apps/game/assets/prefabs/robot.json"));
+	assert!(paths.contains(&"projects/cinder-oath/assets/scene.json"));
+	assert!(paths.contains(&"projects/cinder-oath/assets/prefabs/robot.json"));
+	assert!(paths.contains(&"projects/cinder-oath/assets/soundtrack.wav"));
+	assert!(!paths.iter().any(|p| p.ends_with("legacy.json")));
 	assert!(!paths.iter().any(|p| p.ends_with("private.json")));
 	assert!(!root.join("output").exists());
 	fs::remove_dir_all(root).unwrap();
@@ -241,7 +247,7 @@ fn template_preview_includes_valid_scene_and_prefab_json_only_under_game_assets(
 #[test]
 fn template_preview_rejects_malformed_and_oversized_asset_json_without_publishing() {
 	let (root, source) = fixture("bad-asset-json");
-	let path = source.join("apps/game/assets/scene.json");
+	let path = source.join("projects/cinder-oath/assets/scene.json");
 	let mut builder = Builder::new(&root.join("admin"));
 	fs::write(&path, "{malformed").unwrap();
 	assert!(

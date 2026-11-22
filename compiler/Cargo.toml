@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 courtyard-gameplay = { path = "../crates/courtyard-gameplay" }
+gameplay-catalog = { path = "../crates/gameplay-catalog" }
 engine-logger = { path = "../crates/logger" }
 engine-core = { path = "../crates/engine-core" }
 bridge = { path = "../crates/bridge" }

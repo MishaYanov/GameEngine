@@ -16,7 +16,7 @@ use std::{
 };
 
 const MAX_BYTES: usize = 4 * 1024;
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,19 +44,50 @@ struct RecordV3 {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RecordV4 {
+struct RecordWithAudio<T> {
 	schema_version: u32,
 	movement: Preset,
 	controller: ControllerBindings,
 	display: DisplaySettings,
 	actions: Vec<ActionKeyOverride>,
-	audio: FeedbackMix,
+	audio: T,
+}
+
+impl<T: Into<FeedbackMix>> RecordWithAudio<T> {
+	fn into_settings(self) -> Result<ControlsSettings, String> {
+		validate_rows(&self.actions)?;
+		Ok(ControlsSettings {
+			movement: self.movement,
+			controller: self.controller.validate()?,
+			display: self.display,
+			actions: self.actions,
+			audio: self.audio.into().validate()?,
+		})
+	}
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyAudio {
+	level_percent: u8,
+	muted: bool,
+}
+
+impl From<LegacyAudio> for FeedbackMix {
+	fn from(audio: LegacyAudio) -> Self {
+		Self {
+			level_percent: audio.level_percent,
+			muted: audio.muted,
+			..Self::default()
+		}
+	}
 }
 
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Record {
-	Fourth(RecordV4),
+	Fifth(RecordWithAudio<FeedbackMix>),
+	Fourth(RecordWithAudio<LegacyAudio>),
 	Third(RecordV3),
 	Second(RecordV2),
 	First(RecordV1),
@@ -80,15 +111,9 @@ impl Record {
 				display: record.display,
 				..ControlsSettings::default()
 			}),
-			Self::Fourth(record) if record.schema_version == SCHEMA_VERSION => {
-				validate_rows(&record.actions)?;
-				Ok(ControlsSettings {
-					movement: record.movement,
-					controller: record.controller.validate()?,
-					display: record.display,
-					actions: record.actions,
-					audio: record.audio.validate()?,
-				})
+			Self::Fourth(record) if record.schema_version == 4 => record.into_settings(),
+			Self::Fifth(record) if record.schema_version == SCHEMA_VERSION => {
+				record.into_settings()
 			}
 			_ => Err("Saved controls version is unsupported".into()),
 		}
@@ -143,12 +168,23 @@ impl Preferences {
 
 	/// Bind a review to both canonical preference contents and this local owner.
 	pub(super) fn review_digest(&self, controls: &ControlsSettings) -> Result<[u8; 32], String> {
+		self.scoped_digest(
+			b"game-engine-input-preset-destination-v1",
+			&Self::encode(controls)?,
+		)
+	}
+
+	pub(super) fn library_review_digest(&self, record: &[u8]) -> Result<[u8; 32], String> {
+		self.scoped_digest(b"game-engine-input-library-destination-v1", record)
+	}
+
+	fn scoped_digest(&self, domain: &[u8], record: &[u8]) -> Result<[u8; 32], String> {
 		let profile = self
 			.root
 			.canonicalize()
 			.map_err(|_| "Cannot identify the local profile")?;
 		let mut hasher = Sha256::new();
-		hasher.update(b"game-engine-input-preset-destination-v1");
+		hasher.update(domain);
 		for field in [
 			profile.as_os_str().as_encoded_bytes(),
 			self.filename.as_bytes(),
@@ -156,7 +192,7 @@ impl Preferences {
 			hasher.update((field.len() as u64).to_le_bytes());
 			hasher.update(field);
 		}
-		hasher.update(Self::encode(controls)?);
+		hasher.update(record);
 		Ok(hasher.finalize().into())
 	}
 
@@ -196,22 +232,55 @@ impl Preferences {
 		&self,
 		change: impl FnOnce(ControlsSettings) -> Result<(ControlsSettings, T), String>,
 	) -> Result<T, String> {
+		self.update_record(true, change)
+	}
+
+	pub(super) fn update_existing<T>(
+		&self,
+		change: impl FnOnce(ControlsSettings) -> Result<(ControlsSettings, T), String>,
+	) -> Result<T, String> {
+		self.update_record(false, change)
+	}
+
+	fn update_record<T>(
+		&self,
+		create: bool,
+		change: impl FnOnce(ControlsSettings) -> Result<(ControlsSettings, T), String>,
+	) -> Result<T, String> {
+		self.with_record_lock(create, |folder, path| {
+			let (controls, result) = change(self.load_from(folder)?)?;
+			ordinary_file(path)?;
+			replace_bytes(path, &Self::encode(&controls)?)?;
+			Ok(result)
+		})
+	}
+
+	pub(super) fn with_record_lock<T>(
+		&self,
+		create: bool,
+		operation: impl FnOnce(&Path, &Path) -> Result<T, String>,
+	) -> Result<T, String> {
 		let folder = self
-			.folder(true)?
+			.folder(create)?
 			.ok_or("Local controls storage is unavailable")?;
 		let path = folder.join(&self.filename);
 		let _lock = lock(&path.with_extension("lock"))?;
-		let (controls, result) = change(self.load_from(&folder)?)?;
-		ordinary_file(&path)?;
-		replace_bytes(&path, &Self::encode(&controls)?)?;
-		Ok(result)
+		operation(&folder, &path)
+	}
+
+	pub(super) fn preset_library_path(&self) -> Result<Option<PathBuf>, String> {
+		Ok(self.folder(false)?.map(|folder| {
+			folder
+				.join(&self.filename)
+				.with_extension("preset-library.json")
+		}))
 	}
 
 	fn encode(controls: &ControlsSettings) -> Result<Vec<u8>, String> {
 		validate_rows(&controls.actions)?;
 		let mut actions = controls.actions.clone();
 		actions.sort_unstable_by(|a, b| a.action_id.cmp(&b.action_id));
-		let bytes = serde_json::to_vec(&RecordV4 {
+		let bytes = serde_json::to_vec(&RecordWithAudio {
 			schema_version: SCHEMA_VERSION,
 			movement: controls.movement,
 			controller: controls.controller.validate()?,

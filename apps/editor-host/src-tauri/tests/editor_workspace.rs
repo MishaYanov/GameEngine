@@ -123,7 +123,31 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 }
 
 #[test]
+fn authored_cinder_oath_opens_and_enters_play_through_the_editor_workspace() {
+	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.join("../../..")
+		.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
+		.join("project.json");
+	let mut workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+		.unwrap();
+	assert_eq!(
+		workspace.backend.session().project().gameplay_module.as_deref(),
+		Some(gameplay_catalog::CINDER_OATH_ID)
+	);
+	run(&mut workspace, Command::StartPlay);
+	assert_eq!(
+		workspace.backend.session().play_scene_id().map(SceneId::as_str),
+		Some("intro")
+	);
+	assert!(workspace.backend.play_status().unwrap().gameplay.is_some());
+}
+
+#[test]
 fn scene_warming_rejects_an_old_workspace_with_the_same_revision() {
+	use bridge::viewport::SceneWarmingMode::{Models, References};
 	let (previous_fixture, _, second) = two_scene_project();
 	let (current_fixture, _, _) = two_scene_project();
 	let previous = previous_fixture.open();
@@ -131,19 +155,60 @@ fn scene_warming_rejects_an_old_workspace_with_the_same_revision() {
 	let revision = current.backend.session().revision();
 	assert_eq!(previous.backend.session().revision(), revision);
 	assert_ne!(previous.generation, current.generation);
+	let report = current_fixture
+		.0
+		.parent()
+		.unwrap()
+		.join("warming-report.json");
+	assert!(current
+		.capture_warming_report(previous.generation, "test-session".into())
+		.unwrap_err()
+		.contains("Workspace changed"));
+	assert!(!report.exists());
+	let snapshot = current
+		.capture_warming_report(current.generation, "test-session".into())
+		.unwrap();
+	assert_eq!(editor::scene_warming::publish_warming_report(&snapshot, &report).unwrap(), 0);
+	let original = fs::read(&report).unwrap();
+	assert_eq!(
+		serde_json::from_slice::<bridge::viewport::WarmingSessionReportDto>(&original).unwrap(),
+		snapshot
+	);
+	assert!(editor::scene_warming::publish_warming_report(&snapshot, &report).is_err());
+	assert_eq!(fs::read(&report).unwrap(), original);
 
 	assert!(current
-		.warm_scene(previous.generation, revision, Some(second.clone()))
+		.set_scene_warming_mode(previous.generation, Models)
+		.is_err());
+	let initial = current
+		.set_scene_warming_mode(current.generation, References)
+		.unwrap();
+	current
+		.set_scene_warming_mode(current.generation, Models)
+		.unwrap();
+	let selected = current
+		.set_scene_warming_mode(current.generation, References)
+		.unwrap();
+	assert!(current
+		.warm_scene(
+			previous.generation,
+			revision,
+			selected,
+			Some(second.clone())
+		)
+		.is_err());
+	assert!(current
+		.warm_scene(current.generation, revision, initial, Some(second.clone()))
 		.is_err());
 	assert!(!current.scene_warming.is_requested());
 	current
-		.warm_scene(current.generation, revision, Some(second))
+		.warm_scene(current.generation, revision, selected, Some(second))
 		.unwrap();
 	assert!(current
-		.warm_scene(previous.generation, revision, None)
+		.warm_scene(previous.generation, revision, selected, None)
 		.is_err());
 	current
-		.warm_scene(current.generation, revision, None)
+		.warm_scene(current.generation, revision, selected, None)
 		.unwrap();
 }
 
@@ -868,6 +933,301 @@ fn campaign_repair_is_one_guarded_scene_edit_and_stages_after_history_roundtrip(
 			.collider,
 		Some(original)
 	);
+}
+
+#[test]
+fn campaign_repair_batch_updates_two_colliders_in_one_reviewed_history_entry() {
+	use courtyard_gameplay::authoring_repairs::{CampaignRepairExpectation, CampaignRepairRole};
+	use runtime::scene_data::ColliderData;
+
+	let (fixture, manifest, mut workspace, route) = campaign_workspace();
+	let garden = SceneId::new("garden").unwrap();
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: garden.clone(),
+		},
+	);
+	let keys = ["garden-key-trigger", "garden-exit-trigger"];
+	let colliders = |workspace: &EditorWorkspace| {
+		let document = workspace.backend.session().scene_document(&garden).unwrap();
+		keys.map(|key| {
+			document
+				.entities
+				.iter()
+				.find(|entity| entity.key.as_str() == key)
+				.unwrap()
+				.collider
+				.clone()
+				.unwrap()
+		})
+	};
+	let with_settings = |mut collider: ColliderData, sensor, mask: Option<u32>| {
+		match &mut collider {
+			ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+				interaction.sensor = sensor;
+				if let Some(mask) = mask {
+					interaction.mask = mask;
+				}
+			}
+		}
+		collider
+	};
+	let diagnose = |workspace: &EditorWorkspace| {
+		let revision = workspace.backend.session().revision();
+		workspace
+			.capture_campaign_check(workspace.generation, revision, route.clone())
+			.unwrap()
+			.diagnose()
+	};
+	let original = colliders(&workspace);
+	let broken = original
+		.clone()
+		.map(|collider| with_settings(collider, false, None));
+	for (key, collider) in keys.iter().zip(broken.iter()) {
+		run(
+			&mut workspace,
+			Command::SetCollider {
+				key: (*key).into(),
+				collider: Some(collider.clone()),
+			},
+		);
+	}
+	run(
+		&mut workspace,
+		Command::SetCollider {
+			key: keys[0].into(),
+			collider: Some(with_settings(broken[0].clone(), false, Some(0))),
+		},
+	);
+	let filtered = diagnose(&workspace);
+	assert!(filtered.issues[0].repair_batch.is_empty() && filtered.issues[0].repair.is_none());
+	run(&mut workspace, Command::Undo);
+
+	let before = workspace.backend.snapshot().unwrap();
+	let report = diagnose(&workspace);
+	let targets = &report.issues[0].repair_batch;
+	assert_eq!(
+		targets.iter().map(|target| target.role).collect::<Vec<_>>(),
+		[
+			CampaignRepairRole::KeyTrigger,
+			CampaignRepairRole::ExitTrigger
+		]
+	);
+	let generation = workspace.generation;
+	let repeat = [targets[0].clone(), targets[0].clone()];
+	assert!(workspace
+		.preview_campaign_repair_batch(generation, before.revision, &garden, &repeat)
+		.is_err());
+	let reviewed = workspace
+		.preview_campaign_repair_batch(generation, before.revision, &garden, targets)
+		.unwrap();
+	assert_eq!(
+		reviewed
+			.repairs
+			.iter()
+			.map(|row| row.before.clone())
+			.collect::<Vec<_>>(),
+		broken
+	);
+	assert_eq!(
+		reviewed
+			.repairs
+			.iter()
+			.map(|row| row.after.clone())
+			.collect::<Vec<_>>(),
+		original
+	);
+	assert_eq!(
+		serde_json::to_value(&before).unwrap(),
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+	);
+	let mut expected = reviewed
+		.repairs
+		.into_iter()
+		.map(|row| CampaignRepairExpectation {
+			target: row.target,
+			before: row.before,
+		})
+		.collect::<Vec<_>>();
+	expected[1].before = original[1].clone();
+	assert!(workspace
+		.apply_campaign_repair_batch(generation, before.revision, &garden, &expected)
+		.is_err());
+	assert_eq!(colliders(&workspace), broken);
+	assert_eq!(workspace.backend.session().revision(), before.revision);
+	expected[1].before = broken[1].clone();
+
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: keys[0].into(),
+			name: "Garden key".into(),
+		},
+	);
+	let revision = workspace.backend.session().revision();
+	assert!(workspace
+		.apply_campaign_repair_batch(generation, before.revision, &garden, &expected)
+		.is_err());
+	assert_eq!(colliders(&workspace), broken);
+	let fresh = workspace
+		.preview_campaign_repair_batch(generation, revision, &garden, targets)
+		.unwrap();
+	assert_eq!(fresh.revision, revision);
+	let after = workspace
+		.apply_campaign_repair_batch(generation, revision, &garden, &expected)
+		.unwrap();
+	assert_eq!(after.revision, revision + 1);
+	assert_eq!(after.project, before.project);
+	assert_eq!(colliders(&workspace), original);
+	assert!(diagnose(&workspace).issues.is_empty());
+	run(&mut workspace, Command::Undo);
+	assert_eq!(colliders(&workspace), broken);
+	assert_eq!(diagnose(&workspace).issues[0].repair_batch.len(), 2);
+	run(&mut workspace, Command::Redo);
+	assert_eq!(colliders(&workspace), original);
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	let reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+		.unwrap();
+	assert_eq!(colliders(&reopened), original);
+	let project = runtime::project::ProjectData::load(&manifest).unwrap();
+	let staged = compiler::stage_prepared_project(
+		&compiler::prepare_project(&project, &fixture.0).unwrap(),
+		fixture.0.parent().unwrap().to_str().unwrap(),
+	)
+		.unwrap();
+	assert!(staged
+		.path()
+		.join("assets/scenes/chapter-garden.json")
+		.is_file());
+}
+
+#[test]
+fn campaign_repairs_in_two_scene_visits_keep_separate_undo_and_stage() {
+	use runtime::scene_data::ColliderData;
+
+	let (fixture, manifest, mut workspace, route) = campaign_workspace();
+	let scenes = [
+		(SceneId::new("courtyard").unwrap(), "courtyard-exit-trigger"),
+		(SceneId::new("garden").unwrap(), "garden-exit-trigger"),
+	];
+	let diagnose = |workspace: &EditorWorkspace| {
+		workspace
+			.capture_campaign_check(
+				workspace.generation,
+				workspace.backend.session().revision(),
+				route.clone(),
+			)
+			.unwrap()
+			.diagnose()
+	};
+	for (scene, key) in &scenes {
+		if workspace.backend.snapshot().unwrap().active_scene_id != *scene {
+			run(
+				&mut workspace,
+				Command::SwitchScene {
+					scene_id: scene.clone(),
+				},
+			);
+		}
+		let mut collider = workspace
+			.backend
+			.session()
+			.scene_document(scene)
+			.unwrap()
+			.entities
+			.iter()
+			.find(|entity| entity.key.as_str() == *key)
+			.unwrap()
+			.collider
+			.clone()
+			.unwrap();
+		match &mut collider {
+			ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+				interaction.sensor = false;
+			}
+		}
+		run(
+			&mut workspace,
+			Command::SetCollider {
+				key: (*key).into(),
+				collider: Some(collider),
+			},
+		);
+	}
+
+	let generation = workspace.generation;
+	assert_eq!(diagnose(&workspace).issues.len(), 2);
+	for (scene, _) in &scenes {
+		run(
+			&mut workspace,
+			Command::SwitchScene {
+				scene_id: scene.clone(),
+			},
+		);
+		let revision = workspace.backend.session().revision();
+		let report = diagnose(&workspace);
+		let target = report
+			.issues
+			.iter()
+			.find(|issue| issue.scene_id.as_ref() == Some(scene))
+			.and_then(|issue| issue.repair.as_ref())
+			.unwrap();
+		let preview = workspace
+			.preview_campaign_repair(generation, revision, target)
+			.unwrap();
+		assert_eq!(
+			workspace
+				.apply_campaign_repair(generation, revision, target, &preview.before)
+				.unwrap()
+				.revision,
+			revision + 1
+		);
+	}
+	assert!(diagnose(&workspace).issues.is_empty());
+	run(&mut workspace, Command::Undo);
+	let report = diagnose(&workspace);
+	assert_eq!(report.issues.len(), 1);
+	assert_eq!(report.issues[0].scene_id.as_ref(), Some(&scenes[1].0));
+	run(&mut workspace, Command::Redo);
+	assert!(diagnose(&workspace).issues.is_empty());
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+
+	let project = runtime::project::ProjectData::load(&manifest).unwrap();
+	let staged = compiler::stage_prepared_project(
+		&compiler::prepare_project(&project, &fixture.0).unwrap(),
+		fixture.0.parent().unwrap().to_str().unwrap(),
+	)
+		.unwrap();
+	for (scene_id, key) in &scenes {
+		let scene = project
+			.scenes
+			.iter()
+			.find(|scene| scene.id() == scene_id)
+			.unwrap();
+		let document =
+			runtime::scene_io::load_data(&staged.path().join("assets").join(scene.asset_path()))
+				.unwrap()
+				.data;
+		let collider = document
+			.entities
+			.iter()
+			.find(|entity| entity.key.as_str() == *key)
+			.and_then(|entity| entity.collider.as_ref())
+			.unwrap();
+		match collider {
+			ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+				assert!(interaction.sensor);
+			}
+		}
+	}
 }
 
 #[test]

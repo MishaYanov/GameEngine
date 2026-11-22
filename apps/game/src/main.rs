@@ -15,6 +15,7 @@ mod native_input;
 mod play;
 mod player_controls;
 mod playtrace;
+mod project_sound;
 mod scene_documents;
 mod scene_prefetch;
 mod scene_rendering;
@@ -117,6 +118,7 @@ struct GameApp {
 	play_trace: Option<playtrace::PlayTrace>,
 	feedback_audio: feedback_audio::FeedbackAudio,
 	feedback_captions: feedback_captions::FeedbackCaptions,
+	project_sound: project_sound::ProjectSound,
 	scene_load_timing: Option<SceneLoadTiming>,
 	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
 	scene_prefetch_enabled: bool,
@@ -137,6 +139,7 @@ struct GameApp {
 
 impl GameApp {
 	fn update(&mut self, delta_seconds: f32) {
+		self.update_project_sound();
 		if self.standalone_runtime {
 			if !self.player_controls.is_open() {
 				self.update_player(delta_seconds);
@@ -190,6 +193,26 @@ impl GameApp {
 		}
 	}
 
+	fn update_project_sound(&mut self) {
+		let focused = self.window.as_ref().is_some_and(|window| window.has_focus());
+		self.set_project_sound_focus(focused);
+	}
+
+	fn set_project_sound_focus(&mut self, focused: bool) {
+		if !self.project_sound.has_soundtrack() {
+			return;
+		}
+		let visible = self.window.as_ref().is_some_and(|window| {
+			let size = window.inner_size();
+			size.width > 0 && size.height > 0
+		});
+		self.project_sound.update(
+			self.editor.is_playing(),
+			focused && visible && !self.window_occluded,
+			self.player_controls.feedback_mix().effective_percent(),
+		);
+	}
+
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {
 		if self.editor.play_rig_camera().is_some() {
 			return;
@@ -212,7 +235,8 @@ impl GameApp {
 	fn needs_continuous_redraw(&self) -> bool {
 		if self.window_occluded
 			|| (self.standalone_runtime
-				&& (self.game_completed() || self.player_controls.is_open()))
+			&& ((self.game_completed() && !self.cinder_victory_animation_active())
+			|| self.player_controls.is_open()))
 		{
 			return false;
 		}
@@ -316,11 +340,40 @@ impl GameApp {
 			.or_else(|| self.project.as_ref()?.input_profile.as_ref())
 	}
 
+	fn cinder_in_duel(&self) -> bool {
+		self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Duel)
+	}
+
+	fn cinder_phase(&self) -> Option<gameplay_catalog::cinder_oath::Phase> {
+		self.editor
+			.play_progress::<gameplay_catalog::cinder_oath::CinderProgress>()
+			.map(gameplay_catalog::cinder_oath::CinderProgress::phase)
+	}
+
+	fn cinder_victory_animation_active(&self) -> bool {
+		self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Victory)
+			&& self.editor.animations().is_some_and(|bank| bank.has_active_runtime_one_shot())
+	}
+
+	fn pointer_attack_input(&self) -> Option<InputState> {
+		if !self.standalone_runtime || !self.mouse_captured || !self.cinder_in_duel()
+			|| !self.input.is_held(runtime::input::MouseButton::Left)
+		{
+			return None;
+		}
+		let attack = self.effective_input_profile()?.actions.iter().find(|binding| binding.id == "attack")?;
+		let mut input = self.input.clone();
+		input.press(attack.key);
+		Some(input)
+	}
+
 	fn submit_play_controls(&mut self) -> Result<(), String> {
 		let pad = self.logical_gamepad();
-		self.editor.sample_play_controls(&self.input, pad)?;
+		let pointer_input = self.pointer_attack_input();
+		let input = pointer_input.as_ref().unwrap_or(&self.input);
+		self.editor.sample_play_controls(input, pad)?;
 		if let Some(trace) = self.play_trace.as_mut() {
-			trace.record_controls(&self.input, pad);
+			trace.record_controls(input, pad);
 		}
 		Ok(())
 	}
@@ -510,7 +563,11 @@ impl GameApp {
 			}
 			assets
 		} else {
-			PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
+			self.project_path
+				.as_deref()
+				.and_then(Path::parent)
+				.ok_or("Source project has no parent directory")?
+				.join("assets")
 		};
 		self.initialize_window(window, asset_root)
 	}
@@ -521,6 +578,7 @@ impl GameApp {
 		asset_root: PathBuf,
 	) -> Result<(), String> {
 		let audio_catalog = bridge::feedback_audio::load(&asset_root)?;
+		let project_audio = bridge::project_audio::load(&asset_root)?;
 		let size = window.inner_size();
 		let startup_scene = match self.project.as_ref() {
 			Some(project) => project.startup_scene_path()?,
@@ -557,7 +615,7 @@ impl GameApp {
 			)?,
 		};
 		editor.set_initial_project(project.clone())?;
-		editor.set_module_resolver(Arc::new(progress::resolve))?;
+		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
 		let overlay = if !self.standalone_runtime {
 			Some(SelectionOverlay::new(&renderer, &mut loaded.assets)?)
 		} else {
@@ -591,7 +649,7 @@ impl GameApp {
 		let feedback_audio = feedback_audio::FeedbackAudio::new(
 			audio_catalog,
 			!self.smoke_test,
-			self.player_controls.feedback_mix().effective_percent(),
+			self.player_controls.feedback_mix(),
 			&project.startup_scene_id,
 		)?;
 		// Install only after every fallible initialization step has succeeded.
@@ -611,10 +669,12 @@ impl GameApp {
 		self.project = Some(project);
 		self.asset_root = Some(asset_root);
 		self.feedback_audio = feedback_audio;
+		self.project_sound = project_sound::ProjectSound::new(project_audio, !self.smoke_test);
 		self.scene_path = Some(scene_path);
 		self.checkpoint_base = self.checkpoints.is_some().then(|| Arc::new(parsed.data));
 		self.renderer = Some(renderer);
 		self.window = Some(window);
+		self.update_project_sound();
 		if let Some(timing) = &mut self.scene_load_timing {
 			timing.installed();
 		}
@@ -900,6 +960,14 @@ impl ApplicationHandler for GameApp {
 					ElementState::Released => self.input.release(input_button),
 				}
 				match (button, state) {
+					(MouseButton::Left, _) if self.standalone_runtime && self.cinder_in_duel() => {
+						if state == ElementState::Pressed {
+							self.set_mouse_capture(true);
+						}
+						if let Err(error) = self.submit_play_controls() {
+							self.report_editor_error(error);
+						}
+					}
 					(MouseButton::Left, ElementState::Pressed) if !self.standalone_runtime => {
 						if let Err(error) = self.left_press() {
 							self.report_editor_error(error);
@@ -1027,6 +1095,7 @@ impl ApplicationHandler for GameApp {
 				}
 			}
 			WindowEvent::Focused(false) => {
+				self.set_project_sound_focus(false);
 				self.player_controls.cancel_action_key_capture();
 				if !self.standalone_runtime {
 					self.cancel_drag();
@@ -1040,6 +1109,7 @@ impl ApplicationHandler for GameApp {
 				self.next_frame_deadline = None;
 			}
 			WindowEvent::Focused(true) => {
+				self.set_project_sound_focus(true);
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -1047,6 +1117,7 @@ impl ApplicationHandler for GameApp {
 			}
 			WindowEvent::Occluded(occluded) => {
 				self.window_occluded = occluded;
+				self.update_project_sound();
 				self.clock.reset();
 
 				self.next_frame_deadline = None;
@@ -1067,6 +1138,7 @@ impl ApplicationHandler for GameApp {
 					renderer.resize(size.width, size.height);
 				}
 				if size.width == 0 || size.height == 0 {
+					self.set_project_sound_focus(false);
 					self.player_controls.cancel_action_key_capture();
 					if !self.standalone_runtime {
 						self.cancel_drag();
@@ -1268,13 +1340,17 @@ fn run() -> Result<(), String> {
 	if legacy_install {
 		app.project_name = read_legacy_project_name(&marker);
 	}
-	let source_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.json");
 	app.project_path = if has_manifest {
 		Some(installed_config)
-	} else if !app.installed_project && source_config.is_file() {
-		Some(source_config)
-	} else {
+	} else if legacy_install {
 		None
+	} else {
+		Some(
+			Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("../..")
+				.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
+				.join("project.json"),
+		)
 	};
 	app.project = app
 		.project_path
@@ -1348,7 +1424,7 @@ fn run() -> Result<(), String> {
 	if app.standalone_runtime
 		&& let Some(project) = &app.project
 	{
-		progress::resolve(project)?;
+		gameplay_catalog::resolve(project)?;
 		if project.gameplay_module.as_deref() == Some(progress::COURTYARD_RUN_ID) {
 			app.interaction_action =
 				progress::settings::InteractionSettings::from_project(project)?

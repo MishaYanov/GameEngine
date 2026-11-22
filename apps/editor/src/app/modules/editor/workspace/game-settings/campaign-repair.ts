@@ -1,21 +1,21 @@
-import {afterNextRender, Component, computed, ElementRef, input, output, viewChild} from '@angular/core';
-import type {CampaignRepairPreview, Collider} from '../../../../core/editor/editor.models';
+import {afterNextRender, Component, ElementRef, input, output, viewChild} from '@angular/core';
+import type {CampaignRepairPreview, CampaignRepairTarget, Collider} from '../../../../core/editor/editor.models';
 
 @Component({
     selector: 'editor-campaign-repair',
     templateUrl: './campaign-repair.html',
 })
 export class CampaignRepair {
-    readonly preview = input.required<CampaignRepairPreview>();
+    readonly rows = input.required<readonly CampaignRepairPreview[]>();
     readonly pending = input(false);
     readonly canApply = input(false);
     readonly keep = output<void>();
     readonly apply = output<void>();
-    protected readonly label = computed(() => ({
+    protected readonly roleLabels: Record<CampaignRepairTarget['role'], string> = {
         key_trigger: 'Key trigger',
         exit_trigger: 'Exit trigger',
         finish_trigger: 'Finish trigger',
-    })[this.preview().target.role]);
+    };
     private readonly keepButton = viewChild<ElementRef<HTMLButtonElement>>('keepButton');
 
     constructor() {

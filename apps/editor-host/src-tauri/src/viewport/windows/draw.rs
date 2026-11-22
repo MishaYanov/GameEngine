@@ -1,11 +1,15 @@
 use super::*;
+use bridge::viewport::{
+	SceneWarmingMode, SceneWarmingResultDto, WarmingCacheDto, WarmingCacheState,
+	WarmingLoadIdentityDto, WarmingSessionRowDto, WarmingViewportDto,
+};
 
 impl Worker {
 	pub(super) fn draw(&mut self) -> Result<(), String> {
 		let result = self.draw_frame();
 		if result.is_err() {
-			if let Some((_, timing)) = self.authored_load.take() {
-				timing.finish(LoadOutcome::Failed);
+			if let Some(load) = self.authored_load.take() {
+				load.timing.finish(LoadOutcome::Failed);
 			}
 			if let Some((_, _, _, timing)) = self.play_load.take() {
 				timing.finish(LoadOutcome::Failed);
@@ -134,7 +138,7 @@ impl Worker {
 					};
 					Some(RenderPacket {
 						warm_requested,
-						warm_decode: workspace.scene_warming.decode_enabled(),
+						warming: workspace.scene_warming.context(),
 						warmed,
 						animations: session.animations().cloned(),
 						animation_preview: workspace.active_animation_preview(),
@@ -162,7 +166,7 @@ impl Worker {
 		let RenderPacket {
 			warmed,
 			warm_requested,
-			warm_decode,
+			warming,
 			animations,
 			animation_preview,
 			mut document,
@@ -196,7 +200,7 @@ impl Worker {
 			|| self
 				.authored_load
 				.as_ref()
-				.is_some_and(|(active, _)| Some(active) != key.as_ref())
+			.is_some_and(|load| Some(&load.key) != key.as_ref())
 		{
 			self.authored_load = None;
 		}
@@ -206,12 +210,16 @@ impl Worker {
 			let (_, requested, ready) = switch_clock.unwrap_or((revision, now, now));
 			let mut timing = SceneLoadTiming::new("editor", LoadScope::Authored, requested);
 			timing.cpu_ready_at(ready);
-			self.authored_load = Some((key.clone(), timing));
+			self.authored_load = Some(AuthoredLoad {
+				key: key.clone(),
+				timing,
+				warming: None,
+			});
 		}
 		let request_id = self
 			.authored_load
 			.as_ref()
-			.map(|(_, timing)| timing.id().to_string());
+			.map(|load| load.timing.id().to_string());
 		let (warmed, warm_outcome) = warmed.into_scene();
 		let (mut warm_references, warm_models) = warmed
 			.map(|scene| (Some(scene.references), scene.models))
@@ -222,11 +230,9 @@ impl Worker {
 		let mut model_attempt = ModelWarmAttempt {
 			batch: warm_models,
 			measurement: model_measurement,
-			mode: match warm_outcome {
-				"unrequested" => "off",
-				_ if warm_decode => "decode",
-				_ => "references",
-			},
+			mode: warming.mode,
+			references_hit: warm_outcome == "hit",
+			requested: warm_outcome != "unrequested",
 		};
 		if self.warm_measurement && new_load {
 			if let (Some(request_id), Some(scene)) = (&request_id, &scene_id) {
@@ -234,6 +240,37 @@ impl Worker {
 					"schema_version": 1, "kind": "load", "request_id": request_id,
 					"scene_id": scene.as_str(), "outcome": warm_outcome,
 				}));
+			}
+		}
+		let load_identity = new_load.then(|| {
+			let source_scene_id =
+				self.last_authored_present
+					.as_ref()
+					.and_then(|(previous, scene)| {
+						(*previous == generation && Some(scene) != scene_id.as_ref())
+							.then(|| scene.clone())
+					});
+			WarmingLoadIdentityDto {
+				source_scene_id,
+				workspace_generation: generation,
+				pre_switch_cache: warming_cache(
+					self.gpu.as_ref(),
+					generation,
+					warming.asset_generation,
+				),
+				viewport: warming_viewport(self.extent(), &self.interaction.settings),
+			}
+		});
+		if self.warm_measurement {
+			if let (Some(identity), Some(request_id), Some(scene)) =
+				(&load_identity, &request_id, &scene_id)
+			{
+				let event = serde_json::json!({
+					"schema_version": 1, "request_id": request_id, "scene_id": scene,
+					"scene_revision": revision,
+					"mode": warming.mode, "mode_revision": warming.mode_revision, "identity": identity,
+				});
+				engine_logger::info!(target: "editor_warming_session", "{event}");
 			}
 		}
 		let (parent, control, status, shared) =
@@ -275,8 +312,8 @@ impl Worker {
 		if new_load {
 			report(ViewportSceneLoadStage::Preparing, None);
 		}
-		if let Some((_, timing)) = self.authored_load.as_mut() {
-			timing.gpu_started();
+		if let Some(load) = self.authored_load.as_mut() {
+			load.timing.gpu_started();
 		}
 		let mut last_count = None;
 		let mut count_prepared = |completed, total| {
@@ -418,14 +455,32 @@ impl Worker {
 		} else if lights_changed {
 			gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
 		}
+		if let (Some(load), Some(request_id), Some(identity)) = (
+			self.authored_load.as_mut(),
+			request_id.as_ref(),
+			load_identity,
+		) {
+			load.warming = Some((
+				warming,
+				WarmingSessionRowDto {
+					identity,
+					outcome: warm_outcome.into(),
+					result: model_attempt.result(
+						&load.key,
+						request_id.clone(),
+						warming.mode_revision,
+					),
+				},
+			));
+		}
 		drop(model_attempt);
 		if !is_current() {
 			self.authored_load = None;
 			self.dirty = true;
 			return Ok(());
 		}
-		if let Some((_, timing)) = self.authored_load.as_mut() {
-			timing.installed();
+		if let Some(load) = self.authored_load.as_mut() {
+			load.timing.installed();
 		}
 		let play_is_current = |expected_generation: u64, run_id: &str, scene_generation: u64| {
 			shared.lock().ok().is_some_and(|slot| {
@@ -527,9 +582,12 @@ impl Worker {
 				(presented_at, measurement_started, &scene_id)
 			{
 				log_warm(serde_json::json!({
-					"schema_version": 1, "kind": "active_frame", "scene_id": scene.as_str(),
+					"schema_version": 2, "kind": "active_frame", "scene_id": scene.as_str(),
 					"warming_requested": warm_requested,
 					"elapsed_us": when.saturating_duration_since(started).as_micros().min(u64::MAX as u128) as u64,
+					"workspace_generation": generation, "mode": warming.mode,
+					"pre_switch_cache": warming_cache(Some(gpu), generation, warming.asset_generation),
+					"viewport": warming_viewport([width, height], &self.interaction.settings),
 				}));
 			}
 		}
@@ -563,10 +621,34 @@ impl Worker {
 			}
 		}
 		if let Some(when) = presented_at {
-			if let Some((_, timing)) = self.authored_load.take() {
-				if is_current() {
+			let previous = self
+				.last_authored_present
+				.as_ref()
+				.map(|(owner, scene)| (*owner, scene));
+			let current = scene_id.as_ref().map(|scene| (generation, scene));
+			if current != previous {
+				self.last_authored_present = current.map(|(owner, scene)| (owner, scene.clone()));
+			}
+			if let Some(load) = self.authored_load.take() {
+				let accepted = {
+					let mut slot = shared
+						.lock()
+						.map_err(|_| "Editor document lock is poisoned")?;
+					if let Some(workspace) = slot.as_mut().filter(|w| load.key.matches(w)) {
+						load.timing.finish_at(LoadOutcome::Presented, when);
+						if let Some((context, mut row)) = load.warming {
+							row.identity.viewport =
+								warming_viewport([width, height], &self.interaction.settings);
+							workspace.scene_warming.record_presented(context, row);
+							self.interaction.sync_scene_warming(workspace);
+						}
+						true
+					} else {
+						false
+					}
+				};
+				if accepted {
 					report(ViewportSceneLoadStage::Presented, None);
-					timing.finish_at(LoadOutcome::Presented, when);
 				}
 			}
 			if let Some((generation, run_id, scene_generation, timing)) = self.play_load.take() {
@@ -583,7 +665,31 @@ impl Worker {
 struct ModelWarmAttempt<'a> {
 	batch: Option<runtime::assets::PreparedModelBatch>,
 	measurement: Option<(&'a String, &'a SceneId)>,
-	mode: &'static str,
+	mode: SceneWarmingMode,
+	references_hit: bool,
+	requested: bool,
+}
+
+impl ModelWarmAttempt<'_> {
+	fn result(
+		&self,
+		key: &AuthoredLoadKey,
+		request_id: String,
+		mode_revision: u64,
+	) -> SceneWarmingResultDto {
+		let batch = self.batch.as_ref();
+		SceneWarmingResultDto {
+			scene_id: key.scene_id.clone(),
+			scene_revision: key.revision,
+			request_id,
+			mode: self.mode,
+			mode_revision,
+			references_hit: self.references_hit,
+			prepared_models: batch.map_or(0, runtime::assets::PreparedModelBatch::prepared_count),
+			adopted_models: batch.map_or(0, runtime::assets::PreparedModelBatch::consumed_count),
+			retained_bytes: batch.map_or(0, runtime::assets::PreparedModelBatch::retained_bytes),
+		}
+	}
 }
 
 impl Drop for ModelWarmAttempt<'_> {
@@ -592,15 +698,55 @@ impl Drop for ModelWarmAttempt<'_> {
 			return;
 		};
 		let batch = self.batch.as_ref();
+		let attempt = match (self.requested, self.mode) {
+			(true, SceneWarmingMode::References) => "references",
+			(true, SceneWarmingMode::Models) => "decode",
+			_ => "off",
+		};
 		let event = serde_json::json!({
-			"schema_version": 1, "kind": "model_load",
-			"request_id": request_id, "scene_id": scene.as_str(), "mode": self.mode,
+			"schema_version": 2, "kind": "model_load",
+			"request_id": request_id, "scene_id": scene.as_str(), "mode": attempt,
+			"configured_mode": self.mode,
 			"batch_matched": batch.is_some(),
 			"prepared_models": batch.map_or(0, runtime::assets::PreparedModelBatch::prepared_count),
 			"consumed_models": batch.map_or(0, runtime::assets::PreparedModelBatch::consumed_count),
 			"retained_bytes": batch.map_or(0, runtime::assets::PreparedModelBatch::retained_bytes),
 		});
 		engine_logger::info!(target: "editor_model_warming", "{event}");
+	}
+}
+
+fn warming_cache(
+	gpu: Option<&GpuState>,
+	generation: u64,
+	asset_generation: u64,
+) -> WarmingCacheDto {
+	let state = match gpu {
+		None => WarmingCacheState::Fresh,
+		Some(gpu) if gpu.generation != generation || gpu.assets_invalidated => {
+			WarmingCacheState::Invalidated
+		}
+		Some(_) => WarmingCacheState::Retained,
+	};
+	WarmingCacheDto {
+		state,
+		asset_generation,
+		loaded_models: gpu.map_or(0, |gpu| gpu.assets.loaded_model_count()),
+		gpu_resources: gpu.map_or(0, |gpu| gpu.assets.gpu_resource_count()),
+		gpu_bytes: gpu.map_or(0, |gpu| gpu.assets.gpu_logical_bytes()),
+	}
+}
+
+fn warming_viewport(
+	extent: [u32; 2],
+	settings: &bridge::viewport::ViewportSettingsDto,
+) -> WarmingViewportDto {
+	WarmingViewportDto {
+		width: extent[0],
+		height: extent[1],
+		projection: settings.projection,
+		grid: settings.grid,
+		colliders: settings.colliders,
 	}
 }
 

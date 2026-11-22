@@ -5,8 +5,8 @@ use std::{
 	sync::Arc,
 };
 
-use courtyard_gameplay::authoring_diagnostics::AuthoredScenePreparation;
 use engine_core::{
+	game_session::GameSession,
 	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::SceneData,
 };
@@ -24,7 +24,7 @@ pub fn prepare_project(
 	asset_root: &Path,
 ) -> Result<PreparedProject, String> {
 	project.validate()?;
-	courtyard_gameplay::resolve(project)?;
+	gameplay_catalog::resolve(project)?;
 	let metadata = fs::symlink_metadata(asset_root).map_err(|e| e.to_string())?;
 	if metadata.file_type().is_symlink() || !metadata.is_dir() {
 		return Err("Asset root must be a directory without symbolic links".into());
@@ -53,6 +53,7 @@ pub fn prepare_project(
 	})
 }
 
+#[cfg(test)]
 pub(super) fn read_authored_scene(root: &Path, relative: &str) -> Result<SceneData, String> {
 	engine_core::scene_data::validate_model_path(relative)?;
 	let root = root.canonicalize().map_err(|e| e.to_string())?;
@@ -76,7 +77,8 @@ pub(super) fn validate_catalog_scenes(
 ) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
-	let gameplay = AuthoredScenePreparation::new(Arc::new(project.clone()))?;
+	let factory = gameplay_catalog::resolve(project)?;
+	let project = Arc::new(project.clone());
 	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
 	for behavior in &project.behaviors {
 		targets
@@ -89,12 +91,16 @@ pub(super) fn validate_catalog_scenes(
 	let mut report = String::new();
 	let mut truncated = false;
 
-	for entry in ordered_scenes(project) {
+	for entry in ordered_scenes(&project) {
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result =
 			validate_catalog_scene(scene_targets, root, entry, &packaged).and_then(|scene| {
-				let mut game = gameplay
-					.prepare(entry.id(), Arc::new(scene))
+				let mut game = GameSession::with_factory_for_scene(
+					Arc::clone(&project),
+					entry.id().clone(),
+					Arc::new(scene),
+					Arc::clone(&factory),
+				)
 					.map_err(|cause| scene_error(entry, cause))?;
 				let animation_root = root.to_path_buf();
 				game.set_animation_resolver(Arc::new(move |scene| {

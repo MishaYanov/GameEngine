@@ -127,6 +127,7 @@ dependencies = [
  "compiler",
  "courtyard-gameplay",
  "engine-logger",
+ "gameplay-catalog",
  "glam",
  "log",
  "raw-window-handle",
@@ -585,6 +586,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cinder-oath-gameplay"
+version = "0.1.0"
+dependencies = [
+ "engine-core",
+ "glam",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cocoa"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,6 +649,7 @@ dependencies = [
  "courtyard-gameplay",
  "engine-core",
  "engine-logger",
+ "gameplay-catalog",
  "gltf",
  "serde_json",
  "sha2",
@@ -1166,6 +1178,7 @@ dependencies = [
  "courtyard-gameplay",
  "engine-core",
  "engine-logger",
+ "gameplay-catalog",
  "serde",
  "serde_json",
  "sha2",
@@ -1447,6 +1460,7 @@ dependencies = [
  "bridge",
  "courtyard-gameplay",
  "engine-logger",
+ "gameplay-catalog",
  "glam",
  "image",
  "libc",
@@ -1456,7 +1470,17 @@ dependencies = [
  "serde_json",
  "sha2",
  "tracing",
+ "windows-sys 0.61.2",
  "winit",
+]
+
+[[package]]
+name = "gameplay-catalog"
+version = "0.1.0"
+dependencies = [
+ "cinder-oath-gameplay",
+ "courtyard-gameplay",
+ "engine-core",
 ]
 
 [[package]]

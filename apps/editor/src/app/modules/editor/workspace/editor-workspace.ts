@@ -17,6 +17,7 @@ import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.mod
 import {SceneEditingService} from './scene-editing.service';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
+import {CampaignRepairQueue} from './game-settings/campaign-repair-queue';
 import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
 import {ProjectBuild} from './project-build/project-build';
 import {ViewportEditorService} from '../../../core/editor/viewport-editor.service';
@@ -36,7 +37,10 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
 
 @Component({
     selector: 'editor-workspace',
-    providers: [SceneEditingService, ViewportEditorService, ViewportAssetDragService, SceneSwitchService, WorkspaceViewService],
+    providers: [
+        SceneEditingService, ViewportEditorService, ViewportAssetDragService,
+        SceneSwitchService, WorkspaceViewService, CampaignRepairQueue,
+    ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,

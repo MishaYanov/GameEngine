@@ -290,6 +290,12 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 			closure.record_bytes(relative, bytes)?;
 		}
 	}
+	if let Some(audio) = bridge::project_audio::load(root)? {
+		for (path, bytes) in audio.files() {
+			let relative = closure.key(Path::new(path))?;
+			closure.record_bytes(relative, bytes)?;
+		}
+	}
 	let mut report = String::new();
 	let mut truncated = false;
 	for entry in ordered_scenes(project) {

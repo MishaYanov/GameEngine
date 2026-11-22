@@ -6,6 +6,19 @@ export type ViewportProjection = 'perspective' | 'orthographic';
 export type ViewportPlane = 'xz' | 'xy' | 'yz';
 export type ViewportView = 'scene' | 'game';
 export type ViewportOrientation = 'free' | 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
+export type EditorWarmingMode = 'off' | 'references' | 'models';
+
+export interface SceneWarmingResult {
+    readonly scene_id: string;
+    readonly scene_revision: number;
+    readonly request_id: string;
+    readonly mode: EditorWarmingMode;
+    readonly mode_revision: number;
+    readonly references_hit: boolean;
+    readonly prepared_models: number;
+    readonly adopted_models: number;
+    readonly retained_bytes: number;
+}
 
 export interface ViewportSettings {
     readonly tool: ViewportTool;
@@ -37,6 +50,7 @@ export interface ViewportEditorState {
     readonly collider_error?: string | null;
     readonly transform_preview?: ViewportTransformPreview | null;
     readonly game_status?: PlayStatus | null;
+    readonly scene_warming_result?: SceneWarmingResult | null;
     readonly orbit_status?: {
         readonly blocker: string | null;
         readonly recovering: boolean;

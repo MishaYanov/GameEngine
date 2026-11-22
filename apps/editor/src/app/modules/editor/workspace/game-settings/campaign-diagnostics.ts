@@ -17,7 +17,7 @@ export class CampaignDiagnostics {
     readonly canNavigate = input(false);
     readonly canRepair = input(false);
     readonly inspect = output<SceneId>();
-    readonly reviewRepair = output<CampaignRepairTarget>();
+    readonly reviewRepair = output<readonly CampaignRepairTarget[]>();
 
     private readonly byId = computed(() => new Map(this.scenes().map(scene => [scene.id, scene.asset_path])));
     protected readonly entries = computed(() => this.issues().map(issue => ({

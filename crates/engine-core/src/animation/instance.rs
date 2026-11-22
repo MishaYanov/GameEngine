@@ -49,6 +49,7 @@ pub struct AnimationInspection {
 struct Instance {
 	owner: RuntimeEntityHandle,
 	component: AnimationComponent,
+	runtime_playback: Option<(u32, bool)>,
 	pose: AnimationPose,
 	fade: Option<(Vec<LocalTrs>, u16)>,
 	active: bool,
@@ -128,6 +129,7 @@ impl AnimationBank {
 						.ok_or("Animation owner has no runtime handle")?
 						.clone(),
 					component: component.clone(),
+					runtime_playback: None,
 					pose,
 					fade: None,
 					active,
@@ -151,7 +153,8 @@ impl AnimationBank {
 			.collect()
 	}
 	pub fn replay_state(&self) -> serde_json::Value {
-		serde_json::Value::Array(self.instances.iter().map(|(key,i)|serde_json::json!({
+		serde_json::Value::Array(self.instances.iter().map(|(key, i)| {
+			let mut state = serde_json::json!({
             "key":key,"generation":i.owner.generation,"source_sha256":i.pose.asset.source_sha256,
             "component_id":i.component.id,"enabled":i.component.enabled,"settings":i.component.settings,
             "elapsed_ticks":i.pose.elapsed_ticks,"clip_index":i.pose.clip_index,"mode":i.pose.mode,"active":i.active,
@@ -159,12 +162,22 @@ impl AnimationBank {
             "palette":i.pose.palette.iter().map(|m|m.to_cols_array()).collect::<Vec<_>>(),
             "bounds":{"min":i.pose.bounds.min(),"max":i.pose.bounds.max()},
             "fade":i.fade.as_ref().map(|(pose,age)|serde_json::json!({"age":age,"outgoing_pose":pose}))
-        })).collect())
+			});
+			if let Some((clip_index, looping)) = i.runtime_playback {
+				state["runtime_playback"] = serde_json::json!({ "clip_index": clip_index, "looping": looping });
+			}
+			state
+		}).collect())
 	}
 	pub fn needs_tick(&self) -> bool {
 		self.instances
 			.values()
 			.any(|i| i.active || i.fade.is_some())
+	}
+	pub fn has_active_runtime_one_shot(&self) -> bool {
+		self.instances.values().any(|instance| {
+			instance.active && instance.runtime_playback.is_some_and(|(_, looping)| !looping)
+		})
 	}
 	pub fn is_empty(&self) -> bool {
 		self.instances.is_empty()
@@ -192,6 +205,30 @@ impl AnimationBank {
 			}
 		}
 		self.revision = previous.revision;
+	}
+
+	pub(crate) fn play_clip(
+		&mut self,
+		key: &EntityKey,
+		clip: u32,
+		looping: bool,
+	) -> Result<(), String> {
+		let instance = self
+			.instances
+			.get_mut(key)
+			.ok_or("Prepare the animation before selecting a runtime clip")?;
+		if !instance.component.enabled
+			|| !matches!(
+				instance.component.settings.playback,
+				AnimationPlayback::SingleClip { .. }
+			) {
+			return Err("Runtime clip selection requires an enabled single-clip component".into());
+		}
+		if clip as usize >= instance.pose.asset.clips.len() {
+			return Err("Runtime animation clip is absent from the prepared asset".into());
+		}
+		instance.runtime_playback = Some((clip, looping));
+		Ok(())
 	}
 	/// Stage this bank alongside the tick's world candidate; publish only with aggregate success.
 	pub fn step(
@@ -229,10 +266,14 @@ impl AnimationBank {
 				continue;
 			}
 			let settings = &instance.component.settings;
-			let (mut target, mut mode, looping) =
-				(instance.pose.clip_index, instance.pose.mode, true);
-			let looping = match settings.playback {
-				AnimationPlayback::SingleClip { looping, .. } => looping,
+			let (target, mode, looping) = match settings.playback {
+				AnimationPlayback::SingleClip {
+					clip_index,
+					looping,
+				} => {
+					let (clip, repeat) = instance.runtime_playback.unwrap_or((clip_index, looping));
+					(clip, instance.pose.mode, repeat)
+				}
 				AnimationPlayback::Locomotion3 { idle, walk, air } => {
 					let motion = motions
 						.get(key)
@@ -247,21 +288,24 @@ impl AnimationBank {
 							"Animation motion has stale ownership/tick or nonfinite speed".into(),
 						);
 					}
-					mode = if !motion.grounded {
+					let mode = if !motion.grounded {
 						MotionMode::Air
 					} else if motion.planar_speed
-						> if mode == MotionMode::Walk { 0.05 } else { 0.1 }
-					{
+						> if instance.pose.mode == MotionMode::Walk {
+						0.05
+					} else {
+						0.1
+					} {
 						MotionMode::Walk
 					} else {
 						MotionMode::Idle
 					};
-					target = match mode {
+					let target = match mode {
 						MotionMode::Idle => idle,
 						MotionMode::Walk => walk,
 						MotionMode::Air => air,
 					};
-					looping
+					(target, mode, true)
 				}
 			};
 			let transition = target != instance.pose.clip_index || mode != instance.pose.mode;

@@ -32,3 +32,42 @@ fn new_run_can_clear_all_visible_feedback_without_waiting() {
 	assert_eq!(captions.rows(now).next(), None);
 	assert_eq!(captions.next_expiry(), None);
 }
+
+#[test]
+fn zero_audio_gain_still_allows_gameplay_captions() {
+	use bridge::feedback_audio::FeedbackBus;
+	use runtime::scene_catalog::SceneId;
+
+	let mix = serde_json::from_value(serde_json::json!({
+		"level_percent": 0,
+		"muted": false,
+		"bus_percent": {"collection": 100, "mechanisms": 100, "completion": 100}
+	}))
+		.unwrap();
+	let audio = crate::feedback_audio::FeedbackAudio::new(
+		None,
+		false,
+		mix,
+		&SceneId::new("courtyard").unwrap(),
+	)
+		.unwrap();
+	assert_eq!(
+		audio.cue_details(FeedbackBus::Mechanisms).resolved_percent,
+		0
+	);
+	let now = Instant::now();
+	let mut captions = FeedbackCaptions::default();
+	let before = crate::feedback_audio::Facts {
+		key: false,
+		gate: false,
+		complete: false,
+	};
+	let after = crate::feedback_audio::Facts {
+		gate: true,
+		..before
+	};
+	for cue in before.rising(after) {
+		captions.push(cue, now);
+	}
+	assert_eq!(captions.rows(now).collect::<Vec<_>>(), ["Gate opened"]);
+}

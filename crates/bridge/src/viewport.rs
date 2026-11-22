@@ -108,6 +108,79 @@ pub struct ViewportTransformPreviewDto {
 	pub transform: crate::editor::TransformDto,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SceneWarmingMode {
+	#[default]
+	Off,
+	References,
+	Models,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneWarmingResultDto {
+	pub scene_id: engine_core::scene_catalog::SceneId,
+	pub scene_revision: u64,
+	pub request_id: String,
+	pub mode: SceneWarmingMode,
+	pub mode_revision: u64,
+	pub references_hit: bool,
+	pub prepared_models: usize,
+	pub adopted_models: usize,
+	pub retained_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarmingCacheState {
+	Fresh,
+	Retained,
+	Invalidated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarmingCacheDto {
+	pub state: WarmingCacheState,
+	pub asset_generation: u64,
+	pub loaded_models: usize,
+	pub gpu_resources: usize,
+	pub gpu_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarmingViewportDto {
+	pub width: u32,
+	pub height: u32,
+	pub projection: ViewportProjection,
+	pub grid: bool,
+	pub colliders: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarmingLoadIdentityDto {
+	pub source_scene_id: Option<engine_core::scene_catalog::SceneId>,
+	pub workspace_generation: u64,
+	pub pre_switch_cache: WarmingCacheDto,
+	pub viewport: WarmingViewportDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarmingSessionRowDto {
+	#[serde(flatten)]
+	pub identity: WarmingLoadIdentityDto,
+	pub outcome: String,
+	#[serde(flatten)]
+	pub result: SceneWarmingResultDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WarmingSessionReportDto {
+	pub schema_version: u32,
+	pub session_id: String,
+	pub workspace_generation: u64,
+	pub rows: Vec<WarmingSessionRowDto>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewportEditorStateDto {
 	pub settings: ViewportSettingsDto,
@@ -127,6 +200,8 @@ pub struct ViewportEditorStateDto {
 	pub game_status: Option<crate::editor::PlayStatusDto>,
 	#[serde(default)]
 	pub orbit_status: Option<OrbitStatusDto>,
+	#[serde(default)]
+	pub scene_warming_result: Option<SceneWarmingResultDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +227,7 @@ impl Default for ViewportEditorStateDto {
 			transform_preview: None,
 			game_status: None,
 			orbit_status: None,
+			scene_warming_result: None,
 		}
 	}
 }

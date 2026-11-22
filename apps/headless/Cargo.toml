@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bridge = { path = "../../crates/bridge" }
 courtyard-gameplay = { path = "../../crates/courtyard-gameplay" }
+gameplay-catalog = { path = "../../crates/gameplay-catalog" }
 engine-core = { path = "../../crates/engine-core" }
 engine-logger = { path = "../../crates/logger" }
 serde = { version = "1", features = ["derive"] }

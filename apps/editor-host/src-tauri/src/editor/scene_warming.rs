@@ -1,12 +1,16 @@
 //! A bounded CPU worker for one selected inactive authored scene.
 use std::{
-	path::PathBuf,
+	collections::VecDeque,
+	path::{Path, PathBuf},
 	sync::{
 		atomic::{AtomicBool, Ordering},
 		Arc, Condvar, Mutex,
 	},
 };
 
+use bridge::viewport::{
+	SceneWarmingMode, SceneWarmingResultDto, WarmingSessionReportDto, WarmingSessionRowDto,
+};
 use runtime::{
 	assets::PreparedModelBatch, scene_catalog::SceneId, scene_io::PreparedSceneReferences,
 	SceneData,
@@ -14,11 +18,15 @@ use runtime::{
 
 use super::EditorWorkspace;
 
+const MAX_REPORT_ROWS: usize = 32;
+const MAX_REPORT_BYTES: usize = 64 * 1024;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct WarmKey {
 	workspace: u64,
 	revision: u64,
 	asset_generation: u64,
+	mode: SceneWarmingMode,
 	origin: SceneId,
 	scene: SceneId,
 }
@@ -63,18 +71,15 @@ struct Mailbox {
 
 struct WarmWorker {
 	mailbox: Arc<Mailbox>,
-	decode: bool,
 }
 
 impl WarmWorker {
 	fn new() -> Result<Self, String> {
-		let decode = std::env::var_os("ENGINE_EDITOR_WARM_DECODE").as_deref()
-			== Some(std::ffi::OsStr::new("1"));
-		Self::spawn(decode, move |job| {
+		Self::spawn(|job| {
 			let cancelled = || job.cancel.load(Ordering::Relaxed);
 			let references =
 				PreparedSceneReferences::build(Arc::clone(&job.document), cancelled).ok()??;
-			let models = if decode {
+			let models = if job.key.mode == SceneWarmingMode::Models {
 				PreparedModelBatch::prepare(
 					&job.asset_root,
 					references.static_model_assets(),
@@ -88,7 +93,6 @@ impl WarmWorker {
 	}
 
 	fn spawn(
-		decode: bool,
 		prepare: impl Fn(&Job) -> Option<WarmedScene> + Send + 'static,
 	) -> Result<Self, String> {
 		let mailbox = Arc::new(Mailbox::default());
@@ -97,7 +101,7 @@ impl WarmWorker {
 			.name("editor-scene-warm".into())
 			.spawn(move || work(&owned, prepare))
 			.map_err(|error| error.to_string())?;
-		Ok(Self { mailbox, decode })
+		Ok(Self { mailbox })
 	}
 
 	fn request(&self, key: WarmKey, document: Arc<SceneData>, asset_root: PathBuf) {
@@ -171,7 +175,18 @@ fn work(mailbox: &Mailbox, prepare: impl Fn(&Job) -> Option<WarmedScene>) {
 #[derive(Default)]
 pub(crate) struct SceneWarming {
 	worker: Option<WarmWorker>,
+	mode: SceneWarmingMode,
+	mode_revision: u64,
 	asset_generation: u64,
+	latest: Option<SceneWarmingResultDto>,
+	presented: VecDeque<WarmingSessionRowDto>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WarmingContext {
+	pub(crate) mode: SceneWarmingMode,
+	pub(crate) mode_revision: u64,
+	pub(crate) asset_generation: u64,
 }
 
 pub(crate) enum WarmClaim {
@@ -193,6 +208,49 @@ impl WarmClaim {
 }
 
 impl SceneWarming {
+	pub(crate) fn context(&self) -> WarmingContext {
+		WarmingContext {
+			mode: self.mode,
+			mode_revision: self.mode_revision,
+			asset_generation: self.asset_generation,
+		}
+	}
+
+	fn set_mode(&mut self, mode: SceneWarmingMode) {
+		if self.mode == mode {
+			return;
+		}
+		self.mode = mode;
+		self.mode_revision = self.mode_revision.wrapping_add(1);
+		self.latest = None;
+		self.cancel();
+	}
+
+	pub(crate) fn record_presented(&mut self, context: WarmingContext, row: WarmingSessionRowDto) {
+		if self.context() == context {
+			self.latest = Some(row.result.clone());
+		}
+		if self.presented.len() == MAX_REPORT_ROWS {
+			self.presented.pop_front();
+		}
+		self.presented.push_back(row);
+	}
+
+	fn report(&self, session_id: String, workspace_generation: u64) -> WarmingSessionReportDto {
+		WarmingSessionReportDto {
+			schema_version: 1,
+			session_id,
+			workspace_generation,
+			rows: self.presented.iter().cloned().collect(),
+		}
+	}
+
+	pub(crate) fn latest(&self, scene: &str, revision: u64) -> Option<&SceneWarmingResultDto> {
+		self.latest
+			.as_ref()
+			.filter(|result| result.scene_id.as_str() == scene && result.scene_revision == revision)
+	}
+
 	pub(crate) fn cancel(&self) {
 		if let Some(worker) = &self.worker {
 			if let Ok(mut state) = worker.mailbox.state.lock() {
@@ -205,11 +263,8 @@ impl SceneWarming {
 
 	pub(crate) fn invalidate_assets(&mut self) {
 		self.asset_generation = self.asset_generation.wrapping_add(1);
+		self.latest = None;
 		self.cancel();
-	}
-
-	pub(crate) fn decode_enabled(&self) -> bool {
-		self.worker.as_ref().is_some_and(|worker| worker.decode)
 	}
 
 	pub(crate) fn is_requested(&self) -> bool {
@@ -237,6 +292,7 @@ impl SceneWarming {
 		}
 		if key.workspace != workspace
 			|| &key.scene != scene
+			|| key.mode != self.mode
 			|| key.asset_generation != self.asset_generation
 		{
 			let retired = state.cancel();
@@ -255,21 +311,57 @@ impl SceneWarming {
 }
 
 impl EditorWorkspace {
+	pub(crate) fn check_warming_export(&self, expected_generation: u64) -> Result<(), String> {
+		if self.generation != expected_generation {
+			return Err("Workspace changed before the warming report could be exported".into());
+		}
+		Ok(())
+	}
+
+	pub(crate) fn capture_warming_report(
+		&self,
+		expected_generation: u64,
+		session_id: String,
+	) -> Result<WarmingSessionReportDto, String> {
+		self.check_warming_export(expected_generation)?;
+		Ok(self.scene_warming.report(session_id, self.generation))
+	}
+
+	pub(crate) fn set_scene_warming_mode(
+		&mut self,
+		expected_generation: u64,
+		mode: SceneWarmingMode,
+	) -> Result<u64, String> {
+		if self.generation != expected_generation {
+			return Err("Workspace changed before the scene warming mode update".into());
+		}
+		self.scene_warming.set_mode(mode);
+		Ok(self.scene_warming.mode_revision)
+	}
+
 	pub(crate) fn warm_scene(
 		&mut self,
 		expected_generation: u64,
 		expected_revision: u64,
+		expected_mode_revision: u64,
 		scene: Option<SceneId>,
 	) -> Result<(), String> {
 		let session = self.backend.session();
 		if self.generation != expected_generation || session.revision() != expected_revision {
 			return Err("Workspace changed before the scene warming request".into());
 		}
+		if self.scene_warming.mode_revision != expected_mode_revision {
+			return Err("Scene warming mode changed before the request".into());
+		}
 		let Some(scene) = scene else {
 			self.scene_warming.cancel();
 			return Ok(());
 		};
-		if session.is_playing() || session.has_transaction() || &scene == session.active_scene_id()
+		let mode = self.scene_warming.mode;
+		if mode == SceneWarmingMode::Off
+			|| session.is_playing()
+			|| session.has_transaction()
+			|| &scene == session.active_scene_id()
 		{
 			self.scene_warming.cancel();
 			return Ok(());
@@ -279,6 +371,7 @@ impl EditorWorkspace {
 			workspace: self.generation,
 			revision: session.scene_revision(),
 			asset_generation: self.scene_warming.asset_generation,
+			mode,
 			origin: session.active_scene_id().clone(),
 			scene,
 		};
@@ -290,6 +383,19 @@ impl EditorWorkspace {
 		}
 		Ok(())
 	}
+}
+
+pub(crate) fn publish_warming_report(
+	report: &WarmingSessionReportDto,
+	destination: &Path,
+) -> Result<usize, String> {
+	let mut bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+	bytes.push(b'\n');
+	if bytes.len() > MAX_REPORT_BYTES {
+		return Err("The warming report exceeds its export limit".into());
+	}
+	runtime::scene_io::save_new_bytes(destination, &bytes)?;
+	Ok(report.rows.len())
 }
 
 #[cfg(test)]

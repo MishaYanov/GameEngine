@@ -33,5 +33,5 @@
     <router-outlet></router-outlet>
 </editor-portal>
 
-<editor-settings-dialog/>
+<editor-settings-dialog [sceneWarmingSupported]="editorService.capabilities()?.scene_warming_supported === true"/>
 <editor-context-menu/>

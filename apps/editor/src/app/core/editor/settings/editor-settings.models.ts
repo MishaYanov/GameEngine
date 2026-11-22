@@ -1,4 +1,15 @@
 import {editorShortcutHelp, type EditorShortcutHelp, NATIVE_SCENE_NAVIGATION} from '../editor-keymap';
+import type {EditorWarmingMode} from '../viewport-editor.models';
+
+export const EDITOR_WARMING_MODES = [
+    {value: 'off', label: 'Off'},
+    {value: 'references', label: 'References'},
+    {value: 'models', label: 'Models'},
+] as const satisfies readonly { value: EditorWarmingMode; label: string }[];
+
+export function isEditorWarmingMode(value: unknown): value is EditorWarmingMode {
+    return EDITOR_WARMING_MODES.some(option => option.value === value);
+}
 
 export type EditorSettingsPage = 'editor' | 'editor.keymap';
 

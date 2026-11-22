@@ -126,7 +126,7 @@ impl EditorWorkspace {
 		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
-			.module_resolver(Arc::new(courtyard_gameplay::resolve))
+			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;
@@ -167,7 +167,7 @@ impl EditorWorkspace {
 		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
 		let backend = runtime::EngineBuilder::new(parsed.data, project)
 			.with_scenes(documents)
-			.module_resolver(Arc::new(courtyard_gameplay::resolve))
+			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.build()
 			.map_err(|e| e.to_string())?;

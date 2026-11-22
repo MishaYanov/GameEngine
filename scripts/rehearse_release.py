@@ -78,7 +78,7 @@ def verify_copy(report_path, package):
 
 def rehearse(manifest, evidence):
     evidence.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="courtyard-", dir=evidence))
+    run = Path(tempfile.mkdtemp(prefix="game-", dir=evidence))
     print(f"Evidence directory {run}", flush=True)
     original_manifest = digest(manifest)
     paths = {}

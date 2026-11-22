@@ -25,6 +25,7 @@ import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {CampaignDiagnostics} from './campaign-diagnostics';
 import {CampaignRepair} from './campaign-repair';
+import {CampaignRepairQueue} from './campaign-repair-queue';
 import {
     campaignDefinition,
     type CampaignDraft,
@@ -51,14 +52,16 @@ interface CheckedCampaign {
     readonly report: CampaignDiagnosticReport;
 }
 
-interface SceneInspection {
-    readonly check: CheckedCampaign;
+type SceneInspection = {
     readonly sceneId: SceneId;
-}
+    readonly context: ReviewedCampaign;
+} & ({ readonly source: 'diagnostics'; readonly check: CheckedCampaign } |
+    { readonly source: 'queue'; readonly draft: CampaignDraft });
 
 interface ReviewedRepair {
     readonly check: CheckedCampaign;
-    readonly preview: CampaignRepairPreview;
+    readonly sceneId: SceneId;
+    readonly rows: readonly CampaignRepairPreview[];
 }
 
 @Component({
@@ -74,6 +77,7 @@ export class CampaignSettings {
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly sceneSwitch = inject(SceneSwitchService, {optional: true});
+    protected readonly repairQueue = inject(CampaignRepairQueue);
     private readonly injector = inject(Injector);
     private readonly destroyRef = inject(DestroyRef);
     private readonly chapterInputs = viewChildren<ElementRef<HTMLInputElement>>('chapterId');
@@ -123,13 +127,22 @@ export class CampaignSettings {
     protected readonly canInspect = computed(() => this.sceneSwitch?.canSwitch() ?? false);
     protected readonly inspectChoice = computed(() => {
         const next = this.inspection();
-        return next?.check === this.diagnostics() ? next : null;
+        if (!next || next.context !== this.context()) return null;
+        return (next.source === 'queue'
+            ? next.draft === this.draft() && next.context.revision === this.editor.snapshot()?.revision &&
+            this.repairQueue.sceneIds().includes(next.sceneId)
+            : next.check === this.diagnostics()) ? next : null;
     });
+    protected readonly queueNeedsCheck = computed(() => this.repairQueue.currentCheck()?.revision !==
+        this.editor.snapshot()?.revision || this.diagnostics() === null);
     protected readonly repairChoice = computed(() => {
         const review = this.repair();
         return review && review.check === this.diagnostics() &&
-        review.preview.target.scene_id === this.activeScene() ? review : null;
+        review.sceneId === this.activeScene() ? review : null;
     });
+    protected readonly canOpenQueue = computed(() =>
+        this.available() && this.canInspect() && !this.checking() && !this.repairChoice() && !this.inspectChoice() &&
+        this.context()?.revision === this.editor.snapshot()?.revision);
 
     constructor() {
         effect(() => {
@@ -207,7 +220,7 @@ export class CampaignSettings {
         return scene ? scene.asset_path + ' (' + scene.id + ')' : sceneId;
     }
 
-    protected async checkCampaign(): Promise<void> {
+    protected async checkCampaign(preserveMessage = false): Promise<void> {
         const context = this.context();
         if (!context || !this.open() || !this.available() || this.checking() || this.repairChoice() ||
             this.validation()) return;
@@ -221,10 +234,11 @@ export class CampaignSettings {
         this.inspection.set(null);
         this.repair.set(null);
         this.error.set(null);
-        this.message.set(null);
+        if (!preserveMessage) this.message.set(null);
         try {
+            const definition = campaignDefinition(request.draft);
             const report = await this.editor.diagnoseCampaign(
-                campaignDefinition(request.draft),
+                definition,
                 context.generation,
                 context.nativeGeneration,
                 context.revision,
@@ -232,6 +246,7 @@ export class CampaignSettings {
             if (this.checkingRequest() === request && this.currentDiagnosticRequest(request) &&
                 report.workspace_generation === context.nativeGeneration && report.revision === context.revision) {
                 this.checked.set({request, report});
+                this.repairQueue.accept(context.generation, definition, report);
             }
         } catch (cause) {
             if (this.checkingRequest() === request && this.currentDiagnosticRequest(request)) {
@@ -242,22 +257,43 @@ export class CampaignSettings {
         }
     }
 
-    protected async reviewRepair(target: CampaignRepairTarget): Promise<void> {
+    protected async reviewRepair(targets: readonly CampaignRepairTarget[]): Promise<void> {
         const check = this.diagnostics();
-        if (!check || !this.available() || this.repairChoice() || this.inspectChoice() ||
-            target.scene_id !== this.activeScene() ||
-            !check.report.issues.some(issue => issue.repair === target)) return;
+        const [first] = targets;
+        if (!first || !check || !this.available() || this.repairChoice() || this.inspectChoice() ||
+            first.scene_id !== this.activeScene() ||
+            !check.report.issues.some(issue => issue.repair_batch === targets ||
+                (targets.length === 1 && issue.repair === first))) return;
         const {generation, nativeGeneration, revision} = check.request.context;
+        const sceneId = first.scene_id;
         this.pending.set(true);
         this.error.set(null);
         this.message.set(null);
         try {
-            const preview = await this.editor.previewCampaignRepair(target, generation, nativeGeneration, revision);
-            if (this.diagnostics() === check && this.activeScene() === target.scene_id) {
-                this.repair.set({check, preview});
+            let rows: readonly CampaignRepairPreview[];
+            if (targets.length === 1) {
+                rows = [await this.editor.previewCampaignRepair(first, generation, nativeGeneration, revision)];
+            } else {
+                const batch = await this.editor.previewCampaignRepairBatch(
+                    sceneId, targets, generation, nativeGeneration, revision);
+                if (batch.scene_id !== sceneId || batch.workspace_generation !== nativeGeneration ||
+                    batch.revision !== revision) {
+                    throw new Error('The repair preview is out of date. Check the campaign again.');
+                }
+                rows = batch.repairs;
             }
+            if (this.diagnostics() !== check || this.activeScene() !== sceneId) return;
+            if (rows.length !== targets.length || !targets.every((target, index) => {
+                const returned = rows[index].target;
+                return returned.scene_id === target.scene_id && returned.role === target.role &&
+                    returned.entity_key === target.entity_key;
+            })) {
+                this.showFailure('The repair preview does not match the reviewed triggers. Check the campaign again.');
+                return;
+            }
+            this.repair.set({check, sceneId, rows});
         } catch (cause) {
-            if (this.diagnostics() === check) this.showFailure(cause);
+            if (this.diagnostics() === check && this.activeScene() === sceneId) this.showFailure(cause);
         } finally {
             if (!this.destroyRef.destroyed) this.pending.set(false);
         }
@@ -277,13 +313,21 @@ export class CampaignSettings {
         this.pending.set(true);
         this.error.set(null);
         const current = () => this.open() && this.context() === context && this.currentWorkspace(generation);
+        let recheck = false;
+        let revisedContext: ReviewedCampaign | null = null;
         try {
-            const updated = await this.editor.applyCampaignRepair(repair.preview, generation, nativeGeneration, revision);
+            const [first] = repair.rows;
+            const single = repair.rows.length === 1;
+            const updated = single
+                ? await this.editor.applyCampaignRepair(first, generation, nativeGeneration, revision)
+                : await this.editor.applyCampaignRepairBatch(repair.sceneId, repair.rows, generation, nativeGeneration, revision);
             if (current()) {
-                this.context.set({...context, revision: updated.revision});
+                recheck = this.repairQueue.sceneIds().includes(repair.sceneId);
+                revisedContext = {...context, revision: updated.revision};
+                this.context.set(revisedContext);
                 this.checked.set(null);
-                this.message.set('Trigger repaired. Save All to persist the scene.');
-                this.focusWhileOpen(() => this.checkButton()?.nativeElement);
+                this.message.set(single ? 'Trigger repaired. Save All to persist the scene.'
+                    : 'Triggers repaired. Save All to persist the scene.');
             }
         } catch (cause) {
             if (current()) this.showFailure(cause);
@@ -293,13 +337,27 @@ export class CampaignSettings {
                 this.pending.set(false);
             }
         }
+        if (recheck) await this.checkCampaign(true);
+        if (revisedContext && this.context() === revisedContext && !this.error()) {
+            this.focusWhileOpen(() => this.checkButton()?.nativeElement);
+        }
     }
 
     protected inspectScene(sceneId: SceneId): void {
         const check = this.diagnostics();
         if (!check || this.pending() || this.repairChoice() || !this.canInspectScene(sceneId) ||
             !check.report.issues.some(issue => issue.scene_id === sceneId)) return;
-        const next = {check, sceneId};
+        this.chooseInspection({source: 'diagnostics', check, context: check.request.context, sceneId});
+    }
+
+    protected openQueuedScene(sceneId: SceneId): void {
+        const context = this.context();
+        if (!context || !this.canOpenQueue() || !this.repairQueue.sceneIds().includes(sceneId) ||
+            !this.canInspectScene(sceneId)) return;
+        this.chooseInspection({source: 'queue', draft: this.draft(), context, sceneId});
+    }
+
+    private chooseInspection(next: SceneInspection): void {
         if (this.dirty()) {
             this.inspection.set(next);
             this.focusWhileOpen(() => this.keepDraft()?.nativeElement);
@@ -316,7 +374,7 @@ export class CampaignSettings {
         if (next && this.canInspectScene(next.sceneId)) this.closeForInspection(next);
     }
 
-    protected dialogClosed(): void {
+    protected async dialogClosed(): Promise<void> {
         const next = this.inspectAfterClose;
         this.inspectAfterClose = null;
         this.inspection.set(null);
@@ -324,10 +382,32 @@ export class CampaignSettings {
         this.checked.set(null);
         this.checkingRequest.set(null);
         this.context.set(null);
-        if (next && this.currentWorkspace(next.check.request.context.generation) &&
-            this.editor.snapshot()?.revision === next.check.request.context.revision &&
-            this.canInspectScene(next.sceneId)) {
-            void this.sceneSwitch?.request(next.sceneId);
+        if (!next || !this.currentWorkspace(next.context.generation) ||
+            this.editor.snapshot()?.revision !== next.context.revision || !this.canInspectScene(next.sceneId)) return;
+        if (next.source === 'diagnostics') {
+            await this.sceneSwitch?.request(next.sceneId);
+            return;
+        }
+        this.pending.set(true);
+        const switched = await this.sceneSwitch?.request(next.sceneId);
+        if (this.destroyRef.destroyed) return;
+        this.pending.set(false);
+        // Let the workspace deliver its updated scene-switch pending input before reopening a dialog.
+        afterNextRender(() => void this.resumeQueuedInspection(next, switched === true), {injector: this.injector});
+    }
+
+    private async resumeQueuedInspection(next: Extract<SceneInspection, {
+        source: 'queue'
+    }>, switched: boolean): Promise<void> {
+        if (this.open() || !this.currentWorkspace(next.context.generation)) return;
+        if (switched && this.activeScene() === next.sceneId) {
+            await this.show();
+            await this.checkCampaign();
+        } else if (this.editor.snapshot()?.revision === next.context.revision) {
+            this.context.set(next.context);
+            this.draft.set(next.draft);
+            this.open.set(true);
+            this.focusWhileOpen(() => this.checkButton()?.nativeElement);
         }
     }
 

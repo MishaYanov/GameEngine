@@ -1,0 +1,7035 @@
+{
+  "schema_version": 5,
+  "bindings": {
+    "camera_track": "oath-camera-carrier",
+    "knight": "oath-knight"
+  },
+  "entities": [
+    {
+      "key": "oath-camera-carrier",
+      "name": "Intro dolly",
+      "transform": {
+        "position": [
+          0,
+          1.55,
+          6.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": []
+    },
+    {
+      "key": "oath-knight",
+      "name": "Knight of the Oath",
+      "transform": {
+        "position": [
+          0,
+          0.29,
+          0
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "actors/knight.glb",
+            "asset_id": "d8d8ef81-14d3-5322-8dc4-bb5d091e4393",
+            "mesh_index": 0
+          }
+        },
+        {
+          "id": "animation",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animation",
+            "settings": {
+              "source": {
+                "asset_id": "d8d8ef81-14d3-5322-8dc4-bb5d091e4393",
+                "expected_sha256": "47d080bb44cbe1ca7f561bce99f4a600fe167f05705274716220e2bfae5b52a6",
+                "scene_index": 0,
+                "mesh_node": 0,
+                "skin_index": 0
+              },
+              "playback": {
+                "kind": "single_clip",
+                "clip_index": 0,
+                "looping": true
+              },
+              "speed_numerator": 1,
+              "speed_denominator": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "vault-floor",
+      "name": "Vault foundation",
+      "transform": {
+        "position": [
+          0,
+          -0.235,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          12,
+          0.405,
+          16.6
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-wall",
+      "name": "West wall",
+      "transform": {
+        "position": [
+          -5.9,
+          2.45,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.56,
+          4.9,
+          16.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 2,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-wall",
+      "name": "East wall",
+      "transform": {
+        "position": [
+          5.9,
+          2.45,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.56,
+          4.9,
+          16.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 2,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "north-wall",
+      "name": "Sealed north wall",
+      "transform": {
+        "position": [
+          0,
+          2.45,
+          -8.1
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          11.8,
+          4.9,
+          0.5
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 2,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "south-wall",
+      "name": "South wall",
+      "transform": {
+        "position": [
+          0,
+          2.45,
+          8.1
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          11.8,
+          4.9,
+          0.5
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        },
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 2,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "vault-ceiling",
+      "name": "Vault ceiling",
+      "transform": {
+        "position": [
+          0,
+          4.8,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          12,
+          0.2,
+          16.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "gate-shadow",
+      "name": "Recessed iron gate",
+      "transform": {
+        "position": [
+          0,
+          1.35,
+          -7.815
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2.95,
+          2.7,
+          0.09
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.086,
+                0.112,
+                0.14,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "threshold",
+      "name": "Gate threshold",
+      "transform": {
+        "position": [
+          0,
+          0.115,
+          -7.3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          3.48,
+          0.22,
+          1.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "dais",
+      "name": "Oath dais",
+      "transform": {
+        "position": [
+          0,
+          0.13,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          2.8,
+          0.29,
+          2.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-0",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          -1.16,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-1",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          -0.8699999999999999,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-2",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          -0.58,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-3",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          -0.29,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-4",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          0.0,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-5",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          0.29,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-6",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          0.58,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-7",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          0.8699999999999999,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "iron-bar-8",
+      "name": "Gate bar",
+      "transform": {
+        "position": [
+          1.16,
+          1.3,
+          -7.739
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.068,
+          2.6,
+          0.08
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-0",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          1.61,
+          2.25,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          -1.5707963267948966
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-1",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          1.5312009912351974,
+          2.7166156615061707,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          -1.2566370614359172
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-2",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          1.3025173609436655,
+          3.137555730961634,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          -0.9424777960769379
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-3",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          0.9463342561908819,
+          3.4716156615061706,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          -0.6283185307179586
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-4",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          0.49751736094366544,
+          3.686095339605682,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          -0.3141592653589793
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-5",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          9.858406733136194e-17,
+          3.76,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          0.0
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-6",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          -0.4975173609436652,
+          3.686095339605682,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          0.3141592653589793
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-7",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          -0.9463342561908816,
+          3.4716156615061706,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          0.6283185307179586
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-8",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          -1.3025173609436653,
+          3.1375557309616346,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          0.9424777960769379
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-9",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          -1.5312009912351974,
+          2.7166156615061707,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          1.2566370614359172
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "arch-stone-10",
+      "name": "Cinder arch stone",
+      "transform": {
+        "position": [
+          -1.61,
+          2.25,
+          -7.59
+        ],
+        "rotation": [
+          0,
+          0,
+          1.5707963267948966
+        ],
+        "scale": [
+          0.43,
+          0.42,
+          0.36
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-0-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          -5.46,
+          2.26,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-0-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          -5.46,
+          0.16,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-0-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          -5.46,
+          4.36,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-0-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          -5.06,
+          2.13,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-0-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          -5.06,
+          2.29,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-1-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          -5.46,
+          2.26,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-1-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          -5.46,
+          0.16,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-1-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          -5.46,
+          4.36,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-1-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          -5.06,
+          2.13,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-1-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          -5.06,
+          2.29,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-2-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          -5.46,
+          2.26,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-2-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          -5.46,
+          0.16,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-2-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          -5.46,
+          4.36,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-3-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          -5.46,
+          2.26,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-3-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          -5.46,
+          0.16,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-3-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          -5.46,
+          4.36,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-3-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          -5.06,
+          2.13,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-3-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          -5.06,
+          2.29,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-4-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          -5.46,
+          2.26,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-4-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          -5.46,
+          0.16,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-4-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          -5.46,
+          4.36,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-0",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          -6.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-1",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          -4.49
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-2",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          -2.1799999999999997
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-3",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          0.1299999999999999
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-4",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          2.4400000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-5",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          4.750000000000001
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "west-fillet-6",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          -5.46,
+          0.75,
+          7.06
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-0-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          5.46,
+          2.26,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-0-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          5.46,
+          0.16,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-0-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          5.46,
+          4.36,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-0-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          5.06,
+          2.13,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-0-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          5.06,
+          2.29,
+          -6.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-1-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          5.46,
+          2.26,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-1-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          5.46,
+          0.16,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-1-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          5.46,
+          4.36,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-1-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          5.06,
+          2.13,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-1-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          5.06,
+          2.29,
+          -3.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-2-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          5.46,
+          2.26,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-2-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          5.46,
+          0.16,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-2-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          5.46,
+          4.36,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-3-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          5.46,
+          2.26,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-3-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          5.46,
+          0.16,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-3-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          5.46,
+          4.36,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-3-torch",
+      "name": "Torch bracket",
+      "transform": {
+        "position": [
+          5.06,
+          2.13,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.26,
+          0.15,
+          0.25
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-3-ember",
+      "name": "Lit brazier",
+      "transform": {
+        "position": [
+          5.06,
+          2.29,
+          4.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.13,
+          0.2,
+          0.15
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                1.0,
+                0.46,
+                0.09,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-4-shaft",
+      "name": "Vault pilaster",
+      "transform": {
+        "position": [
+          5.46,
+          2.26,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.39,
+          4.4,
+          0.48
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.26,
+                0.29,
+                0.3,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-4-foot",
+      "name": "Pilaster footing",
+      "transform": {
+        "position": [
+          5.46,
+          0.16,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.7,
+          0.31,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-4-cap",
+      "name": "Pilaster capital",
+      "transform": {
+        "position": [
+          5.46,
+          4.36,
+          7.24
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.68,
+          0.32,
+          0.69
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.195,
+                0.22,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-0",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          -6.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-1",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          -4.49
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-2",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          -2.1799999999999997
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-3",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          0.1299999999999999
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-4",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          2.4400000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-5",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          4.750000000000001
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "east-fillet-6",
+      "name": "Wall stone course",
+      "transform": {
+        "position": [
+          5.46,
+          0.75,
+          7.06
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.17,
+          0.073,
+          2.19
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1,
+                0.13,
+                0.17,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19428561359828622,
+                0.21031889239037782,
+                0.2263521711824694,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21598597103198572,
+                0.23381005602006225,
+                0.2516341410081387,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2277089116989659,
+                0.2465004238294631,
+                0.26529193595996026,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17657524629320756,
+                0.19114698991934606,
+                0.20571873354548453,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21289270890895998,
+                0.2304615246927091,
+                0.24803034047645822,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-0-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          -7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.20817563825080493,
+                0.22535518121325,
+                0.24253472417569505,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.20491061662160034,
+                0.22182071605153827,
+                0.23873081548147615,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.16289655136846987,
+                0.17633947065615915,
+                0.1897823899438484,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.15655312127941395,
+                0.16947255361800637,
+                0.18239198595659878,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18378152158836636,
+                0.19894795783595,
+                0.21411439408353364,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21139024185180186,
+                0.22883506763568842,
+                0.24627989341957499,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-1-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          -5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17373669075985776,
+                0.18807418465751594,
+                0.20241167855517408,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19273215555069553,
+                0.20863723634856848,
+                0.2245423171464414,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17869490260139703,
+                0.19344156932092982,
+                0.20818823604046258,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21900710561176848,
+                0.23708050753118629,
+                0.25515390945060407,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22654268016356266,
+                0.24523794988579845,
+                0.2639332196080342,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18510926121133123,
+                0.20038526820449934,
+                0.21566127519766745,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-2-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          -3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.23060163072773276,
+                0.24963186238973015,
+                0.2686620940517275,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.15924033454926148,
+                0.1723815272062394,
+                0.18552271986321725,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21643705801365995,
+                0.23429836862643774,
+                0.2521596792392155,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22121662379221757,
+                0.23947236459060448,
+                0.2577281053889914,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.16600277790671142,
+                0.17970203627765363,
+                0.19340129464859585,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2082784398804185,
+                0.22546646647249188,
+                0.24265449306456524,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-3-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          -2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1970987382250483,
+                0.21336416807857173,
+                0.22962959793209511,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22730441886152342,
+                0.2460625505151443,
+                0.26482068216876514,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17050696292334472,
+                0.18457792588303823,
+                0.1986488888427317,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19565600658426582,
+                0.2118023760596664,
+                0.22794874553506697,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2217608044609591,
+                0.24006145337278587,
+                0.2583621022846126,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.20318729186037768,
+                0.21995517516924382,
+                0.23672305847810993,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-4-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          -0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17806718817342354,
+                0.1927620532168614,
+                0.20745691826029927,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.16073966296215006,
+                0.17400458660465762,
+                0.18726951024716512,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2261297303032329,
+                0.24479092163893662,
+                0.26345211297464033,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19063578546773022,
+                0.2063678648509895,
+                0.2220999442342488,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.23043998165166107,
+                0.2494568733413613,
+                0.26847376503106146,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1652932962580667,
+                0.17893400517256738,
+                0.19257471408706803,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-5-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          0.78
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21640620810634742,
+                0.23426497285298778,
+                0.2521237375996281,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21649568043971554,
+                0.23436182882551734,
+                0.25222797721131907,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22462049621477015,
+                0.24315713910628034,
+                0.2616937819977905,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.15585933159892745,
+                0.16872150944932437,
+                0.1815836872997213,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18286853838350767,
+                0.19795963135690395,
+                0.2130507243303002,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.15843821067392935,
+                0.17151320864216624,
+                0.18458820661040312,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-6-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          2.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21182009501485508,
+                0.22930039411802275,
+                0.2467806932211904,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18153079311246823,
+                0.19651148963145834,
+                0.21149218615044843,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22763348778020617,
+                0.24641877560672806,
+                0.2652040634332499,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18306946740875732,
+                0.1981771419036548,
+                0.21328481639855223,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21352285675595054,
+                0.23114367503192706,
+                0.24876449330790354,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.22064285284417873,
+                0.2388512436128731,
+                0.2570596343815675,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-7-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          3.9000000000000004
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17271250721234505,
+                0.18696548110850947,
+                0.20121845500467384,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19694056309714267,
+                0.21319293966341174,
+                0.22944531622968078,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2274724319845884,
+                0.24624442879885056,
+                0.2650164256131127,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19466167244367652,
+                0.2107259852181547,
+                0.22679029799263284,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.18191692987791672,
+                0.19692949205230792,
+                0.2119420542266991,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1748660113393979,
+                0.1892967015955618,
+                0.2037273918517257,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-8-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          5.46
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.21444471996648193,
+                0.23214161433264793,
+                0.2498385086988139,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-0",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -4.65,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.169191214574845,
+                0.18315359636014777,
+                0.19711597814545048,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-1",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -2.79,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2005289859211389,
+                0.21707749446802904,
+                0.23362600301491912,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-2",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          -0.93,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19684374883782385,
+                0.21308813587783845,
+                0.22933252291785303,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-3",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          0.93,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.1966863085261679,
+                0.21291770291910408,
+                0.22914909731204025,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-4",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          2.79,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.16436941810569258,
+                0.17793388464839538,
+                0.19149835119109818,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "flagstone-9-5",
+      "name": "Cut floor stone",
+      "transform": {
+        "position": [
+          4.65,
+          -0.032,
+          7.0200000000000005
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.82,
+          0.036,
+          1.52
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.20469583467368713,
+                0.22158820937976814,
+                0.2384805840858491,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-0-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          -6.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-0-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          -6.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-1-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          -4.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-1-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          -4.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-2-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          -1.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-2-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          -1.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-3-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          1.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-3-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          1.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-4-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          3.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-4-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          3.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-5-0",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          -1.52,
+          -0.01,
+          6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "inlay-5-1",
+      "name": "Brass floor inlay",
+      "transform": {
+        "position": [
+          1.52,
+          -0.01,
+          6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.032,
+          0.014,
+          2.46
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "architecture/masonry.glb",
+            "asset_id": "da60ed61-2c92-5979-8bf0-1ecc36955f7b",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.58,
+                0.29,
+                0.087,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "position": [
+      0,
+      1.55,
+      6.5
+    ],
+    "yaw": 0,
+    "pitch": -0.039978687123290044,
+    "vertical_fov": 0.61,
+    "near": 0.02,
+    "far": 65,
+    "follow": {
+      "target": "oath-camera-carrier",
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "look_offset": [
+        0,
+        -0.04,
+        -1
+      ],
+      "smoothing_seconds": 0.1
+    }
+  },
+  "lights": [
+    {
+      "key": "vault-fill",
+      "name": "Cold overhead fill",
+      "kind": "directional",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        0.55,
+        0.69,
+        0.91
+      ],
+      "intensity": 0.67,
+      "range": 7
+    },
+    {
+      "key": "light-west-0",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        -4.9,
+        2.53,
+        -6.7
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "light-west-1",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        -4.9,
+        2.53,
+        -3.0
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "light-west-2",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        -4.9,
+        2.53,
+        4.7
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "light-east-0",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        4.9,
+        2.53,
+        -6.7
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "light-east-1",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        4.9,
+        2.53,
+        -3.0
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "light-east-2",
+      "name": "Brazier light",
+      "kind": "point",
+      "position": [
+        4.9,
+        2.53,
+        4.7
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.49,
+        0.19
+      ],
+      "intensity": 6.0,
+      "range": 7.5
+    },
+    {
+      "key": "gate-glow",
+      "name": "Cinder gate glow",
+      "kind": "point",
+      "position": [
+        0,
+        2.3,
+        -6.5
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        0.95,
+        0.43,
+        0.16
+      ],
+      "intensity": 5.6,
+      "range": 7
+    },
+    {
+      "key": "oath-key",
+      "name": "Knight key light",
+      "kind": "point",
+      "position": [
+        2.35,
+        2.75,
+        2.35
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        1,
+        0.77,
+        0.56
+      ],
+      "intensity": 6.2,
+      "range": 6
+    },
+    {
+      "key": "oath-rim",
+      "name": "Knight rim light",
+      "kind": "point",
+      "position": [
+        -1.8,
+        2.5,
+        -1.7
+      ],
+      "direction": [
+        0.2,
+        -0.72,
+        -0.67
+      ],
+      "color": [
+        0.34,
+        0.62,
+        1
+      ],
+      "intensity": 5,
+      "range": 5
+    }
+  ]
+}

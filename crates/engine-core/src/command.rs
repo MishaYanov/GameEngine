@@ -5,6 +5,15 @@ use crate::scene_data::{CameraData, ColliderData, LightData, MaterialOverrideDat
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub const MAX_COLLIDER_UPDATES: usize = 3;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColliderUpdateDto {
+	pub key: String,
+	pub collider: ColliderData,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransformDto {
@@ -142,6 +151,9 @@ pub enum EditorCommandDto {
 	SetCollider {
 		key: String,
 		collider: Option<ColliderData>,
+	},
+	SetColliders {
+		updates: Vec<ColliderUpdateDto>,
 	},
 	AddComponent {
 		key: String,
@@ -353,4 +365,6 @@ pub struct EditorCapabilitiesDto {
 	pub max_history_entries: usize,
 	pub history_budget_bytes: usize,
 	pub embedded_viewport_supported: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub scene_warming_supported: bool,
 }

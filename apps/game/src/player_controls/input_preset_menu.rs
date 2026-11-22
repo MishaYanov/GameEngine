@@ -1,11 +1,13 @@
 //! Keyboard and controller navigation for portable input presets.
 
 use super::{
-	GameApp, Key, advance_row,
+	ControlsSettings, GameApp, Key, advance_row,
 	input_labels::compact_key_name,
 	input_preset::{PresetPreview, PresetTransfer},
+	preset_library_menu::LibraryMenu,
 };
 use crate::local_player_files::{ordinary_transfer, transfer_entries, transfer_label};
+use runtime::input::InputProfile;
 use std::{
 	path::PathBuf,
 	time::{SystemTime, UNIX_EPOCH},
@@ -21,6 +23,7 @@ struct PresetFile {
 enum Page {
 	Main,
 	Files,
+	Library(Box<LibraryMenu>),
 	Review {
 		result: Result<PresetPreview, String>,
 		focus: usize,
@@ -65,6 +68,8 @@ impl PresetMenu {
 				vec![
 					"Export local preset".into(),
 					"Review preset file".into(),
+					"Save Current Layout".into(),
+					"Saved Layouts".into(),
 					"Back".into(),
 				],
 				self.main_focus,
@@ -84,6 +89,7 @@ impl PresetMenu {
 				let title = self.files[self.file_focus].label.clone();
 				(title, rows, *focus)
 			}
+			Page::Library(library) => library.rows(self.apply_blocked),
 		}
 	}
 
@@ -92,7 +98,7 @@ impl PresetMenu {
 			Page::Main => match key {
 				Key::Escape => return PresetAction::Back,
 				Key::ArrowUp | Key::ArrowDown => {
-					self.main_focus = advance_row(self.main_focus, 3, key);
+					self.main_focus = advance_row(self.main_focus, 5, key);
 				}
 				Key::Enter => match self.main_focus {
 					0 => {
@@ -104,6 +110,13 @@ impl PresetMenu {
 							self.files = files;
 							self.file_focus = 0;
 							self.page = Page::Files;
+							app.player_controls.message = None;
+						}
+						Err(error) => app.player_controls.message = Some(error),
+					},
+					2 | 3 => match LibraryMenu::new(&self.owner, self.main_focus == 2) {
+						Ok(library) => {
+							self.page = Page::Library(Box::new(library));
 							app.player_controls.message = None;
 						}
 						Err(error) => app.player_controls.message = Some(error),
@@ -151,16 +164,7 @@ impl PresetMenu {
 						.check_file(app, file)
 						.and_then(|()| self.owner.apply_reviewed(&file.path, source, destination));
 					match applied {
-						Ok((settings, profile)) => {
-							app.player_controls.applied = settings;
-							app.player_controls.keyboard_problem = None;
-							app.editor
-								.set_play_input_profile(profile.clone(), &mut app.input);
-							app.input_profile_override = Some(profile);
-							app.clear_controls_input();
-							app.player_controls.message = Some("Input preset applied".into());
-							return PresetAction::Applied;
-						}
+						Ok((settings, profile)) => return apply_to_player(app, settings, profile),
 						Err(error) => {
 							self.page = Page::Review {
 								result: Err(error),
@@ -170,6 +174,13 @@ impl PresetMenu {
 					}
 				}
 				_ => {}
+			},
+			Page::Library(library) => match library.key(app, &self.owner, key) {
+				PresetAction::Back => {
+					self.page = Page::Main;
+					app.player_controls.message = None;
+				}
+				result => return result,
 			},
 		}
 		PresetAction::Stay
@@ -231,13 +242,31 @@ impl PresetMenu {
 	}
 }
 
-fn review_length(result: &Result<PresetPreview, String>) -> usize {
+pub(super) fn apply_to_player(
+	app: &mut GameApp,
+	settings: ControlsSettings,
+	profile: InputProfile,
+) -> PresetAction {
+	app.player_controls.applied = settings;
+	app.player_controls.keyboard_problem = None;
+	app.editor
+		.set_play_input_profile(profile.clone(), &mut app.input);
+	app.input_profile_override = Some(profile);
+	app.clear_controls_input();
+	app.player_controls.message = Some("Input preset applied".into());
+	PresetAction::Applied
+}
+
+pub(super) fn review_length(result: &Result<PresetPreview, String>) -> usize {
 	result
 		.as_ref()
 		.map_or(2, |preview| preview.actions.len() + 5)
 }
 
-fn review_rows(result: &Result<PresetPreview, String>, disabled: Option<&str>) -> Vec<String> {
+pub(super) fn review_rows(
+	result: &Result<PresetPreview, String>,
+	disabled: Option<&str>,
+) -> Vec<String> {
 	let mut rows = vec!["Keep current".into()];
 	let Ok(review) = result else {
 		if let Err(error) = result {

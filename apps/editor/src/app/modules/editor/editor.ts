@@ -49,7 +49,9 @@ export class Editor {
     private destroyed = false;
 
     async ngOnInit(): Promise<void> {
-        if (!this.editorService.nativeAvailable || this.editorService.snapshot()) return;
+        if (!this.editorService.nativeAvailable) return;
+        void this.editorService.loadCapabilities().catch(() => undefined);
+        if (this.editorService.snapshot()) return;
         this.openMessage.set(OpenMessages.RESTORING);
         try {
             await this.editorService.restoreWorkspace();

@@ -1,0 +1,59 @@
+{
+  "schema_version": 3,
+  "name": "Cinder Oath",
+  "gameplay_module": "cinder_oath",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behavior_definitions": [],
+  "behaviors": [
+    {
+      "scene_id": "arena",
+      "behavior": {
+        "kind": "controlled_move",
+        "entity": "duelist",
+        "speed": 3.4,
+        "space": "world"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "intro",
+      "asset_path": "scenes/oath.json"
+    },
+    {
+      "id": "arena",
+      "asset_path": "scenes/vault.json"
+    }
+  ],
+  "startup_scene_id": "intro",
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "attack",
+        "key": "f"
+      },
+      {
+        "id": "start",
+        "key": "enter"
+      }
+    ]
+  },
+  "gameplay_settings": {
+    "schema_version": 1,
+    "intro_scene": "intro",
+    "arena_scene": "arena",
+    "intro_camera_travel": [
+      0,
+      0,
+      -3.4
+    ]
+  }
+}

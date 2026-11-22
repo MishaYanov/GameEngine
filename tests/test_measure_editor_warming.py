@@ -77,30 +77,83 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
     def write(self, path, records):
         path.write_text("".join(json.dumps(event) + "\n" for event in records), encoding="utf-8")
 
-    def with_model_records(self, path, enabled):
-        records = self.evidence(path, enabled)
+    def with_model_records(self, path, enabled, configured=None, **sample_options):
+        records = self.evidence(path, enabled, **sample_options)
         for record in list(records):
             if record["component"] != "editor_scene_warming":
                 continue
             event = json.loads(record["message"])
             if event["kind"] != "load":
                 continue
-            matched = enabled and event["outcome"] == "hit"
+            matched = enabled and configured != "references" and event["outcome"] == "hit"
+            attempt = "references" if configured == "references" else "decode"
             records.append(row("editor_model_warming", {
-                "schema_version": 1,
+                "schema_version": 1 if configured is None else 2,
                 "kind": "model_load",
                 "request_id": event["request_id"],
                 "scene_id": event["scene_id"],
-                "mode": "decode" if event["outcome"] != "unrequested" else "off",
+                "mode": attempt if event["outcome"] != "unrequested" else "off",
                 "batch_matched": matched,
                 "prepared_models": 2 if matched else 0,
                 "consumed_models": 1 if matched else 0,
                 "retained_bytes": 8192 if matched else 0,
+                **({"configured_mode": configured} if configured is not None else {}),
             }, record["session_id"]))
         self.write(path, records)
         return records
 
-    def compare(self, ceiling=105, decode=False):
+    def capture(self, path, mode, count=30, cache_bytes=8192):
+        cache = {
+            "state": "retained", "asset_generation": 0,
+            "loaded_models": 2, "gpu_resources": 10, "gpu_bytes": cache_bytes,
+        }
+        viewport = {"width": PROFILE["width"], "height": PROFILE["height"],
+                    "projection": "perspective", "grid": True, "colliders": False}
+        record = {"workspace_generation": 1, "pre_switch_cache": cache, "viewport": viewport}
+        records = self.with_model_records(path, mode != "off", mode, count=count)
+        session = records[0]["session_id"]
+        models = {}
+        for item in records:
+            event = json.loads(item["message"])
+            if item["component"] == "editor_model_warming":
+                # A retained reference hit and a decoded batch can still yield no adoption.
+                event["consumed_models"] = 0
+                models[event["request_id"]] = event
+                item["message"] = json.dumps(event)
+            elif (item["component"] == "editor_scene_warming"
+                  and event["kind"] == "active_frame" and (mode != "off" or not event["warming_requested"])):
+                item["message"] = json.dumps(event | record | {"schema_version": 2, "mode": mode})
+        rows = []
+        for item in list(records):
+            event = json.loads(item["message"])
+            if item["component"] != "editor_scene_warming" or event["kind"] != "load":
+                continue
+            request = event["request_id"]
+            scene = event["scene_id"]
+            identity = record | {"source_scene_id": ACTIVE if scene == TARGET else None}
+            fields = {"request_id": request, "scene_id": scene, "scene_revision": len(rows) + 1,
+                      "mode": mode, "mode_revision": 1}
+            records.append(row("editor_warming_session",
+                               fields | {"schema_version": 1, "identity": identity}, session))
+            terminal = next(json.loads(candidate["message"]) for candidate in records
+                            if candidate["component"] == "scene_load"
+                            and json.loads(candidate["message"])["request_id"] == request)
+            if terminal["outcome"] == "presented":
+                model = models[request]
+                rows.append(fields | identity | {
+                    "outcome": event["outcome"],
+                    "references_hit": event["outcome"] == "hit",
+                    "prepared_models": model["prepared_models"],
+                    "adopted_models": model["consumed_models"],
+                    "retained_bytes": model["retained_bytes"],
+                })
+        report = path.with_suffix(".json")
+        report.write_text(json.dumps({"schema_version": 1, "session_id": session,
+                                      "workspace_generation": 1, "rows": rows}), encoding="utf-8")
+        self.write(path, records)
+        return report
+
+    def compare(self, ceiling=105, decode=False, warmed_mode=None, captures=()):
         errors = StringIO()
         with redirect_stdout(StringIO()), redirect_stderr(errors):
             code = main([
@@ -108,8 +161,92 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
                 "--scene", TARGET, "--active-scene", ACTIVE, "--fixture-sha256", "b" * 64,
                 "--profile", str(self.profile), "--active-ceiling-us", str(ceiling),
                 "--output", str(self.output),
-            ] + (["--decode-evidence"] if decode else []))
+            ] + (["--decode-evidence"] if decode else [])
+              + (["--warmed-mode", warmed_mode] if warmed_mode else []) + list(captures))
         return code, errors.getvalue()
+
+    def matched(self, baseline, warmed, mode="models", digest="b" * 64, warmed_profile=None):
+        return self.compare(warmed_mode=mode, captures=(
+            "--baseline-capture", str(baseline), "b" * 64, str(self.profile),
+            "--warmed-capture", str(warmed), digest, str(warmed_profile or self.profile),
+        ))
+
+    def test_matches_off_and_each_explicit_warmed_mode_with_zero_adoptions(self):
+        off = self.capture(self.baseline, "off")
+        for mode in ("models", "references"):
+            with self.subTest(mode=mode):
+                warmed = self.capture(self.warmed, mode)
+                self.assertEqual((0, ""), self.matched(off, warmed, mode))
+                report = json.loads(self.output.read_text(encoding="utf-8"))
+                self.assertEqual(2, report["schema_version"])
+                group, = report["comparison_groups"]
+                self.assertEqual("measured", group["status"])
+                self.assertEqual("retained", group["pre_switch_cache"]["state"])
+                self.assertEqual("off", group["baseline"]["mode"])
+                self.assertEqual(mode, group["warmed"]["mode"])
+                self.assertEqual(1, group["warmed"]["presentation_outcomes"]["cancelled"])
+                self.assertEqual(10, group["warmed"]["warming_outcomes"]["hit"])
+                self.assertEqual(30, group["warmed"]["first_present_us"]["samples"])
+                self.assertEqual(20 if mode == "models" else 0,
+                                 group["warmed"]["model_warming"]["prepared_models"])
+                self.assertEqual(0, group["warmed"]["model_warming"]["consumed_models"])
+                self.output.unlink()
+
+    def test_rejects_mismatched_fixture_profile_and_cache(self):
+        off = self.capture(self.baseline, "off")
+        warmed = self.capture(self.warmed, "models")
+        self.assertIn("same fixture SHA-256", self.matched(off, warmed, digest="c" * 64)[1])
+        profile = self.directory / "different-profile.json"
+        profile.write_text(json.dumps(PROFILE | {"driver": "another driver"}), encoding="utf-8")
+        self.assertIn("same viewport profile", self.matched(off, warmed, warmed_profile=profile)[1])
+        warmed = self.capture(self.warmed, "models", cache_bytes=10000)
+        self.assertIn("matching native cache conditions", self.matched(off, warmed)[1])
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_unpaired_and_mislabeled_capture_rows(self):
+        off = self.capture(self.baseline, "off")
+        warmed = self.capture(self.warmed, "models")
+        report = json.loads(warmed.read_text(encoding="utf-8"))
+        original = report["rows"][0]
+        report["rows"][0] = original | {"mode_revision": original["mode_revision"] + 1}
+        warmed.write_text(json.dumps(report), encoding="utf-8")
+        self.assertIn("disagree with the native log", self.matched(off, warmed)[1])
+        report["rows"].pop(0)
+        warmed.write_text(json.dumps(report), encoding="utf-8")
+        self.assertIn("missing its report row", self.matched(off, warmed)[1])
+        self.assertFalse(self.output.exists())
+
+    def test_labels_insufficient_matched_samples_without_percentiles(self):
+        off = self.capture(self.baseline, "off", count=29)
+        warmed = self.capture(self.warmed, "models", count=29)
+        self.assertEqual((2, ""), self.matched(off, warmed))
+        report = json.loads(self.output.read_text(encoding="utf-8"))
+        group, = report["comparison_groups"]
+        self.assertEqual("insufficient_matched_samples", group["status"])
+        self.assertEqual(29, group["warmed"]["presented_samples"])
+        self.assertNotIn("first_present_us", group["warmed"])
+        self.assertIsNone(report["active_frame_passed"])
+
+    def test_rejects_non_string_capture_modes_as_input_errors(self):
+        off = self.capture(self.baseline, "off")
+        warmed = self.capture(self.warmed, "models")
+        report = json.loads(warmed.read_bytes())
+        report["rows"][0]["mode"] = ["models"]
+        warmed.write_text(json.dumps(report), encoding="utf-8")
+        code, error = self.matched(off, warmed)
+        self.assertEqual(2, code)
+        self.assertIn("Invalid native warming mode", error)
+
+        warmed = self.capture(self.warmed, "models")
+        records = [json.loads(line) for line in self.warmed.read_bytes().splitlines()]
+        identity = next(item for item in records if item["component"] == "editor_warming_session")
+        event = json.loads(identity["message"])
+        identity["message"] = json.dumps(event | {"mode": {"value": "models"}})
+        self.write(self.warmed, records)
+        code, error = self.matched(off, warmed)
+        self.assertEqual(2, code)
+        self.assertIn("Invalid editor warming session record", error)
+        self.assertFalse(self.output.exists())
 
     def test_joins_same_session_and_reports_selected_native_results(self):
         self.evidence(self.baseline, False)
@@ -223,6 +360,42 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
                                          "retained_bytes": 0})
         }, *records[index + 1:]])
         self.assertIn("does not match its scene or capture mode", self.compare(decode=True)[1])
+
+    def test_reports_references_mode_with_no_model_adoptions(self):
+        self.with_model_records(self.baseline, False, configured="off")
+        self.with_model_records(self.warmed, True, configured="references")
+        self.assertEqual(self.compare(warmed_mode="references"), (0, ""))
+        report = json.loads(self.output.read_bytes())
+        self.assertEqual(report["warmed_mode"], "references")
+        self.assertEqual(report["warmed"]["model_warming"]["consumed_models"], 0)
+
+    def test_rejects_configured_baseline_mode_and_mislabeled_model_records(self):
+        self.with_model_records(self.baseline, False, configured="references")
+        self.with_model_records(self.warmed, True, configured="models")
+        self.assertIn("Baseline capture needs scene warming configured Off", self.compare(warmed_mode="models")[1])
+        self.with_model_records(self.baseline, False, configured="off")
+        self.assertIn("does not match its scene or capture mode", self.compare(warmed_mode="references")[1])
+        records = self.with_model_records(self.warmed, True, configured="models")
+        index = next(index for index, record in enumerate(records)
+                     if record["component"] == "editor_model_warming" and
+                     json.loads(record["message"])["mode"] == "decode")
+        event = json.loads(records[index]["message"])
+        records[index]["message"] = json.dumps({**event, "configured_mode": "references"})
+        self.write(self.warmed, records)
+        self.assertIn("does not match its configured mode", self.compare(warmed_mode="models")[1])
+
+    def test_rejects_off_mode_target_presentation_from_a_model_capture(self):
+        self.with_model_records(self.baseline, False, configured="off")
+        records = self.with_model_records(self.warmed, True, configured="models")
+        index = next(index for index, record in enumerate(records)
+                     if record["component"] == "editor_model_warming"
+                     and json.loads(record["message"])["scene_id"] == TARGET
+                     and json.loads(record["message"])["mode"] == "off")
+        event = json.loads(records[index]["message"])
+        records[index]["message"] = json.dumps({**event, "configured_mode": "off"})
+        self.write(self.warmed, records)
+        self.assertIn("Warmed target loads must use the configured capture mode",
+                      self.compare(warmed_mode="models")[1])
 
 
 if __name__ == "__main__":

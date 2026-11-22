@@ -32,7 +32,7 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if completed {
+		if completed && !self.cinder_victory_animation_active() {
 			return;
 		}
 		if self.play_trace.is_none()
@@ -83,7 +83,11 @@ impl GameApp {
 		if self
 			.orbit_capture
 			.as_ref()
-			.is_some_and(|owner| !self.editor.owns_camera_input(owner) || self.game_completed())
+			.is_some_and(|owner| {
+				!self.editor.owns_camera_input(owner)
+					|| self.game_completed()
+					|| self.cinder_phase() == Some(gameplay_catalog::cinder_oath::Phase::Defeat)
+			})
 		{
 			self.set_mouse_capture(false);
 		}
@@ -110,12 +114,10 @@ impl GameApp {
 		let pad = self.logical_gamepad();
 		let was_paused = self.editor.simulation_paused();
 		let mut before = self.feedback_facts();
-		let mut outcome = self.editor.update_play_with_gamepad(
-			&mut self.scene,
-			&self.input,
-			pad,
-			delta_seconds,
-		)?;
+		let mut prior_combat = self.combat_sound_facts();
+		let pointer_input = self.pointer_attack_input();
+		let input = pointer_input.as_ref().unwrap_or(&self.input);
+		let mut outcome = self.editor.update_play_with_gamepad(&mut self.scene, input, pad, delta_seconds)?;
 		let paused = self.editor.simulation_paused();
 		if paused != was_paused {
 			self.reset_gamepad_input();
@@ -123,7 +125,7 @@ impl GameApp {
 		if let Some(trace) = self.play_trace.as_mut() {
 			trace.record_paused(paused);
 			trace.record_controls(
-				&self.input,
+				pointer_input.as_ref().unwrap_or(&self.input),
 				if paused != was_paused {
 					GamepadSample::default()
 				} else {
@@ -132,6 +134,11 @@ impl GameApp {
 			);
 		}
 		loop {
+			if outcome.steps > 0
+				&& let (Some(prior), Some(after)) = (prior_combat, self.combat_sound_facts())
+			{
+				self.project_sound.emit_combat_change(prior, after);
+			}
 			if outcome.steps > 0
 				&& let (Some(prior), Some(after)) = (before, self.feedback_facts())
 			{
@@ -173,6 +180,7 @@ impl GameApp {
 					.wait_idle()?;
 			}
 			before = self.feedback_facts();
+			prior_combat = self.combat_sound_facts();
 			outcome = self.editor.drain_play(&mut self.scene)?;
 		}
 		Ok(())
@@ -186,6 +194,12 @@ impl GameApp {
 			gate: course.gate_open,
 			complete: progress.completed,
 		})
+	}
+
+	fn combat_sound_facts(&self) -> Option<project_sound::CombatSound> {
+		self.editor
+			.play_progress::<gameplay_catalog::cinder_oath::CinderProgress>()
+			.map(project_sound::CombatSound::from)
 	}
 
 	pub(super) fn fulfill_runtime_spawns(&mut self) -> Result<(), String> {
@@ -276,10 +290,7 @@ impl GameApp {
 			.map(|project| {
 				let scene = &project.startup_scene_id;
 				self.feedback_audio
-					.prepare_scene_mix(
-						self.player_controls.feedback_mix().effective_percent(),
-						scene,
-					)
+					.prepare_scene_mix(self.player_controls.feedback_mix(), scene)
 					.map(|mix| (scene.clone(), mix))
 			})
 			.transpose()?;
@@ -314,6 +325,8 @@ impl GameApp {
 		self.invalidate_scene_prefetch();
 		self.feedback_audio.invalidate();
 		self.feedback_captions.clear();
+		self.project_sound.stop_effect();
+		self.update_project_sound();
 		self.tools.panel.edit = None;
 		self.set_mouse_capture(false);
 		self.input.suppress_held();
@@ -535,10 +548,9 @@ impl GameApp {
 		) -> Result<(), String>,
 	) -> Result<(), String> {
 		let scene_id = prepared.scene_id().clone();
-		let mix = self.feedback_audio.prepare_scene_mix(
-			self.player_controls.feedback_mix().effective_percent(),
-			&scene_id,
-		)?;
+		let mix = self
+			.feedback_audio
+			.prepare_scene_mix(self.player_controls.feedback_mix(), &scene_id)?;
 		let renderer = self
 			.renderer
 			.as_ref()
@@ -566,6 +578,8 @@ impl GameApp {
 		assets.prune_unused();
 		installed?;
 		self.feedback_audio.commit_scene_mix(scene_id, mix);
+		self.project_sound.stop_effect();
+		self.update_project_sound();
 		self.invalidate_scene_prefetch();
 		timing.installed();
 		self.clear_game_controls();

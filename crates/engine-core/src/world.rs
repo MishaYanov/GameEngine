@@ -150,6 +150,9 @@ impl RuntimeWorld {
 	pub fn entity_index(&self, key: &EntityKey) -> Option<usize> {
 		self.indices.get(key).copied()
 	}
+	pub(crate) fn is_root_leaf(&self, index: usize) -> bool {
+		self.parents[index].is_none() && self.children[index].is_empty()
+	}
 	pub fn world_matrices(&self) -> &[Mat4] {
 		&self.matrices
 	}

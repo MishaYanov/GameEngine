@@ -50,6 +50,40 @@ pub struct CampaignRepairPreview {
 	pub after: ColliderData,
 }
 
+/// Bounded by the configured role set of the active scene.
+#[derive(Debug, Serialize)]
+pub struct CampaignRepairBatch {
+	pub scene_id: SceneId,
+	pub workspace_generation: u64,
+	pub revision: u64,
+	pub repairs: Vec<CampaignRepairPreview>,
+}
+
+/// The exact before value and configured target admitted by a review.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CampaignRepairExpectation {
+	pub target: CampaignRepairTarget,
+	pub before: ColliderData,
+}
+
+/// Resolve all eligible roles in authored order, rejecting repeated entity keys.
+pub fn distinct_sensor_repairs(
+	project: &ProjectData,
+	scene: &SceneId,
+	document: &SceneData,
+) -> Vec<CampaignRepairPreview> {
+	let repairs: Vec<_> = sensor_repairs(project, scene, document).collect();
+	if repairs.iter().enumerate().any(|(index, repair)| {
+		repairs[..index]
+			.iter()
+			.any(|earlier| earlier.target.entity_key == repair.target.entity_key)
+	}) {
+		return Vec::new();
+	}
+	repairs
+}
+
 /// Yield candidates for standalone triggers with valid, enabled collision pairs.
 pub fn sensor_repairs(
 	project: &ProjectData,

@@ -214,12 +214,16 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.busy()).toBe(false);
     });
 
-    it('sends both native workspace generation and revision with a warm request', async () => {
-        vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    it('binds scene warming to its applied mode, workspace generation and document revision', async () => {
+        vi.mocked(invoke).mockResolvedValueOnce(2).mockResolvedValueOnce(undefined);
         const service = TestBed.inject(EditorService);
-        await service.warmScene('garden', 8, 37);
-        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_warm_scene', {
-            sceneId: 'garden', expectedRevision: 8, expectedGeneration: 37,
+        const modeRevision = await service.setSceneWarmingMode('models', 37);
+        await service.warmScene('garden', 8, 37, modeRevision);
+        expect(invoke).toHaveBeenNthCalledWith(1, 'editor_set_scene_warming_mode', {
+            mode: 'models', expectedGeneration: 37,
+        });
+        expect(invoke).toHaveBeenNthCalledWith(2, 'editor_warm_scene', {
+            sceneId: 'garden', expectedRevision: 8, expectedGeneration: 37, expectedModeRevision: 2,
         });
     });
 

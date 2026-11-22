@@ -123,11 +123,12 @@ fn capabilities() -> EditorCapabilitiesDto {
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 		commands: CommandFactory::capabilities(),
-		gameplay_modules: vec![courtyard_gameplay::descriptor()],
+		gameplay_modules: gameplay_catalog::descriptors(),
 		max_selection: 4096,
 		max_history_entries: 128,
 		history_budget_bytes: 16 * 1024 * 1024,
 		embedded_viewport_supported: cfg!(target_os = "windows"),
+		scene_warming_supported: cfg!(target_os = "windows"),
 	}
 }
 

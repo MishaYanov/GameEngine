@@ -18,6 +18,8 @@ pub struct CampaignDiagnostic {
 	pub message: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub repair: Option<CampaignRepairTarget>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub repair_batch: Vec<CampaignRepairTarget>,
 }
 
 impl CampaignDiagnostic {
@@ -35,6 +37,7 @@ impl CampaignDiagnostic {
 			scene_id,
 			message,
 			repair: None,
+			repair_batch: Vec::new(),
 		}
 	}
 }

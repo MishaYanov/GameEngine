@@ -205,18 +205,19 @@ fn real_native_template_validation() {
 			.all(|path| Path::new(path).is_file())
 	);
 	let main = fs::read_to_string(root.join("client/apps/game/src/main.rs")).unwrap();
-	assert!(!main.contains("PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"assets\")"));
+	assert!(main.contains("gameplay_catalog::BUNDLED_PROJECT_DIRECTORY"));
 	let cargo = fs::read_to_string(root.join("client/Cargo.toml")).unwrap();
 	assert!(!cargo.contains("admin-dashboard"));
-	assert!(cargo.contains("crates/courtyard-gameplay"));
+	assert!(cargo.contains("crates/cinder-oath-gameplay"));
 	assert!(
-		root.join("client/crates/courtyard-gameplay/src/lib.rs")
+		root.join("client/crates/cinder-oath-gameplay/src/lib.rs")
 			.is_file()
 	);
-	let project =
-		engine_core::project::ProjectData::load(root.join("client/apps/game/project.json"))
-			.unwrap();
-	assert_eq!(project.gameplay_module.as_deref(), Some("courtyard_run"));
+	let project = engine_core::project::ProjectData::load(
+		root.join("client/projects/cinder-oath/project.json"),
+	)
+		.unwrap();
+	assert_eq!(project.gameplay_module.as_deref(), Some("cinder_oath"));
 	eprintln!(
 		"Validated native client at {}",
 		root.join("client").display()

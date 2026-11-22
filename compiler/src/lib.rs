@@ -21,7 +21,9 @@ pub use preflight::prepare_project;
 pub use scaffold::{create_authoring_project, install_project, project_path};
 
 use export::{copy_prepared_project, validate_export_snapshot};
-use preflight::{read_authored_scene, validate_catalog_scenes};
+#[cfg(test)]
+use preflight::read_authored_scene;
+use preflight::validate_catalog_scenes;
 
 #[derive(Clone, PartialEq, Eq)]
 struct PackageAsset {
@@ -162,6 +164,12 @@ fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
 					.map_err(io::Error::other)?
 					.to_path_buf(),
 			);
+		}
+	}
+	if let Some(audio) = bridge::project_audio::load(root).map_err(io::Error::other)? {
+		for (name, _) in audio.files().filter(|(name, _)| name.ends_with(".wav")) {
+			let path = checked_asset_path(root, Path::new(name))?;
+			cue_files.insert(path.strip_prefix(root).map_err(io::Error::other)?.to_path_buf());
 		}
 	}
 	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, &cue_files)?;

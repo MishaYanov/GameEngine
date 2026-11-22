@@ -1,0 +1,10 @@
+[package]
+name = "gameplay-catalog"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[dependencies]
+cinder-oath-gameplay = { path = "../cinder-oath-gameplay" }
+courtyard-gameplay = { path = "../courtyard-gameplay" }
+engine-core = { path = "../engine-core" }

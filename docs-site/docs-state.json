@@ -1,9 +1,49 @@
 {
-  "last_checked_commit": "e9d6f65ea400764d822f06182ade20b172105a9a",
+  "last_checked_commit": "98ea86fb5df2017a9989566c9cad0532f501008c",
   "last_checked_date": "2026-11-22",
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_52_69": {
+    "date": "2026-11-22",
+    "inspected_head": "98ea86fb5df2017a9989566c9cad0532f501008c",
+    "scope": "Milestones 52 through 57 implement reviewed named-layout backups, Player cue auditions and mix diagnostics, the campaign repair queue, local checkpoint audit retention and scoped clear, editor warming session report export and comparison, and verified release handoff comparison and renewal. The learning guides plan Milestones 58 through 69 in 24 features with explicit file ownership, code snippets, acceptance checks, and references.",
+    "verification": [
+      "The DOC, TEST, OPTIMIZATION and defensive SECURITY agents ran before the Rust and Angular best-practices passes. DOC checked 55 Markdown files, 443 local links, 37 snippets and 11 Cargo examples. The documentation site linked 65 pages and passed all eight tests.",
+      "The Rust package suite passed 1,124 tests with 34 opt-in cases ignored. The focused post-optimization Rust warming and workspace tests passed. Python passed 144 tests and Angular passed 564 tests in 62 files.",
+      "Windows Clippy, Tauri custom-protocol checking, and Angular production AOT and bundle boundary checks passed. The existing project setup stylesheet reports 5.22 kB for a 4 kB budget. The Angular pass fixed keyboard focus after deferred repair checks and the refresh hint for a stale empty campaign queue.",
+      "Windows Vulkan scenarios passed layout backup and restore without implicit application, bounded audio auditions with preserved gameplay state, and transfer history retention and scoped clear across restarts. The editor workspace test applied and staged repairs from two scenes with independent Undo.",
+      "The warming export takes a generation-checked snapshot before releasing the workspace lock for publication. The analyzer tests cover independently captured Off, References and Models runs, cache matching, cancellations and zero adoption.",
+      "The verified Windows candidate passed both startup input smoke checks and a local installed Player probe. The packaged headless replay reached Finish at score 2. The relocated handoff compared equal, and a fresh handoff with two disposable role signoffs verified held and preserved the original index."
+    ],
+    "verification_limits": [
+      "The candidate was built from a dirty checkout. The installed Player probe ran on the same host and the rehearsal signers were disposable. Independent clean-host acceptance and production signoffs remain open.",
+      "Physical controller operation, audible playback, the visible Editor save picker, and matched visible warming measurements remain unverified.",
+      "Rust tests used rustc 1.97.1 on Windows x86-64 MSVC. The minimum supported Rust version and Unix targets remain unverified."
+    ],
+    "candidate_archive_sha256": "5c2f2386a4993ef87d1fb3725b1c629f25c8a63f475f7ae07471b6b4f8a46180",
+    "pending_documentation_changes": []
+  },
+  "courtyard_release_milestones_46_57": {
+    "date": "2026-11-22",
+    "inspected_head": "98ea86fb5df2017a9989566c9cad0532f501008c",
+    "scope": "Milestones 46 through 51 implement named local input layouts, per-cue-category playback controls, a guarded same-scene repair batch, filtered checkpoint history and audit export, persisted editor warming modes and a relocatable signed release handoff. Milestones 52 through 57 are planned file-by-file learning guides.",
+    "verification": [
+      "The DOC, TEST, OPTIMIZATION and defensive SECURITY agents ran before the Rust and Angular best-practices reviews. The guide review checked 42 Markdown files, 374 local link references, 48 snippets and 15 Cargo examples. The docs site linked 65 generated pages and passed all eight checks.",
+      "The affected suites passed 1,111 Rust, 136 Python and 560 Angular tests. Windows Clippy, the custom-protocol Editor Host and Angular production AOT and bundle checks passed. The existing project setup stylesheet reports 5.22 kB for a 4 kB budget.",
+      "Windows Vulkan rehearsals verified named layouts over three launches, cue category gain and independent captions through scene changes and Continue, and filtered checkpoint history with a reviewed audit export. A Windows release build passed copied startup, packaged checkpoint transfer, and local audit export.",
+      "Both Garden collider repairs shared one editor revision and Undo entry, persisted through Save All and staged successfully. The authored and staged headless replays agreed and reached Finish at score 2.",
+      "Native workspace and Angular tests exercised local warming mode changes, retired generations and revision-bound preparation results. The analyzer rejected mixed or mislabeled capture modes and preserved earlier log support.",
+      "The signed handoff reverified as held from another directory and working directory using two independent disposable keys and 13 indexed files. The ZIP verifier bounds directory reads and reuses the authenticated archive identity."
+    ],
+    "verification_limits": [
+      "The Windows probe used an independent working directory on the same machine and the candidate receipt records a dirty checkout. Independent-host acceptance and production reviewer signoff remain open.",
+      "Physical-controller testing, audible playback and visible embedded Editor verification remain open. Warming comparisons await matched visible captures, so the results establish no timing change.",
+      "Rust checks used the installed Windows x86_64 MSVC toolchain. The Rust 1.89 minimum and Unix native targets remain unverified."
+    ],
+    "candidate_archive_sha256": "e9442ddc7d2e13e4034c94ab173df91646c5b4c4999c22b3167455aadfd42fcc",
+    "pending_documentation_changes": []
+  },
   "courtyard_release_milestones_40_51": {
     "date": "2026-11-22",
     "inspected_head": "e9d6f65ea400764d822f06182ade20b172105a9a",

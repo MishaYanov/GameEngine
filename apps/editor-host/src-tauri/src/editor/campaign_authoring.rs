@@ -2,10 +2,16 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use bridge::editor::{EditorCommandDto, EditorCommandRequest, EditorSnapshotDto};
+use bridge::editor::{
+	ColliderUpdateDto, EditorCommandDto, EditorCommandRequest, EditorSnapshotDto,
+	MAX_COLLIDER_UPDATES,
+};
 use courtyard_gameplay::{
 	authoring_diagnostics::{AuthoredScenePreparation, CampaignDiagnostic},
-	authoring_repairs::{sensor_repairs, CampaignRepairPreview, CampaignRepairTarget},
+	authoring_repairs::{
+		distinct_sensor_repairs, sensor_repairs, CampaignRepairBatch, CampaignRepairExpectation,
+		CampaignRepairPreview, CampaignRepairTarget,
+	},
 	settings::{CampaignDefinition, InteractionSettings, SceneInteractions},
 };
 use runtime::{project::ProjectData, scene_catalog::SceneId, scene_data::ColliderData, SceneData};
@@ -86,18 +92,13 @@ impl CampaignEdit {
 				let message = preparation.prepare(id, Arc::clone(document)).err()?;
 				let mut issue = CampaignDiagnostic::new(Some(id.clone()), message);
 				if id == active_scene {
-					let mut repairs = sensor_repairs(&self.project, id, document);
-					if let (Some(repair), None) = (repairs.next(), repairs.next()) {
-						let mut trial = (**document).clone();
-						if let Some(entity) = trial
-							.entities
-							.iter_mut()
-							.find(|entity| entity.key == repair.target.entity_key)
-						{
-							entity.collider = Some(repair.after);
-							if preparation.prepare(id, Arc::new(trial)).is_ok() {
-								issue.repair = Some(repair.target);
-							}
+					let repairs = distinct_sensor_repairs(&self.project, id, document);
+					if repairs_pass_preparation(&preparation, id, document, &repairs) {
+						if let [repair] = repairs.as_slice() {
+							issue.repair = Some(repair.target.clone());
+						} else {
+							issue.repair_batch =
+								repairs.into_iter().map(|repair| repair.target).collect();
 						}
 					}
 				}
@@ -105,6 +106,29 @@ impl CampaignEdit {
 			})
 			.collect()
 	}
+}
+
+fn repairs_pass_preparation(
+	preparation: &AuthoredScenePreparation,
+	scene: &SceneId,
+	document: &SceneData,
+	repairs: &[CampaignRepairPreview],
+) -> bool {
+	if repairs.is_empty() || repairs.len() > MAX_COLLIDER_UPDATES {
+		return false;
+	}
+	let mut trial = document.clone();
+	for repair in repairs {
+		let Some(entity) = trial
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key == repair.target.entity_key)
+		else {
+			return false;
+		};
+		entity.collider = Some(repair.after.clone());
+	}
+	preparation.prepare(scene, Arc::new(trial)).is_ok()
 }
 
 pub(crate) struct ReviewedCampaignEdit {
@@ -287,6 +311,74 @@ impl EditorWorkspace {
 			},
 		})
 		.map_err(Into::into)
+	}
+
+	pub(crate) fn preview_campaign_repair_batch(
+		&self,
+		generation: u64,
+		revision: u64,
+		scene: &SceneId,
+		targets: &[CampaignRepairTarget],
+	) -> Result<CampaignRepairBatch, CampaignAuthoringError> {
+		self.check_campaign_owner(generation, revision)?;
+		let session = self.backend.session();
+		if session.active_scene_id() != scene
+			|| !(2..=MAX_COLLIDER_UPDATES).contains(&targets.len())
+		{
+			return Err(CampaignAuthoringError::conflict(
+				"Review the repair batch in its active scene.".into(),
+			));
+		}
+		let document = session.scene_document(scene)?;
+		let repairs = distinct_sensor_repairs(session.project(), scene, &document);
+		if !repairs.iter().map(|repair| &repair.target).eq(targets) {
+			return Err(CampaignAuthoringError::conflict(
+				"The eligible trigger batch changed. Run Check Campaign again.".into(),
+			));
+		}
+		Ok(CampaignRepairBatch {
+			scene_id: scene.clone(),
+			workspace_generation: generation,
+			revision,
+			repairs,
+		})
+	}
+
+	pub(crate) fn apply_campaign_repair_batch(
+		&mut self,
+		generation: u64,
+		revision: u64,
+		scene: &SceneId,
+		expected: &[CampaignRepairExpectation],
+	) -> Result<EditorSnapshotDto, CampaignAuthoringError> {
+		if !(2..=MAX_COLLIDER_UPDATES).contains(&expected.len()) {
+			return Err("Expected two or three reviewed colliders".to_owned().into());
+		}
+		let targets: Vec<_> = expected.iter().map(|row| row.target.clone()).collect();
+		let batch = self.preview_campaign_repair_batch(generation, revision, scene, &targets)?;
+		if batch
+			.repairs
+			.iter()
+			.zip(expected)
+			.any(|(current, reviewed)| current.before != reviewed.before)
+		{
+			return Err(CampaignAuthoringError::conflict(
+				"A trigger collider changed. Review the repair batch again.".into(),
+			));
+		}
+		let updates = batch
+			.repairs
+			.into_iter()
+			.map(|repair| ColliderUpdateDto {
+				key: repair.target.entity_key.as_str().to_owned(),
+				collider: repair.after,
+			})
+			.collect();
+		self.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: EditorCommandDto::SetColliders { updates },
+		})
+			.map_err(Into::into)
 	}
 
 	fn check_campaign_owner(

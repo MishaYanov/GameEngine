@@ -1,6 +1,11 @@
 //! Portable input choices and revision-bound merges into local controls.
 
-use super::{ControlsSettings, Preset, action_keys::ActionKeyOverride, preferences::Preferences};
+use super::{
+	ControlsSettings, Preset,
+	action_keys::ActionKeyOverride,
+	preferences::Preferences,
+	preset_library::{LibraryBackupReview, PresetLibrary, SavedLayout},
+};
 use crate::local_player_files::{ordinary_directory, profile_directory, read_bounded};
 use courtyard_gameplay::checkpoint::CheckpointRegistry;
 use runtime::{
@@ -28,7 +33,7 @@ enum ProjectIdentity {
 	ManifestSha256(String),
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct InputChoices {
 	movement: Preset,
@@ -63,13 +68,24 @@ impl InputChoices {
 	}
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct PortablePreset {
+pub(super) struct PortablePreset {
 	schema_version: u32,
 	project: ProjectIdentity,
 	authored_input_sha256: String,
 	input: InputChoices,
+}
+
+impl PortablePreset {
+	pub(super) fn encoded(&self) -> Result<Vec<u8>, String> {
+		let data = serde_json::to_vec(self)
+			.map_err(|error| format!("Cannot encode input preset: {error}"))?;
+		if data.len() > MAX_PRESET_BYTES {
+			return Err("Input preset exceeds 4 KiB".into());
+		}
+		Ok(data)
+	}
 }
 
 #[derive(Debug, Serialize)]
@@ -189,11 +205,7 @@ impl PresetTransfer {
 		settings: &ControlsSettings,
 	) -> Result<(), String> {
 		self.verify_scope()?;
-		let data = serde_json::to_vec(&self.scope.record(settings)?)
-			.map_err(|error| format!("Cannot encode input preset: {error}"))?;
-		if data.len() > MAX_PRESET_BYTES {
-			return Err("Input preset exceeds 4 KiB".into());
-		}
+		let data = self.scope.record(settings)?.encoded()?;
 		let parent = path
 			.parent()
 			.filter(|parent| !parent.as_os_str().is_empty())
@@ -203,10 +215,83 @@ impl PresetTransfer {
 	}
 
 	pub(crate) fn preview(&self, path: &Path) -> Result<PresetPreview, String> {
+		self.preview_source(|| read_preset(path))
+	}
+
+	pub(super) fn library(&self) -> PresetLibrary<'_> {
+		PresetLibrary::new(&self.preferences)
+	}
+
+	pub(super) fn export_library(&self, path: &Path) -> Result<usize, String> {
+		self.library().export(
+			path,
+			|| self.verify_scope(),
+			|preset| self.validate_library_preset(preset),
+		)
+	}
+
+	pub(super) fn preview_library_backup(
+		&self,
+		path: &Path,
+	) -> Result<LibraryBackupReview, String> {
+		self.verify_scope()?;
+		self.library()
+			.review_backup(path, |preset| self.validate_library_preset(preset))
+	}
+
+	pub(super) fn restore_library_backup(
+		&self,
+		path: &Path,
+		review: &LibraryBackupReview,
+	) -> Result<usize, String> {
+		self.library().restore_backup(
+			path,
+			review,
+			|| self.verify_scope(),
+			|preset| self.validate_library_preset(preset),
+		)
+	}
+
+	fn validate_library_preset(&self, preset: &PortablePreset) -> Result<(), String> {
+		self.scope
+			.proposed(ControlsSettings::default(), preset.clone())
+			.map(|_| ())
+	}
+
+	pub(super) fn save_layout(
+		&self,
+		label: &str,
+		settings: &ControlsSettings,
+	) -> Result<(), String> {
+		self.verify_scope()?;
+		self.library().save(label, self.scope.record(settings)?)
+	}
+
+	pub(super) fn preview_layout(&self, layout: &SavedLayout) -> Result<PresetPreview, String> {
+		self.preview_source(|| self.library().source(layout))
+	}
+
+	pub(super) fn apply_layout(
+		&self,
+		layout: &SavedLayout,
+		review: &PresetPreview,
+	) -> Result<(ControlsSettings, InputProfile), String> {
+		self.apply_source(
+			|| self.library().source(layout),
+			review.source_sha256,
+			review.destination_sha256,
+			true,
+		)
+	}
+
+	fn preview_source(
+		&self,
+		read: impl FnOnce() -> Result<Vec<u8>, String>,
+	) -> Result<PresetPreview, String> {
 		self.verify_scope()?;
 		let current = self.preferences.load()?;
 		let destination_sha256 = self.preferences.review_digest(&current)?;
-		let source = read_preset(path)?;
+		let source = read()?;
 		let source_sha256 = Sha256::digest(&source).into();
 		let record = decode_preset(&source)?;
 		let current_profile = current
@@ -255,23 +340,38 @@ impl PresetTransfer {
 		source: [u8; 32],
 		destination: [u8; 32],
 	) -> Result<(ControlsSettings, InputProfile), String> {
+		self.apply_source(|| read_preset(path), source, destination, false)
+	}
+
+	fn apply_source(
+		&self,
+		read: impl Fn() -> Result<Vec<u8>, String>,
+		source: [u8; 32],
+		destination: [u8; 32],
+		existing_library: bool,
+	) -> Result<(ControlsSettings, InputProfile), String> {
 		let check = |current: ControlsSettings| {
 			self.verify_scope()?;
 			if self.preferences.review_digest(&current)? != destination {
 				return Err("Local controls changed. Review the input preset again.".into());
 			}
-			let bytes = read_preset(path)?;
+			let bytes = read()?;
 			if <[u8; 32]>::from(Sha256::digest(&bytes)) != source {
 				return Err("Input preset changed. Review it again.".into());
 			}
 			self.scope.proposed(current, decode_preset(&bytes)?)
 		};
-		// Reject an already stale review before creating a missing preferences folder.
-		check(self.preferences.load()?)?;
-		self.preferences.update(|current| {
+		let apply = |current| {
 			let (settings, profile) = check(current)?;
 			Ok((settings.clone(), (settings, profile)))
-		})
+		};
+		if existing_library {
+			self.preferences.update_existing(apply)
+		} else {
+			// Reject an already stale file review before creating a preferences folder.
+			check(self.preferences.load()?)?;
+			self.preferences.update(apply)
+		}
 	}
 
 	pub(super) fn transfer_directory(
@@ -316,3 +416,7 @@ fn serialize_digest<S: serde::Serializer>(digest: &[u8; 32], output: S) -> Resul
 #[cfg(test)]
 #[path = "../../tests/unit/input_preset_transfer.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/preset_library.rs"]
+mod library_tests;

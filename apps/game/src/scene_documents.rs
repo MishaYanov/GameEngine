@@ -85,7 +85,7 @@ impl GameApp {
 		if let Some(project) = project.as_ref() {
 			editor.set_initial_project(project.clone())?;
 		}
-		editor.set_module_resolver(Arc::new(progress::resolve))?;
+		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
 		let audio_catalog = bridge::feedback_audio::load(asset_root)?;
 		let playback = editor
 			.project()
@@ -96,7 +96,7 @@ impl GameApp {
 		let audio = feedback_audio::FeedbackAudio::new(
 			audio_catalog,
 			!self.smoke_test,
-			self.player_controls.feedback_mix().effective_percent(),
+			self.player_controls.feedback_mix(),
 			&playback.startup_scene_id,
 		)?;
 		if self.standalone_runtime {

@@ -1,5 +1,6 @@
 import {TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
+import {vi} from 'vitest';
 import {EditorSettingsService} from '../../core/editor/settings/editor-settings.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../shared/services/layout-preferences-storage';
 import {EditorSettingsDialog} from './editor-settings-dialog';
@@ -60,10 +61,43 @@ describe('Editor Settings dialog', () => {
         await fixture.whenStable();
         expect(settings.state().page).toBe('editor');
         expect(dialog.textContent).toContain('Settings for the editor application.');
+        expect(settings.sceneWarmingMode()).toBe('off');
+        expect(dialog.querySelector('#editor-scene-warming-mode')).toBeNull();
 
         dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
         await fixture.whenStable();
         expect(dialog.open).toBe(false);
         expect(settings.state()).toEqual({open: false, page: 'editor'});
+    });
+
+    it('restores and saves the warming mode through local editor preferences', async () => {
+        const load = vi.fn(async () => ({
+            schema_version: 1,
+            components: {'editor:scene-warming': {mode: 'references'}},
+        }));
+        const save = vi.fn(async () => undefined);
+        TestBed.configureTestingModule({
+            providers: [{provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load, save}}],
+        });
+        const fixture = TestBed.createComponent(EditorSettingsDialog);
+        fixture.componentRef.setInput('sceneWarmingSupported', true);
+        const settings = TestBed.inject(EditorSettingsService);
+        settings.select('editor');
+        settings.setOpen(true);
+        await fixture.whenStable();
+
+        const root: HTMLElement = fixture.nativeElement;
+        const select = root.querySelector<HTMLSelectElement>('#editor-scene-warming-mode')!;
+        expect([...select.options].map(option => option.textContent?.trim())).toEqual(['Off', 'References', 'Models']);
+        expect(select.value).toBe('references');
+        select.value = 'models';
+        select.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        expect(settings.sceneWarmingMode()).toBe('models');
+        expect(save).toHaveBeenLastCalledWith(expect.objectContaining({
+            components: expect.objectContaining({'editor:scene-warming': {mode: 'models'}}),
+        }));
+        const audit = await axe.run(root.querySelector('dialog')!, {rules: {'color-contrast': {enabled: false}}});
+        expect(audit.violations.map(violation => violation.id)).toEqual([]);
     });
 });

@@ -229,6 +229,142 @@ fn with_native_window(work: impl FnOnce(&ActiveEventLoop)) {
 }
 
 #[test]
+#[ignore = "requires native Windows Vulkan and the Vulkan SDK screenshot layer"]
+fn cinder_oath_native_player_completes_intro_and_sword_duel() {
+	use gameplay_catalog::cinder_oath::{CinderProgress, Phase};
+	use winit::keyboard::KeyCode;
+
+	const CHILD: &str = "GAME_ENGINE_QA_CINDER_OATH_CAPTURE";
+	if std::env::var_os(CHILD).is_some() {
+		let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../..")
+			.join(gameplay_catalog::BUNDLED_PROJECT_DIRECTORY)
+			.join("project.json");
+		with_native_window(|events| {
+			let mut app = hidden_player(events, &manifest, [960, 540]);
+			let press = |code| native_input::keyboard_key(PhysicalKey::Code(code)).unwrap();
+			let progress = |app: &GameApp| *app.editor.play_progress::<CinderProgress>().unwrap();
+			let step = |app: &mut GameApp, count| {
+				for _ in 0..count {
+					app.tick_play(1.0 / 60.0).unwrap();
+					app.input.end_frame();
+				}
+			};
+			let present = |app: &mut GameApp| {
+				assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
+			};
+
+			assert_eq!(progress(&app).phase(), Phase::Intro);
+			let intro_eye = app.editor.play_rig_camera().unwrap().position;
+			present(&mut app);
+			step(&mut app, 150);
+			assert_eq!(progress(&app).phase(), Phase::Intro);
+			assert!(app.editor.play_rig_camera().unwrap().position[2] < intro_eye[2] - 1.0);
+			present(&mut app);
+			step(&mut app, 80);
+			assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "arena");
+			assert_eq!(progress(&app).phase(), Phase::Duel);
+
+			// The window is hidden so capture ownership is supplied without moving the
+			// user's pointer. Mouse deltas and buttons still use the Player mapping.
+			let start_eye = app.editor.play_rig_camera().unwrap();
+			app.orbit_capture = app.editor.camera_input_owner();
+			assert!(app.orbit_capture.is_some());
+			app.mouse_captured = true;
+			app.captured_motion(40.0, 0.0);
+			step(&mut app, 1);
+			assert!((app.editor.play_rig_camera().unwrap().yaw - start_eye.yaw).abs() > 0.02);
+			app.captured_motion(-40.0, 0.0);
+			step(&mut app, 1);
+			app.input.press(press(KeyCode::KeyW));
+			step(&mut app, 34);
+			app.input.release(press(KeyCode::KeyW));
+			assert!(
+				app.editor.play_rig_camera().unwrap().position[2] < start_eye.position[2] - 1.0
+			);
+			present(&mut app);
+
+			let left = native_input::mouse_button(MouseButton::Left);
+			for attempt in 0..3 {
+				if attempt == 0 {
+					app.input.press(left);
+				} else {
+					app.input.press(press(KeyCode::KeyF));
+				}
+				step(&mut app, 1);
+				app.input.release(left);
+				app.input.release(press(KeyCode::KeyF));
+				step(&mut app, 46);
+				let run = progress(&app);
+				assert_eq!(run.swings(), attempt + 1);
+				assert_eq!(run.enemy_hits(), attempt + 1);
+			}
+			assert_eq!(progress(&app).phase(), Phase::Victory);
+			assert!(app.game_completed());
+			assert!(app.cinder_victory_animation_active());
+			assert!(
+				app.editor
+					.play_status()
+					.unwrap()
+					.gameplay
+					.unwrap()
+					.completed
+			);
+			for _ in 0..90 {
+				app.update_player(1.0 / 60.0);
+			}
+			assert!(!app.cinder_victory_animation_active());
+			assert!(app.game_completed());
+			present(&mut app);
+			app.wait_for_gpu().unwrap();
+			println!("Cinder Oath rendered the intro, entered the arena, and won in three hits");
+		});
+		return;
+	}
+
+	let directory = evidence_directory("cinder-oath");
+	let output = Command::new(std::env::current_exe().unwrap())
+		.args([
+			"--ignored",
+			"--exact",
+			"camera_native_tests::cinder_oath_native_player_completes_intro_and_sword_duel",
+			"--nocapture",
+		])
+		.env(CHILD, "1")
+		.env("LOCALAPPDATA", &directory)
+		.env("VK_INSTANCE_LAYERS", "VK_LAYER_LUNARG_screenshot")
+		.env("VK_SCREENSHOT_DIR", &directory)
+		.env("VK_SCREENSHOT_FRAMES", "0,1,2,3")
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}\n{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr),
+	);
+	let captures = fs::read_dir(&directory)
+		.unwrap()
+		.map(|entry| entry.unwrap().path())
+		.filter(|path| path.extension().is_some_and(|ext| ext == "ppm"))
+		.collect::<Vec<_>>();
+	assert_eq!(
+		captures.len(),
+		4,
+		"Vulkan capture count in {}",
+		directory.display()
+	);
+	for path in captures {
+		let image = image::open(path).unwrap().to_rgb8();
+		assert_eq!(image.dimensions(), (960, 540));
+		let first = *image.get_pixel(0, 0);
+		assert!(image.pixels().any(|pixel| *pixel != first));
+	}
+	print!("{}", String::from_utf8_lossy(&output.stdout));
+	println!("Cinder Oath screenshots: {}", directory.display());
+}
+
+#[test]
 #[ignore = "requires native Vulkan and the Vulkan SDK screenshot layer"]
 fn game_content_rect_native_images() {
 	const CHILD: &str = "GAME_ENGINE_QA_CAPTURE_WIDTH";

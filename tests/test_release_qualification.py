@@ -187,6 +187,14 @@ class DownloadVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected ZIP inventory"):
             verify_candidate(self.archive, receipt(self.archive))
 
+    def test_archive_directory_reads_are_budgeted_before_inventory_loading(self):
+        self.make_zip(FILES.items())
+        expected = receipt(self.archive)
+        verify_candidate(self.archive, expected)
+        with patch("verify_candidate.MAX_ZIP_DIRECTORY_READ_BYTES", 32):
+            with self.assertRaisesRegex(ValueError, "ZIP directory exceeds its read budget"):
+                verify_candidate(self.archive, expected)
+
     def test_duplicate_archive_member_is_rejected(self):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Duplicate name", category=UserWarning)

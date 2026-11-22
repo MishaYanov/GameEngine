@@ -1,5 +1,6 @@
 use super::*;
-use renderer::ui::ScreenOverlay;
+use gameplay_catalog::cinder_oath::Phase;
+use renderer::ui::{ScreenOverlay, ScreenOverlayLayout};
 
 use super::player_controls::input_labels::compact_key_name;
 
@@ -32,6 +33,13 @@ impl GameApp {
 			self.camera = camera;
 		}
 		let dirty = !self.standalone_runtime && self.is_dirty();
+		let cinder_phase = if self.standalone_runtime && !self.player_controls.is_open() {
+			self.cinder_phase()
+		} else {
+			None
+		};
+		let cinder_duel = cinder_phase == Some(Phase::Duel);
+		let mouse_captured = self.mouse_captured;
 		let Some(renderer) = self.renderer.as_mut() else {
 			return Ok(renderer::DrawStatus::Suspended);
 		};
@@ -59,9 +67,27 @@ impl GameApp {
 			if capacity.rows > 0 {
 				hud_rows = self
 					.player_controls
-					.rows_with_layout(capacity.rows, capacity.columns)
+					.rows_with_feedback(capacity.rows, capacity.columns, &self.feedback_audio)
 					.unwrap_or_else(|| {
 						let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
+						if cinder_phase.is_some() {
+							rows.retain(|row| !row.starts_with("Score "));
+						}
+						if cinder_phase == Some(Phase::Intro) {
+							rows.truncate(capacity.rows);
+							return rows;
+						}
+						if cinder_duel {
+							rows.push(if mouse_captured {
+								"WASD Move  /  Mouse Aim"
+							} else {
+								"Click to aim  /  WASD Move"
+							}.into());
+							rows.push("LMB or F Strike".into());
+						}
+						if cinder_phase == Some(Phase::Defeat) {
+							rows.push("F10 to restart".into());
+						}
 						let mut required = usize::from(!rows.is_empty());
 						if let Some(prompt) = rows
 							.iter()
@@ -188,12 +214,19 @@ impl GameApp {
 				objects.push(panel);
 			}
 		}
-		if self.standalone_runtime && !hud_rows.is_empty() {
+		if self.standalone_runtime && (!hud_rows.is_empty() || cinder_duel) {
 			if self.game_hud.is_none() {
 				self.game_hud = Some(ScreenOverlay::new(renderer)?);
 			}
 			let hud = self.game_hud.as_mut().expect("initialized HUD");
-			hud.prepare_with_style(renderer, content_extent, scale, &hud_rows, style)?;
+			let panel = match cinder_phase {
+				Some(phase) => ScreenOverlayLayout::Compact {
+					bottom: phase == Phase::Intro,
+					aim: cinder_duel,
+				},
+				None => ScreenOverlayLayout::Standard,
+			};
+			hud.prepare_with_layout(renderer, content_extent, scale, &hud_rows, style, panel)?;
 			if let Some(object) = hud.object() {
 				objects.push(object);
 			}

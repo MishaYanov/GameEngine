@@ -1,14 +1,20 @@
 <p role="status">{{ summary() }}</p>
 @if (entries().length) {
     <ul aria-label="Campaign issues">
-        @for (issue of entries(); track issue.scene_id) {
+        @for (issue of entries(); track $index) {
             <li>
                 <strong>{{ issue.title }}</strong>
                 <p>{{ issue.message }}</p>
-                @if (issue.repair; as repair) {
-                    <button (click)="reviewRepair.emit(repair)" [disabled]="!canRepair()" type="button">
-                        Review Repair
-                    </button>
+                @if (issue.scene_id === activeScene()) {
+                    @if (issue.repair; as repair) {
+                        <button (click)="reviewRepair.emit([repair])" [disabled]="!canRepair()" type="button">
+                            Review Repair
+                        </button>
+                    } @else if (issue.repair_batch; as batch) {
+                        <button (click)="reviewRepair.emit(batch)" [disabled]="!canRepair()" type="button">
+                            Review Repairs
+                        </button>
+                    }
                 }
                 @if (issue.destination; as scene) {
                     <button (click)="inspect.emit(scene)" [attr.aria-label]="'Inspect Scene ' + issue.title"

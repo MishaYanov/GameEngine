@@ -10,7 +10,7 @@ from zipfile import BadZipFile
 
 from collect_playtest_evidence import verify_handoff
 from compare_playtrace import read_local_json
-from verify_candidate import MAX_RECEIPT_BYTES, _package_files, verify_candidate
+from verify_candidate import MAX_RECEIPT_BYTES, _package_files, verified_archive_stat
 from verify_host_gates import GATES, MAX_RESULT_BYTES, gate_verdict, inspect_gate_evidence
 
 
@@ -41,15 +41,16 @@ def _write_new(path, payload, limit):
         os.fsync(output.fileno())
 
 
-def build_packet(receipt, archive, evidence_dir, profiles, *, playtest=None):
+def prepare_packet(receipt, archive, evidence_dir, profiles, *, playtest=None):
+    """Prepare the current packet and retain its verified archive descriptor metadata."""
     expected, receipt_data = read_local_json(receipt, MAX_RECEIPT_BYTES)
     workers, profile_data = read_local_json(profiles, MAX_RESULT_BYTES)
     package_files = _package_files(expected)
     records, gate_hashes = inspect_gate_evidence(expected, evidence_dir, workers)
-    verify_candidate(archive, expected)
+    archive_info = verified_archive_stat(archive, expected)
     verdict = gate_verdict(expected, records)
     receipt_sha = _digest(receipt_data)
-    return {
+    packet = {
         "schema_version": 1,
         "target": TARGET,
         "archive_sha256": expected["archive_sha256"],
@@ -74,6 +75,11 @@ def build_packet(receipt, archive, evidence_dir, profiles, *, playtest=None):
             if playtest is not None else None
         ),
     }
+    return packet, archive_info
+
+
+def build_packet(receipt, archive, evidence_dir, profiles, *, playtest=None):
+    return prepare_packet(receipt, archive, evidence_dir, profiles, playtest=playtest)[0]
 
 
 def verified_packet_digest(path, current):

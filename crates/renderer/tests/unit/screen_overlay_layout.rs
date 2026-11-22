@@ -46,7 +46,7 @@ fn scaled_geometry_stays_inside_the_panel_and_uses_opaque_palette_colors() {
 	let geometry = OverlayLayout::new([460, 225], 1.5, style).unwrap();
 	let [columns, rows] = [geometry.capacity.columns, geometry.capacity.rows];
 	let text = vec!["X".repeat(columns); rows];
-	let mesh = geometry.draw(&text, style);
+	let mesh = geometry.draw(&text, style, ScreenOverlayLayout::Standard);
 	let (background, characters) = mesh.vertices().split_at(4);
 	assert!(!characters.is_empty());
 	assert!(background.iter().all(|corner| corner.normal == [0.0; 3]));
@@ -65,6 +65,7 @@ fn matching_visible_rows_do_not_hide_a_palette_or_scale_change() {
 		extent: [640, 360],
 		dpi_bits: 1.0f64.to_bits(),
 		style: ScreenOverlayStyle::default(),
+		layout: ScreenOverlayLayout::Standard,
 	};
 	let prepared = PreparedOverlay {
 		key,
@@ -72,6 +73,14 @@ fn matching_visible_rows_do_not_hide_a_palette_or_scale_change() {
 	};
 	assert!(prepared.matches(key, &["Hello world".into()], 5));
 	assert!(!prepared.matches(key, &["Hints".into()], 5));
+	let compact = OverlayKey {
+		layout: ScreenOverlayLayout::Compact {
+			bottom: true,
+			aim: false,
+		},
+		..key
+	};
+	assert!(!prepared.matches(compact, &["Hello".into()], 5));
 	for style in [
 		ScreenOverlayStyle {
 			high_contrast: true,

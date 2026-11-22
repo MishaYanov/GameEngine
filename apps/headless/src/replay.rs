@@ -233,7 +233,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 	let animation_root = asset_root.clone();
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
-		.module_resolver(Arc::new(courtyard_gameplay::resolve))
+		.module_resolver(Arc::new(gameplay_catalog::resolve))
 		.animation_resolver(Arc::new(move |scene| {
 			bridge::animation_asset::prepare_scene(&animation_root, scene)
 		}))

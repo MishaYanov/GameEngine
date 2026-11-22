@@ -1,4 +1,7 @@
 use super::*;
+use crate::editor::scene_warming::publish_warming_report;
+use bridge::viewport::SceneWarmingMode;
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
 pub struct CollisionSnapshotDto {
@@ -27,13 +30,95 @@ pub async fn editor_warm_scene(
 	state: State<'_, EditorState>,
 	expected_generation: u64,
 	expected_revision: u64,
+	expected_mode_revision: u64,
 	scene_id: Option<runtime::scene_catalog::SceneId>,
 ) -> Result<(), String> {
 	trusted_window(&window)?;
+	if !cfg!(target_os = "windows") {
+		return Err("Scene warming requires the Windows editor viewport".into());
+	}
 	workspace(state, false, None, move |editor| {
-		editor.warm_scene(expected_generation, expected_revision, scene_id)
+		editor.warm_scene(
+			expected_generation,
+			expected_revision,
+			expected_mode_revision,
+			scene_id,
+		)
 	})
 	.await
+}
+
+#[tauri::command]
+pub async fn editor_set_scene_warming_mode(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	mode: SceneWarmingMode,
+) -> Result<u64, String> {
+	trusted_window(&window)?;
+	if !cfg!(target_os = "windows") {
+		return Err("Scene warming requires the Windows editor viewport".into());
+	}
+	workspace(state, true, None, move |editor| {
+		editor.set_scene_warming_mode(expected_generation, mode)
+	})
+		.await
+}
+
+#[tauri::command]
+pub async fn editor_export_warming_report(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+) -> Result<Option<usize>, String> {
+	trusted_window(&window)?;
+	if !cfg!(target_os = "windows") {
+		return Err("Scene warming requires the Windows editor viewport".into());
+	}
+	let shared = Arc::clone(&state.editor);
+	tauri::async_runtime::spawn_blocking(move || {
+		{
+			let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+			slot.as_ref()
+				.ok_or("Open a scene before exporting a warming report")?
+				.check_warming_export(expected_generation)?;
+		}
+		let Some(file) = window
+			.dialog()
+			.file()
+			.set_parent(&window)
+			.set_title("Export Warming Report")
+			.set_file_name("warming-report.json")
+			.add_filter("Warming report", &["json"])
+			.blocking_save_file()
+		else {
+			return Ok(None);
+		};
+		trusted_window(&window)?;
+		let destination = file.into_path().map_err(|error| error.to_string())?;
+		if !destination.is_absolute()
+			|| !destination
+			.extension()
+			.is_some_and(|suffix| suffix.eq_ignore_ascii_case("json"))
+		{
+			return Err("Choose an absolute .json filename for the warming report".into());
+		}
+		let session_id = engine_logger::snapshot(engine_logger::SnapshotRequest {
+			limit: 0,
+			..Default::default()
+		})
+			.session_id
+			.ok_or("The native log session is unavailable")?;
+		let report = {
+			let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+			slot.as_ref()
+				.ok_or("Workspace closed before the warming report could be exported")?
+				.capture_warming_report(expected_generation, session_id)?
+		};
+		publish_warming_report(&report, &destination).map(Some)
+	})
+		.await
+		.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

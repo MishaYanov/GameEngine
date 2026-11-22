@@ -49,6 +49,7 @@ export interface CampaignDiagnostic {
     readonly scene_id: SceneId | null;
     readonly message: string;
     readonly repair?: CampaignRepairTarget;
+    readonly repair_batch?: readonly CampaignRepairTarget[];
 }
 
 export interface CampaignRepairTarget {
@@ -61,6 +62,13 @@ export interface CampaignRepairPreview {
     readonly target: CampaignRepairTarget;
     readonly before: Collider;
     readonly after: Collider;
+}
+
+export interface CampaignRepairBatch {
+    readonly scene_id: SceneId;
+    readonly workspace_generation: number;
+    readonly revision: number;
+    readonly repairs: readonly CampaignRepairPreview[];
 }
 
 export interface CampaignDiagnosticReport {
@@ -270,6 +278,10 @@ export type EditorCommand =
     readonly material: MaterialOverride | null;
 }
     | { readonly type: 'set_collider'; readonly key: EntityKey; readonly collider: Collider | null }
+    | {
+    readonly type: 'set_colliders';
+    readonly updates: readonly { readonly key: EntityKey; readonly collider: Collider }[]
+}
     | { readonly type: 'add_component'; readonly key: EntityKey; readonly component: ComponentRecord }
     | { readonly type: 'replace_component'; readonly key: EntityKey; readonly component: ComponentRecord }
     | { readonly type: 'remove_component'; readonly key: EntityKey; readonly component_id: string }
@@ -391,6 +403,7 @@ export interface EditorCapabilities {
     readonly max_history_entries: number;
     readonly history_budget_bytes: number;
     readonly embedded_viewport_supported: boolean;
+    readonly scene_warming_supported?: boolean;
     readonly incremental_commands?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
     readonly component_types?: readonly ComponentTypeDescriptor[];

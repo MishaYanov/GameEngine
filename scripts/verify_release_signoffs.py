@@ -11,7 +11,7 @@ from zipfile import BadZipFile
 
 from compare_playtrace import read_local_json
 from review_candidate import (
-    MAX_DECISION_BYTES, _json_bytes, _write_new, build_packet,
+    MAX_DECISION_BYTES, _json_bytes, _write_new, prepare_packet,
     validate_decision, verified_packet_digest,
 )
 from sign_release_review import MAX_SIGNATURE_BYTES, ssh_keygen
@@ -94,13 +94,15 @@ def verify_roles(selected, policy, executable):
     return verified_roles
 
 
-def build_ledger(args, *, now=None):
+def review_ledger(args, *, now=None):
+    """Return the current ledger, its authenticated packet and verified ZIP metadata."""
     roles, max_age, role_digest = role_policy(args.role_policy)
     selected = signoff_inputs(args.signoff, roles)
     policy = SignerPolicy.load(args.allowed_signers, args.revoked_signers)
     verified_roles = verify_roles(selected, policy, ssh_keygen(args.ssh_keygen)) if selected else {}
-    packet = build_packet(args.receipt, args.archive, args.evidence_dir, args.profiles,
-                          playtest=args.playtest)
+    packet, archive_info = prepare_packet(
+        args.receipt, args.archive, args.evidence_dir, args.profiles, playtest=args.playtest,
+    )
     packet_digest = verified_packet_digest(args.packet, packet)
     now = now if now is not None else datetime.now(timezone.utc)
     rows = []
@@ -133,7 +135,7 @@ def build_ledger(args, *, now=None):
         status = "accepted"
     else:
         status = "held"
-    return {
+    ledger = {
         "schema_version": 1,
         "scope": packet["target"],
         "status": status,
@@ -145,6 +147,11 @@ def build_ledger(args, *, now=None):
         "revocations_sha256": sha256(policy.revoked).hexdigest() if policy.revoked is not None else None,
         "roles": rows,
     }
+    return ledger, packet, archive_info
+
+
+def build_ledger(args, *, now=None):
+    return review_ledger(args, now=now)[0]
 
 
 def main(argv=None):

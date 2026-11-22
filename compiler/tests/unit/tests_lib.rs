@@ -9,7 +9,12 @@ use engine_core::{
 
 use super::export::{install_staged_player, publish_player};
 use super::preflight::{OMISSION_NOTICE, append_scene_error, prepared_asset_path, read_scene_file};
-use super::scaffold::bundled_starter;
+fn legacy_courtyard_project(name: &str) -> (ProjectData, PathBuf) {
+	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game");
+	let mut project = ProjectData::load(directory.join("project.json")).unwrap();
+	project.name = name.into();
+	(project, directory.join("assets"))
+}
 
 #[path = "tests_dependencies.rs"]
 mod dependency_tests;
@@ -119,7 +124,10 @@ mod authoring {
 			create_authoring_project("Authoring Demo", fixture.0.to_str().unwrap()).unwrap();
 		let project = ProjectData::load(project_path.join("project.json")).unwrap();
 		assert_eq!(project.name, "Authoring Demo");
-		assert_eq!(project.gameplay_module, None);
+		assert_eq!(
+			project.gameplay_module.as_deref(),
+			Some(gameplay_catalog::CINDER_OATH_ID)
+		);
 		let prepared = prepare_project(&project, &project_path.join("assets")).unwrap();
 		assert!(prepared.asset_count() > 0);
 		assert!(project.scenes.iter().count() >= 2);
@@ -463,7 +471,7 @@ mod staging {
 		};
 
 		let fixture = AssetFixture::new();
-		let (project, asset_root) = bundled_starter("Courtyard parity").unwrap();
+		let (project, asset_root) = legacy_courtyard_project("Courtyard parity");
 		let prepared = prepare_project(&project, &asset_root).unwrap();
 		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
 		validate_export_snapshot(&staged, None).unwrap();
@@ -1045,7 +1053,7 @@ mod preflight {
 	#[test]
 	fn export_rejects_missing_campaign_finish_binding_before_creating_output() {
 		let fixture = AssetFixture::new();
-		let (project, original_assets) = bundled_starter("Incomplete courtyard").unwrap();
+		let (project, original_assets) = legacy_courtyard_project("Incomplete courtyard");
 		let authored_assets = fixture.0.join("source");
 		copy_assets(&original_assets, &authored_assets).unwrap();
 		let path = Path::new("scenes/finish.json");

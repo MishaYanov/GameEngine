@@ -556,6 +556,7 @@ impl SimulationSession {
 		let initial_matrix_updates = self.world.matrix_updates();
 		let mut collision_candidates_remaining = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let mut progress_transaction = progress.transaction();
+		let mut view_attachments = Vec::new();
 		let result = (|| -> Result<(), String> {
 			for _ in 0..report.steps {
 				let event_start = trigger_events.len();
@@ -601,6 +602,7 @@ impl SimulationSession {
 						world: &self.world,
 						collisions: &self.collisions,
 						input: &self.inputs,
+						camera: camera.camera(),
 						step_seconds: report.step_seconds,
 						progress: progress_transaction.view(),
 						triggers: &trigger_events[event_start..],
@@ -703,6 +705,18 @@ impl SimulationSession {
 							progress_transaction.apply(&action)?;
 							continue;
 						}
+						SimulationAction::PlayAnimation {
+							entity,
+							clip_index,
+							looping,
+						} => {
+							animations.play_clip(&entity, clip_index, looping)?;
+							continue;
+						}
+						SimulationAction::AttachToView { entity } => {
+							view_attachments.push(entity);
+							continue;
+						}
 						SimulationAction::RequestScene { scene_id } => {
 							if scene_id == self.scene_id {
 								return Err("Cannot request the current runtime scene".into());
@@ -729,6 +743,8 @@ impl SimulationSession {
 					let entity = match &action {
 						SimulationAction::Progress(_)
 						| SimulationAction::RequestScene { .. }
+						| SimulationAction::PlayAnimation { .. }
+						| SimulationAction::AttachToView { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -753,6 +769,8 @@ impl SimulationSession {
 					let change = match action {
 						SimulationAction::Progress(_)
 						| SimulationAction::RequestScene { .. }
+						| SimulationAction::PlayAnimation { .. }
+						| SimulationAction::AttachToView { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -831,6 +849,78 @@ impl SimulationSession {
 					self.tick + u64::from(steps) + 1,
 					&mut gameplay_emissions,
 				)?;
+				let before_camera = camera.camera().clone();
+				let clear_camera_input = camera.step(
+					&self.world,
+					&lifecycle,
+					report.step_seconds,
+					camera_input.take_for_step(),
+					self.tick + u64::from(steps) + 1,
+					obstruction_query(
+						&self.world,
+						&lifecycle,
+						&self.collisions,
+						&mut camera_exclusions,
+						&mut collision_candidates_remaining,
+					),
+				)?;
+				if clear_camera_input {
+					camera_input.clear();
+					camera_exclusions = None;
+				}
+				if camera_pose_changed(&before_camera, camera.camera()) {
+					changes.merge(WorldChange {
+						camera_changed: true,
+						..WorldChange::default()
+					});
+				}
+				for entity in view_attachments.drain(..) {
+					let index = self
+						.world
+						.entity_index(&entity)
+						.ok_or("View attachment target is missing")?;
+					let visual = &self.world.data().entities[index];
+					let authored_camera = &self.world.data().camera;
+					if !self.world.is_root_leaf(index)
+						|| visual.collider.is_some()
+						|| authored_camera
+						.follow
+						.as_ref()
+						.is_some_and(|rig| rig.target == entity)
+						|| authored_camera
+						.orbit
+						.as_ref()
+						.is_some_and(|rig| rig.target == entity)
+					{
+						return Err(
+							"View attachment requires an independent root visual with no collider"
+								.into(),
+						);
+					}
+					let pose = camera.camera();
+					let rotation = glam::Quat::from_rotation_y(-pose.yaw)
+						* glam::Quat::from_rotation_x(pose.pitch);
+					let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
+					let transform = crate::scene_data::TransformData {
+						position: pose.position,
+						rotation: [x, y, z],
+						scale: visual.transform.scale,
+					};
+					if transform != visual.transform {
+						if self
+							.world
+							.matrix_updates()
+							.saturating_sub(initial_matrix_updates)
+							>= Self::MAX_MATRIX_UPDATES_PER_TICK
+						{
+							return Err("Simulation tick matrix update budget exceeded".into());
+						}
+						before
+							.entry(entity.clone())
+							.or_insert_with(|| visual.clone());
+						changes.merge(self.world.set_transform(&entity, transform)?);
+					}
+				}
 				let motions = characters
 					.keys()
 					.filter_map(|key| {
@@ -855,31 +945,6 @@ impl SimulationSession {
 				)? {
 					changes.merge(WorldChange {
 						changed_entities: animations.poses().map(|(k, _)| k.clone()).collect(),
-						..WorldChange::default()
-					});
-				}
-				let before_camera = camera.camera().clone();
-				let clear_camera_input = camera.step(
-					&self.world,
-					&lifecycle,
-					report.step_seconds,
-					camera_input.take_for_step(),
-					self.tick + u64::from(steps) + 1,
-					obstruction_query(
-						&self.world,
-						&lifecycle,
-						&self.collisions,
-						&mut camera_exclusions,
-						&mut collision_candidates_remaining,
-					),
-				)?;
-				if clear_camera_input {
-					camera_input.clear();
-					camera_exclusions = None;
-				}
-				if camera_pose_changed(&before_camera, camera.camera()) {
-					changes.merge(WorldChange {
-						camera_changed: true,
 						..WorldChange::default()
 					});
 				}
