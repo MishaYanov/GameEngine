@@ -156,7 +156,7 @@ impl GameCameraController {
 	/// Standalone controllers maintain a probe for the supplied world. Simulation shares its own collision cache.
 	pub fn new(world: &RuntimeWorld) -> Result<Self, String> {
 		if world.data().camera.orbit.is_none() {
-			return Self::fixed_or_follow(world);
+			return Self::fixed_or_follow(world, &world.data().camera);
 		}
 		let mut standalone = StandaloneProbe {
 			world_token: Arc::clone(world.instance_token()),
@@ -186,6 +186,22 @@ impl GameCameraController {
 	pub(crate) fn new_with_lifecycle(
 		world: &RuntimeWorld,
 		lifecycle: &RuntimeLifecycle,
+		query: impl FnMut(
+			&RuntimeEntityHandle,
+			&OrbitCameraSettings,
+			[f32; 3],
+			[f32; 3],
+			f32,
+		) -> Result<OrbitArmLimit, String>,
+	) -> Result<Self, String> {
+		Self::from_authored(world, lifecycle, &world.data().camera, 0, query)
+	}
+
+	pub(crate) fn from_authored(
+		world: &RuntimeWorld,
+		lifecycle: &RuntimeLifecycle,
+		authored: &crate::scene_data::CameraData,
+		tick: u64,
 		mut query: impl FnMut(
 			&RuntimeEntityHandle,
 			&OrbitCameraSettings,
@@ -194,18 +210,18 @@ impl GameCameraController {
 			f32,
 		) -> Result<OrbitArmLimit, String>,
 	) -> Result<Self, String> {
-		let Some(settings) = &world.data().camera.orbit else {
-			return Self::fixed_or_follow(world);
+		let Some(settings) = &authored.orbit else {
+			return Self::fixed_or_follow(world, authored);
 		};
 		let handle = lifecycle
 			.handle(&settings.target)
 			.ok_or("Orbit target is missing from the runtime lifecycle")?;
 		let target = world.camera_target_snapshot(&handle)?;
 		Self::admit_orbit(
-			Self::template(world),
+			authored.to_camera(),
 			settings,
 			&target,
-			0,
+			tick,
 			|pivot, forward, distance| query(&target.handle, settings, pivot, forward, distance),
 		)
 	}
@@ -216,7 +232,13 @@ impl GameCameraController {
 			return Err("Camera elapsed time must be finite and nonnegative".into());
 		}
 		let Some(rig) = self.orbit.as_ref() else {
-			return follow::step(&mut self.camera, world, elapsed, false);
+			return follow::step(
+				&mut self.camera,
+				self.follow.as_ref(),
+				world,
+				elapsed,
+				false,
+			);
 		};
 		let tick = rig
 			.state
@@ -274,7 +296,13 @@ impl GameCameraController {
 			return Err("Camera elapsed time must be finite and nonnegative".into());
 		}
 		let Some(rig) = &mut self.orbit else {
-			follow::step(&mut self.camera, world, elapsed, false)?;
+			follow::step(
+				&mut self.camera,
+				self.follow.as_ref(),
+				world,
+				elapsed,
+				false,
+			)?;
 			return Ok(false);
 		};
 		let bound = &rig.state.target;
@@ -331,6 +359,7 @@ impl GameCameraController {
 		)?;
 		Ok(Self {
 			camera: resolved.pose,
+			follow: None,
 			orbit: Some(OrbitRig {
 				standalone: None,
 				settings: Arc::new(settings.clone()),

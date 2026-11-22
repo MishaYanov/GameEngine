@@ -252,6 +252,9 @@ pub enum EditorCommandDto {
 	SetCamera {
 		camera: CameraData,
 	},
+	SetDefaultGameCamera {
+		key: EntityKey,
+	},
 	SetProject {
 		project: ProjectData,
 	},

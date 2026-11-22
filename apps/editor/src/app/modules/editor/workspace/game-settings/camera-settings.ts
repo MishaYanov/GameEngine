@@ -1,4 +1,5 @@
 import {
+    afterRenderEffect,
     Component,
     computed,
     DestroyRef,
@@ -17,6 +18,7 @@ import {ViewportEditorService} from '../../../../core/editor/viewport-editor.ser
 import type {PreviewDefinition} from '../../../../core/editor/camera-preview';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {CameraRigFields} from './camera-rig-fields';
+import {SelectedCameraPreviewService} from './selected-camera-preview.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {sceneReferenceOptions} from '../scene-reference-options';
 import {cameraFromDraft, cameraSignature, gameCameraDraft, GameCameraDraft} from './camera-draft';
@@ -36,7 +38,9 @@ export class CameraSettings {
     protected readonly pending = signal(false);
     protected readonly error = signal<string | null>(null);
     protected readonly message = signal<string | null>(null);
-    readonly previewing = signal(false);
+    protected readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
+    protected readonly legacyPreviewing = signal(false);
+    readonly previewing = computed(() => this.legacyPreviewing() || !!this.selectedPreview?.active());
     protected readonly draft = signal<GameCameraDraft>({
         mode: 'fixed',
         follow: {
@@ -84,13 +88,16 @@ export class CameraSettings {
     } | null = null;
 
     constructor() {
+        afterRenderEffect(() => {
+            if (this.selectedPreview?.active()) this.backButton()?.nativeElement.focus({preventScroll: true});
+        });
         effect(() => {
-            if ((!this.open() && !this.previewing()) || !this.context) return;
+            if ((!this.open() && !this.legacyPreviewing()) || !this.context) return;
             const snapshot = this.editor.snapshot();
             if (this.context.generation !== this.editor.workspaceGeneration() ||
                 this.context.sceneId !== snapshot?.active_scene_id || this.editor.playing()) {
                 untracked(() => this.close());
-            } else if (this.previewing() && this.previewOwner &&
+            } else if (this.legacyPreviewing() && this.previewOwner &&
                 (this.previewOwner.expectedRevision !== snapshot.revision || snapshot.transaction || this.opening())) {
                 untracked(() => this.backToSettings());
             }
@@ -101,6 +108,7 @@ export class CameraSettings {
     show(focusTarget = false, expectedMode?: 'follow' | 'orbit'): boolean {
         const snapshot = this.editor.snapshot();
         if (!snapshot || !this.available() || expectedMode && !snapshot.document.camera[expectedMode]) return false;
+        this.selectedPreview?.close(false);
         this.stopPreview();
         const serial = ++this.dialogSerial;
         this.context = {
@@ -143,7 +151,8 @@ export class CameraSettings {
             expectedRevision: snapshot.revision, expectedGeneration: generation
         };
         this.focusTarget.set(false);
-        this.previewing.set(true);
+        this.legacyPreviewing.set(true);
+        this.selectedPreview?.setLegacyActive(true);
         this.open.set(false);
         this.editor.cameraPreview.open(this.previewOwner);
     }
@@ -154,7 +163,7 @@ export class CameraSettings {
     }
 
     protected focusPreviewControls(): void {
-        if (this.previewing()) this.backButton()?.nativeElement.focus();
+        if (this.legacyPreviewing()) this.backButton()?.nativeElement.focus();
     }
 
     protected sample(yaw: number, pitch: number, zoom: number): void {
@@ -247,6 +256,7 @@ export class CameraSettings {
     private stopPreview(): void {
         if (this.previewOwner) this.editor.cameraPreview.close(this.previewOwner);
         this.previewOwner = null;
-        this.previewing.set(false);
+        this.legacyPreviewing.set(false);
+        this.selectedPreview?.setLegacyActive(false);
     }
 }

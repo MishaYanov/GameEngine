@@ -115,4 +115,22 @@ describe('native camera preview ownership', () => {
             expect(() => readCameraPreview({...first, ...fields})).toThrow('Invalid');
         }
     });
+
+    it('releases a mismatched selected-camera token and samples only Orbit previews', async () => {
+        const {api, owner} = setup();
+        const scoped: PreviewDefinition = {cameraKey: 'camera', expectedGeneration: 31, expectedRevision: 7, sceneId: 'main'};
+        const still = {...first, mode: 'fixed' as const, camera_key: 'camera', required_probe_radius: 0, effective_distance: 0};
+        expect(readCameraPreview(still)).toEqual(still);
+        expect(() => readCameraPreview({...still, sample: 1})).toThrow('Invalid');
+        api.open.mockResolvedValueOnce({...still, camera_key: 'another'});
+        owner.open(scoped);
+        await vi.waitFor(() => expect(api.close).toHaveBeenCalledWith(first.token));
+        expect(owner.state()).toBeNull();
+        api.open.mockResolvedValueOnce(still);
+        owner.open(scoped);
+        await vi.waitFor(() => expect(owner.state()?.camera_key).toBe('camera'));
+        owner.sample(turn);
+        expect(api.sample).not.toHaveBeenCalled();
+        owner.close(scoped);
+    });
 });

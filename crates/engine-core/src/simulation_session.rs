@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::{collections::HashMap, sync::Arc};
 
+mod camera_objects;
 mod gameplay;
 mod input;
 
@@ -68,6 +69,7 @@ pub struct SimulationSession {
 	controlled_target_set: HashSet<EntityKey>,
 	triggers: TriggerTracker,
 	camera: GameCameraController,
+	camera_objects: camera_objects::CameraObjects,
 	visibility_capabilities: Option<HashSet<EntityKey>>,
 	camera_input: CameraInputLatch,
 	camera_exclusions: Option<CameraExclusions>,
@@ -161,6 +163,7 @@ impl SimulationSession {
 			),
 		)?;
 		let camera_input = CameraInputLatch::default();
+		let camera_objects = camera_objects::CameraObjects::new(&world, &lifecycle);
 
 		Ok(Self {
 			animations: Default::default(),
@@ -182,6 +185,7 @@ impl SimulationSession {
 			controlled_target_set: seen,
 			triggers,
 			camera,
+			camera_objects,
 			visibility_capabilities: None,
 			camera_input,
 			camera_exclusions,
@@ -212,7 +216,7 @@ impl SimulationSession {
 		crate::camera_replay::CameraReplayProjection::from_committed(
 			self.camera(),
 			self.orbit_state(),
-			self.world.data().camera.follow.is_some(),
+			self.camera.is_following(),
 			self.pending_camera_input(),
 			self.lifecycle.world_id(),
 		)
@@ -496,7 +500,11 @@ impl SimulationSession {
 			event_sequence: self.lifecycle.events.sequence(),
 			machine_deadlines: self.lifecycle.machine_deadlines(),
 			stale_events_discarded: self.lifecycle.stale_events_discarded,
-			last_error: self.lifecycle.last_error.clone(),
+			last_error: self
+				.lifecycle
+				.last_error
+				.clone()
+				.or_else(|| self.camera_object_diagnostic().map(str::to_owned)),
 		})
 	}
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
@@ -535,6 +543,7 @@ impl SimulationSession {
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
 		let mut camera = self.camera.clone();
+		let mut camera_objects = self.camera_objects.clone();
 		let mut camera_input = self.camera_input.clone();
 		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
@@ -705,6 +714,18 @@ impl SimulationSession {
 							animations.play_clip(&entity, clip_index, looping)?;
 							continue;
 						}
+						SimulationAction::SelectCamera { entity } => {
+							let target = entity
+								.as_ref()
+								.map(|key| {
+									lifecycle
+										.handle(key)
+										.ok_or("Runtime camera object does not exist")
+								})
+								.transpose()?;
+							camera_objects.stage_override(target, &self.world, &lifecycle)?;
+							continue;
+						}
 						SimulationAction::AttachToView { entity } => {
 							view_attachments.push(entity);
 							continue;
@@ -737,6 +758,7 @@ impl SimulationSession {
 						| SimulationAction::RequestScene { .. }
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
+						| SimulationAction::SelectCamera { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -763,6 +785,7 @@ impl SimulationSession {
 						| SimulationAction::RequestScene { .. }
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
+						| SimulationAction::SelectCamera { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -842,20 +865,34 @@ impl SimulationSession {
 					&mut gameplay_emissions,
 				)?;
 				let before_camera = camera.camera().clone();
-				let clear_camera_input = camera.step(
+				let camera_tick = self.tick + u64::from(steps) + 1;
+				let switched = camera_objects.advance(
 					&self.world,
 					&lifecycle,
-					report.step_seconds,
-					camera_input.take_for_step(),
-					self.tick + u64::from(steps) + 1,
-					obstruction_query(
+					&mut camera,
+					camera_tick,
+					&mut camera_exclusions,
+					&self.collisions,
+					&mut collision_candidates_remaining,
+				)?;
+				let clear_camera_input = if switched {
+					true
+				} else {
+					camera.step(
 						&self.world,
 						&lifecycle,
-						&self.collisions,
-						&mut camera_exclusions,
-						&mut collision_candidates_remaining,
-					),
-				)?;
+						report.step_seconds,
+						camera_input.take_for_step(),
+						camera_tick,
+						obstruction_query(
+							&self.world,
+							&lifecycle,
+							&self.collisions,
+							&mut camera_exclusions,
+							&mut collision_candidates_remaining,
+						),
+					)?
+				};
 				if clear_camera_input {
 					camera_input.clear();
 					camera_exclusions = None;
@@ -872,17 +909,10 @@ impl SimulationSession {
 						.entity_index(&entity)
 						.ok_or("View attachment target is missing")?;
 					let visual = &self.world.data().entities[index];
-					let authored_camera = &self.world.data().camera;
 					if !self.world.is_root_leaf(index)
 						|| visual.collider.is_some()
-						|| authored_camera
-							.follow
-							.as_ref()
-							.is_some_and(|rig| rig.target == entity)
-						|| authored_camera
-							.orbit
-							.as_ref()
-							.is_some_and(|rig| rig.target == entity)
+						|| visual.camera.is_some()
+						|| camera.tracks_entity(&entity)
 					{
 						return Err(
 							"View attachment requires an independent root visual with no collider"
@@ -1000,13 +1030,15 @@ impl SimulationSession {
 		self.animations = animations;
 		self.animation_bindings
 			.retain(|key, _| self.world.entity_index(key).is_some());
-		outcome.camera_status_changed = self.camera_input != camera_input
+		outcome.camera_status_changed = self.camera_objects.active != camera_objects.active
+			|| self.camera_input != camera_input
 			|| self
 				.camera
 				.orbit_state()
 				.zip(camera.orbit_state())
 				.is_some_and(|(previous, next)| !previous.same_status(next));
 		self.camera = camera;
+		self.camera_objects = camera_objects;
 		self.camera_input = camera_input;
 		self.camera_exclusions = camera_exclusions;
 		outcome.trigger_events = trigger_events;
@@ -1014,5 +1046,10 @@ impl SimulationSession {
 	}
 }
 fn camera_pose_changed(before: &crate::Camera, after: &crate::Camera) -> bool {
-	before.position != after.position || before.yaw != after.yaw || before.pitch != after.pitch
+	before.position != after.position
+		|| before.yaw != after.yaw
+		|| before.pitch != after.pitch
+		|| before.vertical_fov != after.vertical_fov
+		|| before.near != after.near
+		|| before.far != after.far
 }

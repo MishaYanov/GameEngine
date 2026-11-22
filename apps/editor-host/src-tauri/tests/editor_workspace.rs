@@ -164,6 +164,124 @@ fn legacy_scene_opens_without_writing_and_explicit_save_publishes_its_camera_obj
 }
 
 #[test]
+fn selected_camera_preview_is_scoped_and_can_see_an_unassigned_follow_camera() {
+	let fixture = Fixture::new();
+	let path = fixture.0.join("scenes/main.json");
+	let mut legacy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+	legacy["schema_version"] = 5.into();
+	let migrated = runtime::SceneData::from_json(&legacy.to_string()).unwrap();
+	let mut scene: serde_json::Value = serde_json::from_str(&migrated.to_json().unwrap()).unwrap();
+	let mut follow_object = scene["entities"][1].clone();
+	follow_object["key"] = "inspection-camera".into();
+	follow_object["components"][0]["data"]["settings"]["rig"] = serde_json::json!({
+		"mode": "follow",
+		"settings": {"target": "a", "offset": [1.0, 2.0, 5.0], "look_offset": [0.0, 0.0, 0.0], "smoothing_seconds": 0.2},
+	});
+	scene["entities"]
+		.as_array_mut()
+		.unwrap()
+		.push(follow_object);
+	fs::write(&path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+	let mut workspace = fixture.open();
+	let fixed = migrated.default_game_camera.unwrap();
+	let follow = EntityKey::new("inspection-camera").unwrap();
+	let generation = workspace.generation;
+	let scene_id = workspace
+		.backend
+		.session()
+		.active_scene_id()
+		.as_str()
+		.to_string();
+	let begin = |workspace: &mut EditorWorkspace, key, generation| {
+		workspace.open_selected_camera_preview(
+			key,
+			workspace.backend.session().revision(),
+			generation,
+			&scene_id,
+		)
+	};
+	assert!(begin(&mut workspace, follow.clone(), generation).is_err());
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec![fixed.as_str().into()],
+		},
+	);
+	let default_preview = begin(&mut workspace, fixed.clone(), generation).unwrap();
+	assert!(matches!(
+		default_preview.mode,
+		camera_preview::CameraPreviewMode::Fixed
+	));
+	assert_eq!(
+		workspace.active_camera_preview().unwrap().position,
+		[0.0, 0.0, 3.0]
+	);
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec![follow.as_str().into()],
+		},
+	);
+	assert!(workspace.active_camera_preview().is_none());
+	assert!(begin(&mut workspace, follow.clone(), generation + 1).is_err());
+	let before = workspace.backend.snapshot().unwrap();
+	let selected = begin(&mut workspace, follow.clone(), generation).unwrap();
+	assert!(matches!(
+		selected.mode,
+		camera_preview::CameraPreviewMode::Follow
+	));
+	assert_eq!(selected.camera_key, Some(follow.clone()));
+	assert_eq!(selected.sample, 0);
+	assert_eq!(
+		workspace.active_camera_preview().unwrap().position,
+		[1.0, 2.0, 5.0]
+	);
+	assert!(!workspace.close_camera_preview(&default_preview.token));
+	assert!(workspace
+		.sample_camera_preview(&selected.token, 1, Default::default())
+		.is_err());
+	assert!(workspace.close_camera_preview(&selected.token));
+	assert!(workspace.active_camera_preview().is_none());
+	let after = workspace.backend.snapshot().unwrap();
+	assert_eq!(after.document, before.document);
+	assert_eq!(after.revision, before.revision);
+	assert_eq!(after.document.default_game_camera, Some(fixed));
+
+	run(
+		&mut workspace,
+		Command::SetDefaultGameCamera { key: follow },
+	);
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	run(&mut workspace, Command::StartPlay);
+	let editor_camera = workspace.backend.session().render_camera();
+	assert_eq!(editor_camera.position, [1.0, 2.0, 5.0]);
+	run(&mut workspace, Command::StopPlay);
+	let prepared = workspace
+		.prepare_build(workspace.backend.session().revision())
+		.unwrap();
+	let output = fixture.0.parent().unwrap().join("camera-package");
+	fs::create_dir(&output).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, output.to_str().unwrap()).unwrap();
+	let manifest =
+		runtime::project::ProjectData::load(&staged.path().join("project.json")).unwrap();
+	let path = manifest.scene_path(&manifest.startup_scene_id).unwrap();
+	let installed = runtime::scene_io::load_data(&staged.path().join("assets").join(path))
+		.unwrap()
+		.data;
+	let game = runtime::simulation_session::SimulationSession::new(
+		manifest,
+		std::sync::Arc::new(installed),
+	)
+	.unwrap();
+	assert_eq!(
+		game.camera().view_projection(1.0).unwrap(),
+		editor_camera.view_projection(1.0).unwrap(),
+	);
+}
+
+#[test]
 fn authored_cinder_oath_opens_and_enters_play_through_the_editor_workspace() {
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../../..")

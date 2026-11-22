@@ -1,7 +1,12 @@
 @if (previewing()) {
-    <section aria-label="Camera preview controls" class="camera-preview-controls">
-        <strong>Orbit camera preview</strong>
+    <section aria-label="Camera preview controls" class="camera-preview-controls"
+             (keydown.escape)="selectedPreview?.close()">
+        @let selected = selectedPreview?.active();
+        <strong>{{ selected ? 'Previewing ' + selected.name : 'Orbit camera preview' }}</strong>
         @if (editor.cameraPreview.state(); as preview) {
+          @if (preview.mode === 'fixed' || preview.mode === 'follow') {
+            <span role="status">{{ preview.mode === 'fixed' ? 'Fixed camera view' : 'Follow camera view' }}</span>
+          } @else {
             <span role="status">Arm {{ preview.effective_distance | number:'1.0-3' }} m
                 @if (preview.blocker; as blocker) {
                     · Blocked by {{ blocker }}
@@ -14,19 +19,24 @@
             <button (click)="sample(0, 0, 0.8)" type="button">Zoom in</button>
             <button (click)="sample(0, 0, 1.25)" type="button">Zoom out</button>
             <button (click)="sample(0, 0, 1)" type="button">Advance one step</button>
+          }
         } @else if (!editor.cameraPreview.error()) {
             <span role="status">Preparing preview…</span>
         }
         @if (editor.cameraPreview.error(); as failure) {
             <span class="error" role="alert">{{ failure }}</span>
         }
-        <button #backButton (click)="backToSettings()" type="button">Back to settings</button>
-        <button (click)="close()" type="button">Close preview</button>
+        @if (selected) {
+            <button #backButton (click)="selectedPreview?.close()" type="button">Close Camera Preview</button>
+        } @else {
+            <button #backButton (click)="backToSettings()" type="button">Back to settings</button>
+            <button (click)="close()" type="button">Close preview</button>
+        }
     </section>
 } @else {
     <button (click)="show()" [disabled]="!available()" type="button">Game Camera…</button>
 }
-<editor-dialog (closed)="focusPreviewControls()" (openChange)="!$event && !previewing() && close()" [config]="{width: '36rem'}"
+<editor-dialog (closed)="focusPreviewControls()" (openChange)="!$event && !legacyPreviewing() && close()" [config]="{width: '36rem'}"
                [open]="open()" [renderFields]="false" title="Game Camera">
     <fieldset [disabled]="pending()" class="fields">
         <legend>Runtime camera</legend>

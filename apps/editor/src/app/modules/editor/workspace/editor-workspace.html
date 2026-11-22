@@ -82,7 +82,8 @@
                     tabindex="0"
             >
                 <editor-pane [icon]="workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="workspaceView.propView() ? 'Prop Workspace' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
+                             [title]="workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' :
+                                 previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
                     @if (!workspaceView.propView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
@@ -114,7 +115,7 @@
                                 [enabled]="showingViewport() && !opening()"
                                 [hidden]="!showingViewport()"
                                 [class.prop-aperture]="workspaceView.propView()"
-                                [label]="workspaceView.propView() ? 'Isolated Prop viewport' :
+                                [label]="workspaceView.propView() ? 'Isolated Prop viewport' : selectedCameraPreview.active() ? 'Selected camera preview viewport' :
                                     workspaceView.gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
                         />
                         @if (workspaceView.propView()) {
@@ -123,7 +124,11 @@
                             <div class="empty-scene">
                                 <div class="empty-content">
                                     <h3>{{ workspaceView.gameView() ? 'Game preview is stopped' : 'Game preview is running' }}</h3>
-                                    <p>{{ workspaceView.gameView() ? 'Select Play to start the preview.' : 'Select Stop to return to scene editing.' }}</p>
+                                    @if (workspaceView.gameView() && missingGameCamera()) {
+                                        <p>Select an enabled Camera in the Hierarchy and choose Set as Game Camera.</p>
+                                    } @else {
+                                        <p>{{ workspaceView.gameView() ? 'Select Play to start the preview.' : 'Select Stop to return to scene editing.' }}</p>
+                                    }
                                 </div>
                             </div>
                         }

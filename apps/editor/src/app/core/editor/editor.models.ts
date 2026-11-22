@@ -289,6 +289,7 @@ export type EditorCommand =
     | { readonly type: 'unpack_linked_prefab_outer'; readonly root_key: EntityKey }
     | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'create_camera' }
+    | { readonly type: 'set_default_game_camera'; readonly key: EntityKey }
     | { readonly type: 'align_camera_to_scene_view'; readonly key: EntityKey; readonly position: Vec3; readonly yaw: number; readonly pitch: number }
     | { readonly type: 'upsert_light'; readonly light: Light }
     | { readonly type: 'remove_light'; readonly key: EntityKey }

@@ -78,7 +78,7 @@ const gameplayModule = {
 
 const folderCapabilities = (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
     .map(name => ({name, label: name, category: 'hierarchy', undoable: true, available_in_play: false}));
-const cameraCapabilities = (['create_camera', 'align_camera_to_scene_view'] as const)
+const cameraCapabilities = (['create_camera', 'align_camera_to_scene_view', 'set_default_game_camera'] as const)
     .map(name => ({name, label: name, category: 'camera', undoable: true, available_in_play: false}));
 const cameraSettings: CameraComponentSettings = {
     lens: {vertical_fov: Math.fround(Math.PI / 3), near: 0.1, far: 100},
@@ -339,6 +339,14 @@ describe('Workspace live editing flow', () => {
                     revision: expectedRevision, request_id: requestId, selection: null};
             }
             if (operation === 'editor_prop_preview_close' || operation === 'editor_prop_preview_select') return undefined;
+            if (operation === 'editor_camera_preview_open') {
+                const {cameraKey, expectedRevision, expectedGeneration, sceneId} =
+                    args as {cameraKey: string; expectedRevision: number; expectedGeneration: number; sceneId: string};
+                return {mode: 'fixed', camera_key: cameraKey, token: 'selected-camera-preview', revision: expectedRevision,
+                    workspace_generation: expectedGeneration, scene_id: sceneId, sample: 0, effective_distance: 0,
+                    required_probe_radius: 0, target_lost: false, blocker: null};
+            }
+            if (operation === 'editor_camera_preview_close') return undefined;
             if (operation === 'editor_linked_prefab_status') return linkedStatus;
             if (operation === 'editor_viewport_bounds') return viewportStatus;
             if (operation === 'editor_viewport_editor_state') return viewportEditorState;
@@ -397,6 +405,13 @@ describe('Workspace live editing flow', () => {
                             }]}};
                     break;
                 }
+                case 'set_default_game_camera':
+                    expect(nativeState.document.entities.find(entity => entity.key === command.key)?.camera?.enabled).toBe(true);
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, default_game_camera: command.key}};
+                    break;
                 case 'replace_component': {
                     const {component, key} = command;
                     if (component.data.kind !== 'camera') throw new Error('Expected Camera fixture component');
@@ -577,6 +592,49 @@ describe('Workspace live editing flow', () => {
         expect(camera()?.camera?.settings.lens.vertical_fov).toBeCloseTo(Math.PI / 2);
         action('Undo').click();
         await vi.waitFor(() => expect(camera()?.camera?.settings.lens.vertical_fov).toBeCloseTo(Math.PI / 3));
+    });
+
+    it('previews a selected Camera over the stopped Game view and assigns the default in a separate edit', async () => {
+        await editor.execute({type: 'create_camera'});
+        await editor.execute({type: 'create_camera'});
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        nativeState = {...nativeState, revision: nativeState.revision + 1,
+            document: {...nativeState.document, default_game_camera: null}};
+        await editor.refresh();
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await fixture.whenStable();
+        const gameTab = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+            .find(tab => tab.textContent?.trim() === 'Game')!;
+        gameTab.click();
+        await fixture.whenStable();
+        expect(root.textContent).toContain('Select an enabled Camera in the Hierarchy');
+        const revision = editor.snapshot()?.revision;
+        const preview = button('Preview Selected Camera');
+        await vi.waitFor(() => expect(preview.disabled).toBe(false));
+        preview.click();
+        await vi.waitFor(() => expect(root.textContent).toContain('Fixed camera view'));
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_camera_preview_open', {
+            cameraKey: 'camera-2', expectedRevision: revision, expectedGeneration: 1, sceneId: 'main',
+        });
+        expect(button('Turn left')).toBeUndefined();
+        expect(editor.document()?.default_game_camera).toBeNull();
+        expect(editor.snapshot()?.revision).toBe(revision);
+        button('Close Camera Preview').click();
+        await fixture.whenStable();
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_camera_preview_close', {token: 'selected-camera-preview'});
+        expect(gameTab.getAttribute('aria-selected')).toBe('true');
+        expect(root.textContent).toContain('Game preview is stopped');
+        expect(document.activeElement).toBe(preview);
+
+        button('Set as Game Camera').click();
+        await vi.waitFor(() => expect(editor.document()?.default_game_camera).toBe('camera-2'));
+        expect(root.textContent).toContain('Default Game Camera');
+        expect(root.textContent).not.toContain('Select an enabled Camera in the Hierarchy');
+        action('Undo').click();
+        await vi.waitFor(() => expect(editor.document()?.default_game_camera).toBeNull());
     });
 
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {

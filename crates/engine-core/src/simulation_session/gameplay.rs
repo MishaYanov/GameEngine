@@ -51,6 +51,10 @@ pub enum SimulationAction {
 		clip_index: u32,
 		looping: bool,
 	},
+	/// Select a live Camera object at the end of the fixed step. None restores the authored default.
+	SelectCamera {
+		entity: Option<EntityKey>,
+	},
 	/// Place a root visual at the final camera pose after movement and look input.
 	AttachToView {
 		entity: EntityKey,

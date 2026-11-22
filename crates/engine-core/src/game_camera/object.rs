@@ -221,6 +221,29 @@ impl SceneData {
 			})
 	}
 
+	pub(crate) fn select_game_camera(&mut self, key: EntityKey) -> Result<(), String> {
+		let camera = self.object_camera(&key, &self.world_matrices()?)?;
+		self.default_game_camera = Some(key);
+		self.camera = camera;
+		Ok(())
+	}
+
+	pub(crate) fn clear_disabled_game_camera(&mut self) {
+		if self
+			.default_game_camera
+			.as_ref()
+			.is_some_and(|key| self.camera_index(key).is_err())
+		{
+			self.clear_game_camera();
+		}
+	}
+
+	fn clear_game_camera(&mut self) {
+		self.default_game_camera = None;
+		self.camera.follow = None;
+		self.camera.orbit = None;
+	}
+
 	pub(crate) fn refresh_game_camera_projection(&mut self) -> Result<(), String> {
 		if self.default_game_camera.is_some() {
 			self.camera = self.authored_game_camera()?;
@@ -277,7 +300,7 @@ impl SceneData {
 			.as_ref()
 			.is_some_and(|key| removed.contains(key))
 		{
-			self.default_game_camera = None;
+			self.clear_game_camera();
 		}
 		for entity in &mut self.entities {
 			if let Some(camera) = &mut entity.camera

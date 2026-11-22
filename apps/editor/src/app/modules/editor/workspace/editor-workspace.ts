@@ -30,6 +30,7 @@ import {ViewportAssetDragService} from './viewport-asset-drag.service';
 import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
 import {CameraSettings} from './game-settings/camera-settings';
+import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
 import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
 import {CommandPalette} from './command-palette/command-palette';
@@ -43,6 +44,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService,
+        SelectedCameraPreviewService,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
@@ -66,6 +68,12 @@ export class EditorWorkspace {
     protected readonly propWorkspace = inject(PropWorkspaceService);
     protected readonly propPreview = inject(PropPreviewService);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
+    protected readonly selectedCameraPreview = inject(SelectedCameraPreviewService);
+    protected readonly missingGameCamera = computed(() => {
+        const document = this.editorService.document();
+        return !!document?.entities.some(entity => !!entity.camera) &&
+            !document.entities.some(entity => entity.key === document.default_game_camera && entity.camera?.enabled);
+    });
     private readonly document = inject(DOCUMENT);
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());

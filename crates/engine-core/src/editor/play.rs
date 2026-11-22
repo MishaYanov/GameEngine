@@ -113,6 +113,12 @@ impl EditorSession {
 		self.set_game_keyboard_input(&MovementTarget::AllControlled, input)
 	}
 
+	pub fn play_has_game_camera_owner(&self) -> bool {
+		self.play
+			.as_ref()
+			.is_some_and(|game| game.active().owns_game_camera_view())
+	}
+
 	pub fn camera_input_owner(&self) -> Option<crate::camera_input::CameraInputOwner> {
 		self.play.as_ref()?.camera_input_owner()
 	}

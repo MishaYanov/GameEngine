@@ -20,16 +20,33 @@ impl From<String> for CameraPreviewError {
 pub async fn editor_camera_preview_open(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
-	camera: CameraData,
+	camera: Option<CameraData>,
+	camera_key: Option<String>,
 	expected_revision: u64,
 	expected_generation: u64,
 	scene_id: String,
 ) -> Result<CameraPreviewDto, CameraPreviewError> {
 	trusted_window(&window).map_err(CameraPreviewError::Validation)?;
 	workspace_with_error(state, true, Some("camera_preview_open"), move |workspace| {
-		workspace
-			.open_camera_preview(camera, expected_revision, expected_generation, &scene_id)
-			.map_err(CameraPreviewError::Validation)
+		match (camera, camera_key) {
+			(Some(camera), None) => workspace.open_camera_preview(
+				camera,
+				expected_revision,
+				expected_generation,
+				&scene_id,
+			),
+			(None, Some(key)) if key.len() <= 256 && !key.chars().any(char::is_control) => {
+				let key = runtime::EntityKey::new(key).map_err(CameraPreviewError::Validation)?;
+				workspace.open_selected_camera_preview(
+					key,
+					expected_revision,
+					expected_generation,
+					&scene_id,
+				)
+			}
+			_ => Err("Choose a valid Camera object or a camera draft for this preview".into()),
+		}
+		.map_err(CameraPreviewError::Validation)
 	})
 	.await
 }

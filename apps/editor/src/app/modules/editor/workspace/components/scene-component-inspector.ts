@@ -4,6 +4,7 @@ import { EditorService } from '../../../../core/editor/editor.service';
 import { ViewportEditorService } from '../../../../core/editor/viewport-editor.service';
 import { SceneEditingService } from '../scene-editing.service';
 import { WorkspaceViewService } from '../scene-viewport/workspace-view.service';
+import { SelectedCameraPreviewService } from '../game-settings/selected-camera-preview.service';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 
 @Component({
@@ -27,6 +28,14 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 	/>
     @if (canShowCameraActions()) {
         <button type="button" [disabled]="!canAlignCamera()" (click)="alignCamera()">Align Camera to Scene View</button>
+    }
+    @if (supportsDefaultCamera() && entity()?.camera) {
+        @if (isDefaultCamera()) {
+            <p role="status">Default Game Camera</p>
+        } @else {
+            <button type="button" [disabled]="!canSetDefault()" (click)="setDefaultCamera()">Set as Game Camera</button>
+        }
+        <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
     }`,
 })
 export class SceneComponentInspector {
@@ -37,6 +46,7 @@ export class SceneComponentInspector {
 	private readonly editing = inject(SceneEditingService);
 	private readonly viewport = inject(ViewportEditorService, {optional: true});
 	private readonly views = inject(WorkspaceViewService, {optional: true});
+	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types ?? []);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
@@ -74,10 +84,21 @@ export class SceneComponentInspector {
 	);
 	protected readonly canShowCameraActions = computed(() => !!this.entity()?.camera &&
 		(this.editor.capabilities()?.commands?.some(command => command.name === 'align_camera_to_scene_view') ?? false));
+	protected readonly supportsDefaultCamera = computed(() =>
+		this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') ?? false);
+	protected readonly isDefaultCamera = computed(() => {
+		const key = this.entity()?.key;
+		return !!key && this.editor.document()?.default_game_camera === key;
+	});
+	protected readonly canSetDefault = computed(() => this.supportsDefaultCamera() && this.available() &&
+		this.entity()?.camera?.enabled === true && !this.isDefaultCamera() && !this.selectedPreview?.active());
+	protected readonly canPreviewCamera = computed(() => this.supportsDefaultCamera() && this.available() &&
+		this.entity()?.camera?.enabled === true && this.selectedPreview?.available() === true);
 	protected readonly canAlignCamera = computed(() => {
 		const view = this.viewport?.state();
 		const snapshot = this.editor.snapshot();
 		return this.canShowCameraActions() && this.available() && snapshot?.mode === 'edit' &&
+			!this.selectedPreview?.active() &&
 			snapshot.selection.length === 1 && snapshot.selection[0] === this.entity()?.key &&
 			(!this.views || this.views.activeViewKind() === 'scene-viewport') &&
 			view?.settings.view === 'scene' && view.workspace_generation !== null &&
@@ -122,6 +143,32 @@ export class SceneComponentInspector {
 			if (!accepted && current()) this.error.set(this.editing.error() ?? 'Finish the current edit before aligning the Camera.');
 		} catch (error) {
 			if (current()) this.error.set(error instanceof Error ? error.message : String(error));
+		} finally {
+			this.pending.set(false);
+		}
+	}
+
+	protected previewCamera(origin: HTMLElement): void {
+		const key = this.entity()?.key;
+		if (key && this.canPreviewCamera()) void this.selectedPreview?.open(key, origin);
+	}
+
+	protected async setDefaultCamera(): Promise<void> {
+		const context = this.context();
+		const key = this.entity()?.key;
+		const generation = this.editor.workspaceGeneration();
+		if (!key || !this.canSetDefault()) return;
+		this.pending.set(true);
+		this.error.set(null);
+		try {
+			const accepted = await this.editing.withCommittedEdit(async () => {
+				const snapshot = this.editor.snapshot();
+				if (context !== this.context() || snapshot?.mode !== 'edit' || this.entity()?.camera?.enabled !== true) return;
+				await this.editor.execute({type: 'set_default_game_camera', key}, generation, snapshot.revision);
+			});
+			if (!accepted && context === this.context()) this.error.set(this.editing.error() ?? 'Finish the current edit before choosing the Game Camera.');
+		} catch (error) {
+			if (context === this.context()) this.error.set(error instanceof Error ? error.message : String(error));
 		} finally {
 			this.pending.set(false);
 		}

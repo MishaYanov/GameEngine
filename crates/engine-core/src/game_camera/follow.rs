@@ -38,8 +38,12 @@ impl FollowCameraSettings {
 	}
 }
 
-pub(super) fn needs_tick(camera: &Camera, world: &RuntimeWorld) -> bool {
-	let Some(follow) = &world.data().camera.follow else {
+pub(super) fn needs_tick(
+	camera: &Camera,
+	follow: Option<&FollowCameraSettings>,
+	world: &RuntimeWorld,
+) -> bool {
+	let Some(follow) = follow else {
 		return false;
 	};
 	let Some(index) = world.entity_index(&follow.target) else {
@@ -54,11 +58,12 @@ pub(super) fn needs_tick(camera: &Camera, world: &RuntimeWorld) -> bool {
 
 pub(super) fn step(
 	camera: &mut Camera,
+	follow: Option<&FollowCameraSettings>,
 	world: &RuntimeWorld,
 	elapsed: f32,
 	snap: bool,
 ) -> Result<(), String> {
-	let Some(follow) = &world.data().camera.follow else {
+	let Some(follow) = follow else {
 		return Ok(());
 	};
 	// Runtime removal can temporarily remove the subject. Retain the last valid pose.

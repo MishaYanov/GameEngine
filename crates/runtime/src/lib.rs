@@ -35,7 +35,7 @@ pub use engine::{GraphicsProbe, GraphicsProbeError};
 pub use engine_core::camera_preview::FrozenOrbitPreview;
 pub use engine_core::camera_replay;
 pub use engine_core::components;
-pub use engine_core::game_camera::required_probe_radius;
+pub use engine_core::game_camera::{GameCameraController, required_probe_radius};
 pub use engine_core::linked_prefab;
 pub use engine_core::state_machine;
 pub use engine_core::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineBuilder};

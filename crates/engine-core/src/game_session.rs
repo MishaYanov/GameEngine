@@ -246,6 +246,19 @@ impl GameSession {
 				.is_some_and(|rig| !rig.target_lost)
 	}
 
+	/// Switch a running presentation camera without modifying its authored scene.
+	pub fn set_runtime_camera(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		target: Option<crate::runtime_lifecycle::RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		if self.run_id() != run_id || self.scene_generation() != scene_generation {
+			return Err("Camera switch belongs to an inactive run or scene".into());
+		}
+		self.active_mut().set_runtime_camera(target)
+	}
+
 	pub fn submit_camera_input(
 		&mut self,
 		run_id: &str,

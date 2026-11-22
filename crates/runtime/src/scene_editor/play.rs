@@ -54,11 +54,9 @@ impl SceneEditor {
 	/// A lost orbit target still owns its last accepted pose until Play changes scene.
 	pub fn play_rig_camera(&self) -> Option<Camera> {
 		let session = self.session.as_ref()?;
-		let world = session.render_world()?;
-		(world.data().default_game_camera.is_some()
-			|| session.orbit_state().is_some()
-			|| world.data().camera.follow.is_some())
-		.then(|| session.render_camera())
+		session
+			.play_has_game_camera_owner()
+			.then(|| session.render_camera())
 	}
 	pub fn apply_play_progress(&mut self, actions: &[ProgressAction]) -> Result<(), String> {
 		self.session

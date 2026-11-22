@@ -1,16 +1,17 @@
 import {signal} from '@angular/core';
-import type {Camera, PlayCameraInputCommand} from './editor.models';
+import type {Camera, EntityKey, PlayCameraInputCommand} from './editor.models';
 
 export type PreviewIntent = Pick<PlayCameraInputCommand, 'yaw_delta' | 'pitch_delta' | 'log_distance_delta'>;
 
-export interface PreviewDefinition {
-    camera: Camera;
-    expectedGeneration: number;
-    expectedRevision: number;
-    sceneId: string;
-}
+export type PreviewDefinition = {
+    readonly expectedGeneration: number;
+    readonly expectedRevision: number;
+    readonly sceneId: string;
+} & ({readonly camera: Camera; readonly cameraKey?: never} | {readonly cameraKey: EntityKey; readonly camera?: never});
 
 export interface CameraPreviewReply {
+    mode?: 'fixed' | 'follow' | 'orbit';
+    camera_key?: EntityKey;
     token: string;
     workspace_generation: number;
     scene_id: string;
@@ -33,10 +34,18 @@ function within(value: unknown, min: number, max: number): boolean {
 export function readCameraPreview(value: unknown): CameraPreviewReply {
     if (!value || typeof value !== 'object') throw new Error('Invalid camera preview reply.');
     const r = value as Record<string, unknown>;
-    if (typeof r['token'] !== 'string' || !r['token'] || r['token'].length > 128 ||
+    const mode = r['mode'];
+    const cameraKey = r['camera_key'];
+    const still = mode === 'fixed' || mode === 'follow';
+    const validCameraKey = typeof cameraKey === 'string' && cameraKey.length > 0 && !/\s/u.test(cameraKey);
+    if (!(mode === undefined || mode === 'orbit' || still) ||
+        !(cameraKey === undefined || validCameraKey && mode !== undefined) ||
+        (still && (!validCameraKey || r['sample'] !== 0 || r['effective_distance'] !== 0 ||
+            r['required_probe_radius'] !== 0 || r['target_lost'] !== false || r['blocker'] !== null)) ||
+        typeof r['token'] !== 'string' || !r['token'] || r['token'].length > 128 ||
         typeof r['scene_id'] !== 'string' || !r['scene_id'] || !counter(r['workspace_generation']) ||
         !counter(r['revision']) || !counter(r['sample']) || !within(r['effective_distance'], 0, 100) ||
-        !within(r['required_probe_radius'], 0.001, 2) || typeof r['target_lost'] !== 'boolean' ||
+        !within(r['required_probe_radius'], still ? 0 : 0.001, 2) || typeof r['target_lost'] !== 'boolean' ||
         !(r['blocker'] === null || typeof r['blocker'] === 'string' && r['blocker'].length > 0)) {
         throw new Error('Invalid camera preview reply.');
     }
@@ -91,6 +100,7 @@ export class CameraPreviewController {
 
     sample(intent: PreviewIntent): void {
         if (!this.active || this.active.owner !== this.wanted || !this.state()) return;
+        if (this.active.reply.mode === 'fixed' || this.active.reply.mode === 'follow') return;
         if (![intent.yaw_delta, intent.pitch_delta, intent.log_distance_delta].every(Number.isFinite)) return;
         const add = (key: keyof PreviewIntent, limit: number) =>
             Math.max(-limit, Math.min(limit, (this.intent?.[key] ?? 0) + intent[key]));
@@ -121,7 +131,7 @@ export class CameraPreviewController {
                         this.active = {owner: wanted, reply};
                         if (reply.workspace_generation !== wanted.expectedGeneration ||
                             reply.scene_id !== wanted.sceneId || reply.revision !== wanted.expectedRevision ||
-                            reply.sample !== 0) {
+                            reply.sample !== 0 || reply.camera_key !== wanted.cameraKey) {
                             if (this.wanted === wanted) {
                                 this.wanted = null;
                                 this.error.set('Camera preview opened in a different scene context.');
@@ -135,7 +145,8 @@ export class CameraPreviewController {
                         const reply = await this.api.sample(old.token, old.sample + 1, intent);
                         if (reply.token !== old.token || reply.sample !== old.sample + 1 ||
                             reply.revision !== old.revision || reply.scene_id !== old.scene_id ||
-                            reply.workspace_generation !== old.workspace_generation) {
+                            reply.workspace_generation !== old.workspace_generation || reply.mode !== old.mode ||
+                            reply.camera_key !== old.camera_key) {
                             if (this.wanted === wanted) {
                                 this.wanted = null;
                                 this.state.set(null);

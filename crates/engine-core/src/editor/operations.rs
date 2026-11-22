@@ -312,10 +312,12 @@ pub(super) fn apply(
 		EditorCommandDto::ReplaceComponent { key, component } => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].put_component(component, true)?;
+			data.clear_disabled_game_camera();
 		}
 		EditorCommandDto::RemoveComponent { key, component_id } => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].remove_component(&component_id)?;
+			data.clear_disabled_game_camera();
 		}
 		EditorCommandDto::SetComponentEnabled {
 			key,
@@ -324,6 +326,7 @@ pub(super) fn apply(
 		} => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].set_component_enabled(&component_id, enabled)?;
+			data.clear_disabled_game_camera();
 		}
 		EditorCommandDto::UpsertLight { light } => {
 			if let Some(existing) = data.lights.iter_mut().find(|entry| entry.key == light.key) {
@@ -341,6 +344,7 @@ pub(super) fn apply(
 			data.lights.remove(index);
 		}
 		EditorCommandDto::SetCamera { camera } => data.set_authored_game_camera(camera)?,
+		EditorCommandDto::SetDefaultGameCamera { key } => data.select_game_camera(key)?,
 		EditorCommandDto::FrameSelection => frame_selection(data, selection, bounds)?,
 		EditorCommandDto::OrbitCamera { yaw, pitch } => orbit(data, selection, bounds, yaw, pitch)?,
 		EditorCommandDto::PanCamera { right, up } => {

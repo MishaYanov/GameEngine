@@ -293,6 +293,7 @@ impl CommandFactory {
 				crate::components::ComponentId::new(component_id.as_str())?;
 			}
 			EditorCommandDto::SetCamera { camera } => camera.validate()?,
+			EditorCommandDto::SetDefaultGameCamera { key } => validate_key(key.as_str())?,
 			EditorCommandDto::SetProject { project } => project.validate()?,
 			EditorCommandDto::OrbitCamera { yaw, pitch } => {
 				finite(&[*yaw, *pitch], "Camera orbit")?
@@ -401,6 +402,13 @@ impl CommandFactory {
 				false,
 			),
 			("set_project", "Configure project", "project", true, false),
+			(
+				"set_default_game_camera",
+				"Set as Game Camera",
+				"camera",
+				true,
+				false,
+			),
 			("add_component", "Add component", "component", true, false),
 			(
 				"replace_component",

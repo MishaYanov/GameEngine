@@ -367,3 +367,247 @@ fn camera_runtime_motion_respects_pause_restart_and_authored_delete_undo() {
 		document.camera.follow
 	);
 }
+
+#[test]
+fn selecting_a_game_camera_changes_saved_and_play_pose_with_one_undo() {
+	let mut data = two_cameras();
+	let left = key("left-camera");
+	let right = key("right-camera");
+	data.default_game_camera = Some(left.clone());
+	let project = ProjectData::for_scene("Cameras", "scenes/main.json", &data).unwrap();
+	let mut engine = EngineBuilder::new(data, project).build().unwrap();
+	let execute = |engine: &mut engine_core::Engine, command| {
+		engine.execute(EditorCommandRequest {
+			expected_revision: engine.session().revision(),
+			command,
+		})
+	};
+	assert!(
+		execute(
+			&mut engine,
+			Command::SetDefaultGameCamera {
+				key: key("missing")
+			}
+		)
+		.is_err()
+	);
+	execute(
+		&mut engine,
+		Command::SetDefaultGameCamera { key: right.clone() },
+	)
+	.unwrap();
+	let authored = engine.session().authored_document();
+	assert_eq!(authored.default_game_camera.as_ref(), Some(&right));
+	let reopened = engine_core::SceneData::from_json(&authored.to_json().unwrap()).unwrap();
+	assert_eq!(reopened.default_game_camera.as_ref(), Some(&right));
+	execute(&mut engine, Command::StartPlay).unwrap();
+	assert_eq!(engine.session().render_camera().position, [6.0, 0.0, 0.0]);
+	execute(&mut engine, Command::StopPlay).unwrap();
+	let attachment = authored.entities[1].camera.as_ref().unwrap();
+	execute(
+		&mut engine,
+		Command::SetComponentEnabled {
+			key: right.as_str().into(),
+			component_id: attachment.id.clone(),
+			enabled: false,
+		},
+	)
+	.unwrap();
+	assert!(
+		engine
+			.session()
+			.authored_document()
+			.default_game_camera
+			.is_none()
+	);
+	execute(&mut engine, Command::Undo).unwrap();
+	assert_eq!(
+		engine
+			.session()
+			.authored_document()
+			.default_game_camera
+			.as_ref(),
+		Some(&right)
+	);
+	execute(&mut engine, Command::Undo).unwrap();
+	assert_eq!(
+		engine
+			.session()
+			.authored_document()
+			.default_game_camera
+			.as_ref(),
+		Some(&left)
+	);
+}
+
+#[test]
+fn live_camera_switch_checks_run_scene_and_runtime_identity() {
+	use engine_core::{game_session::GameSession, simulation_session::ConfiguredBehaviorFactory};
+	let mut data = two_cameras();
+	data.default_game_camera = Some(key("left-camera"));
+	let project = Arc::new(ProjectData::for_scene("Cameras", "scenes/main.json", &data).unwrap());
+	let data = Arc::new(data);
+	let open = || {
+		GameSession::with_factory_for_scene(
+			Arc::clone(&project),
+			project.startup_scene_id.clone(),
+			Arc::clone(&data),
+			Arc::new(ConfiguredBehaviorFactory),
+		)
+		.unwrap()
+	};
+	let mut active = open();
+	let handle = |session: &GameSession| {
+		session
+			.active()
+			.runtime_inspection(session.play_session_id(), session.run_id(), 0, 8)
+			.unwrap()
+			.entities
+			.into_iter()
+			.find(|item| item.handle.key.as_str() == "right-camera")
+			.unwrap()
+			.handle
+	};
+	let owner = active.run_id().to_owned();
+	let scope = active.scene_generation();
+	let replacement = handle(&active);
+	assert!(
+		active
+			.set_runtime_camera(&owner, scope, Some(handle(&open())))
+			.is_err()
+	);
+	assert!(
+		active
+			.set_runtime_camera("previous", scope, Some(replacement.clone()))
+			.is_err()
+	);
+	assert!(
+		active
+			.set_runtime_camera(&owner, scope + 1, Some(replacement.clone()))
+			.is_err()
+	);
+	assert_eq!(active.active().camera().position, [-4.0, 0.0, 0.0]);
+	active
+		.set_runtime_camera(&owner, scope, Some(replacement.clone()))
+		.unwrap();
+	assert_eq!(active.active().active_camera_object(), Some(&replacement));
+	assert_eq!(active.active().camera().position, [6.0, 0.0, 0.0]);
+	assert_eq!(active.active().camera().vertical_fov, 0.8);
+	active.tick(1.0 / 60.0).unwrap();
+	assert_eq!(
+		active.active().document().default_game_camera.as_ref(),
+		Some(&key("left-camera"))
+	);
+	active.set_runtime_camera(&owner, scope, None).unwrap();
+	assert_eq!(active.active().camera().position, [-4.0, 0.0, 0.0]);
+}
+
+fn two_cameras() -> engine_core::SceneData {
+	use engine_core::{
+		components::{ComponentId, NO_MESH_PATH},
+		game_camera::{CameraComponent, CameraSettings},
+	};
+	let default = scene(vec![]);
+	let camera = |name: &str, x, fov| {
+		let mut object = entity(name, [x, 0.0, 0.0]).with_renderable(false);
+		object.model_path = NO_MESH_PATH.into();
+		let mut settings = CameraSettings::from_legacy(&default.camera);
+		settings.lens.vertical_fov = fov;
+		object.camera = Some(Box::new(CameraComponent {
+			id: ComponentId::generate(),
+			enabled: true,
+			settings,
+		}));
+		object
+	};
+	scene(vec![
+		camera("left-camera", -4.0, 1.0),
+		camera("right-camera", 6.0, 0.8),
+	])
+}
+
+#[test]
+fn losing_runtime_camera_pose_reverts_to_default_then_retains_the_last_view() {
+	use engine_core::{
+		game_session::GameSession,
+		scene_catalog::SceneId,
+		simulation_session::{
+			ActionWriter, GameModule, GameModuleFactory, InputFrame, SimulationAction,
+		},
+	};
+	struct ChangeCameraPose;
+	impl GameModuleFactory for ChangeCameraPose {
+		fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+			Ok(Box::new(Self))
+		}
+	}
+	impl GameModule for ChangeCameraPose {
+		fn needs_tick(&self, _: &InputFrame) -> bool {
+			true
+		}
+		fn plan(
+			&self,
+			world: &RuntimeWorld,
+			_: &InputFrame,
+			_: f32,
+			out: &mut ActionWriter<'_>,
+		) -> Result<(), String> {
+			for name in ["right-camera", "left-camera"] {
+				let key = key(name);
+				let object = &world.data().entities[world.entity_index(&key).unwrap()];
+				if object.transform.rotation[2] == 0.0 {
+					let mut transform = object.transform.clone();
+					transform.rotation[2] = 0.4;
+					return out.push(SimulationAction::SetTransform {
+						entity: key,
+						transform,
+					});
+				}
+			}
+			Ok(())
+		}
+	}
+
+	let mut scene = two_cameras();
+	scene.default_game_camera = Some(key("left-camera"));
+	let project = ProjectData::for_scene("Cameras", "scenes/main.json", &scene).unwrap();
+	let startup = project.startup_scene_id.clone();
+	let mut session = GameSession::with_factory_for_scene(
+		Arc::new(project),
+		startup,
+		Arc::new(scene),
+		Arc::new(ChangeCameraPose),
+	)
+	.unwrap();
+	let selected = session
+		.active()
+		.runtime_inspection(session.play_session_id(), session.run_id(), 0, 8)
+		.unwrap()
+		.entities[1]
+		.handle
+		.clone();
+	let run = session.run_id().to_owned();
+	session
+		.set_runtime_camera(&run, session.scene_generation(), Some(selected))
+		.unwrap();
+	assert_eq!(session.active().camera().position, [6.0, 0.0, 0.0]);
+	assert!(session.tick(1.0 / 60.0).unwrap().changes.camera_changed);
+	assert_eq!(
+		session
+			.active()
+			.active_camera_object()
+			.unwrap()
+			.key
+			.as_str(),
+		"left-camera"
+	);
+	let last_valid = session.active().camera().clone();
+	assert!(session.tick(1.0 / 60.0).unwrap().camera_status_changed);
+	assert!(session.active().active_camera_object().is_none());
+	assert!(session.active().camera_object_diagnostic().is_some());
+	assert_eq!(session.active().camera().position, last_valid.position);
+	assert_eq!(
+		session.active().camera().vertical_fov,
+		last_valid.vertical_fov
+	);
+}
