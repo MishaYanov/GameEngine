@@ -44,3 +44,7 @@ dd {
 	overflow-wrap: anywhere;
 	color: var(--color-text-secondary);
 }
+.review-choice {
+	display: grid;
+	gap: var(--space-1);
+}

@@ -633,6 +633,8 @@ mod play;
 mod prop_preview;
 #[path = "editor_workspace/nested_prop.rs"]
 mod nested_prop;
+#[path = "editor_workspace/prop_overrides.rs"]
+mod prop_overrides;
 
 #[path = "editor_workspace/scene_verification.rs"]
 mod scene_verification;

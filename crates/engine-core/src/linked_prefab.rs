@@ -17,8 +17,10 @@ pub use composition::{
 	PropComposition,
 };
 pub use constraints::validate_scene_links;
-pub(crate) use overrides::{apply_value, properties, value};
-pub use overrides::{capture_overrides, override_status};
+pub(crate) use overrides::{
+	apply_value, prepare_linked_source_update, properties, supports_source_override, value,
+};
+pub use overrides::{capture_overrides, override_status, review_source_overrides};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -134,8 +136,28 @@ pub enum LinkedPrefabValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinkedPrefabOverrideDto {
 	pub target: LinkedPrefabOverrideTarget,
+	pub address: PropAddress,
+	pub can_apply_to_root_source: bool,
 	pub base: LinkedPrefabValue,
 	pub value: LinkedPrefabValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinkedPrefabOverrideReviewDto {
+	pub target: LinkedPrefabOverrideTarget,
+	pub address: PropAddress,
+	pub base: LinkedPrefabValue,
+	pub local: LinkedPrefabValue,
+	pub incoming: Option<LinkedPrefabValue>,
+	pub conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkedPrefabOverrideResolution {
+	pub address: PropAddress,
+	pub property: LinkedPrefabProperty,
+	pub resolution: PrefabConflictResolution,
 }
 
 pub fn resolve_scene(scene: &SceneData) -> SceneData {

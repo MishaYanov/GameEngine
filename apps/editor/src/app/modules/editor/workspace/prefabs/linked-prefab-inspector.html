@@ -58,24 +58,28 @@
 			Unpack keeps the current objects and removes their source link. Scene Undo can restore it.
 		</p>
 		<ul aria-label="Prefab overrides">
-			@for (override of status.overrides; track $index) {
+			@for (override of status.overrides; track overrideKey(override)) {
 				<li>
 					<h4>{{ property(override.target) }}</h4>
-					<small class="reference">Source object: {{ override.target.source_entity }}</small>
+					<small class="reference" [title]="overrideKey(override)">{{ addressLabel(override.address) }}</small>
 					<dl>
 						<dt>Base</dt>
 						<dd>{{ value(override.base) }}</dd>
 						<dt>Local</dt>
 						<dd>{{ value(override.value) }}</dd>
 					</dl>
-					<button
-						type="button"
-						[disabled]="!available()"
-						(click)="revert(override.target)"
-						[attr.aria-label]="'Revert ' + property(override.target)"
-					>
-						Revert Property
-					</button>
+					<div class="actions">
+						<button type="button" [disabled]="!available()" (click)="revert(override.target)"
+							[attr.aria-label]="'Revert ' + property(override.target) + ' for ' + addressLabel(override.address)">
+							Revert Property
+						</button>
+						@if (override.can_apply_to_root_source) {
+							<button type="button" [disabled]="!available() || !!status.source_error"
+								(click)="confirmApply(override)">
+								Apply to Source…
+							</button>
+						}
+					</div>
 				</li>
 			} @empty {
 				<li>No local overrides.</li>
@@ -88,6 +92,9 @@
 @if (error(); as message) {
 	<p role="alert" class="error">{{ message }}</p>
 }
+@if (savedMessage(); as message) {
+	<p role="status">{{ message }}</p>
+}
 @if (source(); as source) {
 	<editor-prefab-source-editor
 		[source]="source"
@@ -96,44 +103,89 @@
 	/>
 }
 <editor-dialog
-	[(open)]="updateOpen"
+	[open]="updateOpen()"
 	(openChange)="!$event && closeUpdate()"
-	title="Update Linked Prefab"
+	[closeBlocked]="pending()"
+	title="Update Linked Prop"
 	[renderFields]="false"
 	[config]="{ width: '42rem' }"
 >
-	<p>
-		Non-overlapping changes merge. Reject conflicts first, or explicitly choose which values to keep
-		where source and local edits overlap.
-	</p>
-	<label
-		>Conflict resolution<select
-			#resolution
-			[value]="this.resolution()"
-			[disabled]="pending()"
-			(change)="chooseResolution(resolution.value)"
-		>
-			<option value="reject">Reject overlapping changes</option>
-			<option value="keep_local">Keep local values</option>
-			<option value="use_source">Use source values</option>
-		</select></label
-	>
 	<editor-reference-bindings
 		[names]="names()"
 		[entities]="entities()"
 		[bindings]="bindings()"
 		[disabled]="pending()"
-		(bindingsChanged)="bindings.set($event)"
+		(bindingsChanged)="setBindings($event)"
 	/>
+	@if (reviewRows(); as rows) {
+		<ul aria-label="Reviewed property changes">
+			@for (row of rows; track overrideKey(row)) {
+				<li>
+					<h4>{{ property(row.target) }}</h4>
+					<small class="reference" [title]="overrideKey(row)">{{ addressLabel(row.address) }}</small>
+					<dl>
+						<dt>Saved base</dt>
+						<dd>{{ value(row.base) }}</dd>
+						<dt>Local override</dt>
+						<dd>{{ value(row.local) }}</dd>
+						<dt>Incoming source</dt>
+						<dd>{{ row.incoming === null ? 'The source removed this object.' : value(row.incoming) }}</dd>
+					</dl>
+					@if (row.conflict) {
+						<label class="review-choice">Resolution for {{ property(row.target) }} on {{ addressLabel(row.address) }}
+							<select #choice [disabled]="pending()" [value]="choices().get(overrideKey(row)) ?? ''"
+								(change)="chooseResolution(row, choice.value)">
+								<option value="">Choose a resolution</option>
+								@if (row.incoming !== null) {
+									<option value="keep_local">Keep local value</option>
+								}
+								<option value="use_source">{{ row.incoming === null ? 'Accept source removal' : 'Use source value' }}</option>
+							</select>
+						</label>
+					}
+				</li>
+			} @empty {
+				<li>This instance has no local property overrides.</li>
+			}
+		</ul>
+	} @else {
+		<p>Review the source changes after choosing the required bindings.</p>
+	}
 	@if (error(); as message) {
 		<p role="alert" class="error">{{ message }}</p>
 	}
-	<button
-		dialog-actions
-		type="button"
-		[disabled]="!available() || !validBindings()"
-		(click)="update()"
-	>
+	<button dialog-actions type="button" [disabled]="!available() || !validBindings()" (click)="reviewChanges()">
+		Review Changes
+	</button>
+	<button dialog-actions type="button" [disabled]="!updateReady()" (click)="update()">
 		Update Linked Instance
+	</button>
+</editor-dialog>
+<editor-dialog
+	[open]="applyOpen()"
+	(openChange)="!$event && closeApply()"
+	[closeBlocked]="pending()"
+	title="Apply Override to Source"
+	[renderFields]="false"
+	[config]="{ width: '36rem' }"
+>
+	@if (applyRequest(); as request) {
+		<p>Save this property change to {{ request.path }}. This instance keeps its current saved version until you review an update.</p>
+		<dl>
+			<dt>Object</dt>
+			<dd>{{ addressLabel(request.change.address) }}</dd>
+			<dt>Property</dt>
+			<dd>{{ property(request.change.target) }}</dd>
+			<dt>Saved base</dt>
+			<dd>{{ value(request.change.base) }}</dd>
+			<dt>Value to save</dt>
+			<dd>{{ value(request.change.value) }}</dd>
+		</dl>
+	}
+	@if (error(); as message) {
+		<p role="alert" class="error">{{ message }}</p>
+	}
+	<button dialog-actions type="button" [disabled]="!available() || !applyRequest()" (click)="apply()">
+		Save Override to Source
 	</button>
 </editor-dialog>

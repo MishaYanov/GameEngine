@@ -243,6 +243,12 @@ impl CommandFactory {
 				source,
 				bindings,
 				..
+			}
+			| EditorCommandDto::UpdateLinkedPrefabReviewed {
+				root_key,
+				source,
+				bindings,
+				..
 			} => {
 				validate_key(root_key)?;
 				source.validate()?;

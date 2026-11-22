@@ -31,6 +31,8 @@ mod nested_props;
 pub use nested_props::*;
 mod nested_prop_refresh;
 pub use nested_prop_refresh::*;
+mod prop_overrides;
+pub use prop_overrides::*;
 pub use linked_prefabs::*;
 mod animation;
 pub use animation::*;

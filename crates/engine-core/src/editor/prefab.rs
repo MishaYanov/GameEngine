@@ -5,8 +5,8 @@ use crate::{
 	EntityKey,
 	asset_catalog::AssetId,
 	linked_prefab::{
-		LinkedPrefabSource, NestedPlacement, PinnedAssetVersion, PinnedPropSource, PlacementId,
-		PropAddress, PropComposition,
+		self, LinkedPrefabProperty, LinkedPrefabSource, LinkedPrefabValue, NestedPlacement,
+		PinnedAssetVersion, PinnedPropSource, PlacementId, PropAddress, PropComposition,
 	},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData, SceneData, TransformData},
 };
@@ -403,6 +403,75 @@ impl PrefabData {
 		next.adopt_reviewed_pins(reviewed, version)?;
 		next.composition.retain_reachable_pins();
 		next.validate_nested_draft(owner)
+	}
+
+	/// Stage the reviewed value in the owning Prop draft. The caller saves
+	/// that draft and reviews scene pin changes as separate explicit steps.
+	pub fn with_applied_prop_override(
+		&self,
+		owner: &AssetId,
+		address: &PropAddress,
+		property: &LinkedPrefabProperty,
+		expected: &LinkedPrefabValue,
+		new_value: LinkedPrefabValue,
+	) -> Result<Self, String> {
+		self.validate()?;
+		if !linked_prefab::supports_source_override(address, property) {
+			return Err("The selected Prop draft does not own this editable property".into());
+		}
+		let mut next = self.clone();
+		match address {
+			PropAddress::Object { source_entity, .. } => {
+				let object = next
+					.entities
+					.iter_mut()
+					.find(|object| &object.key == source_entity)
+					.ok_or("The override object no longer exists in the owning Prop draft")?;
+				if &linked_prefab::value(object, property) != expected {
+					return Err(
+						"The owning Prop draft changed this property; review the override again"
+							.into(),
+					);
+				}
+				linked_prefab::apply_value(object, property, new_value)?;
+			}
+			PropAddress::Placement { placement_path } => {
+				let [id] = placement_path.as_slice() else {
+					return Err("Select the draft that directly owns this placement".into());
+				};
+				let placement = next
+					.composition
+					.placements
+					.iter_mut()
+					.find(|candidate| &candidate.id == id)
+					.ok_or("The override placement no longer exists in the owning Prop draft")?;
+				let position = match property {
+					LinkedPrefabProperty::TransformPosition => &mut placement.local.position,
+					LinkedPrefabProperty::TransformRotation => &mut placement.local.rotation,
+					LinkedPrefabProperty::TransformScale => &mut placement.local.scale,
+					_ => {
+						return Err(
+							"The owning Prop draft supports only placement transforms".into()
+						);
+					}
+				};
+				if LinkedPrefabValue::Vector(*position) != *expected {
+					return Err(
+						"The owning Prop draft changed this property; review the override again"
+							.into(),
+					);
+				}
+				let LinkedPrefabValue::Vector(vector) = new_value else {
+					return Err("Placement transform overrides require a vector".into());
+				};
+				*position = vector;
+			}
+		}
+		if next.composition.is_empty() {
+			next.validated()
+		} else {
+			next.validate_nested_draft(owner)
+		}
 	}
 
 	fn reviewed_version(source: &LinkedPrefabSource) -> PinnedAssetVersion {

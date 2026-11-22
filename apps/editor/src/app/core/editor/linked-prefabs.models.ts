@@ -3,7 +3,7 @@ import type {EditorSnapshot, EntityKey, Transform, Vec3} from './editor.models';
 
 /** The fields used for reference navigation from an authored linked instance root. */
 export interface LinkedPrefabReferenceView {
-    readonly source: { readonly source_id: string; readonly path: string };
+    readonly source: { readonly source_id: string; readonly path: string; readonly prefab?: PrefabSourceDocument };
     readonly bindings: Readonly<Record<string, EntityKey>>;
 }
 
@@ -95,21 +95,53 @@ export interface PrefabSourceSave {
 	readonly snapshot: EditorSnapshot;
 }
 
+export type PropAddress =
+    | { readonly kind: 'object'; readonly placement_path: readonly string[]; readonly source_entity: EntityKey }
+    | { readonly kind: 'placement'; readonly placement_path: readonly string[] };
+
+export type LinkedPrefabPropertyKind =
+    | 'name'
+    | 'transform_position'
+    | 'transform_rotation'
+    | 'transform_scale'
+    | 'mesh_renderer'
+    | 'collider'
+    | 'character_controller'
+    | 'animation'
+    | 'native_behavior';
+
+export type LinkedPrefabProperty =
+    | { readonly kind: Exclude<LinkedPrefabPropertyKind, 'native_behavior'> }
+    | { readonly kind: 'native_behavior'; readonly component_id: string };
+
 export interface LinkedPrefabOverrideTarget {
-	readonly source_entity: string;
-	readonly property: {
-		readonly kind:
-			| 'name'
-			| 'transform_position'
-			| 'transform_rotation'
-			| 'transform_scale'
-			| 'mesh_renderer'
-			| 'collider'
-			| 'character_controller'
-			| 'animation'
-			| 'native_behavior';
-		readonly component_id?: string;
-	};
+    readonly source_entity: EntityKey;
+    readonly property: LinkedPrefabProperty;
+}
+
+export interface LinkedPrefabOverride {
+    readonly target: LinkedPrefabOverrideTarget;
+    readonly address: PropAddress;
+    readonly can_apply_to_root_source: boolean;
+    readonly base: LinkedPrefabValue;
+    readonly value: LinkedPrefabValue;
+}
+
+export interface LinkedPrefabOverrideReview {
+    readonly target: LinkedPrefabOverrideTarget;
+    readonly address: PropAddress;
+    readonly base: LinkedPrefabValue;
+    readonly local: LinkedPrefabValue;
+    readonly incoming: LinkedPrefabValue | null;
+    readonly conflict: boolean;
+}
+
+export type LinkedPrefabConflictChoice = 'keep_local' | 'use_source';
+
+export interface LinkedPrefabOverrideResolution {
+    readonly address: PropAddress;
+    readonly property: LinkedPrefabProperty;
+    readonly resolution: LinkedPrefabConflictChoice;
 }
 
 export type LinkedPrefabValue =
@@ -125,9 +157,5 @@ export interface LinkedPrefabStatus {
 	readonly source_changed: boolean;
 	readonly source_error: string | null;
 	readonly bindings: Readonly<Record<string, string>>;
-	readonly overrides: readonly {
-		readonly target: LinkedPrefabOverrideTarget;
-		readonly base: LinkedPrefabValue;
-		readonly value: LinkedPrefabValue;
-	}[];
+	readonly overrides: readonly LinkedPrefabOverride[];
 }

@@ -7,6 +7,7 @@ import type {
 	PrefabSourceDocument,
 	PrefabSourceDraft,
 	LinkedPrefabStatus,
+	LinkedPrefabOverrideReview,
 } from '../../../../core/editor/linked-prefabs.models';
 import type { SceneEntity } from '../../../../core/editor/editor.models';
 import { LAYOUT_PREFERENCES_STORAGE } from '../../../../shared/services/layout-preferences-storage';
@@ -58,11 +59,31 @@ const linked: LinkedPrefabStatus = {
 	overrides: [
 		{
 			target: { source_entity: 'source-door', property: { kind: 'name' } },
+			address: { kind: 'object', placement_path: [], source_entity: 'source-door' },
+			can_apply_to_root_source: true,
 			base: { kind: 'name', value: 'Door' },
 			value: { kind: 'name', value: 'Custom door' },
 		},
 	],
 };
+const reviewedChanges: readonly LinkedPrefabOverrideReview[] = [
+	{
+		target: linked.overrides[0].target,
+		address: linked.overrides[0].address,
+		base: linked.overrides[0].base,
+		local: linked.overrides[0].value,
+		incoming: { kind: 'name', value: 'New source door' },
+		conflict: true,
+	},
+	{
+		target: { source_entity: 'nested-left-key', property: { kind: 'transform_position' } },
+		address: { kind: 'placement', placement_path: ['left'] },
+		base: { kind: 'vector', value: [0, 0, 0] },
+		local: { kind: 'vector', value: [2, 0, 0] },
+		incoming: null,
+		conflict: true,
+	},
+];
 const entity: SceneEntity = {
 	key: 'scene-door',
 	name: 'Custom door',
@@ -110,7 +131,9 @@ function configure() {
 	const linkedPrefabStatus = vi.fn(async (): Promise<LinkedPrefabStatus | null> =>
 		structuredClone(linked),
 	);
-	const updateLinkedPrefab = vi.fn(async () => current());
+	const reviewLinkedPropOverrides = vi.fn(async () => structuredClone(reviewedChanges));
+	const updateLinkedPropReviewed = vi.fn(async () => current());
+	const applyLinkedPropOverride = vi.fn(async () => ({ draft: source, snapshot: current() }));
 	const execute = vi.fn(async () => current());
 	const assets = vi.fn(async () => []);
 	TestBed.configureTestingModule({
@@ -145,7 +168,9 @@ function configure() {
 					createLinkedPrefabSource,
 					instantiateLinkedPrefab,
 					linkedPrefabStatus,
-					updateLinkedPrefab,
+					reviewLinkedPropOverrides,
+					updateLinkedPropReviewed,
+					applyLinkedPropOverride,
 					execute,
 					assets,
 				},
@@ -168,7 +193,9 @@ function configure() {
 		createLinkedPrefabSource,
 		instantiateLinkedPrefab,
 		linkedPrefabStatus,
-		updateLinkedPrefab,
+		reviewLinkedPropOverrides,
+		updateLinkedPropReviewed,
+		applyLinkedPropOverride,
 		execute,
 		assets,
 	};
@@ -511,43 +538,79 @@ describe('typed prefab authoring', () => {
 		expect(backend.execute).not.toHaveBeenCalled();
 	});
 
-	it('keeps an update conflict reviewable and retries only the chosen resolution', async () => {
+	it('requires one explicit resolution per addressed conflict and preserves a rejected review', async () => {
 		const backend = configure();
 		const fixture = TestBed.createComponent(LinkedPrefabInspector);
 		fixture.componentRef.setInput('entity', entity);
 		fixture.componentRef.setInput('editable', true);
 		await fixture.whenStable();
-		const root: HTMLElement = fixture.nativeElement,
-			ui = controls(root);
+		const root: HTMLElement = fixture.nativeElement;
+		const ui = controls(root);
 		ui.button('Review Source Update…').click();
 		await fixture.whenStable();
-		backend.updateLinkedPrefab.mockRejectedValueOnce(
-			new Error('Conflicting local and source changes'),
-		);
-		ui.button('Update Linked Instance').click();
+		expect(backend.reviewLinkedPropOverrides).toHaveBeenCalledWith('anchor', 'draft-1', { Actor: 'player' }, 1, 4);
+		expect(root.textContent).toContain('New source door');
+		expect(root.textContent).toContain('The source removed this object.');
+		const update = ui.button('Update Linked Instance');
+		expect(update.disabled).toBe(true);
+		const decisions = root.querySelectorAll<HTMLSelectElement>('select');
+		expect(decisions).toHaveLength(2);
+		decisions[0].value = 'keep_local';
+		decisions[0].dispatchEvent(new Event('change'));
 		await fixture.whenStable();
-		expect(backend.updateLinkedPrefab).toHaveBeenCalledWith(
-			'anchor',
-			'draft-1',
-			'reject',
-			{ Actor: 'player' },
-			1,
-			4,
-		);
-		expect(root.textContent).toContain('Conflicting local');
+		expect(update.disabled).toBe(true);
+		expect(Array.from(decisions[1].options, option => option.value)).toEqual(['', 'use_source']);
+		decisions[1].value = 'use_source';
+		decisions[1].dispatchEvent(new Event('change'));
+		await fixture.whenStable();
+		backend.updateLinkedPropReviewed.mockRejectedValueOnce(new Error('The source changed during review'));
+		update.click();
+		await fixture.whenStable();
+		expect(root.textContent).toContain('The source changed during review');
 		expect(backend.editingError()).toBeNull();
-		ui.change('Conflict resolution', 'keep_local');
+		expect(decisions[0].value).toBe('keep_local');
+		update.click();
 		await fixture.whenStable();
-		ui.button('Update Linked Instance').click();
+		expect(backend.updateLinkedPropReviewed).toHaveBeenLastCalledWith('anchor', 'draft-1', { Actor: 'player' }, [
+			{ address: reviewedChanges[0].address, property: reviewedChanges[0].target.property, resolution: 'keep_local' },
+			{ address: reviewedChanges[1].address, property: reviewedChanges[1].target.property, resolution: 'use_source' },
+		], 1, 4);
+	});
+
+	it('requires confirmation to save an owned override and refreshes the catalog without updating the instance', async () => {
+		const backend = configure();
+		const unowned = {
+			...linked.overrides[0],
+			address: { kind: 'object', placement_path: ['grate-left'], source_entity: 'inner-door' } as const,
+			can_apply_to_root_source: false,
+		};
+		backend.linkedPrefabStatus.mockResolvedValueOnce({...linked, overrides: [linked.overrides[0], unowned]});
+		const fixture = TestBed.createComponent(LinkedPrefabInspector);
+		fixture.componentRef.setInput('entity', entity);
+		fixture.componentRef.setInput('editable', true);
 		await fixture.whenStable();
-		expect(backend.updateLinkedPrefab).toHaveBeenLastCalledWith(
-			'anchor',
-			'draft-1',
-			'keep_local',
-			{ Actor: 'player' },
-			1,
-			4,
+		const root: HTMLElement = fixture.nativeElement;
+		const ui = controls(root);
+		expect(root.textContent).toContain('Placement grate-left');
+		expect([...root.querySelectorAll('button')].filter(button => button.textContent.trim() === 'Apply to Source…')).toHaveLength(1);
+		ui.button('Apply to Source…').click();
+		await fixture.whenStable();
+		expect(root.textContent).toContain('Save this property change to door.json');
+		expect(backend.applyLinkedPropOverride).not.toHaveBeenCalled();
+		root.querySelector<HTMLButtonElement>('button[aria-label="Close Apply Override to Source"]')!.click();
+		await fixture.whenStable();
+		expect(backend.applyLinkedPropOverride).not.toHaveBeenCalled();
+		ui.button('Apply to Source…').click();
+		await fixture.whenStable();
+		ui.button('Save Override to Source').click();
+		await fixture.whenStable();
+		expect(backend.applyLinkedPropOverride).toHaveBeenCalledWith(
+			'anchor', 'draft-1', linked.overrides[0].address, linked.overrides[0].target.property, 1, 4,
 		);
+		expect(backend.assets).toHaveBeenCalledWith(true);
+		expect(backend.closePrefabSource).toHaveBeenCalledWith('draft-1');
+		expect(backend.updateLinkedPropReviewed).not.toHaveBeenCalled();
+		expect(root.querySelector('[role="status"]')?.textContent).toContain('Saved to door.json');
 	});
 
 	it('validates source hierarchy and special slot names without changing identities', () => {

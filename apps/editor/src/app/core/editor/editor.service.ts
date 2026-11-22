@@ -25,7 +25,11 @@ import {
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import {isSceneSchemaVersion} from './editor.models';
 import type {
+    LinkedPrefabOverrideResolution,
+    LinkedPrefabOverrideReview,
+    LinkedPrefabProperty,
     LinkedPrefabStatus,
+    PropAddress,
     PrefabSourceDocument,
     PrefabSourceDraft,
     PrefabSourceSave,
@@ -589,6 +593,41 @@ export class EditorService {
     updateLinkedPrefab(rootKey: string, draftId: string, resolution: 'reject' | 'keep_local' | 'use_source', bindings: Readonly<Record<string, string>> | null,
         expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
         return this.snapshotOperation('editor_update_linked_prefab', {rootKey, draftId, resolution, bindings}, false, {expectedGeneration, expectedRevision});
+    }
+
+    reviewLinkedPropOverrides(
+        rootKey: EntityKey, draftId: string, bindings: Readonly<Record<string, EntityKey>>,
+        expectedGeneration: number, expectedRevision: number,
+    ): Promise<readonly LinkedPrefabOverrideReview[]> {
+        return this.prefabDraftOperation(
+            'editor_review_linked_prop_overrides', {rootKey, draftId, bindings}, expectedGeneration, expectedRevision,
+        );
+    }
+
+    updateLinkedPropReviewed(
+        rootKey: EntityKey, draftId: string, bindings: Readonly<Record<string, EntityKey>>,
+        resolutions: readonly LinkedPrefabOverrideResolution[], expectedGeneration: number, expectedRevision: number,
+    ): Promise<EditorSnapshot> {
+        return this.snapshotOperation(
+            'editor_update_linked_prop_reviewed', {rootKey, draftId, bindings, resolutions},
+            false, {expectedGeneration, expectedRevision},
+        );
+    }
+
+    applyLinkedPropOverride(
+        rootKey: EntityKey, draftId: string, address: PropAddress, property: LinkedPrefabProperty,
+        expectedGeneration: number, expectedRevision: number,
+    ): Promise<PrefabSourceSave> {
+        return this.enqueue('editor_apply_linked_prop_override', async () => {
+            this.requireGeneration(expectedGeneration);
+            const result = await this.native<PrefabSourceSave>('editor_apply_linked_prop_override', {
+                rootKey, draftId, address, property, expectedRevision,
+            });
+            this.requireGeneration(expectedGeneration);
+            this.accept(result.snapshot);
+            this.invalidateAssetCatalog();
+            return result;
+        }, true, expectedGeneration);
     }
 
     private prefabDraftOperation<T>(operation: string, args: Record<string, unknown>, expectedGeneration?: number, expectedRevision?: number): Promise<T> {

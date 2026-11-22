@@ -4,12 +4,17 @@ use crate::{
 	EntityKey,
 	components::NO_MESH_PATH,
 	linked_prefab::{
-		self, LinkedPrefabInstance, LinkedPrefabOverrideTarget, LinkedPrefabSource,
-		PrefabConflictResolution,
+		self, LinkedPrefabInstance, LinkedPrefabOverrideResolution, LinkedPrefabOverrideTarget,
+		LinkedPrefabSource, PrefabConflictResolution,
 	},
 	scene_data::EntityData,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
+
+enum UpdateResolution {
+	All(PrefabConflictResolution),
+	Reviewed(Vec<LinkedPrefabOverrideResolution>),
+}
 
 impl EditorSession {
 	pub fn instantiate_linked_prefab(
@@ -126,104 +131,110 @@ impl EditorSession {
 		resolution: PrefabConflictResolution,
 		bindings: Option<BTreeMap<String, EntityKey>>,
 	) -> Result<(), String> {
+		self.update_linked_prefab_with_resolution(
+			root_key,
+			source,
+			bindings,
+			UpdateResolution::All(resolution),
+		)
+	}
+
+	pub fn update_linked_prefab_reviewed(
+		&mut self,
+		root_key: String,
+		source: LinkedPrefabSource,
+		bindings: Option<BTreeMap<String, EntityKey>>,
+		resolutions: Vec<LinkedPrefabOverrideResolution>,
+	) -> Result<(), String> {
+		self.update_linked_prefab_with_resolution(
+			root_key,
+			source,
+			bindings,
+			UpdateResolution::Reviewed(resolutions),
+		)
+	}
+
+	fn update_linked_prefab_with_resolution(
+		&mut self,
+		root_key: String,
+		source: LinkedPrefabSource,
+		bindings: Option<BTreeMap<String, EntityKey>>,
+		resolution: UpdateResolution,
+	) -> Result<(), String> {
 		self.require_edit()?;
 		self.require_no_transaction()?;
-		source.validate()?;
 		let root = EntityKey::new(root_key)?;
-		let mut next = (*self.data).clone();
-		let anchor_index = next
-			.entities
-			.iter()
-			.position(|entity| entity.key == root)
-			.ok_or("Linked instance anchor is missing")?;
-		let old = next.entities[anchor_index]
-			.linked_prefab
-			.clone()
-			.ok_or("Object is not a linked instance")?;
-		if source.source_id != old.source.source_id {
-			return Err(
-				"Linked source identity changed; do not retarget an existing instance".into(),
-			);
-		}
-		let old_base = linked_prefab::materialized(&old, &root)?;
-		let old_members: HashMap<_, _> = next
-			.entities
-			.iter()
-			.filter(|entity| old.entity_map.values().any(|key| key == &entity.key))
-			.map(|entity| (entity.key.clone(), entity.clone()))
-			.collect();
-		let mut link = LinkedPrefabInstance {
-			source,
-			entity_map: BTreeMap::new(),
-			bindings: bindings.unwrap_or_else(|| old.bindings.clone()),
-			overrides: old.overrides.clone(),
-		};
-		for entity in link.source.prefab.expanded_entities()?.iter() {
-			link.entity_map.insert(
-				entity.key.clone(),
-				old.entity_map
-					.get(&entity.key)
-					.cloned()
-					.unwrap_or_else(EntityKey::generate),
-			);
-		}
-		let mut fresh = linked_prefab::materialized(&link, &root)?;
-		let mut conflicts = Vec::new();
-		for target in &old.overrides {
-			let Some(incoming) = fresh.get_mut(&target.source_entity) else {
-				if resolution != PrefabConflictResolution::UseSource {
-					return Err(format!(
-						"Source removed overridden entity {}. Choose Use Source to remove it or Unpack to keep it",
-						target.source_entity.as_str()
-					));
+		let mut update =
+			linked_prefab::prepare_linked_source_update(&self.data, &root, source, bindings)?;
+		let mut choices = BTreeMap::new();
+		let fallback = match resolution {
+			UpdateResolution::All(resolution) => resolution,
+			UpdateResolution::Reviewed(reviews) => {
+				for review in reviews {
+					if review.resolution == PrefabConflictResolution::Reject
+						|| choices
+							.insert((review.address, review.property), review.resolution)
+							.is_some()
+					{
+						return Err(
+							"Select one explicit resolution per reviewed Prop conflict".into()
+						);
+					}
 				}
-				link.overrides.remove(target);
-				continue;
-			};
-			let before = old_base
-				.get(&target.source_entity)
-				.ok_or("Pinned source entity is missing")?;
-			let local = old_members
-				.get(&old.entity_map[&target.source_entity])
-				.ok_or("Linked member is missing")?;
-			let base_value = linked_prefab::value(before, &target.property);
-			let local_value = linked_prefab::value(local, &target.property);
-			let incoming_value = linked_prefab::value(incoming, &target.property);
-			let conflict = incoming_value != base_value && incoming_value != local_value;
-			if conflict && resolution == PrefabConflictResolution::Reject {
-				conflicts.push(format!(
-					"{} {:?}",
-					target.source_entity.as_str(),
-					target.property
-				));
-				continue;
+				PrefabConflictResolution::Reject
 			}
-			if conflict && resolution == PrefabConflictResolution::UseSource {
-				link.overrides.remove(target);
+		};
+		let mut conflicts = Vec::new();
+		for review in update.reviews {
+			let target = &review.target;
+			let resolution = if review.conflict {
+				choices
+					.remove(&(review.address.clone(), target.property.clone()))
+					.unwrap_or(fallback)
 			} else {
-				linked_prefab::apply_value(incoming, &target.property, local_value)?;
+				PrefabConflictResolution::KeepLocal
+			};
+			if review.conflict && resolution == PrefabConflictResolution::UseSource {
+				update.link.overrides.remove(target);
+				continue;
 			}
+			if review.incoming.is_none() {
+				return Err(format!(
+					"Source removed overridden entity {:?}. Choose Use Source to remove it or Unpack to keep it",
+					review.address,
+				));
+			}
+			if review.conflict && resolution == PrefabConflictResolution::Reject {
+				if conflicts.len() < 16 {
+					conflicts.push(format!("{:?} {:?}", review.address, target.property));
+				}
+				continue;
+			}
+			let incoming = update
+				.members
+				.get_mut(&target.source_entity)
+				.ok_or("Reviewed override member is missing")?;
+			linked_prefab::apply_value(incoming, &target.property, review.local)?;
+		}
+		if !choices.is_empty() {
+			return Err("A reviewed Prop conflict changed; review the source update again".into());
 		}
 		if !conflicts.is_empty() {
 			return Err(format!(
 				"Linked prefab update conflicts: {}. Choose Keep Local or Use Source explicitly",
-				conflicts
-					.into_iter()
-					.take(16)
-					.collect::<Vec<_>>()
-					.join(", ")
+				conflicts.join(", "),
 			));
 		}
-		let old_keys: HashSet<_> = old.entity_map.values().cloned().collect();
+		let mut next = (*self.data).clone();
 		next.entities
-			.retain(|entity| !old_keys.contains(&entity.key));
-		next.entities.extend(fresh.into_values());
+			.retain(|entity| !update.prior_members.contains(&entity.key));
+		next.entities.extend(update.members.into_values());
 		let anchor = next
 			.entities
 			.iter_mut()
 			.find(|entity| entity.key == root)
-			.expect("anchor retained");
-		anchor.linked_prefab = Some(link);
+			.ok_or("Linked instance anchor is missing")?;
+		anchor.linked_prefab = Some(update.link);
 		let available: HashSet<_> = next.entities.iter().map(|entity| &entity.key).collect();
 		let selection = self
 			.selection

@@ -110,6 +110,25 @@ pub(crate) fn apply_value(
 	Ok(())
 }
 
+pub(crate) fn supports_source_override(
+	address: &PropAddress,
+	property: &LinkedPrefabProperty,
+) -> bool {
+	use LinkedPrefabProperty::*;
+	match address {
+		PropAddress::Object { placement_path, .. } => {
+			placement_path.is_empty() && !matches!(property, NativeBehavior { .. })
+		}
+		PropAddress::Placement { placement_path } => {
+			placement_path.len() == 1
+				&& matches!(
+					property,
+					TransformPosition | TransformRotation | TransformScale
+				)
+		}
+	}
+}
+
 /// Normal Inspector commands record user intent even when its new value equals
 /// a future source value. Only explicit Revert clears that persisted intention.
 pub fn capture_overrides(before: &SceneData, after: &mut SceneData) -> Result<(), String> {
@@ -175,7 +194,11 @@ pub fn override_status(
 		.find(|entity| &entity.key == anchor)
 		.and_then(|entity| entity.linked_prefab.as_ref())
 		.ok_or("Select a linked instance")?;
-	let base = materialized(link, anchor)?;
+	let projection = link
+		.source
+		.prefab
+		.expanded_composition(Some(&link.source.source_id))?;
+	let base = materialized_from(link, &projection.entities, anchor)?;
 	let entities: HashMap<_, _> = scene
 		.entities
 		.iter()
@@ -190,11 +213,129 @@ pub fn override_status(
 			let actual = entities
 				.get(&link.entity_map[&target.source_entity])
 				.ok_or("Linked member is missing")?;
+			let address = projection
+				.addresses
+				.get(&target.source_entity)
+				.ok_or("Override source address is missing")?;
 			Ok(LinkedPrefabOverrideDto {
 				target: target.clone(),
+				address: address.clone(),
+				can_apply_to_root_source: supports_source_override(address, &target.property),
 				base: value(expected, &target.property),
 				value: value(actual, &target.property),
 			})
 		})
 		.collect()
+}
+
+/// Compare saved pin, current instance and proposed source as one read-only
+/// operation. Incoming rows with missing targets require explicit removal.
+pub fn review_source_overrides(
+	scene: &SceneData,
+	anchor: &EntityKey,
+	incoming: &LinkedPrefabSource,
+	bindings: Option<&BTreeMap<String, EntityKey>>,
+) -> Result<Vec<LinkedPrefabOverrideReviewDto>, String> {
+	Ok(prepare_linked_source_update(scene, anchor, incoming.clone(), bindings.cloned())?.reviews)
+}
+
+pub(crate) struct PreparedLinkedSourceUpdate {
+	pub link: LinkedPrefabInstance,
+	pub members: BTreeMap<EntityKey, EntityData>,
+	pub prior_members: HashSet<EntityKey>,
+	pub reviews: Vec<LinkedPrefabOverrideReviewDto>,
+}
+
+pub(crate) fn prepare_linked_source_update(
+	scene: &SceneData,
+	anchor: &EntityKey,
+	source: LinkedPrefabSource,
+	bindings: Option<BTreeMap<String, EntityKey>>,
+) -> Result<PreparedLinkedSourceUpdate, String> {
+	source.validate()?;
+	let old = scene
+		.entities
+		.iter()
+		.find(|entity| &entity.key == anchor)
+		.and_then(|entity| entity.linked_prefab.as_ref())
+		.ok_or("Select a linked instance")?;
+	if source.source_id != old.source.source_id {
+		return Err("Linked source identity changed; update requires the same asset".into());
+	}
+	let props = old
+		.source
+		.prefab
+		.expanded_composition(Some(&old.source.source_id))?;
+	let before = materialized_from(old, &props.entities, anchor)?;
+	let actual: HashMap<_, _> = scene
+		.entities
+		.iter()
+		.map(|entity| (&entity.key, entity))
+		.collect();
+	let entity_map = source
+		.prefab
+		.expanded_entities()?
+		.iter()
+		.map(|entity| {
+			let key = old
+				.entity_map
+				.get(&entity.key)
+				.cloned()
+				.unwrap_or_else(EntityKey::generate);
+			(entity.key.clone(), key)
+		})
+		.collect();
+	let bindings = bindings.unwrap_or_else(|| old.bindings.clone());
+	if bindings.values().any(|entity| !actual.contains_key(entity)) {
+		return Err("Linked prefab reference binding targets a missing scene entity".into());
+	}
+	let link = LinkedPrefabInstance {
+		source,
+		entity_map,
+		bindings,
+		overrides: old.overrides.clone(),
+	};
+	let members = materialized(&link, anchor)?;
+	let reviews = old
+		.overrides
+		.iter()
+		.map(|target| {
+			let source_entity = &target.source_entity;
+			let property = &target.property;
+			let base = before
+				.get(source_entity)
+				.ok_or("Pinned override object is missing")?;
+			let address = props
+				.addresses
+				.get(source_entity)
+				.ok_or("Pinned override address is missing")?;
+			let scene_key = old
+				.entity_map
+				.get(source_entity)
+				.ok_or("Linked member map is missing")?;
+			let local = actual.get(scene_key).ok_or("Linked member is missing")?;
+			let base = value(base, property);
+			let local = value(local, property);
+			let incoming = members
+				.get(source_entity)
+				.map(|entity| value(entity, property));
+			let conflict = incoming
+				.as_ref()
+				.is_none_or(|incoming| incoming != &base && incoming != &local);
+			Ok(LinkedPrefabOverrideReviewDto {
+				target: target.clone(),
+				address: address.clone(),
+				base,
+				local,
+				incoming,
+				conflict,
+			})
+		})
+		.collect::<Result<_, String>>()?;
+	Ok(PreparedLinkedSourceUpdate {
+		link,
+		members,
+		prior_members: old.entity_map.values().cloned().collect(),
+		reviews,
+	})
 }

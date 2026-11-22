@@ -8,12 +8,17 @@ import {
 	signal,
 	untracked,
 } from '@angular/core';
-import type { SceneEntity } from '../../../../core/editor/editor.models';
+import type { EntityKey, SceneEntity } from '../../../../core/editor/editor.models';
 import type {
+	LinkedPrefabConflictChoice,
+	LinkedPrefabOverride,
+	LinkedPrefabOverrideResolution,
+	LinkedPrefabOverrideReview,
 	LinkedPrefabOverrideTarget,
 	LinkedPrefabStatus,
 	LinkedPrefabValue,
 	PrefabSourceDraft,
+	PropAddress,
 } from '../../../../core/editor/linked-prefabs.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { EditorDialog } from '../../../../shared/components/dialog/dialog';
@@ -23,6 +28,21 @@ import { ReferenceBindings } from './reference-bindings';
 import { readPrefabSource } from './prefab-source-values';
 import { PropAssetSelection } from './prop-asset-selection';
 import { PropWorkspaceService } from '../prop-workspace/prop-workspace.service';
+
+interface OverrideReview {
+	readonly draftId: string;
+	readonly revision: number;
+	readonly bindings: Readonly<Record<string, EntityKey>>;
+	readonly rows: readonly LinkedPrefabOverrideReview[];
+}
+
+interface OverrideApply {
+	readonly root: EntityKey;
+	readonly assetId: string;
+	readonly path: string;
+	readonly revision: number;
+	readonly change: LinkedPrefabOverride;
+}
 
 @Component({
 	selector: 'editor-linked-prefab-inspector',
@@ -43,7 +63,22 @@ export class LinkedPrefabInspector {
 	protected readonly source = signal<PrefabSourceDraft | null>(null);
 	protected readonly updateSource = signal<PrefabSourceDraft | null>(null);
 	protected readonly updateOpen = signal(false);
-	protected readonly resolution = signal<'reject' | 'keep_local' | 'use_source'>('reject');
+	protected readonly applyOpen = signal(false);
+	protected readonly applyRequest = signal<OverrideApply | null>(null);
+	protected readonly savedMessage = signal<string | null>(null);
+	private readonly review = signal<OverrideReview | null>(null);
+	protected readonly choices = signal<ReadonlyMap<string, LinkedPrefabConflictChoice>>(new Map());
+	protected readonly reviewRows = computed(() => {
+		const review = this.review();
+		return review && review.draftId === this.updateSource()?.draft_id
+			&& review.revision === this.editor.snapshot()?.revision && review.bindings === this.bindings()
+			? review.rows : null;
+	});
+	protected readonly updateReady = computed(() => {
+		const rows = this.reviewRows();
+		return this.available() && this.validBindings() && rows !== null
+			&& rows.every(row => !row.conflict || this.choices().has(this.overrideKey(row)));
+	});
 	protected readonly bindings = signal<Readonly<Record<string, string>>>({});
 	protected readonly names = computed(() =>
 		Object.keys(this.updateSource()?.prefab.reference_slots ?? {}),
@@ -101,6 +136,8 @@ export class LinkedPrefabInspector {
 					this.observedContext = context;
 					this.closeSource();
 					this.closeUpdate();
+					this.closeApply();
+					this.savedMessage.set(null);
 					this.status.set(null);
 					this.error.set(null);
 					this.request++;
@@ -117,6 +154,7 @@ export class LinkedPrefabInspector {
 			this.request++;
 			this.closeSource();
 			this.closeUpdate();
+			this.closeApply();
 		});
 	}
 
@@ -154,66 +192,153 @@ export class LinkedPrefabInspector {
 
 	protected async openSource(update: boolean): Promise<void> {
 		const status = this.status();
-		if (!status || !this.available()) return;
+		if (!status || status.source_error) return;
 		await this.run(async (generation, revision, current) => {
-			const draft = await this.editor.openPrefabSource(status.source_path, generation, revision);
-			if (!current()) {
-				void this.editor.closePrefabSource(draft.draft_id).catch(() => undefined);
-				return;
-			}
-			try {
-				readPrefabSource(draft.prefab);
-			} catch (error) {
-				void this.editor.closePrefabSource(draft.draft_id).catch(() => undefined);
-				throw error;
-			}
+			const draft = await this.openReviewedSource(status.source_path, status.source_id, generation, revision, current);
+			if (!draft) return;
 			if (update) {
 				this.updateSource.set(draft);
-				this.bindings.set(
-					Object.fromEntries(
-						Object.keys(draft.prefab.reference_slots).map((name) => [
-							name,
-							Object.hasOwn(status.bindings, name) ? status.bindings[name] : '',
-						]),
-					),
-				);
-				this.resolution.set('reject');
+				this.setBindings(this.bindingsFor(draft, status.bindings));
 				this.updateOpen.set(true);
-			} else this.source.set(draft);
+				if (this.validBindings()) await this.loadReview(status.root_key, draft, generation, revision, current);
+			} else {
+				this.source.set(draft);
+			}
 		});
 	}
 
 	protected closeSource(): void {
 		const source = this.source();
 		this.source.set(null);
-		if (source) void this.editor.closePrefabSource(source.draft_id).catch(() => undefined);
+		if (source) this.releaseDraft(source.draft_id);
 	}
+
 	protected closeUpdate(): void {
 		const source = this.updateSource();
 		this.updateSource.set(null);
 		this.updateOpen.set(false);
-		if (source) void this.editor.closePrefabSource(source.draft_id).catch(() => undefined);
+		this.review.set(null);
+		this.choices.set(new Map());
+		if (source) this.releaseDraft(source.draft_id);
 	}
-	protected chooseResolution(value: string): void {
-		if (value === 'reject' || value === 'keep_local' || value === 'use_source')
-			this.resolution.set(value);
+
+	protected setBindings(bindings: Readonly<Record<string, EntityKey>>): void {
+		this.bindings.set(bindings);
+		this.review.set(null);
+		this.choices.set(new Map());
+	}
+
+	protected chooseResolution(row: LinkedPrefabOverrideReview, value: string): void {
+		this.choices.update(prior => {
+			const next = new Map(prior);
+			const key = this.overrideKey(row);
+			if (value === 'use_source' || (value === 'keep_local' && row.incoming !== null)) next.set(key, value);
+			else next.delete(key);
+			return next;
+		});
+	}
+
+	protected async reviewChanges(): Promise<void> {
+		const status = this.status(), previous = this.updateSource();
+		if (!status || status.source_error || !previous || !this.validBindings()) return;
+		await this.run(async (generation, revision, current) => {
+			this.review.set(null);
+			this.choices.set(new Map());
+			const draft = await this.openReviewedSource(status.source_path, status.source_id, generation, revision, current);
+			if (!draft) return;
+			this.updateSource.set(draft);
+			if (previous.draft_id !== draft.draft_id) this.releaseDraft(previous.draft_id);
+			this.setBindings(this.bindingsFor(draft, this.bindings()));
+			if (this.validBindings()) await this.loadReview(status.root_key, draft, generation, revision, current);
+		});
 	}
 
 	protected async update(): Promise<void> {
-		const source = this.updateSource(),
-			status = this.status();
-		if (!source || !status || !this.validBindings()) return;
-		await this.run(async (generation, _revision, current) => {
-			await this.editor.updateLinkedPrefab(
-				status.root_key,
-				source.draft_id,
-				this.resolution(),
-				this.bindings(),
-				generation,
-				source.revision,
+		const status = this.status(), review = this.review(), rows = this.reviewRows();
+		if (!status || !review || !rows || !this.updateReady()) return;
+		const resolutions: LinkedPrefabOverrideResolution[] = [];
+		for (const row of rows) {
+			const resolution = this.choices().get(this.overrideKey(row));
+			if (row.conflict && resolution) resolutions.push({ address: row.address, property: row.target.property, resolution });
+		}
+		await this.run(async (generation, revision, current) => {
+			if (revision !== review.revision) throw new Error('The scene changed. Review the linked Prop again.');
+			await this.editor.updateLinkedPropReviewed(
+				status.root_key, review.draftId, review.bindings, resolutions, generation, revision,
 			);
 			if (current()) this.closeUpdate();
 		});
+	}
+
+	protected confirmApply(change: LinkedPrefabOverride): void {
+		const status = this.status(), revision = this.editor.snapshot()?.revision;
+		if (!status || status.source_error || revision === undefined || !change.can_apply_to_root_source || !this.available()) return;
+		this.applyRequest.set({ root: status.root_key, assetId: status.source_id, path: status.source_path, revision, change });
+		this.applyOpen.set(true);
+	}
+
+	protected closeApply(): void {
+		this.applyOpen.set(false);
+		this.applyRequest.set(null);
+	}
+
+	protected async apply(): Promise<void> {
+		const request = this.applyRequest();
+		if (!request) return;
+		await this.run(async (generation, revision, current) => {
+			if (request.revision !== revision) throw new Error('The scene changed. Select the override and review it again.');
+			const draft = await this.openReviewedSource(request.path, request.assetId, generation, revision, current);
+			if (!draft) return;
+			try {
+				const result = await this.editor.applyLinkedPropOverride(
+					request.root, draft.draft_id, request.change.address, request.change.target.property, generation, revision,
+				);
+				if (!current()) return;
+				this.closeApply();
+				this.savedMessage.set(`Saved to ${result.draft.path}. Review Source Update to update this instance.`);
+				await this.editor.assets(true);
+			} finally {
+				this.releaseDraft(draft.draft_id);
+			}
+		});
+	}
+
+	private async openReviewedSource(
+		path: string, assetId: string, generation: number, revision: number, current: () => boolean,
+	): Promise<PrefabSourceDraft | null> {
+		const draft = await this.editor.openPrefabSource(path, generation, revision);
+		if (!current()) {
+			this.releaseDraft(draft.draft_id);
+			return null;
+		}
+		try {
+			if (draft.asset_id !== assetId) throw new Error('The Prop asset changed. Select its source again.');
+			readPrefabSource(draft.prefab);
+			return draft;
+		} catch (error) {
+			this.releaseDraft(draft.draft_id);
+			throw error;
+		}
+	}
+
+	private releaseDraft(draftId: string): void {
+		void this.editor.closePrefabSource(draftId).catch(() => undefined);
+	}
+
+	private bindingsFor(draft: PrefabSourceDraft, bindings: Readonly<Record<string, EntityKey>>): Readonly<Record<string, EntityKey>> {
+		return Object.fromEntries(
+			Object.keys(draft.prefab.reference_slots).map(name => [name, Object.hasOwn(bindings, name) ? bindings[name] : '']),
+		);
+	}
+
+	private async loadReview(
+		root: EntityKey, draft: PrefabSourceDraft, generation: number, revision: number, current: () => boolean,
+	): Promise<void> {
+		const bindings = this.bindings();
+		const rows = await this.editor.reviewLinkedPropOverrides(root, draft.draft_id, bindings, generation, revision);
+		if (current() && this.updateSource()?.draft_id === draft.draft_id) {
+			this.review.set({ draftId: draft.draft_id, revision, bindings, rows });
+		}
 	}
 
 	protected async revert(property: LinkedPrefabOverrideTarget | null): Promise<void> {
@@ -237,6 +362,28 @@ export class LinkedPrefabInspector {
 				revision,
 			);
 		});
+	}
+
+	protected overrideKey(row: Pick<LinkedPrefabOverride, 'address' | 'target'>): string {
+		return JSON.stringify([row.address, row.target.property]);
+	}
+
+	protected addressLabel(address: PropAddress): string {
+		const root = this.entities().find(entity => entity.key === this.status()?.root_key);
+		const prefab = root?.linked_prefab?.source.prefab;
+		const composition = prefab?.composition;
+		let placements = composition?.placements;
+		const labels = address.placement_path.map(id => {
+			const placement = placements?.find(entry => entry.id === id);
+			placements = placement && composition?.pins.find(pin => pin.version.asset_id === placement.target.asset_id
+				&& pin.version.fingerprint === placement.target.fingerprint)?.placements;
+			return placement?.name ?? `Placement ${id}`;
+		});
+		if (address.kind === 'object') {
+			const object = address.placement_path.length === 0 ? prefab?.entities.find(entity => entity.key === address.source_entity) : null;
+			labels.push(object?.name ?? `Source object ${address.source_entity}`);
+		}
+		return labels.join(' › ');
 	}
 
 	protected property(target: LinkedPrefabOverrideTarget): string {

@@ -2,15 +2,19 @@ mod support;
 
 use engine_core::{
 	EntityKey, asset_catalog,
-	command::{EditorCommandDto, EditorCommandRequest},
+	command::{
+		EditorCommandDto, EditorCommandRequest, TransformDto, TransformEditDto, TransformSpace,
+	},
 	editor::{EditorSession, PrefabData},
 	scene_data,
 };
 use std::collections::BTreeMap;
 
 use engine_core::linked_prefab::{
-	LinkedPrefabSource, MAX_NESTED_PLACEMENTS, MAX_PROP_NESTING, NestedBinding, NestedPlacement,
-	PinnedAssetVersion, PinnedPropSource, PlacementId, PropAddress, PropComposition, resolve_scene,
+	LinkedPrefabOverrideResolution, LinkedPrefabProperty, LinkedPrefabSource, LinkedPrefabValue,
+	MAX_NESTED_PLACEMENTS, MAX_PROP_NESTING, NestedBinding, NestedPlacement, PinnedAssetVersion,
+	PinnedPropSource, PlacementId, PrefabConflictResolution, PropAddress, PropComposition,
+	override_status, resolve_scene, review_source_overrides,
 };
 use support::{entity, key, scene};
 
@@ -345,23 +349,23 @@ fn saved_nested_sources_link_and_reopen_with_distinct_scene_member_keys() {
 	assert_eq!(grates, vec![5.0, 7.0, 21.0, 23.0]);
 }
 
+fn source(name: &str, fingerprint: &str) -> LinkedPrefabSource {
+	LinkedPrefabSource {
+		source_id: asset_catalog::AssetId::generate(),
+		path: format!("prefabs/{name}.json"),
+		fingerprint: fingerprint.repeat(64),
+		prefab: PrefabData {
+			schema_version: 3,
+			entities: vec![entity(name, [0.0; 3])],
+			gameplay: None,
+			reference_slots: BTreeMap::new(),
+			composition: PropComposition::default(),
+		},
+	}
+}
+
 #[test]
 fn refreshing_one_placement_only_releases_pins_unreachable_from_any_placement() {
-	fn source(name: &str, fingerprint: &str) -> LinkedPrefabSource {
-		LinkedPrefabSource {
-			source_id: asset_catalog::AssetId::generate(),
-			path: format!("prefabs/{name}.json"),
-			fingerprint: fingerprint.repeat(64),
-			prefab: PrefabData {
-				schema_version: 3,
-				entities: vec![entity(name, [0.0; 3])],
-				gameplay: None,
-				reference_slots: BTreeMap::new(),
-				composition: PropComposition::default(),
-			},
-		}
-	}
-
 	let floor = source("floor", "1");
 	let bolt = source("bolt", "2");
 	let original_grate = source("grate", "3");
@@ -443,4 +447,256 @@ fn refreshing_one_placement_only_releases_pins_unreachable_from_any_placement() 
 			.contains("same nested Prop asset identity")
 	);
 	assert_eq!(first_refresh.to_json().unwrap(), before);
+}
+
+#[test]
+fn direct_placement_apply_stages_one_draft_and_rejects_wrong_owners_or_stale_bases() {
+	let floor = source("floor", "1");
+	let grate = source("grate", "2");
+	let child = PinnedAssetVersion {
+		asset_id: grate.source_id.clone(),
+		fingerprint: grate.fingerprint.clone(),
+	};
+	let left = placement("left", &child, "floor", 1.0);
+	let right = placement("right", &child, "floor", 2.0);
+	let saved = floor
+		.prefab
+		.with_nested_placement(&floor.source_id, &grate, left.clone())
+		.unwrap()
+		.with_nested_placement(&floor.source_id, &grate, right.clone())
+		.unwrap();
+	let placement = PropAddress::Placement {
+		placement_path: vec![left.id.clone()],
+	};
+	let before = LinkedPrefabValue::Vector(left.local.position);
+	let edited = LinkedPrefabValue::Vector([4.0, 0.0, 0.0]);
+	let staged = saved
+		.with_applied_prop_override(
+			&floor.source_id,
+			&placement,
+			&LinkedPrefabProperty::TransformPosition,
+			&before,
+			edited.clone(),
+		)
+		.unwrap();
+	assert_eq!(
+		staged.composition.placements[0].local.position,
+		[4.0, 0.0, 0.0]
+	);
+	assert_eq!(staged.composition.placements[1], right);
+	assert_eq!(staged.composition.pins, saved.composition.pins);
+	assert_eq!(saved.composition.placements[0], left);
+	assert!(
+		staged
+			.with_applied_prop_override(
+				&floor.source_id,
+				&placement,
+				&LinkedPrefabProperty::TransformPosition,
+				&before,
+				edited,
+			)
+			.unwrap_err()
+			.contains("changed this property")
+	);
+
+	let child_object = PropAddress::Object {
+		placement_path: vec![left.id.clone()],
+		source_entity: key("grate"),
+	};
+	assert!(
+		saved
+			.with_applied_prop_override(
+				&floor.source_id,
+				&child_object,
+				&LinkedPrefabProperty::Name,
+				&LinkedPrefabValue::Name("grate".into()),
+				LinkedPrefabValue::Name("Second grate".into()),
+			)
+			.unwrap_err()
+			.contains("does not own")
+	);
+	let root_object = PropAddress::Object {
+		placement_path: vec![],
+		source_entity: key("floor"),
+	};
+	let staged = staged
+		.with_applied_prop_override(
+			&floor.source_id,
+			&root_object,
+			&LinkedPrefabProperty::Name,
+			&LinkedPrefabValue::Name("floor".into()),
+			LinkedPrefabValue::Name("New floor".into()),
+		)
+		.unwrap();
+	assert_eq!(staged.entities[0].name, "New floor");
+}
+
+#[test]
+fn typed_nested_overrides_revert_and_resolve_conflicts_independently() {
+	fn execute(session: &mut EditorSession, command: EditorCommandDto) -> Result<(), String> {
+		session
+			.execute_command(EditorCommandRequest {
+				expected_revision: session.revision(),
+				command,
+			})
+			.map(|_| ())
+	}
+
+	let mut floor = source("floor", "1");
+	let grate = source("grate", "2");
+	let target = PinnedAssetVersion {
+		asset_id: grate.source_id.clone(),
+		fingerprint: grate.fingerprint.clone(),
+	};
+	let left = placement("left", &target, "floor", 1.0);
+	let right = placement("right", &target, "floor", 2.0);
+	floor.prefab = floor
+		.prefab
+		.with_nested_placement(&floor.source_id, &grate, left.clone())
+		.unwrap()
+		.with_nested_placement(&floor.source_id, &grate, right.clone())
+		.unwrap();
+	let left_address = PropAddress::Placement {
+		placement_path: vec![left.id],
+	};
+	let right_address = PropAddress::Placement {
+		placement_path: vec![right.id],
+	};
+	let mut session = EditorSession::new(scene(Vec::new())).unwrap();
+	execute(
+		&mut session,
+		EditorCommandDto::InstantiateLinkedPrefab {
+			source: floor.clone(),
+			position: [0.0; 3],
+			bindings: BTreeMap::new(),
+		},
+	)
+	.unwrap();
+	let original = session.authored_document();
+	let anchor = original
+		.entities
+		.iter()
+		.find(|entity| entity.linked_prefab.is_some())
+		.unwrap();
+	let root = anchor.key.clone();
+	let map = &anchor.linked_prefab.as_ref().unwrap().entity_map;
+	let left_object = map[&left_address.materialized_key().unwrap()].clone();
+	let right_object = map[&right_address.materialized_key().unwrap()].clone();
+	execute(
+		&mut session,
+		EditorCommandDto::SetTransforms {
+			edits: [(left_object.clone(), 7.0), (right_object.clone(), 9.0)]
+				.into_iter()
+				.map(|(key, x)| TransformEditDto {
+					key: key.as_str().into(),
+					transform: TransformDto {
+						position: [x, 0.0, 0.0],
+						..Default::default()
+					},
+				})
+				.collect(),
+			space: TransformSpace::Local,
+			snap: false,
+		},
+	)
+	.unwrap();
+	let local = session.authored_document();
+	let rows = override_status(&local, &root).unwrap();
+	assert_eq!(rows.len(), 2);
+	assert!(rows.iter().all(|row| row.can_apply_to_root_source));
+	let left_row = rows.iter().find(|row| row.address == left_address).unwrap();
+	execute(
+		&mut session,
+		EditorCommandDto::RevertLinkedPrefab {
+			root_key: root.as_str().into(),
+			property: Some(left_row.target.clone()),
+		},
+	)
+	.unwrap();
+	let after_revert = override_status(&session.authored_document(), &root).unwrap();
+	assert_eq!(after_revert.len(), 1);
+	assert_eq!(after_revert[0].address, right_address);
+	execute(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), local);
+
+	let mut incoming = floor.clone();
+	incoming.fingerprint = "3".repeat(64);
+	incoming.prefab.composition.placements[0].name = "Grate at entrance".into();
+	incoming.prefab.composition.placements[0].local.position[0] = 11.0;
+	incoming.prefab.composition.placements[1].local.position[0] = 13.0;
+	incoming.prefab.composition.placements.reverse();
+	let reviewed = review_source_overrides(&local, &root, &incoming, None).unwrap();
+	assert_eq!(reviewed.len(), 2);
+	assert!(reviewed.iter().all(|row| row.conflict));
+	let choices = vec![
+		LinkedPrefabOverrideResolution {
+			address: left_address.clone(),
+			property: LinkedPrefabProperty::TransformPosition,
+			resolution: PrefabConflictResolution::KeepLocal,
+		},
+		LinkedPrefabOverrideResolution {
+			address: right_address.clone(),
+			property: LinkedPrefabProperty::TransformPosition,
+			resolution: PrefabConflictResolution::UseSource,
+		},
+	];
+	let update = |resolutions| EditorCommandDto::UpdateLinkedPrefabReviewed {
+		root_key: root.as_str().into(),
+		source: incoming.clone(),
+		bindings: None,
+		resolutions,
+	};
+	let mut removed = incoming.clone();
+	removed
+		.prefab
+		.composition
+		.placements
+		.retain(|entry| entry.id.as_str() != "left");
+	let removed_reviews = review_source_overrides(&local, &root, &removed, None).unwrap();
+	let unresolved = removed_reviews
+		.iter()
+		.find(|row| row.address == left_address)
+		.unwrap();
+	assert!(unresolved.conflict);
+	assert_eq!(unresolved.incoming, None);
+	assert!(
+		execute(
+			&mut session,
+			EditorCommandDto::UpdateLinkedPrefabReviewed {
+				root_key: root.as_str().into(),
+				source: removed,
+				bindings: None,
+				resolutions: choices.clone(),
+			}
+		)
+		.unwrap_err()
+		.contains("Source removed overridden entity")
+	);
+	assert_eq!(session.authored_document(), local);
+	let revision = session.revision();
+	assert!(
+		execute(&mut session, update(vec![choices[0].clone()]))
+			.unwrap_err()
+			.contains("conflicts")
+	);
+	assert_eq!(session.authored_document(), local);
+	assert_eq!(session.revision(), revision);
+	execute(&mut session, update(choices)).unwrap();
+	let applied = session.authored_document();
+	let x = |key: &EntityKey| {
+		applied
+			.entities
+			.iter()
+			.find(|entity| &entity.key == key)
+			.unwrap()
+			.transform
+			.position[0]
+	};
+	assert_eq!(x(&left_object), 7.0);
+	assert_eq!(x(&right_object), 13.0);
+	let remaining = override_status(&applied, &root).unwrap();
+	assert_eq!(remaining.len(), 1);
+	assert_eq!(remaining[0].address, left_address);
+	execute(&mut session, EditorCommandDto::Undo).unwrap();
+	assert_eq!(session.authored_document(), local);
 }

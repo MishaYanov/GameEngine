@@ -212,6 +212,13 @@ pub enum EditorCommandDto {
 		#[serde(default)]
 		bindings: Option<BTreeMap<String, crate::EntityKey>>,
 	},
+	UpdateLinkedPrefabReviewed {
+		root_key: String,
+		source: crate::linked_prefab::LinkedPrefabSource,
+		#[serde(default)]
+		bindings: Option<BTreeMap<String, crate::EntityKey>>,
+		resolutions: Vec<crate::linked_prefab::LinkedPrefabOverrideResolution>,
+	},
 	RevertLinkedPrefab {
 		root_key: String,
 		property: Option<crate::linked_prefab::LinkedPrefabOverrideTarget>,

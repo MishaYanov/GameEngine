@@ -553,6 +553,12 @@ impl EditorSession {
 				resolution,
 				bindings,
 			} => self.update_linked_prefab(root_key, source, resolution, bindings)?,
+			Command::UpdateLinkedPrefabReviewed {
+				root_key,
+				source,
+				bindings,
+				resolutions,
+			} => self.update_linked_prefab_reviewed(root_key, source, bindings, resolutions)?,
 			Command::RevertLinkedPrefab { root_key, property } => {
 				self.revert_linked_prefab(root_key, property)?
 			}

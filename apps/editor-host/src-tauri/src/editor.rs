@@ -283,7 +283,9 @@ impl EditorWorkspace {
 				} if *workspace_generation != self.generation => {
 					return Err("Camera input belongs to a previous workspace".into());
 				}
-				Command::InstantiateLinkedPrefab { .. } | Command::UpdateLinkedPrefab { .. } => {
+				Command::InstantiateLinkedPrefab { .. }
+				| Command::UpdateLinkedPrefab { .. }
+				| Command::UpdateLinkedPrefabReviewed { .. } => {
 					return Err("Linked source changes require the guarded prefab command and a reviewed source draft".into());
 				}
 				Command::AddScene { asset_path, .. } => {

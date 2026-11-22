@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "instances/review.rs"]
+mod review;
+
 impl EditorWorkspace {
 	pub fn instantiate_linked_source(
 		&mut self,
@@ -88,24 +91,7 @@ impl EditorWorkspace {
 		bindings: Option<std::collections::BTreeMap<String, EntityKey>>,
 		revision: u64,
 	) -> Result<EditorSnapshotDto, String> {
-		self.prefab_edit_context(revision)?;
-		let root = self.linked_root(key)?.ok_or("Select a linked instance")?;
-		let scene = self.backend.session().authored_document();
-		let id = scene
-			.entities
-			.iter()
-			.find(|entity| entity.key == root)
-			.and_then(|entity| entity.linked_prefab.as_ref())
-			.expect("root resolved")
-			.source
-			.source_id
-			.clone();
-		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
-		let asset = catalog
-			.by_id(&id)
-			.ok_or("Linked source identity is unavailable")?;
-		let source = self.reviewed_prefab_source(draft_id, &asset.path, revision)?;
-		drop(scene);
+		let (root, source) = self.resolve_reviewed_instance_source(key, draft_id, revision)?;
 		self.backend
 			.execute(EditorCommandRequest {
 				expected_revision: revision,
