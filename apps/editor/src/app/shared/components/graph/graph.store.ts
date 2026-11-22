@@ -42,13 +42,15 @@ export const GraphStore = signalStore(
             return false;
         };
         return {
-            load(document: GraphDocument): boolean {
+            load(document: GraphDocument, preserveSelection = false): boolean {
                 const error = graphDocumentError(document);
                 if (error) return fail(error);
                 patchState(store, {
                     document: structuredClone(document),
-                    selected: null,
-                    selectedConnection: null,
+                    selected: preserveSelection && document.nodes.some(node => node.id === store.selected())
+                        ? store.selected() : null,
+                    selectedConnection: preserveSelection && document.connections.some(edge => edge.id === store.selectedConnection())
+                        ? store.selectedConnection() : null,
                     error: null,
                 });
                 return true;

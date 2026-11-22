@@ -8,6 +8,7 @@ import {SceneEditingService} from '../scene-editing.service';
 import {AnimatorAssetEditor} from './animator-asset-editor';
 import {animatorDescendants, type ActorGraph, reviewActorGraph} from './animator-actor-binding';
 import {AnimatorAssets} from './animator-assets.service';
+import {AnimatorWorkspaceService} from './animator-workspace.service';
 
 interface ReviewedAnimator {
     readonly document: AnimatorDocument;
@@ -22,6 +23,7 @@ interface ReviewedAnimator {
     styleUrl: './animator-inspector.scss',
 })
 export class AnimatorInspector {
+    protected readonly workspace = inject(AnimatorWorkspaceService, {optional: true});
     readonly actor = input.required<SceneEntity>();
     readonly editable = input(false);
     protected readonly library = inject(AnimatorAssets);

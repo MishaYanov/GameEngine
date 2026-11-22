@@ -16,6 +16,17 @@
             @if (!projectOpen()) {
                 <p>Open a project to browse its assets.</p>
             } @else {
+                @if (animatorAssets?.supported() && animatorAssets?.assets()?.length) {
+                    <details>
+                        <summary>Animators</summary>
+                        <ul aria-label="Animator assets">
+                            @for (asset of animatorAssets?.assets(); track asset.id) {
+                                <li><button type="button" (click)="animatorWorkspace?.open(asset.id)" [disabled]="!canRunAction()"
+                                    [attr.aria-label]="'Open Animator ' + asset.path">{{ asset.path }}</button></li>
+                            }
+                        </ul>
+                    </details>
+                }
                 <nav aria-label="Asset folders" class="folder-location">
                     <button (click)="upOneFolder(location)" [disabled]="!folder()" type="button">Up</button>
                     <span #location tabindex="-1">{{ folder() ? 'Assets / ' + folder() : 'Assets' }}</span>

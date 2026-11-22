@@ -416,8 +416,13 @@ export class EditorService {
         return this.workspaceAssetOperation('editor_move_input_actions', {destination, capture}, scope, readInputActionsAsset);
     }
 
-    listAnimators(scope: WorkspaceAssetScope): Promise<readonly AnimatorAsset[]> {
-        return this.workspaceAssetOperation('editor_list_animators', {}, scope, readAnimatorCatalog);
+    async listAnimators(scope: WorkspaceAssetScope): Promise<readonly AnimatorAsset[]> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const entries = await this.native<unknown>('editor_list_animators', {
+            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return readAnimatorCatalog(entries);
     }
 
     openAnimator(assetId: string, scope: WorkspaceAssetScope): Promise<AnimatorDocument> {

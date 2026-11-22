@@ -1,7 +1,7 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
         <workspace-toolbar (paletteRequested)="openPalette()"
-                           [sceneActionsVisible]="!workspaceView.propView()"
+                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animatorView()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
@@ -50,6 +50,7 @@
     <workspace-tabs #tabs (viewSelected)="workspaceView.selectView($event)"
                     [propAvailable]="!!propWorkspace.document() && !editorService.playing()"
                     [animationAvailable]="!!editorService.snapshot() && !editorService.playing()"
+                    [animatorAvailable]="!!editorService.snapshot() && animatorAssets.supported() && !editorService.playing()"
                     [activeViewKind]="workspaceView.activeViewKind()"/>
 
     <div class="workspace-main">
@@ -72,7 +73,7 @@
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
-            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !previewingCamera()) {
+            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !previewingCamera()) {
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
@@ -82,10 +83,10 @@
                     role="tabpanel"
                     tabindex="0"
             >
-                <editor-pane [icon]="workspaceView.animationView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' :
+                <editor-pane [icon]="workspaceView.animationView() || workspaceView.animatorView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
+                             [title]="workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' :
                                  previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
-                    @if (!workspaceView.propView() && !workspaceView.animationView() && sceneProgress(); as progress) {
+                    @if (!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
                             <progress
@@ -104,9 +105,9 @@
                               role="status">{{
                                 workspaceView.gameKeyboardCaptured() ? 'Game keyboard active · Esc releases' : 'Click Game to capture the keyboard'
                             }}</span>
-                    } @else if (!workspaceView.propView() && !workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
+                    } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
                         <span class="viewport-keyboard-hint" pane-actions role="status">WASD to move · Mouse to look · Esc exits</span>
-                    } @else if (!workspaceView.propView() && !workspaceView.gameView() && assetDrag.message(); as message) {
+                    } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.gameView() && assetDrag.message(); as message) {
                         <span [title]="message" class="viewport-keyboard-hint" pane-actions
                               role="status">{{ message }}</span>
                     }
@@ -123,6 +124,8 @@
                             <editor-prop-workspace (closed)="closePropWorkspace()"/>
                         } @else if (workspaceView.animationView()) {
                             <editor-animation-workspace/>
+                        } @else if (workspaceView.animatorView()) {
+                            <editor-animator-workspace/>
                         } @else if (!showingViewport()) {
                             <div class="empty-scene">
                                 <div class="empty-content">
@@ -160,7 +163,7 @@
         </section>
         @if (workspaceView.gameView() && editorService.playing()) {
             <editor-runtime-inspector [opening]="workspaceActionBlocked()"/>
-        } @else if (!workspaceView.propView()) {
+        } @else if (!workspaceView.propView() && !workspaceView.animatorView()) {
         <inspector-panel
                 data-editor-shortcut-scope="inspector"
                 [entity]="sceneEditing.entity()"
@@ -201,4 +204,16 @@
     }
     <button (click)="propWorkspace.chooseClose('save')" [disabled]="!propWorkspace.canResolveClose()" type="button">Save Prop and Continue</button>
     <button (click)="propWorkspace.chooseClose('discard')" [disabled]="!propWorkspace.canResolveClose()" type="button">Discard Prop Changes</button>
+</editor-dialog>
+
+<editor-dialog title="Unsaved Animator changes" [open]="animatorWorkspace.confirming()" [renderFields]="false"
+               (openChange)="!$event && animatorWorkspace.settleNavigation('cancel')"
+               [closeBlocked]="animatorWorkspace.pending()" closeLabel="Keep Editing">
+    <p>Save or discard the changes to {{ animatorWorkspace.document()?.asset?.path }} to continue.</p>
+    @if (animatorWorkspace.error(); as message) { <p role="alert">{{ message }}</p> }
+    @for (issue of animatorWorkspace.issues(); track issue.target) { <p>{{ issue.message }}</p> }
+    <button type="button" (click)="animatorWorkspace.settleNavigation('save')"
+            [disabled]="!animatorWorkspace.canSave()">Save Animator and Continue</button>
+    <button type="button" (click)="animatorWorkspace.settleNavigation('discard')"
+            [disabled]="animatorWorkspace.pending()">Discard Animator Changes</button>
 </editor-dialog>

@@ -13,6 +13,7 @@ import {
     input,
     linkedSignal,
     model,
+    output,
     signal,
     untracked,
     viewChild,
@@ -22,6 +23,7 @@ import {form, FormField} from '@angular/forms/signals';
 import {EditorIcon} from '../../icons/editor-icon';
 import {GraphNodeCard, GraphPortEvent, GraphPortPointer} from './graph-node';
 import {
+    connectionError,
     emptyGraph,
     GRAPH_NODES,
     graphDefinition,
@@ -52,11 +54,18 @@ interface GraphView {
 interface GraphGesture {
     readonly mode: 'pan' | 'node' | 'wire';
     readonly node?: string;
+    readonly originalPosition?: GraphPoint;
     readonly pointer: number;
     readonly target: HTMLElement;
     x: number;
     y: number;
 }
+
+export type GraphCanvasSelection = {readonly kind: 'node' | 'connection'; readonly id: string};
+export type GraphCanvasEdit =
+    | {readonly kind: 'move_node'; readonly id: string; readonly position: GraphPoint}
+    | {readonly kind: 'remove_node' | 'remove_connection'; readonly id: string}
+    | {readonly kind: 'connect'; readonly from: GraphEndpoint; readonly to: GraphEndpoint; readonly revision: number};
 
 let nextGraphId = 0;
 
@@ -82,6 +91,11 @@ export class EditorGraph {
     readonly graph = model<GraphDocument>(emptyGraph());
     readonly label = input('Node graph');
     readonly clipAssets = input<readonly AnimationClipAsset[]>([]);
+    readonly managed = input(false);
+    readonly managedRevision = input(0);
+    readonly managedSelection = input<GraphCanvasSelection | null>(null);
+    readonly selectedItem = output<GraphCanvasSelection>();
+    readonly canvasEdited = output<GraphCanvasEdit>();
     protected readonly inspectorConfig = signal<Config<DrawerSettings>>({
         width: 'var(--layout-inspector-width)',
         minWidth: '16rem',
@@ -200,23 +214,34 @@ export class EditorGraph {
     private latest: GraphPoint | undefined;
     private fitOnMeasure = true;
     private suppressPortClick = false;
+    private wireRevision = 0;
 
     constructor() {
         effect(() => {
             const source = this.graph();
             if (source !== untracked(this.store.document)) {
                 this.stop();
-                if (this.store.load(source)) {
+                const preserve = this.managed() && untracked(this.store.document).nodes.length > 0;
+                if (this.store.load(source, preserve)) {
                     this.machineOpen.set(false);
                     this.pending.set(null);
-                    this.fitOnMeasure = true;
+                    this.fitOnMeasure = !preserve;
                     this.loaded.update((revision) => revision + 1);
                 } else this.graph.set(untracked(this.store.document));
             }
         });
         effect(() => {
             const value = this.store.document();
-            if (value !== untracked(this.graph)) this.graph.set(value);
+            if (!this.managed() && value !== untracked(this.graph)) this.graph.set(value);
+        });
+        effect(() => {
+            if (!this.managed()) return;
+            const selection = this.managedSelection();
+            this.store.document();
+            untracked(() => {
+                if (selection?.kind === 'connection') this.store.selectConnection(selection.id);
+                else this.store.select(selection?.id ?? null);
+            });
         });
         afterRenderEffect((onCleanup) => {
             this.loaded();
@@ -257,7 +282,31 @@ export class EditorGraph {
     }
 
     protected activateWire(id: string): void {
-        if (this.store.document().kind === 'stateMachine') this.store.selectConnection(id);
+        if (this.store.document().kind === 'stateMachine') {
+            this.store.selectConnection(id);
+            if (this.managed()) this.selectedItem.emit({kind: 'connection', id});
+        } else this.store.disconnect(id);
+    }
+
+    protected selectNode(id: string): void {
+        this.store.select(id);
+        if (this.managed()) this.selectedItem.emit({kind: 'node', id});
+    }
+
+    private connect(from: GraphEndpoint, to: GraphEndpoint): boolean {
+        if (!this.managed()) return this.store.connect(from, to);
+        const error = connectionError(this.store.document(), from, to);
+        if (error) {
+            this.message.set(error);
+            return false;
+        }
+        this.canvasEdited.emit({kind: 'connect', from, to, revision: this.wireRevision});
+        return true;
+    }
+
+    private deleteItem(kind: 'remove_node' | 'remove_connection', id: string): void {
+        if (this.managed()) this.canvasEdited.emit({kind, id});
+        else if (kind === 'remove_node') this.store.remove(id);
         else this.store.disconnect(id);
     }
 
@@ -353,7 +402,7 @@ export class EditorGraph {
 
     protected startNode(event: PointerEvent, node: string): void {
         if (event.button === 0) {
-            this.store.select(node);
+            this.selectNode(node);
             this.start(event, 'node', node);
         }
     }
@@ -361,6 +410,7 @@ export class EditorGraph {
     protected startPort(port: GraphPortPointer): void {
         if (port.event.button !== 0) return;
         this.suppressPortClick = false;
+        this.wireRevision = this.managedRevision();
         this.pending.set(port.endpoint);
         this.store.clearError();
         this.updateCursor(port.event.clientX, port.event.clientY);
@@ -373,14 +423,15 @@ export class EditorGraph {
             return;
         }
         if (port.direction === 'output') {
+            this.wireRevision = this.managedRevision();
             this.pending.set(port.endpoint);
             const point = this.anchor(port.endpoint, 'output');
             if (point) this.cursor.set(point);
             this.message.set('Choose a matching input.');
         } else if (this.pending()) {
-            if (this.store.connect(this.pending()!, port.endpoint)) {
+            if (this.connect(this.pending()!, port.endpoint)) {
                 this.pending.set(null);
-                this.message.set('Connection added.');
+                this.message.set(this.managed() ? '' : 'Connection added.');
             }
         }
     }
@@ -407,13 +458,21 @@ export class EditorGraph {
                     ? port?.closest<HTMLElement>('[data-node]')?.dataset['node']
                     : undefined;
             const id = port?.dataset['portId'];
-            if (node && id && this.store.connect(this.pending()!, {node, port: id})) {
+            if (node && id && this.connect(this.pending()!, {node, port: id})) {
                 this.pending.set(null);
                 this.suppressPortClick = true;
-                this.message.set('Connection added.');
+                this.message.set(this.managed() ? '' : 'Connection added.');
             }
         }
         if (event.type !== 'pointerup' && this.gesture.mode === 'wire') this.pending.set(null);
+        if (this.managed() && this.gesture.mode === 'node' && this.gesture.node) {
+            const id = this.gesture.node;
+            const position = this.store.nodeById().get(id)?.position;
+            if (event.type === 'pointerup' && position && position !== this.gesture.originalPosition) {
+                this.restoreManagedPosition();
+                this.canvasEdited.emit({kind: 'move_node', id, position});
+            } else if (event.type !== 'pointerup') this.restoreManagedPosition();
+        }
         this.stop();
     }
 
@@ -423,13 +482,14 @@ export class EditorGraph {
             this.pending.set(null);
             this.store.clearError();
             this.message.set('');
+            this.restoreManagedPosition();
             this.stop();
             return;
         }
         const transition = this.store.selectedConnection();
         if (transition && (event.key === 'Delete' || event.key === 'Backspace')) {
             event.preventDefault();
-            this.store.disconnect(transition);
+            this.deleteItem('remove_connection', transition);
             return;
         }
         const selected =
@@ -437,7 +497,7 @@ export class EditorGraph {
             this.store.selected();
         if (selected && (event.key === 'Delete' || event.key === 'Backspace')) {
             event.preventDefault();
-            this.store.remove(selected);
+            this.deleteItem('remove_node', selected);
             this.stage()?.nativeElement.focus();
         }
         if (!(event.target as Element).closest('[data-node-handle]') || !selected) return;
@@ -447,8 +507,10 @@ export class EditorGraph {
         const dy = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
         if (node && (dx || dy)) {
             event.preventDefault();
-            this.store.select(node.id);
-            this.store.move(selected, {x: node.position.x + dx, y: node.position.y + dy});
+            this.selectNode(node.id);
+            const position = {x: node.position.x + dx, y: node.position.y + dy};
+            if (this.managed()) this.canvasEdited.emit({kind: 'move_node', id: node.id, position});
+            else this.store.move(selected, position);
         }
     }
 
@@ -462,7 +524,7 @@ export class EditorGraph {
             event.preventDefault();
             event.stopPropagation();
             if (event.key === 'Delete' || event.key === 'Backspace') {
-                this.store.disconnect(id);
+                this.deleteItem('remove_connection', id);
                 this.stage()?.nativeElement.focus();
             } else this.activateWire(id);
         }
@@ -471,7 +533,7 @@ export class EditorGraph {
     protected deleteSelected(): void {
         const selected = this.store.selected();
         if (selected) {
-            this.store.remove(selected);
+            this.deleteItem('remove_node', selected);
             this.stage()?.nativeElement.focus();
         }
     }
@@ -532,6 +594,7 @@ export class EditorGraph {
         this.gesture = {
             mode,
             node,
+            originalPosition: node ? this.store.nodeById().get(node)?.position : undefined,
             pointer: event.pointerId,
             target,
             x: event.clientX,
@@ -574,6 +637,13 @@ export class EditorGraph {
                 x: (x - rect.left - view.x) / view.zoom,
                 y: (y - rect.top - view.y) / view.zoom,
             });
+    }
+
+    private restoreManagedPosition(): void {
+        const gesture = this.gesture;
+        if (this.managed() && gesture?.node && gesture.originalPosition) {
+            this.store.move(gesture.node, gesture.originalPosition);
+        }
     }
 
     private stop(): void {

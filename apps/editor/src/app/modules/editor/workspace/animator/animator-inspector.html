@@ -15,6 +15,10 @@
         </label>
         <button type="button" (click)="library.refresh()" [disabled]="!available() || library.pending()">Refresh Animators</button>
         <button type="button" (click)="review(selected())" [disabled]="!available() || !selected()">Review Asset</button>
+        @if (workspace; as animator) {
+            <button type="button" [disabled]="!available() || !selected() || animator.pending()"
+                    (click)="animator.open(selected())">Open Animator</button>
+        }
     </div>
     @if (library.error(); as failure) {
         <p role="alert" class="error">{{ failure }}</p>

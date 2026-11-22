@@ -1,0 +1,185 @@
+<section class="animator" aria-label="Animator">
+    @if (workspace.error(); as error) {
+        <p class="failure" role="alert">{{ error }}</p>
+    }
+    @if (workspace.document(); as document) {
+        @if (workspace.graph(); as graph) {
+            <header class="actions">
+                <strong [title]="document.asset.path">{{ document.asset.path }}</strong>
+                @if (workspace.dirty()) { <span role="status">Unsaved changes</span> }
+                <button type="button" (click)="workspace.undo()" [disabled]="!workspace.canUndo()">Undo</button>
+                <button type="button" (click)="workspace.redo()" [disabled]="!workspace.canRedo()">Redo</button>
+                <button type="button" (click)="workspace.save()" [disabled]="!workspace.canSave()">Save Animator</button>
+                <button type="button" (click)="workspace.close()" [disabled]="workspace.pending()">Close Animator</button>
+            </header>
+            <div class="editor">
+                @if (canvas(); as graphCanvas) {
+                    <editor-graph
+                        [managed]="true" [managedSelection]="selection()" [managedRevision]="workspace.revision()"
+                        [graph]="graphCanvas" label="Animator state graph"
+                        (selectedItem)="selection.set($event)" (canvasEdited)="canvasEdit($event)"/>
+                }
+                <div class="outline">
+                    <fieldset [disabled]="workspace.pending()" class="outline-group">
+                        <legend>States</legend>
+                        <div class="field-row">
+                            <label>New state name <input #stateNameInput maxlength="96" (keydown.enter)="addState(graph, stateNameInput.value)"></label>
+                            <button type="button" (click)="addState(graph, stateNameInput.value)" [disabled]="graph.states.length >= 64">Add State</button>
+                        </div>
+                        <ul aria-label="Animator states">
+                            @for (state of graph.states; track state.id) {
+                                <li>
+                                    <button type="button" [attr.data-state-id]="state.id"
+                                        [attr.aria-pressed]="selectedState()?.id === state.id"
+                                        (click)="selection.set({kind: 'node', id: state.id})">
+                                        {{ state.name }}{{ state.id === graph.entry ? ' · Entry' : '' }}
+                                    </button>
+                                    @if (issueByState().get(state.id); as issue) {
+                                        <span class="failure" role="status">{{ issue }}</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                        @if (selectedState(); as state) {
+                            <div class="fields" aria-label="Selected state">
+                                <label>State name
+                                    <input #editStateName [value]="state.name" maxlength="96"
+                                        (change)="updateState(state, {name: editStateName.value.trim()})">
+                                </label>
+                                <label>Clip
+                                    <select #selectedClip [value]="clipKey(state.clip)" (change)="chooseClip(state, selectedClip.value)">
+                                        @for (choice of clipChoices(); track clipKey(choice.clip)) {
+                                            <option [value]="clipKey(choice.clip)">{{ choice.label }}</option>
+                                        }
+                                    </select>
+                                </label>
+                                <button type="button" [disabled]="reviewingClips()" (click)="reviewClips(state)">Load Clips</button>
+                                <label><input #looping type="checkbox" [checked]="state.looping"
+                                    (change)="updateState(state, {looping: looping.checked})"> Loop clip</label>
+                                <button type="button" [disabled]="state.id === graph.entry"
+                                    (click)="workspace.edit({kind: 'set_entry', id: state.id})">Set as Entry</button>
+                                <button type="button" [disabled]="graph.states.length === 1" (click)="remove('state', state.id)">Remove State</button>
+                            </div>
+                        }
+                    </fieldset>
+                    <fieldset [disabled]="workspace.pending()" class="outline-group">
+                        <legend>Transitions</legend>
+                        <div class="fields" aria-label="Add transition">
+                            <label>From
+                                <select #from [value]="graph.entry">
+                                    @for (state of graph.states; track state.id) { <option [value]="state.id">{{ state.name }}</option> }
+                                </select>
+                            </label>
+                            <label>To
+                                <select #to>
+                                    @for (state of graph.states; track state.id) { <option [value]="state.id">{{ state.name }}</option> }
+                                </select>
+                            </label>
+                            <button type="button" [disabled]="graph.transitions.length >= 256" (click)="connect(from.value, to.value)">Add Transition</button>
+                        </div>
+                        <ol aria-label="Transition order">
+                            @for (edge of graph.transitions; track edge.id) {
+                                <li>
+                                    <button type="button" [attr.data-transition-id]="edge.id"
+                                        [attr.aria-pressed]="selectedEdge()?.id === edge.id"
+                                        (click)="selection.set({kind: 'connection', id: edge.id})">
+                                        {{ stateName(graph, edge.from) }} → {{ stateName(graph, edge.to) }}
+                                    </button>
+                                </li>
+                            }
+                        </ol>
+                        @if (selectedEdge(); as edge) {
+                            <div class="fields" aria-label="Selected transition">
+                                <label>Source state
+                                    <select #sourceState [value]="edge.from" (change)="updateEdge(edge, {from: sourceState.value})">
+                                        @for (state of graph.states; track state.id) { <option [value]="state.id">{{ state.name }}</option> }
+                                    </select>
+                                </label>
+                                <label>Destination state
+                                    <select #destinationState [value]="edge.to" (change)="updateEdge(edge, {to: destinationState.value})">
+                                        @for (state of graph.states; track state.id) { <option [value]="state.id">{{ state.name }}</option> }
+                                    </select>
+                                </label>
+                                <label>Condition
+                                    <select #condition [value]="edge.condition.kind === 'always' ? '' : edge.condition.parameter"
+                                        (change)="chooseCondition(graph, edge, condition.value)">
+                                        <option value="">Always</option>
+                                        @for (parameter of graph.parameters; track parameter.id) {
+                                            <option [value]="parameter.id">{{ parameter.name }} · {{ parameterSource(parameter.source.kind) }}</option>
+                                        }
+                                    </select>
+                                </label>
+                                @if (edge.condition.kind === 'bool') {
+                                    <label><input #conditionValue type="checkbox" [checked]="edge.condition.value"
+                                        (change)="updateEdge(edge, {condition: {kind: 'bool', parameter: edge.condition.parameter, value: conditionValue.checked}})"> Expected true</label>
+                                }
+                                <label>Exit after ticks
+                                    <input #exitTicks type="number" min="0" max="1000000" step="1"
+                                        [value]="edge.exit_after_ticks ?? ''"
+                                        (change)="updateEdge(edge, {exit_after_ticks: exitTicks.value ? exitTicks.valueAsNumber : undefined})">
+                                </label>
+                                <label>Blend ticks
+                                    <input #blendTicks type="number" min="0" max="3600" step="1" [value]="edge.blend_ticks"
+                                        (change)="updateEdge(edge, {blend_ticks: blendTicks.valueAsNumber})">
+                                </label>
+                                <button type="button" [disabled]="graph.transitions[0].id === edge.id"
+                                    (click)="workspace.edit({kind: 'move_transition', id: edge.id, delta: -1})">Move Transition Earlier</button>
+                                <button type="button" [disabled]="graph.transitions[graph.transitions.length - 1].id === edge.id"
+                                    (click)="workspace.edit({kind: 'move_transition', id: edge.id, delta: 1})">Move Transition Later</button>
+                                <button type="button" (click)="remove('transition', edge.id)">Remove Transition</button>
+                            </div>
+                        }
+                    </fieldset>
+                    <fieldset [disabled]="workspace.pending()" class="outline-group">
+                        <legend>Parameters</legend>
+                        <div class="fields">
+                            <label>Parameter name <input #parameterName maxlength="96"></label>
+                            <label>Source
+                                <select #sourceKind [value]="parameterKind()" (change)="chooseParameterKind(sourceKind.value)">
+                                    <option value="boolean">Boolean</option>
+                                    <option value="grounded">Grounded</option>
+                                    <option value="moving">Moving</option>
+                                    <option value="jumped">Jumped</option>
+                                    <option value="action_accepted">Action Accepted</option>
+                                </select>
+                            </label>
+                            <label [hidden]="parameterKind() !== 'moving'">Minimum speed (mm/s)
+                                <input #threshold type="number" min="1" max="10000" step="1" value="100">
+                            </label>
+                            <label [hidden]="parameterKind() !== 'action_accepted'">Action ID <input #actionId maxlength="64"></label>
+                            <label [hidden]="parameterKind() !== 'boolean'"><input #parameterDefault type="checkbox"> Starts true</label>
+                            <button type="button" [disabled]="graph.parameters.length >= 64"
+                                (click)="addParameter(parameterName.value, parameterKind() === 'moving' ? threshold.value : actionId.value, parameterDefault.checked)">Add Parameter</button>
+                        </div>
+                        <ul aria-label="Animator parameters">
+                            @for (parameter of graph.parameters; track parameter.id) {
+                                <li>
+                                    {{ parameter.name }} · {{ parameterSource(parameter.source.kind) }}
+                                    <button type="button" [attr.aria-label]="'Remove ' + parameter.name"
+                                        (click)="workspace.edit({kind: 'remove_parameter', id: parameter.id})">Remove</button>
+                                </li>
+                            }
+                        </ul>
+                    </fieldset>
+                </div>
+            </div>
+            @if (workspace.runtimeDigest(); as digest) {
+                <footer class="digest">Runtime digest <code>{{ digest }}</code></footer>
+            }
+        }
+    } @else if (workspace.pending()) {
+        <p role="status">Opening Animator…</p>
+    } @else {
+        <div class="empty">
+            <p>Choose an Animator asset.</p>
+            @if (assets.error(); as error) { <p role="alert">{{ error }}</p> }
+            @if (assets.pending()) { <p role="status">Loading Animators…</p> }
+            <button type="button" [disabled]="assets.pending()" (click)="assets.refresh()">Refresh Animators</button>
+            <ul aria-label="Animator assets">
+                @for (asset of assets.assets(); track asset.id) {
+                    <li><button type="button" (click)="workspace.open(asset.id)">{{ asset.path }}</button></li>
+                }
+            </ul>
+        </div>
+    }
+</section>

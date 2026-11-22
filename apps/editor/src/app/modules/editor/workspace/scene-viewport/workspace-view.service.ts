@@ -9,6 +9,7 @@ import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspac
 export class WorkspaceViewService {
     readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
     readonly propView = computed(() => this.activeViewKind() === 'prop-workspace');
+    readonly animatorView = computed(() => this.activeViewKind() === 'animation-controller');
     readonly animationView = computed(() => this.activeViewKind() === 'animation-workspace');
     private readonly animationScope = signal<'scene' | 'prop'>('scene');
     readonly animationOrigin = this.animationScope.asReadonly();
@@ -42,7 +43,7 @@ export class WorkspaceViewService {
             const playing = this.editor.playing();
             untracked(() => {
                 if (playing) {
-                    this.returnFromPlay = this.propView() ? 'prop-workspace' : 'scene-viewport';
+                    this.returnFromPlay = this.propView() || this.animatorView() ? this.activeViewKind() : 'scene-viewport';
                     this.activeView.set('game-preview');
                 } else if (this.wasPlaying) {
                     this.activeView.set(this.returnFromPlay);
@@ -52,7 +53,7 @@ export class WorkspaceViewService {
         });
         effect(() => {
             const state = this.viewport.state();
-            if (!state || this.propView() || this.animationView()) return;
+            if (!state || this.propView() || this.animationView() || this.animatorView()) return;
             const view = this.gameView() ? 'game' : 'scene';
             if (state.settings.view === view || this.requestedView === view) return;
             this.requestedView = view;
@@ -63,7 +64,7 @@ export class WorkspaceViewService {
     }
 
     selectView(kind: WorkspaceViewKind): void {
-        if ((kind === 'prop-workspace' || kind === 'animation-workspace') && this.editor.playing()) return;
+        if ((kind === 'prop-workspace' || kind === 'animation-workspace' || kind === 'animation-controller') && this.editor.playing()) return;
         if (kind === 'animation-workspace' && !this.animationView()) {
             this.animationScope.set(this.propView() ? 'prop' : 'scene');
         }

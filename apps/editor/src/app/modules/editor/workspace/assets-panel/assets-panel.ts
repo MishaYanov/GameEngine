@@ -16,6 +16,8 @@ import {AssetAuthoring} from './asset-authoring';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
 import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
+import {AnimatorAssets} from '../animator/animator-assets.service';
+import {AnimatorWorkspaceService} from '../animator/animator-workspace.service';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -57,6 +59,8 @@ export class AssetsPanel {
     private readonly editor = inject(EditorService);
     private readonly propAssetSelection = inject(PropAssetSelection, {optional: true});
     protected readonly propWorkspace = inject(PropWorkspaceService, {optional: true});
+    protected readonly animatorAssets = inject(AnimatorAssets, {optional: true});
+    protected readonly animatorWorkspace = inject(AnimatorWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);

@@ -1,0 +1,64 @@
+:host {
+    display: block;
+    min-height: 0;
+    height: 100%;
+}
+
+.animator {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+
+.actions,
+.field-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.actions, .digest, .empty, .animator > .failure { padding: .5rem; }
+.actions strong { overflow-wrap: anywhere; }
+.editor {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(10rem, 1fr) minmax(13rem, 19rem);
+    min-height: 0;
+    overflow: auto;
+}
+
+editor-graph { min-height: 15rem; }
+
+.outline {
+    display: grid;
+    align-content: start;
+    min-height: 0;
+    padding: .5rem;
+    gap: .5rem;
+    overflow: auto;
+}
+
+.outline-group {
+    min-width: 0;
+    margin: 0;
+}
+
+.fields {
+    display: grid;
+    gap: .35rem;
+}
+
+label {
+    min-width: 0;
+    max-width: 100%;
+}
+
+input, select { max-width: 100%; }
+label[hidden] { display: none; }
+li { margin-block: .25rem; }
+li .failure { display: block; }
+.failure { color: var(--color-danger, #ef8a8a); }
+.digest { overflow-wrap: anywhere; }
+button[aria-pressed='true'] { outline: 1px solid currentColor; }

@@ -66,7 +66,7 @@ export class Editor {
     protected async openProject(): Promise<void> {
         if (!this.canOpenProject()) return;
         const workspace = this.workspace();
-        if ((workspace && !await workspace.reviewPropNavigation()) || !this.canOpenProject()) return;
+        if ((workspace && !await workspace.reviewProjectNavigation()) || !this.canOpenProject()) return;
 
         this.openError.set(null);
         this.openMessage.set(OpenMessages.CREATING);
@@ -135,7 +135,7 @@ export class Editor {
     protected async exitEditor(): Promise<void> {
         if (!this.canExit()) return;
         const workspace = this.workspace();
-        if ((workspace && !await workspace.reviewPropNavigation()) || !this.canExit()) return;
+        if ((workspace && !await workspace.reviewProjectNavigation()) || !this.canExit()) return;
         this.openError.set(null);
         this.openMessage.set(OpenMessages.EXITING);
         let closing = false;
