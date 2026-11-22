@@ -29,6 +29,8 @@ pub use feedback_audio::*;
 mod linked_prefabs;
 mod nested_props;
 pub use nested_props::*;
+mod nested_prop_refresh;
+pub use nested_prop_refresh::*;
 pub use linked_prefabs::*;
 mod animation;
 pub use animation::*;

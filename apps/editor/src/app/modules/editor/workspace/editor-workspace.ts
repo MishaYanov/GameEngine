@@ -229,7 +229,7 @@ export class EditorWorkspace {
     }
 
     reviewPropNavigation(): Promise<boolean> {
-        return this.propWorkspace.reviewClose();
+        return this.propWorkspace.reviewNavigation();
     }
 
     private runPropAction(id: EditorActionId): boolean {

@@ -5,8 +5,8 @@ use crate::{
 	EntityKey,
 	asset_catalog::AssetId,
 	linked_prefab::{
-		LinkedPrefabSource, MAX_PINNED_PROP_VERSIONS, NestedPlacement, PinnedAssetVersion,
-		PinnedPropSource, PropAddress, PropComposition,
+		LinkedPrefabSource, NestedPlacement, PinnedAssetVersion, PinnedPropSource, PlacementId,
+		PropAddress, PropComposition,
 	},
 	scene_data::{CURRENT_SCHEMA_VERSION, CameraData, EntityData, SceneData, TransformData},
 };
@@ -368,14 +368,55 @@ impl PrefabData {
 		if self.gameplay.is_some() {
 			return Err("Nested placements require an owning component Prop source".into());
 		}
-		let version = PinnedAssetVersion {
-			asset_id: reviewed.source_id.clone(),
-			fingerprint: reviewed.fingerprint.clone(),
-		};
+		let version = Self::reviewed_version(reviewed);
 		if placement.target != version {
 			return Err("Nested placement does not match the reviewed source version".into());
 		}
 		let mut next = self.clone();
+		next.composition.placements.push(placement);
+		next.adopt_reviewed_pins(reviewed, version)?;
+		next.validate_nested_draft(owner)
+	}
+
+	/// Refresh one root placement to reviewed bytes of the same child asset.
+	/// Other placements keep the exact captured versions they already reference.
+	pub fn with_refreshed_nested_placement(
+		&self,
+		owner: &AssetId,
+		placement: &PlacementId,
+		reviewed: &LinkedPrefabSource,
+	) -> Result<Self, String> {
+		self.validate()?;
+		let index = self
+			.composition
+			.placements
+			.iter()
+			.position(|candidate| &candidate.id == placement)
+			.ok_or("Nested Prop placement no longer exists in this source")?;
+		if self.composition.placements[index].target.asset_id != reviewed.source_id {
+			return Err("Refresh must use the same nested Prop asset identity".into());
+		}
+		reviewed.validate()?;
+		let version = Self::reviewed_version(reviewed);
+		let mut next = self.clone();
+		next.composition.placements[index].target = version.clone();
+		next.adopt_reviewed_pins(reviewed, version)?;
+		next.composition.retain_reachable_pins();
+		next.validate_nested_draft(owner)
+	}
+
+	fn reviewed_version(source: &LinkedPrefabSource) -> PinnedAssetVersion {
+		PinnedAssetVersion {
+			asset_id: source.source_id.clone(),
+			fingerprint: source.fingerprint.clone(),
+		}
+	}
+
+	fn adopt_reviewed_pins(
+		&mut self,
+		reviewed: &LinkedPrefabSource,
+		version: PinnedAssetVersion,
+	) -> Result<(), String> {
 		let child = PinnedPropSource {
 			version,
 			path: reviewed.path.clone(),
@@ -384,7 +425,7 @@ impl PrefabData {
 			placements: reviewed.prefab.composition.placements.clone(),
 		};
 		for pin in std::iter::once(child).chain(reviewed.prefab.composition.pins.iter().cloned()) {
-			if let Some(saved) = next
+			if let Some(saved) = self
 				.composition
 				.pins
 				.iter()
@@ -402,17 +443,17 @@ impl PrefabData {
 					));
 				}
 			} else {
-				if next.composition.pins.len() >= MAX_PINNED_PROP_VERSIONS {
-					return Err("The Prop has reached its pinned source budget".into());
-				}
-				next.composition.pins.push(pin);
+				self.composition.pins.push(pin);
 			}
 		}
-		next.composition.placements.push(placement);
-		next.schema_version = 4;
-		next.composition
-			.validate(Some(owner), &next.entities, &next.reference_slots)?;
-		next.validated()
+		Ok(())
+	}
+
+	fn validate_nested_draft(mut self, owner: &AssetId) -> Result<Self, String> {
+		self.schema_version = 4;
+		self.composition
+			.validate(Some(owner), &self.entities, &self.reference_slots)?;
+		self.validated()
 	}
 
 	/// Materialize one portable hierarchy. Nested members use stable source

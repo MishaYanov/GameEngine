@@ -562,6 +562,17 @@ export class EditorService {
         }, false, expectedGeneration);
     }
 
+    refreshNestedProp(
+        draftId: string, expectedDraftRevision: number, placementId: string, fingerprint: string, expectedGeneration: number,
+    ): Promise<PrefabSourceDraft> {
+        return this.enqueue('editor_prop_draft_refresh_nested', async () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<PrefabSourceDraft>('editor_prop_draft_refresh_nested', {
+                draftId, expectedDraftRevision, placementId, fingerprint,
+            });
+        }, false, expectedGeneration);
+    }
+
     linkedPrefabStatus(rootKey: string, expectedGeneration?: number, expectedRevision?: number): Promise<LinkedPrefabStatus | null> {
         return this.queue.then(async () => {
             this.requireGeneration(expectedGeneration);

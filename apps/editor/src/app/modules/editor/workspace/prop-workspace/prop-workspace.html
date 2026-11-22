@@ -4,6 +4,11 @@
             <nav aria-label="Prop location">
                 <span>{{ document.kind === 'source' ? 'Assets' : 'Scene' }}</span>
                 <span aria-hidden="true">/</span>
+                @for (ancestor of prop.breadcrumbs(); track $index) {
+                    <button (click)="backTo($index)" [disabled]="!prop.canOpen()"
+                            [attr.aria-label]="'Back to ' + ancestor" type="button">{{ ancestor }}</button>
+                    <span aria-hidden="true">/</span>
+                }
                 <strong aria-current="page">{{ document.name }}</strong>
             </nav>
             <div class="preview-actions">
@@ -73,10 +78,38 @@
                         <dt>Linked source</dt><dd>{{ placementSource()?.path ?? placement.target.asset_id }}</dd>
                         <dt>Saved version</dt><dd>{{ placement.target.fingerprint }}</dd>
                     </dl>
+                    @if (placementAsset()?.fingerprint) {
+                        <p role="status">{{ newerFingerprint() ? 'A new source version is available.' : 'The pinned source is current.' }}</p>
+                    } @else {
+                        <p role="status">Source unavailable. The saved pin is still shown in the Prop preview.</p>
+                    }
                     <div class="preview-actions">
+                        <button (click)="openSelectedSource()" [disabled]="!placementAsset() || !prop.canOpenNested()" type="button">Open Nested Source</button>
+                        @if (newerFingerprint()) {
+                            <button (click)="reviewPlacementRefresh()" [disabled]="!prop.canEditDraft() || prop.nestedReviewPending()" type="button">Review Refresh…</button>
+                        }
                         <button (click)="prop.reorderPlacement(-1)" [disabled]="!mayReorder(-1)" type="button">Move Placement Up</button>
                         <button (click)="prop.reorderPlacement(1)" [disabled]="!mayReorder(1)" type="button">Move Placement Down</button>
                     </div>
+                    @if (prop.atNestedDepthLimit()) {
+                        <p>Go back to a parent Prop to open a different source. You can keep four Prop drafts open.</p>
+                    }
+                    @if (placementRefresh(); as refresh) {
+                        <section aria-label="Review nested Prop refresh" class="refresh-review">
+                            <h4>Refresh {{ placement.name }}</h4>
+                            <dl class="properties">
+                                <dt>Current pin</dt><dd>{{ refresh.previous }}</dd>
+                                <dt>New pin</dt><dd>{{ refresh.next }}</dd>
+                            </dl>
+                            @if (prop.nestedReviewPending()) {
+                                <p role="status">Checking the new source…</p>
+                            }
+                            <div class="preview-actions">
+                                <button (click)="refreshPlacement()" [disabled]="!canRefreshPlacement()" type="button">Refresh This Placement</button>
+                                <button (click)="cancelPlacementRefresh()" [disabled]="prop.draftPending()" type="button">Cancel Refresh</button>
+                            </div>
+                        </section>
+                    }
                     @if (placementEditable(); as placementObject) {
                         <prop-object-editor [object]="placementObject" [objects]="document.objects"
                                             [disabled]="!prop.canEditDraft()" [requireParent]="true" [maxNameBytes]="256"

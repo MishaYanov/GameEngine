@@ -138,6 +138,21 @@ impl PropComposition {
 		self.placements.is_empty() && self.pins.is_empty()
 	}
 
+	pub(crate) fn retain_reachable_pins(&mut self) {
+		let pins: HashMap<_, _> = self.pins.iter().map(|pin| (&pin.version, pin)).collect();
+		let mut pending: Vec<_> = self.placements.iter().map(|entry| &entry.target).collect();
+		let mut used = HashSet::new();
+		while let Some(version) = pending.pop() {
+			if used.insert(version)
+				&& let Some(pin) = pins.get(version)
+			{
+				pending.extend(pin.placements.iter().map(|entry| &entry.target));
+			}
+		}
+		let used: HashSet<_> = used.into_iter().cloned().collect();
+		self.pins.retain(|pin| used.contains(&pin.version));
+	}
+
 	/// Validate the reachable pinned graph and return the flattened entity count.
 	/// The caller validates its own and pinned local entity/component documents.
 	pub fn validate(

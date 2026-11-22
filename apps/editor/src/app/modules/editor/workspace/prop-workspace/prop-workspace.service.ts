@@ -28,8 +28,21 @@ interface PropScope {
 }
 
 type PropTab =
-    | {readonly kind: 'source'; readonly scope: PropScope; readonly name: string; readonly draft: PrefabSourceDraft}
+    | SourcePropTab
     | {readonly kind: 'instance'; readonly scope: PropScope; readonly root: EntityKey};
+
+interface SourcePropTab {
+    readonly kind: 'source';
+    readonly scope: PropScope;
+    readonly name: string;
+    readonly draft: PrefabSourceDraft;
+}
+
+interface PropAncestor {
+    readonly tab: SourcePropTab;
+    readonly selectedKey: EntityKey | null;
+    readonly placementId: string | null;
+}
 
 export type PropWorkspaceDocument = PropTab & {
     readonly name: string;
@@ -47,7 +60,7 @@ interface PropObjectRecord {
     readonly components: readonly ComponentRecord[];
 }
 
-/** Owns one isolated Prop document, its native draft, and local object selection. */
+/** Owns the isolated Prop document and retained draft trail for nested source navigation. */
 @Injectable()
 export class PropWorkspaceService {
     private readonly editor = inject(EditorService);
@@ -56,38 +69,50 @@ export class PropWorkspaceService {
     private readonly injector = inject(Injector);
     private readonly dom = inject(DOCUMENT);
     private readonly tab = signal<PropTab | null>(null);
+    private readonly ancestors = signal<readonly PropAncestor[]>([]);
     private readonly selectedKey = signal<EntityKey | null>(null);
     private readonly placementId = signal<string | null>(null);
     private readonly opening = signal<PropScope | null>(null);
+    private readonly closingChild = signal(false);
     private readonly failure = signal<string | null>(null);
     private readonly editingDraft = signal(false);
     private readonly reviewingClose = signal(false);
     private readonly nestedSource = signal<NestedPropSource | null>(null);
     private readonly reviewingNestedSource = signal(false);
     private nestedReviewRequest = 0;
-    private closeReview: {readonly promise: Promise<boolean>; readonly resolve: (approved: boolean) => void} | null = null;
-    private sourceDraft: PrefabSourceDraft | null = null;
+    private closeReview: {
+        readonly draftId: string;
+        readonly resolve: (approved: boolean) => void;
+    } | null = null;
     private focusedBeforeOpen: HTMLElement | null = null;
     private request = 0;
     private destroyed = false;
 
     readonly error = this.failure.asReadonly();
+    readonly breadcrumbs = computed(() => this.ancestors().map(route => route.tab.name));
     readonly pending = computed(() => this.opening() !== null);
     readonly draftPending = this.editingDraft.asReadonly();
     readonly nestedReview = this.nestedSource.asReadonly();
     readonly nestedReviewPending = this.reviewingNestedSource.asReadonly();
     readonly assets = computed(() => this.editor.modelAssets() ?? []);
     readonly confirmingClose = this.reviewingClose.asReadonly();
-    readonly canOpen = computed(() => this.editing.ready() && !this.pending() && !this.draftPending() && !!this.editor.snapshot());
+    private readonly closeName = signal<string | null>(null);
+    readonly closeTargetName = this.closeName.asReadonly();
+    readonly canOpen = computed(() => this.editing.ready() && !this.pending() && !this.closingChild() && !this.draftPending() &&
+        !this.confirmingClose() && !!this.editor.snapshot());
+    readonly atNestedDepthLimit = computed(() => this.ancestors().length >= 3);
+    readonly canOpenNested = computed(() => this.canOpen() && !this.atNestedDepthLimit());
     readonly draft = computed(() => {
         const tab = this.tab();
         return tab?.kind === 'source' ? tab.draft : null;
     });
-    readonly canEditDraft = computed(() => {
+    private readonly draftCommandsReady = computed(() => {
         const snapshot = this.editor.snapshot();
-        return this.draft()?.draft_revision !== undefined && !this.draftPending() && !this.editor.busy() &&
-            snapshot?.mode === 'edit' && snapshot.transaction === null;
+        return !this.draftPending() && !this.pending() && !this.closingChild() &&
+            !this.editor.busy() && snapshot?.mode === 'edit' && snapshot.transaction === null;
     });
+    readonly canEditDraft = computed(() => this.draft()?.draft_revision !== undefined && this.draftCommandsReady());
+    readonly canResolveClose = this.draftCommandsReady;
     readonly document = computed<PropWorkspaceDocument | null>(() => {
         const tab = this.tab();
         if (!tab) return null;
@@ -141,11 +166,32 @@ export class PropWorkspaceService {
             this.request++;
             unsubscribe?.();
             this.finishClose(false);
-            this.releaseSource();
+            this.releaseSources();
         });
     }
 
     async openSource(asset: Pick<ModelAsset, 'asset_id' | 'path' | 'name'>): Promise<boolean> {
+        const active = this.draft();
+        if (asset.asset_id && active?.asset_id === asset.asset_id) {
+            this.views.selectView('prop-workspace');
+            return true;
+        }
+        const ancestor = asset.asset_id ? this.ancestors().findIndex(item => item.tab.draft.asset_id === asset.asset_id) : -1;
+        return ancestor >= 0 ? this.backTo(ancestor) : this.loadSource(asset, false);
+    }
+
+    async openNestedSource(asset: ModelAsset): Promise<boolean> {
+        const placement = this.selectedPlacement();
+        if (!placement || placement.target.asset_id !== asset.asset_id || asset.kind !== 'prefab') return false;
+        if (!this.canOpenNested()) return false;
+        if (this.sourceTabs().some(tab => tab.draft.asset_id === asset.asset_id)) {
+            this.failure.set('This source is already open in the Prop breadcrumb trail.');
+            return false;
+        }
+        return this.loadSource(asset, true);
+    }
+
+    private async loadSource(asset: Pick<ModelAsset, 'asset_id' | 'path' | 'name'>, nested: boolean): Promise<boolean> {
         return this.open(async (scope, revision, current) => {
             const draft = await this.editor.openPrefabSource(asset.path, scope.generation, revision);
             if (!current()) {
@@ -162,7 +208,7 @@ export class PropWorkspaceService {
                 throw error;
             }
             return {kind: 'source', scope, name: asset.name, draft};
-        });
+        }, nested);
     }
 
     async openInstance(root: EntityKey): Promise<boolean> {
@@ -171,6 +217,35 @@ export class PropWorkspaceService {
             if (!entity?.linked_prefab) throw new Error('This object no longer has a linked Prop source.');
             return {kind: 'instance', scope, root};
         });
+    }
+
+    async backTo(index: number): Promise<boolean> {
+        if (!this.canOpen() || index < 0 || index >= this.ancestors().length) return false;
+        while (this.ancestors().length > index) {
+            const active = this.tab();
+            const parentId = this.ancestors().at(-1)?.tab.draft.draft_id;
+            if (active?.kind !== 'source' || !parentId || !await this.reviewClose(active)) return false;
+            const ancestor = this.ancestors().at(-1);
+            if (this.draft()?.draft_id !== active.draft.draft_id || ancestor?.tab.draft.draft_id !== parentId) return false;
+            this.closingChild.set(true);
+            try {
+                await this.editor.closePrefabSource(active.draft.draft_id);
+            } catch (error) {
+                this.failure.set(error instanceof Error ? error.message : String(error));
+                return false;
+            } finally {
+                this.closingChild.set(false);
+            }
+            if (this.draft()?.draft_id !== active.draft.draft_id) return false;
+            this.ancestors.update(route => route.slice(0, -1));
+            this.tab.set(ancestor.tab);
+            this.selectedKey.set(ancestor.selectedKey);
+            this.placementId.set(ancestor.placementId);
+            this.clearNestedReview();
+            this.failure.set(null);
+        }
+        this.views.selectView('prop-workspace');
+        return true;
     }
 
     selectObject(key: EntityKey): void {
@@ -234,6 +309,19 @@ export class PropWorkspaceService {
         return accepted;
     }
 
+    async refreshNested(placementId: string, previous: string, fingerprint: string): Promise<boolean> {
+        const placement = this.selectedPlacement();
+        const review = this.nestedReview();
+        if (!placement || placement.id !== placementId || placement.target.fingerprint !== previous ||
+            previous === fingerprint || review?.asset_id !== placement.target.asset_id || review.fingerprint !== fingerprint ||
+            !this.assets().some(asset => asset.kind === 'prefab' &&
+                asset.asset_id === placement.target.asset_id && asset.fingerprint === fingerprint)) return false;
+        const accepted = await this.runDraft((draft, revision, generation) =>
+            this.editor.refreshNestedProp(draft.draft_id, revision, placementId, fingerprint, generation));
+        if (accepted) this.clearNestedReview();
+        return accepted;
+    }
+
     editPlacement(change: PropObjectEdit): Promise<boolean> {
         const selected = this.selectedPlacement();
         const composition = this.draft()?.prefab.composition;
@@ -268,25 +356,44 @@ export class PropWorkspaceService {
         return this.runDraft((draft, revision, generation) => this.editor.editPropDraft(draft.draft_id, revision, edit, generation));
     }
 
-    saveDraft(): Promise<boolean> {
-        return this.runDraft((draft, revision, generation) => this.editor.savePropDraft(draft.draft_id, revision, generation));
+    async saveDraft(target = this.tab()): Promise<boolean> {
+        const saved = await this.runDraft((draft, revision, generation) =>
+            this.editor.savePropDraft(draft.draft_id, revision, generation), target);
+        if (saved) void this.editor.assets(true).catch(() => undefined);
+        return saved;
     }
 
-    reviewClose(): Promise<boolean> {
-        if (!this.draft()?.dirty) return Promise.resolve(!this.draftPending());
-        if (this.closeReview) return this.closeReview.promise;
+    async reviewNavigation(): Promise<boolean> {
+        if (this.pending() || this.closingChild() || this.draftPending() || this.confirmingClose()) return false;
+        const draftIds = this.sourceTabs().map(tab => tab.draft.draft_id);
+        for (const draftId of draftIds) {
+            const tab = this.sourceTab(draftId);
+            if (!tab || !await this.reviewClose(tab)) return false;
+        }
+        return !this.sourceTabs().some(tab => tab.draft.dirty);
+    }
+
+    private reviewClose(tab: SourcePropTab): Promise<boolean> {
+        if (!tab.draft.dirty) return Promise.resolve(!this.draftPending());
+        if (this.closeReview) return Promise.resolve(false);
         let resolve!: (approved: boolean) => void;
         const promise = new Promise<boolean>(done => (resolve = done));
-        this.closeReview = {promise, resolve};
+        this.closeReview = {draftId: tab.draft.draft_id, resolve};
         this.failure.set(null);
+        this.closeName.set(tab.name);
         this.reviewingClose.set(true);
         return promise;
     }
 
     async chooseClose(action: 'save' | 'discard'): Promise<void> {
-        if (!this.closeReview) return;
-        const accepted = action === 'save' ? await this.saveDraft() : await this.editDraft({type: 'discard'});
-        if (accepted && !this.draft()?.dirty) this.finishClose(true);
+        const review = this.closeReview;
+        const tab = review && this.sourceTab(review.draftId);
+        if (!review || !tab) return;
+        const accepted = action === 'save' ? await this.saveDraft(tab) : await this.runDraft(
+            (draft, revision, generation) => this.editor.editPropDraft(draft.draft_id, revision, {type: 'discard'}, generation), tab);
+        if (accepted && this.closeReview === review && this.sourceTab(review.draftId)?.draft.dirty === false) {
+            this.finishClose(true);
+        }
     }
 
     cancelClose(): void {
@@ -300,11 +407,12 @@ export class PropWorkspaceService {
     close(restoreFocus = true, fallbackFocus?: () => void): void {
         this.finishClose(false);
         this.cancelOpen();
+        this.releaseSources();
         this.tab.set(null);
+        this.ancestors.set([]);
         this.selectedKey.set(null);
         this.placementId.set(null);
         this.clearNestedReview();
-        this.releaseSource();
         const origin = this.focusedBeforeOpen;
         this.focusedBeforeOpen = null;
         this.views.closePropView();
@@ -316,14 +424,19 @@ export class PropWorkspaceService {
 
     private async open(load: (
         scope: PropScope, revision: number, current: () => boolean,
-    ) => Promise<PropTab | null>): Promise<boolean> {
+    ) => Promise<PropTab | null>, nested = false): Promise<boolean> {
         const scope = this.scope();
-        if (!scope || !this.canOpen() || !await this.reviewClose() ||
-            !this.sameScope(scope, this.scope()) || !this.canOpen()) return false;
+        if (!scope || !this.canOpen()) return false;
+        const parentId = nested ? this.draft()?.draft_id : null;
+        if (nested ? !parentId : !await this.reviewNavigation()) return false;
+        if (!this.sameScope(scope, this.scope()) || !this.canOpen()) return false;
         const focused = this.dom.activeElement;
+        const selectedKey = this.selectedKey();
+        const placementId = this.placementId();
         const request = ++this.request;
         const current = () => !this.destroyed && this.request === request &&
-            this.sameScope(scope, this.scope()) && this.editor.snapshot()?.mode === 'edit';
+            this.sameScope(scope, this.scope()) && this.editor.snapshot()?.mode === 'edit' &&
+            (!nested || this.draft()?.draft_id === parentId && this.placementId() === placementId);
         this.failure.set(null);
         this.opening.set(scope);
         let opened = false;
@@ -337,9 +450,14 @@ export class PropWorkspaceService {
                     if (tab.kind === 'source') this.closeDraft(tab.draft.draft_id);
                     return;
                 }
-                this.releaseSource();
-                this.sourceDraft = tab.kind === 'source' ? tab.draft : null;
-                this.focusedBeforeOpen = focused instanceof HTMLElement ? focused : null;
+                const parent = this.tab();
+                if (nested && parent?.kind === 'source') {
+                    this.ancestors.update(route => [...route, {tab: parent, selectedKey, placementId}]);
+                } else {
+                    this.releaseSources();
+                    this.ancestors.set([]);
+                    this.focusedBeforeOpen = focused instanceof HTMLElement ? focused : null;
+                }
                 this.selectedKey.set(null);
                 this.placementId.set(null);
                 this.clearNestedReview();
@@ -367,17 +485,18 @@ export class PropWorkspaceService {
 
     private async runDraft(run: (
         draft: PrefabSourceDraft, revision: number, generation: number,
-    ) => Promise<PrefabSourceDraft>): Promise<boolean> {
-        const draft = this.draft();
-        if (!this.canEditDraft() || !draft || draft.draft_revision === undefined) return false;
+    ) => Promise<PrefabSourceDraft>, target = this.tab()): Promise<boolean> {
+        if (target?.kind !== 'source' || !this.draftCommandsReady()) return false;
+        const draft = target.draft;
         const generation = this.editor.workspaceGeneration();
+        if (target.scope.generation !== generation || draft.draft_revision === undefined) return false;
         this.failure.set(null);
         this.editingDraft.set(true);
         try {
             const accepted = await run(draft, draft.draft_revision, generation);
             return this.acceptDraft(accepted, false);
         } catch (error) {
-            if (!this.destroyed && this.draft()?.draft_id === draft.draft_id &&
+            if (!this.destroyed && this.sourceTab(draft.draft_id) &&
                 this.editor.workspaceGeneration() === generation) {
                 this.failure.set(error instanceof Error ? error.message : String(error));
             }
@@ -388,9 +507,9 @@ export class PropWorkspaceService {
     }
 
     private acceptDraft(draft: PrefabSourceDraft, newerOnly: boolean): boolean {
-        const tab = this.tab();
-        if (this.destroyed || tab?.kind !== 'source' || tab.scope.generation !== this.editor.workspaceGeneration() ||
-            draft.draft_id !== tab.draft.draft_id || draft.workspace_generation !== tab.draft.workspace_generation ||
+        const tab = this.sourceTab(draft.draft_id);
+        if (this.destroyed || !tab || tab.scope.generation !== this.editor.workspaceGeneration() ||
+            draft.workspace_generation !== tab.draft.workspace_generation ||
             draft.asset_id !== tab.draft.asset_id || draft.path !== tab.draft.path || draft.draft_revision === undefined ||
             tab.draft.draft_revision === undefined || draft.draft_revision < tab.draft.draft_revision ||
             (newerOnly && draft.draft_revision === tab.draft.draft_revision)) return false;
@@ -400,14 +519,17 @@ export class PropWorkspaceService {
             this.failure.set(error instanceof Error ? error.message : String(error));
             return false;
         }
-        this.sourceDraft = draft;
-        this.tab.set({...tab, draft});
+        const updated = {...tab, draft};
+        if (this.draft()?.draft_id === draft.draft_id) this.tab.set(updated);
+        else this.ancestors.update(route => route.map(item => item.tab.draft.draft_id === draft.draft_id
+            ? {...item, tab: updated} : item));
         return true;
     }
 
     private finishClose(approved: boolean): void {
         const review = this.closeReview;
         this.closeReview = null;
+        this.closeName.set(null);
         this.reviewingClose.set(false);
         review?.resolve(approved);
     }
@@ -421,9 +543,18 @@ export class PropWorkspaceService {
         this.opening.set(null);
     }
 
-    private releaseSource(): void {
-        if (this.sourceDraft) this.closeDraft(this.sourceDraft.draft_id);
-        this.sourceDraft = null;
+    private sourceTabs(): readonly SourcePropTab[] {
+        const active = this.tab();
+        const ancestors = this.ancestors().map(item => item.tab).reverse();
+        return active?.kind === 'source' ? [active, ...ancestors] : ancestors;
+    }
+
+    private sourceTab(draftId: string): SourcePropTab | undefined {
+        return this.sourceTabs().find(tab => tab.draft.draft_id === draftId);
+    }
+
+    private releaseSources(): void {
+        for (const tab of this.sourceTabs()) this.closeDraft(tab.draft.draft_id);
     }
 
     private closeDraft(draftId: string): void {

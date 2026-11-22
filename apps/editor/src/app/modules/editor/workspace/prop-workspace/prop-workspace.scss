@@ -39,6 +39,8 @@ h2, h3, h4 {margin: 0 0 var(--space-1);}
     border-radius: var(--radius-sm);
 }
 
+.refresh-review {margin-block: var(--space-2);}
+
 ul {margin: 0; padding-inline-start: var(--space-4);}
 .objects {list-style: none; padding: 0; max-height: 50vh; overflow: auto;}
 .nested-objects {max-height: none;}

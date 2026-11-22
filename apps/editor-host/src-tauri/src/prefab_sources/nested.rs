@@ -8,6 +8,9 @@ use runtime::{
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+#[path = "nested/refresh.rs"]
+mod refresh;
+
 #[derive(Serialize)]
 pub struct NestedPropSourceDto {
 	pub asset_id: AssetId,

@@ -344,3 +344,103 @@ fn saved_nested_sources_link_and_reopen_with_distinct_scene_member_keys() {
 	grates.sort_by(f32::total_cmp);
 	assert_eq!(grates, vec![5.0, 7.0, 21.0, 23.0]);
 }
+
+#[test]
+fn refreshing_one_placement_only_releases_pins_unreachable_from_any_placement() {
+	fn source(name: &str, fingerprint: &str) -> LinkedPrefabSource {
+		LinkedPrefabSource {
+			source_id: asset_catalog::AssetId::generate(),
+			path: format!("prefabs/{name}.json"),
+			fingerprint: fingerprint.repeat(64),
+			prefab: PrefabData {
+				schema_version: 3,
+				entities: vec![entity(name, [0.0; 3])],
+				gameplay: None,
+				reference_slots: BTreeMap::new(),
+				composition: PropComposition::default(),
+			},
+		}
+	}
+
+	let floor = source("floor", "1");
+	let bolt = source("bolt", "2");
+	let original_grate = source("grate", "3");
+	let bolt_version = PinnedAssetVersion {
+		asset_id: bolt.source_id.clone(),
+		fingerprint: bolt.fingerprint.clone(),
+	};
+	let mut old_grate = original_grate.clone();
+	old_grate.prefab = original_grate
+		.prefab
+		.with_nested_placement(
+			&original_grate.source_id,
+			&bolt,
+			placement("bolt", &bolt_version, "grate", 1.0),
+		)
+		.unwrap();
+	let old_grate_version = PinnedAssetVersion {
+		asset_id: old_grate.source_id.clone(),
+		fingerprint: old_grate.fingerprint.clone(),
+	};
+	let left = placement("left", &old_grate_version, "floor", 2.0);
+	let right = placement("right", &old_grate_version, "floor", 4.0);
+	let draft = floor
+		.prefab
+		.with_nested_placement(&floor.source_id, &old_grate, left.clone())
+		.unwrap()
+		.with_nested_placement(&floor.source_id, &old_grate, right.clone())
+		.unwrap();
+	assert_eq!(draft.composition.pins.len(), 2);
+
+	let mut new_grate = original_grate.clone();
+	new_grate.fingerprint = "4".repeat(64);
+	new_grate.prefab.entities[0].name = "Replacement grating".into();
+	let new_grate_version = PinnedAssetVersion {
+		asset_id: new_grate.source_id.clone(),
+		fingerprint: new_grate.fingerprint.clone(),
+	};
+
+	let first_refresh = draft
+		.with_refreshed_nested_placement(&floor.source_id, &left.id, &new_grate)
+		.unwrap();
+	assert_eq!(
+		first_refresh.composition.placements,
+		[
+			NestedPlacement {
+				target: new_grate_version.clone(),
+				..left.clone()
+			},
+			right.clone(),
+		]
+	);
+	assert_eq!(first_refresh.composition.pins.len(), 3);
+	let second_refresh = first_refresh
+		.with_refreshed_nested_placement(&floor.source_id, &right.id, &new_grate)
+		.unwrap();
+	assert_eq!(second_refresh.composition.pins.len(), 1);
+	assert_eq!(
+		second_refresh.composition.pins[0].version,
+		new_grate_version
+	);
+
+	let mut requires_new_binding = new_grate.clone();
+	requires_new_binding.fingerprint = "5".repeat(64);
+	requires_new_binding
+		.prefab
+		.reference_slots
+		.insert("Guide".into(), key("outside-guide"));
+	let before = first_refresh.to_json().unwrap();
+	assert!(
+		first_refresh
+			.with_refreshed_nested_placement(&floor.source_id, &left.id, &requires_new_binding)
+			.unwrap_err()
+			.contains("every child slot")
+	);
+	assert!(
+		first_refresh
+			.with_refreshed_nested_placement(&floor.source_id, &left.id, &bolt)
+			.unwrap_err()
+			.contains("same nested Prop asset identity")
+	);
+	assert_eq!(first_refresh.to_json().unwrap(), before);
+}

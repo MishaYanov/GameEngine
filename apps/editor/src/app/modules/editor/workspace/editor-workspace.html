@@ -182,13 +182,13 @@
 <editor-dialog title="Unsaved Prop changes" [open]="propWorkspace.confirmingClose()" [renderFields]="false"
                (openChange)="!$event && propWorkspace.cancelClose()" [closeBlocked]="propWorkspace.draftPending()"
                closeLabel="Keep Editing">
-    <p>Save or discard the Prop draft to continue.</p>
+    <p>Save or discard the draft for {{ propWorkspace.closeTargetName() }} to continue.</p>
     @if (editorService.playing()) {
         <p role="status">Stop Play before changing the draft.</p>
     }
     @if (propWorkspace.error(); as message) {
         <p role="alert">{{ message }}</p>
     }
-    <button (click)="propWorkspace.chooseClose('save')" [disabled]="!propWorkspace.canEditDraft()" type="button">Save Prop and Continue</button>
-    <button (click)="propWorkspace.chooseClose('discard')" [disabled]="!propWorkspace.canEditDraft()" type="button">Discard Prop Changes</button>
+    <button (click)="propWorkspace.chooseClose('save')" [disabled]="!propWorkspace.canResolveClose()" type="button">Save Prop and Continue</button>
+    <button (click)="propWorkspace.chooseClose('discard')" [disabled]="!propWorkspace.canResolveClose()" type="button">Discard Prop Changes</button>
 </editor-dialog>

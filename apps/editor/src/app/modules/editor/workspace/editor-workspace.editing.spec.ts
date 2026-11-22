@@ -93,6 +93,19 @@ function propSource(revision: number): PrefabSourceDraft {
     };
 }
 
+function nestedSourceFixture(revision: number, path: string): PrefabSourceDraft {
+    const draft = {...propSource(revision), draft_revision: 1, dirty: false, can_undo: false, can_redo: false};
+    if (path === nestedAsset.path) {
+        return {...draft, path, draft_id: 'grate-draft', asset_id: nestedAsset.asset_id, fingerprint: nestedAsset.fingerprint};
+    }
+    const target = {asset_id: nestedAsset.asset_id, fingerprint: 'b'.repeat(64)};
+    const local = draft.prefab.entities[0].transform;
+    return {...draft, prefab: {...draft.prefab, schema_version: 4, composition: {
+        pins: [{version: target, path: 'old-grate.prefab.json', entities: draft.prefab.entities}],
+        placements: ['left', 'right'].map(id => ({id, name: id, parent: 'arch', target, local})),
+    }}};
+}
+
 describe('Workspace live editing flow', () => {
     const dialogPrototype = HTMLDialogElement.prototype;
     const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
@@ -135,8 +148,10 @@ describe('Workspace live editing flow', () => {
     let restartReply: (() => Promise<ViewportEditorState>) | undefined;
     let assets: readonly ModelAsset[];
     let linkedStatus: LinkedPrefabStatus | null;
-    let openPropSource: (revision: number) => Promise<PrefabSourceDraft>;
+    let openPropSource: (revision: number, path: string) => Promise<PrefabSourceDraft>;
     let propDraft: PrefabSourceDraft | null;
+    let propDrafts: Map<string, PrefabSourceDraft>;
+    let initialPropDrafts: Map<string, PrefabSourceDraft>;
     let propDraftListener: ((event: TauriEvent<PrefabSourceDraft>) => void) | undefined;
     let previousProp: PrefabSourceDraft['prefab'] | null;
     let nextProp: PrefabSourceDraft['prefab'] | null;
@@ -168,6 +183,8 @@ describe('Workspace live editing flow', () => {
         linkedStatus = null;
         openPropSource = async revision => propSource(revision);
         propDraft = null;
+        propDrafts = new Map();
+        initialPropDrafts = new Map();
         propDraftListener = undefined;
         previousProp = null;
         nextProp = null;
@@ -211,12 +228,15 @@ describe('Workspace live editing flow', () => {
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_assets') return assets;
             if (operation === 'editor_prefab_source_open') {
-                propDraft = await openPropSource((args as {expectedRevision: number}).expectedRevision);
+                const {path, expectedRevision} = args as {path: string; expectedRevision: number};
+                propDraft = await openPropSource(expectedRevision, path);
+                propDrafts.set(propDraft.draft_id, propDraft);
+                initialPropDrafts.set(propDraft.draft_id, propDraft);
                 return propDraft;
             }
             if (operation === 'editor_prop_draft_edit') {
                 const {draftId, expectedDraftRevision, edit} = args as {draftId: string; expectedDraftRevision: number; edit: PropDraftEdit};
-                const draft = propDraft!;
+                const draft = propDrafts.get(draftId)!;
                 expect(draft.draft_id).toBe(draftId);
                 expect(draft.draft_revision).toBe(expectedDraftRevision);
                 let prefab = draft.prefab;
@@ -237,21 +257,24 @@ describe('Workspace live editing flow', () => {
                         nextProp = null;
                         break;
                     case 'discard':
-                        prefab = propSource(draft.revision).prefab;
+                        prefab = initialPropDrafts.get(draftId)!.prefab;
                         previousProp = null;
                         nextProp = null;
                         break;
                 }
                 propDraft = {...draft, prefab, draft_revision: expectedDraftRevision + 1,
                     dirty: edit.type !== 'discard', can_undo: previousProp !== null, can_redo: nextProp !== null};
+                propDrafts.set(draftId, propDraft);
                 return propDraft;
             }
             if (operation === 'editor_prop_draft_save') {
                 const {draftId, expectedDraftRevision} = args as {draftId: string; expectedDraftRevision: number};
-                expect(propDraft?.draft_id).toBe(draftId);
-                expect(propDraft?.draft_revision).toBe(expectedDraftRevision);
+                const draft = propDrafts.get(draftId)!;
+                expect(draft.draft_revision).toBe(expectedDraftRevision);
                 if (savePropFailure) throw new Error(savePropFailure);
-                propDraft = {...propDraft!, dirty: false, draft_revision: expectedDraftRevision + 1, fingerprint: 'new saved fingerprint'};
+                propDraft = {...draft, dirty: false, draft_revision: expectedDraftRevision + 1, fingerprint: 'new saved fingerprint'};
+                propDrafts.set(draftId, propDraft);
+                initialPropDrafts.set(draftId, propDraft);
                 return {draft: propDraft, snapshot: nativeState};
             }
             if (operation === 'editor_prop_nested_source') {
@@ -275,9 +298,31 @@ describe('Workspace live editing flow', () => {
                             name: placement.name, parent: placement.parent, local: placement.local, bindings: placement.bindings}],
                     },
                 }};
+                propDrafts.set(draftId, propDraft);
                 return propDraft;
             }
-            if (operation === 'editor_prefab_source_close') return undefined;
+            if (operation === 'editor_prop_draft_refresh_nested') {
+                const {draftId, expectedDraftRevision, placementId, fingerprint} =
+                    args as {draftId: string; expectedDraftRevision: number; placementId: string; fingerprint: string};
+                const draft = propDrafts.get(draftId)!;
+                expect(draft.draft_revision).toBe(expectedDraftRevision);
+                const composition = draft.prefab.composition!;
+                const target = {asset_id: nestedAsset.asset_id, fingerprint};
+                propDraft = {...draft, draft_revision: expectedDraftRevision + 1, dirty: true, prefab: {
+                    ...draft.prefab, composition: {
+                        pins: [...composition.pins, {version: target, path: nestedAsset.path, entities: draft.prefab.entities}],
+                        placements: composition.placements.map(placement => placement.id === placementId ? {...placement, target} : placement),
+                    },
+                }};
+                propDrafts.set(draftId, propDraft);
+                return propDraft;
+            }
+            if (operation === 'editor_prefab_source_close') {
+                const {draftId} = args as {draftId: string};
+                if (propDrafts.get(draftId)?.dirty) throw new Error('Save or discard this draft first.');
+                propDrafts.delete(draftId);
+                return undefined;
+            }
             if (operation === 'editor_prop_preview_open') {
                 const {requestId, expectedGeneration, expectedRevision} =
                     args as {requestId: number; expectedGeneration: number; expectedRevision: number};
@@ -1190,6 +1235,102 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(placements().map(item => item.id)).toEqual(['grate-2', 'grate-1']));
         expect(placements().map(item => item.local.position[0])).toEqual([5, 2]);
         expect(propDraft?.prefab.composition?.pins).toHaveLength(1);
+        expect(editor.dirty()).toBe(false);
+    });
+
+    it('retains an outer draft and its placement through nested Back and reviews all drafts on File navigation', async () => {
+        openPropSource = async (revision, path) => nestedSourceFixture(revision, path);
+        assets = [propAsset, nestedAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const heading = () => root.querySelector('[aria-current="page"]')?.textContent?.trim();
+        const review = () => root.querySelector('dialog[open]')?.textContent;
+        const rename = (name: string) => {
+            const input = root.querySelector<HTMLInputElement>('prop-object-editor input[type="text"]')!;
+            input.value = name;
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        };
+        const openAsset = (id: string) => root.querySelector(`[data-asset-id="${id}"]`)!
+            .dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        openAsset(propAsset.asset_id);
+        await vi.waitFor(() => expect(heading()).toBe('Arch'));
+        rename('Edited Arch');
+        await vi.waitFor(() => expect(propDrafts.get('arch-draft')?.dirty).toBe(true));
+        const placement = () => root.querySelector<HTMLButtonElement>('[data-prop-placement="left"]')!;
+        placement().click();
+        await fixture.whenStable();
+        button('Open Nested Source').click();
+        await vi.waitFor(() => expect(heading()).toBe('Grate'));
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_prefab_source_open', expect.objectContaining({path: nestedAsset.path}));
+        openAsset(nestedAsset.asset_id);
+        await fixture.whenStable();
+        expect(vi.mocked(invoke).mock.calls.filter(([operation]) => operation === 'editor_prefab_source_open')).toHaveLength(2);
+        rename('Edited Grate');
+        await vi.waitFor(() => expect(propDrafts.get('grate-draft')?.dirty).toBe(true));
+        button('Arch').click();
+        await vi.waitFor(() => expect(review()).toContain('draft for Grate'));
+        button('Keep Editing').click();
+        await vi.waitFor(() => expect(review()).toBeUndefined());
+        expect(heading()).toBe('Grate');
+        button('Arch').click();
+        await vi.waitFor(() => expect(review()).toContain('draft for Grate'));
+        button('Discard Prop Changes').click();
+        await vi.waitFor(() => expect(heading()).toBe('Arch'));
+        expect(placement().getAttribute('aria-pressed')).toBe('true');
+        expect(propDrafts.get('arch-draft')?.prefab.entities[0].name).toBe('Edited Arch');
+        expect(propDrafts.has('grate-draft')).toBe(false);
+
+        button('Open Nested Source').click();
+        await vi.waitFor(() => expect(heading()).toBe('Grate'));
+        rename('Edited Grate again');
+        await vi.waitFor(() => expect(propDrafts.get('grate-draft')?.dirty).toBe(true));
+        const leave = fixture.componentInstance.reviewPropNavigation();
+        await vi.waitFor(() => expect(review()).toContain('draft for Grate'));
+        button('Discard Prop Changes').click();
+        await vi.waitFor(() => expect(review()).toContain('draft for Arch'));
+        button('Save Prop and Continue').click();
+        await expect(leave).resolves.toBe(true);
+        expect(propDrafts.get('arch-draft')?.dirty).toBe(false);
+        expect(propDrafts.get('arch-draft')?.prefab.entities[0].name).toBe('Edited Arch');
+        expect(editor.dirty()).toBe(false);
+    });
+
+    it('keeps missing nested sources pinned and refreshes only the reviewed placement', async () => {
+        openPropSource = async (revision, path) => nestedSourceFixture(revision, path);
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('[data-prop-placement="left"]')).not.toBeNull());
+        root.querySelector<HTMLButtonElement>('[data-prop-placement="left"]')!.click();
+        await fixture.whenStable();
+        const inspector = () => root.querySelector('[aria-label="Prop Inspector"]')?.textContent;
+        expect(inspector()).toContain('Source unavailable');
+        expect(inspector()).toContain('old-grate.prefab.json');
+        expect(button('Open Nested Source').disabled).toBe(true);
+        assets = [propAsset, nestedAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        expect(inspector()).toContain('A new source version is available');
+        button('Review Refresh…').click();
+        await vi.waitFor(() => expect(button('Refresh This Placement')?.disabled).toBe(false));
+        const review = root.querySelector('[aria-label="Review nested Prop refresh"]')?.textContent;
+        expect(review).toContain('b'.repeat(64));
+        expect(review).toContain(nestedAsset.fingerprint);
+        expect(vi.mocked(invoke).mock.calls.some(([operation]) => operation === 'editor_prop_draft_refresh_nested')).toBe(false);
+        button('Refresh This Placement').click();
+        await vi.waitFor(() => expect(inspector()).toContain('The pinned source is current'));
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_prop_draft_refresh_nested', {
+            draftId: 'arch-draft', expectedDraftRevision: 1, placementId: 'left', fingerprint: nestedAsset.fingerprint,
+        });
+        expect(propDrafts.get('arch-draft')?.prefab.composition?.placements.map(placement => placement.target.fingerprint))
+            .toEqual([nestedAsset.fingerprint, 'b'.repeat(64)]);
         expect(editor.dirty()).toBe(false);
     });
 
