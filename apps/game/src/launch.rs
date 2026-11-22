@@ -92,6 +92,7 @@ impl CheckpointTransfer {
 pub struct LaunchOptions {
 	pub mode: LaunchMode,
 	pub transfer: Option<CheckpointTransfer>,
+	pub transfer_directory: Option<PathBuf>,
 	pub input_profile: Option<PathBuf>,
 	/// Publish a bounded replay from a fresh Player run on exit.
 	pub record_playtrace: Option<PathBuf>,
@@ -125,6 +126,7 @@ impl LaunchOptions {
 			return Ok(Self {
 				mode: LaunchMode::Player,
 				transfer: CheckpointTransfer::parse(option.as_ref(), args)?,
+				transfer_directory: None,
 				input_profile: None,
 				record_playtrace: None,
 				smoke_test: false,
@@ -135,6 +137,7 @@ impl LaunchOptions {
 		}
 		let mut explicit = None;
 		let mut input_profile = None;
+		let mut transfer_directory = None;
 		let mut record_playtrace = None;
 		let mut smoke_test = false;
 		let mut smoke_scene_cycles = None;
@@ -181,11 +184,11 @@ impl LaunchOptions {
 							.ok_or("--smoke-scene-cycles requires a count from 1 to 100")?,
 					);
 				}
-				option @ ("--input-profile" | "--record-playtrace") => {
-					let value = if option == "--input-profile" {
-						&mut input_profile
-					} else {
-						&mut record_playtrace
+				option @ ("--input-profile" | "--record-playtrace" | "--transfer-directory") => {
+					let value = match option {
+						"--input-profile" => &mut input_profile,
+						"--transfer-directory" => &mut transfer_directory,
+						_ => &mut record_playtrace,
 					};
 					if value.is_some() {
 						return Err(format!("Specify {option} only once"));
@@ -202,7 +205,7 @@ impl LaunchOptions {
 				argument => {
 					return Err(format!(
 						"Unknown game argument {argument:?}; supported arguments are \
-                     --development, --player, --input-profile <path>, \
+                     --development, --player, --input-profile <path>, --transfer-directory <path>, \
                      --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, \
                      or a standalone --export-slot, --preview-slot-import, or --commit-slot-import command"
 					));
@@ -235,9 +238,15 @@ impl LaunchOptions {
 		if scene_prefetch && (mode != LaunchMode::Player || !installed_project) {
 			return Err("--scene-prefetch requires an installed Player".into());
 		}
+		if transfer_directory.is_some()
+			&& (!installed_project || mode != LaunchMode::Player || smoke_test)
+		{
+			return Err("--transfer-directory requires an interactive installed Player".into());
+		}
 		Ok(Self {
 			mode,
 			transfer: None,
+			transfer_directory,
 			input_profile,
 			record_playtrace,
 			smoke_test,

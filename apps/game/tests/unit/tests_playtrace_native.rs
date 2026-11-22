@@ -62,30 +62,8 @@ fn native_controller_remap_persists_and_playtrace_replays() {
 			.contains("F1")
 	);
 
-	if let Some(headless) = std::env::var_os(HEADLESS_VAR) {
-		let manifest = package
-			.unwrap_or_else(|| {
-				PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.release-learning.json")
-			})
-			.canonicalize()
-			.unwrap();
-		let output = Command::new(PathBuf::from(headless).canonicalize().unwrap())
-			.current_dir(&profile.0)
-			.arg("--project")
-			.arg(manifest)
-			.arg("--replay")
-			.arg(&trace)
-			.output()
-			.unwrap();
-		assert!(
-			output.status.success(),
-			"{}",
-			String::from_utf8_lossy(&output.stderr)
-		);
-		let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-		assert_eq!(report["play_scene_id"], "finish");
-		assert_eq!(report["play_status"]["gameplay"]["completed"], true);
-		assert_eq!(report["play_status"]["gameplay"]["score"], 1);
+	if let Some(report) = replay_in_headless(package.as_deref(), &profile.0, &trace) {
+		assert_completed_courtyard(&report);
 		println!("NATIVE_PLAYTRACE_REPLAY_OK");
 	}
 	if let Some(output) = std::env::var_os("GAME_ENGINE_QA_PLAYTRACE_OUTPUT") {
@@ -98,6 +76,7 @@ pub(super) fn run_phase(app: &mut GameApp, phase: &str) {
 	match phase {
 		"trace-remap" => remap(app),
 		"trace-record" => record(app),
+		phase if phase.starts_with("trace-keyboard-") => native_keyboard_profile_phase(app, phase),
 		_ => panic!("Unknown player trace phase"),
 	}
 }
@@ -168,7 +147,7 @@ fn record(app: &mut GameApp) {
 			app.player_controls.controller(),
 			app.player_controls.prompt_device(),
 		),
-		"Press B to open the route gate",
+		"Press B (Controller) to open the route gate",
 	);
 	submit_pad(app, &mut now, None);
 	app.tick_play(STEP).unwrap();
@@ -208,4 +187,166 @@ fn submit_pad(app: &mut GameApp, now: &mut Instant, face: Option<FaceButton>) {
 
 fn progress(app: &GameApp) -> &progress::CampaignProgress {
 	app.editor.play_progress().unwrap()
+}
+
+#[test]
+#[ignore = "requires the release fixture and native Windows Vulkan support"]
+fn native_keyboard_remap_restores_authored_playtrace_across_processes() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str = "playtrace_native_tests::native_keyboard_remap_restores_authored_playtrace_across_processes";
+	let isolated = ProfileDir::new();
+	let package = std::env::var_os(CURRENT_PROJECT_VAR).map(PathBuf::from);
+	for phase in [
+		"trace-keyboard-remap",
+		"trace-keyboard-verify",
+		"trace-keyboard-record",
+	] {
+		run_isolated_phase(TEST, phase, &isolated, package.as_deref());
+	}
+	let trace = isolated.0.join(TRACE_NAME);
+	let payload: Value = serde_json::from_slice(&fs::read(&trace).unwrap()).unwrap();
+	let actions = payload["actions"].as_array().unwrap();
+	assert!(
+		actions
+			.iter()
+			.any(|action| action == &json!({"type": "keyboard_input", "keys": ["KeyE"]}))
+	);
+	assert!(
+		!actions
+			.iter()
+			.any(|action| action == &json!({"type": "keyboard_input", "keys": ["KeyF"]}))
+	);
+	if let Some(report) = replay_in_headless(package.as_deref(), &isolated.0, &trace) {
+		assert_completed_courtyard(&report);
+		println!("NATIVE_KEYBOARD_PLAYTRACE_REPLAY_OK");
+	}
+}
+
+fn replay_in_headless(package: Option<&Path>, profile_root: &Path, trace: &Path) -> Option<Value> {
+	let executable = PathBuf::from(std::env::var_os(HEADLESS_VAR)?);
+	let manifest = package.map_or_else(
+		|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.release-learning.json"),
+		Path::to_path_buf,
+	);
+	let output = Command::new(executable.canonicalize().unwrap())
+		.current_dir(profile_root)
+		.arg("--project")
+		.arg(manifest.canonicalize().unwrap())
+		.arg("--replay")
+		.arg(trace)
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	Some(serde_json::from_slice(&output.stdout).unwrap())
+}
+
+fn assert_completed_courtyard(report: &Value) {
+	assert_eq!(report["play_scene_id"], "finish");
+	assert_eq!(report["play_status"]["gameplay"]["completed"], true);
+	assert_eq!(report["play_status"]["gameplay"]["score"], 1);
+}
+
+fn open_keyboard_menu(app: &mut GameApp) {
+	if !app.player_controls.is_open() {
+		assert!(app.player_controls_key(Key::Escape));
+	}
+	for _ in 0..12 {
+		if app.player_controls.rows_with_capacity(1).unwrap() == ["> Keyboard"] {
+			assert!(app.player_controls_key(Key::Enter));
+			return;
+		}
+		assert!(app.player_controls_key(Key::ArrowDown));
+	}
+	panic!("Keyboard Controls page unavailable");
+}
+
+fn tap(app: &mut GameApp, key: Key) {
+	app.input.press(key);
+	app.submit_play_controls().unwrap();
+	app.input.release(key);
+	app.submit_play_controls().unwrap();
+	app.tick_play(STEP).unwrap();
+}
+
+fn native_keyboard_profile_phase(app: &mut GameApp, phase: &str) {
+	let authored = app.project.as_ref().unwrap().input_profile.clone().unwrap();
+	let output = PathBuf::from(std::env::var_os("GAME_ENGINE_QA_CHECKPOINT_PROFILE").unwrap())
+		.join(TRACE_NAME);
+	match phase {
+		"trace-keyboard-remap" => {
+			open_keyboard_menu(app);
+			for key in [Key::Enter, Key::F, Key::ArrowDown, Key::Enter, Key::Escape] {
+				assert!(app.player_controls_key(key));
+			}
+			assert_eq!(
+				app.effective_input_profile().unwrap().actions[0].key,
+				Key::F
+			);
+		}
+		"trace-keyboard-verify" => {
+			let effective = app.effective_input_profile().unwrap();
+			assert_eq!(effective.actions[0].key, Key::F);
+			assert!(
+				playtrace::PlayTrace::new(output, &authored, effective)
+					.err()
+					.unwrap()
+					.contains("Restore Keyboard defaults")
+			);
+			move_for(app, Key::D, 90);
+			move_for(app, Key::A, 84);
+			tap(app, Key::E);
+			assert!(!progress(app).route_gate_open);
+			tap(app, Key::F);
+			assert!(progress(app).route_gate_open);
+			open_keyboard_menu(app);
+			for key in [
+				Key::ArrowDown,
+				Key::ArrowDown,
+				Key::Enter,
+				Key::ArrowUp,
+				Key::Enter,
+				Key::Escape,
+			] {
+				assert!(app.player_controls_key(key));
+			}
+			assert_eq!(app.effective_input_profile().unwrap(), &authored);
+		}
+		"trace-keyboard-record" => {
+			let effective = app.effective_input_profile().unwrap();
+			app.play_trace = Some(playtrace::PlayTrace::new(output, &authored, effective).unwrap());
+			open_keyboard_menu(app);
+			for key in [Key::Enter, Key::F, Key::ArrowDown, Key::Enter] {
+				assert!(app.player_controls_key(key));
+			}
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.last()
+					.unwrap()
+					.contains("recording")
+			);
+			for _ in 0..2 {
+				assert!(app.player_controls_key(Key::Escape));
+			}
+			assert_eq!(app.effective_input_profile().unwrap(), &authored);
+			move_for(app, Key::D, 90);
+			move_for(app, Key::A, 84);
+			tap(app, Key::E);
+			assert!(progress(app).route_gate_open);
+			move_for(app, Key::A, 64);
+			move_for(app, Key::A, 30);
+			move_for(app, Key::D, 90);
+			assert!(progress(app).completed);
+			app.play_trace.take().unwrap().finish().unwrap();
+		}
+		_ => panic!("Unknown keyboard replay phase"),
+	}
 }

@@ -1,8 +1,58 @@
-//! Cross-process test of the installed checkpoint CLI and ordinary Continue path.
+//! Cross-process rehearsals of installed checkpoint transfer and ordinary Continue.
 use super::*;
 
 const NATIVE_TRANSFER_TEST: &str = "checkpoint_native_tests::checkpoint_transfer_native::packaged_checkpoint_transfer_spans_profiles";
+const NATIVE_MENU_TRANSFER_TEST: &str =
+	"checkpoint_native_tests::checkpoint_transfer_native::checkpoint_transfer_menu_spans_profiles";
 const CHAPTER_PROFILE: &str = "GameEngine/checkpoints/3ef795f1-4bb8-41ff-bebb-66a170e68878";
+
+#[test]
+#[ignore = "requires a native Windows Vulkan session"]
+fn checkpoint_transfer_menu_spans_profiles() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	let manifest =
+		PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("project.courtyard-chapters.json");
+	let rehearsal = ProfileDir::new();
+	let source = ProfileDir(rehearsal.0.join("source"));
+	let destination = ProfileDir(rehearsal.0.join("destination"));
+	let transfers = rehearsal.0.join("transfers");
+	for path in [&source.0, &destination.0, &transfers] {
+		fs::create_dir(path).unwrap();
+	}
+	let run = |phase, profile| {
+		run_isolated_phase(NATIVE_MENU_TRANSFER_TEST, phase, profile, Some(&manifest));
+	};
+	run("chapters-save", &source);
+	let saved_slots = ["slot.json", "slot-2.json", "slot-2.previous.json"]
+		.map(|name| source.0.join(CHAPTER_PROFILE).join(name));
+	let saved_bytes = saved_slots.each_ref().map(|path| fs::read(path).unwrap());
+
+	run("chapters-transfer-menu-export", &source);
+	let mut files = fs::read_dir(&transfers).unwrap();
+	let archive = files.next().unwrap().unwrap();
+	assert!(files.next().is_none());
+	let name = archive.file_name();
+	let name = name.to_str().unwrap();
+	assert!(name.starts_with("slot-2-") && name.ends_with(".courtyard-save.json"));
+	let archive = archive.path();
+	let archive_bytes = fs::read(&archive).unwrap();
+
+	let target = destination.0.join(CHAPTER_PROFILE);
+	let imported = target.join("slot-2.json");
+	assert!(!imported.exists());
+	run("chapters-transfer-menu-import", &destination);
+	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
+	run("chapters-transfer-continue", &destination);
+	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
+	for name in ["slot.json", "slot-2.previous.json", "slot-3.json"] {
+		assert!(!target.join(name).exists(), "unexpected file {name}");
+	}
+	assert_eq!(fs::read(archive).unwrap(), archive_bytes);
+	assert_eq!(saved_slots.map(|path| fs::read(path).unwrap()), saved_bytes);
+}
 
 #[test]
 #[ignore = "requires native Vulkan and a copied chaptered Player in GAME_ENGINE_QA_TRANSFER_PLAYER"]
@@ -116,6 +166,55 @@ fn packaged_checkpoint_transfer_spans_profiles() {
 	assert!(!target_dir.join("slot-3.json").exists());
 	assert_eq!(fs::read(source_dir.join("slot-2.json")).unwrap(), garden);
 	assert_eq!(fs::read(source_dir.join("slot.json")).unwrap(), courtyard);
+}
+
+pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
+	let profile = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+	let directory = profile.parent().unwrap().join("transfers");
+	app.transfer_directory = Some(directory.clone());
+	match phase {
+		"chapters-transfer-menu-export" => {
+			open_slot_actions(app, true, SaveSlot::Two);
+			menu_keys(app, &[Key::ArrowUp]);
+			assert_menu_rows(app, &["> Export checkpoint file"]);
+			assert!(fs::read_dir(&directory).unwrap().next().is_none());
+			menu_keys(app, &[Key::Enter]);
+			assert_menu_rows(app, &["Exported slot-2-"]);
+			assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+		}
+		"chapters-transfer-menu-import" => {
+			let slot = profile.join(CHAPTER_PROFILE).join("slot-2.json");
+			open_slot_actions(app, false, SaveSlot::Two);
+			menu_keys(app, &[Key::ArrowUp]);
+			assert_menu_rows(app, &["> Import checkpoint file"]);
+			menu_keys(app, &[Key::Enter]);
+			assert_menu_rows(app, &["From transfers", "> Transfer 01: slot-2-"]);
+			menu_keys(app, &[Key::Enter]);
+			assert_menu_rows(
+				app,
+				&["Transfer 01:", "Chapter: Garden", "Checkpoint:", "> Cancel"],
+			);
+			assert!(!slot.exists());
+			menu_keys(app, &[Key::Enter]);
+			assert_menu_rows(app, &["From transfers", "> Transfer 01: slot-2-"]);
+			assert!(!slot.exists());
+			menu_keys(app, &[Key::Enter, Key::ArrowRight]);
+			assert_menu_rows(app, &["> Import checkpoint"]);
+			assert!(!slot.exists());
+			menu_keys(app, &[Key::Enter]);
+			assert_menu_rows(app, &["> Continue (Ready)"]);
+			assert!(slot.is_file());
+		}
+		_ => panic!("unknown checkpoint transfer phase {phase}"),
+	}
+	close_checkpoint_menu(app);
+}
+
+fn assert_menu_rows(app: &GameApp, expected: &[&str]) {
+	let rows = app.player_controls.rows().unwrap().join("\n");
+	for text in expected {
+		assert!(rows.contains(text), "expected {text:?} in:\n{rows}");
+	}
 }
 
 pub(super) fn continue_imported_garden(app: &mut GameApp) {

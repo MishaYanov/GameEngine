@@ -261,14 +261,19 @@ impl ApplicationHandler for NativePhase {
 			"chapters-transfer-continue" => {
 				checkpoint_transfer_native::continue_imported_garden(&mut app)
 			}
+			"chapters-transfer-menu-export" | "chapters-transfer-menu-import" => {
+				checkpoint_transfer_native::run_menu_phase(&mut app, &self.phase)
+			}
 			"chapters-continue" => continue_chapter_slots(&mut app, false),
 			"chapters-recover" => continue_chapter_slots(&mut app, true),
 			"controller-menu-save" | "controller-menu-continue" => {
 				super::controller_menu_native_tests::run_phase(&mut app, &self.phase)
 			}
-			"trace-remap" | "trace-record" => {
-				super::playtrace_native_tests::run_phase(&mut app, &self.phase)
-			}
+			"trace-remap"
+			| "trace-record"
+			| "trace-keyboard-remap"
+			| "trace-keyboard-verify"
+			| "trace-keyboard-record" => super::playtrace_native_tests::run_phase(&mut app, &self.phase),
 			_ => panic!("Unknown checkpoint verification phase"),
 		}
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);

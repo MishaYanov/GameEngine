@@ -122,6 +122,31 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 	(fixture, project, second)
 }
 
+#[test]
+fn scene_warming_rejects_an_old_workspace_with_the_same_revision() {
+	let (previous_fixture, _, second) = two_scene_project();
+	let (current_fixture, _, _) = two_scene_project();
+	let previous = previous_fixture.open();
+	let mut current = current_fixture.open();
+	let revision = current.backend.session().revision();
+	assert_eq!(previous.backend.session().revision(), revision);
+	assert_ne!(previous.generation, current.generation);
+
+	assert!(current
+		.warm_scene(previous.generation, revision, Some(second.clone()))
+		.is_err());
+	assert!(!current.scene_warming.is_requested());
+	current
+		.warm_scene(current.generation, revision, Some(second))
+		.unwrap();
+	assert!(current
+		.warm_scene(previous.generation, revision, None)
+		.is_err());
+	current
+		.warm_scene(current.generation, revision, None)
+		.unwrap();
+}
+
 fn assert_missing_manifest_reload_preserves_edits(workspace: &mut EditorWorkspace) {
 	let original_scene = workspace.backend.session().authored_document();
 	let original_project = workspace.backend.session().project().clone();
@@ -715,4 +740,138 @@ fn campaign_authoring_applies_one_undoable_route_and_roundtrips_through_staging(
 		reopened.backend.play_status().unwrap().scene_id,
 		route.chapters[0].course_scene
 	);
+}
+
+#[test]
+fn campaign_diagnostics_read_unsaved_scenes_in_draft_order_without_an_edit() {
+	use runtime::scene_data::ColliderData;
+	let (fixture, manifest, mut workspace, route) = campaign_workspace();
+	let garden = SceneId::new("garden").unwrap();
+	let courtyard = SceneId::new("courtyard").unwrap();
+	let edit_trigger =
+		|workspace: &mut EditorWorkspace, scene: &SceneId, key: &str, enabled: bool| {
+			let doc = workspace.backend.session().scene_document(scene).unwrap();
+			let mut collider = doc
+				.entities
+				.iter()
+				.find(|entity| entity.key.as_str() == key)
+				.unwrap()
+				.collider
+				.clone()
+				.unwrap();
+			match &mut collider {
+				ColliderData::Box { interaction, .. }
+				| ColliderData::Sphere { interaction, .. } => {
+					interaction.sensor = enabled;
+				}
+			}
+			run(
+				workspace,
+				Command::SetCollider {
+					key: key.into(),
+					collider: Some(collider),
+				},
+			);
+		};
+	let select = |workspace: &mut EditorWorkspace, id: &SceneId| {
+		run(
+			workspace,
+			Command::SwitchScene {
+				scene_id: id.clone(),
+			},
+		);
+	};
+	let run_check = |workspace: &EditorWorkspace| {
+		let revision = workspace.backend.session().revision();
+		let generation = workspace.campaign_generation(revision).unwrap();
+		workspace
+			.capture_campaign_check(generation, revision, route.clone())
+			.unwrap()
+			.diagnose()
+	};
+
+	edit_trigger(&mut workspace, &courtyard, "courtyard-key-trigger", false);
+	select(&mut workspace, &garden);
+	edit_trigger(&mut workspace, &garden, "garden-exit-trigger", false);
+	select(&mut workspace, &courtyard);
+	let before = workspace.backend.snapshot().unwrap();
+	let report = workspace
+		.accept_campaign_diagnostics(run_check(&workspace))
+		.unwrap();
+	assert_eq!(report.revision, before.revision);
+	assert_eq!(report.issues.len(), 2);
+	assert_eq!(report.issues[0].scene_id.as_ref(), Some(&courtyard));
+	assert!(report.issues[0].message.contains("Key trigger"));
+	assert_eq!(report.issues[1].scene_id.as_ref(), Some(&garden));
+	assert_eq!(
+		report.issues[1].message,
+		"Exit trigger needs an enabled sensor collider"
+	);
+	assert_eq!(
+		serde_json::to_value(&before).unwrap(),
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+	);
+
+	let reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| (),
+	)
+		.unwrap();
+	assert_eq!(
+		reopened
+			.accept_campaign_diagnostics(run_check(&workspace))
+			.unwrap_err()
+			.code,
+		"conflict"
+	);
+
+	select(&mut workspace, &garden);
+	edit_trigger(&mut workspace, &garden, "garden-exit-trigger", true);
+	assert_eq!(
+		workspace
+			.accept_campaign_diagnostics(report)
+			.unwrap_err()
+			.code,
+		"conflict"
+	);
+	let only_courtyard = run_check(&workspace);
+	assert_eq!(only_courtyard.issues.len(), 1);
+	assert_eq!(only_courtyard.issues[0].scene_id.as_ref(), Some(&courtyard));
+	select(&mut workspace, &courtyard);
+	edit_trigger(&mut workspace, &courtyard, "courtyard-key-trigger", true);
+	assert!(workspace
+		.accept_campaign_diagnostics(run_check(&workspace))
+		.unwrap()
+		.issues
+		.is_empty());
+
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.campaign_generation(revision).unwrap();
+	let mut incomplete = route.clone();
+	incomplete.chapters.pop();
+	let project_issue = workspace
+		.capture_campaign_check(generation, revision, incomplete)
+		.unwrap()
+		.diagnose();
+	assert_eq!(project_issue.issues.len(), 1);
+	assert!(project_issue.issues[0].scene_id.is_none());
+
+	let mut repeated = route;
+	repeated.chapters[1].course_scene = courtyard.clone();
+	let scene_issue = workspace
+		.capture_campaign_check(generation, revision, repeated)
+		.unwrap()
+		.diagnose();
+	assert_eq!(scene_issue.issues.len(), 1);
+	assert_eq!(scene_issue.issues[0].scene_id.as_ref(), Some(&courtyard));
+	assert!(scene_issue.issues[0]
+		.message
+		.contains("Choose this Course only once"));
+
+	workspace.save_all(revision).unwrap();
+	let project = runtime::project::ProjectData::load(&manifest).unwrap();
+	let destination = fixture.0.parent().unwrap().join("repaired-stage");
+	fs::create_dir(&destination).unwrap();
+	let stage = compiler::prepare_project(&project, &fixture.0).unwrap();
+	assert!(compiler::stage_prepared_project(&stage, destination.to_str().unwrap()).is_ok());
 }

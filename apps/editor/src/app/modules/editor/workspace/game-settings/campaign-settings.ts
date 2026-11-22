@@ -13,10 +13,12 @@ import {
     viewChildren,
 } from '@angular/core';
 import {applyEach, form, FormField, maxLength} from '@angular/forms/signals';
-import type {SceneId} from '../../../../core/editor/editor.models';
+import type {CampaignDiagnosticReport, SceneId} from '../../../../core/editor/editor.models';
 import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
+import {SceneSwitchService} from '../scene-actions/scene-switch.service';
+import {CampaignDiagnostics} from './campaign-diagnostics';
 import {
     campaignDefinition,
     type CampaignDraft,
@@ -33,9 +35,24 @@ interface ReviewedCampaign {
     readonly signature: string;
 }
 
+interface DiagnosticRequest {
+    readonly context: ReviewedCampaign;
+    readonly draft: CampaignDraft;
+}
+
+interface CheckedCampaign {
+    readonly request: DiagnosticRequest;
+    readonly report: CampaignDiagnosticReport;
+}
+
+interface SceneInspection {
+    readonly check: CheckedCampaign;
+    readonly sceneId: SceneId;
+}
+
 @Component({
     selector: 'editor-campaign-settings',
-    imports: [EditorDialog, FormField],
+    imports: [CampaignDiagnostics, EditorDialog, FormField],
     templateUrl: './campaign-settings.html',
     styleUrls: ['./settings.scss', './campaign-settings.scss'],
 })
@@ -45,12 +62,19 @@ export class CampaignSettings {
 
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService, {optional: true});
+    private readonly sceneSwitch = inject(SceneSwitchService, {optional: true});
     private readonly injector = inject(Injector);
     private readonly destroyRef = inject(DestroyRef);
     private readonly chapterInputs = viewChildren<ElementRef<HTMLInputElement>>('chapterId');
     private readonly finishSelect = viewChild<ElementRef<HTMLSelectElement>>('finishSelect');
     private readonly failureMessage = viewChild<ElementRef<HTMLElement>>('failureMessage');
+    private readonly checkButton = viewChild<ElementRef<HTMLButtonElement>>('checkButton');
+    private readonly keepDraft = viewChild<ElementRef<HTMLButtonElement>>('keepDraft');
     private readonly context = signal<ReviewedCampaign | null>(null);
+    private readonly checkingRequest = signal<DiagnosticRequest | null>(null);
+    private readonly checked = signal<CheckedCampaign | null>(null);
+    private readonly inspection = signal<SceneInspection | null>(null);
+    private inspectAfterClose: SceneInspection | null = null;
     private nextRow = 0;
 
     protected readonly open = signal(false);
@@ -77,6 +101,18 @@ export class CampaignSettings {
         JSON.stringify(campaignDefinition(this.draft())) !== this.context()?.signature);
     protected readonly currentStartup = computed(() => this.editor.snapshot()?.project.startup_scene_id);
     protected readonly chosenStartup = computed(() => this.draft().chapters[0]?.course_scene);
+    protected readonly checking = computed(() => this.checkingRequest() !== null);
+    protected readonly diagnostics = computed(() => {
+        const checked = this.checked();
+        return checked && this.currentDiagnosticRequest(checked.request) ? checked : null;
+    });
+    protected readonly activeScene = computed(() => this.editor.snapshot()?.active_scene_id);
+    protected readonly sceneCatalog = computed(() => this.editor.snapshot()?.scenes ?? []);
+    protected readonly canInspect = computed(() => this.sceneSwitch?.canSwitch() ?? false);
+    protected readonly inspectChoice = computed(() => {
+        const next = this.inspection();
+        return next?.check === this.diagnostics() ? next : null;
+    });
 
     constructor() {
         effect(() => {
@@ -151,9 +187,76 @@ export class CampaignSettings {
         return scene ? scene.asset_path + ' (' + scene.id + ')' : sceneId;
     }
 
+    protected async checkCampaign(): Promise<void> {
+        const context = this.context();
+        if (!context || !this.open() || !this.available() || this.checking() || this.validation()) return;
+        const request = {context, draft: this.draft()};
+        if (!this.currentDiagnosticRequest(request)) {
+            this.showFailure('The workspace changed. Reopen Campaign Settings to check the current revision.');
+            return;
+        }
+        this.checkingRequest.set(request);
+        this.checked.set(null);
+        this.inspection.set(null);
+        this.error.set(null);
+        this.message.set(null);
+        try {
+            const report = await this.editor.diagnoseCampaign(
+                campaignDefinition(request.draft),
+                context.generation,
+                context.nativeGeneration,
+                context.revision,
+            );
+            if (this.checkingRequest() === request && this.currentDiagnosticRequest(request) &&
+                report.workspace_generation === context.nativeGeneration && report.revision === context.revision) {
+                this.checked.set({request, report});
+            }
+        } catch (cause) {
+            if (this.checkingRequest() === request && this.currentDiagnosticRequest(request)) {
+                this.showFailure(cause);
+            }
+        } finally {
+            if (!this.destroyRef.destroyed && this.checkingRequest() === request) this.checkingRequest.set(null);
+        }
+    }
+
+    protected inspectScene(sceneId: SceneId): void {
+        const check = this.diagnostics();
+        if (!check || !this.canInspectScene(sceneId) || !check.report.issues.some(issue => issue.scene_id === sceneId)) return;
+        const next = {check, sceneId};
+        if (this.dirty()) {
+            this.inspection.set(next);
+            this.focusWhileOpen(() => this.keepDraft()?.nativeElement);
+        } else this.closeForInspection(next);
+    }
+
+    protected cancelInspection(): void {
+        this.inspection.set(null);
+        this.focusWhileOpen(() => this.checkButton()?.nativeElement);
+    }
+
+    protected confirmInspection(): void {
+        const next = this.inspectChoice();
+        if (next && this.canInspectScene(next.sceneId)) this.closeForInspection(next);
+    }
+
+    protected dialogClosed(): void {
+        const next = this.inspectAfterClose;
+        this.inspectAfterClose = null;
+        this.inspection.set(null);
+        this.checked.set(null);
+        this.checkingRequest.set(null);
+        this.context.set(null);
+        if (next && this.currentWorkspace(next.check.request.context.generation) &&
+            this.editor.snapshot()?.revision === next.check.request.context.revision &&
+            this.canInspectScene(next.sceneId)) {
+            void this.sceneSwitch?.request(next.sceneId);
+        }
+    }
+
     protected async apply(): Promise<void> {
         const context = this.context();
-        if (!context || !this.open() || !this.available() || this.validation() || !this.dirty()) return;
+        if (!context || !this.open() || !this.available() || this.checking() || this.validation() || !this.dirty()) return;
         const definition = campaignDefinition(this.draft());
         this.pending.set(true);
         this.error.set(null);
@@ -184,6 +287,20 @@ export class CampaignSettings {
         } finally {
             if (!this.destroyRef.destroyed) this.pending.set(false);
         }
+    }
+
+    private currentDiagnosticRequest(request: DiagnosticRequest): boolean {
+        return this.open() && this.context() === request.context && this.draft() === request.draft &&
+            this.currentWorkspace(request.context.generation) && this.editor.snapshot()?.revision === request.context.revision;
+    }
+
+    private canInspectScene(sceneId: SceneId): boolean {
+        return this.canInspect() && sceneId !== this.activeScene() && this.sceneCatalog().some(scene => scene.id === sceneId);
+    }
+
+    private closeForInspection(next: SceneInspection): void {
+        this.inspectAfterClose = next;
+        this.open.set(false);
     }
 
     private currentWorkspace(generation: number): boolean {

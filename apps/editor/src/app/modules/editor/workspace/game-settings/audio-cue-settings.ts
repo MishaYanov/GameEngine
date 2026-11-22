@@ -1,5 +1,5 @@
 import {Component, computed, DestroyRef, effect, inject, input, signal} from '@angular/core';
-import {form, FormField, maxLength} from '@angular/forms/signals';
+import {form, FormField, max, maxLength, min} from '@angular/forms/signals';
 import {
     type FeedbackCueDraft,
     type FeedbackCueEvent,
@@ -9,7 +9,7 @@ import {
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
-import {CuePreview} from './cue-preview';
+import {auditionGain, CuePreview, type AuditionMix} from './cue-preview';
 
 type CuePaths = Record<FeedbackCueEvent, string>;
 
@@ -22,6 +22,7 @@ interface CueRow {
 
 interface Audition extends CueRow {
     readonly path: string;
+    readonly mix: AuditionMix;
 }
 
 interface DialogScope {
@@ -33,6 +34,8 @@ const cueRows: readonly CueRow[] = [
     {event: 'gate_opened', label: 'Gate opened'},
     {event: 'run_completed', label: 'Run completed'},
 ];
+
+const defaultPreviewMix = {levelPercent: 100, muted: false} satisfies AuditionMix;
 
 function cuePaths(catalog?: FeedbackCueDraft): CuePaths {
     const paths: CuePaths = {key_collected: '', gate_opened: '', run_completed: ''};
@@ -56,6 +59,7 @@ export class AudioCueSettings {
     private readonly catalog = signal<FeedbackCueDraft | null>(null);
     private readonly paths = signal(cuePaths());
     private readonly importDraft = signal<{ slug: string; event: FeedbackCueEvent }>({slug: '', event: 'gate_opened'});
+    protected readonly previewMix = signal<AuditionMix>(defaultPreviewMix);
 
     protected readonly rows = cueRows;
     protected readonly descriptionPrefix = 'feedback-audio-' + nextAudioDialogId++;
@@ -63,6 +67,10 @@ export class AudioCueSettings {
         for (const {event} of cueRows) maxLength(path[event], 46);
     });
     protected readonly imports = form(this.importDraft, path => maxLength(path.slug, 32));
+    protected readonly previewFields = form(this.previewMix, path => {
+        min(path.levelPercent, 0);
+        max(path.levelPercent, 100);
+    });
     protected readonly open = computed(() => this.scope() !== null);
     protected readonly supported = computed(() => this.editor.snapshot()?.project.gameplay_module === 'courtyard_run');
     protected readonly available = computed(() => this.supported() && this.editor.nativeAvailable && this.editMode() &&
@@ -177,13 +185,16 @@ export class AudioCueSettings {
         if (!scope || !catalog || !this.canPreview(row.event) || !this.active(scope)) return;
         // Use a fresh request identity even when replaying the same cue.
         const path = this.paths()[row.event];
-        const request = {...row, path};
+        const mix = this.previewMix();
+        const request = {...row, path, mix};
         this.audition.set(request);
         this.error.set(null);
+        this.status.set(auditionGain(mix) === 0 ? 'Preview skipped at zero volume.' : null);
         const current = () => this.active(scope) && this.audition() === request && !this.auditionChanged();
         try {
             await this.player.play(
                 () => this.editor.previewFeedbackCue(catalog.workspace_generation, path, scope.clientGeneration),
+                mix,
                 current,
                 () => {
                     if (current()) this.audition.set(null);
@@ -209,6 +220,7 @@ export class AudioCueSettings {
         this.catalog.set(null);
         this.paths.set(cuePaths());
         this.importDraft.set({slug: '', event: 'gate_opened'});
+        this.previewMix.set(defaultPreviewMix);
         this.pending.set(false);
         this.publishing.set(false);
         this.error.set(null);
@@ -222,7 +234,10 @@ export class AudioCueSettings {
 
     private auditionChanged(): boolean {
         const selected = this.audition();
-        return selected !== null && this.paths()[selected.event] !== selected.path;
+        if (!selected) return false;
+        const mix = this.previewMix();
+        return this.paths()[selected.event] !== selected.path ||
+            mix.levelPercent !== selected.mix.levelPercent || mix.muted !== selected.mix.muted;
     }
 
     private editMode(): boolean {

@@ -11,10 +11,14 @@ use crate::{
 mod document;
 mod native;
 pub(crate) mod paths;
+mod references;
 pub use paths::resolve_confined_scene_path;
 
 pub use document::{load_data, replace_bytes, save_data, save_new_bytes, save_project_data};
-pub use native::{instantiate, instantiate_cancellable, instantiate_with_progress};
+pub use native::{
+	instantiate, instantiate_cancellable, instantiate_with_progress, instantiate_with_references,
+};
+pub use references::PreparedSceneReferences;
 
 pub struct LoadedScene {
 	pub scene: Scene,

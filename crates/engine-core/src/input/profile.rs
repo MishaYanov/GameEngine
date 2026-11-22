@@ -254,7 +254,8 @@ impl InputProfile {
 	}
 }
 
-pub(crate) fn valid_game_action_id(value: &str) -> bool {
+/// Validates the action ID grammar shared by authored profiles and local overrides.
+pub fn valid_game_action_id(value: &str) -> bool {
 	let mut bytes = value.bytes();
 	value.len() <= 32
 		&& bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())

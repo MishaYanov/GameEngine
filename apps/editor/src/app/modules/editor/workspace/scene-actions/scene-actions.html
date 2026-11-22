@@ -3,12 +3,20 @@
         <label>Scene
             <select #scene (change)="switchScene(scene)" [disabled]="!available()">
                 @for (entry of snapshot.scenes; track entry.id) {
-                    <option [selected]="entry.id === snapshot.active_scene_id" [value]="entry.id">
+                    <option [selected]="entry.id === (warmTarget() ?? snapshot.active_scene_id)" [value]="entry.id">
                         {{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}
                     </option>
                 }
             </select>
         </label>
+        <button (click)="toggleWarming()" [attr.aria-pressed]="warming()" [disabled]="!prepareAvailable()"
+                type="button">Prepare scene
+        </button>
+        @if (warming()) {
+            <button (click)="openPreparedScene()" [disabled]="!available() || warmTarget() === null"
+                    type="button">Open selected scene
+            </button>
+        }
         @if (snapshot.project.startup_scene_id === snapshot.active_scene_id) {
             <span class="startup">Startup scene</span>
         } @else {

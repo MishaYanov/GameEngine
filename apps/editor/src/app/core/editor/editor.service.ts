@@ -32,6 +32,7 @@ import type {
     AssetOperation,
     BuildLaunchResult,
     CampaignDefinition,
+    CampaignDiagnosticReport,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -196,6 +197,10 @@ export class EditorService {
         });
     }
 
+    warmScene(sceneId: SceneId | null, expectedRevision: number, expectedGeneration: number): Promise<void> {
+        return this.native<void>('editor_warm_scene', {sceneId, expectedRevision, expectedGeneration});
+    }
+
     switchScene(sceneId: SceneId): Promise<EditorSnapshot> {
         return this.execute({type: 'switch_scene', scene_id: sceneId});
     }
@@ -308,6 +313,23 @@ export class EditorService {
         return this.enqueue('editor_campaign_generation', () => {
             this.requireGeneration(expectedGeneration);
             return this.native<number>('editor_campaign_generation', {expectedRevision});
+        }, false, expectedGeneration);
+    }
+
+    diagnoseCampaign(
+        campaign: CampaignDefinition,
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<CampaignDiagnosticReport> {
+        const operation = 'editor_diagnose_campaign';
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(expectedGeneration);
+            const report = await this.native<CampaignDiagnosticReport>(operation, {
+                campaign, expectedGeneration: expectedNativeGeneration, expectedRevision,
+            });
+            this.requireGeneration(expectedGeneration);
+            return report;
         }, false, expectedGeneration);
     }
 

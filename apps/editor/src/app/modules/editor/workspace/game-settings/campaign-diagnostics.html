@@ -1,0 +1,17 @@
+<p role="status">{{ summary() }}</p>
+@if (entries().length) {
+    <ul aria-label="Campaign issues">
+        @for (issue of entries(); track issue.scene_id) {
+            <li>
+                <strong>{{ issue.title }}</strong>
+                <p>{{ issue.message }}</p>
+                @if (issue.destination; as scene) {
+                    <button (click)="inspect.emit(scene)" [attr.aria-label]="'Inspect Scene ' + issue.title"
+                            type="button">
+                        Inspect Scene
+                    </button>
+                }
+            </li>
+        }
+    </ul>
+}

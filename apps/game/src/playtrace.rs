@@ -38,7 +38,7 @@ impl PlayTrace {
 		effective: &InputProfile,
 	) -> Result<Self, String> {
 		if authored != effective {
-			return Err("Playtrace requires the authored keyboard profile".into());
+			return Err("Playtrace requires the authored keyboard profile. Restore Keyboard defaults and apply Project defaults for Movement.".into());
 		}
 		authored.validate()?;
 		check_new_output(&path)?;

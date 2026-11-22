@@ -3,8 +3,8 @@
     <p class="error" role="alert">{{ failure }}</p>
 }
 
-<editor-dialog [(open)]="open" [closeBlocked]="pending()" [config]="{width: '42rem'}" [renderFields]="false"
-               title="Campaign Settings">
+<editor-dialog (closed)="dialogClosed()" [(open)]="open" [closeBlocked]="pending()" [config]="{width: '42rem'}"
+               [renderFields]="false" title="Campaign Settings">
     <p>Use Interaction Settings to configure the Course and Finish roles. Order the courses here to connect their
         exits.</p>
     @if (chosenStartup(); as startup) {
@@ -73,7 +73,26 @@
     @if (message(); as text) {
         <p role="status">{{ text }}</p>
     }
-    <button (click)="apply()" [disabled]="!available() || !!validation() || !dirty()" dialog-actions type="button">
+    @if (checking()) {
+        <p role="status">Checking campaign…</p>
+    } @else if (diagnostics(); as checked) {
+        <editor-campaign-diagnostics (inspect)="inspectScene($event)" [activeScene]="activeScene()"
+                                     [canNavigate]="canInspect()" [issues]="checked.report.issues"
+                                     [scenes]="sceneCatalog()"/>
+    }
+    @if (inspectChoice(); as next) {
+        <section aria-label="Inspect campaign scene">
+            <p>Inspecting {{ sceneLabel(next.sceneId) }} closes Campaign Settings. Unapplied campaign changes will be
+                discarded.</p>
+            <button #keepDraft (click)="cancelInspection()" type="button">Keep Draft</button>
+            <button (click)="confirmInspection()" type="button">Discard Draft and Inspect</button>
+        </section>
+    }
+    <button #checkButton (click)="checkCampaign()" [disabled]="!available() || checking() || !!validation()"
+            dialog-actions type="button">Check Campaign
+    </button>
+    <button (click)="apply()" [disabled]="!available() || checking() || !!validation() || !dirty()" dialog-actions
+            type="button">
         Apply Campaign
     </button>
 </editor-dialog>

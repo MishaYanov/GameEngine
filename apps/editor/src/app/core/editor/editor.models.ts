@@ -45,6 +45,17 @@ export interface CampaignDefinition {
     readonly finish_scene: SceneId;
 }
 
+export interface CampaignDiagnostic {
+    readonly scene_id: SceneId | null;
+    readonly message: string;
+}
+
+export interface CampaignDiagnosticReport {
+    readonly workspace_generation: number;
+    readonly revision: number;
+    readonly issues: readonly CampaignDiagnostic[];
+}
+
 export interface ProjectData {
     readonly schema_version: 3;
     readonly name: string;

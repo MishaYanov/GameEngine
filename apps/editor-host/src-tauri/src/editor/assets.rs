@@ -304,6 +304,7 @@ impl EditorWorkspace {
 		Ok(used)
 	}
 	pub fn asset_published(&mut self) -> Result<EditorSnapshotDto, String> {
+		self.scene_warming.invalidate_assets();
 		self.metadata.clear();
 		if let Err(error) = self.jobs.advance_generation() {
 			engine_logger::error!(target: "editor", "Asset job generation reset failed after publication: {error}");

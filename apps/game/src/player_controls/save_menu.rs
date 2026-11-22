@@ -3,6 +3,10 @@ use courtyard_gameplay::checkpoint::{
 	ContinueAvailability, RestoreSource, SaveSlot, SlotGeneration, SlotInspection,
 };
 
+#[path = "transfer_menu.rs"]
+mod transfer_menu;
+use transfer_menu::{TransferAction, TransferMenu};
+
 #[derive(Clone, Copy)]
 pub(super) enum Intent {
 	Save,
@@ -11,6 +15,7 @@ pub(super) enum Intent {
 
 enum Page {
 	Slots,
+	Transfer(Box<TransferMenu>),
 	Actions {
 		focus: usize,
 	},
@@ -23,6 +28,7 @@ enum Page {
 
 pub(super) struct SaveMenu {
 	intent: Intent,
+	transfer_available: bool,
 	selected: usize,
 	slots: [SlotInspection; 3],
 	page: Page,
@@ -32,6 +38,7 @@ impl SaveMenu {
 	pub(super) fn new(app: &GameApp, intent: Intent) -> Self {
 		Self {
 			intent,
+			transfer_available: app.installed_project,
 			selected: 0,
 			slots: app.checkpoint_slots(),
 			page: Page::Slots,
@@ -66,7 +73,7 @@ impl SaveMenu {
 				self.selected,
 			),
 			Page::Actions { focus } => {
-				let rows = match self.intent {
+				let mut rows = match self.intent {
 					Intent::Save => vec![
 						(if slot.generation.is_some_and(SlotGeneration::can_save) {
 							"Save checkpoint"
@@ -89,8 +96,15 @@ impl SaveMenu {
 						rows
 					}
 				};
+				if self.transfer_available {
+					rows.push(match self.intent {
+						Intent::Save => "Export checkpoint file".into(),
+						Intent::Continue => "Import checkpoint file".into(),
+					});
+				}
 				(selected.label().into(), rows, *focus)
 			}
+			Page::Transfer(transfer) => transfer.rows(),
 			Page::Confirm { replace, .. } => (
 				format!("Replace {}?", selected.label()),
 				vec!["Cancel".into(), "Replace save".into()],
@@ -121,8 +135,27 @@ impl SaveMenu {
 				let back = if has_recovery { 2 } else { 1 };
 				match key {
 					Key::Escape => self.page = Page::Slots,
-					Key::ArrowUp | Key::ArrowDown => *focus = advance_row(*focus, back + 1, key),
+					Key::ArrowUp | Key::ArrowDown => {
+						*focus = advance_row(
+							*focus,
+							back + 1 + usize::from(self.transfer_available),
+							key,
+						);
+					}
 					Key::Enter if *focus == back => self.page = Page::Slots,
+					Key::Enter if *focus > back && self.transfer_available => match self.intent {
+						Intent::Save => {
+							let result = app.export_checkpoint_transfer(slot);
+							self.update(app, result);
+						}
+						Intent::Continue => match TransferMenu::new(app, slot) {
+							Ok(transfer) => {
+								app.player_controls.message = None;
+								self.page = Page::Transfer(Box::new(transfer));
+							}
+							Err(error) => app.player_controls.message = Some(error),
+						},
+					},
 					Key::Enter => {
 						let Some(generation) = snapshot.generation else {
 							app.player_controls.message = Some("Save storage unavailable".into());
@@ -167,6 +200,15 @@ impl SaveMenu {
 					_ => {}
 				}
 			}
+			Page::Transfer(transfer) => match transfer.key(app, key) {
+				TransferAction::Stay => {}
+				TransferAction::Back => {
+					app.player_controls.message = None;
+					let focus = 2 + usize::from(snapshot.recovery_checkpoint_id.is_some());
+					self.page = Page::Actions { focus };
+				}
+				TransferAction::Imported(message) => self.update(app, Ok(message)),
+			},
 			Page::Confirm {
 				replace,
 				generation,

@@ -1,8 +1,12 @@
 //! Installed Player Controls and input presentation.
 
+mod action_keys;
+mod audio;
 #[cfg(any(windows, test))]
 mod controller_menu_input;
 mod display;
+pub(super) mod input_labels;
+mod keyboard_menu;
 mod preferences;
 mod save_menu;
 
@@ -19,7 +23,10 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use super::GameApp;
+use action_keys::ActionKeyOverride;
+use audio::{AudioAction, AudioMenu, FeedbackMix};
 use display::{DisplayAction, DisplayMenu, DisplaySettings};
+use keyboard_menu::{KeyboardAction, KeyboardMenu};
 use preferences::Preferences;
 use save_menu::{Intent, SaveMenu};
 
@@ -47,21 +54,21 @@ impl Preset {
 		choices[(index + if forward { 1 } else { 2 }) % choices.len()]
 	}
 
-	fn resolve(self, authored: Option<&InputProfile>) -> Result<InputProfile, String> {
-		let mut profile = authored.cloned().unwrap_or_default();
-		let previous = profile.movement;
-		profile.movement = match self {
-			Self::Project => previous,
+	fn movement(self, default: MovementBindings) -> MovementBindings {
+		match self {
+			Self::Project => default,
 			Self::Arrows => MovementBindings::ARROWS,
 			Self::Wasd => MovementBindings::WASD,
-		};
-		for action in &profile.actions {
-			if profile.movement.contains_key(action.key) && !previous.contains_key(action.key) {
-				return Err(format!("Key {:?} is assigned to {}", action.key, action.id));
-			}
 		}
-		validate_profile(&profile)?;
-		Ok(profile)
+	}
+
+	#[cfg(test)]
+	fn resolve(self, authored: Option<&InputProfile>) -> Result<InputProfile, String> {
+		ControlsSettings {
+			movement: self,
+			..ControlsSettings::default()
+		}
+			.resolve_keyboard(authored)
 	}
 }
 
@@ -73,6 +80,8 @@ enum Row {
 	Save,
 	Continue,
 	Controller,
+	Keyboard,
+	Audio,
 	Display,
 	Back,
 }
@@ -86,6 +95,8 @@ impl Row {
 				Self::Save,
 				Self::Continue,
 				Self::Controller,
+				Self::Keyboard,
+				Self::Audio,
 				Self::Display,
 				Self::Back,
 			],
@@ -93,6 +104,8 @@ impl Row {
 				Self::Layout,
 				Self::Apply,
 				Self::Controller,
+				Self::Keyboard,
+				Self::Audio,
 				Self::Display,
 				Self::Back,
 			],
@@ -106,11 +119,25 @@ impl Row {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ControlsSettings {
 	movement: Preset,
 	controller: ControllerBindings,
 	display: DisplaySettings,
+	actions: Vec<ActionKeyOverride>,
+	audio: FeedbackMix,
+}
+
+impl ControlsSettings {
+	fn resolve_keyboard(&self, authored: Option<&InputProfile>) -> Result<InputProfile, String> {
+		let fallback = InputProfile::default();
+		let authored = authored.unwrap_or(&fallback);
+		action_keys::resolve(
+			authored,
+			self.movement.movement(authored.movement),
+			&self.actions,
+		)
+	}
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -148,6 +175,8 @@ enum Page {
 		draft: ControllerBindings,
 	},
 	Display(DisplayMenu),
+	Keyboard(KeyboardMenu),
+	Audio(AudioMenu),
 	Saves(SaveMenu),
 }
 
@@ -168,6 +197,7 @@ pub(super) struct PlayerControls {
 	controller_menu_input: ControllerMenuInput,
 	preferences: Option<Preferences>,
 	override_active: bool,
+	keyboard_problem: Option<String>,
 	message: Option<String>,
 }
 
@@ -187,21 +217,7 @@ impl PlayerControls {
 				let choice = preferences.load();
 				self.preferences = Some(preferences);
 				match choice {
-					Ok(settings) => {
-						self.applied.controller = settings.controller;
-						self.applied.display = settings.display;
-						if override_active {
-							self.applied.movement = settings.movement;
-							return None;
-						}
-						match settings.movement.resolve(authored) {
-							Ok(profile) => {
-								self.applied.movement = settings.movement;
-								return (settings.movement != Preset::Project).then_some(profile);
-							}
-							Err(error) => self.message = Some(error),
-						}
-					}
+					Ok(settings) => return self.restore_settings(settings, authored),
 					Err(error) => self.message = Some(error),
 				}
 			}
@@ -209,6 +225,47 @@ impl PlayerControls {
 		}
 		// A rejected stored preference leaves the original file available.
 		None
+	}
+
+	fn restore_settings(
+		&mut self,
+		settings: ControlsSettings,
+		authored: Option<&InputProfile>,
+	) -> Option<InputProfile> {
+		self.applied = settings;
+		self.keyboard_problem = None;
+		if self.override_active {
+			return None;
+		}
+		match self.applied.resolve_keyboard(authored) {
+			Ok(profile) => {
+				let defaults = InputProfile::default();
+				(&profile != authored.unwrap_or(&defaults)).then_some(profile)
+			}
+			Err(error) => {
+				self.message = Some("Keyboard uses project defaults. Check Keyboard.".into());
+				self.keyboard_problem = Some(error);
+				None
+			}
+		}
+	}
+
+	fn captures_action_key(&self) -> bool {
+		matches!(
+			self.menu.as_ref().map(|menu| &menu.page),
+			Some(Page::Keyboard(menu)) if menu.captures_key()
+		)
+	}
+
+	pub(super) fn cancel_action_key_capture(&mut self) {
+		if let Some(Menu {
+			            page: Page::Keyboard(menu),
+			            ..
+		            }) = self.menu.as_mut()
+			&& menu.cancel_capture()
+		{
+			self.message = Some("Key capture cancelled".into());
+		}
 	}
 
 	pub(super) fn is_open(&self) -> bool {
@@ -221,6 +278,10 @@ impl PlayerControls {
 
 	pub(super) fn display(&self) -> DisplaySettings {
 		self.applied.display
+	}
+
+	pub(super) fn feedback_mix(&self) -> FeedbackMix {
+		self.applied.audio
 	}
 
 	pub(super) fn prompt_device(&self) -> PromptDevice {
@@ -268,13 +329,22 @@ impl PlayerControls {
 				*focus,
 			),
 			Page::Display(display) => display.rows(),
+			Page::Keyboard(keyboard) => keyboard.rows(columns),
+			Page::Audio(audio) => audio.rows(),
 			Page::Saves(saves) => saves.rows(),
 			Page::Main => self.main_rows(menu),
 		};
-		let help = self
-			.message
-			.as_deref()
-			.unwrap_or_else(|| self.menu_device.controls_help(columns));
+		let help = if self.captures_action_key() {
+			if columns >= 25 {
+				"Press a key. Esc/B cancels"
+			} else {
+				"Esc/B cancels"
+			}
+		} else {
+			self.message
+				.as_deref()
+				.unwrap_or_else(|| self.menu_device.controls_help(columns))
+		};
 		Some(focused_rows(title, actions, focus, help, capacity))
 	}
 
@@ -294,7 +364,9 @@ impl PlayerControls {
 				Row::Save => "Save checkpoint".into(),
 				Row::Continue => "Continue from slot".into(),
 				Row::Controller => "Controller".into(),
+				Row::Keyboard => "Keyboard".into(),
 				Row::Display => "Accessibility".into(),
+				Row::Audio => "Feedback Audio".into(),
 				Row::Back => "Back".into(),
 			})
 			.collect();
@@ -313,25 +385,44 @@ impl PlayerControls {
 		preset: Preset,
 		authored: Option<&InputProfile>,
 	) -> Result<InputProfile, String> {
-		let profile = preset.resolve(authored)?;
-		self.apply_settings(ControlsSettings {
-			movement: preset,
-			..self.applied
-		})?;
+		self.apply_keyboard_settings(
+			ControlsSettings {
+				movement: preset,
+				..self.applied.clone()
+			},
+			authored,
+		)
+	}
+
+	fn apply_keyboard_settings(
+		&mut self,
+		settings: ControlsSettings,
+		authored: Option<&InputProfile>,
+	) -> Result<InputProfile, String> {
+		let profile = settings.resolve_keyboard(authored)?;
+		self.apply_settings(settings)?;
+		self.keyboard_problem = None;
 		Ok(profile)
 	}
 
 	fn apply_controller(&mut self, controller: ControllerBindings) -> Result<(), String> {
 		self.apply_settings(ControlsSettings {
 			controller,
-			..self.applied
+			..self.applied.clone()
 		})
 	}
 
 	fn apply_display(&mut self, display: DisplaySettings) -> Result<(), String> {
 		self.apply_settings(ControlsSettings {
 			display,
-			..self.applied
+			..self.applied.clone()
+		})
+	}
+
+	fn apply_audio(&mut self, audio: FeedbackMix) -> Result<(), String> {
+		self.apply_settings(ControlsSettings {
+			audio: audio.validate()?,
+			..self.applied.clone()
 		})
 	}
 
@@ -340,7 +431,7 @@ impl PlayerControls {
 			.preferences
 			.as_ref()
 			.ok_or("Local controls storage is unavailable")?;
-		preferences.save(settings)?;
+		preferences.save(&settings)?;
 		self.applied = settings;
 		self.message = None;
 		Ok(())
@@ -364,11 +455,21 @@ impl GameApp {
 	}
 
 	fn handle_player_controls(&mut self, key: Key, device: PromptDevice) -> bool {
-		match key {
-			Key::Escape => {}
-			Key::Enter | Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
-			if self.player_controls.is_open() => {}
-			_ => return self.player_controls.is_open(),
+		if self.player_controls.captures_action_key() {
+			if device == PromptDevice::Controller && key != Key::Escape {
+				return false;
+			}
+			if device == PromptDevice::Keyboard {
+				self.input.press(key);
+				self.input.suppress_held();
+			}
+		} else {
+			match key {
+				Key::Escape => {}
+				Key::Enter | Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
+				if self.player_controls.is_open() => {}
+				_ => return self.player_controls.is_open(),
+			}
 		}
 		self.player_controls.menu_device = device;
 		let Some(mut menu) = self.player_controls.menu.take() else {
@@ -390,8 +491,20 @@ impl GameApp {
 				}
 				false
 			}
+			Page::Keyboard(keyboard) => {
+				if self.keyboard_menu_key(keyboard, key, device) {
+					menu.page = Page::Main;
+				}
+				false
+			}
 			Page::Display(display) => {
 				if self.display_menu_key(display, key) {
+					menu.page = Page::Main;
+				}
+				false
+			}
+			Page::Audio(audio) => {
+				if self.audio_menu_key(audio, key) {
 					menu.page = Page::Main;
 				}
 				false
@@ -462,11 +575,89 @@ impl GameApp {
 					draft: self.player_controls.controller(),
 				};
 			}
+			Key::Enter if matches!(menu.focus, Row::Keyboard) => {
+				let editable = !self.player_controls.override_active;
+				let keyboard = if editable {
+					KeyboardMenu::new(
+						self.project
+							.as_ref()
+							.and_then(|project| project.input_profile.as_ref()),
+						&self.player_controls.applied.actions,
+						true,
+					)
+				} else {
+					KeyboardMenu::new(self.effective_input_profile(), &[], false)
+				};
+				self.player_controls.message = if editable {
+					self.player_controls.keyboard_problem.clone()
+				} else {
+					Some("Launch profile override is active".into())
+				};
+				menu.page = Page::Keyboard(keyboard);
+			}
 			Key::Enter if matches!(menu.focus, Row::Display) => {
 				self.player_controls.message = None;
 				menu.page = Page::Display(DisplayMenu::new(self.player_controls.display()));
 			}
+			Key::Enter if matches!(menu.focus, Row::Audio) => {
+				self.player_controls.message = None;
+				menu.page = Page::Audio(AudioMenu::new(self.player_controls.feedback_mix()));
+			}
 			_ => {}
+		}
+		false
+	}
+
+	fn keyboard_menu_key(
+		&mut self,
+		menu: &mut KeyboardMenu,
+		key: Key,
+		device: PromptDevice,
+	) -> bool {
+		match menu.key(key, device) {
+			KeyboardAction::Stay | KeyboardAction::Started => {}
+			KeyboardAction::Cancelled => {
+				self.player_controls.message = Some("Key capture cancelled".into());
+			}
+			KeyboardAction::Back => {
+				self.player_controls.message = None;
+				return true;
+			}
+			KeyboardAction::Locked => {
+				self.player_controls.message = Some("Launch profile override is active".into());
+			}
+			KeyboardAction::Apply if self.play_trace.is_some() => {
+				self.player_controls.message =
+					Some("Keyboard cannot change during playtrace recording".into());
+			}
+			action @ (KeyboardAction::Edited | KeyboardAction::Apply) => {
+				let settings = ControlsSettings {
+					actions: menu.draft().to_vec(),
+					..self.player_controls.applied.clone()
+				};
+				let authored = self
+					.project
+					.as_ref()
+					.and_then(|project| project.input_profile.as_ref());
+				if matches!(action, KeyboardAction::Edited) {
+					self.player_controls.message = settings.resolve_keyboard(authored).err();
+				} else {
+					match self
+						.player_controls
+						.apply_keyboard_settings(settings, authored)
+					{
+						Ok(profile) => {
+							self.editor
+								.set_play_input_profile(profile.clone(), &mut self.input);
+							self.input_profile_override = Some(profile);
+							self.clear_controls_input();
+							self.player_controls.message = Some("Keyboard mapping saved".into());
+							return true;
+						}
+						Err(error) => self.player_controls.message = Some(error),
+					}
+				}
+			}
 		}
 		false
 	}
@@ -491,6 +682,36 @@ impl GameApp {
 					false
 				}
 			},
+		}
+	}
+
+	fn audio_menu_key(&mut self, menu: &mut AudioMenu, key: Key) -> bool {
+		match menu.key(key) {
+			AudioAction::Back => {
+				self.player_controls.message = None;
+				true
+			}
+			AudioAction::Stay => false,
+			AudioAction::Apply(mix) => {
+				// The running mix changes only once the matching local preferences are saved.
+				match self
+					.feedback_audio
+					.prepare_mix(mix.effective_percent())
+					.and_then(|prepared| {
+						self.player_controls.apply_audio(mix)?;
+						Ok(prepared)
+					}) {
+					Ok(prepared) => {
+						self.feedback_audio.commit_mix(prepared);
+						self.player_controls.message = Some("Feedback audio saved".into());
+						true
+					}
+					Err(error) => {
+						self.player_controls.message = Some(error);
+						false
+					}
+				}
+			}
 		}
 	}
 

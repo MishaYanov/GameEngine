@@ -7,6 +7,18 @@
         <p role="status">Working with project audio…</p>
     }
     <fieldset [disabled]="!ready()" class="fields">
+        <legend>Preview mix</legend>
+        <label>Preview volume
+            <input [attr.aria-valuetext]="previewMix().levelPercent + '%'" [formField]="previewFields.levelPercent"
+                   step="10" type="range">
+        </label>
+        <span aria-hidden="true">{{ previewMix().levelPercent }}%</span>
+        <label>
+            <input [formField]="previewFields.muted" type="checkbox">
+            Mute preview
+        </label>
+    </fieldset>
+    <fieldset [disabled]="!ready()" class="fields">
         <legend>Cue assignments</legend>
         @for (row of rows; track row.event) {
             <label>{{ row.label }}

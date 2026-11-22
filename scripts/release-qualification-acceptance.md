@@ -122,6 +122,22 @@ python -B scripts/review_candidate.py verify-decision $receipt $archive $gateDir
 The reviewer field records operator-entered text. Attach a previously verified reproduction with --playtest on all three
 commands when it belongs to the same candidate. The attachment leaves the gate verdict unchanged.
 
+## Detached signer verification
+
+The release operator selects a local OpenSSH key and the verification operator supplies the trusted allowed-signers
+policy and principal. Signing reconstructs the current review before requesting a signature. Verification checks the
+captured decision against the signer policy first, then reconstructs the review. Both commands use the system OpenSSH
+executable by default. Use --ssh-keygen with the absolute path of a trusted installation when OpenSSH is installed
+outside the system directory. Pass the same optional playtest attachment to both commands.
+
+~~~powershell
+python -B scripts/sign_release_review.py $receipt $archive $gateDirectory $packet $decision $signature --profiles $profiles --key $localSigningKey
+python -B scripts/verify_release_review_signature.py $receipt $archive $gateDirectory $packet $decision $signature --profiles $profiles --allowed-signers $allowedSigners --principal $principal
+~~~
+
+A valid signature retains the review decision's existing held, rejected or accepted status. Independent gate evidence
+still determines whether acceptance is available.
+
 ## Relevant information and resources
 
 - [Native two-process rehearsal](release-rehearsal-checklist.md) · [Approved predecessor evidence](../apps/game/fixtures/courtyard-release-learning/save-upgrade-evidence.md)

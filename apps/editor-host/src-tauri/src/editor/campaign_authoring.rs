@@ -3,11 +3,11 @@
 use std::{collections::HashSet, sync::Arc};
 
 use bridge::editor::{EditorCommandDto, EditorCommandRequest, EditorSnapshotDto};
-use courtyard_gameplay::settings::{CampaignDefinition, InteractionSettings, SceneInteractions};
-use runtime::{
-	game_session::GameSession, project::ProjectData, scene_catalog::SceneId,
-	simulation_session::GameModuleFactory, SceneData,
+use courtyard_gameplay::{
+	authoring_diagnostics::{AuthoredScenePreparation, CampaignDiagnostic},
+	settings::{CampaignDefinition, InteractionSettings, SceneInteractions},
 };
+use runtime::{project::ProjectData, scene_catalog::SceneId, SceneData};
 use serde::Serialize;
 
 use super::EditorWorkspace;
@@ -52,8 +52,41 @@ impl From<String> for CampaignAuthoringError {
 pub(crate) struct CampaignEdit {
 	expected_revision: u64,
 	expected_generation: u64,
-	project: ProjectData,
+	project: Arc<ProjectData>,
 	scenes: Vec<(SceneId, Arc<SceneData>)>,
+}
+
+impl CampaignEdit {
+	/// Prepare the same CPU gameplay configuration as compiler preflight, off the editor lock.
+	pub(crate) fn review(self) -> Result<ReviewedCampaignEdit, CampaignAuthoringError> {
+		let preparation = AuthoredScenePreparation::new(Arc::clone(&self.project))?;
+		for (id, document) in self.scenes {
+			preparation
+				.prepare(&id, document)
+				.map_err(|message| CampaignAuthoringError::scene(id, message))?;
+		}
+		drop(preparation);
+		Ok(ReviewedCampaignEdit {
+			expected_revision: self.expected_revision,
+			expected_generation: self.expected_generation,
+			project: Arc::unwrap_or_clone(self.project),
+		})
+	}
+
+	fn diagnose(&self) -> Vec<CampaignDiagnostic> {
+		let preparation = match AuthoredScenePreparation::new(Arc::clone(&self.project)) {
+			Ok(preparation) => preparation,
+			Err(message) => return vec![CampaignDiagnostic::new(None, message)],
+		};
+		// The captured route has at most eight chapters and one Finish.
+		self.scenes
+			.iter()
+			.filter_map(|(id, document)| {
+				let message = preparation.prepare(id, Arc::clone(document)).err()?;
+				Some(CampaignDiagnostic::new(Some(id.clone()), message))
+			})
+			.collect()
+	}
 }
 
 pub(crate) struct ReviewedCampaignEdit {
@@ -62,20 +95,31 @@ pub(crate) struct ReviewedCampaignEdit {
 	project: ProjectData,
 }
 
-impl CampaignEdit {
-	/// Prepare the same CPU gameplay configuration as compiler preflight, off the editor lock.
-	pub(crate) fn review(self) -> Result<ReviewedCampaignEdit, CampaignAuthoringError> {
-		let project = Arc::new(self.project);
-		let factory = courtyard_gameplay::resolve(&project)?;
-		for (id, document) in self.scenes {
-			review_scene(&project, id, document, &factory)?;
+pub(crate) struct CampaignCheck {
+	workspace_generation: u64,
+	revision: u64,
+	draft: Result<CampaignEdit, CampaignAuthoringError>,
+}
+
+impl CampaignCheck {
+	pub(crate) fn diagnose(self) -> CampaignDiagnosticReport {
+		let issues = match self.draft {
+			Ok(edit) => edit.diagnose(),
+			Err(error) => vec![CampaignDiagnostic::new(error.scene_id, error.message)],
+		};
+		CampaignDiagnosticReport {
+			workspace_generation: self.workspace_generation,
+			revision: self.revision,
+			issues,
 		}
-		Ok(ReviewedCampaignEdit {
-			expected_revision: self.expected_revision,
-			expected_generation: self.expected_generation,
-			project: Arc::unwrap_or_clone(project),
-		})
 	}
+}
+
+#[derive(Debug, Serialize)]
+pub struct CampaignDiagnosticReport {
+	pub workspace_generation: u64,
+	pub revision: u64,
+	pub issues: Vec<CampaignDiagnostic>,
 }
 
 impl EditorWorkspace {
@@ -107,6 +151,15 @@ impl EditorWorkspace {
 		campaign: CampaignDefinition,
 	) -> Result<CampaignEdit, CampaignAuthoringError> {
 		self.check_campaign_owner(generation, revision)?;
+		self.capture_campaign_draft(generation, revision, campaign)
+	}
+
+	fn capture_campaign_draft(
+		&self,
+		generation: u64,
+		revision: u64,
+		campaign: CampaignDefinition,
+	) -> Result<CampaignEdit, CampaignAuthoringError> {
 		let session = self.backend.session();
 		let mut project = session.project().clone();
 		let route = prepare_campaign(&mut project, &campaign)?;
@@ -122,9 +175,32 @@ impl EditorWorkspace {
 		Ok(CampaignEdit {
 			expected_revision: revision,
 			expected_generation: generation,
-			project,
+			project: Arc::new(project),
 			scenes,
 		})
+	}
+
+	pub(crate) fn capture_campaign_check(
+		&self,
+		generation: u64,
+		revision: u64,
+		campaign: CampaignDefinition,
+	) -> Result<CampaignCheck, CampaignAuthoringError> {
+		self.check_campaign_owner(generation, revision)?;
+		let draft = self.capture_campaign_draft(generation, revision, campaign);
+		Ok(CampaignCheck {
+			workspace_generation: generation,
+			revision,
+			draft,
+		})
+	}
+
+	pub(crate) fn accept_campaign_diagnostics(
+		&self,
+		report: CampaignDiagnosticReport,
+	) -> Result<CampaignDiagnosticReport, CampaignAuthoringError> {
+		self.check_campaign_owner(report.workspace_generation, report.revision)?;
+		Ok(report)
 	}
 
 	pub(crate) fn commit_campaign(
@@ -261,20 +337,4 @@ fn prepare_campaign(
 		.map(|chapter| chapter.course_scene.clone())
 		.chain(std::iter::once(campaign.finish_scene.clone()))
 		.collect())
-}
-
-fn review_scene(
-	project: &Arc<ProjectData>,
-	scene: SceneId,
-	document: Arc<SceneData>,
-	factory: &Arc<dyn GameModuleFactory>,
-) -> Result<(), CampaignAuthoringError> {
-	GameSession::with_factory_for_scene(
-		Arc::clone(project),
-		scene.clone(),
-		document,
-		Arc::clone(factory),
-	)
-		.map(|_| ())
-		.map_err(|reason| CampaignAuthoringError::scene(scene, reason))
 }

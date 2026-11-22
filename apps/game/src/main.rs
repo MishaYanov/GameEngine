@@ -118,6 +118,7 @@ struct GameApp {
 	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
 	scene_prefetch_enabled: bool,
 	checkpoints: Option<courtyard_gameplay::checkpoint::CheckpointRegistry>,
+	transfer_directory: Option<PathBuf>,
 	checkpoint_base: Option<Arc<runtime::scene_data::SceneData>>,
 	interaction_action: Option<String>,
 	project_path: Option<PathBuf>,
@@ -581,6 +582,11 @@ impl GameApp {
 		} else {
 			None
 		};
+		let feedback_audio = feedback_audio::FeedbackAudio::new(
+			audio_catalog,
+			!self.smoke_test,
+			self.player_controls.feedback_mix().effective_percent(),
+		)?;
 		// Install only after every fallible initialization step has succeeded.
 		if self.standalone_runtime {
 			editor.start_play(&mut loaded.scene)?;
@@ -597,7 +603,7 @@ impl GameApp {
 		self.selection_overlay = overlay;
 		self.project = Some(project);
 		self.asset_root = Some(asset_root);
-		self.feedback_audio = feedback_audio::FeedbackAudio::new(audio_catalog, !self.smoke_test);
+		self.feedback_audio = feedback_audio;
 		self.scene_path = Some(scene_path);
 		self.checkpoint_base = self.checkpoints.is_some().then(|| Arc::new(parsed.data));
 		self.renderer = Some(renderer);
@@ -1014,6 +1020,7 @@ impl ApplicationHandler for GameApp {
 				}
 			}
 			WindowEvent::Focused(false) => {
+				self.player_controls.cancel_action_key_capture();
 				if !self.standalone_runtime {
 					self.cancel_drag();
 					self.tools.panel.edit = None;
@@ -1037,6 +1044,7 @@ impl ApplicationHandler for GameApp {
 
 				self.next_frame_deadline = None;
 				if occluded {
+					self.player_controls.cancel_action_key_capture();
 					self.set_mouse_capture(false);
 					self.input.suppress_held();
 					self.clear_game_controls();
@@ -1052,6 +1060,7 @@ impl ApplicationHandler for GameApp {
 					renderer.resize(size.width, size.height);
 				}
 				if size.width == 0 || size.height == 0 {
+					self.player_controls.cancel_action_key_capture();
 					if !self.standalone_runtime {
 						self.cancel_drag();
 					}
@@ -1291,6 +1300,7 @@ fn run() -> Result<(), String> {
 		.map(load_input_profile)
 		.transpose()?;
 
+	app.transfer_directory = options.transfer_directory;
 	app.smoke_test = options.smoke_test;
 	app.smoke_scene_cycles = options.smoke_scene_cycles;
 	app.smoke_prefetch_probe = options.smoke_prefetch_probe;

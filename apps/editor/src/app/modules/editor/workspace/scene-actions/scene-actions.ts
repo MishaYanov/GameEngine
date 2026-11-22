@@ -1,10 +1,11 @@
-import {Component, computed, effect, ElementRef, inject, input, signal} from '@angular/core';
+import {Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, signal} from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
-import type {EditorCommand} from '../../../../core/editor/editor.models';
+import type {EditorCommand, SceneId} from '../../../../core/editor/editor.models';
 import {courtyardScene, readCourtyardSettings} from '../game-settings/courtyard-settings';
 
 @Component({
@@ -20,6 +21,15 @@ export class SceneActions {
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly pending = signal(false);
+    private readonly viewport = inject(ViewportEditorService);
+    private readonly nativeGeneration = computed(() => this.viewport.state()?.workspace_generation ?? null);
+    protected readonly warming = linkedSignal({source: this.nativeGeneration, computation: () => false});
+    protected readonly warmTarget = linkedSignal({
+        source: this.warming,
+        computation: (): SceneId | null => null,
+    });
+    private warmRequest = Promise.resolve();
+    private warmSequence = 0;
     protected readonly expanded = signal(false);
     protected readonly message = signal<string | null>(null);
     protected readonly error = signal<string | null>(null);
@@ -27,6 +37,7 @@ export class SceneActions {
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         !this.opening() && !this.pending() && !this.sceneSwitch.pending() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
+    protected readonly prepareAvailable = computed(() => this.available() && this.nativeGeneration() !== null);
     private readonly pathDraft = signal({path: ''});
     protected readonly fields = form(this.pathDraft, path => {
         required(path.path);
@@ -65,8 +76,14 @@ export class SceneActions {
     constructor() {
         effect(() => {
             this.editor.workspaceGeneration();
+            this.warmSequence += 1;
+            this.warming.set(false);
+            this.warmTarget.set(null);
             this.error.set(null);
             this.message.set(null);
+        });
+        inject(DestroyRef).onDestroy(() => {
+            if (this.warming()) this.queueWarmScene(null);
         });
     }
 
@@ -80,11 +97,65 @@ export class SceneActions {
 
     protected switchScene(select: HTMLSelectElement): void {
         const id = select.value;
-        select.value = this.editor.snapshot()?.active_scene_id ?? '';
-        if (!this.available()) return;
+        const active = this.editor.snapshot()?.active_scene_id ?? '';
+        if (!this.available()) {
+            select.value = this.warmTarget() ?? active;
+            return;
+        }
+        if (this.warming()) {
+            this.error.set(null);
+            this.message.set(null);
+            this.warmTarget.set(id === active ? null : id);
+            this.queueWarmScene(this.warmTarget());
+            return;
+        }
+        select.value = active;
         this.error.set(null);
         this.message.set(null);
         void this.sceneSwitch.request(id);
+    }
+
+    protected toggleWarming(): void {
+        if (!this.prepareAvailable()) return;
+        const enabled = !this.warming();
+        this.warming.set(enabled);
+        this.warmTarget.set(null);
+        if (!enabled) this.queueWarmScene(null);
+    }
+
+    protected async openPreparedScene(): Promise<void> {
+        const target = this.warmTarget();
+        const generation = this.editor.workspaceGeneration();
+        if (!target || !this.available()) return;
+        this.error.set(null);
+        this.message.set(null);
+        this.warmSequence += 1;
+        const opened = await this.sceneSwitch.request(target);
+        if (this.editor.workspaceGeneration() !== generation || this.warmTarget() !== target) return;
+        if (opened) {
+            this.warmTarget.set(null);
+        } else {
+            this.queueWarmScene(null);
+        }
+    }
+
+    private queueWarmScene(target: SceneId | null): void {
+        const generation = this.editor.workspaceGeneration();
+        const expectedGeneration = this.nativeGeneration();
+        const sequence = ++this.warmSequence;
+        if (expectedGeneration === null) return;
+        const current = () => sequence === this.warmSequence && this.editor.workspaceGeneration() === generation &&
+            expectedGeneration === this.nativeGeneration();
+        this.warmRequest = this.warmRequest.then(async () => {
+            if (!current()) return;
+            const snapshot = this.editor.snapshot();
+            if (!snapshot) return;
+            await this.editor.warmScene(target, snapshot.revision, expectedGeneration);
+        }).catch(error => {
+            if (current() && target !== null) {
+                this.error.set(error instanceof Error ? error.message : String(error));
+            }
+        });
     }
 
     protected async setStartup(): Promise<void> {

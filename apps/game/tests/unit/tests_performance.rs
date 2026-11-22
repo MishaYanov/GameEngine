@@ -176,6 +176,140 @@ fn representative_native_scene_performance_baseline() {
 }
 
 #[test]
+#[ignore = "requires Windows Vulkan and the authored courtyard fixture"]
+fn native_prepared_scene_references_preserve_scene_and_geometry() {
+	use renderer::{DrawStatus, vulkan::DrawMetrics};
+	use runtime::{SceneData, scene_io::PreparedSceneReferences};
+
+	#[derive(Debug, PartialEq)]
+	struct GeometryPart {
+		index_count: u32,
+		model: [f32; 16],
+		tint: [f32; 4],
+		flags: [u32; 4],
+	}
+
+	#[derive(Debug, PartialEq)]
+	struct RenderedScene {
+		scene: SceneData,
+		geometry: Vec<GeometryPart>,
+		metrics: DrawMetrics,
+	}
+
+	#[derive(Default)]
+	struct ReferenceProbe {
+		completed: bool,
+	}
+
+	impl ApplicationHandler for ReferenceProbe {
+		fn resumed(&mut self, events: &ActiveEventLoop) {
+			let asset_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+			let path = asset_root.join("scenes/courtyard-release-learning.json");
+			let authored = Arc::new(scene_io::load_data(&path).unwrap().data);
+			let references = PreparedSceneReferences::build(Arc::clone(&authored), || false)
+				.unwrap()
+				.expect("The courtyard fits the warming budget");
+			assert!(references.matches(&authored));
+
+			let mut revised = (*authored).clone();
+			let player = revised
+				.entities
+				.iter_mut()
+				.find(|entity| entity.key.as_str() == "courtyard-player")
+				.unwrap();
+			assert_eq!(player.model_path, "props/capsule.glb");
+			player.model_path = "props/cube.glb".into();
+			let revised = Arc::new(revised);
+			let stale = PreparedSceneReferences::build(Arc::clone(&authored), || false)
+				.unwrap()
+				.unwrap();
+			assert!(!stale.matches(&revised));
+
+			let window = Arc::new(
+				events
+					.create_window(
+						Window::default_attributes()
+							.with_visible(false)
+							.with_inner_size(winit::dpi::PhysicalSize::new(1280, 720)),
+					)
+					.unwrap(),
+			);
+			let size = window.inner_size();
+			let mut renderer = WindowRenderer::new(window, size.width, size.height).unwrap();
+			let mut assets = AssetManager::new(&asset_root).unwrap();
+			let mut render = |document: &SceneData, references| {
+				let (scene, camera) = scene_io::instantiate_with_references(
+					document,
+					&mut assets,
+					&renderer,
+					references,
+					|_, _| {},
+					|| false,
+				)
+					.unwrap()
+					.expect("Uncancelled construction should produce a scene");
+				renderer.set_lights(&scene.renderer_lights()).unwrap();
+				let [width, height] = renderer.prepare().unwrap().unwrap();
+				let camera_uniform = CameraUniform::perspective(
+					camera.position,
+					camera.target(),
+					[0.0, 1.0, 0.0],
+					camera.vertical_fov,
+					width as f32 / height as f32,
+					camera.near,
+					camera.far,
+				);
+				let objects = scene.try_render_objects().unwrap();
+				assert_eq!(
+					renderer.draw(&camera_uniform, &objects).unwrap(),
+					DrawStatus::Rendered
+				);
+				renderer.wait_idle().unwrap();
+				RenderedScene {
+					scene: scene.to_data(&camera).unwrap(),
+					geometry: objects
+						.iter()
+						.map(|object| GeometryPart {
+							index_count: object.mesh().index_count(),
+							model: object.transform().model,
+							tint: object.transform().base_color_factor,
+							flags: object.transform().flags,
+						})
+						.collect(),
+					metrics: DrawMetrics {
+						gpu_time_ms: None,
+						..renderer.last_metrics()
+					},
+				}
+			};
+
+			let cold = render(&authored, None);
+			assert!(cold.metrics.draw_calls > 0);
+			assert_eq!(render(&authored, Some(references)), cold);
+			let revised_cold = render(&revised, None);
+			assert_ne!(revised_cold.geometry, cold.geometry);
+			assert_eq!(render(&revised, Some(stale)), revised_cold);
+			eprintln!(
+				"NATIVE_PREPARED_SCENE_REFERENCES_OK authored_entities={} render_parts={} cold_triangles={} revised_triangles={}",
+				cold.scene.entities.len(),
+				cold.geometry.len(),
+				cold.metrics.triangles,
+				revised_cold.metrics.triangles,
+			);
+			self.completed = true;
+			events.exit();
+		}
+
+		fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+	}
+
+	let events = EventLoop::builder().with_any_thread(true).build().unwrap();
+	let mut probe = ReferenceProbe::default();
+	events.run_app(&mut probe).unwrap();
+	assert!(probe.completed);
+}
+
+#[test]
 #[ignore = "requires Windows Vulkan and an authored two-chapter manifest"]
 fn chapter_scene_prefetch_native_probe() {
 	struct PrefetchProbe {

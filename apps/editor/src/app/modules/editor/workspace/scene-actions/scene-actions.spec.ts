@@ -4,6 +4,7 @@ import {vi} from 'vitest';
 import axe from 'axe-core';
 import type {EditorSnapshot, GameplayModuleDescriptor, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneActions} from './scene-actions';
@@ -63,6 +64,7 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
     const current = signal(initial);
     const busy = signal(false);
     const generation = signal(1);
+    const nativeGeneration = signal<number | null>(17);
     const capabilities = signal<{gameplay_modules: readonly GameplayModuleDescriptor[] | undefined}>({gameplay_modules: modules});
     const switchScene = vi.fn(async (sceneId: string) => {
         current.update(value => ({...value, active_scene_id: sceneId, scene_revision: value.scene_revision + 1}));
@@ -76,6 +78,7 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
         }));
         return current();
     });
+    const warmScene = vi.fn<EditorService['warmScene']>(async () => undefined);
     const registerScene = vi.fn(async (_path: string) => current());
     const saveSceneAs = vi.fn(async (_path: string) => current());
     const execute = vi.fn<EditorService['execute']>(async () => current());
@@ -86,11 +89,15 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
     TestBed.configureTestingModule({providers: [
             SceneSwitchService,
             {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
+            {
+                provide: ViewportEditorService,
+                useValue: {state: computed(() => ({workspace_generation: nativeGeneration()}))}
+            },
         {provide: EditorService, useValue: {
             nativeAvailable: true, snapshot: current, busy, capabilities,
             playing: computed(() => current().mode === 'play'),
                 workspaceGeneration: generation,
-                switchScene, save, registerScene, saveSceneAs, execute,
+                switchScene, warmScene, save, registerScene, saveSceneAs, execute,
         }},
         {provide: SceneEditingService, useValue: {
             ready: computed(() => !busy() && current().mode === 'edit' && current().transaction === null),
@@ -115,9 +122,11 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
         current,
         busy,
         generation,
+        nativeGeneration,
         capabilities,
         sceneSwitch,
         switchScene,
+        warmScene,
         save,
         registerScene,
         saveSceneAs,
@@ -129,6 +138,87 @@ async function createActions(initial = snapshot(), modules: readonly GameplayMod
 }
 
 describe('SceneActions', () => {
+    it('warms the selected scene before an explicit open and cancels a pending selection', async () => {
+        const {fixture, root, button, warmScene, switchScene, current} = await createActions();
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        const scene = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
+        choose(scene, 'second');
+        await fixture.whenStable();
+        expect(warmScene).toHaveBeenLastCalledWith('second', 1, 17);
+        expect(switchScene).not.toHaveBeenCalled();
+
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        expect(warmScene).toHaveBeenLastCalledWith(null, 1, 17);
+        expect(current().active_scene_id).toBe('main');
+
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        choose(scene, 'second');
+        await fixture.whenStable();
+        button('Open selected scene').click();
+        await fixture.whenStable();
+        expect(switchScene).toHaveBeenCalledWith('second');
+        expect(current().active_scene_id).toBe('second');
+    });
+
+    it('opens the selected scene while native warming is still pending', async () => {
+        const {fixture, root, button, warmScene, switchScene, current} = await createActions();
+        let finishWarm!: () => void;
+        warmScene.mockImplementationOnce(() => new Promise<void>(resolve => finishWarm = resolve));
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        await vi.waitFor(() => expect(warmScene).toHaveBeenCalledExactlyOnceWith('second', 1, 17));
+
+        try {
+            button('Open selected scene').click();
+            await vi.waitFor(() => expect(switchScene).toHaveBeenCalledExactlyOnceWith('second'));
+            expect(current().active_scene_id).toBe('second');
+        } finally {
+            finishWarm();
+        }
+        await fixture.whenStable();
+    });
+
+    it('keeps ordinary switching available while the native viewport has no workspace token', async () => {
+        const {fixture, root, button, warmScene, switchScene, nativeGeneration} = await createActions();
+        nativeGeneration.set(null);
+        await fixture.whenStable();
+
+        expect(button('Prepare scene').disabled).toBe(true);
+        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        await fixture.whenStable();
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
+        expect(warmScene).not.toHaveBeenCalled();
+    });
+
+    it('retires a pending warm selection when the native workspace changes at the same revision', async () => {
+        const {fixture, root, button, warmScene, current, nativeGeneration} = await createActions();
+        let rejectWarm!: (error: Error) => void;
+        warmScene.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => rejectWarm = reject));
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        const scene = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
+        choose(scene, 'second');
+        await vi.waitFor(() => expect(warmScene).toHaveBeenCalledExactlyOnceWith('second', 1, 17));
+
+        nativeGeneration.set(18);
+        await fixture.whenStable();
+        expect(scene.value).toBe('main');
+        expect(button('Open selected scene')).toBeUndefined();
+        rejectWarm(new Error('Retired workspace'));
+        await fixture.whenStable();
+        expect(root.querySelector('[role="alert"]')).toBeNull();
+
+        button('Prepare scene').click();
+        await fixture.whenStable();
+        choose(scene, 'second');
+        await vi.waitFor(() => expect(warmScene).toHaveBeenLastCalledWith('second', current().revision, 18));
+        expect(warmScene).toHaveBeenCalledTimes(2);
+    });
+
     const prototype = HTMLDialogElement.prototype;
     const originalShow = Object.getOwnPropertyDescriptor(prototype, 'showModal');
     const originalClose = Object.getOwnPropertyDescriptor(prototype, 'close');

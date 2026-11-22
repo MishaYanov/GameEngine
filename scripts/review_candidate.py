@@ -131,11 +131,19 @@ def decide(packet, packet_path, decision_path, *, scope, status, reviewer, reaso
     return record
 
 
+def validate_reviewed_decision(packet, packet_path, record):
+    _validate_decision(record, packet, _verified_packet(packet_path, packet))
+
+
+def verified_decision_bytes(packet, packet_path, decision_path):
+    """Return the reviewed decision and the exact bytes admitted by this check."""
+    record, payload = read_local_json(decision_path, MAX_DECISION_BYTES)
+    validate_reviewed_decision(packet, packet_path, record)
+    return record, payload
+
+
 def verify_decision(packet, packet_path, decision_path):
-    identity = _verified_packet(packet_path, packet)
-    record, _ = read_local_json(decision_path, MAX_DECISION_BYTES)
-    _validate_decision(record, packet, identity)
-    return record
+    return verified_decision_bytes(packet, packet_path, decision_path)[0]
 
 
 def main(argv=None):

@@ -1,9 +1,30 @@
 {
-  "last_checked_commit": "a3ab7e123f03ef4d1327a1e09d8388c88860c626",
-  "last_checked_date": "2026-11-21",
+  "last_checked_commit": "2c7664e48a40f7bccde3d1eb6bd65b8eefcb4657",
+  "last_checked_date": "2026-11-22",
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_34_45": {
+    "date": "2026-11-22",
+    "inspected_head": "2c7664e48a40f7bccde3d1eb6bd65b8eefcb4657",
+    "scope": "Milestones 34 through 39 implement Player keyboard remapping, feedback volume and mute, read-only campaign diagnostics, native checkpoint transfer, opt-in editor scene warming and signed release reviews. Milestones 40 through 45 are planned learning exercises.",
+    "verification": [
+      "DOC, TEST, OPTIMIZATION and defensive SECURITY reviews ran before the separate Rust and Angular best-practices reviews. The learning-guide index and 44 Markdown files cover 31 feature pages with local source links and resource sections.",
+      "All 1,086 affected Rust, 117 Python and 547 Angular tests passed. Windows Clippy, the custom-protocol Editor Host check, and Angular production AOT and bundle checks passed. Angular reported the existing project-setup.scss budget warning. The documentation site link-checked 65 pages and passed all eight site tests.",
+      "Windows Vulkan rehearsals verified keyboard action remapping and semantic replay, checkpoint transfer across four disposable processes with explicit Continue to Finish, and parity of native renderer geometry using retained or stale scene references.",
+      "Campaign checks diagnosed unsaved retained scenes in draft order, attached capture errors to their scenes, verified compiler/export parity, and reproduced Finish at score 2. The warming command rejected requests from another workspace with the same revision.",
+      "The rebuilt Windows candidate passed both input smoke checks, ZIP verification, and an extracted-package probe from a separate working directory on the local machine. A headless replay using the extracted authored data reached Finish at score 2.",
+      "Five OpenSSH tests passed. A disposable Ed25519 key signed the rebuilt candidate's held review, and the explicit principal and policy verified exact decision bytes and evidence."
+    ],
+    "verification_limits": [
+      "The package receipt records a dirty checkout, and the local extracted-package probe did not use the independent release host. Visible editor, physical controller, and audible playback acceptance remain open.",
+      "The visible embedded Editor did not run the repeated matched warming benchmark. Vulkan parity verifies behavior, and the available artifacts do not establish a latency change.",
+      "The detached signature uses a disposable rehearsal key. The review remains held and release-operator signoff remains pending.",
+      "The Windows Rust 1.89 minimum toolchain was not installed for this pass."
+    ],
+    "candidate_archive_sha256": "0776d0cca280b1e2d3799235bdb49983e3d09598766ef91e05af5e1a75b5d3a8",
+    "pending_documentation_changes": []
+  },
   "courtyard_release_milestones_28_39": {
     "date": "2026-11-21",
     "inspected_head": "da621adec6b76c09be8b445bc3db7b37b776c365",

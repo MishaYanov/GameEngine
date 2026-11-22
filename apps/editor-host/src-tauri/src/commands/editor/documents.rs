@@ -234,3 +234,31 @@ pub async fn editor_apply_campaign(
 	})
 		.await
 }
+
+#[tauri::command]
+pub async fn editor_diagnose_campaign(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	campaign: courtyard_gameplay::settings::CampaignDefinition,
+) -> Result<
+	crate::editor::campaign_authoring::CampaignDiagnosticReport,
+	crate::editor::campaign_authoring::CampaignAuthoringError,
+> {
+	trusted_window(&window)?;
+	let check = workspace_with_error(
+		state.clone(),
+		false,
+		Some("capture_campaign_diagnostics"),
+		move |w| w.capture_campaign_check(expected_generation, expected_revision, campaign),
+	)
+		.await?;
+	let report = tauri::async_runtime::spawn_blocking(move || check.diagnose())
+		.await
+		.map_err(|error| format!("Campaign diagnostics worker failed: {error}"))?;
+	workspace_with_error(state, false, None, move |w| {
+		w.accept_campaign_diagnostics(report)
+	})
+		.await
+}

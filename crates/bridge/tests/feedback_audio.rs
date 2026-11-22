@@ -94,6 +94,30 @@ fn rejects_invalid_pcm_before_it_can_reach_playback() {
 	assert!(CueClip::from_wave(TONE.to_vec()).is_ok());
 }
 
+#[test]
+fn scaling_preserves_layout_and_signed_samples() {
+	let mut bytes = TONE.to_vec();
+	let samples = [i16::MIN, -3, 0, 3, i16::MAX];
+	for (encoded, sample) in bytes[44..].chunks_exact_mut(2).zip(samples) {
+		encoded.copy_from_slice(&sample.to_le_bytes());
+	}
+	let original = CueClip::from_wave(bytes).unwrap();
+	let unchanged = original.scaled(100).unwrap();
+	assert!(std::ptr::eq(original.bytes(), unchanged.bytes()));
+	let quiet = original.scaled(0).unwrap();
+	assert_eq!(&original.bytes()[..44], &quiet.bytes()[..44]);
+	assert!(quiet.bytes()[44..].iter().all(|sample| *sample == 0));
+	let half = original.scaled(50).unwrap();
+	assert_eq!(&original.bytes()[..44], &half.bytes()[..44]);
+	let first_samples = half.bytes()[44..]
+		.chunks_exact(2)
+		.take(samples.len())
+		.map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+		.collect::<Vec<_>>();
+	assert_eq!(first_samples, [-16_384, -1, 0, 1, 16_383]);
+	assert!(original.scaled(101).is_err());
+}
+
 #[cfg(unix)]
 #[test]
 fn linked_audio_directory_is_rejected_even_without_a_catalog() {

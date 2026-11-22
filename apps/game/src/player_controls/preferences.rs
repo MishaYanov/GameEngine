@@ -1,4 +1,9 @@
-use super::{ControlsSettings, Preset, display::DisplaySettings};
+use super::{
+	ControlsSettings, Preset,
+	action_keys::{ActionKeyOverride, validate_rows},
+	audio::FeedbackMix,
+	display::DisplaySettings,
+};
 use runtime::input::ControllerBindings;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,8 +14,8 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering},
 };
 
-const MAX_BYTES: usize = 256;
-const SCHEMA_VERSION: u32 = 3;
+const MAX_BYTES: usize = 4 * 1024;
+const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,7 +32,7 @@ struct RecordV2 {
 	controller: ControllerBindings,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordV3 {
 	schema_version: u32,
@@ -36,9 +41,21 @@ struct RecordV3 {
 	display: DisplaySettings,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecordV4 {
+	schema_version: u32,
+	movement: Preset,
+	controller: ControllerBindings,
+	display: DisplaySettings,
+	actions: Vec<ActionKeyOverride>,
+	audio: FeedbackMix,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Record {
+	Fourth(RecordV4),
 	Third(RecordV3),
 	Second(RecordV2),
 	First(RecordV1),
@@ -51,7 +68,7 @@ impl Record {
 			.read_to_end(&mut bytes)
 			.map_err(|error| format!("Cannot read controls: {error}"))?;
 		if bytes.len() > MAX_BYTES {
-			return Err("Saved controls exceed 256 bytes".into());
+			return Err(format!("Saved controls exceed {MAX_BYTES} bytes"));
 		}
 		match serde_json::from_slice(&bytes).map_err(|_| "Saved controls are invalid")? {
 			Self::First(record) if record.schema_version == 1 => Ok(ControlsSettings {
@@ -63,11 +80,20 @@ impl Record {
 				controller: record.controller.validate()?,
 				..ControlsSettings::default()
 			}),
-			Self::Third(record) if record.schema_version == SCHEMA_VERSION => {
+			Self::Third(record) if record.schema_version == 3 => Ok(ControlsSettings {
+				movement: record.movement,
+				controller: record.controller.validate()?,
+				display: record.display,
+				..ControlsSettings::default()
+			}),
+			Self::Fourth(record) if record.schema_version == SCHEMA_VERSION => {
+				validate_rows(&record.actions)?;
 				Ok(ControlsSettings {
 					movement: record.movement,
 					controller: record.controller.validate()?,
 					display: record.display,
+					actions: record.actions,
+					audio: record.audio.validate()?,
 				})
 			}
 			_ => Err("Saved controls version is unsupported".into()),
@@ -137,16 +163,19 @@ impl Preferences {
 		Record::read(file)
 	}
 
-	pub(super) fn save(&self, controls: ControlsSettings) -> Result<(), String> {
-		let bytes = serde_json::to_vec(&RecordV3 {
+	pub(super) fn save(&self, controls: &ControlsSettings) -> Result<(), String> {
+		validate_rows(&controls.actions)?;
+		let bytes = serde_json::to_vec(&RecordV4 {
 			schema_version: SCHEMA_VERSION,
 			movement: controls.movement,
 			controller: controls.controller.validate()?,
 			display: controls.display,
+			actions: controls.actions.clone(),
+			audio: controls.audio.validate()?,
 		})
 		.map_err(|error| format!("Cannot encode controls: {error}"))?;
 		if bytes.len() > MAX_BYTES {
-			return Err("Saved controls exceed 256 bytes".into());
+			return Err(format!("Saved controls exceed {MAX_BYTES} bytes"));
 		}
 		let folder = self
 			.folder(true)?

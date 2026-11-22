@@ -32,31 +32,81 @@ impl Facts {
 pub(super) struct FeedbackAudio {
 	catalog: Option<PreparedCueCatalog>,
 	legacy_gate: Option<CueClip>,
+	mix: PreparedMix,
 	#[cfg(windows)]
 	worker: Option<Worker>,
 }
 
 impl FeedbackAudio {
-	pub fn new(catalog: Option<PreparedCueCatalog>, enabled: bool) -> Self {
+	pub fn new(
+		catalog: Option<PreparedCueCatalog>,
+		enabled: bool,
+		gain_percent: u8,
+	) -> Result<Self, String> {
 		let legacy_gate = catalog
 			.is_none()
 			.then(|| CueClip::from_wave(GATE_TONE.to_vec()).expect("embedded PCM must be valid"));
 		#[cfg(not(windows))]
 		let _ = enabled;
-		Self {
+		let mut audio = Self {
 			catalog,
 			legacy_gate,
+			mix: PreparedMix::default(),
 			#[cfg(windows)]
-			worker: enabled.then(Worker::start).flatten(),
+			worker: None,
+		};
+		let prepared = audio.prepare_mix(gain_percent)?;
+		audio.commit_mix(prepared);
+		#[cfg(windows)]
+		{
+			audio.worker = enabled.then(Worker::start).flatten();
 		}
+		Ok(audio)
 	}
 
-	fn clip(&self, cue: FeedbackCue) -> Option<&CueClip> {
+	fn original_clip(&self, cue: FeedbackCue) -> Option<&CueClip> {
 		match &self.catalog {
 			Some(catalog) => catalog.clip(cue),
 			None if cue == FeedbackCue::GateOpened => self.legacy_gate.as_ref(),
 			None => None,
 		}
+	}
+
+	pub fn prepare_mix(&self, gain_percent: u8) -> Result<Option<PreparedMix>, String> {
+		if gain_percent > 100 {
+			return Err("Feedback volume must be from 0 to 100".into());
+		}
+		if self.mix.gain_percent == gain_percent {
+			return Ok(None);
+		}
+		let mut mix = PreparedMix {
+			gain_percent,
+			..PreparedMix::default()
+		};
+		if gain_percent != 0 {
+			for cue in [
+				FeedbackCue::KeyCollected,
+				FeedbackCue::GateOpened,
+				FeedbackCue::RunCompleted,
+			] {
+				mix.clips[cue_slot(cue)] = self
+					.original_clip(cue)
+					.map(|clip| clip.scaled(gain_percent))
+					.transpose()?;
+			}
+		}
+		Ok(Some(mix))
+	}
+
+	pub fn commit_mix(&mut self, prepared: Option<PreparedMix>) {
+		if let Some(mix) = prepared {
+			self.invalidate();
+			self.mix = mix;
+		}
+	}
+
+	fn clip(&self, cue: FeedbackCue) -> Option<&CueClip> {
+		self.mix.clips[cue_slot(cue)].as_ref()
 	}
 
 	pub fn emit(&self, cue: FeedbackCue) {
@@ -75,6 +125,20 @@ impl FeedbackAudio {
 		if let Some(worker) = &self.worker {
 			worker.epoch.fetch_add(1, Ordering::Relaxed);
 		}
+	}
+}
+
+#[derive(Default)]
+pub(super) struct PreparedMix {
+	gain_percent: u8,
+	clips: [Option<CueClip>; 3],
+}
+
+fn cue_slot(cue: FeedbackCue) -> usize {
+	match cue {
+		FeedbackCue::KeyCollected => 0,
+		FeedbackCue::GateOpened => 1,
+		FeedbackCue::RunCompleted => 2,
 	}
 }
 

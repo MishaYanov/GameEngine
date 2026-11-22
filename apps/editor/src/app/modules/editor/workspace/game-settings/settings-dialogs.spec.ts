@@ -2,7 +2,12 @@ import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import {vi} from 'vitest';
-import type {CampaignDefinition, EditorCommand, EditorSnapshot} from '../../../../core/editor/editor.models';
+import type {
+    CampaignDefinition,
+    CampaignDiagnosticReport,
+    EditorCommand,
+    EditorSnapshot
+} from '../../../../core/editor/editor.models';
 import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import {
     CameraPreviewController,
@@ -12,6 +17,7 @@ import {
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
+import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {CameraSettings} from './camera-settings';
 import {GameplaySettings} from './gameplay-settings';
 
@@ -94,6 +100,10 @@ describe('game settings dialogs', () => {
         }
         const generation = signal(1);
         const campaignGeneration = vi.fn(async (_generation: number, _revision: number) => 42);
+        const diagnoseCampaign = vi.fn(async (
+            _definition: CampaignDefinition, _generation: number, nativeGeneration: number, revision: number,
+        ): Promise<CampaignDiagnosticReport> => ({workspace_generation: nativeGeneration, revision, issues: []}));
+        const switchScene = vi.fn(async (_sceneId: string) => true);
         const applyCampaign = vi.fn(async (
             definition: CampaignDefinition, _generation: number, _nativeGeneration: number, _revision: number,
         ) => {
@@ -125,11 +135,13 @@ describe('game settings dialogs', () => {
                     playing: computed(() => current().mode === 'play'),
                     execute,
                     campaignGeneration,
+                    diagnoseCampaign,
                     applyCampaign,
                     cameraPreview: new CameraPreviewController(previewApi),
             }},
                 {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 42})}},
             {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
+                {provide: SceneSwitchService, useValue: {request: switchScene, canSwitch: () => true}},
         ]});
         const fixture = kind === 'camera' ? TestBed.createComponent(CameraSettings) : TestBed.createComponent(GameplaySettings);
         await fixture.whenStable();
@@ -165,6 +177,8 @@ describe('game settings dialogs', () => {
             change,
             previewApi,
             campaignGeneration,
+            diagnoseCampaign,
+            switchScene,
             applyCampaign
         };
     }
@@ -311,6 +325,91 @@ describe('game settings dialogs', () => {
         expect(panel.current().project.gameplay_settings).toEqual(before);
         const dialog = [...panel.root.querySelectorAll('dialog')].find(element => element.open)!;
         expect((await axe.run(dialog, {rules: {'color-contrast': {enabled: false}}})).violations).toEqual([]);
+    });
+
+    it('reports both named scenes and requires discarding a changed draft before using normal scene navigation', async () => {
+        const panel = await setup('campaign');
+        await panel.change('Chapter label', 'Changed chapter');
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [
+                {scene_id: 'main', message: 'Key trigger needs a sensor.'},
+                {scene_id: 'garden', message: 'Exit trigger needs a sensor.'},
+            ],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        expect(panel.diagnoseCampaign).toHaveBeenCalledExactlyOnceWith({
+            chapters: [
+                {id: 'main', label: 'Changed chapter', course_scene: 'main'},
+                {id: 'garden', label: 'Garden', course_scene: 'garden'},
+            ], finish_scene: 'ending',
+        }, 1, 42, 7);
+        const issues = panel.root.querySelector('ul[aria-label="Campaign issues"]')!;
+        expect(issues.textContent).toContain('scenes/main.json');
+        expect(issues.textContent).toContain('scenes/garden.json');
+        const inspect = issues.querySelector<HTMLButtonElement>('[aria-label="Inspect Scene scenes/garden.json"]')!;
+        expect(inspect.tabIndex).toBe(0);
+        expect(issues.querySelectorAll('button')).toHaveLength(1);
+        const dialog = panel.root.querySelector('dialog[open]')!;
+        expect((await axe.run(dialog, {rules: {'color-contrast': {enabled: false}}})).violations).toEqual([]);
+
+        inspect.click();
+        await panel.fixture.whenStable();
+        expect(document.activeElement).toBe(panel.button('Keep Draft'));
+        panel.button('Keep Draft').click();
+        await panel.fixture.whenStable();
+        expect(panel.switchScene).not.toHaveBeenCalled();
+        expect(panel.field('Chapter label').value).toBe('Changed chapter');
+        expect(document.activeElement).toBe(panel.button('Check Campaign'));
+
+        panel.switchScene.mockImplementationOnce(async () => {
+            expect(panel.root.querySelector('dialog[open]')).toBeNull();
+            return false; // The existing unsaved-scene confirmation was cancelled.
+        });
+        inspect.click();
+        await panel.fixture.whenStable();
+        panel.button('Discard Draft and Inspect').click();
+        await panel.fixture.whenStable();
+        expect(panel.switchScene).toHaveBeenCalledExactlyOnceWith('garden');
+        expect(panel.current().active_scene_id).toBe('main');
+        expect(panel.applyCampaign).not.toHaveBeenCalled();
+    });
+
+    it('shows a project-level diagnostic without navigation and a fresh passed report', async () => {
+        const panel = await setup('campaign');
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [{scene_id: null, message: 'Review the proposed route.'}],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).toContain('1 campaign issue.');
+        expect(panel.root.textContent).toContain('Campaign draft');
+        expect(panel.root.querySelector('ul[aria-label="Campaign issues"] button')).toBeNull();
+
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).toContain('All campaign scenes passed.');
+        expect(panel.root.querySelector('ul[aria-label="Campaign issues"]')).toBeNull();
+    });
+
+    it.each(['draft', 'workspace', 'close'])('ignores a delayed diagnostics result after a %s change', async change => {
+        const panel = await setup('campaign');
+        let complete!: (value: CampaignDiagnosticReport) => void;
+        panel.diagnoseCampaign.mockReturnValueOnce(new Promise(resolve => {
+            complete = resolve;
+        }));
+        panel.button('Check Campaign').click();
+        await vi.waitFor(() => expect(panel.diagnoseCampaign).toHaveBeenCalledOnce());
+        if (change === 'draft') await panel.change('Chapter label', 'Different chapter');
+        else if (change === 'workspace') panel.generation.set(2);
+        else panel.button('Close').click();
+        await panel.fixture.whenStable();
+
+        complete({workspace_generation: 42, revision: 7, issues: [{scene_id: 'garden', message: 'Obsolete issue.'}]});
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).not.toContain('Obsolete issue.');
     });
 
     it('applies Follow once using the latest unrelated revision and preserves the pose', async () => {

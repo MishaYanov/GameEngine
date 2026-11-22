@@ -7,6 +7,8 @@ pub(crate) mod campaign_authoring;
 mod documents;
 #[path = "prefab_sources.rs"]
 pub(crate) mod prefab_sources;
+#[path = "editor/scene_warming.rs"]
+pub(crate) mod scene_warming;
 
 use crate::project_location::ProjectLocation;
 use assets::PendingAsset;
@@ -52,6 +54,7 @@ pub struct EditorWorkspace {
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
+	pub(crate) scene_warming: scene_warming::SceneWarming,
 	pub(crate) scene_switch: Option<(u64, std::time::Instant, std::time::Instant)>,
 	pub backend: runtime::Engine,
 	pub asset_root: PathBuf,
@@ -386,6 +389,7 @@ impl EditorWorkspace {
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			camera_capture_epoch: 0,
 			scene_switch: None,
+			scene_warming: scene_warming::SceneWarming::default(),
 			backend,
 			asset_root,
 			scene_path,

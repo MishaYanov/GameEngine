@@ -105,15 +105,6 @@ impl GameApp {
 		Ok(format!("Saved {}", checkpoint.id))
 	}
 
-	#[cfg(all(test, windows))]
-	pub(super) fn continue_checkpoint(&mut self) -> Result<String, String> {
-		let expected = self
-			.checkpoint_slot(SaveSlot::One)
-			.generation
-			.ok_or("Checkpoint storage is unavailable")?;
-		self.continue_checkpoint_slot(SaveSlot::One, &expected, RestoreSource::Current)
-	}
-
 	pub(super) fn continue_checkpoint_slot(
 		&mut self,
 		slot: SaveSlot,

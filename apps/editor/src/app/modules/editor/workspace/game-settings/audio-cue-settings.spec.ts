@@ -164,6 +164,53 @@ describe(AudioCueSettings, () => {
         }
     });
 
+    it('cancels a pending decode when preview volume changes and keeps the catalog draft clean', async () => {
+        const ui = await setup();
+        let finish!: (buffer: AudioBuffer) => void;
+        const decoded = new Promise<AudioBuffer>(resolve => {
+            finish = resolve;
+        });
+        const decode = vi.fn(() => decoded);
+        const createSource = vi.fn();
+        vi.stubGlobal('AudioContext', class {
+            resume = vi.fn(async () => {
+            });
+            close = vi.fn(async () => {
+            });
+            decodeAudioData = decode;
+            createBufferSource = createSource;
+        });
+        try {
+            ui.previewFeedbackCue.mockResolvedValueOnce(Array.from({length: 46}, () => 0));
+            ui.button('Preview Gate opened').click();
+            await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce());
+            await ui.change('Preview volume', '50');
+            finish({} as AudioBuffer);
+            await ui.fixture.whenStable();
+            expect(ui.field('Preview volume').getAttribute('aria-valuetext')).toBe('50%');
+            expect(createSource).not.toHaveBeenCalled();
+            expect(ui.button('Apply Feedback Audio').disabled).toBe(true);
+
+            ui.field('Mute preview').click();
+            await ui.fixture.whenStable();
+            ui.button('Preview Gate opened').click();
+            await ui.fixture.whenStable();
+            expect(ui.root.textContent).toContain('Preview skipped at zero volume.');
+            expect(ui.previewFeedbackCue).toHaveBeenCalledOnce();
+            expect(ui.applyFeedbackCues).not.toHaveBeenCalled();
+
+            ui.button('Close').click();
+            await ui.fixture.whenStable();
+            ui.button('Feedback Audio…').click();
+            await ui.fixture.whenStable();
+            expect(ui.field('Preview volume').value).toBe('100');
+            expect(ui.field('Mute preview').checked).toBe(false);
+        } finally {
+            ui.fixture.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('validates relative path names, shows accessible text, and closes on a workspace change', async () => {
         const ui = await setup();
         await ui.change('Gate opened', 'audio/../outside.wav');

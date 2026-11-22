@@ -214,6 +214,15 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.busy()).toBe(false);
     });
 
+    it('sends both native workspace generation and revision with a warm request', async () => {
+        vi.mocked(invoke).mockResolvedValueOnce(undefined);
+        const service = TestBed.inject(EditorService);
+        await service.warmScene('garden', 8, 37);
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_warm_scene', {
+            sceneId: 'garden', expectedRevision: 8, expectedGeneration: 37,
+        });
+    });
+
     it.each(['reload', 'openProject'] as const)(
         'rejects queued role edits from the previous workspace after %s even when scene IDs match',
         async operation => {

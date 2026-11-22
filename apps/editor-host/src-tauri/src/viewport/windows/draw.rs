@@ -18,6 +18,7 @@ impl Worker {
 		if !self.active() {
 			return Ok(());
 		}
+		let measurement_started = self.warm_measurement.then(Instant::now);
 		let was_captured = self.interaction.captured();
 		let packet = loop {
 			let captured = {
@@ -120,17 +121,27 @@ impl Worker {
 						Some(session.render_document())
 					};
 					let game_camera = self.interaction.game_camera(workspace);
+					let scene_id = (!session.is_playing()
+						&& self.interaction.settings.view == bridge::viewport::ViewportView::Scene)
+						.then(|| session.active_scene_id().clone());
+					let warm_requested =
+						self.warm_measurement && workspace.scene_warming.is_requested();
+					let warmed = match (&scene_id, &document) {
+						(Some(scene), Some(document)) => {
+							workspace.scene_warming.claim(generation, scene, document)
+						}
+						_ => crate::editor::scene_warming::WarmClaim::Unrequested,
+					};
 					Some(RenderPacket {
+						warm_requested,
+						warmed,
 						animations: session.animations().cloned(),
 						animation_preview: workspace.active_animation_preview(),
 						document,
 						game_camera,
 						revision,
 						generation,
-						scene_id: (!session.is_playing()
-							&& self.interaction.settings.view
-								== bridge::viewport::ViewportView::Scene)
-							.then(|| session.active_scene_id().clone()),
+						scene_id,
 						switch_clock: workspace.scene_switch,
 						change_cursor: cursor,
 						asset_root: workspace.asset_root.clone(),
@@ -148,6 +159,8 @@ impl Worker {
 		};
 		self.release_ended_scene_capture(was_captured);
 		let RenderPacket {
+			warmed,
+			warm_requested,
 			animations,
 			animation_preview,
 			mut document,
@@ -197,6 +210,15 @@ impl Worker {
 			.authored_load
 			.as_ref()
 			.map(|(_, timing)| timing.id().to_string());
+		let (mut warm_references, warm_outcome) = warmed.into_references();
+		if self.warm_measurement && new_load {
+			if let (Some(request_id), Some(scene)) = (&request_id, &scene_id) {
+				log_warm(serde_json::json!({
+					"schema_version": 1, "kind": "load", "request_id": request_id,
+					"scene_id": scene.as_str(), "outcome": warm_outcome,
+				}));
+			}
+		}
 		let (parent, control, status, shared) =
 			(&self.parent, &self.control, &self.status, &self.shared);
 		let is_current = || {
@@ -264,10 +286,11 @@ impl Worker {
 			let data = document
 				.take()
 				.ok_or("Initial viewport packet is missing scene data")?;
-			let candidate = scene_io::instantiate_cancellable(
+			let candidate = scene_io::instantiate_with_references(
 				&data,
 				&mut assets,
 				&renderer,
+				warm_references.take(),
 				&mut count_prepared,
 				|| !is_current(),
 			)?;
@@ -311,10 +334,11 @@ impl Worker {
 				.ok_or("Full viewport synchronization packet is missing scene data")?;
 			let replacement =
 				if loading || gpu.assets_invalidated || !gpu.scene.synchronize(&data)? {
-					let (scene, _) = match scene_io::instantiate_cancellable(
+					let (scene, _) = match scene_io::instantiate_with_references(
 						&data,
 						&mut gpu.assets,
 						&gpu.renderer,
+						warm_references.take(),
 						&mut count_prepared,
 						|| !is_current(),
 					) {
@@ -478,6 +502,17 @@ impl Worker {
 			None => gpu.renderer.draw(&uniform, &objects)?,
 		};
 		let presented_at = (frame_status == DrawStatus::Rendered).then(Instant::now);
+		if !loading {
+			if let (Some(when), Some(started), Some(scene)) =
+				(presented_at, measurement_started, &scene_id)
+			{
+				log_warm(serde_json::json!({
+					"schema_version": 1, "kind": "active_frame", "scene_id": scene.as_str(),
+					"warming_requested": warm_requested,
+					"elapsed_us": when.saturating_duration_since(started).as_micros().min(u64::MAX as u128) as u64,
+				}));
+			}
+		}
 		match frame_status {
 			DrawStatus::NeedsRedraw => {
 				self.dirty = true;
@@ -523,4 +558,8 @@ impl Worker {
 		self.publish_editor(false);
 		Ok(())
 	}
+}
+
+fn log_warm(message: serde_json::Value) {
+	engine_logger::info!(target: "editor_scene_warming", "{message}");
 }

@@ -218,6 +218,8 @@ struct GpuState {
 }
 
 struct RenderPacket {
+	warmed: crate::editor::scene_warming::WarmClaim,
+	warm_requested: bool,
 	animations: Option<runtime::animation::AnimationBank>,
 	animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 	document: Option<Arc<runtime::SceneData>>,
@@ -303,6 +305,7 @@ impl AuthoredLoadKey {
 }
 
 struct Worker {
+	warm_measurement: bool,
 	authored_load: Option<(AuthoredLoadKey, SceneLoadTiming)>,
 	play_load: Option<(u64, String, u64, SceneLoadTiming)>,
 	gpu: Option<GpuState>,
@@ -352,6 +355,8 @@ impl Worker {
 	) -> Self {
 		let now = Instant::now();
 		Self {
+			warm_measurement: std::env::var_os("ENGINE_EDITOR_WARM_MEASURE").as_deref()
+				== Some(std::ffi::OsStr::new("1")),
 			authored_load: None,
 			play_load: None,
 			gpu: None,

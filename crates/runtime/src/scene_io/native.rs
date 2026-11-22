@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use renderer::WindowRenderer;
 
@@ -6,8 +6,10 @@ use crate::{
 	Camera, SceneData, Transform,
 	assets::{AssetManager, Model},
 	model_instance::ModelInstance,
-	scene::{MAX_SCENE_RENDER_OBJECTS, Scene, validate_animation_placements},
+	scene::{MAX_SCENE_RENDER_OBJECTS, Scene},
 };
+
+use super::references::{PreparedSceneReferences, reference, validate_layout};
 
 /// GPU factory used by both file loading and editor document revisions. Reusing
 /// an AssetManager retains mesh/texture caches across document reinstantiation.
@@ -36,14 +38,28 @@ pub fn instantiate_cancellable(
 	data: &SceneData,
 	assets: &mut AssetManager,
 	renderer: &WindowRenderer,
+	prepared: impl FnMut(usize, usize),
+	cancelled: impl FnMut() -> bool,
+) -> Result<Option<(Scene, Camera)>, String> {
+	instantiate_with_references(data, assets, renderer, None, prepared, cancelled)
+}
+
+/// Use checked, bounded CPU references only for the exact retained document.
+pub fn instantiate_with_references(
+	data: &SceneData,
+	assets: &mut AssetManager,
+	renderer: &WindowRenderer,
+	references: Option<PreparedSceneReferences>,
 	mut prepared: impl FnMut(usize, usize),
 	mut cancelled: impl FnMut() -> bool,
 ) -> Result<Option<(Scene, Camera)>, String> {
 	if cancelled() {
 		return Ok(None);
 	}
-	let placements = data.validated_world_matrices()?;
-	validate_animation_placements(data, &placements)?;
+	let references = references.filter(|references| references.matches(data));
+	if references.is_none() {
+		validate_layout(data)?;
+	}
 	let total = data.entities.len();
 	prepared(0, total);
 	let mut scene = Scene::default();
@@ -71,11 +87,11 @@ pub fn instantiate_cancellable(
 		if cancelled() {
 			return Ok(None);
 		}
-		let cache_key = engine_core::asset_registry::AssetRef::new(
-			entity.model_path.clone(),
-			Some(entity.mesh_index.unwrap_or(0)),
-		)?
-		.with_asset_id(entity.asset_id.clone());
+		let cache_key = if let Some(references) = &references {
+			Cow::Borrowed(references.asset(index))
+		} else {
+			Cow::Owned(reference(entity)?)
+		};
 		let model = if let Some(asset) = animations.get(&entity.key) {
 			assets
 				.load_animation(renderer, asset.clone())
@@ -83,21 +99,21 @@ pub fn instantiate_cancellable(
 		} else if !entity.has_mesh_component()
 			|| (!entity.renderable
 				&& !assets
-					.asset_exists(&cache_key)
+			.asset_exists(cache_key.as_ref())
 					.map_err(|error| error.to_string())?)
 		{
 			Arc::clone(&group_model)
-		} else if let Some(model) = models.get(&cache_key) {
+		} else if let Some(model) = models.get(cache_key.as_ref()) {
 			Arc::clone(model)
 		} else {
-			let loaded = assets.load_asset(renderer, &cache_key);
+			let loaded = assets.load_asset(renderer, cache_key.as_ref());
 			let model = loaded.map_err(|error| {
 				format!(
 					"Scene entity {index} ({:?}), model '{}': {error}",
 					entity.name, entity.model_path
 				)
 			})?;
-			models.insert(cache_key, Arc::clone(&model));
+			models.insert(cache_key.into_owned(), Arc::clone(&model));
 			model
 		};
 		render_objects = render_objects

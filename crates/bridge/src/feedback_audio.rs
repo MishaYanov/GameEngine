@@ -36,6 +36,23 @@ impl CueClip {
 	pub fn bytes(&self) -> &[u8] {
 		&self.0
 	}
+
+	/// Apply linear gain to the PCM samples while preserving the canonical WAV layout.
+	pub fn scaled(&self, percent: u8) -> Result<Self, &'static str> {
+		if percent > 100 {
+			return Err("Feedback volume must be from 0 to 100");
+		}
+		if percent == 100 {
+			return Ok(self.clone());
+		}
+		let mut bytes = self.bytes().to_vec();
+		for sample in bytes[HEADER_BYTES..].chunks_exact_mut(2) {
+			let original = i16::from_le_bytes([sample[0], sample[1]]);
+			let value = (i32::from(original) * i32::from(percent) / 100) as i16;
+			sample.copy_from_slice(&value.to_le_bytes());
+		}
+		Self::from_wave(bytes)
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

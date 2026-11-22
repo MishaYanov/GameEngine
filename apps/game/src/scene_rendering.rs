@@ -1,6 +1,8 @@
 use super::*;
 use renderer::ui::ScreenOverlay;
 
+use super::player_controls::input_labels::compact_key_name;
+
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
 		let result = self.render_frame();
@@ -75,8 +77,8 @@ impl GameApp {
 								capacity.columns,
 							);
 							required = (prompt + 1).min(capacity.rows);
-							if capacity.rows == 1 {
-								rows.swap(0, prompt);
+							if prompt >= capacity.rows {
+								rows.swap(capacity.rows - 1, prompt);
 							}
 						}
 						rows.truncate(capacity.rows);
@@ -234,12 +236,12 @@ fn interact_hint_for_columns(
 		}
 			.into();
 	};
-	let key = if device == PromptDevice::Controller && binding.id == "interact" {
-		format!("{:?}", bindings.interact)
+	let (key, source) = if device == PromptDevice::Controller && binding.id == "interact" {
+		(format!("{:?}", bindings.interact).into(), "Controller")
 	} else {
-		format!("{:?}", binding.key)
+		(compact_key_name(binding.key), "Keyboard")
 	};
-	let full = format!("Press {key} to open the route gate");
+	let full = format!("Press {key} ({source}) to open the route gate");
 	if full.len() <= columns {
 		full
 	} else {
@@ -247,7 +249,7 @@ fn interact_hint_for_columns(
 		if compact.len() <= columns {
 			compact
 		} else {
-			key
+			key.into_owned()
 		}
 	}
 }

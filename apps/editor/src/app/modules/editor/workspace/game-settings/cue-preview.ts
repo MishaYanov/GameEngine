@@ -1,6 +1,16 @@
 const minimumWaveSize = 46;
 const maximumWaveSize = 16_044;
-const previewGain = 0.35;
+const auditionCeiling = 0.35;
+
+export interface AuditionMix {
+    readonly levelPercent: number;
+    readonly muted: boolean;
+}
+
+export function auditionGain({levelPercent, muted}: AuditionMix): number {
+    if (muted || !Number.isFinite(levelPercent)) return 0;
+    return auditionCeiling * Math.min(100, Math.max(0, levelPercent)) / 100;
+}
 
 export function decodeCue(context: BaseAudioContext, bytes: unknown): Promise<AudioBuffer> {
     if (!Array.isArray(bytes) || bytes.length < minimumWaveSize || bytes.length > maximumWaveSize ||
@@ -21,8 +31,15 @@ export class CuePreview {
     constructor(private readonly createContext: () => AudioContext = () => new AudioContext()) {
     }
 
-    async play(load: () => Promise<unknown>, active: () => boolean, ended: () => void): Promise<void> {
+    async play(
+        load: () => Promise<unknown>, mix: AuditionMix, active: () => boolean, ended: () => void,
+    ): Promise<void> {
         this.stop();
+        const volume = auditionGain(mix);
+        if (volume === 0) {
+            if (active()) ended();
+            return;
+        }
         const generation = this.generation;
         const current = () => this.generation === generation && active();
         const context = this.context ??= this.createContext();
@@ -39,7 +56,7 @@ export class CuePreview {
         this.gain = gain;
         try {
             source.buffer = buffer;
-            gain.gain.value = previewGain;
+            gain.gain.value = volume;
             source.connect(gain);
             gain.connect(context.destination);
             source.onended = () => {

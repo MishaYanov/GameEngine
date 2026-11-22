@@ -18,6 +18,21 @@ pub async fn editor_collisions(
 			shapes: runtime::collision::debug_shapes(&document)?,
 		})
 	})
+		.await
+}
+
+#[tauri::command]
+pub async fn editor_warm_scene(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	scene_id: Option<runtime::scene_catalog::SceneId>,
+) -> Result<(), String> {
+	trusted_window(&window)?;
+	workspace(state, false, None, move |editor| {
+		editor.warm_scene(expected_generation, expected_revision, scene_id)
+	})
 	.await
 }
 
@@ -53,6 +68,14 @@ pub fn editor_viewport_detach(
 	state: State<'_, EditorState>,
 ) -> Result<ViewportStatusDto, String> {
 	trusted_window(&window)?;
+	if let Some(editor) = state
+		.editor
+		.lock()
+		.map_err(|_| "Editor state lock failed")?
+		.as_ref()
+	{
+		editor.scene_warming.cancel();
+	}
 	let mut viewport = state
 		.viewport
 		.lock()

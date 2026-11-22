@@ -5,8 +5,8 @@ use std::{
 	sync::Arc,
 };
 
+use courtyard_gameplay::authoring_diagnostics::AuthoredScenePreparation;
 use engine_core::{
-	game_session::GameSession,
 	scene_catalog::{SceneDescriptor, SceneId},
 	scene_data::SceneData,
 };
@@ -76,10 +76,7 @@ pub(super) fn validate_catalog_scenes(
 ) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
-	let gameplay = (
-		Arc::new(project.clone()),
-		courtyard_gameplay::resolve(project)?,
-	);
+	let gameplay = AuthoredScenePreparation::new(Arc::new(project.clone()))?;
 	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
 	for behavior in &project.behaviors {
 		targets
@@ -96,22 +93,14 @@ pub(super) fn validate_catalog_scenes(
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result =
 			validate_catalog_scene(scene_targets, root, entry, &packaged).and_then(|scene| {
-				{
-					let (project, factory) = &gameplay;
-					let mut game = GameSession::with_factory_for_scene(
-						Arc::clone(project),
-						entry.id().clone(),
-						Arc::new(scene),
-						Arc::clone(factory),
-					)
+				let mut game = gameplay
+					.prepare(entry.id(), Arc::new(scene))
 					.map_err(|cause| scene_error(entry, cause))?;
-					let animation_root = root.to_path_buf();
-					game.set_animation_resolver(Arc::new(move |scene| {
-						bridge::animation_asset::prepare_scene(&animation_root, scene)
-					}))
-					.map_err(|cause| scene_error(entry, cause))?;
-				}
-				Ok(())
+				let animation_root = root.to_path_buf();
+				game.set_animation_resolver(Arc::new(move |scene| {
+					bridge::animation_asset::prepare_scene(&animation_root, scene)
+				}))
+					.map_err(|cause| scene_error(entry, cause))
 			});
 		if let Err(error) = result {
 			append_scene_error(&mut report, &error, &mut truncated);
