@@ -10,6 +10,9 @@ pub mod model;
 mod primitives;
 pub mod project_assets;
 mod scene_import;
+mod warm_model;
+
+pub use warm_model::PreparedModelBatch;
 
 pub use asset_manager::AssetManager;
 pub use asset_manager::AssetManagerError;

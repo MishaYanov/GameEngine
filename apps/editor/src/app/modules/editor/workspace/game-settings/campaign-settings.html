@@ -3,7 +3,8 @@
     <p class="error" role="alert">{{ failure }}</p>
 }
 
-<editor-dialog (closed)="dialogClosed()" [(open)]="open" [closeBlocked]="pending()" [config]="{width: '42rem'}"
+<editor-dialog (closeAttempted)="cancelRepair()" (closed)="dialogClosed()" [(open)]="open"
+               [closeBlocked]="pending() || repairChoice() !== null" [config]="{width: '42rem'}"
                [renderFields]="false" title="Campaign Settings">
     <p>Use Interaction Settings to configure the Course and Finish roles. Order the courses here to connect their
         exits.</p>
@@ -14,7 +15,7 @@
             }
         </p>
     }
-    <fieldset [disabled]="pending()">
+    <fieldset [disabled]="pending() || repairChoice() !== null">
         <legend>Chapter order</legend>
         <ol class="chapters">
             @for (chapter of draft().chapters; track chapter.row; let index = $index) {
@@ -76,9 +77,16 @@
     @if (checking()) {
         <p role="status">Checking campaign…</p>
     } @else if (diagnostics(); as checked) {
-        <editor-campaign-diagnostics (inspect)="inspectScene($event)" [activeScene]="activeScene()"
-                                     [canNavigate]="canInspect()" [issues]="checked.report.issues"
+        <editor-campaign-diagnostics (inspect)="inspectScene($event)" (reviewRepair)="reviewRepair($event)"
+                                     [activeScene]="activeScene()"
+                                     [canNavigate]="canInspect() && !pending() && !repairChoice()"
+                                     [canRepair]="available() && !repairChoice() && !inspectChoice()"
+                                     [issues]="checked.report.issues"
                                      [scenes]="sceneCatalog()"/>
+    }
+    @if (repairChoice(); as repair) {
+        <editor-campaign-repair (apply)="applyRepair()" (keep)="cancelRepair()" [canApply]="available()"
+                                [pending]="pending()" [preview]="repair.preview"/>
     }
     @if (inspectChoice(); as next) {
         <section aria-label="Inspect campaign scene">
@@ -88,10 +96,12 @@
             <button (click)="confirmInspection()" type="button">Discard Draft and Inspect</button>
         </section>
     }
-    <button #checkButton (click)="checkCampaign()" [disabled]="!available() || checking() || !!validation()"
+    <button #checkButton (click)="checkCampaign()"
+            [disabled]="!available() || checking() || !!repairChoice() || !!validation()"
             dialog-actions type="button">Check Campaign
     </button>
-    <button (click)="apply()" [disabled]="!available() || checking() || !!validation() || !dirty()" dialog-actions
+    <button (click)="apply()" [disabled]="!available() || checking() || !!repairChoice() || !!validation() || !dirty()"
+            dialog-actions
             type="button">
         Apply Campaign
     </button>

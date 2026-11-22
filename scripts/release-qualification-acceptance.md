@@ -138,6 +138,40 @@ python -B scripts/verify_release_review_signature.py $receipt $archive $gateDire
 A valid signature retains the review decision's existing held, rejected or accepted status. Independent gate evidence
 still determines whether acceptance is available.
 
+## Combine release and QA signoffs
+
+Write a trusted role policy outside the candidate and evidence folders. Give each required role one to eight permitted
+principals. Use independent signing keys, even when each role names a different principal. Pick the maximum age for both
+decisions in seconds, up to 31 days.
+
+~~~json
+{
+  "schema_version": 1,
+  "max_decision_age_seconds": 86400,
+  "roles": {"release": ["release-owner"], "qa": ["qa-owner"]}
+}
+~~~
+
+Each reviewer signs a decision for the same current packet using the detached signing command. Pass each role,
+principal, decision and signature together. Use the same independently provisioned allowed-signers and optional
+revocation files for both roles. Pass the original optional playtest folder when the packet includes it.
+
+~~~powershell
+$inputs = @($receipt, $archive, $gateDirectory, $packet, $ledger,
+    '--profiles', $profiles, '--role-policy', $rolePolicy, '--allowed-signers', $allowedSigners,
+    '--signoff', 'release', $releasePrincipal, $releaseDecision, $releaseSignature,
+    '--signoff', 'qa', $qaPrincipal, $qaDecision, $qaSignature)
+python -B scripts/verify_release_signoffs.py publish @inputs
+$ledgerStatus = $LASTEXITCODE
+python -B scripts/verify_release_signoffs.py verify @inputs
+$verificationStatus = $LASTEXITCODE
+~~~
+
+Publish uses a fresh ledger path. Verify rechecks every supplied signature, rebuilds the current packet and compares the
+complete stored ledger. Exit 0 means accepted, 1 means rejected, 2 means held, and 3 means invalid evidence or output. A
+missing or expired role keeps a pending decision held. A current rejection or a rejected gate takes precedence.
+Acceptance requires both current approvals and all of the existing clean-build and independent-host gates.
+
 ## Relevant information and resources
 
 - [Native two-process rehearsal](release-rehearsal-checklist.md) · [Approved predecessor evidence](../apps/game/fixtures/courtyard-release-learning/save-upgrade-evidence.md)

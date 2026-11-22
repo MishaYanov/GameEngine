@@ -5,6 +5,11 @@
             <li>
                 <strong>{{ issue.title }}</strong>
                 <p>{{ issue.message }}</p>
+                @if (issue.repair; as repair) {
+                    <button (click)="reviewRepair.emit(repair)" [disabled]="!canRepair()" type="button">
+                        Review Repair
+                    </button>
+                }
                 @if (issue.destination; as scene) {
                     <button (click)="inspect.emit(scene)" [attr.aria-label]="'Inspect Scene ' + issue.title"
                             type="button">

@@ -6,6 +6,10 @@ pub struct MeshData {
 }
 
 impl MeshData {
+	pub(super) fn retained_bytes(&self) -> usize {
+		self.vertices.capacity() * size_of::<Vertex>() + self.indices.capacity() * size_of::<u32>()
+	}
+
 	pub fn plane() -> Self {
 		super::primitives::plane::build()
 	}

@@ -92,6 +92,8 @@ pub fn run() {
 			editor_campaign_generation,
 			editor_apply_campaign,
 			editor_diagnose_campaign,
+			editor_preview_campaign_repair,
+			editor_apply_campaign_repair,
 			editor_build_project,
 			editor_prepare_project_build,
 			editor_finish_project_build,

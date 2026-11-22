@@ -2,12 +2,13 @@ use std::{collections::HashSet, path::Path};
 
 use super::{
 	GltfLoaderError, IMPORT_LIMIT, ImportedPrimitive, charge,
-	mesh::{import_first_mesh, import_mesh, preflight_meshes},
+	mesh::{import_first_mesh, import_mesh, import_mesh_checked, preflight_meshes},
 	rejected,
 };
-use crate::assets::ImageAsset;
+use crate::assets::{ImageAsset, import_budget::ImportBudget};
 
 const RESOURCE_LIMIT: usize = 64 * 1024 * 1024;
+const WARM_IMAGE_DECODER_BYTES: usize = 1024 * 1024;
 
 pub(in crate::assets) struct Resources {
 	pub(in crate::assets) source_fingerprint: String,
@@ -86,12 +87,33 @@ impl Resources {
 		&mut self,
 		mesh_index: usize,
 	) -> Result<(), GltfLoaderError> {
-		preflight_meshes(&self.document, [mesh_index])?;
+		self.prepare_mesh_images_checked(mesh_index, None)
+	}
+
+	fn prepare_mesh_images_checked(
+		&mut self,
+		mesh_index: usize,
+		mut warm: Option<&mut ImportBudget<'_>>,
+	) -> Result<(), GltfLoaderError> {
+		if let Some(warm) = warm.as_deref_mut() {
+			warm.reserve_product(self.document.meshes().len(), size_of::<bool>())?;
+		}
+		let geometry_bytes = preflight_meshes(&self.document, [mesh_index])?;
 		let mesh = self
 			.document
 			.meshes()
 			.nth(mesh_index)
 			.ok_or_else(|| rejected(format!("mesh index {mesh_index} does not exist")))?;
+		if let Some(warm) = warm.as_deref_mut() {
+			warm.reserve(geometry_bytes)?;
+			// Includes the selected primitive array, image-index set, decode
+			// work list, and the second selected-mesh validation before import.
+			warm.reserve_product(
+				mesh.primitives().len(),
+				size_of::<ImportedPrimitive>() + 256,
+			)?;
+			warm.reserve_product(self.document.meshes().len(), size_of::<bool>())?;
+		}
 		let required: HashSet<_> = mesh
 			.primitives()
 			.filter_map(|primitive| {
@@ -118,7 +140,12 @@ impl Resources {
 				} => &self.buffers[*buffer].0[*offset..*end],
 				ImageResource::Decoded(_) => unreachable!(),
 			};
-			prepared.push((index, decode_image(encoded, &mut budget)?));
+			let image = if let Some(warm) = warm.as_deref_mut() {
+				decode_warm_image(encoded, warm)?
+			} else {
+				decode_image(encoded, &mut budget)?
+			};
+			prepared.push((index, image));
 		}
 		// Failed decoding leaves the cached snapshot and its accounting intact.
 		for (index, image) in prepared {
@@ -158,8 +185,101 @@ pub(in crate::assets) fn load_resources_in_root(
 	let mut budget = IMPORT_LIMIT;
 	let bytes = read_bounded(&path, &mut budget)?;
 	let source_fingerprint = super::super::project_assets::fingerprint(&bytes);
-	let gltf::Gltf { document, mut blob } = gltf::Gltf::from_slice(&bytes)?;
+	let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(&bytes)?;
 	drop(bytes);
+	build_resources(
+		document,
+		blob,
+		source_fingerprint,
+		budget,
+		|uri, budget| read_uri_in_root(base, &root, uri, budget),
+		&|| Ok(()),
+	)
+}
+
+pub(in crate::assets) fn load_warm_mesh(
+	bytes: Vec<u8>,
+	source_fingerprint: String,
+	mesh_index: usize,
+	warm: &mut ImportBudget<'_>,
+) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
+	let container = gltf::binary::Glb::from_slice(&bytes)?;
+	warm.preflight_json(container.json.as_ref())?;
+	warm.reserve(container.bin.as_ref().map_or(0, |bytes| bytes.len()))?;
+	let gltf::Gltf { document, blob } = gltf::Gltf::from_slice_without_validation(&bytes)?;
+	drop(bytes);
+	let raw = document.into_json();
+	check_warm_position_indices(&raw, warm)?;
+	let document = gltf::Document::from_json(raw)?;
+	warm.checkpoint()?;
+	if document.animations().next().is_some() || document.skins().next().is_some() {
+		return Err(rejected("model warming supports static GLB assets"));
+	}
+	warm.reserve_product(
+		document.buffers().len(),
+		size_of::<gltf::buffer::Data>() * 2,
+	)?;
+	warm.reserve_product(document.images().len(), size_of::<ImageResource>())?;
+	let mut resources = build_resources(
+		document,
+		blob,
+		source_fingerprint,
+		IMPORT_LIMIT,
+		|_, _| Err(rejected("model warming requires embedded GLB resources")),
+		&|| warm.checkpoint(),
+	)?;
+	super::mesh::validate_warm_accessor_ranges(
+		&resources.document,
+		&resources.buffers,
+		mesh_index,
+		&|| warm.checkpoint(),
+	)?;
+	resources.prepare_mesh_images_checked(mesh_index, Some(warm))?;
+	import_mesh_checked(
+		&resources.document,
+		&resources.buffers,
+		&resources.images,
+		mesh_index,
+		&|| warm.checkpoint(),
+	)
+}
+
+fn check_warm_position_indices(
+	raw: &gltf::json::Root,
+	warm: &ImportBudget<'_>,
+) -> Result<(), GltfLoaderError> {
+	use gltf::json::{mesh::Semantic, validation::Checked};
+	let position = Checked::Valid(Semantic::Positions);
+	for primitive in raw.meshes.iter().flat_map(|mesh| &mesh.primitives) {
+		warm.checkpoint()?;
+		if let Some(index) = primitive.attributes.get(&position) {
+			// The dependency's validation hook indexes POSITION directly.
+			let accessor = raw
+				.accessors
+				.get(index.value())
+				.ok_or_else(|| rejected("warm primitive POSITION accessor is missing"))?;
+			for bounds in [&accessor.min, &accessor.max].into_iter().flatten() {
+				if !bounds.as_array().is_some_and(|values| {
+					values.len() == 3 && values.iter().all(|value| value.is_number())
+				}) {
+					return Err(rejected(
+						"warm primitive POSITION bounds need three numbers",
+					));
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
+fn build_resources(
+	document: gltf::Document,
+	mut blob: Option<Vec<u8>>,
+	source_fingerprint: String,
+	mut budget: usize,
+	mut load_uri: impl FnMut(&str, &mut usize) -> Result<Vec<u8>, GltfLoaderError>,
+	checkpoint: &impl Fn() -> Result<(), GltfLoaderError>,
+) -> Result<Resources, GltfLoaderError> {
 	if document.nodes().len() > 10_000
 		|| document.meshes().len() > 10_000
 		|| document.images().len() > 10_000
@@ -169,13 +289,14 @@ pub(in crate::assets) fn load_resources_in_root(
 			"glTF exceeds 10000 nodes, meshes, images or buffers",
 		));
 	}
-	let mut buffers = Vec::new();
+	let mut buffers = Vec::with_capacity(document.buffers().len());
 	for buffer in document.buffers() {
+		checkpoint()?;
 		if buffer.length() > RESOURCE_LIMIT {
 			return Err(rejected("buffer exceeds 64 MiB"));
 		}
 		let data = match buffer.source() {
-			gltf::buffer::Source::Uri(uri) => read_uri_in_root(base, &root, uri, &mut budget)?,
+			gltf::buffer::Source::Uri(uri) => load_uri(uri, &mut budget)?,
 			gltf::buffer::Source::Bin => blob
 				.take()
 				.ok_or_else(|| rejected("missing binary buffer"))?,
@@ -187,9 +308,10 @@ pub(in crate::assets) fn load_resources_in_root(
 	}
 	let mut images = Vec::with_capacity(document.images().len());
 	for image in document.images() {
+		checkpoint()?;
 		let source = match image.source() {
 			gltf::image::Source::Uri { uri, .. } => {
-				ImageResource::Encoded(read_uri_in_root(base, &root, uri, &mut budget)?)
+				ImageResource::Encoded(load_uri(uri, &mut budget)?)
 			}
 			gltf::image::Source::View { view, .. } => {
 				let end = view
@@ -233,6 +355,51 @@ fn decode_image(encoded: &[u8], budget: &mut usize) -> Result<ImageAsset, GltfLo
 		.and_then(|n| n.checked_mul(4))
 		.ok_or_else(|| rejected("image size overflow"))?;
 	charge(budget, size)?;
+	image_from_dynamic(decoded)
+}
+
+fn decode_warm_image(
+	encoded: &[u8],
+	warm: &mut ImportBudget<'_>,
+) -> Result<ImageAsset, GltfLoaderError> {
+	use image::ImageDecoder as _;
+	// Opening a decoder may copy the encoded input (JPEG) or allocate for
+	// ancillary chunks (PNG) even before reading the first image row.
+	warm.reserve_product(encoded.len(), 2)?;
+	warm.reserve(WARM_IMAGE_DECODER_BYTES)?;
+	let format = reader_format(encoded)?;
+	let mut reader = image::ImageReader::with_format(std::io::Cursor::new(encoded), format);
+	let mut limits = image::Limits::default();
+	limits.max_image_width = Some(4096);
+	limits.max_image_height = Some(4096);
+	limits.max_alloc = Some(WARM_IMAGE_DECODER_BYTES as u64);
+	reader.limits(limits);
+	let decoder = reader.into_decoder().map_err(rejected)?;
+	let (width, height) = decoder.dimensions();
+	let pixels = match format {
+		image::ImageFormat::Jpeg => {
+			// Charge padded MCU storage, coefficient tables, reconstructed
+			// pixels and conversion output together for progressive JPEG.
+			(width as usize).next_multiple_of(32) * (height as usize).next_multiple_of(32) * 32
+		}
+		_ => width as usize * height as usize * 12,
+	};
+	warm.reserve(pixels)?;
+	let decoded = image::DynamicImage::from_decoder(decoder).map_err(rejected)?;
+	warm.checkpoint()?;
+	image_from_dynamic(decoded)
+}
+
+fn reader_format(encoded: &[u8]) -> Result<image::ImageFormat, GltfLoaderError> {
+	match image::guess_format(encoded).map_err(rejected)? {
+		format @ (image::ImageFormat::Png | image::ImageFormat::Jpeg) => Ok(format),
+		_ => Err(rejected(
+			"model warming supports embedded PNG and JPEG images",
+		)),
+	}
+}
+
+fn image_from_dynamic(decoded: image::DynamicImage) -> Result<ImageAsset, GltfLoaderError> {
 	let rgba = decoded.into_rgba8();
 	Ok(ImageAsset::from_rgba8(
 		rgba.width(),

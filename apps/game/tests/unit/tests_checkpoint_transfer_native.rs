@@ -31,6 +31,14 @@ fn checkpoint_transfer_menu_spans_profiles() {
 	let saved_bytes = saved_slots.each_ref().map(|path| fs::read(path).unwrap());
 
 	run("chapters-transfer-menu-export", &source);
+	assert_history(&source.0, "export", "garden_entry");
+	assert!(
+		!destination
+			.0
+			.join(CHAPTER_PROFILE)
+			.join("transfer-history.json")
+			.exists()
+	);
 	let mut files = fs::read_dir(&transfers).unwrap();
 	let archive = files.next().unwrap().unwrap();
 	assert!(files.next().is_none());
@@ -44,6 +52,7 @@ fn checkpoint_transfer_menu_spans_profiles() {
 	let imported = target.join("slot-2.json");
 	assert!(!imported.exists());
 	run("chapters-transfer-menu-import", &destination);
+	assert_history(&destination.0, "import", "garden_entry");
 	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
 	run("chapters-transfer-continue", &destination);
 	assert_eq!(fs::read(&imported).unwrap(), saved_bytes[1]);
@@ -52,6 +61,16 @@ fn checkpoint_transfer_menu_spans_profiles() {
 	}
 	assert_eq!(fs::read(archive).unwrap(), archive_bytes);
 	assert_eq!(saved_slots.map(|path| fs::read(path).unwrap()), saved_bytes);
+}
+
+fn assert_history(profile: &Path, direction: &str, checkpoint: &str) {
+	let file = profile.join(CHAPTER_PROFILE).join("transfer-history.json");
+	let record: serde_json::Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+	let entries = record["entries"].as_array().unwrap();
+	assert_eq!(entries.len(), 1);
+	assert_eq!(entries[0]["slot"], 2);
+	assert_eq!(entries[0]["direction"], direction);
+	assert_eq!(entries[0]["checkpoint_id"], checkpoint);
 }
 
 #[test]
@@ -97,11 +116,15 @@ fn packaged_checkpoint_transfer_spans_profiles() {
 		"{}",
 		String::from_utf8_lossy(&export.stderr)
 	);
+	let source_history = source_dir.join("transfer-history.json");
+	let exported_history = fs::read(&source_history).unwrap();
 	assert!(
 		!execute(&source, &["--export-slot", "1", path])
 			.status
 			.success()
 	);
+	assert_eq!(fs::read(&source_history).unwrap(), exported_history);
+	assert_history(&source.0, "export", "garden_entry");
 	let preview = |file| {
 		let result = execute(&destination, &["--preview-slot-import", "2", file]);
 		assert!(
@@ -137,7 +160,11 @@ fn packaged_checkpoint_transfer_spans_profiles() {
 		String::from_utf8_lossy(&result.stderr)
 	);
 	assert_eq!(fs::read(target_dir.join("slot-2.json")).unwrap(), garden);
+	let destination_history = target_dir.join("transfer-history.json");
+	let accepted = fs::read(&destination_history).unwrap();
 	assert!(!commit(&review, path, true).status.success());
+	assert_eq!(fs::read(&destination_history).unwrap(), accepted);
+	assert_history(&destination.0, "import", "garden_entry");
 	run_isolated_phase(
 		NATIVE_TRANSFER_TEST,
 		"chapters-transfer-continue",
@@ -166,6 +193,15 @@ fn packaged_checkpoint_transfer_spans_profiles() {
 	assert!(!target_dir.join("slot-3.json").exists());
 	assert_eq!(fs::read(source_dir.join("slot-2.json")).unwrap(), garden);
 	assert_eq!(fs::read(source_dir.join("slot.json")).unwrap(), courtyard);
+
+	let invalid_history = b"incomplete checkpoint history";
+	fs::write(&source_history, invalid_history).unwrap();
+	let extra = source.0.join("after-history-failure.json");
+	let export = execute(&source, &["--export-slot", "2", extra.to_str().unwrap()]);
+	assert!(export.status.success());
+	assert!(String::from_utf8_lossy(&export.stderr).contains("History is unavailable"));
+	assert!(extra.is_file());
+	assert_eq!(fs::read(source_history).unwrap(), invalid_history);
 }
 
 pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
@@ -198,12 +234,38 @@ pub(super) fn run_menu_phase(app: &mut GameApp, phase: &str) {
 			menu_keys(app, &[Key::Enter]);
 			assert_menu_rows(app, &["From transfers", "> Transfer 01: slot-2-"]);
 			assert!(!slot.exists());
+			assert!(
+				!profile
+					.join(CHAPTER_PROFILE)
+					.join("transfer-history.json")
+					.exists()
+			);
 			menu_keys(app, &[Key::Enter, Key::ArrowRight]);
 			assert_menu_rows(app, &["> Import checkpoint"]);
 			assert!(!slot.exists());
 			menu_keys(app, &[Key::Enter]);
 			assert_menu_rows(app, &["> Continue (Ready)"]);
 			assert!(slot.is_file());
+			menu_keys(app, &[Key::ArrowUp, Key::ArrowUp, Key::Enter]);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Imported garden_entry (now)"]
+			);
+			menu_keys(app, &[Key::Enter]);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Imported garden_entry (now)"]
+			);
+			menu_keys(app, &[Key::ArrowDown]);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Back"]
+			);
+			menu_keys(app, &[Key::Enter]);
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Transfer history"]
+			);
 		}
 		_ => panic!("unknown checkpoint transfer phase {phase}"),
 	}

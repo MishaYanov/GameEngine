@@ -5,11 +5,18 @@ const auditionCeiling = 0.35;
 export interface AuditionMix {
     readonly levelPercent: number;
     readonly muted: boolean;
+    readonly categoryPercent?: number;
+    readonly scenePercent?: number;
 }
 
-export function auditionGain({levelPercent, muted}: AuditionMix): number {
-    if (muted || !Number.isFinite(levelPercent)) return 0;
-    return auditionCeiling * Math.min(100, Math.max(0, levelPercent)) / 100;
+export function combinedFeedbackPercent(player: number, category: number, scene: number): number {
+    if (![player, category, scene].every(Number.isFinite)) return 0;
+    const clamp = (level: number) => Math.min(100, Math.max(0, level));
+    return Math.round(clamp(player) * clamp(category) * clamp(scene) / 10_000);
+}
+
+export function auditionGain({levelPercent, muted, categoryPercent = 100, scenePercent = 100}: AuditionMix): number {
+    return muted ? 0 : auditionCeiling * combinedFeedbackPercent(levelPercent, categoryPercent, scenePercent) / 100;
 }
 
 export function decodeCue(context: BaseAudioContext, bytes: unknown): Promise<AudioBuffer> {

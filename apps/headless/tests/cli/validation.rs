@@ -105,14 +105,47 @@ fn audio_catalog_is_validated_before_headless_reports_are_published() {
 		audio.join("cues.json"),
 		br#"{"schema_version":1,"cues":[{"event":"key_collected","path":"audio/cue-key.wav"}]}"#,
 	)
-		.unwrap();
+	.unwrap();
 	fs::write(audio.join("cue-key.wav"), KEY_CLIP).unwrap();
 	let valid = success(fixture.command().arg("--steps").arg("0").output().unwrap());
 	assert_eq!(valid["state_hash"], initial["state_hash"]);
 	assert_eq!(valid["fixed_steps"], initial["fixed_steps"]);
 
-	fs::write(audio.join("cue-key.wav"), &KEY_CLIP[..KEY_CLIP.len() - 1]).unwrap();
+	let cue_manifest = audio.join("cues.json");
+	let project = ProjectData::load(&fixture.project).unwrap();
+	let variant = |scene: &str| {
+		json!({
+			"schema_version": 2,
+			"cues": [{"event":"key_collected","path":"audio/cue-key.wav"}],
+			"bus_percent": {"collection": 60},
+			"scene_bus_percent": { (scene): {"collection": 20} },
+		})
+		.to_string()
+	};
+	fs::write(&cue_manifest, variant(project.startup_scene_id.as_str())).unwrap();
+	let mixed = success(fixture.command().arg("--steps").arg("0").output().unwrap());
+	assert_eq!(mixed["state_hash"], initial["state_hash"]);
+
 	let output = fixture.root.join("report.json");
+	fs::write(&cue_manifest, variant("unknown")).unwrap();
+	let missing_scene = failure(
+		fixture
+			.command()
+			.arg("--output")
+			.arg(&output)
+			.output()
+			.unwrap(),
+	);
+	assert!(
+		missing_scene["error"]["message"]
+			.as_str()
+			.unwrap()
+			.contains("unregistered scene")
+	);
+	assert!(!output.exists());
+
+	fs::write(&cue_manifest, variant(project.startup_scene_id.as_str())).unwrap();
+	fs::write(audio.join("cue-key.wav"), &KEY_CLIP[..KEY_CLIP.len() - 1]).unwrap();
 	let rejected = failure(
 		fixture
 			.command()

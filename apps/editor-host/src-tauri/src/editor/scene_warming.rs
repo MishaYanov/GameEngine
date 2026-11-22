@@ -1,10 +1,16 @@
 //! A bounded CPU worker for one selected inactive authored scene.
-use std::sync::{
-	atomic::{AtomicBool, Ordering},
-	Arc, Condvar, Mutex,
+use std::{
+	path::PathBuf,
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		Arc, Condvar, Mutex,
+	},
 };
 
-use runtime::{scene_catalog::SceneId, scene_io::PreparedSceneReferences, SceneData};
+use runtime::{
+	assets::PreparedModelBatch, scene_catalog::SceneId, scene_io::PreparedSceneReferences,
+	SceneData,
+};
 
 use super::EditorWorkspace;
 
@@ -20,7 +26,13 @@ struct WarmKey {
 struct Job {
 	key: WarmKey,
 	document: Arc<SceneData>,
+	asset_root: PathBuf,
 	cancel: Arc<AtomicBool>,
+}
+
+pub(crate) struct WarmedScene {
+	pub(crate) references: PreparedSceneReferences,
+	pub(crate) models: Option<PreparedModelBatch>,
 }
 
 #[derive(Default)]
@@ -28,18 +40,18 @@ struct Pending {
 	selected: Option<WarmKey>,
 	cancel: Option<Arc<AtomicBool>>,
 	queue: Option<Job>,
-	ready: Option<PreparedSceneReferences>,
+	ready: Option<WarmedScene>,
 	closed: bool,
 }
 
 impl Pending {
-	fn cancel(&mut self) {
+	fn cancel(&mut self) -> Option<WarmedScene> {
 		if let Some(cancel) = self.cancel.take() {
 			cancel.store(true, Ordering::Relaxed);
 		}
 		self.selected = None;
 		self.queue = None;
-		self.ready = None;
+		self.ready.take()
 	}
 }
 
@@ -49,21 +61,35 @@ struct Mailbox {
 	wake: Condvar,
 }
 
-struct WarmWorker(Arc<Mailbox>);
+struct WarmWorker {
+	mailbox: Arc<Mailbox>,
+	decode: bool,
+}
 
 impl WarmWorker {
 	fn new() -> Result<Self, String> {
-		Self::spawn(|job| {
-			PreparedSceneReferences::build(Arc::clone(&job.document), || {
-				job.cancel.load(Ordering::Relaxed)
-			})
-				.ok()
-				.flatten()
+		let decode = std::env::var_os("ENGINE_EDITOR_WARM_DECODE").as_deref()
+			== Some(std::ffi::OsStr::new("1"));
+		Self::spawn(decode, move |job| {
+			let cancelled = || job.cancel.load(Ordering::Relaxed);
+			let references =
+				PreparedSceneReferences::build(Arc::clone(&job.document), cancelled).ok()??;
+			let models = if decode {
+				PreparedModelBatch::prepare(
+					&job.asset_root,
+					references.static_model_assets(),
+					&cancelled,
+				)
+			} else {
+				None
+			};
+			Some(WarmedScene { references, models })
 		})
 	}
 
 	fn spawn(
-		prepare: impl Fn(&Job) -> Option<PreparedSceneReferences> + Send + 'static,
+		decode: bool,
+		prepare: impl Fn(&Job) -> Option<WarmedScene> + Send + 'static,
 	) -> Result<Self, String> {
 		let mailbox = Arc::new(Mailbox::default());
 		let owned = Arc::clone(&mailbox);
@@ -71,40 +97,45 @@ impl WarmWorker {
 			.name("editor-scene-warm".into())
 			.spawn(move || work(&owned, prepare))
 			.map_err(|error| error.to_string())?;
-		Ok(Self(mailbox))
+		Ok(Self { mailbox, decode })
 	}
 
-	fn request(&self, key: WarmKey, document: Arc<SceneData>) {
-		let Ok(mut state) = self.0.state.lock() else {
+	fn request(&self, key: WarmKey, document: Arc<SceneData>, asset_root: PathBuf) {
+		let Ok(mut state) = self.mailbox.state.lock() else {
 			return;
 		};
 		if state.selected.as_ref() == Some(&key) {
 			return;
 		}
-		state.cancel();
+		let retired = state.cancel();
 		let cancel = Arc::new(AtomicBool::new(false));
 		state.selected = Some(key.clone());
 		state.cancel = Some(Arc::clone(&cancel));
 		state.queue = Some(Job {
 			key,
 			document,
+			asset_root,
 			cancel,
 		});
-		self.0.wake.notify_one();
+		self.mailbox.wake.notify_one();
+		drop(state);
+		drop(retired);
 	}
 }
 
 impl Drop for WarmWorker {
 	fn drop(&mut self) {
-		if let Ok(mut state) = self.0.state.lock() {
-			state.cancel();
+		if let Ok(mut state) = self.mailbox.state.lock() {
+			let retired = state.cancel();
 			state.closed = true;
-			self.0.wake.notify_one();
+			self.mailbox.wake.notify_one();
+			drop(state);
+			drop(retired);
 		}
 	}
 }
 
-fn work(mailbox: &Mailbox, prepare: impl Fn(&Job) -> Option<PreparedSceneReferences>) {
+fn work(mailbox: &Mailbox, prepare: impl Fn(&Job) -> Option<WarmedScene>) {
 	loop {
 		let Ok(state) = mailbox.state.lock() else {
 			return;
@@ -145,16 +176,16 @@ pub(crate) struct SceneWarming {
 
 pub(crate) enum WarmClaim {
 	Unrequested,
-	Hit(PreparedSceneReferences),
+	Hit(WarmedScene),
 	Miss,
 	Stale,
 }
 
 impl WarmClaim {
-	pub(crate) fn into_references(self) -> (Option<PreparedSceneReferences>, &'static str) {
+	pub(crate) fn into_scene(self) -> (Option<WarmedScene>, &'static str) {
 		match self {
 			Self::Unrequested => (None, "unrequested"),
-			Self::Hit(references) => (Some(references), "hit"),
+			Self::Hit(scene) => (Some(scene), "hit"),
 			Self::Miss => (None, "miss"),
 			Self::Stale => (None, "stale"),
 		}
@@ -164,8 +195,10 @@ impl WarmClaim {
 impl SceneWarming {
 	pub(crate) fn cancel(&self) {
 		if let Some(worker) = &self.worker {
-			if let Ok(mut state) = worker.0.state.lock() {
-				state.cancel();
+			if let Ok(mut state) = worker.mailbox.state.lock() {
+				let retired = state.cancel();
+				drop(state);
+				drop(retired);
 			}
 		}
 	}
@@ -175,10 +208,14 @@ impl SceneWarming {
 		self.cancel();
 	}
 
+	pub(crate) fn decode_enabled(&self) -> bool {
+		self.worker.as_ref().is_some_and(|worker| worker.decode)
+	}
+
 	pub(crate) fn is_requested(&self) -> bool {
 		self.worker.as_ref().is_some_and(|worker| {
 			worker
-				.0
+				.mailbox
 				.state
 				.try_lock()
 				.is_ok_and(|state| state.selected.is_some())
@@ -189,7 +226,7 @@ impl SceneWarming {
 		let Some(worker) = &self.worker else {
 			return WarmClaim::Unrequested;
 		};
-		let Ok(mut state) = worker.0.state.lock() else {
+		let Ok(mut state) = worker.mailbox.state.lock() else {
 			return WarmClaim::Miss;
 		};
 		let Some(key) = state.selected.as_ref() else {
@@ -202,16 +239,18 @@ impl SceneWarming {
 			|| &key.scene != scene
 			|| key.asset_generation != self.asset_generation
 		{
-			state.cancel();
+			let retired = state.cancel();
+			drop(state);
+			drop(retired);
 			return WarmClaim::Stale;
 		}
-		let result = match state.ready.take() {
-			Some(references) if references.matches(document) => WarmClaim::Hit(references),
+		let prepared = state.cancel();
+		drop(state);
+		match prepared {
+			Some(scene) if scene.references.matches(document) => WarmClaim::Hit(scene),
 			Some(_) => WarmClaim::Stale,
 			None => WarmClaim::Miss,
-		};
-		state.cancel();
-		result
+		}
 	}
 }
 
@@ -247,7 +286,7 @@ impl EditorWorkspace {
 			self.scene_warming.worker = Some(WarmWorker::new()?);
 		}
 		if let Some(worker) = &self.scene_warming.worker {
-			worker.request(key, document);
+			worker.request(key, document, self.asset_root.clone());
 		}
 		Ok(())
 	}

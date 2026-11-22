@@ -168,8 +168,8 @@ fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
 			true,
 			false
 		)
-			.unwrap()
-			.smoke_prefetch_probe
+		.unwrap()
+		.smoke_prefetch_probe
 	);
 	assert!(LaunchOptions::parse(["--export-slot", "1", "p.json"], false, false).is_err());
 	assert!(LaunchOptions::parse(["--export-slot", "4", "p.json"], true, false).is_err());
@@ -179,7 +179,7 @@ fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
 			true,
 			false
 		)
-			.is_err()
+		.is_err()
 	);
 	assert!(
 		LaunchOptions::parse(["--preview-slot-import", "2", "p.json"], true, false)
@@ -195,4 +195,64 @@ fn checkpoint_tools_and_prefetch_only_activate_in_the_installed_player() {
 			.unwrap()
 			.scene_prefetch
 	);
+}
+
+#[test]
+fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
+	use game::launch::InputPresetCommand;
+
+	let digest = "ab".repeat(32);
+	for command in ["--export-input-preset", "--preview-input-preset"] {
+		assert!(LaunchOptions::parse([command, "preset.json"], false, false).is_err());
+		assert!(LaunchOptions::parse([command, "preset.json", "--player"], true, false).is_err());
+		assert!(
+			LaunchOptions::parse([command, "preset.json"], true, false)
+				.unwrap()
+				.input_preset
+				.is_some()
+		);
+	}
+	let apply = LaunchOptions::parse(
+		[
+			"--apply-input-preset",
+			"preset.json",
+			"--source-sha256",
+			&digest,
+			"--destination-sha256",
+			&digest,
+		],
+		true,
+		false,
+	)
+	.unwrap()
+	.input_preset;
+	assert!(
+		matches!(apply, Some(InputPresetCommand::Apply { source_sha256, destination_sha256, .. }) if source_sha256 == [0xab; 32] && destination_sha256 == [0xab; 32])
+	);
+	for arguments in [
+		vec![
+			"--apply-input-preset",
+			"preset.json",
+			"--source-sha256",
+			&digest,
+		],
+		vec![
+			"--apply-input-preset",
+			"preset.json",
+			"--source-sha256",
+			&digest,
+			"--source-sha256",
+			&digest,
+		],
+		vec![
+			"--apply-input-preset",
+			"preset.json",
+			"--source-sha256",
+			"zz",
+			"--destination-sha256",
+			&digest,
+		],
+	] {
+		assert!(LaunchOptions::parse(arguments, true, false).is_err());
+	}
 }

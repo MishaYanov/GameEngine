@@ -77,7 +77,30 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
     def write(self, path, records):
         path.write_text("".join(json.dumps(event) + "\n" for event in records), encoding="utf-8")
 
-    def compare(self, ceiling=105):
+    def with_model_records(self, path, enabled):
+        records = self.evidence(path, enabled)
+        for record in list(records):
+            if record["component"] != "editor_scene_warming":
+                continue
+            event = json.loads(record["message"])
+            if event["kind"] != "load":
+                continue
+            matched = enabled and event["outcome"] == "hit"
+            records.append(row("editor_model_warming", {
+                "schema_version": 1,
+                "kind": "model_load",
+                "request_id": event["request_id"],
+                "scene_id": event["scene_id"],
+                "mode": "decode" if event["outcome"] != "unrequested" else "off",
+                "batch_matched": matched,
+                "prepared_models": 2 if matched else 0,
+                "consumed_models": 1 if matched else 0,
+                "retained_bytes": 8192 if matched else 0,
+            }, record["session_id"]))
+        self.write(path, records)
+        return records
+
+    def compare(self, ceiling=105, decode=False):
         errors = StringIO()
         with redirect_stdout(StringIO()), redirect_stderr(errors):
             code = main([
@@ -85,7 +108,7 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
                 "--scene", TARGET, "--active-scene", ACTIVE, "--fixture-sha256", "b" * 64,
                 "--profile", str(self.profile), "--active-ceiling-us", str(ceiling),
                 "--output", str(self.output),
-            ])
+            ] + (["--decode-evidence"] if decode else []))
         return code, errors.getvalue()
 
     def test_joins_same_session_and_reports_selected_native_results(self):
@@ -158,6 +181,48 @@ class EditorWarmingBenchmarkTests(unittest.TestCase):
         self.write(self.warmed, records)
         self.assertIn("must use independent native runs", self.compare()[1])
         self.assertFalse(self.output.exists())
+
+
+    def test_reports_only_presented_target_adoptions_with_matching_session(self):
+        self.with_model_records(self.baseline, False)
+        self.with_model_records(self.warmed, True)
+        self.assertEqual(self.compare(decode=True), (0, ""))
+        report = json.loads(self.output.read_bytes())
+        self.assertEqual(report["warmed"]["model_warming"], {
+            "matched_batches": 10, "prepared_models": 20, "consumed_models": 10,
+            "max_retained_bytes": 8192,
+        })
+        self.assertEqual(report["baseline"]["model_warming"]["consumed_models"], 0)
+
+    def test_rejects_required_model_event_missing_from_session_or_repeated(self):
+        self.with_model_records(self.baseline, False)
+        records = self.with_model_records(self.warmed, True)
+        self.write(self.warmed, records[:-1])
+        self.assertIn("needs one model record in the same session", self.compare(decode=True)[1])
+        record = {**records[-1], "session_id": "wrong-native-session"}
+        self.write(self.warmed, [*records[:-1], record])
+        self.assertIn("needs one model record in the same session", self.compare(decode=True)[1])
+        self.write(self.warmed, [*records, records[-1]])
+        self.assertIn("Duplicate model_load record", self.compare(decode=True)[1])
+
+    def test_rejects_oversized_batch_and_references_only_decode_evidence(self):
+        self.with_model_records(self.baseline, False)
+        records = self.with_model_records(self.warmed, True)
+        index = next(index for index, record in enumerate(records)
+                     if record["component"] == "editor_model_warming"
+                     and json.loads(record["message"])["batch_matched"])
+        row = records[index]
+        event = json.loads(row["message"])
+        self.write(self.warmed, [*records[:index], {
+            **row, "message": json.dumps({**event, "retained_bytes": 16 * 1024 * 1024 + 1})
+        }, *records[index + 1:]])
+        self.assertIn("retained-byte budget", self.compare(decode=True)[1])
+        self.write(self.warmed, [*records[:index], {
+            **row, "message": json.dumps({**event, "mode": "references", "prepared_models": 0,
+                                         "batch_matched": False, "consumed_models": 0,
+                                         "retained_bytes": 0})
+        }, *records[index + 1:]])
+        self.assertIn("does not match its scene or capture mode", self.compare(decode=True)[1])
 
 
 if __name__ == "__main__":

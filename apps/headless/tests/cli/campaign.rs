@@ -83,7 +83,10 @@ fn authored_chapters_advance_independently_and_restart_from_the_first_course() {
 }
 
 #[test]
-fn renamed_authored_campaign_replays_identically_after_compiler_staging() {
+fn renamed_and_repaired_campaign_replays_identically_after_compiler_staging() {
+	use courtyard_gameplay::authoring_repairs::sensor_repairs;
+	use engine_core::{scene_catalog::SceneId, scene_data::ColliderData};
+
 	let fixture = Fixture::new();
 	let game = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../game");
 	let mut authored = ProjectData::load(&game.join("project.courtyard-chapters.json")).unwrap();
@@ -96,7 +99,7 @@ fn renamed_authored_campaign_replays_identically_after_compiler_staging() {
 			game.join("assets").join(scene.asset_path()),
 			assets.join(scene.asset_path()),
 		)
-			.unwrap();
+		.unwrap();
 	}
 	fs::create_dir(assets.join("props")).unwrap();
 	for file in ["capsule.glb", "cube.glb", "sphere.glb"] {
@@ -104,8 +107,29 @@ fn renamed_authored_campaign_replays_identically_after_compiler_staging() {
 			game.join("assets/props").join(file),
 			assets.join("props").join(file),
 		)
-			.unwrap();
+		.unwrap();
 	}
+	let garden_path = assets.join("scenes/chapter-garden.json");
+	let mut garden = SceneData::from_json(&fs::read_to_string(&garden_path).unwrap()).unwrap();
+	let trigger = garden
+		.entities
+		.iter()
+		.position(|entity| entity.key.as_str() == "garden-exit-trigger")
+		.unwrap();
+	match garden.entities[trigger].collider.as_mut().unwrap() {
+		ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+			interaction.sensor = false;
+		}
+	}
+	fs::write(&garden_path, garden.to_json().unwrap()).unwrap();
+	assert!(compiler::prepare_project(&authored, &assets).is_err());
+	let garden_id = SceneId::new("garden").unwrap();
+	let repair = sensor_repairs(&authored, &garden_id, &garden)
+		.next()
+		.unwrap();
+	assert_eq!(garden.entities[trigger].key, repair.target.entity_key);
+	garden.entities[trigger].collider = Some(repair.after);
+	fs::write(&garden_path, garden.to_json().unwrap()).unwrap();
 	let prepared = compiler::prepare_project(&authored, &assets).unwrap();
 	let staged =
 		compiler::stage_prepared_project(&prepared, fixture.root.to_str().unwrap()).unwrap();
@@ -141,7 +165,7 @@ fn release_learning_route_reaches_finish_after_one_deliberate_press() {
 		&fs::read_to_string(game.join("fixtures/courtyard-release-learning/route.replay.json"))
 			.unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let actions = script["actions"].as_array().unwrap();
 	let run = |label: &str, actions: Vec<Value>| {
 		let replay = fixture.replay_version(3, actions);

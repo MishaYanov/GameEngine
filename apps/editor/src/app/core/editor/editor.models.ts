@@ -48,6 +48,19 @@ export interface CampaignDefinition {
 export interface CampaignDiagnostic {
     readonly scene_id: SceneId | null;
     readonly message: string;
+    readonly repair?: CampaignRepairTarget;
+}
+
+export interface CampaignRepairTarget {
+    readonly scene_id: SceneId;
+    readonly role: 'key_trigger' | 'exit_trigger' | 'finish_trigger';
+    readonly entity_key: EntityKey;
+}
+
+export interface CampaignRepairPreview {
+    readonly target: CampaignRepairTarget;
+    readonly before: Collider;
+    readonly after: Collider;
 }
 
 export interface CampaignDiagnosticReport {

@@ -26,6 +26,12 @@ pub struct PreparedScene {
 	simulation: SimulationSession,
 }
 
+impl PreparedScene {
+	pub fn scene_id(&self) -> &SceneId {
+		self.simulation.scene_id()
+	}
+}
+
 impl GameSession {
 	pub fn set_animation_resolver(
 		&mut self,

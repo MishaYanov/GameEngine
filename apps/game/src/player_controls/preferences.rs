@@ -4,13 +4,14 @@ use super::{
 	audio::FeedbackMix,
 	display::DisplaySettings,
 };
-use runtime::input::ControllerBindings;
+use crate::local_player_files::{lock, ordinary_file, profile_directory, read_bounded};
+use runtime::{input::ControllerBindings, scene_io::replace_bytes};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::{
-	fs::{self, File, Metadata, OpenOptions},
-	io::{self, Read, Write},
-	path::{Path, PathBuf},
+	fs,
 	sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -62,15 +63,8 @@ enum Record {
 }
 
 impl Record {
-	fn read(file: File) -> Result<ControlsSettings, String> {
-		let mut bytes = Vec::new();
-		file.take((MAX_BYTES + 1) as u64)
-			.read_to_end(&mut bytes)
-			.map_err(|error| format!("Cannot read controls: {error}"))?;
-		if bytes.len() > MAX_BYTES {
-			return Err(format!("Saved controls exceed {MAX_BYTES} bytes"));
-		}
-		match serde_json::from_slice(&bytes).map_err(|_| "Saved controls are invalid")? {
+	fn read(bytes: &[u8]) -> Result<ControlsSettings, String> {
+		match serde_json::from_slice(bytes).map_err(|_| "Saved controls are invalid")? {
 			Self::First(record) if record.schema_version == 1 => Ok(ControlsSettings {
 				movement: record.movement,
 				..ControlsSettings::default()
@@ -135,133 +129,106 @@ impl Preferences {
 		})
 	}
 
-	pub(super) fn load(&self) -> Result<ControlsSettings, String> {
-		let Some(folder) = self.folder(false)? else {
-			return Ok(ControlsSettings::default());
-		};
-		let path = folder.join(&self.filename);
-		if !regular_record(&path)? {
-			return Ok(ControlsSettings::default());
+	#[cfg(test)]
+	pub(super) fn test_profile(root: &Path) -> Self {
+		Self {
+			root: root.to_owned(),
+			filename: "test-controls.json".into(),
 		}
-		let mut options = OpenOptions::new();
-		options.read(true);
-		#[cfg(windows)]
-		{
-			use std::os::windows::fs::OpenOptionsExt;
-			const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-			options.custom_flags(OPEN_REPARSE_POINT);
-		}
-		let file = options
-			.open(path)
-			.map_err(|error| format!("Cannot open controls: {error}"))?;
-		let metadata = file
-			.metadata()
-			.map_err(|error| format!("Cannot inspect controls: {error}"))?;
-		if !metadata.is_file() || linked(&metadata) {
-			return Err("Controls record is not an ordinary file".into());
-		}
-		Record::read(file)
 	}
 
+	pub(super) fn profile_root(&self) -> &Path {
+		&self.root
+	}
+
+	/// Bind a review to both canonical preference contents and this local owner.
+	pub(super) fn review_digest(&self, controls: &ControlsSettings) -> Result<[u8; 32], String> {
+		let profile = self
+			.root
+			.canonicalize()
+			.map_err(|_| "Cannot identify the local profile")?;
+		let mut hasher = Sha256::new();
+		hasher.update(b"game-engine-input-preset-destination-v1");
+		for field in [
+			profile.as_os_str().as_encoded_bytes(),
+			self.filename.as_bytes(),
+		] {
+			hasher.update((field.len() as u64).to_le_bytes());
+			hasher.update(field);
+		}
+		hasher.update(Self::encode(controls)?);
+		Ok(hasher.finalize().into())
+	}
+
+	pub(super) fn load(&self) -> Result<ControlsSettings, String> {
+		self.folder(false)?.map_or_else(
+			|| Ok(ControlsSettings::default()),
+			|folder| self.load_from(&folder),
+		)
+	}
+
+	fn load_from(&self, folder: &Path) -> Result<ControlsSettings, String> {
+		read_bounded(&folder.join(&self.filename), MAX_BYTES)?.map_or_else(
+			|| Ok(ControlsSettings::default()),
+			|bytes| Record::read(&bytes),
+		)
+	}
+
+	#[cfg(test)]
 	pub(super) fn save(&self, controls: &ControlsSettings) -> Result<(), String> {
+		self.update(|_| Ok((controls.clone(), ())))
+	}
+
+	pub(super) fn save_if_current(
+		&self,
+		previous: &ControlsSettings,
+		controls: &ControlsSettings,
+	) -> Result<(), String> {
+		self.update(|current| {
+			if Self::encode(&current)? != Self::encode(previous)? {
+				return Err("Local controls changed. Reopen the Player before editing.".into());
+			}
+			Ok((controls.clone(), ()))
+		})
+	}
+
+	pub(super) fn update<T>(
+		&self,
+		change: impl FnOnce(ControlsSettings) -> Result<(ControlsSettings, T), String>,
+	) -> Result<T, String> {
+		let folder = self
+			.folder(true)?
+			.ok_or("Local controls storage is unavailable")?;
+		let path = folder.join(&self.filename);
+		let _lock = lock(&path.with_extension("lock"))?;
+		let (controls, result) = change(self.load_from(&folder)?)?;
+		ordinary_file(&path)?;
+		replace_bytes(&path, &Self::encode(&controls)?)?;
+		Ok(result)
+	}
+
+	fn encode(controls: &ControlsSettings) -> Result<Vec<u8>, String> {
 		validate_rows(&controls.actions)?;
+		let mut actions = controls.actions.clone();
+		actions.sort_unstable_by(|a, b| a.action_id.cmp(&b.action_id));
 		let bytes = serde_json::to_vec(&RecordV4 {
 			schema_version: SCHEMA_VERSION,
 			movement: controls.movement,
 			controller: controls.controller.validate()?,
 			display: controls.display,
-			actions: controls.actions.clone(),
+			actions,
 			audio: controls.audio.validate()?,
 		})
 		.map_err(|error| format!("Cannot encode controls: {error}"))?;
 		if bytes.len() > MAX_BYTES {
 			return Err(format!("Saved controls exceed {MAX_BYTES} bytes"));
 		}
-		let folder = self
-			.folder(true)?
-			.ok_or("Local controls storage is unavailable")?;
-		let path = folder.join(&self.filename);
-		regular_record(&path)?;
-		let (temporary, mut file) = temporary_sibling(&path)
-			.map_err(|error| format!("Cannot prepare controls: {error}"))?;
-		let written = file.write_all(&bytes).and_then(|()| file.sync_all());
-		drop(file);
-		let result = written.and_then(|()| fs::rename(&temporary, path));
-		if let Err(error) = result {
-			let _ = fs::remove_file(temporary);
-			return Err(format!("Cannot save controls: {error}"));
-		}
-		Ok(())
+		Ok(bytes)
 	}
 
 	fn folder(&self, create: bool) -> Result<Option<PathBuf>, String> {
-		let root = self
-			.root
-			.canonicalize()
-			.map_err(|_| "Local controls storage is unavailable")?;
-		let mut path = root;
-		for segment in ["GameEngine", "controls"] {
-			path.push(segment);
-			if create {
-				match fs::create_dir(&path) {
-					Ok(()) => {}
-					Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-					Err(error) => return Err(format!("Cannot create controls folder: {error}")),
-				}
-			}
-			match fs::symlink_metadata(&path) {
-				Ok(metadata) if metadata.is_dir() && !linked(&metadata) => {}
-				Ok(_) => return Err("Controls folder is not an ordinary directory".into()),
-				Err(error) if error.kind() == io::ErrorKind::NotFound && !create => {
-					return Ok(None);
-				}
-				Err(error) => return Err(format!("Cannot inspect controls folder: {error}")),
-			}
-		}
-		Ok(Some(path))
+		profile_directory(&self.root, &["GameEngine", "controls"], create)
 	}
-}
-
-fn regular_record(path: &Path) -> Result<bool, String> {
-	match fs::symlink_metadata(path) {
-		Ok(metadata) if metadata.is_file() && !linked(&metadata) => Ok(true),
-		Ok(_) => Err("Controls record is not an ordinary file".into()),
-		Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-		Err(error) => Err(format!("Cannot inspect saved controls: {error}")),
-	}
-}
-
-fn linked(metadata: &Metadata) -> bool {
-	#[cfg(windows)]
-	{
-		use std::os::windows::fs::MetadataExt;
-		const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-		if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-			return true;
-		}
-	}
-	metadata.file_type().is_symlink()
-}
-
-fn temporary_sibling(path: &Path) -> io::Result<(PathBuf, File)> {
-	static NEXT: AtomicU64 = AtomicU64::new(0);
-	for _ in 0..128 {
-		let id = NEXT.fetch_add(1, Ordering::Relaxed);
-		let temporary = path.with_extension(format!("tmp-{}-{id}", std::process::id()));
-		match OpenOptions::new()
-			.write(true)
-			.create_new(true)
-			.open(&temporary)
-		{
-			Ok(file) => return Ok((temporary, file)),
-			Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-			Err(error) => return Err(error),
-		}
-	}
-	Err(io::Error::new(
-		io::ErrorKind::AlreadyExists,
-		"Controls temporary file names exhausted",
-	))
 }
 
 #[cfg(test)]

@@ -210,7 +210,7 @@ pub async fn editor_campaign_generation(
 	workspace_with_error(state, false, None, move |w| {
 		w.campaign_generation(expected_revision)
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -225,14 +225,14 @@ pub async fn editor_apply_campaign(
 	let edit = workspace_with_error(state.clone(), false, Some("capture_campaign"), move |w| {
 		w.capture_campaign(expected_generation, expected_revision, campaign)
 	})
-		.await?;
+	.await?;
 	let reviewed = tauri::async_runtime::spawn_blocking(move || edit.review())
 		.await
 		.map_err(|error| format!("Campaign validation worker failed: {error}"))??;
 	workspace_with_error(state, true, Some("commit_campaign"), move |w| {
 		w.commit_campaign(reviewed)
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -253,12 +253,51 @@ pub async fn editor_diagnose_campaign(
 		Some("capture_campaign_diagnostics"),
 		move |w| w.capture_campaign_check(expected_generation, expected_revision, campaign),
 	)
-		.await?;
+	.await?;
 	let report = tauri::async_runtime::spawn_blocking(move || check.diagnose())
 		.await
 		.map_err(|error| format!("Campaign diagnostics worker failed: {error}"))?;
 	workspace_with_error(state, false, None, move |w| {
 		w.accept_campaign_diagnostics(report)
 	})
-		.await
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_preview_campaign_repair(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	target: courtyard_gameplay::authoring_repairs::CampaignRepairTarget,
+) -> Result<
+	courtyard_gameplay::authoring_repairs::CampaignRepairPreview,
+	crate::editor::campaign_authoring::CampaignAuthoringError,
+> {
+	trusted_window(&window)?;
+	workspace_with_error(state, false, None, move |w| {
+		w.preview_campaign_repair(expected_generation, expected_revision, &target)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_apply_campaign_repair(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	expected_revision: u64,
+	target: courtyard_gameplay::authoring_repairs::CampaignRepairTarget,
+	expected_collider: runtime::scene_data::ColliderData,
+) -> Result<EditorSnapshotDto, crate::editor::campaign_authoring::CampaignAuthoringError> {
+	trusted_window(&window)?;
+	workspace_with_error(state, true, None, move |w| {
+		w.apply_campaign_repair(
+			expected_generation,
+			expected_revision,
+			&target,
+			&expected_collider,
+		)
+	})
+	.await
 }

@@ -1,5 +1,10 @@
 import {Component, computed, input, output} from '@angular/core';
-import type {CampaignDiagnostic, SceneDescriptor, SceneId} from '../../../../core/editor/editor.models';
+import type {
+    CampaignDiagnostic,
+    CampaignRepairTarget,
+    SceneDescriptor,
+    SceneId
+} from '../../../../core/editor/editor.models';
 
 @Component({
     selector: 'editor-campaign-diagnostics',
@@ -10,7 +15,9 @@ export class CampaignDiagnostics {
     readonly scenes = input.required<readonly SceneDescriptor[]>();
     readonly activeScene = input<SceneId>();
     readonly canNavigate = input(false);
+    readonly canRepair = input(false);
     readonly inspect = output<SceneId>();
+    readonly reviewRepair = output<CampaignRepairTarget>();
 
     private readonly byId = computed(() => new Map(this.scenes().map(scene => [scene.id, scene.asset_path])));
     protected readonly entries = computed(() => this.issues().map(issue => ({

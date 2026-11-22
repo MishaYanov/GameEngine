@@ -41,6 +41,19 @@ impl PreparedSceneReferences {
 		std::ptr::eq(self.document.as_ref(), document)
 	}
 
+	/// Candidate model references in authored order. Hidden and animated
+	/// entities keep the ordinary assembly path.
+	pub fn static_model_assets(&self) -> impl Iterator<Item = &AssetRef> {
+		self.document
+			.entities
+			.iter()
+			.zip(&self.assets)
+			.filter_map(|(entity, asset)| {
+				(entity.renderable && entity.has_mesh_component() && entity.animation.is_none())
+					.then_some(asset)
+			})
+	}
+
 	pub(super) fn asset(&self, index: usize) -> &AssetRef {
 		&self.assets[index]
 	}
@@ -56,5 +69,5 @@ pub(super) fn reference(entity: &engine_core::scene_data::EntityData) -> Result<
 		entity.model_path.clone(),
 		Some(entity.mesh_index.unwrap_or(0)),
 	)?
-		.with_asset_id(entity.asset_id.clone()))
+	.with_asset_id(entity.asset_id.clone()))
 }

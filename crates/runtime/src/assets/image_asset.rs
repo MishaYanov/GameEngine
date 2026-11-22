@@ -76,6 +76,10 @@ impl From<ImageError> for ImageAssetError {
 }
 
 impl ImageAsset {
+	pub(super) fn retained_bytes(&self) -> usize {
+		self.pixels.capacity()
+	}
+
 	/// Constructs an image from decoded RGBA8 pixels.
 	///
 	/// Each pixel must contain four bytes: red, green, blue, alpha.

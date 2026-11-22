@@ -3,8 +3,11 @@ use courtyard_gameplay::checkpoint::{
 	ContinueAvailability, RestoreSource, SaveSlot, SlotGeneration, SlotInspection,
 };
 
+#[path = "transfer_history_menu.rs"]
+mod transfer_history_menu;
 #[path = "transfer_menu.rs"]
 mod transfer_menu;
+use transfer_history_menu::TransferHistoryMenu;
 use transfer_menu::{TransferAction, TransferMenu};
 
 #[derive(Clone, Copy)]
@@ -16,6 +19,7 @@ pub(super) enum Intent {
 enum Page {
 	Slots,
 	Transfer(Box<TransferMenu>),
+	History(TransferHistoryMenu),
 	Actions {
 		focus: usize,
 	},
@@ -97,6 +101,7 @@ impl SaveMenu {
 					}
 				};
 				if self.transfer_available {
+					rows.push("Transfer history".into());
 					rows.push(match self.intent {
 						Intent::Save => "Export checkpoint file".into(),
 						Intent::Continue => "Import checkpoint file".into(),
@@ -105,6 +110,7 @@ impl SaveMenu {
 				(selected.label().into(), rows, *focus)
 			}
 			Page::Transfer(transfer) => transfer.rows(),
+			Page::History(history) => history.rows(),
 			Page::Confirm { replace, .. } => (
 				format!("Replace {}?", selected.label()),
 				vec!["Cancel".into(), "Replace save".into()],
@@ -138,24 +144,38 @@ impl SaveMenu {
 					Key::ArrowUp | Key::ArrowDown => {
 						*focus = advance_row(
 							*focus,
-							back + 1 + usize::from(self.transfer_available),
+							back + 1 + 2 * usize::from(self.transfer_available),
 							key,
 						);
 					}
 					Key::Enter if *focus == back => self.page = Page::Slots,
-					Key::Enter if *focus > back && self.transfer_available => match self.intent {
-						Intent::Save => {
-							let result = app.export_checkpoint_transfer(slot);
-							self.update(app, result);
-						}
-						Intent::Continue => match TransferMenu::new(app, slot) {
-							Ok(transfer) => {
+					Key::Enter if *focus == back + 1 && self.transfer_available => {
+						match TransferHistoryMenu::new(app, slot) {
+							Ok(history) => {
 								app.player_controls.message = None;
-								self.page = Page::Transfer(Box::new(transfer));
+								self.page = Page::History(history);
 							}
-							Err(error) => app.player_controls.message = Some(error),
-						},
-					},
+							Err(_) => {
+								app.player_controls.message =
+									Some("Transfer history unavailable".into())
+							}
+						}
+					}
+					Key::Enter if *focus == back + 2 && self.transfer_available => {
+						match self.intent {
+							Intent::Save => {
+								let result = app.export_checkpoint_transfer(slot);
+								self.update(app, result);
+							}
+							Intent::Continue => match TransferMenu::new(app, slot) {
+								Ok(transfer) => {
+									app.player_controls.message = None;
+									self.page = Page::Transfer(Box::new(transfer));
+								}
+								Err(error) => app.player_controls.message = Some(error),
+							},
+						}
+					}
 					Key::Enter => {
 						let Some(generation) = snapshot.generation else {
 							app.player_controls.message = Some("Save storage unavailable".into());
@@ -200,11 +220,18 @@ impl SaveMenu {
 					_ => {}
 				}
 			}
+			Page::History(history) => {
+				if !history.key(key) {
+					app.player_controls.message = None;
+					let focus = 2 + usize::from(snapshot.recovery_checkpoint_id.is_some());
+					self.page = Page::Actions { focus };
+				}
+			}
 			Page::Transfer(transfer) => match transfer.key(app, key) {
 				TransferAction::Stay => {}
 				TransferAction::Back => {
 					app.player_controls.message = None;
-					let focus = 2 + usize::from(snapshot.recovery_checkpoint_id.is_some());
+					let focus = 3 + usize::from(snapshot.recovery_checkpoint_id.is_some());
 					self.page = Page::Actions { focus };
 				}
 				TransferAction::Imported(message) => self.update(app, Ok(message)),

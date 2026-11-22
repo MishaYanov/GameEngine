@@ -19,6 +19,42 @@
         </label>
     </fieldset>
     <fieldset [disabled]="!ready()" class="fields">
+        <legend>Campaign bus levels</legend>
+        @for (bus of buses; track bus) {
+            @let invalid = invalidBusLevel(mixFields.category[bus]().value());
+            <label>Campaign {{ bus }} level (%)
+                <input [attr.aria-describedby]="invalid ? descriptionPrefix + '-mix' : null"
+                       [attr.aria-invalid]="invalid || null" [formField]="mixFields.category[bus]"
+                       step="1" type="number">
+            </label>
+        }
+    </fieldset>
+    @if (sceneChoices().length) {
+        <fieldset [disabled]="!ready()" class="fields">
+            <legend>Scene bus levels</legend>
+            <label>Preview and edit scene
+                <select [formField]="sceneField">
+                    @for (scene of sceneChoices(); track scene.id) {
+                        <option [value]="scene.id">{{ scene.id }}</option>
+                    }
+                </select>
+            </label>
+            @if (mixFields.scenes[selectedSceneIndex()]; as selected) {
+                @for (bus of buses; track bus) {
+                    @let invalid = invalidBusLevel(selected.levels[bus]().value());
+                    <label>Scene {{ bus }} level (%)
+                        <input [attr.aria-describedby]="invalid ? descriptionPrefix + '-mix' : null"
+                               [attr.aria-invalid]="invalid || null" [formField]="selected.levels[bus]"
+                               step="1" type="number">
+                    </label>
+                }
+            }
+        </fieldset>
+    }
+    @if (mixError(); as message) {
+        <p [id]="descriptionPrefix + '-mix'" class="error" role="status">{{ message }}</p>
+    }
+    <fieldset [disabled]="!ready()" class="fields">
         <legend>Cue assignments</legend>
         @for (row of rows; track row.event) {
             <label>{{ row.label }}
@@ -31,10 +67,14 @@
                     Enter a project path such as audio/cue-gate.wav.
                 </p>
             }
-            <button (click)="togglePreview(row)" [disabled]="audition()?.event !== row.event && !canPreview(row.event)"
+            <button (click)="togglePreview(row)" [disabled]="audition()?.event !== row.event && !canPreview(row)"
                     type="button">
                 {{ audition()?.event === row.event ? 'Stop preview of' : 'Preview' }} {{ row.label }}
             </button>
+            @let level = authoredPercent(row.bus);
+            @if (level !== null) {
+                <span>{{ row.label }} authored level {{ level }}%</span>
+            }
         }
     </fieldset>
     <fieldset [disabled]="!ready()" class="fields">

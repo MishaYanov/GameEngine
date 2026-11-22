@@ -13,12 +13,18 @@ import {
     viewChildren,
 } from '@angular/core';
 import {applyEach, form, FormField, maxLength} from '@angular/forms/signals';
-import type {CampaignDiagnosticReport, SceneId} from '../../../../core/editor/editor.models';
+import type {
+    CampaignDiagnosticReport,
+    CampaignRepairPreview,
+    CampaignRepairTarget,
+    SceneId
+} from '../../../../core/editor/editor.models';
 import {EditorClientError, EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {CampaignDiagnostics} from './campaign-diagnostics';
+import {CampaignRepair} from './campaign-repair';
 import {
     campaignDefinition,
     type CampaignDraft,
@@ -50,9 +56,14 @@ interface SceneInspection {
     readonly sceneId: SceneId;
 }
 
+interface ReviewedRepair {
+    readonly check: CheckedCampaign;
+    readonly preview: CampaignRepairPreview;
+}
+
 @Component({
     selector: 'editor-campaign-settings',
-    imports: [CampaignDiagnostics, EditorDialog, FormField],
+    imports: [CampaignDiagnostics, CampaignRepair, EditorDialog, FormField],
     templateUrl: './campaign-settings.html',
     styleUrls: ['./settings.scss', './campaign-settings.scss'],
 })
@@ -74,6 +85,7 @@ export class CampaignSettings {
     private readonly checkingRequest = signal<DiagnosticRequest | null>(null);
     private readonly checked = signal<CheckedCampaign | null>(null);
     private readonly inspection = signal<SceneInspection | null>(null);
+    private readonly repair = signal<ReviewedRepair | null>(null);
     private inspectAfterClose: SceneInspection | null = null;
     private nextRow = 0;
 
@@ -113,12 +125,20 @@ export class CampaignSettings {
         const next = this.inspection();
         return next?.check === this.diagnostics() ? next : null;
     });
+    protected readonly repairChoice = computed(() => {
+        const review = this.repair();
+        return review && review.check === this.diagnostics() &&
+        review.preview.target.scene_id === this.activeScene() ? review : null;
+    });
 
     constructor() {
         effect(() => {
             const context = this.context();
             if (this.open() && context && !this.currentWorkspace(context.generation)) {
                 this.open.set(false);
+            } else if (this.open() && this.repair() && !this.repairChoice() && !this.pending()) {
+                this.repair.set(null);
+                this.showFailure('The scene changed. Reopen Campaign Settings to review the current revision.');
             }
         });
     }
@@ -189,7 +209,8 @@ export class CampaignSettings {
 
     protected async checkCampaign(): Promise<void> {
         const context = this.context();
-        if (!context || !this.open() || !this.available() || this.checking() || this.validation()) return;
+        if (!context || !this.open() || !this.available() || this.checking() || this.repairChoice() ||
+            this.validation()) return;
         const request = {context, draft: this.draft()};
         if (!this.currentDiagnosticRequest(request)) {
             this.showFailure('The workspace changed. Reopen Campaign Settings to check the current revision.');
@@ -198,6 +219,7 @@ export class CampaignSettings {
         this.checkingRequest.set(request);
         this.checked.set(null);
         this.inspection.set(null);
+        this.repair.set(null);
         this.error.set(null);
         this.message.set(null);
         try {
@@ -220,9 +242,63 @@ export class CampaignSettings {
         }
     }
 
+    protected async reviewRepair(target: CampaignRepairTarget): Promise<void> {
+        const check = this.diagnostics();
+        if (!check || !this.available() || this.repairChoice() || this.inspectChoice() ||
+            target.scene_id !== this.activeScene() ||
+            !check.report.issues.some(issue => issue.repair === target)) return;
+        const {generation, nativeGeneration, revision} = check.request.context;
+        this.pending.set(true);
+        this.error.set(null);
+        this.message.set(null);
+        try {
+            const preview = await this.editor.previewCampaignRepair(target, generation, nativeGeneration, revision);
+            if (this.diagnostics() === check && this.activeScene() === target.scene_id) {
+                this.repair.set({check, preview});
+            }
+        } catch (cause) {
+            if (this.diagnostics() === check) this.showFailure(cause);
+        } finally {
+            if (!this.destroyRef.destroyed) this.pending.set(false);
+        }
+    }
+
+    protected cancelRepair(): void {
+        if (!this.repairChoice() || this.pending()) return;
+        this.repair.set(null);
+        this.focusWhileOpen(() => this.checkButton()?.nativeElement);
+    }
+
+    protected async applyRepair(): Promise<void> {
+        const repair = this.repairChoice();
+        if (!repair || !this.available()) return;
+        const context = repair.check.request.context;
+        const {generation, nativeGeneration, revision} = context;
+        this.pending.set(true);
+        this.error.set(null);
+        const current = () => this.open() && this.context() === context && this.currentWorkspace(generation);
+        try {
+            const updated = await this.editor.applyCampaignRepair(repair.preview, generation, nativeGeneration, revision);
+            if (current()) {
+                this.context.set({...context, revision: updated.revision});
+                this.checked.set(null);
+                this.message.set('Trigger repaired. Save All to persist the scene.');
+                this.focusWhileOpen(() => this.checkButton()?.nativeElement);
+            }
+        } catch (cause) {
+            if (current()) this.showFailure(cause);
+        } finally {
+            if (!this.destroyRef.destroyed) {
+                this.repair.set(null);
+                this.pending.set(false);
+            }
+        }
+    }
+
     protected inspectScene(sceneId: SceneId): void {
         const check = this.diagnostics();
-        if (!check || !this.canInspectScene(sceneId) || !check.report.issues.some(issue => issue.scene_id === sceneId)) return;
+        if (!check || this.pending() || this.repairChoice() || !this.canInspectScene(sceneId) ||
+            !check.report.issues.some(issue => issue.scene_id === sceneId)) return;
         const next = {check, sceneId};
         if (this.dirty()) {
             this.inspection.set(next);
@@ -244,6 +320,7 @@ export class CampaignSettings {
         const next = this.inspectAfterClose;
         this.inspectAfterClose = null;
         this.inspection.set(null);
+        this.repair.set(null);
         this.checked.set(null);
         this.checkingRequest.set(null);
         this.context.set(null);
@@ -256,7 +333,8 @@ export class CampaignSettings {
 
     protected async apply(): Promise<void> {
         const context = this.context();
-        if (!context || !this.open() || !this.available() || this.checking() || this.validation() || !this.dirty()) return;
+        if (!context || !this.open() || !this.available() || this.checking() || this.repairChoice() ||
+            this.validation() || !this.dirty()) return;
         const definition = campaignDefinition(this.draft());
         this.pending.set(true);
         this.error.set(null);

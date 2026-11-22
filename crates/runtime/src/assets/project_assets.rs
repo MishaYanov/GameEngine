@@ -98,7 +98,63 @@ pub fn load_catalog(asset_root: &Path) -> Result<AssetCatalog, String> {
 		None => Ok(AssetCatalog::default()),
 	}
 }
+pub(super) fn warm_model_path(asset_root: &Path, relative: &str) -> Result<PathBuf, String> {
+	validate_model_path(relative)?;
+	let asset_root = root(asset_root)?;
+	crate::scene_io::paths::resolve_from_canonical_root(&asset_root, Path::new(relative))
+}
+
+pub(super) fn open_warm_file(path: &Path) -> std::io::Result<fs::File> {
+	use crate::scene_io::paths::is_linked;
+	if is_linked(&fs::symlink_metadata(path)?) {
+		return Err(std::io::Error::other(
+			"Warm source must be an ordinary file",
+		));
+	}
+	let mut options = OpenOptions::new();
+	options.read(true);
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::OpenOptionsExt;
+		options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+	}
+	#[cfg(windows)]
+	{
+		use std::os::windows::fs::OpenOptionsExt;
+		use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+		options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+	}
+	let file = options.open(path)?;
+	let metadata = file.metadata()?;
+	if !metadata.is_file() || is_linked(&metadata) {
+		return Err(std::io::Error::other(
+			"Warm source must be an ordinary file",
+		));
+	}
+	Ok(file)
+}
+
+pub(super) fn load_catalog_for_warming(
+	asset_root: &Path,
+	budget: &mut super::import_budget::ImportBudget<'_>,
+) -> Result<AssetCatalog, String> {
+	let path = warm_model_path(asset_root, CATALOG_FILE)?;
+	let bytes = budget
+		.read_file_at_most(&path, MAX_CATALOG_BYTES)
+		.map_err(|e| e.to_string())?;
+	budget.preflight_json(&bytes).map_err(|e| e.to_string())?;
+	AssetCatalog::from_json(std::str::from_utf8(&bytes).map_err(|e| e.to_string())?)
+}
+
 pub fn resolve_asset(asset_root: &Path, reference: &AssetRef) -> Result<AssetRef, String> {
+	resolve_asset_with_model(asset_root, reference, |_| ()).map(|(reference, ())| reference)
+}
+
+pub(super) fn resolve_asset_with_model<T>(
+	asset_root: &Path,
+	reference: &AssetRef,
+	use_model: impl FnOnce(Option<&PersistentAsset>) -> T,
+) -> Result<(AssetRef, T), String> {
 	reference.validate()?;
 	let catalog = load_catalog(asset_root)?;
 	match catalog.resolve(
@@ -106,12 +162,12 @@ pub fn resolve_asset(asset_root: &Path, reference: &AssetRef) -> Result<AssetRef
 		&reference.path,
 		reference.mesh_index,
 	)? {
-		Some(asset) if asset.kind == AssetKind::Model => {
-			Ok(AssetRef::new(&asset.path, reference.mesh_index)?
-				.with_asset_id(Some(asset.id.clone())))
-		}
+		Some(asset) if asset.kind == AssetKind::Model => Ok((
+			AssetRef::new(&asset.path, reference.mesh_index)?.with_asset_id(Some(asset.id.clone())),
+			use_model(Some(asset)),
+		)),
 		Some(_) => Err("A renderable entity requires a model asset".into()),
-		None => Ok(reference.clone()),
+		None => Ok((reference.clone(), use_model(None))),
 	}
 }
 fn unique(asset_root: &Path, suffix: &str) -> PathBuf {

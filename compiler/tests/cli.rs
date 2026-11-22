@@ -175,10 +175,15 @@ fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
 		ProjectData::for_scene("CPU audio stage", "scenes/main.json", &scene).unwrap();
 	let manifest = authoring.join("project.json");
 	fs::write(&manifest, project.to_json().unwrap()).unwrap();
-	use bridge::feedback_audio::{CueAssignment, FeedbackCue, prepare_catalog};
+	use bridge::feedback_audio::{CueAssignment, FeedbackCue, prepare_catalog_with_mix};
 	fs::write(audio.join("cue-key.wav"), KEY_CLIP).unwrap();
 	fs::write(audio.join("cue-unused.wav"), KEY_CLIP).unwrap();
-	let catalog = prepare_catalog(
+	let mix = serde_json::from_value(serde_json::json!({
+		"bus_percent": {"collection": 35},
+		"scene_bus_percent": { (project.startup_scene_id.as_str()): {"mechanisms": 60} },
+	}))
+	.unwrap();
+	let catalog = prepare_catalog_with_mix(
 		&assets,
 		vec![
 			CueAssignment {
@@ -190,8 +195,9 @@ fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
 				path: "audio/cue-key.wav".into(),
 			},
 		],
+		mix,
 	)
-		.unwrap();
+	.unwrap();
 	fs::write(audio.join("cues.json"), catalog.manifest()).unwrap();
 
 	let stage = || {
@@ -222,6 +228,17 @@ fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
 
 	project.name = "Rejected audio stage".into();
 	fs::write(&manifest, project.to_json().unwrap()).unwrap();
+	fs::write(
+		audio.join("cues.json"),
+		br#"{"schema_version":2,"cues":[],"scene_bus_percent":{"unregistered":{}}}"#,
+	)
+	.unwrap();
+	let unknown = stage();
+	assert!(!unknown.status.success());
+	assert!(String::from_utf8_lossy(&unknown.stderr).contains("unregistered scene"));
+	assert!(!destination.join("Rejected audio stage").exists());
+
+	fs::write(audio.join("cues.json"), catalog.manifest()).unwrap();
 	let mut corrupt = KEY_CLIP.to_vec();
 	corrupt[24] = 0;
 	fs::write(audio.join("cue-key.wav"), corrupt).unwrap();
@@ -255,14 +272,14 @@ fn campaign_diagnostics_name_the_same_garden_role_as_editor_preparation() {
 			source.join("assets").join(scene.asset_path()),
 			assets.join(scene.asset_path()),
 		)
-			.unwrap();
+		.unwrap();
 	}
 	for model in ["capsule.glb", "cube.glb", "sphere.glb"] {
 		fs::copy(
 			source.join("assets/props").join(model),
 			assets.join("props").join(model),
 		)
-			.unwrap();
+		.unwrap();
 	}
 	let path = assets.join("scenes/chapter-garden.json");
 	let original = fs::read_to_string(&path).unwrap();

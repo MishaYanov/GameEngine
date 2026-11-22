@@ -34,7 +34,9 @@ pub(super) fn source(options: &Options) -> Result<Source, String> {
 			.clone()
 			.unwrap_or_else(|| manifest.parent().unwrap_or(Path::new(".")).join("assets"));
 		// Check the named directory before canonicalization erases its link metadata.
-		bridge::feedback_audio::load(&asset_root)?;
+		if let Some(audio) = bridge::feedback_audio::load(&asset_root)? {
+			audio.mix().validate_scenes(&project.scenes)?;
+		}
 		let root = asset_root
 			.canonicalize()
 			.map_err(|e| format!("Cannot open asset root: {e}"))?;

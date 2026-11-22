@@ -270,8 +270,24 @@ impl GameApp {
 			return Ok(());
 		}
 		self.cancel_drag();
+		let scene_mix = self
+			.editor
+			.project()
+			.map(|project| {
+				let scene = &project.startup_scene_id;
+				self.feedback_audio
+					.prepare_scene_mix(
+						self.player_controls.feedback_mix().effective_percent(),
+						scene,
+					)
+					.map(|mix| (scene.clone(), mix))
+			})
+			.transpose()?;
 		let mut play_scene = self.scene.clone();
 		self.editor.start_play(&mut play_scene)?;
+		if let Some((scene, mix)) = scene_mix {
+			self.feedback_audio.commit_scene_mix(scene, mix);
+		}
 		let authored_scene = std::mem::replace(&mut self.scene, play_scene);
 		self.authored = Some(AuthoredScene {
 			scene: authored_scene,
@@ -518,6 +534,11 @@ impl GameApp {
 			Option<&courtyard_gameplay::checkpoint::CheckpointRegistry>,
 		) -> Result<(), String>,
 	) -> Result<(), String> {
+		let scene_id = prepared.scene_id().clone();
+		let mix = self.feedback_audio.prepare_scene_mix(
+			self.player_controls.feedback_mix().effective_percent(),
+			&scene_id,
+		)?;
 		let renderer = self
 			.renderer
 			.as_ref()
@@ -544,6 +565,7 @@ impl GameApp {
 		});
 		assets.prune_unused();
 		installed?;
+		self.feedback_audio.commit_scene_mix(scene_id, mix);
 		self.invalidate_scene_prefetch();
 		timing.installed();
 		self.clear_game_controls();

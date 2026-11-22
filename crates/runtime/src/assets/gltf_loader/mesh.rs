@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use gltf::mesh::Mode;
+use gltf::{
+	accessor::{DataType, Dimensions},
+	mesh::Mode,
+};
 use renderer::vulkan::Vertex;
 
 use super::{
@@ -25,6 +28,17 @@ pub(super) fn import_mesh(
 	images: &[ImageResource],
 	mesh_index: usize,
 ) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
+	import_mesh_checked(document, buffers, images, mesh_index, &|| Ok(()))
+}
+
+pub(super) fn import_mesh_checked(
+	document: &gltf::Document,
+	buffers: &[gltf::buffer::Data],
+	images: &[ImageResource],
+	mesh_index: usize,
+	checkpoint: &impl Fn() -> Result<(), GltfLoaderError>,
+) -> Result<Vec<ImportedPrimitive>, GltfLoaderError> {
+	checkpoint()?;
 	preflight_meshes(document, [mesh_index])?;
 	let mesh = document
 		.meshes()
@@ -33,10 +47,11 @@ pub(super) fn import_mesh(
 	if mesh.primitives().len() > 4096 {
 		return Err(rejected("mesh exceeds 4096 primitives"));
 	}
-	let mut parts = Vec::new();
+	let mut parts = Vec::with_capacity(mesh.primitives().len());
 	let mut budget = IMPORT_LIMIT;
 	let mut shared_images = HashSet::new();
 	for primitive in mesh.primitives() {
+		checkpoint()?;
 		// Accessor counts are checked before allocating decoded vertex buffers.
 		let vertices = primitive
 			.get(&gltf::Semantic::Positions)
@@ -67,6 +82,82 @@ pub(super) fn import_mesh(
 		return Err(GltfLoaderError::NoPrimitives);
 	}
 	Ok(parts)
+}
+
+/// Admit only contiguous or strided ordinary accessor views for warm decoding.
+/// Library iterators require the final element to fit both the view and buffer.
+pub(super) fn validate_warm_accessor_ranges(
+	document: &gltf::Document,
+	buffers: &[gltf::buffer::Data],
+	mesh_index: usize,
+	checkpoint: &impl Fn() -> Result<(), GltfLoaderError>,
+) -> Result<(), GltfLoaderError> {
+	let mesh = document
+		.meshes()
+		.nth(mesh_index)
+		.ok_or_else(|| rejected(format!("mesh index {mesh_index} does not exist")))?;
+	for primitive in mesh.primitives() {
+		checkpoint()?;
+		let uv = primitive
+			.material()
+			.pbr_metallic_roughness()
+			.base_color_texture()
+			.map_or(0, |texture| texture.tex_coord());
+		for (accessor, types, dimensions) in [
+			(
+				primitive.get(&gltf::Semantic::Positions),
+				&[DataType::F32][..],
+				Dimensions::Vec3,
+			),
+			(
+				primitive.get(&gltf::Semantic::Normals),
+				&[DataType::F32][..],
+				Dimensions::Vec3,
+			),
+			(
+				primitive.get(&gltf::Semantic::TexCoords(uv)),
+				&[DataType::U8, DataType::U16, DataType::F32][..],
+				Dimensions::Vec2,
+			),
+			(
+				primitive.indices(),
+				&[DataType::U8, DataType::U16, DataType::U32][..],
+				Dimensions::Scalar,
+			),
+		] {
+			let Some(accessor) = accessor else { continue };
+			if accessor.sparse().is_some()
+				|| accessor.dimensions() != dimensions
+				|| !types.contains(&accessor.data_type())
+			{
+				return Err(rejected(
+					"model warming defers unsupported accessor layouts",
+				));
+			}
+			let view = accessor
+				.view()
+				.ok_or_else(|| rejected("warm accessor needs a buffer view"))?;
+			let buffer = buffers
+				.get(view.buffer().index())
+				.ok_or_else(|| rejected("warm accessor buffer is missing"))?;
+			let size = accessor.size();
+			let stride = view.stride().unwrap_or(size);
+			let end = accessor
+				.count()
+				.checked_sub(1)
+				.and_then(|count| count.checked_mul(stride))
+				.and_then(|remaining| accessor.offset().checked_add(remaining))
+				.and_then(|offset| offset.checked_add(size));
+			let view_end = view.offset().checked_add(view.length());
+			if stride < size
+				|| end.is_none_or(|end| end > view.length())
+				|| view_end.is_none_or(|end| end > buffer.0.len())
+			{
+				return Err(rejected("warm accessor exceeds its buffer view"));
+			}
+		}
+	}
+	Ok(())
 }
 
 /// Charge every decoded primitive once per selected mesh. Shared accessors

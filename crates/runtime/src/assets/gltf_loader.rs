@@ -14,7 +14,7 @@ mod resources;
 pub use super::scene_import::{ImportedNode, ImportedScene};
 pub(super) use mesh::preflight_meshes;
 pub use resources::load_first_mesh;
-pub(super) use resources::{Resources, load_resources_in_root};
+pub(super) use resources::{Resources, load_resources_in_root, load_warm_mesh};
 
 pub(super) const IMPORT_LIMIT: usize = 256 * 1024 * 1024;
 

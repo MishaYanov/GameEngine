@@ -1,8 +1,6 @@
 //! Shared checkpoint transfer operations for Player Controls and the offline CLI.
 
 use std::{
-	fs,
-	io::ErrorKind,
 	path::{Path, PathBuf},
 	time::{SystemTime, UNIX_EPOCH},
 };
@@ -16,16 +14,40 @@ use runtime::{SceneData, project::ProjectData, scene_catalog::SceneId};
 use super::{
 	GameApp,
 	checkpoint_controls::storage_root,
-	play::{is_linked_package_entry, resolve_scene_path},
+	checkpoint_transfer_history::{Direction, HistoryEntry, TransferHistory},
+	local_player_files::{
+		ordinary_directory, ordinary_transfer, profile_directory, transfer_entries,
+		transfer_label as visible_file_label,
+	},
+	play::resolve_scene_path,
 };
 
 const SUFFIX: &str = ".courtyard-save.json";
-const MAX_FILES: usize = 32;
-const MAX_SCANNED_ENTRIES: usize = 512;
 
 pub(super) struct TransferFile {
 	pub label: String,
 	pub path: PathBuf,
+}
+
+#[derive(Clone, Copy)]
+enum HistoryStatus {
+	Recorded,
+	Unavailable,
+}
+
+impl HistoryStatus {
+	fn menu_message(self, success: String, partial: impl FnOnce() -> String) -> String {
+		match self {
+			Self::Recorded => success,
+			Self::Unavailable => partial(),
+		}
+	}
+
+	fn print_warning(self) {
+		if matches!(self, Self::Unavailable) {
+			eprintln!("Checkpoint transfer completed. History is unavailable.");
+		}
+	}
 }
 
 struct TransferOwner<'a> {
@@ -41,18 +63,19 @@ impl TransferOwner<'_> {
 		Ok(runtime::scene_io::load_data(&path)?.data)
 	}
 
-	fn export(&self, slot: SaveSlot, path: &Path) -> Result<(), String> {
+	fn export(&self, slot: SaveSlot, path: &Path) -> Result<HistoryStatus, String> {
 		let expected = self
 			.registry
 			.slot_transfer_generation(&self.profile, slot)?;
-		let bytes = self.registry.export_slot_transfer(
+		let (bytes, checkpoint) = self.registry.export_slot_transfer_with_checkpoint(
 			&self.profile,
 			slot,
 			&expected,
 			self.project,
 			|scene| self.authored(scene),
 		)?;
-		runtime::scene_io::save_new_bytes(path, &bytes)
+		runtime::scene_io::save_new_bytes(path, &bytes)?;
+		Ok(self.record(slot, Direction::Export, checkpoint))
 	}
 
 	fn preview(&self, slot: SaveSlot, path: &Path) -> Result<ImportPreview, String> {
@@ -68,8 +91,8 @@ impl TransferOwner<'_> {
 		archive: &Path,
 		review: &ImportReview,
 		intent: ImportIntent,
-	) -> Result<(), String> {
-		self.registry.import_slot_transfer(
+	) -> Result<HistoryStatus, String> {
+		let checkpoint = self.registry.import_slot_transfer_with_checkpoint(
 			CheckpointImport {
 				profile: &self.profile,
 				slot,
@@ -79,7 +102,22 @@ impl TransferOwner<'_> {
 				project: self.project,
 			},
 			|scene| self.authored(scene),
-		)
+		)?;
+		Ok(self.record(slot, Direction::Import, checkpoint))
+	}
+
+	fn history(&self) -> TransferHistory<'_> {
+		TransferHistory::new(&self.profile, self.registry)
+	}
+
+	fn record(&self, slot: SaveSlot, direction: Direction, checkpoint: String) -> HistoryStatus {
+		match self.history().append(slot, direction, checkpoint) {
+			Ok(()) => HistoryStatus::Recorded,
+			Err(error) => {
+				engine_logger::warn!(target: "checkpoint_transfer_history", "Checkpoint transfer completed; history unavailable: {error}");
+				HistoryStatus::Unavailable
+			}
+		}
 	}
 }
 
@@ -120,12 +158,8 @@ impl GameApp {
 			return ordinary_directory(path, false, false);
 		}
 		let profile = storage_root()?;
-		let root = ordinary_directory(&profile, false, false)?
-			.ok_or("Checkpoint profile is unavailable")?;
-		let Some(game) = ordinary_directory(&root.join("GameEngine"), create, true)? else {
-			return Ok(None);
-		};
-		ordinary_directory(&game.join("Checkpoint Transfers"), create, true)
+		ordinary_directory(&profile, false, false)?;
+		profile_directory(&profile, &["GameEngine", "Checkpoint Transfers"], create)
 	}
 
 	pub(super) fn checkpoint_transfer_files(&self) -> Result<Vec<TransferFile>, String> {
@@ -143,8 +177,10 @@ impl GameApp {
 		let directory = self
 			.checkpoint_transfer_directory(true)?
 			.ok_or("Checkpoint transfer folder is unavailable")?;
-		owner.export(slot, &directory.join(&name))?;
-		Ok(format!("Exported {name}"))
+		let history = owner.export(slot, &directory.join(&name))?;
+		Ok(history.menu_message(format!("Exported {name}"), || {
+			"Exported checkpoint. History unavailable.".into()
+		}))
 	}
 
 	pub(super) fn preview_checkpoint_transfer(
@@ -175,12 +211,20 @@ impl GameApp {
 		} else {
 			ImportIntent::EmptyOnly
 		};
-		self.transfer_owner()?
+		let history = self
+			.transfer_owner()?
 			.import(slot, &file.path, &review, intent)?;
-		Ok(format!(
-			"Imported {}. Select Continue to resume.",
-			slot.label()
+		Ok(history.menu_message(
+			format!("Imported {}. Select Continue to resume.", slot.label()),
+			|| format!("Imported {}. History unavailable.", slot.label()),
 		))
+	}
+
+	pub(super) fn checkpoint_transfer_history(
+		&self,
+		slot: SaveSlot,
+	) -> Result<Vec<HistoryEntry>, String> {
+		self.transfer_owner()?.history().slot(slot)
 	}
 
 	fn check_transfer_selection(&self, file: &TransferFile) -> Result<(), String> {
@@ -188,7 +232,7 @@ impl GameApp {
 			.checkpoint_transfer_directory(false)?
 			.ok_or("Transfer folder is unavailable")?;
 		if file.path.parent() != Some(directory.as_path())
-			|| ordinary_transfer(&file.path)?.is_none()
+			|| ordinary_transfer(&file.path, SUFFIX)?.is_none()
 		{
 			return Err("Transfer file changed. Reopen the transfer list.".into());
 		}
@@ -213,8 +257,9 @@ pub(super) fn execute(
 	};
 	match command {
 		CheckpointTransfer::Export { slot, path } => {
-			owner.export(slot, &path)?;
+			let history = owner.export(slot, &path)?;
 			println!("Exported {}", slot.label());
+			history.print_warning();
 		}
 		CheckpointTransfer::Preview { slot, path } => {
 			let review = owner.preview(slot, &path)?;
@@ -229,8 +274,9 @@ pub(super) fn execute(
 			review,
 			intent,
 		} => {
-			owner.import(slot, &path, &review, intent)?;
+			let history = owner.import(slot, &path, &review, intent)?;
 			println!("Imported {}", slot.label());
+			history.print_warning();
 		}
 	}
 	Ok(())
@@ -245,58 +291,9 @@ fn export_name(slot: SaveSlot, seconds: u64) -> String {
 	format!("slot-{number}-{seconds}{SUFFIX}")
 }
 
-fn ordinary_directory(
-	path: &Path,
-	create: bool,
-	optional: bool,
-) -> Result<Option<PathBuf>, String> {
-	if create {
-		match fs::create_dir(path) {
-			Ok(()) => {}
-			Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-			Err(error) => return Err(error.to_string()),
-		}
-	}
-	match fs::symlink_metadata(path) {
-		Ok(metadata) if metadata.is_dir() && !is_linked_package_entry(&metadata) => path
-			.canonicalize()
-			.map(Some)
-			.map_err(|error| error.to_string()),
-		Ok(_) => Err("Checkpoint transfer folder must be an ordinary directory".into()),
-		Err(error) if error.kind() == ErrorKind::NotFound && optional => Ok(None),
-		Err(error) => Err(error.to_string()),
-	}
-}
-
-fn ordinary_transfer(path: &Path) -> Result<Option<String>, String> {
-	let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-		return Ok(None);
-	};
-	if !name.ends_with(SUFFIX) || name.len() > 96 || name.chars().any(char::is_control) {
-		return Ok(None);
-	}
-	let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-	Ok((metadata.is_file() && !is_linked_package_entry(&metadata)).then(|| name.into()))
-}
-
 fn files_in(directory: &Path) -> Result<Vec<TransferFile>, String> {
-	let mut files = Vec::new();
-	let entries = fs::read_dir(directory).map_err(|error| error.to_string())?;
-	for (index, entry) in entries.enumerate() {
-		if index == MAX_SCANNED_ENTRIES {
-			return Err(
-				"Transfer folder has more than 512 entries. Choose a smaller folder.".into(),
-			);
-		}
-		let path = entry.map_err(|error| error.to_string())?.path();
-		if let Some(name) = ordinary_transfer(&path)? {
-			files.push((name, path));
-		}
-	}
-	files.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-	Ok(files
+	Ok(transfer_entries(directory, SUFFIX)?
 		.into_iter()
-		.take(MAX_FILES)
 		.enumerate()
 		.map(|(index, (name, path))| TransferFile {
 			label: transfer_label(index + 1, &name),
@@ -306,16 +303,7 @@ fn files_in(directory: &Path) -> Result<Vec<TransferFile>, String> {
 }
 
 fn transfer_label(number: usize, name: &str) -> String {
-	// The row number stays visible when names look alike in the bitmap font
-	// or the viewport clips a long basename. Keep the original path for I/O.
-	let mut basename = name.strip_suffix(SUFFIX).unwrap_or(name).chars();
-	let visible: String = basename
-		.by_ref()
-		.take(22)
-		.map(|character| if character.is_ascii() { character } else { '?' })
-		.collect();
-	let continuation = if basename.next().is_some() { "..." } else { "" };
-	format!("Transfer {number:02}: {visible}{continuation}")
+	visible_file_label("Transfer", number, name, SUFFIX)
 }
 
 #[cfg(test)]

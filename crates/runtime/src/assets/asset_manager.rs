@@ -15,8 +15,10 @@ use renderer::{
 };
 
 use super::{
-	ImageAsset, ImageAssetError, MaterialData, MeshData, Model, gltf_loader::GltfLoaderError,
+	ImageAsset, ImageAssetError, MaterialData, MeshData, Model, PreparedModelBatch,
+	gltf_loader::{GltfLoaderError, ImportedPrimitive},
 	model::ModelPart,
+	warm_model::CurrentModel,
 };
 
 mod gpu_budget;
@@ -203,6 +205,20 @@ impl AssetManager {
 		path: impl AsRef<Path>,
 		mesh_index: usize,
 	) -> Result<Arc<Model>, AssetManagerError> {
+		self.load_model_mesh_prepared(renderer, path.as_ref(), mesh_index, None)
+	}
+
+	fn load_model_mesh_prepared(
+		&mut self,
+		renderer: &WindowRenderer,
+		path: &Path,
+		mesh_index: usize,
+		warming: Option<(
+			&mut PreparedModelBatch,
+			&engine_core::asset_registry::AssetRef,
+			CurrentModel,
+		)>,
+	) -> Result<Arc<Model>, AssetManagerError> {
 		let full_path = self.resolve(path)?;
 		let model_key = engine_core::asset_registry::AssetRef::new(
 			full_path
@@ -225,11 +241,37 @@ impl AssetManager {
 				"model cache entry limit reached; retire unused models first".into(),
 			));
 		}
-		let resources = self
-			.source_cache
-			.prepare_resources(&self.root, &full_path, mesh_index)?;
-		let source_fingerprint = resources.source_fingerprint.clone();
-		let imported_parts = resources.import_mesh(mesh_index)?;
+		let (source_fingerprint, imported_parts) = if let Some((fingerprint, parts)) = warming
+			.and_then(|(batch, reference, source)| {
+				batch.take_current(&self.root, reference, &source, &full_path)
+			}) {
+			(fingerprint, parts)
+		} else {
+			let resources = self
+				.source_cache
+				.prepare_resources(&self.root, &full_path, mesh_index)?;
+			(
+				resources.source_fingerprint.clone(),
+				resources.import_mesh(mesh_index)?,
+			)
+		};
+		self.upload_model(
+			renderer,
+			full_path,
+			model_key,
+			imported_parts,
+			source_fingerprint,
+		)
+	}
+
+	fn upload_model(
+		&mut self,
+		renderer: &WindowRenderer,
+		full_path: PathBuf,
+		model_key: engine_core::asset_registry::AssetRef,
+		imported_parts: Vec<ImportedPrimitive>,
+		source_fingerprint: String,
+	) -> Result<Arc<Model>, AssetManagerError> {
 		self.preflight_model_upload(&full_path, &imported_parts)?;
 		self.upload_model_resources(renderer, &full_path, &imported_parts)?;
 		let mut parts = Vec::with_capacity(imported_parts.len());
@@ -289,9 +331,28 @@ impl AssetManager {
 		renderer: &WindowRenderer,
 		reference: &engine_core::asset_registry::AssetRef,
 	) -> Result<Arc<Model>, AssetManagerError> {
-		let reference = super::project_assets::resolve_asset(&self.root, reference)
+		self.load_asset_prepared(renderer, reference, None)
+	}
+
+	pub(crate) fn load_asset_prepared(
+		&mut self,
+		renderer: &WindowRenderer,
+		reference: &engine_core::asset_registry::AssetRef,
+		warming: Option<&mut PreparedModelBatch>,
+	) -> Result<Arc<Model>, AssetManagerError> {
+		let (reference, warming) =
+			super::project_assets::resolve_asset_with_model(&self.root, reference, |model| {
+				warming
+					.zip(model)
+					.map(|(batch, asset)| (batch, CurrentModel::from(asset)))
+			})
 			.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
-		self.load_model_mesh(renderer, &reference.path, reference.mesh_index.unwrap_or(0))
+		self.load_model_mesh_prepared(
+			renderer,
+			Path::new(&reference.path),
+			reference.mesh_index.unwrap_or(0),
+			warming.map(|(batch, source)| (batch, &reference, source)),
+		)
 	}
 
 	/// Hidden authoring markers may deliberately have no model. Existing glTF

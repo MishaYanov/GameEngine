@@ -284,6 +284,7 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 		file_reads: 0,
 	};
 	if let Some(audio) = bridge::feedback_audio::load(root)? {
+		audio.mix().validate_scenes(&project.scenes)?;
 		for (path, bytes) in audio.files() {
 			let relative = closure.key(Path::new(path))?;
 			closure.record_bytes(relative, bytes)?;

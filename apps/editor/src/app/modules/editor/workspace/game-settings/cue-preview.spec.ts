@@ -57,6 +57,15 @@ describe(CuePreview, () => {
         expect(second.disconnect).toHaveBeenCalledOnce();
     });
 
+    it('combines local, category and scene levels before the audition ceiling', async () => {
+        const {preview, gain} = fakeDevice();
+        const mix = {levelPercent: 75, categoryPercent: 80, scenePercent: 50, muted: false};
+        await preview.play(async () => wave, mix, () => true, vi.fn());
+        expect(gain.gain.value).toBeCloseTo(0.105);
+        expect(auditionGain({...mix, muted: true})).toBe(0);
+        expect(auditionGain({...mix, scenePercent: 0})).toBe(0);
+    });
+
     it('discards a delayed read after close and releases the device', async () => {
         const {context, preview, source} = fakeDevice();
         const response = deferred<unknown>();

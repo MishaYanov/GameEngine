@@ -69,6 +69,56 @@ fn shared_images_are_converted_once_and_survive_other_primitives() {
 }
 
 #[test]
+fn warming_reserves_embedded_image_decode_before_returning_pixels() {
+	let pixels = [24, 48, 72];
+	let mut png = Vec::new();
+	image::ImageEncoder::write_image(
+		image::codecs::png::PngEncoder::new(&mut png),
+		&pixels,
+		1,
+		1,
+		image::ExtendedColorType::Rgb8,
+	)
+	.unwrap();
+	let mut jpeg = Vec::new();
+	image::ImageEncoder::write_image(
+		image::codecs::jpeg::JpegEncoder::new(&mut jpeg),
+		&pixels,
+		1,
+		1,
+		image::ExtendedColorType::Rgb8,
+	)
+	.unwrap();
+	for encoded in [png, jpeg] {
+		let mut narrow = ImportBudget::warming(WARM_IMAGE_DECODER_BYTES, &|| false);
+		assert!(decode_warm_image(&encoded, &mut narrow).is_err());
+		let mut budget = ImportBudget::warming(4 * WARM_IMAGE_DECODER_BYTES, &|| false);
+		let decoded = decode_warm_image(&encoded, &mut budget).unwrap();
+		assert_eq!(
+			(decoded.width(), decoded.height(), decoded.pixels().len()),
+			(1, 1, 4)
+		);
+		assert!(budget.charged_bytes() > WARM_IMAGE_DECODER_BYTES);
+	}
+
+	let mut encoded = Vec::new();
+	image::ImageEncoder::write_image(
+		image::codecs::png::PngEncoder::new(&mut encoded),
+		&vec![0; 512 * 512 * 3],
+		512,
+		512,
+		image::ExtendedColorType::Rgb8,
+	)
+	.unwrap();
+	let mut budget = ImportBudget::warming(2 * WARM_IMAGE_DECODER_BYTES, &|| false);
+	assert!(decode_warm_image(&encoded, &mut budget).is_err());
+	assert_eq!(
+		budget.charged_bytes(),
+		WARM_IMAGE_DECODER_BYTES + 2 * encoded.len()
+	);
+}
+
+#[test]
 fn external_references_cannot_escape_or_use_schemes() {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.canonicalize()

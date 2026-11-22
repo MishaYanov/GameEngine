@@ -179,7 +179,32 @@ fn representative_native_scene_performance_baseline() {
 #[ignore = "requires Windows Vulkan and the authored courtyard fixture"]
 fn native_prepared_scene_references_preserve_scene_and_geometry() {
 	use renderer::{DrawStatus, vulkan::DrawMetrics};
-	use runtime::{SceneData, scene_io::PreparedSceneReferences};
+	use runtime::{
+		SceneData,
+		asset_catalog::{
+			AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MeshSignature, PersistentAsset,
+		},
+		assets::{PreparedModelBatch, project_assets},
+		scene_data::EntityData,
+		scene_io::PreparedSceneReferences,
+	};
+	use std::fs;
+
+	struct ManagedFixture(PathBuf);
+	impl ManagedFixture {
+		fn new(asset_root: &std::path::Path) -> Self {
+			let target = asset_root.join("../../../target");
+			fs::create_dir_all(&target).unwrap();
+			let path = target.join(format!("warm-vulkan-{}", AssetId::generate().as_str()));
+			fs::create_dir(&path).unwrap();
+			Self(path)
+		}
+	}
+	impl Drop for ManagedFixture {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.0);
+		}
+	}
 
 	#[derive(Debug, PartialEq)]
 	struct GeometryPart {
@@ -237,17 +262,21 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 			let size = window.inner_size();
 			let mut renderer = WindowRenderer::new(window, size.width, size.height).unwrap();
 			let mut assets = AssetManager::new(&asset_root).unwrap();
-			let mut render = |document: &SceneData, references| {
-				let (scene, camera) = scene_io::instantiate_with_references(
+			let mut render = |document: &SceneData,
+			                  assets: &mut AssetManager,
+			                  references,
+			                  models: Option<&mut PreparedModelBatch>| {
+				let (scene, camera) = scene_io::instantiate_with_warming(
 					document,
-					&mut assets,
+					assets,
 					&renderer,
 					references,
+					models,
 					|_, _| {},
 					|| false,
 				)
-					.unwrap()
-					.expect("Uncancelled construction should produce a scene");
+				.unwrap()
+				.expect("Uncancelled construction should produce a scene");
 				renderer.set_lights(&scene.renderer_lights()).unwrap();
 				let [width, height] = renderer.prepare().unwrap().unwrap();
 				let camera_uniform = CameraUniform::perspective(
@@ -283,12 +312,119 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 				}
 			};
 
-			let cold = render(&authored, None);
+			let cold = render(&authored, &mut assets, None, None);
 			assert!(cold.metrics.draw_calls > 0);
-			assert_eq!(render(&authored, Some(references)), cold);
-			let revised_cold = render(&revised, None);
+			assert_eq!(render(&authored, &mut assets, Some(references), None), cold);
+			let revised_cold = render(&revised, &mut assets, None, None);
 			assert_ne!(revised_cold.geometry, cold.geometry);
-			assert_eq!(render(&revised, Some(stale)), revised_cold);
+			assert_eq!(
+				render(&revised, &mut assets, Some(stale), None),
+				revised_cold
+			);
+
+			let fixture = ManagedFixture::new(&asset_root);
+			let model = fixture.0.join("managed.glb");
+			let catalog_file = fixture.0.join(CATALOG_FILE);
+			let bytes = fs::read(asset_root.join("props/cube.glb")).unwrap();
+			let id = AssetId::generate();
+			let mut catalog = AssetCatalog {
+				schema_version: 1,
+				assets: vec![PersistentAsset {
+					id: id.clone(),
+					path: "managed.glb".into(),
+					kind: AssetKind::Model,
+					aliases: vec![],
+					revision: 1,
+					fingerprint: project_assets::fingerprint(&bytes),
+					bytes: bytes.len() as u64,
+					source_path: None,
+					dependencies: vec![],
+					meshes: vec![MeshSignature {
+						index: 0,
+						name: "Managed".into(),
+						primitives: 1,
+					}],
+				}],
+			};
+			fs::write(&model, bytes).unwrap();
+			fs::write(&catalog_file, catalog.to_json().unwrap()).unwrap();
+			let mut document = (*authored).clone();
+			document.bindings.clear();
+			document.camera.follow = None;
+			document.camera.orbit = None;
+			document.entities = vec![
+				EntityData::new(
+					runtime::EntityKey::new("warm-managed").unwrap(),
+					"Managed",
+					"managed.glb",
+				)
+				.with_asset_id(Some(id)),
+			];
+			let document = Arc::new(document);
+			let prepare = || {
+				let references = PreparedSceneReferences::build(Arc::clone(&document), || false)
+					.unwrap()
+					.unwrap();
+				let models = PreparedModelBatch::prepare(
+					&fixture.0,
+					references.static_model_assets(),
+					&|| false,
+				)
+				.unwrap();
+				(references, models)
+			};
+			let (references, mut warm) = prepare();
+			let mut warmed_assets = AssetManager::new(&fixture.0).unwrap();
+			let warm_scene = render(
+				&document,
+				&mut warmed_assets,
+				Some(references),
+				Some(&mut warm),
+			);
+			assert_eq!(warm.consumed_count(), 1);
+			let mut cold_assets = AssetManager::new(&fixture.0).unwrap();
+			assert_eq!(render(&document, &mut cold_assets, None, None), warm_scene);
+
+			let (references, mut cached) = prepare();
+			assert_eq!(
+				render(
+					&document,
+					&mut warmed_assets,
+					Some(references),
+					Some(&mut cached)
+				),
+				warm_scene
+			);
+			assert_eq!(
+				cached.consumed_count(),
+				0,
+				"a GPU cache hit should skip a prepared model"
+			);
+
+			let (references, mut stale_model) = prepare();
+			let replacement = fs::read(asset_root.join("props/capsule.glb")).unwrap();
+			let record = &mut catalog.assets[0];
+			record.revision = 2;
+			record.fingerprint = project_assets::fingerprint(&replacement);
+			record.bytes = replacement.len() as u64;
+			fs::write(&model, replacement).unwrap();
+			fs::write(&catalog_file, catalog.to_json().unwrap()).unwrap();
+			let mut reimported_assets = AssetManager::new(&fixture.0).unwrap();
+			let reimported = render(
+				&document,
+				&mut reimported_assets,
+				Some(references),
+				Some(&mut stale_model),
+			);
+			assert_eq!(stale_model.consumed_count(), 0);
+			assert_ne!(reimported.geometry, warm_scene.geometry);
+			eprintln!(
+				"NATIVE_WARM_MODEL_OK cold_triangles={} reimported_triangles={} adopted={} gpu_cache_adopted={}",
+				warm_scene.metrics.triangles,
+				reimported.metrics.triangles,
+				warm.consumed_count(),
+				cached.consumed_count(),
+			);
 			eprintln!(
 				"NATIVE_PREPARED_SCENE_REFERENCES_OK authored_entities={} render_parts={} cold_triangles={} revised_triangles={}",
 				cold.scene.entities.len(),

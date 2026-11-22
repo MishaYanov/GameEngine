@@ -5,6 +5,8 @@ import {vi} from 'vitest';
 import type {
     CampaignDefinition,
     CampaignDiagnosticReport,
+    CampaignRepairPreview,
+    CampaignRepairTarget,
     EditorCommand,
     EditorSnapshot
 } from '../../../../core/editor/editor.models';
@@ -99,11 +101,30 @@ describe('game settings dialogs', () => {
             });
         }
         const generation = signal(1);
+        const editingReady = signal(true);
         const campaignGeneration = vi.fn(async (_generation: number, _revision: number) => 42);
         const diagnoseCampaign = vi.fn(async (
             _definition: CampaignDefinition, _generation: number, nativeGeneration: number, revision: number,
         ): Promise<CampaignDiagnosticReport> => ({workspace_generation: nativeGeneration, revision, issues: []}));
         const switchScene = vi.fn(async (_sceneId: string) => true);
+        const previewCampaignRepair = vi.fn(async (
+            target: CampaignRepairTarget, _generation: number, _native: number, _revision: number,
+        ): Promise<CampaignRepairPreview> => ({
+            target,
+            before: {kind: 'sphere', radius: 0.5, offset: [0, 0, 0]},
+            after: {
+                kind: 'sphere',
+                radius: 0.5,
+                offset: [0, 0, 0],
+                interaction: {sensor: true, layers: 1, mask: 4294967295}
+            },
+        }));
+        const applyCampaignRepair = vi.fn(async (
+            _preview: CampaignRepairPreview, _generation: number, _native: number, _revision: number,
+        ) => {
+            current.update(value => ({...value, revision: value.revision + 1, dirty: true}));
+            return current();
+        });
         const applyCampaign = vi.fn(async (
             definition: CampaignDefinition, _generation: number, _nativeGeneration: number, _revision: number,
         ) => {
@@ -137,10 +158,15 @@ describe('game settings dialogs', () => {
                     campaignGeneration,
                     diagnoseCampaign,
                     applyCampaign,
+                    previewCampaignRepair,
+                    applyCampaignRepair,
                     cameraPreview: new CameraPreviewController(previewApi),
             }},
                 {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 42})}},
-            {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
+                {
+                    provide: SceneEditingService,
+                    useValue: {ready: editingReady, error: () => null, withCommittedEdit: committed}
+                },
                 {provide: SceneSwitchService, useValue: {request: switchScene, canSwitch: () => true}},
         ]});
         const fixture = kind === 'camera' ? TestBed.createComponent(CameraSettings) : TestBed.createComponent(GameplaySettings);
@@ -170,6 +196,7 @@ describe('game settings dialogs', () => {
             root,
             current,
             generation,
+            editingReady,
             execute,
             committed,
             button,
@@ -178,6 +205,8 @@ describe('game settings dialogs', () => {
             previewApi,
             campaignGeneration,
             diagnoseCampaign,
+            previewCampaignRepair,
+            applyCampaignRepair,
             switchScene,
             applyCampaign
         };
@@ -374,6 +403,120 @@ describe('game settings dialogs', () => {
         expect(panel.switchScene).toHaveBeenCalledExactlyOnceWith('garden');
         expect(panel.current().active_scene_id).toBe('main');
         expect(panel.applyCampaign).not.toHaveBeenCalled();
+    });
+
+    it('previews a typed sensor repair with safe focus and applies exactly once after confirmation', async () => {
+        const panel = await setup('campaign');
+        const target: CampaignRepairTarget = {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'};
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [{scene_id: 'main', message: 'Exit trigger needs a sensor.', repair: target}],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        panel.button('Review Repair').click();
+        await panel.fixture.whenStable();
+        const dialog = panel.root.querySelector<HTMLDialogElement>('dialog[open]')!;
+        expect(panel.previewCampaignRepair).toHaveBeenCalledExactlyOnceWith(target, 1, 42, 7);
+        expect(document.activeElement).toBe(panel.button('Keep Current'));
+        expect(dialog.textContent).toContain('Solid');
+        expect(dialog.textContent).toContain('Sensor');
+        expect((await axe.run(dialog, {rules: {'color-contrast': {enabled: false}}})).violations).toEqual([]);
+        dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaignRepair).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(panel.button('Check Campaign'));
+        expect(dialog.open).toBe(true);
+
+        panel.button('Review Repair').click();
+        await panel.fixture.whenStable();
+        panel.button('Keep Current').click();
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaignRepair).not.toHaveBeenCalled();
+
+        panel.button('Review Repair').click();
+        await panel.fixture.whenStable();
+        panel.button('Apply Repair').click();
+        await panel.fixture.whenStable();
+        expect(panel.applyCampaignRepair).toHaveBeenCalledExactlyOnceWith({
+            target,
+            before: {kind: 'sphere', radius: 0.5, offset: [0, 0, 0]},
+            after: {
+                kind: 'sphere',
+                radius: 0.5,
+                offset: [0, 0, 0],
+                interaction: {sensor: true, layers: 1, mask: 4294967295}
+            },
+        }, 1, 42, 7);
+        expect(panel.applyCampaign).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(panel.button('Check Campaign'));
+        expect(panel.root.textContent).toContain('Trigger repaired.');
+    });
+
+    it('keeps the campaign draft when a delayed repair preview is stale', async () => {
+        const panel = await setup('campaign');
+        const target: CampaignRepairTarget = {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'};
+        const collider = {kind: 'sphere', radius: 0.5, offset: [0, 0, 0]} as const;
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [{scene_id: 'main', message: 'Exit trigger needs a sensor.', repair: target}],
+        });
+        await panel.change('Chapter label', 'Unsaved route');
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        let resolvePreview!: (preview: CampaignRepairPreview) => void;
+        panel.previewCampaignRepair.mockReturnValueOnce(new Promise(resolve => {
+            resolvePreview = resolve;
+        }));
+        panel.button('Review Repair').click();
+        await vi.waitFor(() => expect(panel.previewCampaignRepair).toHaveBeenCalledOnce());
+        panel.current.update(value => ({...value, revision: 8}));
+        resolvePreview({target, before: collider, after: collider});
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).not.toContain('Apply Repair');
+        expect(panel.field('Chapter label').value).toBe('Unsaved route');
+        expect(panel.applyCampaignRepair).not.toHaveBeenCalled();
+    });
+
+    it('keeps one campaign confirmation active and recovers focus when the repair becomes stale', async () => {
+        const panel = await setup('campaign');
+        const target: CampaignRepairTarget = {scene_id: 'main', role: 'exit_trigger', entity_key: 'exit-sensor'};
+        await panel.change('Chapter label', 'Unsaved route');
+        panel.diagnoseCampaign.mockResolvedValueOnce({
+            workspace_generation: 42, revision: 7,
+            issues: [
+                {scene_id: 'main', message: 'Exit trigger needs a sensor.', repair: target},
+                {scene_id: 'garden', message: 'Garden needs an exit.'},
+            ],
+        });
+        panel.button('Check Campaign').click();
+        await panel.fixture.whenStable();
+        panel.button('Inspect Scene').click();
+        await panel.fixture.whenStable();
+        expect(document.activeElement).toBe(panel.button('Keep Draft'));
+        expect(panel.button('Review Repair').disabled).toBe(true);
+        panel.button('Keep Draft').click();
+        await panel.fixture.whenStable();
+
+        panel.button('Review Repair').click();
+        await panel.fixture.whenStable();
+        expect(document.activeElement).toBe(panel.button('Keep Current'));
+        expect(panel.button('Inspect Scene')).toBeUndefined();
+        expect(panel.button('Check Campaign').disabled).toBe(true);
+        expect(panel.field('Chapter label').matches(':disabled')).toBe(true);
+        panel.editingReady.set(false);
+        await panel.fixture.whenStable();
+        expect(panel.button('Apply Repair').disabled).toBe(true);
+        expect(panel.button('Keep Current').disabled).toBe(false);
+
+        panel.current.update(value => ({...value, revision: 8}));
+        await panel.fixture.whenStable();
+        const failure = panel.root.querySelector('dialog [role="alert"]');
+        expect(failure?.textContent).toContain('The scene changed.');
+        expect(document.activeElement).toBe(failure);
+        expect(panel.button('Apply Repair')).toBeUndefined();
+        expect(panel.field('Chapter label').value).toBe('Unsaved route');
+        expect(panel.applyCampaignRepair).not.toHaveBeenCalled();
     });
 
     it('shows a project-level diagnostic without navigation and a fresh passed report', async () => {

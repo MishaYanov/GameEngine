@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[test]
@@ -16,7 +17,7 @@ fn transfer_file_list_is_bounded_sorted_and_filters_nonfiles() {
 	fs::write(root.join("external.txt"), []).unwrap();
 	fs::create_dir(root.join(format!("directory{SUFFIX}"))).unwrap();
 	let files = files_in(&root).unwrap();
-	assert_eq!(files.len(), MAX_FILES);
+	assert_eq!(files.len(), 32);
 	assert_eq!(files[0].label, "Transfer 01: 00");
 	assert_eq!(files[31].label, "Transfer 32: 31");
 	assert_eq!(files[0].path, root.join(format!("00{SUFFIX}")));

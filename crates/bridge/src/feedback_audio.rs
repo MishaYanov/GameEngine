@@ -1,18 +1,20 @@
 //! CPU-only preparation for optional, project-owned gameplay feedback.
 use std::{
 	collections::BTreeMap,
-	fs,
+	fmt, fs,
 	path::{Path, PathBuf},
 	sync::Arc,
 };
 
-use serde::{Deserialize, Serialize};
+use engine_core::scene_catalog::{SceneCatalog, SceneId};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use sha2::{Digest, Sha256};
 
 use crate::asset_io::{contained_file, is_link, optional_contained_file, read_bounded};
 
 const CATALOG: &str = "audio/cues.json";
-const MAX_CATALOG_BYTES: usize = 4_096;
+const MAX_CATALOG_BYTES: usize = 16 * 1024;
+const MAX_SCENE_MIXES: usize = 16;
 const HEADER_BYTES: usize = 44;
 const MAX_PCM_BYTES: usize = 16_000;
 
@@ -22,6 +24,166 @@ pub enum FeedbackCue {
 	KeyCollected,
 	GateOpened,
 	RunCompleted,
+}
+
+impl FeedbackCue {
+	pub const ALL: [Self; 3] = [Self::KeyCollected, Self::GateOpened, Self::RunCompleted];
+
+	pub fn bus(self) -> FeedbackBus {
+		match self {
+			Self::KeyCollected => FeedbackBus::Collection,
+			Self::GateOpened => FeedbackBus::Mechanisms,
+			Self::RunCompleted => FeedbackBus::Completion,
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeedbackBus {
+	Collection,
+	Mechanisms,
+	Completion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+struct BusPercent(u8);
+
+impl<'de> Deserialize<'de> for BusPercent {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		let value = u8::deserialize(deserializer)?;
+		if value > 100 {
+			return Err(de::Error::custom(
+				"Feedback bus level must be from 0 to 100",
+			));
+		}
+		Ok(Self(value))
+	}
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BusLevels {
+	#[serde(
+		default,
+		deserialize_with = "present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	collection: Option<BusPercent>,
+	#[serde(
+		default,
+		deserialize_with = "present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	mechanisms: Option<BusPercent>,
+	#[serde(
+		default,
+		deserialize_with = "present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	completion: Option<BusPercent>,
+}
+
+impl BusLevels {
+	fn percent(self, bus: FeedbackBus) -> u8 {
+		let level = match bus {
+			FeedbackBus::Collection => self.collection,
+			FeedbackBus::Mechanisms => self.mechanisms,
+			FeedbackBus::Completion => self.completion,
+		};
+		level.map_or(100, |value| value.0)
+	}
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+struct SceneBusLevels(BTreeMap<String, BusLevels>);
+
+impl<'de> Deserialize<'de> for SceneBusLevels {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		struct UniqueSceneLevels;
+		impl<'de> de::Visitor<'de> for UniqueSceneLevels {
+			type Value = SceneBusLevels;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+				formatter.write_str("a map of at most 16 unique scene IDs to feedback bus levels")
+			}
+
+			fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+				let mut levels = BTreeMap::new();
+				while let Some(key) = map.next_key::<String>()? {
+					if levels.len() >= MAX_SCENE_MIXES {
+						return Err(de::Error::custom("Feedback scene mix limit is 16"));
+					}
+					SceneId::new(key.clone()).map_err(de::Error::custom)?;
+					match levels.entry(key) {
+						std::collections::btree_map::Entry::Vacant(entry) => {
+							entry.insert(map.next_value()?);
+						}
+						std::collections::btree_map::Entry::Occupied(_) => {
+							return Err(de::Error::custom("Feedback mix repeats a scene ID"));
+						}
+					}
+				}
+				Ok(SceneBusLevels(levels))
+			}
+		}
+
+		deserializer.deserialize_map(UniqueSceneLevels)
+	}
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeedbackBusMix {
+	#[serde(default)]
+	bus_percent: BusLevels,
+	#[serde(default)]
+	scene_bus_percent: SceneBusLevels,
+}
+
+impl FeedbackBusMix {
+	pub fn category_percent(&self, bus: FeedbackBus) -> u8 {
+		self.bus_percent.percent(bus)
+	}
+
+	pub fn scene_percent(&self, scene: &SceneId, bus: FeedbackBus) -> u8 {
+		self.scene_bus_percent
+			.0
+			.get(scene.as_str())
+			.copied()
+			.unwrap_or_default()
+			.percent(bus)
+	}
+
+	pub fn validate_scenes(&self, scenes: &SceneCatalog) -> Result<(), String> {
+		for name in self.scene_bus_percent.0.keys() {
+			if scenes.get(&SceneId::new(name.clone())?).is_err() {
+				return Err(format!(
+					"Feedback audio mix references unregistered scene {name:?}"
+				));
+			}
+		}
+		Ok(())
+	}
+}
+
+/// Multiply the three linear controls and round the resulting percentage once.
+pub fn combined_percent(player: u8, category: u8, scene: u8) -> Result<u8, &'static str> {
+	if [player, category, scene]
+		.into_iter()
+		.any(|level| level > 100)
+	{
+		return Err("Feedback volume must be from 0 to 100");
+	}
+	let product = u32::from(player) * u32::from(category) * u32::from(scene);
+	Ok(((product + 5_000) / 10_000) as u8)
+}
+
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+	deserializer: D,
+) -> Result<Option<T>, D::Error> {
+	T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone)]
@@ -66,6 +228,7 @@ pub struct PreparedCueCatalog {
 	manifest: Vec<u8>,
 	events: BTreeMap<FeedbackCue, String>,
 	clips: BTreeMap<String, CueClip>,
+	mix: FeedbackBusMix,
 }
 
 impl PreparedCueCatalog {
@@ -74,11 +237,15 @@ impl PreparedCueCatalog {
 		digest(&self.manifest)
 	}
 
-	pub fn assignments(&self) -> impl Iterator<Item=CueAssignment> + '_ {
+	pub fn assignments(&self) -> impl Iterator<Item = CueAssignment> + '_ {
 		self.events.iter().map(|(&event, path)| CueAssignment {
 			event,
 			path: path.clone(),
 		})
+	}
+
+	pub fn mix(&self) -> &FeedbackBusMix {
+		&self.mix
 	}
 
 	pub fn manifest(&self) -> &[u8] {
@@ -89,7 +256,7 @@ impl PreparedCueCatalog {
 		self.clips.get(self.events.get(&cue)?)
 	}
 
-	pub fn files(&self) -> impl Iterator<Item=(&'_ str, &'_ [u8])> {
+	pub fn files(&self) -> impl Iterator<Item = (&'_ str, &'_ [u8])> {
 		std::iter::once((CATALOG, self.manifest())).chain(
 			self.clips
 				.iter()
@@ -103,6 +270,18 @@ impl PreparedCueCatalog {
 struct CueCatalog {
 	schema_version: u32,
 	cues: Vec<CueAssignment>,
+	#[serde(
+		default,
+		deserialize_with = "present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	bus_percent: Option<BusLevels>,
+	#[serde(
+		default,
+		deserialize_with = "present",
+		skip_serializing_if = "Option::is_none"
+	)]
+	scene_bus_percent: Option<SceneBusLevels>,
 }
 
 /// Validates the portable catalog and all referenced clips before returning playable bytes.
@@ -120,15 +299,38 @@ pub fn load(asset_root: &Path) -> Result<Option<PreparedCueCatalog>, String> {
 /// Checks assignments against actual project clips and prepares canonical editor output.
 pub fn prepare_catalog(
 	asset_root: &Path,
+	cues: Vec<CueAssignment>,
+) -> Result<PreparedCueCatalog, String> {
+	prepare_authored_catalog(asset_root, cues, None)
+}
+
+/// Checks cue assignments and serializes a version 2 authored mix.
+pub fn prepare_catalog_with_mix(
+	asset_root: &Path,
+	cues: Vec<CueAssignment>,
+	mix: FeedbackBusMix,
+) -> Result<PreparedCueCatalog, String> {
+	prepare_authored_catalog(asset_root, cues, Some(mix))
+}
+
+fn prepare_authored_catalog(
+	asset_root: &Path,
 	mut cues: Vec<CueAssignment>,
+	mix: Option<FeedbackBusMix>,
 ) -> Result<PreparedCueCatalog, String> {
 	if cues.len() > 3 || cues.iter().any(|cue| !valid_path(&cue.path)) {
 		return Err("Assign at most three audio/cue-<slug>.wav files".into());
 	}
 	cues.sort_by_key(|cue| cue.event);
+	let (schema_version, bus_percent, scene_bus_percent) = match mix {
+		Some(mix) => (2, Some(mix.bus_percent), Some(mix.scene_bus_percent)),
+		None => (1, None, None),
+	};
 	let catalog = CueCatalog {
-		schema_version: 1,
+		schema_version,
 		cues,
+		bus_percent,
+		scene_bus_percent,
 	};
 	let mut manifest = serde_json::to_vec_pretty(&catalog).map_err(|error| error.to_string())?;
 	manifest.push(b'\n');
@@ -203,9 +405,22 @@ fn prepare(
 	manifest: Vec<u8>,
 	catalog: CueCatalog,
 ) -> Result<PreparedCueCatalog, String> {
-	if catalog.schema_version != 1 || catalog.cues.len() > 3 {
-		return Err("Feedback cue catalog requires schema 1 and at most three events".into());
+	if manifest.len() > MAX_CATALOG_BYTES || catalog.cues.len() > FeedbackCue::ALL.len() {
+		return Err("Feedback cue catalog exceeds its byte or event limit".into());
 	}
+	let mix = match (
+		catalog.schema_version,
+		catalog.bus_percent,
+		catalog.scene_bus_percent,
+	) {
+		(1, None, None) => FeedbackBusMix::default(),
+		(1, _, _) => return Err("Feedback cue schema 1 cannot contain authored bus tables".into()),
+		(2, bus_percent, scene_bus_percent) => FeedbackBusMix {
+			bus_percent: bus_percent.unwrap_or_default(),
+			scene_bus_percent: scene_bus_percent.unwrap_or_default(),
+		},
+		_ => return Err("Feedback cue catalog requires schema 1 or 2".into()),
+	};
 	let mut events = BTreeMap::new();
 	let mut clips = BTreeMap::new();
 	for entry in catalog.cues {
@@ -222,6 +437,7 @@ fn prepare(
 		manifest,
 		events,
 		clips,
+		mix,
 	})
 }
 
@@ -241,8 +457,8 @@ fn valid_path(path: &str) -> bool {
 fn valid_slug(slug: &str) -> bool {
 	(1..=32).contains(&slug.len())
 		&& slug
-		.bytes()
-		.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+			.bytes()
+			.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn validate_wave(wave: &[u8]) -> Result<(), &'static str> {

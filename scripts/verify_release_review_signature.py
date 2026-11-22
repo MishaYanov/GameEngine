@@ -1,6 +1,7 @@
 """Verify a reviewed release decision against an explicit OpenSSH signer policy."""
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -25,6 +26,19 @@ MAX_REVOCATIONS_BYTES = 1024 * 1024
 PRINCIPAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,95}")
 
 
+@dataclass(frozen=True)
+class SignerPolicy:
+    allowed: bytes
+    revoked: bytes | None
+
+    @classmethod
+    def load(cls, allowed, revoked):
+        return cls(
+            read_ordinary(allowed, MAX_POLICY_BYTES),
+            read_ordinary(revoked, MAX_REVOCATIONS_BYTES) if revoked is not None else None,
+        )
+
+
 def read_ordinary(path, limit):
     if not stat.S_ISREG(ordinary_mode(path)):
         raise ValueError("Signature inputs must be ordinary files")
@@ -40,31 +54,34 @@ def read_ordinary(path, limit):
     return data
 
 
-def verify(args):
-    if PRINCIPAL.fullmatch(args.principal) is None:
+def verify_detached_signature(payload, signature, principal, policy, executable):
+    """Authenticate the admitted bytes with one explicitly selected principal."""
+    if PRINCIPAL.fullmatch(principal) is None:
         raise ValueError("Expected one explicit signer principal")
-    signature = require_signature(read_ordinary(args.signature, MAX_SIGNATURE_BYTES))
-    policy = read_ordinary(args.allowed_signers, MAX_POLICY_BYTES)
-    revoked = (read_ordinary(args.revoked_signers, MAX_REVOCATIONS_BYTES)
-               if args.revoked_signers is not None else None)
-    record, payload = read_local_json(args.decision, MAX_DECISION_BYTES)
-    # OpenSSH reads an immutable snapshot of the public policy and signature. The
-    # checked decision bytes go directly to stdin without reopening the document.
+    require_signature(signature)
     with tempfile.TemporaryDirectory(prefix="engine-review-") as directory:
         root = Path(directory)
         policy_file = root / "allowed-signers"
         signature_file = root / "decision.sig"
-        policy_file.write_bytes(policy)
+        policy_file.write_bytes(policy.allowed)
         signature_file.write_bytes(signature)
-        command = ["-Y", "verify", "-f", str(policy_file), "-I", args.principal,
+        command = ["-Y", "verify", "-f", str(policy_file), "-I", principal,
                    "-n", NAMESPACE, "-s", str(signature_file)]
-        if revoked is not None:
+        if policy.revoked is not None:
             revocation_file = root / "revoked-signers"
-            revocation_file.write_bytes(revoked)
+            revocation_file.write_bytes(policy.revoked)
             command.extend(("-r", str(revocation_file)))
-        verified = run_ssh(ssh_keygen(args.ssh_keygen), command, payload)
+        verified = run_ssh(executable, command, payload)
     if verified.returncode != 0:
         raise ValueError("Signature was denied by the configured signer policy")
+    return verified.stdout
+
+
+def verify(args):
+    signature = read_ordinary(args.signature, MAX_SIGNATURE_BYTES)
+    policy = SignerPolicy.load(args.allowed_signers, args.revoked_signers)
+    record, payload = read_local_json(args.decision, MAX_DECISION_BYTES)
+    verify_detached_signature(payload, signature, args.principal, policy, ssh_keygen(args.ssh_keygen))
     packet = build_packet(args.receipt, args.archive, args.evidence_dir, args.profiles,
                           playtest=args.playtest)
     validate_reviewed_decision(packet, args.packet, record)
@@ -74,8 +91,8 @@ def verify(args):
         "status": record["status"],
         "archive_sha256": record["archive_sha256"],
         "principal": args.principal,
-        "policy_sha256": sha256(policy).hexdigest(),
-        "revocations_sha256": sha256(revoked).hexdigest() if revoked is not None else None,
+        "policy_sha256": sha256(policy.allowed).hexdigest(),
+        "revocations_sha256": sha256(policy.revoked).hexdigest() if policy.revoked is not None else None,
         "verified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

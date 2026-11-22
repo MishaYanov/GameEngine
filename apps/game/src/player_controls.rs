@@ -6,6 +6,8 @@ mod audio;
 mod controller_menu_input;
 mod display;
 pub(super) mod input_labels;
+pub(crate) mod input_preset;
+mod input_preset_menu;
 mod keyboard_menu;
 mod preferences;
 mod save_menu;
@@ -26,6 +28,7 @@ use super::GameApp;
 use action_keys::ActionKeyOverride;
 use audio::{AudioAction, AudioMenu, FeedbackMix};
 use display::{DisplayAction, DisplayMenu, DisplaySettings};
+use input_preset_menu::{PresetAction, PresetMenu};
 use keyboard_menu::{KeyboardAction, KeyboardMenu};
 use preferences::Preferences;
 use save_menu::{Intent, SaveMenu};
@@ -68,7 +71,7 @@ impl Preset {
 			movement: self,
 			..ControlsSettings::default()
 		}
-			.resolve_keyboard(authored)
+		.resolve_keyboard(authored)
 	}
 }
 
@@ -81,41 +84,50 @@ enum Row {
 	Continue,
 	Controller,
 	Keyboard,
+	Presets,
 	Audio,
 	Display,
 	Back,
 }
 
 impl Row {
-	fn available(checkpoints: bool) -> &'static [Self] {
-		match checkpoints {
-			true => &[
-				Self::Layout,
-				Self::Apply,
-				Self::Save,
-				Self::Continue,
-				Self::Controller,
-				Self::Keyboard,
-				Self::Audio,
-				Self::Display,
-				Self::Back,
-			],
-			false => &[
-				Self::Layout,
-				Self::Apply,
-				Self::Controller,
-				Self::Keyboard,
-				Self::Audio,
-				Self::Display,
-				Self::Back,
-			],
-		}
+	fn available(
+		checkpoints: bool,
+		presets: bool,
+	) -> impl DoubleEndedIterator<Item = Self> + Clone {
+		[
+			Self::Layout,
+			Self::Apply,
+			Self::Save,
+			Self::Continue,
+			Self::Controller,
+			Self::Keyboard,
+			Self::Presets,
+			Self::Audio,
+			Self::Display,
+			Self::Back,
+		]
+		.into_iter()
+		.filter(move |row| match row {
+			Self::Save | Self::Continue => checkpoints,
+			Self::Presets => presets,
+			_ => true,
+		})
 	}
 
-	fn adjacent(self, forward: bool, checkpoints: bool) -> Self {
-		let rows = Self::available(checkpoints);
-		let index = rows.iter().position(|row| *row == self).unwrap_or_default();
-		rows[(index + if forward { 1 } else { rows.len() - 1 }) % rows.len()]
+	fn adjacent(self, forward: bool, checkpoints: bool, presets: bool) -> Self {
+		let mut rows = Self::available(checkpoints, presets);
+		if forward {
+			let first = rows.clone().next().unwrap_or_default();
+			rows.find(|row| *row == self)
+				.and_then(|_| rows.next())
+				.unwrap_or(first)
+		} else {
+			let last = rows.clone().next_back().unwrap_or_default();
+			rows.rfind(|row| *row == self)
+				.and_then(|_| rows.next_back())
+				.unwrap_or(last)
+		}
 	}
 }
 
@@ -176,6 +188,7 @@ enum Page {
 	},
 	Display(DisplayMenu),
 	Keyboard(KeyboardMenu),
+	Presets(Box<PresetMenu>),
 	Audio(AudioMenu),
 	Saves(SaveMenu),
 }
@@ -184,6 +197,7 @@ struct Menu {
 	focus: Row,
 	draft: Preset,
 	checkpoints: bool,
+	presets: bool,
 	page: Page,
 }
 
@@ -259,9 +273,9 @@ impl PlayerControls {
 
 	pub(super) fn cancel_action_key_capture(&mut self) {
 		if let Some(Menu {
-			            page: Page::Keyboard(menu),
-			            ..
-		            }) = self.menu.as_mut()
+			page: Page::Keyboard(menu),
+			..
+		}) = self.menu.as_mut()
 			&& menu.cancel_capture()
 		{
 			self.message = Some("Key capture cancelled".into());
@@ -330,6 +344,7 @@ impl PlayerControls {
 			),
 			Page::Display(display) => display.rows(),
 			Page::Keyboard(keyboard) => keyboard.rows(columns),
+			Page::Presets(presets) => presets.rows(),
 			Page::Audio(audio) => audio.rows(),
 			Page::Saves(saves) => saves.rows(),
 			Page::Main => self.main_rows(menu),
@@ -354,9 +369,9 @@ impl PlayerControls {
 		} else {
 			menu.draft.label()
 		};
-		let available = Row::available(menu.checkpoints);
+		let available = Row::available(menu.checkpoints, menu.presets);
 		let rows = available
-			.iter()
+			.clone()
 			.map(|row| match row {
 				Row::Layout => format!("Movement: {layout}"),
 				Row::Apply if self.override_active => "Apply disabled".into(),
@@ -365,6 +380,7 @@ impl PlayerControls {
 				Row::Continue => "Continue from slot".into(),
 				Row::Controller => "Controller".into(),
 				Row::Keyboard => "Keyboard".into(),
+				Row::Presets => "Input presets".into(),
 				Row::Display => "Accessibility".into(),
 				Row::Audio => "Feedback Audio".into(),
 				Row::Back => "Back".into(),
@@ -374,8 +390,8 @@ impl PlayerControls {
 			"Controls".into(),
 			rows,
 			available
-				.iter()
-				.position(|row| *row == menu.focus)
+				.clone()
+				.position(|row| row == menu.focus)
 				.unwrap_or_default(),
 		)
 	}
@@ -431,7 +447,7 @@ impl PlayerControls {
 			.preferences
 			.as_ref()
 			.ok_or("Local controls storage is unavailable")?;
-		preferences.save(&settings)?;
+		preferences.save_if_current(&self.applied, &settings)?;
 		self.applied = settings;
 		self.message = None;
 		Ok(())
@@ -467,7 +483,7 @@ impl GameApp {
 			match key {
 				Key::Escape => {}
 				Key::Enter | Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
-				if self.player_controls.is_open() => {}
+					if self.player_controls.is_open() => {}
 				_ => return self.player_controls.is_open(),
 			}
 		}
@@ -478,6 +494,7 @@ impl GameApp {
 				focus: Row::Layout,
 				draft: self.player_controls.applied.movement,
 				checkpoints,
+				presets: self.installed_project && self.project_path.is_some(),
 				page: Page::Main,
 			});
 			self.clear_controls_input();
@@ -494,6 +511,20 @@ impl GameApp {
 			Page::Keyboard(keyboard) => {
 				if self.keyboard_menu_key(keyboard, key, device) {
 					menu.page = Page::Main;
+				}
+				false
+			}
+			Page::Presets(presets) => {
+				match presets.key(self, key) {
+					PresetAction::Stay => {}
+					PresetAction::Back => {
+						self.player_controls.message = None;
+						menu.page = Page::Main;
+					}
+					PresetAction::Applied => {
+						menu.draft = self.player_controls.applied.movement;
+						menu.page = Page::Main;
+					}
 				}
 				false
 			}
@@ -530,7 +561,9 @@ impl GameApp {
 				return true;
 			}
 			Key::ArrowUp | Key::ArrowDown => {
-				menu.focus = menu.focus.adjacent(key == Key::ArrowDown, menu.checkpoints);
+				menu.focus =
+					menu.focus
+						.adjacent(key == Key::ArrowDown, menu.checkpoints, menu.presets);
 			}
 			Key::ArrowLeft | Key::ArrowRight
 				if !self.player_controls.override_active && matches!(menu.focus, Row::Layout) =>
@@ -595,6 +628,13 @@ impl GameApp {
 				};
 				menu.page = Page::Keyboard(keyboard);
 			}
+			Key::Enter if matches!(menu.focus, Row::Presets) => match PresetMenu::new(self) {
+				Ok(presets) => {
+					self.player_controls.message = None;
+					menu.page = Page::Presets(Box::new(presets));
+				}
+				Err(error) => self.player_controls.message = Some(error),
+			},
 			Key::Enter if matches!(menu.focus, Row::Display) => {
 				self.player_controls.message = None;
 				menu.page = Page::Display(DisplayMenu::new(self.player_controls.display()));
@@ -746,6 +786,16 @@ impl GameApp {
 			_ => {}
 		}
 		false
+	}
+
+	fn input_preset_apply_blocked(&self) -> Option<&'static str> {
+		if self.play_trace.is_some() {
+			Some("Playtrace recording: Apply disabled")
+		} else if self.player_controls.override_active {
+			Some("Launch profile override: Apply disabled")
+		} else {
+			None
+		}
 	}
 
 	fn clear_controls_input(&mut self) {

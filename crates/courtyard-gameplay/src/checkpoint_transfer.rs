@@ -82,10 +82,23 @@ impl CheckpointRegistry {
 		project: &ProjectData,
 		load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
 	) -> Result<Vec<u8>, String> {
+		self.export_slot_transfer_with_checkpoint(profile, slot, expected, project, load_authored)
+			.map(|(envelope, _)| envelope)
+	}
+
+	/// Return portable bytes and the identifier of that exact validated record.
+	pub fn export_slot_transfer_with_checkpoint(
+		&self,
+		profile: &Path,
+		slot: SaveSlot,
+		expected: &SlotGeneration,
+		project: &ProjectData,
+		load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
+	) -> Result<(Vec<u8>, String), String> {
 		let files = self.read_generations(profile, slot)?;
 		files.verify(slot, expected)?;
 		let record = files.primary.ok_or("Select an occupied checkpoint slot")?;
-		self.current_record(project, &record, load_authored)?;
+		let saved = self.current_record(project, &record, load_authored)?;
 		let envelope = TransferEnvelope {
 			schema_version: 1,
 			project_save_id: self.project_save_id().to_owned(),
@@ -96,7 +109,7 @@ impl CheckpointRegistry {
 		if bytes.len() > MAX_TRANSFER_BYTES {
 			return Err("Checkpoint transfer exceeds its size limit".into());
 		}
-		Ok(bytes)
+		Ok((bytes, saved.checkpoint_id().to_owned()))
 	}
 
 	/// Validate the transfer and current destination without creating or changing files.
@@ -131,6 +144,16 @@ impl CheckpointRegistry {
 		request: CheckpointImport<'_>,
 		load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
 	) -> Result<(), String> {
+		self.import_slot_transfer_with_checkpoint(request, load_authored)
+			.map(|_| ())
+	}
+
+	/// Return the exact checkpoint identifier only after the archive is published.
+	pub fn import_slot_transfer_with_checkpoint(
+		&self,
+		request: CheckpointImport<'_>,
+		load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
+	) -> Result<String, String> {
 		self.publish_transfer(request, load_authored, publish_record)
 	}
 
@@ -139,7 +162,7 @@ impl CheckpointRegistry {
 		request: CheckpointImport<'_>,
 		mut load_authored: impl FnMut(&SceneId) -> Result<SceneData, String>,
 		mut publish: impl FnMut(&Path, &str, &[u8]) -> Result<(), String>,
-	) -> Result<(), String> {
+	) -> Result<String, String> {
 		let CheckpointImport {
 			profile,
 			slot,
@@ -148,7 +171,7 @@ impl CheckpointRegistry {
 			intent,
 			project,
 		} = request;
-		let (archive_digest, record, _) =
+		let (archive_digest, record, saved) =
 			self.read_transfer(archive, project, &mut load_authored)?;
 		if archive_digest != review.archive {
 			return Err("Checkpoint transfer changed. Preview it again before importing".into());
@@ -179,7 +202,8 @@ impl CheckpointRegistry {
 				publish(&parent, slot.previous(), primary)?;
 			}
 		}
-		publish(&parent, slot.primary(), &record)
+		publish(&parent, slot.primary(), &record)?;
+		Ok(saved.checkpoint_id().to_owned())
 	}
 
 	fn read_transfer(
@@ -276,8 +300,8 @@ fn encode_digest(bytes: &[u8; 32]) -> String {
 fn decode_digest(value: &str) -> Result<[u8; 32], String> {
 	if value.len() != 64
 		|| !value
-		.bytes()
-		.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+			.bytes()
+			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 	{
 		return Err(
 			"Checkpoint transfer tokens require exactly 64 lowercase hexadecimal digits".into(),

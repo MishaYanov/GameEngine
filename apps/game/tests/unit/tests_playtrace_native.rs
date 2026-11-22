@@ -77,6 +77,7 @@ pub(super) fn run_phase(app: &mut GameApp, phase: &str) {
 		"trace-remap" => remap(app),
 		"trace-record" => record(app),
 		phase if phase.starts_with("trace-keyboard-") => native_keyboard_profile_phase(app, phase),
+		phase if phase.starts_with("preset-") => native_preset_phase(app, phase),
 		_ => panic!("Unknown player trace phase"),
 	}
 }
@@ -349,4 +350,139 @@ fn native_keyboard_profile_phase(app: &mut GameApp, phase: &str) {
 		}
 		_ => panic!("Unknown keyboard replay phase"),
 	}
+}
+
+#[test]
+#[ignore = "requires the release fixture and native Windows Vulkan support"]
+fn native_input_preset_transfers_across_player_profiles() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str =
+		"playtrace_native_tests::native_input_preset_transfers_across_player_profiles";
+	let rehearsal = ProfileDir::new();
+	let source = ProfileDir(rehearsal.0.join("source"));
+	let destination = ProfileDir(rehearsal.0.join("destination"));
+	let transfers = rehearsal.0.join("presets");
+	for directory in [&source.0, &destination.0, &transfers] {
+		fs::create_dir(directory).unwrap();
+	}
+	run_isolated_phase(TEST, "preset-export", &source, None);
+	let preset = fs::read_dir(&transfers)
+		.unwrap()
+		.next()
+		.unwrap()
+		.unwrap()
+		.path();
+	let exported = fs::read(&preset).unwrap();
+	run_isolated_phase(TEST, "preset-apply", &destination, None);
+	run_isolated_phase(TEST, "preset-relaunch", &destination, None);
+	assert_eq!(fs::read(preset).unwrap(), exported);
+}
+
+fn native_preset_phase(app: &mut GameApp, phase: &str) {
+	let profile = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
+	app.transfer_directory = Some(profile.parent().unwrap().join("presets"));
+	match phase {
+		"preset-export" => {
+			native_keyboard_profile_phase(app, "trace-keyboard-remap");
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Export local preset");
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.last()
+					.unwrap()
+					.contains("Exported input")
+			);
+		}
+		"preset-apply" => {
+			let authored = app.project.as_ref().unwrap().input_profile.clone().unwrap();
+			assert_eq!(
+				app.effective_input_profile().unwrap_or(&authored).actions[0].key,
+				Key::E
+			);
+
+			// The review defaults to a non-writing action even in the shortest layout.
+			select_preset_row(app, "> Input presets");
+			select_preset_row(app, "> Review preset file");
+			assert!(
+				app.player_controls.rows_with_capacity(1).unwrap()[0].starts_with("> Preset 01:")
+			);
+			assert!(app.player_controls_key(Key::Enter));
+			assert_eq!(
+				app.player_controls.rows_with_capacity(1).unwrap(),
+				["> Keep current"]
+			);
+			assert!(app.player_controls_key(Key::Enter));
+			assert!(app.effective_input_profile().unwrap_or(&authored).actions[0].key == Key::E);
+
+			app.play_trace = Some(
+				playtrace::PlayTrace::new(
+					profile.join("blocked.replay.json"),
+					&authored,
+					&authored,
+				)
+				.unwrap(),
+			);
+			assert!(app.player_controls_key(Key::Enter));
+			select_preset_row(app, "> Apply preset");
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.last()
+					.unwrap()
+					.contains("recording")
+			);
+			assert_eq!(
+				app.effective_input_profile().unwrap_or(&authored).actions[0].key,
+				Key::E
+			);
+			app.play_trace.take();
+
+			select_preset_row(app, "> Apply preset");
+			assert_eq!(
+				app.effective_input_profile().unwrap().actions[0].key,
+				Key::F
+			);
+			assert!(
+				app.player_controls
+					.rows()
+					.unwrap()
+					.last()
+					.unwrap()
+					.contains("Input preset applied")
+			);
+		}
+		"preset-relaunch" => {
+			assert_eq!(
+				app.effective_input_profile().unwrap().actions[0].key,
+				Key::F
+			);
+			move_for(app, Key::D, 90);
+			move_for(app, Key::A, 84);
+			tap(app, Key::E);
+			assert!(!progress(app).route_gate_open);
+			tap(app, Key::F);
+			assert!(progress(app).route_gate_open);
+		}
+		_ => panic!("Unknown input preset phase"),
+	}
+}
+
+fn select_preset_row(app: &mut GameApp, label: &str) {
+	if !app.player_controls.is_open() {
+		assert!(app.player_controls_key(Key::Escape));
+	}
+	for _ in 0..30 {
+		if app.player_controls.rows_with_capacity(1).unwrap() == [label] {
+			assert!(app.player_controls_key(Key::Enter));
+			return;
+		}
+		assert!(app.player_controls_key(Key::ArrowDown));
+	}
+	panic!("Preset row {label} unavailable");
 }

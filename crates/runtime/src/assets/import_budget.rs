@@ -16,6 +16,7 @@ pub(super) struct ImportBudget<'a> {
 	remaining: usize,
 	limit: usize,
 	context: Option<&'a AssetJobContext>,
+	cancelled: Option<&'a dyn Fn() -> bool>,
 	references: HashSet<PathBuf>,
 	pub referenced_bytes: usize,
 	values: usize,
@@ -25,10 +26,23 @@ impl<'a> ImportBudget<'a> {
 		let limit = context.map_or(IMPORT_LIMIT, |context| {
 			context.byte_limit().min(IMPORT_LIMIT)
 		});
+		Self::with_limit(limit, context, None)
+	}
+
+	pub fn warming(limit: usize, cancelled: &'a dyn Fn() -> bool) -> Self {
+		Self::with_limit(limit, None, Some(cancelled))
+	}
+
+	fn with_limit(
+		limit: usize,
+		context: Option<&'a AssetJobContext>,
+		cancelled: Option<&'a dyn Fn() -> bool>,
+	) -> Self {
 		Self {
 			remaining: limit,
 			limit,
 			context,
+			cancelled,
 			references: HashSet::new(),
 			referenced_bytes: 0,
 			values: 0,
@@ -38,13 +52,21 @@ impl<'a> ImportBudget<'a> {
 		if let Some(context) = self.context {
 			context.check_cancelled().map_err(reject)?;
 		}
+		if self.cancelled.is_some_and(|cancelled| cancelled()) {
+			return Err(reject("Model warming was cancelled"));
+		}
 		Ok(())
 	}
+
+	pub fn charged_bytes(&self) -> usize {
+		self.limit - self.remaining
+	}
+
 	pub fn reserve(&mut self, bytes: usize) -> Result<(), GltfLoaderError> {
 		self.checkpoint()?;
 		self.remaining = self.remaining.checked_sub(bytes).ok_or_else(|| {
 			reject(format!(
-				"metadata import exceeds its {}-byte reservation",
+				"asset preparation exceeds its {}-byte reservation",
 				self.limit
 			))
 		})?;
@@ -80,12 +102,27 @@ impl<'a> ImportBudget<'a> {
 		Ok(())
 	}
 	pub fn read_file(&mut self, path: &Path) -> Result<Vec<u8>, GltfLoaderError> {
+		self.read_file_at_most(path, 64 * 1024 * 1024)
+	}
+
+	pub fn read_file_at_most(
+		&mut self,
+		path: &Path,
+		limit: usize,
+	) -> Result<Vec<u8>, GltfLoaderError> {
 		self.checkpoint()?;
-		let mut file = std::fs::File::open(path).map_err(reject)?;
+		let mut file = if self.cancelled.is_some() {
+			super::project_assets::open_warm_file(path)
+		} else {
+			std::fs::File::open(path)
+		}
+		.map_err(reject)?;
 		let metadata = file.metadata().map_err(reject)?;
 		let size = usize::try_from(metadata.len()).map_err(|_| reject("resource size overflow"))?;
-		if !metadata.is_file() || size > 64 * 1024 * 1024 {
-			return Err(reject("resource must be a regular file within 64 MiB"));
+		if !metadata.is_file() || size > limit {
+			return Err(reject(format!(
+				"resource must be a regular file within {limit} bytes"
+			)));
 		}
 		self.reference(path, size)?;
 		self.reserve(size)?;

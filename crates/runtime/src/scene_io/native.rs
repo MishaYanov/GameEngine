@@ -4,7 +4,7 @@ use renderer::WindowRenderer;
 
 use crate::{
 	Camera, SceneData, Transform,
-	assets::{AssetManager, Model},
+	assets::{AssetManager, Model, PreparedModelBatch},
 	model_instance::ModelInstance,
 	scene::{MAX_SCENE_RENDER_OBJECTS, Scene},
 };
@@ -50,6 +50,22 @@ pub fn instantiate_with_references(
 	assets: &mut AssetManager,
 	renderer: &WindowRenderer,
 	references: Option<PreparedSceneReferences>,
+	prepared: impl FnMut(usize, usize),
+	cancelled: impl FnMut() -> bool,
+) -> Result<Option<(Scene, Camera)>, String> {
+	instantiate_with_warming(
+		data, assets, renderer, references, None, prepared, cancelled,
+	)
+}
+
+/// Adopt optional CPU model payloads for the exact retained scene. Ordinary
+/// assembly and GPU cache lookups remain authoritative when a payload is absent.
+pub fn instantiate_with_warming(
+	data: &SceneData,
+	assets: &mut AssetManager,
+	renderer: &WindowRenderer,
+	references: Option<PreparedSceneReferences>,
+	mut warming: Option<&mut PreparedModelBatch>,
 	mut prepared: impl FnMut(usize, usize),
 	mut cancelled: impl FnMut() -> bool,
 ) -> Result<Option<(Scene, Camera)>, String> {
@@ -58,6 +74,7 @@ pub fn instantiate_with_references(
 	}
 	let references = references.filter(|references| references.matches(data));
 	if references.is_none() {
+		warming = None;
 		validate_layout(data)?;
 	}
 	let total = data.entities.len();
@@ -99,14 +116,19 @@ pub fn instantiate_with_references(
 		} else if !entity.has_mesh_component()
 			|| (!entity.renderable
 				&& !assets
-			.asset_exists(cache_key.as_ref())
+					.asset_exists(cache_key.as_ref())
 					.map_err(|error| error.to_string())?)
 		{
 			Arc::clone(&group_model)
 		} else if let Some(model) = models.get(cache_key.as_ref()) {
 			Arc::clone(model)
 		} else {
-			let loaded = assets.load_asset(renderer, cache_key.as_ref());
+			let warm_model = if entity.renderable && entity.animation.is_none() {
+				warming.as_deref_mut()
+			} else {
+				None
+			};
+			let loaded = assets.load_asset_prepared(renderer, cache_key.as_ref(), warm_model);
 			let model = loaded.map_err(|error| {
 				format!(
 					"Scene entity {index} ({:?}), model '{}': {error}",

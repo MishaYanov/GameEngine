@@ -44,12 +44,10 @@ fn preferences_round_trip_and_replace_within_the_local_directory() {
 	};
 	settings.save(&controls).unwrap();
 	assert_eq!(settings.load().unwrap(), controls);
-	assert_eq!(
-		fs::read_dir(root.path().join("GameEngine/controls"))
-			.unwrap()
-			.count(),
-		1
-	);
+	let folder = root.path().join("GameEngine/controls");
+	assert!(folder.join("controls.json").is_file());
+	assert!(folder.join("controls.lock").is_file());
+	assert_eq!(fs::read_dir(folder).unwrap().count(), 2);
 }
 
 #[test]
@@ -240,7 +238,7 @@ fn v3_loads_unchanged_and_explicit_keyboard_apply_persists_a_v4_draft() {
 	let project = runtime::project::ProjectData::from_json(include_str!(
 		"../../project.release-learning.json"
 	))
-		.unwrap();
+	.unwrap();
 	let mut app = GameApp::default();
 	app.project = Some(project);
 	app.player_controls.applied = settings;

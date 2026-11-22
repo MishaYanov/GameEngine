@@ -1,5 +1,6 @@
 mod checkpoint_controls;
 mod checkpoint_transfer;
+mod checkpoint_transfer_history;
 mod editor_panel;
 mod editor_tools;
 mod feedback_audio;
@@ -8,6 +9,8 @@ mod feedback_captions;
 mod frame_metrics;
 mod game;
 mod gizmo_overlay;
+mod input_preset_transfer;
+mod local_player_files;
 mod native_input;
 mod play;
 mod player_controls;
@@ -250,7 +253,7 @@ impl GameApp {
 			|| !self.editor.is_playing()
 			|| !self.window.as_ref().is_some_and(|window| {
 				let size = window.inner_size();
-			window.has_focus() && GameContentRect::fit(size.width, size.height).is_some()
+				window.has_focus() && GameContentRect::fit(size.width, size.height).is_some()
 			}) {
 			self.reset_gamepad_input();
 			return None;
@@ -299,8 +302,8 @@ impl GameApp {
 			.resolve(self.play_gamepad.sample());
 		if pad != GamepadSample::default()
 			&& (self.player_controls.is_open()
-			|| self.editor.simulation_paused()
-			|| self.game_completed())
+				|| self.editor.simulation_paused()
+				|| self.game_completed())
 		{
 			return GamepadSample::default();
 		}
@@ -582,10 +585,14 @@ impl GameApp {
 		} else {
 			None
 		};
+		if let Some(catalog) = &audio_catalog {
+			catalog.mix().validate_scenes(&project.scenes)?;
+		}
 		let feedback_audio = feedback_audio::FeedbackAudio::new(
 			audio_catalog,
 			!self.smoke_test,
 			self.player_controls.feedback_mix().effective_percent(),
+			&project.startup_scene_id,
 		)?;
 		// Install only after every fallible initialization step has succeeded.
 		if self.standalone_runtime {
@@ -1293,6 +1300,13 @@ fn run() -> Result<(), String> {
 
 	if let Some(transfer) = options.transfer {
 		return checkpoint_transfer::execute(transfer, app.project.as_ref(), executable_root);
+	}
+	if let Some(command) = options.input_preset {
+		return input_preset_transfer::execute(
+			command,
+			app.project_path.as_deref(),
+			app.project.as_ref(),
+		);
 	}
 	app.input_profile_override = options
 		.input_profile

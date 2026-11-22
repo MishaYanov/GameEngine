@@ -576,7 +576,7 @@ fn campaign_workspace() -> (
 			source.join("assets").join(scene.asset_path()),
 			fixture.0.join(scene.asset_path()),
 		)
-			.unwrap();
+		.unwrap();
 	}
 	fs::create_dir(fixture.0.join("props")).unwrap();
 	for model in ["capsule.glb", "cube.glb", "sphere.glb"] {
@@ -584,7 +584,7 @@ fn campaign_workspace() -> (
 			source.join("assets/props").join(model),
 			fixture.0.join("props").join(model),
 		)
-			.unwrap();
+		.unwrap();
 	}
 	let campaign = courtyard_gameplay::settings::InteractionSettings::from_project(&project)
 		.unwrap()
@@ -595,7 +595,7 @@ fn campaign_workspace() -> (
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	(fixture, manifest, workspace, campaign)
 }
 
@@ -723,7 +723,7 @@ fn campaign_authoring_applies_one_undoable_route_and_roundtrips_through_staging(
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| {},
 	)
-		.unwrap();
+	.unwrap();
 	let disk = runtime::project::ProjectData::load(&manifest).unwrap();
 	assert_eq!(reopened.backend.session().project(), &disk);
 	assert_eq!(&disk, &accepted.project);
@@ -739,6 +739,134 @@ fn campaign_authoring_applies_one_undoable_route_and_roundtrips_through_staging(
 	assert_eq!(
 		reopened.backend.play_status().unwrap().scene_id,
 		route.chapters[0].course_scene
+	);
+}
+
+#[test]
+fn campaign_repair_is_one_guarded_scene_edit_and_stages_after_history_roundtrip() {
+	use courtyard_gameplay::authoring_repairs::CampaignRepairRole;
+	use runtime::scene_data::ColliderData;
+
+	let (fixture, manifest, mut workspace, route) = campaign_workspace();
+	let garden = SceneId::new("garden").unwrap();
+	let key = "garden-exit-trigger";
+	let collider = |workspace: &EditorWorkspace| {
+		workspace
+			.backend
+			.session()
+			.scene_document(&garden)
+			.unwrap()
+			.entities
+			.iter()
+			.find(|entity| entity.key.as_str() == key)
+			.unwrap()
+			.collider
+			.clone()
+			.unwrap()
+	};
+	let diagnose = |workspace: &EditorWorkspace| {
+		let revision = workspace.backend.session().revision();
+		workspace
+			.capture_campaign_check(workspace.generation, revision, route.clone())
+			.unwrap()
+			.diagnose()
+	};
+	run(
+		&mut workspace,
+		Command::SwitchScene {
+			scene_id: garden.clone(),
+		},
+	);
+	let original = collider(&workspace);
+	let mut broken = original.clone();
+	match &mut broken {
+		ColliderData::Box { interaction, .. } | ColliderData::Sphere { interaction, .. } => {
+			interaction.sensor = false;
+		}
+	}
+	run(
+		&mut workspace,
+		Command::SetCollider {
+			key: key.into(),
+			collider: Some(broken.clone()),
+		},
+	);
+	let before = workspace.backend.snapshot().unwrap();
+	let report = diagnose(&workspace);
+	assert_eq!(report.issues.len(), 1);
+	let target = report.issues[0].repair.as_ref().unwrap();
+	assert_eq!(target.role, CampaignRepairRole::ExitTrigger);
+	assert_eq!(target.entity_key.as_str(), key);
+	let preview = workspace
+		.preview_campaign_repair(workspace.generation, before.revision, target)
+		.unwrap();
+	assert_eq!(preview.before, broken);
+	assert_eq!(preview.after, original);
+	assert_eq!(
+		serde_json::to_value(&before).unwrap(),
+		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap()
+	);
+
+	let generation = workspace.generation;
+	assert!(workspace
+		.apply_campaign_repair(generation, before.revision, target, &original)
+		.is_err());
+	run(
+		&mut workspace,
+		Command::Rename {
+			key: key.into(),
+			name: "Garden exit".into(),
+		},
+	);
+	let current = workspace.backend.session().revision();
+	assert!(workspace
+		.apply_campaign_repair(generation, before.revision, target, &preview.before)
+		.is_err());
+	assert_eq!(workspace.backend.session().revision(), current);
+	assert_eq!(collider(&workspace), broken);
+	let fresh = workspace
+		.preview_campaign_repair(generation, current, target)
+		.unwrap();
+	let repaired = workspace
+		.apply_campaign_repair(generation, current, target, &fresh.before)
+		.unwrap();
+	assert_eq!(repaired.revision, current + 1);
+	assert_eq!(repaired.project, before.project);
+	assert!(diagnose(&workspace).issues.is_empty());
+
+	run(&mut workspace, Command::Undo);
+	assert_eq!(collider(&workspace), broken);
+	assert!(diagnose(&workspace).issues[0].repair.is_some());
+	run(&mut workspace, Command::Redo);
+	assert_eq!(collider(&workspace), original);
+	assert!(diagnose(&workspace).issues.is_empty());
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+
+	let reopened = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&manifest).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	assert_eq!(collider(&reopened), original);
+	let project = runtime::project::ProjectData::load(&manifest).unwrap();
+	let prepared = compiler::prepare_project(&project, &fixture.0).unwrap();
+	let parent = fixture.0.parent().unwrap().join("repair-stage");
+	fs::create_dir(&parent).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, parent.to_str().unwrap()).unwrap();
+	let result =
+		runtime::scene_io::load_data(&staged.path().join("assets/scenes/chapter-garden.json"))
+			.unwrap()
+			.data;
+	assert_eq!(
+		result
+			.entities
+			.iter()
+			.find(|entity| entity.key.as_str() == key)
+			.unwrap()
+			.collider,
+		Some(original)
 	);
 }
 
@@ -802,7 +930,9 @@ fn campaign_diagnostics_read_unsaved_scenes_in_draft_order_without_an_edit() {
 	assert_eq!(report.issues.len(), 2);
 	assert_eq!(report.issues[0].scene_id.as_ref(), Some(&courtyard));
 	assert!(report.issues[0].message.contains("Key trigger"));
+	assert!(report.issues[0].repair.is_some());
 	assert_eq!(report.issues[1].scene_id.as_ref(), Some(&garden));
+	assert!(report.issues[1].repair.is_none());
 	assert_eq!(
 		report.issues[1].message,
 		"Exit trigger needs an enabled sensor collider"
@@ -816,7 +946,7 @@ fn campaign_diagnostics_read_unsaved_scenes_in_draft_order_without_an_edit() {
 		ProjectLocation::from_manifest(&manifest).unwrap(),
 		|| (),
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(
 		reopened
 			.accept_campaign_diagnostics(run_check(&workspace))

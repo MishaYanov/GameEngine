@@ -7,7 +7,7 @@ fn document() -> SceneData {
 	SceneData::from_json(include_str!(
 		"../../../../game/assets/scenes/courtyard-release-learning.json"
 	))
-		.unwrap()
+	.unwrap()
 }
 
 fn key(scene: &str, revision: u64) -> WarmKey {
@@ -21,9 +21,9 @@ fn key(scene: &str, revision: u64) -> WarmKey {
 }
 
 fn wait_ready(worker: &WarmWorker) {
-	let state = worker.0.state.lock().unwrap();
+	let state = worker.mailbox.state.lock().unwrap();
 	let (state, _) = worker
-		.0
+		.mailbox
 		.wake
 		.wait_timeout_while(state, WAIT, |state| state.ready.is_none())
 		.unwrap();
@@ -34,21 +34,25 @@ fn wait_ready(worker: &WarmWorker) {
 fn replaced_warm_jobs_cannot_publish_and_a_matching_document_is_claimed_once() {
 	let (started, signal) = mpsc::channel();
 	let (release, wait) = mpsc::channel();
-	let worker = WarmWorker::spawn(move |job| {
+	let worker = WarmWorker::spawn(false, move |job| {
 		if job.key.revision == 1 {
 			started.send(()).unwrap();
 			wait.recv_timeout(WAIT).unwrap();
 			assert!(job.cancel.load(Ordering::Relaxed));
 		}
-		PreparedSceneReferences::build(Arc::clone(&job.document), || false).unwrap()
+		Some(WarmedScene {
+			references: PreparedSceneReferences::build(Arc::clone(&job.document), || false)
+				.unwrap()?,
+			models: None,
+		})
 	})
-		.unwrap();
+	.unwrap();
 	let old = Arc::new(document());
 	let new = Arc::new(document());
-	worker.request(key("garden", 1), old);
+	worker.request(key("garden", 1), old, PathBuf::new());
 	signal.recv_timeout(WAIT).unwrap();
-	worker.request(key("other", 2), Arc::clone(&new));
-	worker.request(key("garden", 3), Arc::clone(&new));
+	worker.request(key("other", 2), Arc::clone(&new), PathBuf::new());
+	worker.request(key("garden", 3), Arc::clone(&new), PathBuf::new());
 	release.send(()).unwrap();
 	wait_ready(&worker);
 	let mut warming = SceneWarming {
@@ -72,7 +76,7 @@ fn a_different_retained_draft_cannot_reuse_the_previous_reference_list() {
 	let worker = WarmWorker::new().unwrap();
 	let scene = key("garden", 1);
 	let original = Arc::new(document());
-	worker.request(scene.clone(), Arc::clone(&original));
+	worker.request(scene.clone(), Arc::clone(&original), PathBuf::new());
 	wait_ready(&worker);
 	let warming = SceneWarming {
 		worker: Some(worker),

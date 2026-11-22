@@ -9,6 +9,7 @@ use engine_core::{
 use settings::InteractionSettings;
 
 pub mod authoring_diagnostics;
+pub mod authoring_repairs;
 mod chapters;
 pub mod checkpoint;
 mod preparation;

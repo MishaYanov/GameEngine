@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::authoring_repairs::CampaignRepairTarget;
 use engine_core::{
 	game_session::GameSession, project::ProjectData, scene_catalog::SceneId, scene_data::SceneData,
 	simulation_session::GameModuleFactory,
@@ -15,6 +16,8 @@ const MAX_ISSUE_BYTES: usize = 1024;
 pub struct CampaignDiagnostic {
 	pub scene_id: Option<SceneId>,
 	pub message: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub repair: Option<CampaignRepairTarget>,
 }
 
 impl CampaignDiagnostic {
@@ -28,7 +31,11 @@ impl CampaignDiagnostic {
 			message.truncate(end);
 			message.push_str("...");
 		}
-		Self { scene_id, message }
+		Self {
+			scene_id,
+			message,
+			repair: None,
+		}
 	}
 }
 

@@ -192,6 +192,23 @@ fn chapter_slots_continue_and_recover_across_native_processes() {
 	assert_eq!(fs::read(previous).unwrap(), previous_garden);
 }
 
+#[test]
+#[ignore = "requires native Windows Vulkan and a chaptered fixture with a version 2 feedback catalog"]
+fn chapter_feedback_mix_follows_scene_commit_and_checkpoint_restore() {
+	if let Some(phase) = std::env::var_os(PHASE_VAR) {
+		run_native_phase(phase.to_str().unwrap());
+		return;
+	}
+	const TEST: &str =
+		"checkpoint_native_tests::chapter_feedback_mix_follows_scene_commit_and_checkpoint_restore";
+	let manifest = std::env::var_os("GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT")
+		.map(PathBuf::from)
+		.expect("set GAME_ENGINE_QA_CHAPTER_AUDIO_PROJECT to the chaptered fixture project.json");
+	let profile = ProfileDir::new();
+	run_isolated_phase(TEST, "chapters-audio-save", &profile, Some(&manifest));
+	run_isolated_phase(TEST, "chapters-audio-continue", &profile, Some(&manifest));
+}
+
 struct NativePhase {
 	phase: String,
 	completed: bool,
@@ -243,6 +260,7 @@ impl ApplicationHandler for NativePhase {
 		app.input_profile_override = input_profile_override;
 		app.standalone_runtime = true;
 		app.installed_project = true;
+		app.smoke_test = self.phase.starts_with("chapters-audio-");
 		app.initialize_window(window, assets).unwrap();
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
 		match self.phase.as_str() {
@@ -258,6 +276,9 @@ impl ApplicationHandler for NativePhase {
 			"slots-save" => save_independent_slots(&mut app),
 			"slots-restore" => restore_independent_slots(&mut app),
 			"chapters-save" => save_chapter_slots(&mut app),
+			"chapters-audio-save" | "chapters-audio-continue" => {
+				check_chapter_audio(&mut app, &self.phase);
+			}
 			"chapters-transfer-continue" => {
 				checkpoint_transfer_native::continue_imported_garden(&mut app)
 			}
@@ -273,7 +294,10 @@ impl ApplicationHandler for NativePhase {
 			| "trace-record"
 			| "trace-keyboard-remap"
 			| "trace-keyboard-verify"
-			| "trace-keyboard-record" => super::playtrace_native_tests::run_phase(&mut app, &self.phase),
+			| "trace-keyboard-record"
+			| "preset-export"
+			| "preset-apply"
+			| "preset-relaunch" => super::playtrace_native_tests::run_phase(&mut app, &self.phase),
 			_ => panic!("Unknown checkpoint verification phase"),
 		}
 		assert_eq!(app.render().unwrap(), renderer::DrawStatus::Rendered);
@@ -517,6 +541,32 @@ fn open_slot_actions(app: &mut GameApp, saving: bool, slot: SaveSlot) {
 		menu_keys(app, &[Key::ArrowDown]);
 	}
 	menu_keys(app, &[Key::Enter]);
+}
+
+fn check_chapter_audio(app: &mut GameApp, phase: &str) {
+	use bridge::feedback_audio::FeedbackCue;
+	let gate = FeedbackCue::GateOpened;
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "courtyard");
+	assert_eq!(app.feedback_audio.test_gain(gate), 80);
+
+	if phase == "chapters-audio-save" {
+		let missing = SceneId::new("missing").unwrap();
+		assert!(app.switch_player_scene(missing).is_err());
+		assert_eq!(app.feedback_audio.test_gain(gate), 80);
+		save_chapter_slots(app);
+	} else {
+		open_slot_actions(app, false, SaveSlot::Two);
+		menu_keys(app, &[Key::Enter]);
+		close_checkpoint_menu(app);
+		assert_eq!(progress(app).score, 2);
+	}
+	assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "garden");
+	assert_eq!(app.feedback_audio.test_gain(gate), 40);
+	if phase == "chapters-audio-continue" {
+		move_for(app, Key::D, 90);
+		assert_eq!(app.editor.play_scene_id().unwrap().as_str(), "finish");
+		assert_eq!(app.feedback_audio.test_gain(gate), 80);
+	}
 }
 
 fn save_chapter_slots(app: &mut GameApp) {

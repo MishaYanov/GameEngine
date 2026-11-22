@@ -134,6 +134,7 @@ impl Worker {
 					};
 					Some(RenderPacket {
 						warm_requested,
+						warm_decode: workspace.scene_warming.decode_enabled(),
 						warmed,
 						animations: session.animations().cloned(),
 						animation_preview: workspace.active_animation_preview(),
@@ -161,6 +162,7 @@ impl Worker {
 		let RenderPacket {
 			warmed,
 			warm_requested,
+			warm_decode,
 			animations,
 			animation_preview,
 			mut document,
@@ -184,17 +186,17 @@ impl Worker {
 					(progress.workspace_generation == key.generation
 						&& progress.scene_id == key.scene_id
 						&& switch_clock
-						.is_none_or(|(accepted, _, _)| progress.scene_revision >= accepted))
-						.then_some(progress.stage)
+							.is_none_or(|(accepted, _, _)| progress.scene_revision >= accepted))
+					.then_some(progress.stage)
 				})
 			})
 		});
 		let loading = key.is_some() && previous != Some(ViewportSceneLoadStage::Presented);
 		if !loading
 			|| self
-			.authored_load
-			.as_ref()
-			.is_some_and(|(active, _)| Some(active) != key.as_ref())
+				.authored_load
+				.as_ref()
+				.is_some_and(|(active, _)| Some(active) != key.as_ref())
 		{
 			self.authored_load = None;
 		}
@@ -210,7 +212,22 @@ impl Worker {
 			.authored_load
 			.as_ref()
 			.map(|(_, timing)| timing.id().to_string());
-		let (mut warm_references, warm_outcome) = warmed.into_references();
+		let (warmed, warm_outcome) = warmed.into_scene();
+		let (mut warm_references, warm_models) = warmed
+			.map(|scene| (Some(scene.references), scene.models))
+			.unwrap_or_default();
+		let model_measurement = (self.warm_measurement && new_load)
+			.then(|| request_id.as_ref().zip(scene_id.as_ref()))
+			.flatten();
+		let mut model_attempt = ModelWarmAttempt {
+			batch: warm_models,
+			measurement: model_measurement,
+			mode: match warm_outcome {
+				"unrequested" => "off",
+				_ if warm_decode => "decode",
+				_ => "references",
+			},
+		};
 		if self.warm_measurement && new_load {
 			if let (Some(request_id), Some(scene)) = (&request_id, &scene_id) {
 				log_warm(serde_json::json!({
@@ -286,11 +303,12 @@ impl Worker {
 			let data = document
 				.take()
 				.ok_or("Initial viewport packet is missing scene data")?;
-			let candidate = scene_io::instantiate_with_references(
+			let candidate = scene_io::instantiate_with_warming(
 				&data,
 				&mut assets,
 				&renderer,
 				warm_references.take(),
+				model_attempt.batch.as_mut(),
 				&mut count_prepared,
 				|| !is_current(),
 			)?;
@@ -334,11 +352,12 @@ impl Worker {
 				.ok_or("Full viewport synchronization packet is missing scene data")?;
 			let replacement =
 				if loading || gpu.assets_invalidated || !gpu.scene.synchronize(&data)? {
-					let (scene, _) = match scene_io::instantiate_with_references(
+					let (scene, _) = match scene_io::instantiate_with_warming(
 						&data,
 						&mut gpu.assets,
 						&gpu.renderer,
 						warm_references.take(),
+						model_attempt.batch.as_mut(),
 						&mut count_prepared,
 						|| !is_current(),
 					) {
@@ -399,6 +418,7 @@ impl Worker {
 		} else if lights_changed {
 			gpu.renderer.set_lights(&gpu.scene.renderer_lights())?;
 		}
+		drop(model_attempt);
 		if !is_current() {
 			self.authored_load = None;
 			self.dirty = true;
@@ -412,9 +432,9 @@ impl Worker {
 				slot.as_ref().is_some_and(|workspace| {
 					workspace.generation == expected_generation
 						&& workspace
-						.backend
-						.session()
-						.owns_play_scene(run_id, scene_generation)
+							.backend
+							.session()
+							.owns_play_scene(run_id, scene_generation)
 				})
 			})
 		};
@@ -557,6 +577,30 @@ impl Worker {
 		}
 		self.publish_editor(false);
 		Ok(())
+	}
+}
+
+struct ModelWarmAttempt<'a> {
+	batch: Option<runtime::assets::PreparedModelBatch>,
+	measurement: Option<(&'a String, &'a SceneId)>,
+	mode: &'static str,
+}
+
+impl Drop for ModelWarmAttempt<'_> {
+	fn drop(&mut self) {
+		let Some((request_id, scene)) = self.measurement else {
+			return;
+		};
+		let batch = self.batch.as_ref();
+		let event = serde_json::json!({
+			"schema_version": 1, "kind": "model_load",
+			"request_id": request_id, "scene_id": scene.as_str(), "mode": self.mode,
+			"batch_matched": batch.is_some(),
+			"prepared_models": batch.map_or(0, runtime::assets::PreparedModelBatch::prepared_count),
+			"consumed_models": batch.map_or(0, runtime::assets::PreparedModelBatch::consumed_count),
+			"retained_bytes": batch.map_or(0, runtime::assets::PreparedModelBatch::retained_bytes),
+		});
+		engine_logger::info!(target: "editor_model_warming", "{event}");
 	}
 }
 

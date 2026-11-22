@@ -86,6 +86,19 @@ impl GameApp {
 			editor.set_initial_project(project.clone())?;
 		}
 		editor.set_module_resolver(Arc::new(progress::resolve))?;
+		let audio_catalog = bridge::feedback_audio::load(asset_root)?;
+		let playback = editor
+			.project()
+			.ok_or("Project configuration is unavailable")?;
+		if let Some(catalog) = &audio_catalog {
+			catalog.mix().validate_scenes(&playback.scenes)?;
+		}
+		let audio = feedback_audio::FeedbackAudio::new(
+			audio_catalog,
+			!self.smoke_test,
+			self.player_controls.feedback_mix().effective_percent(),
+			&playback.startup_scene_id,
+		)?;
 		if self.standalone_runtime {
 			editor.start_play(&mut loaded.scene)?;
 		}
@@ -104,6 +117,7 @@ impl GameApp {
 			editor.set_play_input_profile(profile.clone(), &mut self.input);
 		}
 		self.editor = editor;
+		self.feedback_audio = audio;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
 		self.project = project;

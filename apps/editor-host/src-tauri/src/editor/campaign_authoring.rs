@@ -5,9 +5,10 @@ use std::{collections::HashSet, sync::Arc};
 use bridge::editor::{EditorCommandDto, EditorCommandRequest, EditorSnapshotDto};
 use courtyard_gameplay::{
 	authoring_diagnostics::{AuthoredScenePreparation, CampaignDiagnostic},
+	authoring_repairs::{sensor_repairs, CampaignRepairPreview, CampaignRepairTarget},
 	settings::{CampaignDefinition, InteractionSettings, SceneInteractions},
 };
-use runtime::{project::ProjectData, scene_catalog::SceneId, SceneData};
+use runtime::{project::ProjectData, scene_catalog::SceneId, scene_data::ColliderData, SceneData};
 use serde::Serialize;
 
 use super::EditorWorkspace;
@@ -73,7 +74,7 @@ impl CampaignEdit {
 		})
 	}
 
-	fn diagnose(&self) -> Vec<CampaignDiagnostic> {
+	fn diagnose(&self, active_scene: &SceneId) -> Vec<CampaignDiagnostic> {
 		let preparation = match AuthoredScenePreparation::new(Arc::clone(&self.project)) {
 			Ok(preparation) => preparation,
 			Err(message) => return vec![CampaignDiagnostic::new(None, message)],
@@ -83,7 +84,24 @@ impl CampaignEdit {
 			.iter()
 			.filter_map(|(id, document)| {
 				let message = preparation.prepare(id, Arc::clone(document)).err()?;
-				Some(CampaignDiagnostic::new(Some(id.clone()), message))
+				let mut issue = CampaignDiagnostic::new(Some(id.clone()), message);
+				if id == active_scene {
+					let mut repairs = sensor_repairs(&self.project, id, document);
+					if let (Some(repair), None) = (repairs.next(), repairs.next()) {
+						let mut trial = (**document).clone();
+						if let Some(entity) = trial
+							.entities
+							.iter_mut()
+							.find(|entity| entity.key == repair.target.entity_key)
+						{
+							entity.collider = Some(repair.after);
+							if preparation.prepare(id, Arc::new(trial)).is_ok() {
+								issue.repair = Some(repair.target);
+							}
+						}
+					}
+				}
+				Some(issue)
 			})
 			.collect()
 	}
@@ -98,13 +116,14 @@ pub(crate) struct ReviewedCampaignEdit {
 pub(crate) struct CampaignCheck {
 	workspace_generation: u64,
 	revision: u64,
+	active_scene: SceneId,
 	draft: Result<CampaignEdit, CampaignAuthoringError>,
 }
 
 impl CampaignCheck {
 	pub(crate) fn diagnose(self) -> CampaignDiagnosticReport {
 		let issues = match self.draft {
-			Ok(edit) => edit.diagnose(),
+			Ok(edit) => edit.diagnose(&self.active_scene),
 			Err(error) => vec![CampaignDiagnostic::new(error.scene_id, error.message)],
 		};
 		CampaignDiagnosticReport {
@@ -191,6 +210,7 @@ impl EditorWorkspace {
 		Ok(CampaignCheck {
 			workspace_generation: generation,
 			revision,
+			active_scene: self.backend.session().active_scene_id().clone(),
 			draft,
 		})
 	}
@@ -220,7 +240,53 @@ impl EditorWorkspace {
 				project: edit.project,
 			},
 		})
-			.map_err(Into::into)
+		.map_err(Into::into)
+	}
+
+	pub(crate) fn preview_campaign_repair(
+		&self,
+		generation: u64,
+		revision: u64,
+		target: &CampaignRepairTarget,
+	) -> Result<CampaignRepairPreview, CampaignAuthoringError> {
+		self.check_campaign_owner(generation, revision)?;
+		let session = self.backend.session();
+		if session.active_scene_id() != &target.scene_id {
+			return Err(CampaignAuthoringError::conflict(
+				"Open the repair's scene and run Check Campaign again.".into(),
+			));
+		}
+		let document = session.scene_document(&target.scene_id)?;
+		let preview = sensor_repairs(session.project(), &target.scene_id, &document)
+			.find(|repair| repair.target == *target);
+		preview.ok_or_else(|| {
+			CampaignAuthoringError::conflict(
+				"This trigger is no longer eligible. Run Check Campaign again.".into(),
+			)
+		})
+	}
+
+	pub(crate) fn apply_campaign_repair(
+		&mut self,
+		generation: u64,
+		revision: u64,
+		target: &CampaignRepairTarget,
+		expected_collider: &ColliderData,
+	) -> Result<EditorSnapshotDto, CampaignAuthoringError> {
+		let preview = self.preview_campaign_repair(generation, revision, target)?;
+		if &preview.before != expected_collider {
+			return Err(CampaignAuthoringError::conflict(
+				"The trigger collider changed. Review the repair again.".into(),
+			));
+		}
+		self.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: EditorCommandDto::SetCollider {
+				key: target.entity_key.as_str().to_owned(),
+				collider: Some(preview.after),
+			},
+		})
+		.map_err(Into::into)
 	}
 
 	fn check_campaign_owner(

@@ -104,9 +104,9 @@ impl PlayInstall<'_> {
 			} => Ok(workspace.generation == *generation
 				&& workspace.backend.pending_play_scene() == Some(*target)
 				&& workspace
-				.backend
-				.session()
-				.owns_play_scene(run_id, *scene_generation)),
+					.backend
+					.session()
+					.owns_play_scene(run_id, *scene_generation)),
 			Self::Restart(request) => {
 				request.validate_context(workspace.generation, now)?;
 				let ViewportActionDto::RestartRun {
@@ -220,6 +220,7 @@ struct GpuState {
 struct RenderPacket {
 	warmed: crate::editor::scene_warming::WarmClaim,
 	warm_requested: bool,
+	warm_decode: bool,
 	animations: Option<runtime::animation::AnimationBank>,
 	animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 	document: Option<Arc<runtime::SceneData>>,

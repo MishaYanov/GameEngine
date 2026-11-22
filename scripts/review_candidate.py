@@ -76,7 +76,7 @@ def build_packet(receipt, archive, evidence_dir, profiles, *, playtest=None):
     }
 
 
-def _verified_packet(path, current):
+def verified_packet_digest(path, current):
     _, payload = read_local_json(path, MAX_PACKET_BYTES)
     if payload != _json_bytes(current):
         raise ValueError("Review packet no longer matches the verified candidate and evidence")
@@ -91,7 +91,7 @@ def _text(value, max_bytes, field):
     return value
 
 
-def _validate_decision(record, packet, packet_hash):
+def validate_decision(record, packet, packet_hash):
     if (not isinstance(record, dict) or record.keys() != DECISION_KEYS
             or type(record["schema_version"]) is not int or record["schema_version"] != 1):
         raise ValueError("Unsupported decision schema")
@@ -115,7 +115,7 @@ def _validate_decision(record, packet, packet_hash):
 
 
 def decide(packet, packet_path, decision_path, *, scope, status, reviewer, reason):
-    identity = _verified_packet(packet_path, packet)
+    identity = verified_packet_digest(packet_path, packet)
     record = {
         "schema_version": 1,
         "packet_sha256": identity,
@@ -126,13 +126,13 @@ def decide(packet, packet_path, decision_path, *, scope, status, reviewer, reaso
         "reason": reason,
         "reviewed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    _validate_decision(record, packet, identity)
+    validate_decision(record, packet, identity)
     _write_new(decision_path, _json_bytes(record), MAX_DECISION_BYTES)
     return record
 
 
 def validate_reviewed_decision(packet, packet_path, record):
-    _validate_decision(record, packet, _verified_packet(packet_path, packet))
+    validate_decision(record, packet, verified_packet_digest(packet_path, packet))
 
 
 def verified_decision_bytes(packet, packet_path, decision_path):

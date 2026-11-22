@@ -60,13 +60,13 @@ fn feedback_publication_preserves_catalog_after_rejected_changes() {
 		Some(&digest),
 		vec![assignment("audio/cue-missing.wav")]
 	)
-		.is_err());
+	.is_err());
 	assert!(apply_catalog(
 		&root.0,
 		Some(&digest),
 		vec![assignment(&path), assignment(&path)]
 	)
-		.is_err());
+	.is_err());
 	assert_eq!(fs::read(&manifest).unwrap(), applied);
 	let cleared = apply_catalog(&root.0, Some(&digest), Vec::new()).unwrap();
 	assert_eq!(fs::read(&manifest).unwrap(), cleared.manifest());
@@ -103,4 +103,40 @@ fn feedback_catalog_lock_serializes_processes_and_preserves_current_catalog() {
 	assert!(apply_catalog(&root.0, Some(&prepared.digest()), Vec::new()).is_ok());
 	assert!(!audio.join("assets.feedback-audio.lock").exists());
 	assert!(root.0.with_extension("feedback-audio.lock").is_file());
+}
+
+#[test]
+fn feedback_bus_mix_requires_registered_scenes_before_publication() {
+	let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
+	let workspace =
+		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/courtyard.json").unwrap();
+	let project = workspace.backend.session().project();
+	let root = Scratch::new();
+	let mix = |scene: &str| {
+		serde_json::from_value(serde_json::json!({
+			"bus_percent": {"completion": 70},
+			"scene_bus_percent": { (scene): {"mechanisms": 60} }
+		}))
+		.unwrap()
+	};
+	let allowed = feedback_audio::prepare_catalog_with_mix(
+		&root.0,
+		Vec::new(),
+		mix(project.startup_scene_id.as_str()),
+	)
+	.unwrap();
+	validate_mix_scenes(&workspace, &allowed).unwrap();
+	let result = FeedbackCueDraftDto::new(workspace.generation, Some(&allowed));
+	assert_eq!(result.mix, *allowed.mix());
+	publish_catalog(&root.0, None, &allowed).unwrap();
+	let rejected =
+		feedback_audio::prepare_catalog_with_mix(&root.0, Vec::new(), mix("unknown-scene"))
+			.unwrap();
+	assert!(validate_mix_scenes(&workspace, &rejected)
+		.unwrap_err()
+		.contains("unregistered scene"));
+	assert_eq!(
+		fs::read(root.0.join("audio/cues.json")).unwrap(),
+		allowed.manifest()
+	);
 }

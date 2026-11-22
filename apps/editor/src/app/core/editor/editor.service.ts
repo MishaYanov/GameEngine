@@ -9,10 +9,11 @@ import {validComponentTypes} from './editor-components';
 import {CameraPreviewController, readCameraPreview} from './camera-preview';
 import {validMachineDescriptor} from './state-machine.models';
 import {
-    readFeedbackCueDraft,
-    validCuePath,
+    type FeedbackBusMix,
     type FeedbackCueAssignment,
-    type FeedbackCueDraft
+    type FeedbackCueDraft,
+    readFeedbackCueDraft,
+    validCuePath
 } from './feedback-audio.models';
 import {
     type AnimationPreview,
@@ -33,6 +34,8 @@ import type {
     BuildLaunchResult,
     CampaignDefinition,
     CampaignDiagnosticReport,
+    CampaignRepairPreview,
+    CampaignRepairTarget,
     CollisionSnapshot,
     EditorCapabilities,
     EditorCommand,
@@ -344,6 +347,35 @@ export class EditorService {
         }, false, {expectedGeneration, expectedRevision});
     }
 
+    previewCampaignRepair(
+        target: CampaignRepairTarget,
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<CampaignRepairPreview> {
+        const operation = 'editor_preview_campaign_repair';
+        return this.enqueue(operation, async () => {
+            this.requireGeneration(expectedGeneration);
+            const preview = await this.native<CampaignRepairPreview>(operation, {
+                target, expectedGeneration: expectedNativeGeneration, expectedRevision,
+            });
+            this.requireGeneration(expectedGeneration);
+            return preview;
+        }, false, expectedGeneration);
+    }
+
+    applyCampaignRepair(
+        preview: CampaignRepairPreview,
+        expectedGeneration: number,
+        expectedNativeGeneration: number,
+        expectedRevision: number,
+    ): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_apply_campaign_repair', {
+            target: preview.target, expectedCollider: preview.before,
+            expectedGeneration: expectedNativeGeneration,
+        }, false, {expectedGeneration, expectedRevision});
+    }
+
     save(): Promise<EditorSnapshot> {
         return this.snapshotOperation('editor_save');
     }
@@ -417,12 +449,12 @@ export class EditorService {
 
     applyFeedbackCues(
         workspaceGeneration: number, expectedDigest: string | null, cues: readonly FeedbackCueAssignment[],
-        expectedGeneration: number,
+        expectedGeneration: number, mix: FeedbackBusMix,
     ): Promise<FeedbackCueDraft> {
         const operation = 'editor_feedback_cues_apply';
         return this.enqueue(operation, async () => {
             this.requireGeneration(expectedGeneration);
-            const result = await this.native<unknown>(operation, {workspaceGeneration, expectedDigest, cues});
+            const result = await this.native<unknown>(operation, {workspaceGeneration, expectedDigest, cues, mix});
             this.requireGeneration(expectedGeneration);
             return readFeedbackCueDraft(result);
         }, false, expectedGeneration);

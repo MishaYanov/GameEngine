@@ -1,9 +1,30 @@
 {
-  "last_checked_commit": "2c7664e48a40f7bccde3d1eb6bd65b8eefcb4657",
+  "last_checked_commit": "e9d6f65ea400764d822f06182ade20b172105a9a",
   "last_checked_date": "2026-11-22",
   "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "courtyard_release_milestones_40_51": {
+    "date": "2026-11-22",
+    "inspected_head": "e9d6f65ea400764d822f06182ade20b172105a9a",
+    "scope": "Milestones 40 through 45 implement portable input presets, authored feedback audio buses, active-scene campaign trigger repair, local checkpoint transfer history, opt-in editor model warming, and an independent release and QA signoff ledger. Milestones 46 through 51 are planned file-by-file learning guides.",
+    "verification": [
+      "The DOC, TEST, OPTIMIZATION and defensive SECURITY reviews ran before the Rust and Angular best-practices reviews. The refreshed milestone index and 40 through 51 guides comprise 41 Markdown files and 28 features with 367 local links and 39 snippets.",
+      "Affected tests passed across Rust (1,101), Python (126) and Angular (553). Windows Clippy, the packaged Editor Host custom-protocol check and Angular production AOT and bundle checks passed. The static documentation build link-checked 65 pages and passed eight tests.",
+      "Windows Vulkan rehearsals verified three-process Player input preset transfer, two-process scene audio mix and checkpoint restore, four-process checkpoint transfer and history, and model-warming adoption on an exact GPU cache miss.",
+      "The repaired Garden Exit passed revision checks, single Undo and Redo, Save All and compiler staging. The repaired authored and staged headless projects reached Finish with score 2.",
+      "The local rebuilt Windows candidate passed both input smoke checks, verified its archive and started from a separate working directory in a disposable profile. Preset preview, Apply and relaunch worked against the extracted Player, and the packaged V2 audio catalog exactly matched the authored fixture.",
+      "Two independently generated disposable OpenSSH keys signed release and QA decisions for the same candidate and packet. Ledger publication and reconstruction both verified held."
+    ],
+    "verification_limits": [
+      "The candidate was built from a dirty checkout. Independent release-host acceptance, physical-controller checks, audible playback and visible embedded Editor acceptance remain open.",
+      "The hidden Vulkan warming probe verifies one CPU adoption, GPU cache precedence and fresh geometry after reimport. Matched visible-editor first-presentation and foreground timings remain unmeasured.",
+      "Rust verification used Windows rustc 1.97.1. The Rust 1.89 minimum and the Unix-specific open flags remain unverified on their respective targets.",
+      "Angular production reports the existing project setup stylesheet budget warning of 5.22 kB against 4 kB. The release ledger uses disposable QA keys and remains held."
+    ],
+    "candidate_archive_sha256": "605a1833689f64131633266cf3048cb5acb8f030b10df2c9b0466b3fc6c8ee67",
+    "pending_documentation_changes": []
+  },
   "courtyard_release_milestones_34_45": {
     "date": "2026-11-22",
     "inspected_head": "2c7664e48a40f7bccde3d1eb6bd65b8eefcb4657",

@@ -4,7 +4,8 @@ use std::{
 	sync::atomic::{AtomicUsize, Ordering},
 };
 
-use bridge::feedback_audio::{CueClip, FeedbackCue, load};
+use bridge::feedback_audio::{CueClip, FeedbackBus, FeedbackCue, combined_percent, load};
+use engine_core::scene_catalog::{SceneCatalog, SceneDescriptor, SceneId};
 use serde_json::{Value, json};
 
 const TONE: &[u8] =
@@ -31,7 +32,7 @@ impl Folder {
 			audio.join("cues.json"),
 			json!({"schema_version": 1, "cues": cues}).to_string(),
 		)
-			.unwrap();
+		.unwrap();
 	}
 
 	fn path(&self) -> &Path {
@@ -125,5 +126,77 @@ fn linked_audio_directory_is_rejected_even_without_a_catalog() {
 	let folder = Folder::new();
 	let outside = Folder::new();
 	symlink(outside.path(), folder.path().join("audio")).unwrap();
+	assert!(load(folder.path()).is_err());
+}
+
+#[test]
+fn reads_both_catalog_versions_and_validates_registered_scene_mix() {
+	let folder = Folder::new();
+	fs::create_dir(folder.path().join("audio")).unwrap();
+	let manifest = folder.path().join("audio/cues.json");
+	let v1 = br#"{ "schema_version": 1, "cues": [] }"#;
+	fs::write(&manifest, v1).unwrap();
+	let legacy = load(folder.path()).unwrap().unwrap();
+	assert_eq!(legacy.manifest(), v1.as_slice());
+	let modern_without_levels = br#"{ "schema_version": 2, "cues": [] }"#;
+	fs::write(&manifest, modern_without_levels).unwrap();
+	let defaults = load(folder.path()).unwrap().unwrap();
+	assert_eq!(defaults.mix(), legacy.mix());
+
+	let authored = br#"{ "schema_version": 2, "cues": [],
+		"bus_percent": {"mechanisms": 80},
+		"scene_bus_percent": {"garden": {"mechanisms": 50}} }"#;
+	fs::write(&manifest, authored).unwrap();
+	let catalog = load(folder.path()).unwrap().unwrap();
+	assert_eq!(catalog.manifest(), authored.as_slice());
+	let mut scenes = SceneCatalog::default();
+	assert!(catalog.mix().validate_scenes(&scenes).is_err());
+	let garden = SceneId::new("garden").unwrap();
+	scenes
+		.insert(SceneDescriptor::new(garden.clone(), "scenes/garden.json").unwrap())
+		.unwrap();
+	catalog.mix().validate_scenes(&scenes).unwrap();
+	assert_eq!(catalog.mix().category_percent(FeedbackBus::Collection), 100);
+	assert_eq!(catalog.mix().category_percent(FeedbackBus::Mechanisms), 80);
+	assert_eq!(
+		catalog
+			.mix()
+			.scene_percent(&garden, FeedbackBus::Mechanisms),
+		50
+	);
+	assert_eq!(combined_percent(75, 80, 50), Ok(30));
+	assert_eq!(combined_percent(99, 15, 50), Ok(7));
+	assert_eq!(combined_percent(99, 50, 50), Ok(25));
+}
+
+#[test]
+fn rejects_wrong_schema_fields_bad_values_duplicates_and_oversized_mix() {
+	let folder = Folder::new();
+	fs::create_dir(folder.path().join("audio")).unwrap();
+	let manifest = folder.path().join("audio/cues.json");
+	for catalog in [
+		r#"{"schema_version":1,"cues":[],"bus_percent":{}}"#,
+		r#"{"schema_version":1,"cues":[],"scene_bus_percent":{}}"#,
+		r#"{"schema_version":3,"cues":[]}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":{"speech":80}}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":{"mechanisms":101}}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":{"mechanisms":90.5}}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":{"mechanisms":null}}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":null}"#,
+		r#"{"schema_version":2,"cues":[],"bus_percent":{"mechanisms":80,"mechanisms":20}}"#,
+		r#"{"schema_version":2,"cues":[],"scene_bus_percent":{"bad id":{}}}"#,
+		r#"{"schema_version":2,"cues":[],"scene_bus_percent":{"garden":{},"garden":{}}}"#,
+	] {
+		fs::write(&manifest, catalog).unwrap();
+		assert!(load(folder.path()).is_err(), "accepted {catalog}");
+	}
+	let too_many = (0..17)
+		.map(|index| (format!("scene-{index}"), json!({})))
+		.collect::<serde_json::Map<String, Value>>();
+	fs::write(
+		&manifest,
+		json!({"schema_version": 2, "cues": [], "scene_bus_percent": too_many}).to_string(),
+	)
+	.unwrap();
 	assert!(load(folder.path()).is_err());
 }

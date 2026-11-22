@@ -1,6 +1,6 @@
 //! Trusted editor access to the project-owned gameplay feedback catalog.
 use super::{trusted_window, workspace, EditorState, EditorWorkspace};
-use bridge::feedback_audio::{self, CueAssignment, CueClip, PreparedCueCatalog};
+use bridge::feedback_audio::{self, CueAssignment, CueClip, FeedbackBusMix, PreparedCueCatalog};
 use runtime::scene_io::{replace_bytes, save_new_bytes};
 use serde::Serialize;
 use std::{
@@ -16,6 +16,7 @@ pub struct FeedbackCueDraftDto {
 	workspace_generation: u64,
 	catalog_digest: Option<String>,
 	cues: Vec<CueAssignment>,
+	mix: FeedbackBusMix,
 }
 
 impl FeedbackCueDraftDto {
@@ -24,6 +25,7 @@ impl FeedbackCueDraftDto {
 			workspace_generation: generation,
 			catalog_digest: catalog.map(PreparedCueCatalog::digest),
 			cues: catalog.map_or_else(Vec::new, |catalog| catalog.assignments().collect()),
+			mix: catalog.map_or_else(FeedbackBusMix::default, |catalog| catalog.mix().clone()),
 		}
 	}
 }
@@ -38,9 +40,12 @@ pub async fn editor_feedback_cues_read(
 		prepare_for_workspace(state.clone(), None, feedback_audio::load).await?;
 	workspace(state, false, None, move |editor| {
 		require_editing(editor, Some(generation))?;
+		if let Some(catalog) = &catalog {
+			validate_mix_scenes(editor, catalog)?;
+		}
 		Ok(FeedbackCueDraftDto::new(generation, catalog.as_ref()))
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -55,7 +60,7 @@ pub async fn editor_feedback_cue_import(
 	workspace(state.clone(), false, None, move |editor| {
 		require_editing(editor, Some(workspace_generation))
 	})
-		.await?;
+	.await?;
 	let clip = tauri::async_runtime::spawn_blocking(move || {
 		let Some(file) = window
 			.dialog()
@@ -71,14 +76,14 @@ pub async fn editor_feedback_cue_import(
 		let source = file.into_path().map_err(|error| error.to_string())?;
 		feedback_audio::read_external_clip(&source).map(Some)
 	})
-		.await
-		.map_err(|error| error.to_string())??;
+	.await
+	.map_err(|error| error.to_string())??;
 	let Some(clip) = clip else { return Ok(None) };
 	workspace(state, false, Some("import_feedback_cue"), move |editor| {
 		require_editing(editor, Some(workspace_generation))?;
 		save_clip(&editor.asset_root, &slug, &clip).map(Some)
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -88,19 +93,21 @@ pub async fn editor_feedback_cues_apply(
 	workspace_generation: u64,
 	expected_digest: Option<String>,
 	cues: Vec<CueAssignment>,
+	mix: FeedbackBusMix,
 ) -> Result<FeedbackCueDraftDto, String> {
 	trusted_window(&window)?;
 	let (_, catalog) =
 		prepare_for_workspace(state.clone(), Some(workspace_generation), move |root| {
-			feedback_audio::prepare_catalog(root, cues)
+			feedback_audio::prepare_catalog_with_mix(root, cues, mix)
 		})
-			.await?;
+		.await?;
 	workspace(state, false, Some("apply_feedback_cues"), move |editor| {
 		require_editing(editor, Some(workspace_generation))?;
+		validate_mix_scenes(editor, &catalog)?;
 		publish_catalog(&editor.asset_root, expected_digest.as_deref(), &catalog)?;
 		Ok(FeedbackCueDraftDto::new(editor.generation, Some(&catalog)))
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -114,12 +121,12 @@ pub async fn editor_feedback_cue_preview(
 	let (_, clip) = prepare_for_workspace(state.clone(), Some(workspace_generation), move |root| {
 		feedback_audio::load_clip(root, &relative_path)
 	})
-		.await?;
+	.await?;
 	workspace(state, false, None, move |editor| {
 		require_editing(editor, Some(workspace_generation))?;
 		Ok(clip.bytes().to_vec())
 	})
-		.await
+	.await
 }
 
 async fn prepare_for_workspace<T: Send + 'static>(
@@ -131,7 +138,7 @@ async fn prepare_for_workspace<T: Send + 'static>(
 		require_editing(editor, expected)?;
 		Ok((editor.generation, editor.asset_root.clone()))
 	})
-		.await?;
+	.await?;
 	let prepared = tauri::async_runtime::spawn_blocking(move || prepare(&root))
 		.await
 		.map_err(|error| error.to_string())??;
@@ -147,6 +154,15 @@ fn require_editing(editor: &EditorWorkspace, generation: Option<u64>) -> Result<
 		return Err("Finish Play or the current edit before changing feedback audio.".into());
 	}
 	Ok(())
+}
+
+fn validate_mix_scenes(
+	editor: &EditorWorkspace,
+	catalog: &PreparedCueCatalog,
+) -> Result<(), String> {
+	catalog
+		.mix()
+		.validate_scenes(&editor.backend.session().project().scenes)
 }
 
 fn save_clip(asset_root: &Path, slug: &str, clip: &CueClip) -> Result<String, String> {

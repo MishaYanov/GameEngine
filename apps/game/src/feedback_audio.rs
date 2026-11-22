@@ -1,5 +1,6 @@
 //! Presentation-only audio for events that have committed to a game run.
-use bridge::feedback_audio::{CueClip, FeedbackCue, PreparedCueCatalog};
+use bridge::feedback_audio::{CueClip, FeedbackCue, PreparedCueCatalog, combined_percent};
+use runtime::scene_catalog::SceneId;
 #[cfg(windows)]
 use std::sync::{
 	Arc,
@@ -17,14 +18,14 @@ pub(super) struct Facts {
 }
 
 impl Facts {
-	pub fn rising(self, after: Self) -> impl Iterator<Item=FeedbackCue> {
+	pub fn rising(self, after: Self) -> impl Iterator<Item = FeedbackCue> {
 		[
 			(!self.key && after.key, FeedbackCue::KeyCollected),
 			(!self.gate && after.gate, FeedbackCue::GateOpened),
 			(!self.complete && after.complete, FeedbackCue::RunCompleted),
 		]
-			.into_iter()
-			.filter_map(|(changed, cue)| changed.then_some(cue))
+		.into_iter()
+		.filter_map(|(changed, cue)| changed.then_some(cue))
 	}
 }
 
@@ -33,6 +34,7 @@ pub(super) struct FeedbackAudio {
 	catalog: Option<PreparedCueCatalog>,
 	legacy_gate: Option<CueClip>,
 	mix: PreparedMix,
+	scene: Option<SceneId>,
 	#[cfg(windows)]
 	worker: Option<Worker>,
 }
@@ -42,6 +44,7 @@ impl FeedbackAudio {
 		catalog: Option<PreparedCueCatalog>,
 		enabled: bool,
 		gain_percent: u8,
+		startup: &SceneId,
 	) -> Result<Self, String> {
 		let legacy_gate = catalog
 			.is_none()
@@ -52,6 +55,7 @@ impl FeedbackAudio {
 			catalog,
 			legacy_gate,
 			mix: PreparedMix::default(),
+			scene: Some(startup.clone()),
 			#[cfg(windows)]
 			worker: None,
 		};
@@ -73,29 +77,53 @@ impl FeedbackAudio {
 	}
 
 	pub fn prepare_mix(&self, gain_percent: u8) -> Result<Option<PreparedMix>, String> {
-		if gain_percent > 100 {
-			return Err("Feedback volume must be from 0 to 100".into());
+		self.prepare_for_scene(gain_percent, self.scene.as_ref())
+	}
+
+	pub fn prepare_scene_mix(
+		&self,
+		gain_percent: u8,
+		scene: &SceneId,
+	) -> Result<Option<PreparedMix>, String> {
+		self.prepare_for_scene(gain_percent, Some(scene))
+	}
+
+	fn prepare_for_scene(
+		&self,
+		gain_percent: u8,
+		scene: Option<&SceneId>,
+	) -> Result<Option<PreparedMix>, String> {
+		let mut gains = [0; FeedbackCue::ALL.len()];
+		let authored = self.catalog.as_ref().map(PreparedCueCatalog::mix);
+		for cue in FeedbackCue::ALL {
+			let category = authored.map_or(100, |catalog| catalog.category_percent(cue.bus()));
+			let scene = authored
+				.zip(scene)
+				.map_or(100, |(catalog, id)| catalog.scene_percent(id, cue.bus()));
+			gains[cue_slot(cue)] = combined_percent(gain_percent, category, scene)?;
 		}
-		if self.mix.gain_percent == gain_percent {
+		if self.mix.gains == gains {
 			return Ok(None);
 		}
 		let mut mix = PreparedMix {
-			gain_percent,
+			gains,
 			..PreparedMix::default()
 		};
-		if gain_percent != 0 {
-			for cue in [
-				FeedbackCue::KeyCollected,
-				FeedbackCue::GateOpened,
-				FeedbackCue::RunCompleted,
-			] {
-				mix.clips[cue_slot(cue)] = self
+		for cue in FeedbackCue::ALL {
+			let slot = cue_slot(cue);
+			if gains[slot] != 0 {
+				mix.clips[slot] = self
 					.original_clip(cue)
-					.map(|clip| clip.scaled(gain_percent))
+					.map(|clip| clip.scaled(gains[slot]))
 					.transpose()?;
 			}
 		}
 		Ok(Some(mix))
+	}
+
+	pub fn commit_scene_mix(&mut self, scene: SceneId, prepared: Option<PreparedMix>) {
+		self.scene = Some(scene);
+		self.commit_mix(prepared);
 	}
 
 	pub fn commit_mix(&mut self, prepared: Option<PreparedMix>) {
@@ -107,6 +135,11 @@ impl FeedbackAudio {
 
 	fn clip(&self, cue: FeedbackCue) -> Option<&CueClip> {
 		self.mix.clips[cue_slot(cue)].as_ref()
+	}
+
+	#[cfg(all(test, windows))]
+	pub(super) fn test_gain(&self, cue: FeedbackCue) -> u8 {
+		self.mix.gains[cue_slot(cue)]
 	}
 
 	pub fn emit(&self, cue: FeedbackCue) {
@@ -130,8 +163,8 @@ impl FeedbackAudio {
 
 #[derive(Default)]
 pub(super) struct PreparedMix {
-	gain_percent: u8,
-	clips: [Option<CueClip>; 3],
+	gains: [u8; FeedbackCue::ALL.len()],
+	clips: [Option<CueClip>; FeedbackCue::ALL.len()],
 }
 
 fn cue_slot(cue: FeedbackCue) -> usize {

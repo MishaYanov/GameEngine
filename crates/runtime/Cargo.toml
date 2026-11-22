@@ -20,3 +20,6 @@ glam = "0.33.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input_XboxController"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

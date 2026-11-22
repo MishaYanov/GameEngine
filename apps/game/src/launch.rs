@@ -30,7 +30,7 @@ pub enum CheckpointTransfer {
 impl CheckpointTransfer {
 	fn parse(
 		option: &str,
-		args: impl Iterator<Item=impl AsRef<str>>,
+		args: impl Iterator<Item = impl AsRef<str>>,
 	) -> Result<Option<Self>, String> {
 		if !matches!(
 			option,
@@ -88,10 +88,85 @@ impl CheckpointTransfer {
 	}
 }
 
+/// Standalone installed-Player operations. These never create a viewport.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputPresetCommand {
+	Export(PathBuf),
+	Preview(PathBuf),
+	Apply {
+		path: PathBuf,
+		source_sha256: [u8; 32],
+		destination_sha256: [u8; 32],
+	},
+}
+
+impl InputPresetCommand {
+	fn matches(option: &str) -> bool {
+		matches!(
+			option,
+			"--export-input-preset" | "--preview-input-preset" | "--apply-input-preset"
+		)
+	}
+
+	fn parse(
+		option: &str,
+		mut args: impl Iterator<Item = impl AsRef<str>>,
+	) -> Result<Self, String> {
+		let path = args.next().ok_or("Input preset requires a file path")?;
+		let path = path.as_ref();
+		if path.is_empty() || path.starts_with("--") {
+			return Err("Input preset requires a file path".into());
+		}
+		let path = PathBuf::from(path);
+		if option != "--apply-input-preset" {
+			if args.next().is_some() {
+				return Err("Preset export and preview accept only a file path".into());
+			}
+			return Ok(if option == "--export-input-preset" {
+				Self::Export(path)
+			} else {
+				Self::Preview(path)
+			});
+		}
+		let mut source_sha256 = None;
+		let mut destination_sha256 = None;
+		while let Some(flag) = args.next() {
+			let destination = match flag.as_ref() {
+				"--source-sha256" if source_sha256.is_none() => &mut source_sha256,
+				"--destination-sha256" if destination_sha256.is_none() => &mut destination_sha256,
+				_ => return Err("Unexpected or duplicate input preset option".into()),
+			};
+			let digest = args
+				.next()
+				.ok_or("Expected the SHA-256 printed by preview")?;
+			*destination = Some(parse_digest(digest.as_ref())?);
+		}
+		Ok(Self::Apply {
+			path,
+			source_sha256: source_sha256.ok_or("Provide --source-sha256 from preview")?,
+			destination_sha256: destination_sha256
+				.ok_or("Provide --destination-sha256 from preview")?,
+		})
+	}
+}
+
+fn parse_digest(value: &str) -> Result<[u8; 32], String> {
+	if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+		return Err("Expected a 64-digit SHA-256 from preview".into());
+	}
+	let mut digest = [0u8; 32];
+	for (index, byte) in digest.iter_mut().enumerate() {
+		*byte = u8::from_str_radix(&value[index * 2..][..2], 16)
+			.map_err(|_| "Invalid hexadecimal SHA-256")?;
+	}
+	Ok(digest)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchOptions {
 	pub mode: LaunchMode,
 	pub transfer: Option<CheckpointTransfer>,
+	pub input_preset: Option<InputPresetCommand>,
 	pub transfer_directory: Option<PathBuf>,
 	pub input_profile: Option<PathBuf>,
 	/// Publish a bounded replay from a fresh Player run on exit.
@@ -115,17 +190,31 @@ impl LaunchOptions {
 	) -> Result<Self, String> {
 		let mut args = arguments.into_iter().peekable();
 		if let Some(argument) = args.peek()
-			&& matches!(
+			&& (matches!(
 				argument.as_ref(),
 				"--export-slot" | "--preview-slot-import" | "--commit-slot-import"
-			) {
-			if !installed_project {
-				return Err("Checkpoint transfer requires an installed Player".into());
-			}
+			) || InputPresetCommand::matches(argument.as_ref()))
+		{
 			let option = args.next().expect("peeked transfer option");
+			let option = option.as_ref();
+			let presets = InputPresetCommand::matches(option);
+			if !installed_project {
+				return Err(if presets {
+					"Input presets require an installed Player"
+				} else {
+					"Checkpoint transfer requires an installed Player"
+				}
+				.into());
+			}
+			let (transfer, input_preset) = if presets {
+				(None, Some(InputPresetCommand::parse(option, args)?))
+			} else {
+				(CheckpointTransfer::parse(option, args)?, None)
+			};
 			return Ok(Self {
 				mode: LaunchMode::Player,
-				transfer: CheckpointTransfer::parse(option.as_ref(), args)?,
+				transfer,
+				input_preset,
 				transfer_directory: None,
 				input_profile: None,
 				record_playtrace: None,
@@ -207,7 +296,8 @@ impl LaunchOptions {
 						"Unknown game argument {argument:?}; supported arguments are \
                      --development, --player, --input-profile <path>, --transfer-directory <path>, \
                      --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, \
-                     or a standalone --export-slot, --preview-slot-import, or --commit-slot-import command"
+                     or a standalone --export-slot, --preview-slot-import, --commit-slot-import, \
+                     --export-input-preset, --preview-input-preset, or --apply-input-preset command"
 					));
 				}
 			}
@@ -246,6 +336,7 @@ impl LaunchOptions {
 		Ok(Self {
 			mode,
 			transfer: None,
+			input_preset: None,
 			transfer_directory,
 			input_profile,
 			record_playtrace,

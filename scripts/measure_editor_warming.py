@@ -22,12 +22,24 @@ TERMINAL_OUTCOMES = ("presented", "cancelled", "failed")
 COMMON_FIELDS = {"schema_version", "kind", "scene_id"}
 LOAD_FIELDS = COMMON_FIELDS | {"request_id", "outcome"}
 FRAME_FIELDS = COMMON_FIELDS | {"warming_requested", "elapsed_us"}
+MODEL_FIELDS = COMMON_FIELDS | {
+    "request_id", "mode", "batch_matched", "prepared_models", "consumed_models", "retained_bytes",
+}
+MODEL_COMPONENT = "editor_model_warming"
+MAX_WARM_MODELS = 8
+MAX_RETAINED_MODEL_BYTES = 16 * 1024 * 1024
 
 
 def scene_id(value):
     if (not isinstance(value, str) or not 1 <= len(value.encode("utf-8")) <= 256
             or any(char.isspace() or category(char) == "Cc" for char in value)):
         raise ValueError("Invalid authored scene ID")
+    return value
+
+
+def request_id(value):
+    if not isinstance(value, str) or len(value) != 36 or str(UUID(value)) != value:
+        raise ValueError("Invalid editor warming request ID")
     return value
 
 
@@ -38,9 +50,7 @@ def warming_record(message):
     if not isinstance(event, dict) or not integer(event.get("schema_version"), 1, 1):
         raise ValueError("Expected editor warming schema 1")
     if event.get("kind") == "load" and set(event) == LOAD_FIELDS:
-        request = event["request_id"]
-        if not isinstance(request, str) or len(request) != 36 or str(UUID(request)) != request:
-            raise ValueError("Invalid editor warming request ID")
+        request_id(event["request_id"])
         if event["outcome"] not in WARM_OUTCOMES:
             raise ValueError("Invalid editor warming outcome")
     elif event.get("kind") == "active_frame" and set(event) == FRAME_FIELDS:
@@ -53,6 +63,29 @@ def warming_record(message):
     return event
 
 
+def model_record(message):
+    if not isinstance(message, str):
+        raise ValueError("Editor model warming log row needs a JSON message")
+    event = parse_line(message.encode("utf-8"))
+    if (not isinstance(event, dict) or set(event) != MODEL_FIELDS
+            or not integer(event["schema_version"], 1, 1) or event["kind"] != "model_load"):
+        raise ValueError("Invalid editor model warming record")
+    request_id(event["request_id"])
+    scene_id(event["scene_id"])
+    prepared = event["prepared_models"]
+    consumed = event["consumed_models"]
+    retained = event["retained_bytes"]
+    matched = event["batch_matched"]
+    if (event["mode"] not in ("off", "references", "decode") or type(matched) is not bool
+            or not integer(prepared, MAX_WARM_MODELS) or not integer(consumed, prepared)
+            or not integer(retained, MAX_RETAINED_MODEL_BYTES)):
+        raise ValueError("Invalid editor model count or retained-byte budget")
+    if ((matched and (event["mode"] != "decode" or not prepared or not retained))
+            or (not matched and (prepared or consumed or retained))):
+        raise ValueError("Editor model counts require a matching decode batch")
+    return event
+
+
 def record_request(requests, session, event):
     key = session, event["request_id"]
     if key in requests:
@@ -62,9 +95,10 @@ def record_request(requests, session, event):
     requests[key] = event
 
 
-def collect_mode(paths, target_scene, active_scene, warmed):
+def collect_mode(paths, target_scene, active_scene, warmed, decode_evidence=False):
     loads = {}
     timings = {}
+    models = {}
     frames = []
     sessions = set()
     active_sessions = set()
@@ -72,12 +106,15 @@ def collect_mode(paths, target_scene, active_scene, warmed):
     for path, number, row in log_records(paths):
         component = row.get("component")
         if component not in ("scene_load", "editor_scene_warming"):
-            continue
+            if not decode_evidence or component != MODEL_COMPONENT:
+                continue
         try:
             if component == "scene_load":
                 event = require_timing(row.get("message"))
                 if event["host"] != "editor" or event["scope"] != "authored":
                     continue
+            elif component == MODEL_COMPONENT:
+                event = model_record(row.get("message"))
             else:
                 event = warming_record(row.get("message"))
             session = row.get("session_id")
@@ -89,6 +126,8 @@ def collect_mode(paths, target_scene, active_scene, warmed):
 
             if component == "scene_load":
                 record_request(timings, session, event)
+            elif component == MODEL_COMPONENT:
+                record_request(models, session, event)
             elif event["kind"] == "load":
                 record_request(loads, session, event)
             elif event["scene_id"] == active_scene:
@@ -104,6 +143,16 @@ def collect_mode(paths, target_scene, active_scene, warmed):
 
     if loads.keys() != timings.keys():
         raise ValueError("Every editor warming load needs one authored terminal in the same session")
+    if decode_evidence:
+        if loads.keys() != models.keys():
+            raise ValueError("Every editor warming load needs one model record in the same session")
+        for key, record in models.items():
+            load = loads[key]
+            expected_mode = "decode" if warmed and load["outcome"] != "unrequested" else "off"
+            if record["scene_id"] != load["scene_id"] or record["mode"] != expected_mode:
+                raise ValueError("Editor model record does not match its scene or capture mode")
+            if record["batch_matched"] and load["outcome"] != "hit":
+                raise ValueError("A matching model batch requires a retained-reference hit")
     selected = [(key, load, timings[key]) for key, load in loads.items()
                 if load["scene_id"] == target_scene]
     presented = [(key, timing) for key, _, timing in selected if timing["outcome"] == "presented"]
@@ -118,12 +167,21 @@ def collect_mode(paths, target_scene, active_scene, warmed):
     if not warmed and len(selected) != warming_outcomes["unrequested"]:
         raise ValueError("Baseline target loads include a warming request")
     presentation_outcomes = Counter(timing["outcome"] for _, _, timing in selected)
-    return {
+    result = {
         "first_present_us": measurements([timing["first_present_us"] for _, timing in presented]),
         "active_frame_us": measurements(frames),
         "warming_outcomes": {outcome: warming_outcomes[outcome] for outcome in WARM_OUTCOMES},
         "presentation_outcomes": {outcome: presentation_outcomes[outcome] for outcome in TERMINAL_OUTCOMES},
-    }, sessions, {request for _, request in loads}
+    }
+    if decode_evidence:
+        samples = [models[key] for key, _ in presented]
+        result["model_warming"] = {
+            "matched_batches": sum(event["batch_matched"] for event in samples),
+            "prepared_models": sum(event["prepared_models"] for event in samples),
+            "consumed_models": sum(event["consumed_models"] for event in samples),
+            "max_retained_bytes": max(event["retained_bytes"] for event in samples),
+        }
+    return result, sessions, {request for _, request in loads}
 
 
 def main(argv=None):
@@ -135,6 +193,8 @@ def main(argv=None):
     parser.add_argument("--fixture-sha256", required=True)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--active-ceiling-us", type=int, required=True, help="Maximum warmed active-frame p95")
+    parser.add_argument("--decode-evidence", action="store_true",
+                        help="Require matched model measurements from baseline and decode captures")
     parser.add_argument("--output", type=Path, required=True, help="New report JSON path")
     args = parser.parse_args(argv)
     try:
@@ -147,8 +207,10 @@ def main(argv=None):
             raise ValueError("Each log must appear once across the two modes")
         digest = fixture_id(args.fixture_sha256)
         profile = validate_profile(read_local_json(args.profile, MAX_METADATA_BYTES)[0])
-        off, off_sessions, off_requests = collect_mode(args.baseline, target, active, False)
-        on, on_sessions, on_requests = collect_mode(args.warmed, target, active, True)
+        off, off_sessions, off_requests = collect_mode(
+            args.baseline, target, active, False, args.decode_evidence)
+        on, on_sessions, on_requests = collect_mode(
+            args.warmed, target, active, True, args.decode_evidence)
         if off_sessions & on_sessions or off_requests & on_requests:
             raise ValueError("Baseline and warmed logs must use independent native runs")
         if off["first_present_us"]["samples"] != on["first_present_us"]["samples"]:
