@@ -6,8 +6,8 @@ use std::{
 use crate::entity_key::EntityKey;
 use crate::model_instance::ModelInstance;
 use crate::scene_data::{
-	CURRENT_SCHEMA_VERSION, CameraData, ColliderData, EntityData, LightData, MaterialOverrideData,
-	TransformData, resolve_world_matrices,
+	CURRENT_SCHEMA_VERSION, CameraData, ColliderData, EntityData, FolderId, LightData,
+	MaterialOverrideData, SceneOrganization, TransformData, resolve_world_matrices,
 };
 use crate::{Camera, SceneData};
 
@@ -85,6 +85,7 @@ pub struct EntitySnapshot {
 	index: usize,
 	bindings: BTreeMap<String, EntityKey>,
 	orbit_target_settings: Option<Box<engine_core::game_camera::OrbitCameraSettings>>,
+	folder: Option<FolderId>,
 }
 
 impl EntitySnapshot {
@@ -110,6 +111,7 @@ pub(crate) struct RetainedEntity(SceneEntry);
 pub struct Scene {
 	entries: Vec<SceneEntry>,
 	bindings: BTreeMap<String, EntityKey>,
+	organization: SceneOrganization,
 	next_id: u64,
 	lights: Vec<LightData>,
 	camera_follow: Option<engine_core::game_camera::FollowCameraSettings>,
@@ -223,6 +225,7 @@ impl Scene {
 	pub fn matches_data(&self, data: &SceneData, camera: &Camera) -> bool {
 		let saved_camera = &data.camera;
 		self.bindings == data.bindings
+			&& self.organization == data.organization
 			&& self.lights == data.lights
 			&& self.camera_follow == data.camera.follow
 			&& self.camera_orbit == data.camera.orbit
@@ -272,6 +275,10 @@ impl Scene {
 			.map(|(name, key)| (name.clone(), key.clone()))
 			.collect();
 		Ok(EntitySnapshot {
+			folder: entry
+				.key
+				.as_ref()
+				.and_then(|key| self.organization.root_membership.get(key).cloned()),
 			orbit_target_settings: self
 				.camera_orbit
 				.as_ref()
@@ -316,6 +323,15 @@ impl Scene {
 		{
 			return Err("Cannot restore orbit target: another camera rig is configured".into());
 		}
+		if let Some(folder) = &snapshot.folder
+			&& !self
+				.organization
+				.folders
+				.iter()
+				.any(|record| &record.id == folder)
+		{
+			return Err("Cannot restore an entity whose folder is missing".into());
+		}
 		let next_id = entry
 			.id
 			.0
@@ -328,6 +344,11 @@ impl Scene {
 		}
 		if let Some(key) = &entry.key {
 			self.key_ids.insert(key.clone(), entry.id);
+			if let Some(folder) = &snapshot.folder {
+				self.organization
+					.root_membership
+					.insert(key.clone(), folder.clone());
+			}
 		}
 		*self.world_cache.get_mut() = None;
 		self.bindings.extend(snapshot.bindings.clone());
@@ -474,6 +495,7 @@ impl Scene {
 		if let Some(key) = entry.key.as_ref() {
 			self.key_ids.remove(key);
 			self.bindings.retain(|_, target| target != key);
+			self.organization.root_membership.remove(key);
 			if self
 				.camera_orbit
 				.as_ref()
@@ -536,6 +558,7 @@ impl Scene {
 
 		let data = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
+			organization: self.organization.clone(),
 			bindings: self.bindings.clone(),
 			entities,
 			camera: CameraData {
@@ -691,6 +714,9 @@ impl Scene {
 		}
 		entry.asset_id.clone_from(&data.asset_id);
 		entry.parent.clone_from(&data.parent);
+		if data.parent.is_some() {
+			self.organization.root_membership.remove(&data.key);
+		}
 		entry.mesh_index = data.mesh_index;
 		entry.apply_document_properties(data);
 		self.authored_children = None;
@@ -712,6 +738,10 @@ impl Scene {
 	}
 	pub fn set_lights(&mut self, lights: Vec<LightData>) {
 		self.lights = lights;
+	}
+
+	pub(crate) fn set_organization(&mut self, organization: &SceneOrganization) {
+		self.organization.clone_from(organization);
 	}
 
 	pub fn world_matrices(&self) -> Result<Vec<glam::Mat4>, String> {

@@ -22,6 +22,7 @@ pub fn scene(entities: Vec<EntityData>) -> SceneData {
 	let camera = runtime::Camera::default();
 	SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
 		bindings: Default::default(),
 		entities,
 		camera: CameraData {

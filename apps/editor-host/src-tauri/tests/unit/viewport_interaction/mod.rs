@@ -233,6 +233,7 @@ impl Fixture {
 		let camera = runtime::Camera::default();
 		let document = SceneData {
 			schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			bindings: Default::default(),
 			entities: (0..count)
 				.map(|index| {

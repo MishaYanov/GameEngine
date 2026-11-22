@@ -39,6 +39,7 @@ fn authored_scene_fixture(source: &Path) -> (ProjectData, SceneData) {
 	let camera = engine_core::Camera::default();
 	let scene = SceneData {
 		schema_version: engine_core::scene_data::CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
 		entities: vec![],
 		bindings: Default::default(),
 		lights: vec![],

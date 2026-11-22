@@ -35,6 +35,7 @@ impl Fixture {
 		}
 		SceneData {
 			schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			bindings: Default::default(),
 			entities,
 			lights: vec![],

@@ -175,6 +175,7 @@ impl PrefabData {
 		}
 		let mut validation = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			entities,
 			bindings: self
 				.gameplay

@@ -44,6 +44,7 @@ fn scene(looping: bool) -> SceneData {
 	let camera = engine_core::Camera::default();
 	SceneData {
 		schema_version: engine_core::scene_data::CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
 		bindings: BTreeMap::new(),
 		entities: vec![entity],
 		camera: CameraData {

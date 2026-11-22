@@ -200,6 +200,7 @@ pub fn instantiate_with_warming(
 		scene.set_binding(name.clone(), id)?;
 	}
 	scene.set_lights(data.lights.clone());
+	scene.set_organization(&data.organization);
 
 	let camera = Camera {
 		position: data.camera.position,

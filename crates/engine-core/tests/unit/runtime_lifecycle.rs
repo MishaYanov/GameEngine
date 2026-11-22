@@ -12,6 +12,7 @@ fn lifecycle() -> RuntimeLifecycle {
 	let camera = crate::Camera::default();
 	let world = RuntimeWorld::new(Arc::new(SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
 		bindings: BTreeMap::new(),
 		entities: vec![EntityData::new(key("owner"), "Owner", "models/item.gltf")],
 		camera: CameraData {

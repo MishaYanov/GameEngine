@@ -1,5 +1,12 @@
-import type {EditorCommandUpdate, EditorSnapshot, SceneEntity} from './editor.models';
+import {
+    type EditorCommandUpdate, type EditorSnapshot, type SceneEntity, isSceneSchemaVersion,
+} from './editor.models';
 import {validComponentViews} from './editor-components';
+
+const maxSceneFolders = 1_024;
+const maxFolderDepth = 32;
+const maxFolderNameBytes = 128;
+const utf8 = new TextEncoder();
 
 function record(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -36,7 +43,9 @@ function camera(value: unknown, schema: unknown): boolean {
     return (
         record(value) &&
         validFollow &&
-        (schema === 5 ? (value['orbit'] == null || (follow == null && orbitCamera(value['orbit']))) : !('orbit' in value)) &&
+        (schema === 5 || schema === 6
+            ? (value['orbit'] == null || (follow == null && orbitCamera(value['orbit'])))
+            : !('orbit' in value)) &&
         vector(value['position'], 3) &&
         ['yaw', 'pitch', 'vertical_fov', 'near', 'far'].every((key) => Number.isFinite(value[key]))
     );
@@ -74,10 +83,47 @@ function linkedPrefab(value: unknown): boolean {
         Object.values(value['bindings']).every(key => typeof key === 'string');
 }
 
+function folderId(value: unknown): value is string {
+    return typeof value === 'string' && /^[\w-]{1,128}$/.test(value);
+}
+
+function validOrganization(value: unknown, entities: readonly SceneEntity[]): boolean {
+    if (!record(value) || !Array.isArray(value['folders']) || value['folders'].length > maxSceneFolders ||
+        !record(value['root_membership'])) {
+        return false;
+    }
+    const parents = new Map<string, string | null>();
+    for (const folder of value['folders']) {
+        if (!record(folder)) return false;
+        const id = folder['id'];
+        const name = folder['name'];
+        const parent = folder['parent'];
+        if (!folderId(id) || parents.has(id) || typeof name !== 'string' || !name ||
+            name !== name.trim() || /\p{Cc}/u.test(name) || utf8.encode(name).length > maxFolderNameBytes ||
+            (parent != null && !folderId(parent))) {
+            return false;
+        }
+        parents.set(id, parent ?? null);
+    }
+    for (const parent of parents.values()) {
+        let next = parent;
+        let depth = 1;
+        while (next !== null) {
+            const ancestor = parents.get(next);
+            if (ancestor === undefined || ++depth > maxFolderDepth) return false;
+            next = ancestor;
+        }
+    }
+    const roots = new Set(entities.filter(item => item.parent == null).map(item => item.key));
+    return Object.entries(value['root_membership']).every(
+        ([root, folder]) => roots.has(root) && folderId(folder) && parents.has(folder),
+    );
+}
+
 function validDocument(value: unknown): boolean {
     return (
         record(value) &&
-        (value['schema_version'] === 3 || value['schema_version'] === 4 || value['schema_version'] === 5) &&
+        isSceneSchemaVersion(value['schema_version']) &&
         record(value['bindings']) &&
         Object.values(value['bindings']).every((key) => typeof key === 'string') &&
         camera(value['camera'], value['schema_version']) &&
@@ -85,7 +131,9 @@ function validDocument(value: unknown): boolean {
         value['lights'].every(light) &&
         Array.isArray(value['entities']) &&
         value['entities'].every(entity) &&
-        new Set(value['entities'].map((item) => item.key)).size === value['entities'].length
+        new Set(value['entities'].map((item) => item.key)).size === value['entities'].length &&
+        (value['organization'] === undefined ||
+            (value['schema_version'] === 6 && validOrganization(value['organization'], value['entities'])))
     );
 }
 

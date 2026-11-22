@@ -5,7 +5,7 @@ use engine_core::{
 	command::{EditorCommandDto as Command, EditorCommandRequest},
 	game_camera::{FollowCameraSettings, OrbitCameraSettings, required_probe_radius},
 	project::ProjectData,
-	scene_data::parse_json,
+	scene_data::{CURRENT_SCHEMA_VERSION, parse_json},
 };
 use serde_json::{Value, json};
 use support::{entity, key, scene};
@@ -56,7 +56,7 @@ fn disk(document: &SceneData) -> Value {
 fn orbit_survives_disk_and_editor_projection_without_changing_fallback_pose() {
 	let document = orbit_scene();
 	let saved = disk(&document);
-	assert_eq!(saved["schema_version"], 5);
+	assert_eq!(saved["schema_version"], CURRENT_SCHEMA_VERSION);
 	assert!(saved["entities"][0].get("components").is_some());
 	assert!(saved["camera"].get("follow").is_none());
 	assert_eq!(saved["camera"]["orbit"]["obstruction_mask"], 0x8000_0001u32);
@@ -81,7 +81,7 @@ fn schema_four_fixed_and_follow_migrate_from_canonical_disk_and_flat_editor_proj
 			let migrated = parse_json(&historical.to_string()).unwrap();
 			assert_eq!(migrated.source_schema_version, 4);
 			assert_eq!(migrated.data, document);
-			assert_eq!(disk(&migrated.data)["schema_version"], 5);
+			assert_eq!(disk(&migrated.data)["schema_version"], CURRENT_SCHEMA_VERSION);
 			assert_eq!(
 				serde_json::from_value::<SceneData>(historical).unwrap(),
 				document

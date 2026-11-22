@@ -102,6 +102,49 @@ fn metadata_bindings_and_camera_only_updates_preserve_world_matrices() {
 	assert_eq!(native.world_matrix(id).unwrap(), matrix);
 }
 
+#[test]
+fn authored_folder_changes_keep_native_objects_and_survive_scene_round_trips() {
+	use runtime::scene_data::{FolderId, FolderRecord};
+
+	let mut data = scene(vec![entity("floor1", [2.0, 3.0, 4.0])]);
+	let mut native = native(&data);
+	let object = native.entity_ids().next().unwrap();
+	let world = native.world_matrix(object).unwrap();
+	let model = native.get(object).unwrap().model() as *const Model;
+	let folder = FolderId::new("floor").unwrap();
+	data.organization.folders.push(FolderRecord {
+		id: folder.clone(),
+		name: "Floor".into(),
+		parent: None,
+	});
+	data.organization
+		.root_membership
+		.insert(key("floor1"), folder);
+	assert!(
+		native
+			.synchronize_authored(data.validated().unwrap(), &WorldChange::default())
+			.unwrap()
+	);
+	assert_eq!(native.get(object).unwrap().model() as *const Model, model);
+	assert_eq!(native.world_matrix(object).unwrap(), world);
+	let camera = Camera::default();
+	assert_eq!(
+		native.to_data(&camera).unwrap().organization,
+		data.organization
+	);
+
+	let snapshot = native.snapshot(object).unwrap();
+	native.remove(object).unwrap();
+	let removed = native.to_data(&camera).unwrap();
+	assert_eq!(removed.organization.folders, data.organization.folders);
+	assert!(removed.organization.root_membership.is_empty());
+	assert_eq!(native.restore(&snapshot).unwrap(), object);
+	assert_eq!(
+		native.to_data(&camera).unwrap().organization,
+		data.organization
+	);
+}
+
 fn orbit_scene() -> runtime::SceneData {
 	use runtime::scene_data::OrbitCameraSettings;
 	let mut data = scene(vec![entity("actor", [0.; 3]), entity("prop", [1.; 3])]);

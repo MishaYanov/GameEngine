@@ -4,7 +4,7 @@ use crate::{
 	components::{ComponentRecord, NO_MESH_PATH},
 	scene_data::{
 		CURRENT_SCHEMA_VERSION, CameraData, EntityData, LightData, LightKind, MAX_SCENE_BYTES,
-		ParsedScene, SceneData, TransformData,
+		ParsedScene, SceneData, SceneOrganization, TransformData,
 	},
 };
 use serde::{
@@ -22,6 +22,8 @@ struct ProjectionScene {
 	camera: CameraData,
 	#[serde(default)]
 	lights: Vec<LightData>,
+	#[serde(default)]
+	organization: SceneOrganization,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,6 +35,8 @@ struct StoredScene {
 	camera: CameraData,
 	#[serde(default)]
 	lights: Vec<LightData>,
+	#[serde(default)]
+	organization: SceneOrganization,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,13 +71,15 @@ impl StoredEntity {
 impl<'de> Deserialize<'de> for SceneData {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 		let value = serde_json::Value::deserialize(deserializer)?;
-		let version = camera_schema_version(&value).map_err(serde::de::Error::custom)?;
+		let version = scene_schema_version(&value).map_err(serde::de::Error::custom)?;
 		decode_scene(value, version).map_err(serde::de::Error::custom)
 	}
 }
 pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<SceneData, String> {
-	if !matches!(version, 3..=5) {
-		return Err("Direct scene DTO requires schema 3, 4 or 5".into());
+	if !(3..=u64::from(CURRENT_SCHEMA_VERSION)).contains(&version) {
+		return Err(format!(
+			"Direct scene DTO requires a schema between 3 and {CURRENT_SCHEMA_VERSION}"
+		));
 	}
 	let canonical = value
 		.get("entities")
@@ -84,8 +90,8 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 				.any(|entity| entity.get("components").is_some())
 		});
 	if canonical {
-		if !matches!(version, 4 | 5) {
-			return Err("Typed component sources require scene schema 4 or 5".into());
+		if version < 4 {
+			return Err("Typed component sources require scene schema 4 or newer".into());
 		}
 		let stored: StoredScene =
 			serde_json::from_value(value).map_err(|error| error.to_string())?;
@@ -99,6 +105,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 				.collect::<Result<_, _>>()?,
 			camera: stored.camera,
 			lights: stored.lights,
+			organization: stored.organization,
 		})
 	} else {
 		let projection: ProjectionScene =
@@ -122,6 +129,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 			entities: projection.entities,
 			camera: projection.camera,
 			lights: projection.lights,
+			organization: projection.organization,
 		})
 	}
 }
@@ -158,12 +166,16 @@ pub(crate) struct StoredSceneRef<'a>(pub &'a SceneData);
 impl Serialize for StoredSceneRef<'_> {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		let scene = self.0;
-		let mut map = serializer.serialize_map(Some(5))?;
+		let mut map =
+			serializer.serialize_map(Some(5 + usize::from(!scene.organization.is_empty())))?;
 		map.serialize_entry("schema_version", &CURRENT_SCHEMA_VERSION)?;
 		map.serialize_entry("bindings", &scene.bindings)?;
 		map.serialize_entry("entities", &StoredEntities(&scene.entities))?;
 		map.serialize_entry("camera", &scene.camera)?;
 		map.serialize_entry("lights", &scene.lights)?;
+		if !scene.organization.is_empty() {
+			map.serialize_entry("organization", &scene.organization)?;
+		}
 		map.end()
 	}
 }
@@ -194,7 +206,7 @@ pub fn deserialize_entities<'de, D: Deserializer<'de>>(
 	}
 }
 
-pub(crate) fn camera_schema_version(value: &serde_json::Value) -> Result<u64, String> {
+fn scene_schema_version(value: &serde_json::Value) -> Result<u64, String> {
 	let version = value
 		.get("schema_version")
 		.and_then(serde_json::Value::as_u64)
@@ -205,6 +217,9 @@ pub(crate) fn camera_schema_version(value: &serde_json::Value) -> Result<u64, St
 		.is_some_and(|camera| camera.contains_key("orbit"));
 	if version < 5 && contains_orbit {
 		return Err("Orbit camera fields require scene schema 5".into());
+	}
+	if version < 6 && value.get("organization").is_some() {
+		return Err("Scene organization requires scene schema 6".into());
 	}
 	Ok(version)
 }
@@ -247,7 +262,7 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 	let value: serde_json::Value =
 		serde_json::from_str(source).map_err(|error| format!("Invalid scene JSON: {error}"))?;
 
-	let source_version = crate::scene_format::camera_schema_version(&value)?;
+	let source_version = scene_schema_version(&value)?;
 
 	let parsed = match source_version {
 		1 => {
@@ -278,6 +293,7 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 					entities,
 					camera: legacy.camera,
 					lights,
+					organization: SceneOrganization::default(),
 				},
 			}
 		}
@@ -305,16 +321,17 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 					entities,
 					camera: legacy.camera,
 					lights,
+					organization: SceneOrganization::default(),
 				},
 			}
 		}
 
-		3..=5 => {
+		3.. if source_version <= u64::from(CURRENT_SCHEMA_VERSION) => {
 			let data = crate::scene_format::decode_scene(value, source_version)
 				.map_err(|error| format!("Invalid scene JSON: {error}"))?;
 
 			ParsedScene {
-				// Safe here: this branch accepts only 3, 4, or 5.
+				// Only supported canonical versions reach this branch.
 				source_schema_version: source_version as u32,
 				data,
 			}

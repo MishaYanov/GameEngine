@@ -1,14 +1,19 @@
 mod hierarchy;
+mod organization;
 pub use crate::collider::{ColliderData, ColliderInteraction};
 pub use crate::game_camera::{FollowCameraSettings, OrbitCameraSettings};
 pub use crate::scene_format::parse_json;
 use crate::{Transform, entity_key::EntityKey};
 use glam::{EulerRot, Mat4};
 pub use hierarchy::resolve_world_matrices;
+pub use organization::{
+	FolderId, FolderRecord, MAX_FOLDER_DEPTH, MAX_FOLDER_ID_BYTES, MAX_FOLDER_NAME_BYTES,
+	MAX_SCENE_FOLDERS, SceneOrganization,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
 pub const MAX_SCENE_LIGHTS: usize = 16;
 pub const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
@@ -22,6 +27,8 @@ pub struct SceneData {
 	pub camera: CameraData,
 	#[serde(default)]
 	pub lights: Vec<LightData>,
+	#[serde(skip_serializing_if = "SceneOrganization::is_empty")]
+	pub organization: SceneOrganization,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -486,6 +493,20 @@ impl SceneData {
 					key.as_str()
 				));
 			}
+		}
+		self.organization.validate(&self.entities)?;
+		for folder in &self.organization.folders {
+			charge(
+				96,
+				&[
+					folder.id.as_str(),
+					&folder.name,
+					folder.parent.as_ref().map_or("", FolderId::as_str),
+				],
+			)?;
+		}
+		for (entity, folder) in &self.organization.root_membership {
+			charge(24, &[entity.as_str(), folder.as_str()])?;
 		}
 		// Iterative traversal rejects cycles without recursive stack growth.
 		let world = self.world_matrices()?;

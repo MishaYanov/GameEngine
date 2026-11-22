@@ -30,6 +30,7 @@ impl Fixture {
 		let camera = engine_core::Camera::default();
 		let scene = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			bindings: Default::default(),
 			lights: vec![],
 			entities: vec![

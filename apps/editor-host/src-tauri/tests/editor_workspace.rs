@@ -44,6 +44,7 @@ impl Fixture {
 		let camera = runtime::Camera::default();
 		let data = runtime::scene_data::SceneData {
 			schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			bindings: Default::default(),
 			entities: vec![EntityData::new(
 				EntityKey::new("a").unwrap(),

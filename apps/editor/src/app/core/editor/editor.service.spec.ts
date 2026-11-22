@@ -3,6 +3,7 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import {EditorService} from './editor.service';
+import {applyEditorUpdate} from './editor-updates';
 import type {
     Camera,
     CommandReceipt,
@@ -100,6 +101,34 @@ function receipt(next: EditorSnapshot): CommandReceipt {
 function commandUpdate(next: EditorSnapshot): EditorCommandUpdate {
     return {kind: 'snapshot', snapshot: next, receipt: receipt(next)};
 }
+
+it('preserves scene folders from a version six snapshot', () => {
+    const previous = snapshot(1);
+    const next = snapshot(2);
+    const document = {
+        ...next.document,
+        schema_version: 6 as const,
+        organization: {
+            folders: [{id: 'floor', name: 'Floor'}, {id: 'stone', name: 'Stone', parent: 'floor'}],
+            root_membership: {},
+        },
+    };
+    expect(applyEditorUpdate(previous, commandUpdate({...next, document})).document.organization)
+        .toEqual(document.organization);
+});
+
+it('rejects a cyclic organization before accepting a version six snapshot', () => {
+    const next = snapshot(2);
+    const document = {
+        ...next.document,
+        schema_version: 6 as const,
+        organization: {
+            folders: [{id: 'floor', name: 'Floor', parent: 'stone'}, {id: 'stone', name: 'Stone', parent: 'floor'}],
+            root_membership: {},
+        },
+    };
+    expect(() => applyEditorUpdate(snapshot(1), commandUpdate({...next, document}))).toThrow('inconsistent');
+});
 
 function delta(
     next: EditorSnapshot,

@@ -79,6 +79,7 @@ impl Room {
 		let template = crate::Camera::default();
 		let world = RuntimeWorld::new(Arc::new(SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
+			organization: Default::default(),
 			bindings: Default::default(),
 			lights: vec![],
 			entities,

@@ -267,6 +267,7 @@ impl Patch {
 		}
 		let mut next = SceneData {
 			schema_version: current.schema_version,
+			organization: current.organization.clone(),
 			bindings: current.bindings.clone(),
 			entities,
 			camera: current.camera.clone(),

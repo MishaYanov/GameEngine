@@ -10,6 +10,7 @@ fn valid_data() -> SceneData {
 
 	SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
 		bindings: btm,
 		entities: [-0.8, 0.8]
 			.into_iter()

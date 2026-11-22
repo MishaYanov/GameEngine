@@ -146,12 +146,32 @@ export interface Light {
     readonly range: number;
 }
 
+export type SceneSchemaVersion = 3 | 4 | 5 | 6;
+
+export function isSceneSchemaVersion(value: unknown): value is SceneSchemaVersion {
+    return value === 3 || value === 4 || value === 5 || value === 6;
+}
+
+export type FolderId = string;
+
+export interface FolderRecord {
+    readonly id: FolderId;
+    readonly name: string;
+    readonly parent?: FolderId | null;
+}
+
+export interface SceneOrganization {
+    readonly folders: readonly FolderRecord[];
+    readonly root_membership: Readonly<Record<EntityKey, FolderId>>;
+}
+
 export interface SceneDocument {
-    readonly schema_version: 3 | 4 | 5;
+    readonly schema_version: SceneSchemaVersion;
     readonly bindings: Readonly<Record<string, EntityKey>>;
     readonly entities: readonly SceneEntity[];
     readonly camera: Camera;
     readonly lights: readonly Light[];
+    readonly organization?: SceneOrganization;
 }
 
 export interface CopiedPrefab {

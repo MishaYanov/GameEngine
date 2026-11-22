@@ -37,6 +37,7 @@ impl Scene {
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
+		self.set_organization(&data.organization);
 		self.synchronize_camera_settings(&data.camera);
 		true
 	}
@@ -158,6 +159,9 @@ impl Scene {
 		if self.bindings != data.bindings {
 			self.bindings.clone_from(&data.bindings);
 		}
+		if self.organization != data.organization {
+			self.set_organization(&data.organization);
+		}
 		if changes.lights_changed {
 			self.lights.clone_from(&data.lights);
 		}
@@ -261,6 +265,7 @@ impl Scene {
 			next_id: self.next_id,
 			bindings: data.bindings.clone(),
 			lights: data.lights.clone(),
+			organization: data.organization.clone(),
 			..Scene::default()
 		};
 		next.synchronize_camera_settings(&data.camera);

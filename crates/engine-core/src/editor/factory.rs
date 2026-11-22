@@ -177,6 +177,7 @@ impl CommandFactory {
 				let camera = crate::Camera::default();
 				SceneData {
 					schema_version: CURRENT_SCHEMA_VERSION,
+					organization: Default::default(),
 					bindings: BTreeMap::new(),
 					entities: Vec::new(),
 					camera: CameraData {
