@@ -30,6 +30,24 @@ impl ViewportInteraction {
 			});
 		}
 		let selection = workspace.backend.session().selection();
+		if selection.len() == 1 {
+			let cache = self.transform_targets(workspace)?;
+			let segments = runtime::GameContentRect::fit(extent[0], extent[1])
+				.and_then(|rect| {
+					tools::camera_frustum(cache.active_camera.as_ref()?, rect.aspect())
+				});
+			if let Some(segments) = segments {
+				visuals
+					.lines
+					.extend(segments.map(|(start, end)| EditorLine {
+						start: start.to_array(),
+						end: end.to_array(),
+						color: [0.44, 0.89, 1.0, 0.95],
+						width: 1.45 * dpi as f32,
+						depth_test: false,
+					}));
+			}
+		}
 		if let Some(index) = self
 			.hovered
 			.as_ref()

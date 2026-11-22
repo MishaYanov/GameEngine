@@ -1,7 +1,9 @@
 //! CPU command implementations. Input bindings and Angular widgets choose
 //! commands; neither participates in their scene mutation semantics.
 mod camera;
-use camera::{camera_forward, camera_right, dolly, frame_selection, orbit};
+use camera::{
+	align_camera, camera_forward, camera_right, create_camera, dolly, frame_selection, orbit,
+};
 mod entities;
 use entities::{duplicate, fresh_key};
 mod organization;
@@ -60,6 +62,17 @@ pub(super) fn apply(
 				.with_mesh_index(entity.mesh_index);
 			data.entities.push(entity);
 			*selection = vec![key];
+		}
+		EditorCommandDto::CreateCamera => {
+			*selection = vec![create_camera(data)?];
+		}
+		EditorCommandDto::AlignCameraToSceneView {
+			key,
+			position,
+			yaw,
+			pitch,
+		} => {
+			align_camera(data, &key, position, yaw, pitch)?;
 		}
 		EditorCommandDto::SetTransforms {
 			edits,
@@ -206,14 +219,6 @@ pub(super) fn apply(
 		}
 		EditorCommandDto::DuplicateSelection { offset } => {
 			duplicate(data, selection, finite_vec(offset, "Duplicate offset")?)?
-		}
-		EditorCommandDto::DuplicateLinkedPrefab { root_key } => {
-			let anchor = &data.entities[entity_index(data, &root_key)?];
-			if anchor.linked_prefab.is_none() {
-				return Err("Select a linked Prop instance".into());
-			}
-			*selection = vec![anchor.key.clone()];
-			duplicate(data, selection, Vec3::ZERO)?;
 		}
 		EditorCommandDto::DeleteSelection => {
 			let hierarchy = hierarchy(data)?;

@@ -1,5 +1,40 @@
 use super::*;
 
+pub(super) fn create_camera(data: &mut SceneData) -> Result<EntityKey, String> {
+	if data.entities.len() >= MAX_SCENE_ENTITIES {
+		return Err("Scene entity limit reached; remove entities before creating a Camera".into());
+	}
+	let key = fresh_key(data);
+	let default = if data.default_game_camera.is_none() {
+		data.camera.clone()
+	} else {
+		CameraData::default()
+	};
+	data.entities
+		.push(default.to_camera_object(key.clone(), "Camera")?);
+	if data.default_game_camera.is_none() {
+		data.default_game_camera = Some(key.clone());
+	}
+	Ok(key)
+}
+
+pub(super) fn align_camera(
+	data: &mut SceneData,
+	key: &EntityKey,
+	position: [f32; 3],
+	yaw: f32,
+	pitch: f32,
+) -> Result<(), String> {
+	let index = data.camera_index(key)?;
+	let camera = CameraData {
+		position,
+		yaw,
+		pitch,
+		..CameraData::default()
+	};
+	data.set_camera_object_pose(index, &camera)
+}
+
 fn selection_bounds(
 	data: &SceneData,
 	selection: &[EntityKey],

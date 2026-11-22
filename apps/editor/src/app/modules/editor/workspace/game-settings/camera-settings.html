@@ -30,57 +30,8 @@
                [open]="open()" [renderFields]="false" title="Game Camera">
     <fieldset [disabled]="pending()" class="fields">
         <legend>Runtime camera</legend>
-        <label>Mode
-            <select [formField]="fields.mode">
-                <option value="fixed">Fixed</option>
-                <option value="follow">Follow</option>
-                <option value="orbit">Orbit</option>
-            </select>
-        </label>
-        @if (draft().mode === 'orbit') {
-            <editor-search-picker (picked)="fields.orbit.target().value.set($event)"
-                                  [autofocus]="open() && focusTarget()" [clearable]="true"
-                                  [disabled]="pending()" [options]="entityOptions()" [value]="draft().orbit.target"
-                                  label="Target" placeholder="Search entities…"/>
-            <fieldset>
-                <legend>Pivot offset in world units</legend>
-                <div class="vector">
-                    @for (axis of axes; track axis) {
-                        <label>{{ axis.toUpperCase() }}
-                            <input [attr.aria-label]="'Orbit pivot ' + axis.toUpperCase()" [formField]="fields.orbit.pivot[axis]"
-                                   inputmode="decimal"
-                                   type="text"/>
-                        </label>
-                    }
-                </div>
-            </fieldset>
-            @for (field of orbitNumbers; track field.key) {
-                <label>{{ field.label }}
-                    <input [attr.inputmode]="field.key === 'obstructionMask' ? 'numeric' : 'decimal'" [formField]="fields.orbit[field.key]"
-                           type="text"/>
-                </label>
-            }
-            <p>Walls can shorten the arm below the minimum zoom distance.</p>
-        } @else if (draft().mode === 'follow') {
-            <editor-search-picker (picked)="fields.follow.target().value.set($event)"
-                                  [autofocus]="open() && focusTarget()" [clearable]="true"
-                                  [disabled]="pending()" [options]="entityOptions()" [value]="draft().follow.target"
-                                  label="Target" placeholder="Search entities…"/>
-            @for (group of groups; track group.name) {
-                <fieldset>
-                    <legend>{{ group.label }} in world units</legend>
-                    <div class="vector">
-                        @for (axis of axes; track axis) {
-                            <label>{{ axis.toUpperCase() }}<input [attr.aria-label]="group.label + ' ' + axis.toUpperCase()" [formField]="fields.follow[group.name][axis]"
-                                                                  inputmode="decimal"
-                                                                  type="text"/></label>
-                        }
-                    </div>
-                </fieldset>
-            }
-            <label>Smoothing in seconds<input [formField]="fields.follow.smoothing" inputmode="decimal"
-                                              type="text"/></label>
-        }
+        <editor-camera-rig-fields [draft]="draft()" [fields]="fields" [targets]="entityOptions()"
+                                  [disabled]="pending()" [focusTarget]="open() && focusTarget()"/>
         @if (canRevealTarget()) {
             <button (click)="revealTarget()" type="button">Show Target in Hierarchy</button>
         }

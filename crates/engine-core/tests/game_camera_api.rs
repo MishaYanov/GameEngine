@@ -25,6 +25,159 @@ fn followed() -> engine_core::SceneData {
 }
 
 #[test]
+fn camera_authoring_creates_aligns_and_edits_one_undoable_object_at_a_time() {
+	use engine_core::{
+		command::{TransformDto, TransformEditDto, TransformSpace},
+		components::ComponentData,
+	};
+	let mut parent = entity("parent", [4.0, 0.0, 2.0]);
+	parent.transform.rotation[1] = 0.45;
+	let data = scene(vec![parent]);
+	let project = ProjectData::for_scene("Camera", "scenes/main.json", &data).unwrap();
+	let mut engine = EngineBuilder::new(data, project).build().unwrap();
+	let run = |engine: &mut engine_core::Engine, command| {
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: engine.session().revision(),
+				command,
+			})
+			.unwrap();
+	};
+	run(&mut engine, Command::CreateCamera);
+	let default = engine
+		.session()
+		.authored_document()
+		.default_game_camera
+		.clone()
+		.unwrap();
+	assert_eq!(engine.session().selection(), std::slice::from_ref(&default));
+	run(&mut engine, Command::CreateCamera);
+	let second = engine.session().selection()[0].clone();
+	assert_ne!(second, default);
+	assert_eq!(
+		engine.session().authored_document().default_game_camera,
+		Some(default.clone())
+	);
+	assert_eq!(engine.session().authored_document().entities.len(), 3);
+	run(&mut engine, Command::Undo);
+	assert_eq!(engine.session().authored_document().entities.len(), 2);
+	assert_eq!(engine.session().selection(), std::slice::from_ref(&default));
+	run(&mut engine, Command::Redo);
+	assert_eq!(engine.session().selection(), std::slice::from_ref(&second));
+	run(
+		&mut engine,
+		Command::ReparentObjects {
+			keys: vec![second.clone()],
+			parent: Some(key("parent")),
+			keep_world: true,
+		},
+	);
+	let command = Command::AlignCameraToSceneView {
+		key: second.clone(),
+		position: [9.0, 3.0, -4.0],
+		yaw: 0.28,
+		pitch: -0.25,
+	};
+	let before_align = engine.session().authored_document();
+	let revision = engine.session().revision();
+	assert!(
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: revision - 1,
+				command: command.clone()
+			})
+			.is_err()
+	);
+	assert_eq!(engine.session().authored_document(), before_align);
+	run(&mut engine, command);
+	let aligned = engine.session().authored_document();
+	let pose = aligned
+		.object_camera(&second, &aligned.world_matrices().unwrap())
+		.unwrap();
+	for (value, expected) in pose.position.into_iter().zip([9.0, 3.0, -4.0]) {
+		close(value, expected);
+	}
+	close(pose.yaw, 0.28);
+	close(pose.pitch, -0.25);
+	assert_eq!(aligned.camera, before_align.camera);
+	assert_eq!(
+		aligned.entities.last().unwrap().camera,
+		before_align.entities.last().unwrap().camera
+	);
+	run(&mut engine, Command::Undo);
+	assert_eq!(engine.session().authored_document(), before_align);
+	run(&mut engine, Command::Redo);
+	assert_eq!(engine.session().authored_document(), aligned);
+
+	let mut component = aligned
+		.entities
+		.last()
+		.unwrap()
+		.component_records()
+		.remove(0);
+	let ComponentData::Camera { settings } = &mut component.data else {
+		panic!("camera record expected")
+	};
+	settings.lens.vertical_fov = 0.65;
+	run(
+		&mut engine,
+		Command::ReplaceComponent {
+			key: second.as_str().into(),
+			component,
+		},
+	);
+	let previous = engine.session().authored_document();
+	assert_eq!(
+		previous
+			.entities
+			.last()
+			.unwrap()
+			.camera
+			.as_ref()
+			.unwrap()
+			.settings
+			.lens
+			.vertical_fov,
+		0.65
+	);
+	assert_eq!(
+		previous.entities.last().unwrap().transform,
+		aligned.entities.last().unwrap().transform
+	);
+	run(&mut engine, Command::Undo);
+	assert_eq!(engine.session().authored_document(), aligned);
+	run(&mut engine, Command::Redo);
+	assert_eq!(engine.session().authored_document(), previous);
+	engine.mark_scene_saved().unwrap();
+	run(
+		&mut engine,
+		Command::BeginTransaction {
+			label: "Camera transform".into(),
+		},
+	);
+	let old = &previous.entities.last().unwrap().transform;
+	run(
+		&mut engine,
+		Command::SetTransforms {
+			edits: vec![TransformEditDto {
+				key: second.as_str().into(),
+				transform: TransformDto {
+					position: [0.0; 3],
+					rotation: old.rotation,
+					scale: old.scale,
+				},
+			}],
+			space: TransformSpace::Local,
+			snap: false,
+		},
+	);
+	assert_ne!(engine.session().authored_document(), previous);
+	run(&mut engine, Command::CancelTransaction);
+	assert_eq!(engine.session().authored_document(), previous);
+	assert!(!engine.session().is_dirty());
+}
+
+#[test]
 fn migrated_camera_drives_play_and_legacy_edits_read_and_write_the_object() {
 	let legacy = followed();
 	let mut wire: serde_json::Value = serde_json::from_str(&legacy.to_json().unwrap()).unwrap();

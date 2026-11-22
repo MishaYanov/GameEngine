@@ -185,6 +185,16 @@ impl ViewportInteraction {
 			.and_then(|key| worlds.get(key.as_str()))
 			.copied()
 			.unwrap_or(Mat4::IDENTITY);
+		let active_camera = if session.selection().len() == 1 {
+			roots
+				.first()
+				.and_then(|(entity, _)| entity.camera.as_ref())
+				.filter(|camera| camera.enabled)
+				.map(|camera| camera.settings.from_world_matrix(active_world))
+				.transpose()?
+		} else {
+			None
+		};
 		*self.transform_cache.borrow_mut() = Some(TransformCache {
 			generation: workspace.generation,
 			revision: session.scene_revision(),
@@ -195,6 +205,7 @@ impl ViewportInteraction {
 				.collect(),
 			targets,
 			active_world,
+			active_camera,
 			move_targets,
 		});
 		Ok(Ref::map(self.transform_cache.borrow(), |cache| {

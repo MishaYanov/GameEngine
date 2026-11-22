@@ -109,6 +109,21 @@ impl CommandFactory {
 				validate_key(key)?;
 				validate_name(name, 1024)?;
 			}
+			EditorCommandDto::AlignCameraToSceneView {
+				key,
+				position,
+				yaw,
+				pitch,
+			} => {
+				validate_key(key.as_str())?;
+				crate::scene_data::CameraData {
+					position: *position,
+					yaw: *yaw,
+					pitch: *pitch,
+					..Default::default()
+				}
+				.validate()?;
+			}
 			EditorCommandDto::Spawn { entity } => {
 				validate_name(&entity.name, 1024)?;
 				validate_model_path(&entity.model_path)?;
@@ -344,7 +359,8 @@ impl CommandFactory {
 				}
 				.validate()?;
 			}
-			EditorCommandDto::DeleteSelection
+			EditorCommandDto::CreateCamera
+			| EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
 			| EditorCommandDto::CommitTransaction
 			| EditorCommandDto::CancelTransaction
@@ -359,6 +375,14 @@ impl CommandFactory {
 
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
+			("create_camera", "Create Camera", "camera", true, false),
+			(
+				"align_camera_to_scene_view",
+				"Align Camera to Scene View",
+				"camera",
+				true,
+				true,
+			),
 			("add_scene", "Add scene", "scene", true, false),
 			("switch_scene", "Switch scene", "scene", false, false),
 			("remove_scene", "Remove scene", "scene", true, false),

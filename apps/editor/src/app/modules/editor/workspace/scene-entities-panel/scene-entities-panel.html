@@ -38,7 +38,7 @@
                                         (dragstart)="entity && dragStarted($event, entity.key)"
                                         [attr.aria-expanded]="row.children ? row.expanded : null"
                                         (drop)="dropped($event, row.item)"
-                                        [attr.aria-label]="folder ? row.item.name + ' folder' : entity?.linked_prefab ? row.item.name + ' linked Prop' : row.item.name"
+                                        [attr.aria-label]="folder ? row.item.name + ' folder' : entity?.linked_prefab ? row.item.name + ' linked Prop' : entity?.camera ? row.item.name + ' camera object' : row.item.name"
                                         [class.drop-target]="isDropTarget(row.key) && dropTarget()?.valid"
                                         [class.drop-rejected]="isDropTarget(row.key) && !dropTarget()?.valid"
                                         [disabled]="disabled()" [draggable]="!disabled() && entity !== null"
@@ -58,6 +58,8 @@
                                     <span class="entity-name">{{ row.item.name }}</span>
                                     @if (entity?.linked_prefab) {
                                         <small aria-hidden="true">Linked Prop</small>
+                                    } @else if (entity?.camera) {
+                                        <small aria-hidden="true">Camera</small>
                                     }
                                 </button>
                             }
@@ -69,6 +71,13 @@
                     <p class="placeholder">This scene contains no entities.</p>
                 }
                 <div class="hierarchy-actions" role="group" aria-label="Hierarchy actions">
+                    @if (cameraCreationEnabled()) {
+                        <button #createButton type="button" (click)="openCreateMenu(createButton)" [disabled]="!canCreateCamera()"
+                                [editorContextMenu]="createMenu" editorContextMenuLabel="Create scene object"
+                                aria-haspopup="menu" [attr.aria-expanded]="contextMenu.request()?.owner === createButton">
+                            Create
+                        </button>
+                    }
                     <button (click)="beginParenting()" [disabled]="disabled() || !primary()" type="button">Make Child Of…
                     </button>
                     <button (click)="moveToRoot()" [disabled]="!canMoveToRoot()"

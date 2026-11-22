@@ -120,6 +120,13 @@ pub enum EditorCommandDto {
 	Spawn {
 		entity: EntitySpecDto,
 	},
+	CreateCamera,
+	AlignCameraToSceneView {
+		key: EntityKey,
+		position: [f32; 3],
+		yaw: f32,
+		pitch: f32,
+	},
 	SetTransforms {
 		edits: Vec<TransformEditDto>,
 		space: TransformSpace,

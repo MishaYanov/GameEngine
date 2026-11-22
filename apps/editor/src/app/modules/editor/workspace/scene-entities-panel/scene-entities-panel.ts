@@ -37,6 +37,7 @@ import {hierarchyScrollTop, renderHierarchyWindow} from './hierarchy-viewport';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
+import {ContextMenuService} from '../../../../shared/components/context-menu/context-menu.service';
 import {
     type FolderDestination, type FolderEdit, type HierarchyFolderCommand, HierarchyFolderEditor,
 } from './hierarchy-folder-editor';
@@ -80,6 +81,7 @@ export class SceneEntitiesPanel {
     readonly disabled = input(false);
     readonly foldersEnabled = input(false);
     readonly batchParentingEnabled = input(false);
+    readonly cameraCreationEnabled = input(false);
     readonly sceneLabel = input('Scene');
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
@@ -88,6 +90,7 @@ export class SceneEntitiesPanel {
     readonly usagesRequested = output<EntityKey>();
     readonly reparentRequested = output<HierarchyReparentRequest>();
     readonly folderRequested = output<HierarchyFolderCommand>();
+    readonly cameraRequested = output<void>();
 
     protected readonly rowHeight = 28;
     protected readonly treeId = `editor-hierarchy-${nextHierarchyId++}`;
@@ -173,6 +176,16 @@ export class SceneEntitiesPanel {
     });
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
+    protected readonly contextMenu = inject(ContextMenuService);
+    protected readonly canCreateCamera = computed(() => this.cameraCreationEnabled() && this.scene().projectOpen && !this.disabled());
+    private readonly createCameraAction = ContextActionBuilder.create<{readonly contextKey: string}>('hierarchy.create.camera', 'Camera')
+        .when(() => this.cameraCreationEnabled())
+        .enabledWhen(context => this.canCreateCamera() && context.contextKey === this.contextKey())
+        .run(context => {
+            if (this.canCreateCamera() && context.contextKey === this.contextKey()) this.cameraRequested.emit();
+        }).build();
+    private readonly createMenuBuilder = ContextMenuBuilder.create<{readonly contextKey: string}>().action(this.createCameraAction);
+    protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey()});
     private readonly entityMenuBuilder = ContextMenuBuilder.create<EntityMenuContext>()
         .action(ContextActionBuilder.create<EntityMenuContext>('entity.select', 'Select')
             .icon('object')
@@ -198,7 +211,8 @@ export class SceneEntitiesPanel {
             .icon('folder')
             .when(() => this.foldersEnabled())
             .enabledWhen(context => this.canUseEntityMenu(context) && this.canOrganize(this.dragSelection(context.key)))
-            .run(context => this.beginMoveObjects(this.dragSelection(context.key))).build());
+            .run(context => this.beginMoveObjects(this.dragSelection(context.key))).build())
+        .submenu('entity.create', 'Create', items => items.action(this.createCameraAction));
     private readonly folderMenuBuilder = ContextMenuBuilder.create<FolderMenuContext>()
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.create', 'New Subfolder…')
             .icon('folder')
@@ -212,7 +226,8 @@ export class SceneEntitiesPanel {
             .run(context => this.editFolder(context.id, 'move-folder')).build())
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.remove', 'Remove Folder')
             .enabledWhen(context => this.canUseFolderMenu(context))
-            .run(context => this.submitFolderEdit({type: 'remove_folder', id: context.id})).build());
+            .run(context => this.submitFolderEdit({type: 'remove_folder', id: context.id})).build())
+        .submenu('folder.create-object', 'Create', items => items.action(this.createCameraAction));
     protected readonly activeItemMenu = (): readonly ContextMenuItem[] => {
         const key = this.activeKey();
         const item = key ? this.forest().items.get(key) : undefined;
@@ -224,6 +239,19 @@ export class SceneEntitiesPanel {
         return item.kind === 'entity'
             ? () => this.entityMenuBuilder.build({key: item.entity.key, contextKey})
             : () => this.folderMenuBuilder.build({id: item.folder.id, contextKey});
+    }
+
+    protected openCreateMenu(button: HTMLButtonElement): void {
+        if (!this.canCreateCamera()) return;
+        if (this.contextMenu.request()?.owner === button) {
+            this.contextMenu.close();
+            return;
+        }
+        const bounds = button.getBoundingClientRect();
+        this.contextMenu.open({
+            items: this.createMenu(), label: 'Create scene object', x: bounds.left, y: bounds.bottom,
+            owner: button, returnFocus: button,
+        });
     }
 
     private canUseEntityMenu(context: EntityMenuContext): boolean {

@@ -6,6 +6,7 @@ import {
 import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
+import {cameraComponentDraft, cameraComponentFromDraft, type CameraComponentDraft} from './camera-component-draft';
 import {
 	defaultMachine,
 	machineError,
@@ -41,6 +42,7 @@ export interface ComponentDraft {
 	machine: MachineDefinition;
 	controller: Record<ControllerNumberKey, string> & { jump_action: string };
 	animation: AnimationSettings | null;
+	camera: CameraComponentDraft;
     interactable: { action: string; reach: string };
 	actor: string;
 	key_trigger: string;
@@ -80,6 +82,7 @@ export function componentDraft(
 			jump_action: 'jump',
 		},
 		animation: null,
+		camera: cameraComponentDraft(),
         interactable: {action: 'interact', reach: '1'},
 		actor: '',
 		key_trigger: '',
@@ -123,6 +126,8 @@ export function componentDraft(
 		};
 	} else if (value.data.kind === 'animation') {
 		draft.animation = structuredClone(value.data.settings);
+	} else if (value.data.kind === 'camera') {
+		draft.camera = cameraComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
         draft.interactable = {action: value.data.settings.action, reach: String(value.data.settings.reach)};
 	} else if (value.data.kind === 'native_behavior') {
@@ -253,6 +258,9 @@ export function componentFromDraft(
 				'Review an animation asset, choose its clips, and enter a valid speed ratio.',
 			);
 		data = { kind: 'animation', settings: structuredClone(draft.animation) };
+	} else if (draft.kind === 'camera') {
+		const settings = original?.data.kind === 'camera' ? original.data.settings : undefined;
+		data = {kind: 'camera', settings: cameraComponentFromDraft(draft.camera, targets.map(target => target.key), settings)};
     } else if (draft.kind === 'interactable') {
         const {action, reach: reachText} = draft.interactable;
         const reach = parseF32(reachText);

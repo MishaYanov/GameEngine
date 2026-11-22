@@ -256,6 +256,12 @@ impl Default for ViewportEditorStateDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ViewportActionDto {
+	AlignCameraToSceneView {
+		key: engine_core::EntityKey,
+		expected_revision: u64,
+		expected_generation: u64,
+		scene_id: engine_core::scene_catalog::SceneId,
+	},
 	RestartRun {
 		run_id: String,
 		expected_revision: u64,
@@ -317,6 +323,24 @@ impl ViewportActionDto {
 	pub fn validate(&self) -> Result<(), String> {
 		let positive = |value: f32| value.is_finite() && (0.0001..=1_000_000.0).contains(&value);
 		match self {
+			Self::AlignCameraToSceneView {
+				key,
+				expected_revision,
+				expected_generation,
+				scene_id,
+			} => {
+				key.validate()?;
+				engine_core::scene_catalog::SceneId::new(scene_id.as_str())?;
+				if key.as_str().len() > 256
+					|| key.as_str().chars().any(char::is_control)
+					|| (*expected_revision).max(*expected_generation) > 9_007_199_254_740_991
+				{
+					return Err(
+						"Align Camera requires valid scene, revision and object identities".into(),
+					);
+				}
+				Ok(())
+			}
 			Self::RestartRun { run_id, .. }
 				if run_id.is_empty() || run_id.len() > 64 || !run_id.is_ascii() =>
 			{

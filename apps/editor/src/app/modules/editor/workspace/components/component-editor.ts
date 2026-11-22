@@ -32,6 +32,8 @@ import type { AnimationSettings } from '../../../../core/editor/animation.models
 import { AnimationEditor } from './animation-editor';
 import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 import {sceneReferenceOptions} from '../scene-reference-options';
+import {CameraRigFields} from '../game-settings/camera-rig-fields';
+import {validateCameraLens} from './camera-component-draft';
 
 export type ComponentEditIntent =
 	| { readonly kind: 'add'; readonly component: ComponentRecord; readonly expected: string | null }
@@ -45,7 +47,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -108,6 +110,21 @@ export class ComponentEditor {
         keywords: type.type_id,
     })));
     protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
+	protected readonly cameraTargets = computed(() => this.entities().filter(entity => entity.key !== this.ownerKey()));
+	protected readonly cameraOptions = computed(() => sceneReferenceOptions(this.cameraTargets()));
+	protected readonly cameraLensFields = [
+		{key: 'fovDegrees', label: 'Vertical field of view (degrees)'},
+		{key: 'near', label: 'Near clip'},
+		{key: 'far', label: 'Far clip'},
+	] as const;
+	protected readonly cameraLensErrors = computed(() => {
+		const draft = this.draft();
+		if (draft.kind !== 'camera') return {};
+		const original = this.original()?.data;
+		return validateCameraLens(draft.camera.lens, original?.kind === 'camera' ? original.settings.lens : undefined).errors;
+	});
+	protected readonly candidateError = computed(() => this.cameraLensFields.some(field => !!this.cameraLensErrors()[field.key])
+		? null : this.candidate().error);
 	protected readonly candidate = computed(() => {
 		try {
 			if (this.animationPending()) throw new Error('Wait for animation preparation to finish.');
@@ -116,7 +133,7 @@ export class ComponentEditor {
 				value: componentFromDraft(
 					this.draft(),
 					this.collider(),
-					this.entities(),
+					this.draft().kind === 'camera' ? this.cameraTargets() : this.entities(),
 					this.models(),
 					this.original(),
 				),
@@ -174,6 +191,7 @@ export class ComponentEditor {
 	}
 
 	protected label(component: ComponentRecord): string {
+		if (component.data.kind === 'camera') return 'Camera';
 		if (component.data.kind === 'native_behavior')
 			return {
 				key_door: 'Key and Door',

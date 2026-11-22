@@ -15,6 +15,86 @@ use std::{
 const EXTENT: [u32; 2] = [800, 600];
 
 #[test]
+fn camera_alignment_uses_the_owned_scene_view_and_draws_the_resized_game_frustum() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	command(&mut workspace, Command::CreateCamera);
+	let key = workspace.backend.session().selection()[0].clone();
+	let mut view = controller(&mut workspace);
+	view.camera.pivot = Vec3::new(2.0, 1.5, -4.0);
+	view.camera.yaw = 0.34;
+	view.camera.pitch = -0.26;
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.generation;
+	let scene_id = workspace.backend.session().active_scene_id().clone();
+	let request =
+		|expected_revision, expected_generation| ViewportActionDto::AlignCameraToSceneView {
+			key: key.clone(),
+			expected_revision,
+			expected_generation,
+			scene_id: scene_id.clone(),
+		};
+	let before = workspace.backend.session().authored_document();
+	assert!(view
+		.action(request(revision, generation + 1), &mut workspace, EXTENT)
+		.is_err());
+	assert!(view
+		.action(request(revision - 1, generation), &mut workspace, EXTENT)
+		.is_err());
+	assert_eq!(workspace.backend.session().authored_document(), before);
+	view.action(request(revision, generation), &mut workspace, EXTENT)
+		.unwrap();
+	let authored = workspace.backend.session().authored_document();
+	let camera = authored.authored_game_camera().unwrap();
+	assert!(Vec3::from_array(camera.position).abs_diff_eq(view.camera.position(), 1e-5));
+	assert!((camera.yaw - view.camera.yaw).abs() < 1e-5);
+	assert!((camera.pitch - view.camera.pitch).abs() < 1e-5);
+	assert_eq!(
+		authored.entities.last().unwrap().camera,
+		before.entities.last().unwrap().camera
+	);
+
+	let frustum = |extent| {
+		let visuals = view.visuals(&workspace, extent, 1.0).unwrap();
+		visuals.validate().unwrap();
+		visuals
+			.lines
+			.into_iter()
+			.filter(|line| line.color == [0.44, 0.89, 1.0, 0.95])
+			.collect::<Vec<_>>()
+	};
+	let square = frustum([600, 600]);
+	let wide = frustum([1_200, 600]);
+	let aspect_capped = frustum([2_400, 600]);
+	assert_eq!(square.len(), 12);
+	assert_eq!(wide.len(), square.len());
+	let width =
+		|line: &EditorLine| Vec3::from_array(line.start).distance(Vec3::from_array(line.end));
+	assert!((width(&wide[0]) / width(&square[0]) - 2.0).abs() < 1e-4);
+	assert!((width(&aspect_capped[0]) / width(&square[0]) - 3.0).abs() < 1e-4);
+	view.action(
+		ViewportActionDto::SetView {
+			view: ViewportView::Game,
+		},
+		&mut workspace,
+		EXTENT,
+	)
+	.unwrap();
+	assert!(view
+		.visuals(&workspace, EXTENT, 1.0)
+		.unwrap()
+		.lines
+		.is_empty());
+	let edited_revision = workspace.backend.session().revision();
+	assert!(view
+		.action(request(edited_revision, generation), &mut workspace, EXTENT)
+		.is_err());
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+	command(&mut workspace, Command::Undo);
+	assert_eq!(workspace.backend.session().authored_document(), before);
+}
+
+#[test]
 fn camera_room_preview_restores_scene_and_applied_camera_survives_undo_save_and_play() {
 	let temp = Fixture::new(0);
 	let demo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../game");

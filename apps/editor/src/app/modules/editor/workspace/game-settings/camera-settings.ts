@@ -11,12 +11,12 @@ import {
     viewChild
 } from '@angular/core';
 import {DecimalPipe} from '@angular/common';
-import {form, FormField} from '@angular/forms/signals';
+import {form} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {PreviewDefinition} from '../../../../core/editor/camera-preview';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
-import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {CameraRigFields} from './camera-rig-fields';
 import {SceneEditingService} from '../scene-editing.service';
 import {sceneReferenceOptions} from '../scene-reference-options';
 import {cameraFromDraft, cameraSignature, gameCameraDraft, GameCameraDraft} from './camera-draft';
@@ -24,7 +24,7 @@ import {orbitDraft} from "./orbit-camera";
 
 @Component({
     selector: 'editor-camera-settings',
-    imports: [EditorDialog, EditorSearchPicker, FormField, DecimalPipe],
+    imports: [EditorDialog, CameraRigFields, DecimalPipe],
     templateUrl: './camera-settings.html',
     styleUrl: './settings.scss',
 })
@@ -48,24 +48,6 @@ export class CameraSettings {
     protected readonly fields = form(this.draft);
     protected readonly focusTarget = signal(false);
     protected readonly entityOptions = computed(() => sceneReferenceOptions(this.editor.snapshot()?.document.entities ?? []));
-    protected readonly orbitNumbers = [
-        {key: 'yawDegrees', label: 'Initial yaw in degrees'},
-        {key: 'pitchDegrees', label: 'Initial pitch in degrees'},
-        {key: 'minimumPitchDegrees', label: 'Minimum pitch in degrees'},
-        {key: 'maximumPitchDegrees', label: 'Maximum pitch in degrees'},
-        {key: 'distance', label: 'Initial distance'},
-        {key: 'minimumDistance', label: 'Minimum distance'},
-        {key: 'maximumDistance', label: 'Maximum distance'},
-        {key: 'followSeconds', label: 'Follow response in seconds'},
-        {key: 'recoverySeconds', label: 'Outward recovery in seconds'},
-        {key: 'teleportDistance', label: 'Teleport snap distance'},
-        {key: 'probeRadius', label: 'Probe radius'},
-        {key: 'obstructionMask', label: 'Obstacle layer mask'},
-    ] as const;
-    protected readonly groups = [{name: 'offset', label: 'Camera offset'}, {
-        name: 'look_offset',
-        label: 'Look offset'
-    }] as const;
     protected readonly candidate = computed(() => {
         const snapshot = this.editor.snapshot();
         if (!snapshot) return {value: null, error: 'No scene is open.'};
@@ -87,7 +69,6 @@ export class CameraSettings {
     });
     private readonly viewport = inject(ViewportEditorService, {optional: true});
     protected readonly nativeGeneration = computed(() => this.viewport?.state()?.workspace_generation ?? null);
-    protected readonly axes = ['x', 'y', 'z'] as const;
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         this.editor.snapshot()?.mode === 'edit' && !this.opening() && !this.pending() &&
         (this.editing?.ready() ?? (!this.editor.busy() && !this.editor.snapshot()?.transaction)));

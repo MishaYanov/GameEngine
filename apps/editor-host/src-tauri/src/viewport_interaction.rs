@@ -68,6 +68,7 @@ struct TransformCache {
 	selection: Vec<String>,
 	targets: Vec<TransformTarget>,
 	active_world: Mat4,
+	active_camera: Option<runtime::scene_data::CameraData>,
 	move_targets: Vec<MoveTarget>,
 }
 
@@ -442,7 +443,8 @@ impl ViewportInteraction {
 		// A settings boundary resolves its captured gesture before changing axes or projection.
 		if !matches!(
 			&action,
-			ViewportActionDto::UpdatePlacement { .. }
+			ViewportActionDto::AlignCameraToSceneView { .. }
+				| ViewportActionDto::UpdatePlacement { .. }
 				| ViewportActionDto::CommitPlacement
 				| ViewportActionDto::CancelPlacement
 		) && self.drag.is_some()
@@ -450,6 +452,40 @@ impl ViewportInteraction {
 			self.cancel_transform(workspace)?;
 		}
 		match action {
+			ViewportActionDto::AlignCameraToSceneView {
+				key,
+				expected_revision,
+				expected_generation,
+				scene_id,
+			} => {
+				if workspace.generation != expected_generation
+					|| workspace.backend.session().active_scene_id() != &scene_id
+				{
+					return Err(
+						"Scene or workspace changed before the Camera could be aligned".into(),
+					);
+				}
+				workspace.check_revision(expected_revision)?;
+				if !self.can_author(workspace) || workspace.prop_preview_active() {
+					return Err("Open Scene view and stop Play before aligning a Camera".into());
+				}
+				let session = workspace.backend.session();
+				if session.has_transaction() || self.drag.is_some() {
+					return Err("Finish the current edit before aligning a Camera".into());
+				}
+				if session.selection() != std::slice::from_ref(&key) {
+					return Err("Select the Camera to align in the current Scene".into());
+				}
+				self.execute(
+					workspace,
+					Command::AlignCameraToSceneView {
+						key,
+						position: self.camera.position().to_array(),
+						yaw: self.camera.yaw,
+						pitch: self.camera.pitch,
+					},
+				)?;
+			}
 			ViewportActionDto::RestartRun { .. } => {
 				return Err("Restart Run must be prepared by the native viewport worker".into());
 			}

@@ -162,6 +162,28 @@ impl CameraData {
 			Vec3::from_array(self.position).extend(1.0),
 		)
 	}
+
+	pub(crate) fn to_camera_object(
+		&self,
+		key: EntityKey,
+		name: &str,
+	) -> Result<EntityData, String> {
+		let mut object = EntityData::new(key, name, NO_MESH_PATH)
+			.with_renderable(false)
+			.with_transform(TransformData::from_matrix(self.pose_matrix())?);
+		object.put_component(
+			ComponentRecord {
+				id: ComponentId::new("camera")?,
+				schema_version: 1,
+				enabled: true,
+				data: ComponentData::Camera {
+					settings: CameraSettings::from_legacy(self),
+				},
+			},
+			false,
+		)?;
+		Ok(object)
+	}
 }
 
 impl SceneData {
@@ -214,28 +236,37 @@ impl SceneData {
 				|| self.camera.yaw != camera.yaw
 				|| self.camera.pitch != camera.pitch
 			{
-				let entity = &self.entities[index];
-				let local = if let Some(parent) = &entity.parent {
-					let world = self.world_matrices()?;
-					let parent_index = self
-						.entities
-						.iter()
-						.position(|entity| &entity.key == parent)
-						.ok_or("Game camera parent is missing")?;
-					world[parent_index].inverse() * camera.pose_matrix()
-				} else {
-					camera.pose_matrix()
-				};
-				let mut transform = TransformData::from_matrix(local)?;
-				// Lens and rig edits preserve authored scale, which is independent of the lens.
-				transform.scale = entity.transform.scale;
-				self.entities[index].transform = transform;
+				self.set_camera_object_pose(index, &camera)?;
 			}
 			let entity = &mut self.entities[index];
 			entity.camera.as_mut().expect("checked camera").settings =
 				CameraSettings::from_legacy(&camera);
 		}
 		self.camera = camera;
+		Ok(())
+	}
+
+	pub(crate) fn set_camera_object_pose(
+		&mut self,
+		index: usize,
+		camera: &CameraData,
+	) -> Result<(), String> {
+		let entity = &self.entities[index];
+		let world_pose = camera.pose_matrix();
+		let local = if let Some(parent) = &entity.parent {
+			let world = self.world_matrices()?;
+			let parent_index = self
+				.entities
+				.iter()
+				.position(|entity| &entity.key == parent)
+				.ok_or("Camera parent is missing")?;
+			world[parent_index].inverse() * world_pose
+		} else {
+			world_pose
+		};
+		let mut transform = TransformData::from_matrix(local)?;
+		transform.scale = entity.transform.scale;
+		self.entities[index].transform = transform;
 		Ok(())
 	}
 
@@ -275,22 +306,9 @@ impl SceneData {
 				format!("legacy-game-camera-{suffix}")
 			};
 			if !occupied.contains(candidate.as_str()) {
-				let mut object =
-					EntityData::new(EntityKey::new(candidate)?, "Game Camera", NO_MESH_PATH)
-						.with_renderable(false)
-						.with_transform(TransformData::from_matrix(self.camera.pose_matrix())?);
-				object.put_component(
-					ComponentRecord {
-						id: ComponentId::new("camera")?,
-						schema_version: 1,
-						enabled: true,
-						data: ComponentData::Camera {
-							settings: CameraSettings::from_legacy(&self.camera),
-						},
-					},
-					false,
-				)?;
-				return Ok(object);
+				return self
+					.camera
+					.to_camera_object(EntityKey::new(candidate)?, "Game Camera");
 			}
 		}
 		Err("Could not allocate a stable migrated Game Camera key".into())

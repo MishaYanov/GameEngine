@@ -11,6 +11,7 @@ import type {
     EditorCommand,
     EditorCommandRequest,
     EditorSnapshot,
+    CameraComponentSettings,
     ModelAsset,
     ProjectData,
     SceneDocument,
@@ -30,6 +31,7 @@ import {
     type ViewportAction,
     type ViewportEditorState
 } from '../../../core/editor/viewport-editor.models';
+import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -76,6 +78,12 @@ const gameplayModule = {
 
 const folderCapabilities = (['create_folder', 'rename_folder', 'move_folder', 'move_roots_to_folder', 'remove_folder'] as const)
     .map(name => ({name, label: name, category: 'hierarchy', undoable: true, available_in_play: false}));
+const cameraCapabilities = (['create_camera', 'align_camera_to_scene_view'] as const)
+    .map(name => ({name, label: name, category: 'camera', undoable: true, available_in_play: false}));
+const cameraSettings: CameraComponentSettings = {
+    lens: {vertical_fov: Math.fround(Math.PI / 3), near: 0.1, far: 100},
+    rig: {mode: 'fixed'},
+};
 
 const propAsset = {kind: 'prefab', asset_id: 'arch-id', path: 'arch.prefab.json', name: 'Arch'} as const;
 const nestedAsset = {kind: 'prefab', asset_id: '00000000-0000-0000-0000-000000000001',
@@ -203,7 +211,8 @@ describe('Workspace live editing flow', () => {
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
                 protocol_version: 2, scene_schema_version: 3, incremental_commands: true,
-                commands: folderCapabilities, embedded_viewport_supported: true,
+                commands: [...folderCapabilities, ...cameraCapabilities], embedded_viewport_supported: true,
+                component_types: [{type_id: 'engine.camera', kind: 'camera', label: 'Camera', description: 'Authored camera', max_per_object: 1}],
                 max_selection: 4096, max_history_entries: 128, history_budget_bytes: 16 * 1024 * 1024,
                 gameplay_modules: [gameplayModule],
             };
@@ -343,6 +352,19 @@ describe('Workspace live editing flow', () => {
                     return viewportEditorState;
                 }
                 if (action.type === 'restart_run' && restartReply) return restartReply();
+                if (action.type === 'align_camera_to_scene_view') {
+                    expect(action.expected_revision).toBe(nativeState.revision);
+                    expect(action.expected_generation).toBe(viewportEditorState.workspace_generation);
+                    expect(action.scene_id).toBe(nativeState.active_scene_id);
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
+                        revision: nativeState.revision + 1, scene_revision: nativeState.scene_revision + 1,
+                        document: {...nativeState.document, entities: nativeState.document.entities.map(entity =>
+                            entity.key === action.key ? {...entity, transform: {...entity.transform, position: [2, 3, 5]}} : entity)}};
+                    viewportEditorState = {...viewportEditorState, revision: viewportEditorState.revision + 1};
+                    return viewportEditorState;
+                }
             }
             if (operation !== 'editor_execute_incremental') throw new Error(`Unexpected operation: ${operation}`);
             const {request} = args as {request: EditorCommandRequest};
@@ -358,6 +380,34 @@ describe('Workspace live editing flow', () => {
                 case 'set_camera':
                     nativeState = {...nativeState, dirty: true, document: {...nativeState.document, camera: command.camera}};
                     break;
+                case 'create_camera': {
+                    expect(nativeState.transaction).toBeNull();
+                    const key = `camera-${nativeState.document.entities.filter(entity => !!entity.camera).length + 1}`;
+                    const details = {id: `lens-${key}`, enabled: true, settings: cameraSettings};
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, selection: [key], dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, schema_version: 7,
+                            default_game_camera: nativeState.document.default_game_camera ?? key,
+                            entities: [...nativeState.document.entities, {
+                                key, name: 'Camera', model_path: '__no_mesh__', renderable: false,
+                                transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+                                camera: details, component_views: [{schema_version: 1, id: details.id, enabled: true,
+                                    data: {kind: 'camera', settings: cameraSettings}}],
+                            }]}};
+                    break;
+                }
+                case 'replace_component': {
+                    const {component, key} = command;
+                    if (component.data.kind !== 'camera') throw new Error('Expected Camera fixture component');
+                    const details = {id: component.id, enabled: component.enabled, settings: component.data.settings};
+                    undo.push(nativeState.document);
+                    redo = [];
+                    nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
+                        document: {...nativeState.document, entities: nativeState.document.entities.map(entity =>
+                            entity.key === key ? {...entity, camera: details, component_views: [component]} : entity)}};
+                    break;
+                }
                 case 'begin_transaction':
                     expect(nativeState.transaction).toBeNull();
                     transactionBefore = structuredClone(nativeState.document);
@@ -483,6 +533,51 @@ describe('Workspace live editing flow', () => {
         field.dispatchEvent(new Event('input', {bubbles: true}));
         await fixture.whenStable();
     }
+
+    it('creates and selects Camera objects from the Hierarchy and commits lens and alignment as separate Undo steps', async () => {
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
+            .find(item => item.textContent?.trim() === label)!;
+        const menu = TestBed.inject(ContextMenuService);
+        const create = async (key: string) => {
+            button('Create').click();
+            const camera = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Camera');
+            expect(camera).toBeDefined();
+            menu.execute(camera!);
+            await vi.waitFor(() => expect(editor.selection()).toEqual([key]));
+            await fixture.whenStable();
+        };
+        await create('camera-1');
+        await create('camera-2');
+        expect(editor.document()?.default_game_camera).toBe('camera-1');
+        expect(commands.filter(item => item.type === 'create_camera')).toEqual([{type: 'create_camera'}, {type: 'create_camera'}]);
+        expect(root.querySelector('[data-key="camera-2"]')?.getAttribute('aria-selected')).toBe('true');
+        root.querySelector<HTMLButtonElement>('button[aria-label="Edit Camera"]')!.click();
+        await fixture.whenStable();
+        const field = (label: string) => [...root.querySelectorAll('editor-component-editor label')]
+            .find(item => item.firstChild?.textContent?.trim() === label)!.querySelector('input')!;
+        await change(field('Near clip'), '200');
+        expect(field('Far clip').getAttribute('aria-invalid')).toBe('true');
+        expect(button('Apply Component').disabled).toBe(true);
+        await change(field('Near clip'), '0.25');
+        await change(field('Vertical field of view (degrees)'), '90');
+        button('Apply Component').click();
+        const camera = () => editor.document()?.entities.find(entity => entity.key === 'camera-2');
+        await vi.waitFor(() => expect(camera()?.camera?.settings.lens.vertical_fov).toBeCloseTo(Math.PI / 2));
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await fixture.whenStable();
+        expect(button('Align Camera to Scene View').disabled).toBe(false);
+        button('Align Camera to Scene View').click();
+        await vi.waitFor(() => expect(camera()?.transform.position).toEqual([2, 3, 5]));
+        action('Undo').click();
+        await vi.waitFor(() => expect(camera()?.transform.position).toEqual([0, 0, 0]));
+        expect(camera()?.camera?.settings.lens.vertical_fov).toBeCloseTo(Math.PI / 2);
+        action('Undo').click();
+        await vi.waitFor(() => expect(camera()?.camera?.settings.lens.vertical_fov).toBeCloseTo(Math.PI / 3));
+    });
 
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {
         const setParent = async (parent: string) => {

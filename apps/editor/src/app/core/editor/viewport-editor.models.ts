@@ -85,6 +85,13 @@ export type ViewportAction =
     | {readonly type: 'set_projection'; readonly projection: ViewportProjection}
     | {readonly type: 'set_plane'; readonly plane: ViewportPlane}
     | {readonly type: 'set_view'; readonly view: ViewportView}
+    | {
+        readonly type: 'align_camera_to_scene_view';
+        readonly key: import('./editor.models').EntityKey;
+        readonly expected_revision: number;
+        readonly expected_generation: number;
+        readonly scene_id: import('./editor.models').SceneId;
+    }
     | { readonly type: 'restart_run'; readonly run_id: string; readonly expected_revision: number }
     | {readonly type: 'orient'; readonly orientation: ViewportOrientation}
     | {readonly type: 'zoom'; readonly factor: number}
