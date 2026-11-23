@@ -399,6 +399,46 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
     });
 
+    it('shows matching folder contents with ancestor context and keyboard access', async () => {
+        await openFolders({
+            folders: [
+                {id: 'site', name: 'Worksite', parent: null},
+                {id: 'floor', name: 'Floor', parent: 'site'},
+                {id: 'upper', name: 'Upper Floor', parent: 'floor'},
+                {id: 'walls', name: 'Walls', parent: 'site'},
+            ],
+            root_membership: {concrete: 'floor', marker: 'upper', drywall: 'walls'},
+        }, [], [
+            entity('concrete', null, 'Concrete'),
+            entity('bevel', 'concrete', 'Bevel'),
+            entity('marker', null, 'Marker'),
+            entity('drywall', null, 'Drywall'),
+            entity('lamp', null, 'Lamp'),
+        ]);
+        await keydown('ArrowLeft');
+        expect(folder('site').getAttribute('aria-expanded')).toBe('false');
+
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = ' FLOOR ';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(folder('site').getAttribute('aria-expanded')).toBe('true');
+        expect(folder('floor').getAttribute('aria-level')).toBe('2');
+        expect(folder('upper').getAttribute('aria-level')).toBe('3');
+        expect(row('marker').getAttribute('aria-level')).toBe('4');
+        expect(row('concrete').getAttribute('aria-level')).toBe('3');
+        expect(row('bevel').getAttribute('aria-level')).toBe('4');
+        expect(keys()).toEqual([undefined, undefined, undefined, 'marker', 'concrete', 'bevel']);
+
+        for (let step = 0; step < 5; step++) await keydown('ArrowDown');
+        expect(requested).toHaveBeenLastCalledWith('bevel');
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('bevel').id);
+
+        search.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        await fixture.whenStable();
+        expect(folder('site').getAttribute('aria-expanded')).toBe('false');
+    });
+
     it('moves roots dropped on a folder but preserves a transform child and a stale drag', async () => {
         // An omitted parent is the wire representation for a scene root.
         const rootObject = {...floors[0], parent: undefined};
@@ -467,6 +507,12 @@ describe('SceneEntitiesPanel hierarchy', () => {
         await fixture.whenStable();
         expect(root.querySelectorAll('[role="treeitem"]').length).toBe(2);
         expect(row('item-6000').getAttribute('aria-level')).toBe('2');
+        search.value = 'floor';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        await keydown('End');
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('item-11999').id);
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
     });
 
     it('validates the folder interface with accessibility structure checks and cancels a name draft', async () => {

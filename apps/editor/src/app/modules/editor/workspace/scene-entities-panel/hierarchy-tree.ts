@@ -133,14 +133,24 @@ export function hierarchyAncestors({rowParents}: HierarchyForest, key: Hierarchy
     return ancestors;
 }
 
-function searchMatches({items, rowParents}: HierarchyForest, query: string): ReadonlySet<HierarchyKey> | null {
+function searchMatches({items, rowChildren, rowParents}: HierarchyForest, query: string): ReadonlySet<HierarchyKey> | null {
     if (!query) return null;
     const matches = new Set<HierarchyKey>();
+    const folderBranches: HierarchyKey[] = [];
     for (const item of items.values()) {
         if (!item.name.toLocaleLowerCase().includes(query)) continue;
+        if (item.kind === 'folder') folderBranches.push(item.key);
         for (let key: HierarchyKey | null = item.key; key && !matches.has(key); key = rowParents.get(key) ?? null) {
             matches.add(key);
         }
+    }
+    const visitedBranches = new Set<HierarchyKey>();
+    while (folderBranches.length) {
+        const key = folderBranches.pop()!;
+        if (visitedBranches.has(key)) continue;
+        visitedBranches.add(key);
+        matches.add(key);
+        for (const child of rowChildren.get(key) ?? []) folderBranches.push(child.key);
     }
     return matches;
 }
