@@ -24,6 +24,48 @@ input[type="number"] { inline-size: 6rem; }
 .key-lane { min-inline-size: 100%; }
 .playhead-lane input { inline-size: 100%; }
 
+.timing-ruler { margin-inline: var(--space-2); }
+
+.ruler-labels {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ruler-labels span:last-child { justify-self: end; }
+
+.ruler-track {
+    position: relative;
+    block-size: 1.5rem;
+    border-block-end: var(--border-width) solid var(--color-border-strong);
+}
+
+.ruler-key, .ruler-bookmark, .ruler-playhead { position: absolute; }
+
+.ruler-key {
+    inset-block-start: 0.75rem;
+    inline-size: 0.42rem;
+    block-size: 0.42rem;
+    background: var(--color-text-secondary);
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.ruler-key.current { background: var(--color-action); }
+
+.ruler-bookmark {
+    inset-block-start: 0.1rem;
+    border-inline: 0.25rem solid transparent;
+    border-block-start: 0.45rem solid var(--color-info);
+    transform: translateX(-50%);
+}
+
+.ruler-playhead {
+    inset-block: 0;
+    border-inline-start: 2px solid var(--color-action);
+}
+
 .keys {
     padding: 0;
     list-style: none;

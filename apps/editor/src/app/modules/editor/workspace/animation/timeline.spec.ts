@@ -273,6 +273,62 @@ describe('Authored clip timeline', () => {
         expect(edit).not.toHaveBeenCalled();
     });
 
+    it('places ruler ticks, keys, bookmarks and the playhead in the same time scale at every zoom', async () => {
+        const {fixture, timeline, edit} = setup(timedDraft);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const ruler = root.querySelector<HTMLElement>('.timing-ruler')!;
+        const positions = (selector: string) => [...ruler.querySelectorAll<HTMLElement>(selector)]
+            .map(point => Number.parseFloat(point.style.left));
+        expect(ruler.textContent).toContain('500 ms');
+        expect(positions('.ruler-key')).toEqual([0, expect.closeTo(33.3), 100]);
+        expect(positions('.ruler-bookmark')).toEqual([expect.closeTo(7.9), expect.closeTo(87.6)]);
+        timeline.zoom.set(4);
+        button(root, '333 ms').click();
+        await fixture.whenStable();
+        expect(root.querySelector<HTMLElement>('.key-lane')?.style.width).toBe('400%');
+        expect(positions('.ruler-playhead')).toEqual([expect.closeTo(33.3)]);
+        expect(positions('.ruler-key.current')).toEqual([expect.closeTo(33.3)]);
+        expect(edit).not.toHaveBeenCalled();
+    });
+
+    it('reveals an off-screen jump or selection inside the zoomed lane while keeping focus and outer scroll', async () => {
+        const {fixture, timeline, edit} = setup(timedDraft);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const lane = root.querySelector<HTMLElement>('.scroll-lane')!;
+        const cursor = lane.querySelector<HTMLElement>('.ruler-playhead')!;
+        const panel = root.querySelector<HTMLElement>('.timeline')!;
+        panel.scrollLeft = 30;
+        timeline.zoom.set(8);
+        Object.defineProperty(lane, 'clientWidth', {value: 160});
+        vi.spyOn(lane, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 0, 160, 48));
+        const marker = vi.spyOn(cursor, 'getBoundingClientRect').mockReturnValue(new DOMRect(510, 0, 2, 16));
+        lane.focus();
+        lane.dispatchEvent(new KeyboardEvent('keydown', {key: 'PageDown', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(333);
+        expect(lane.scrollLeft).toBe(252);
+        expect(document.activeElement).toBe(lane);
+
+        marker.mockReturnValue(new DOMRect(92, 0, 2, 16));
+        const bookmark = button(root, 'Half-open · 79 ms');
+        bookmark.focus();
+        bookmark.click();
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(79);
+        expect(lane.scrollLeft).toBe(244);
+        expect(document.activeElement).toBe(bookmark);
+        expect(panel.scrollLeft).toBe(30);
+
+        marker.mockClear();
+        timeline.seek(876);
+        await fixture.whenStable();
+        expect(marker).not.toHaveBeenCalled();
+        expect(lane.scrollLeft).toBe(244);
+        expect(edit).not.toHaveBeenCalled();
+    });
+
     it('plays at the chosen editor speed without writing to the clip or its undo history', async () => {
         const {fixture, timeline, edit, saveDraft} = setup();
         await fixture.whenStable();

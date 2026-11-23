@@ -53,10 +53,24 @@
                 }
             </select>
         </label>
-        <section class="scroll-lane" aria-label="Timeline keys. Arrow keys scrub, Page Up and Page Down jump between keys, Shift with Page Up or Page Down jumps between bookmarks."
+        <section #scrollLane class="scroll-lane" aria-label="Timeline keys. Arrow keys scrub. Shift plus arrows move a key. Insert adds a key and Delete removes it. Page Up and Page Down jump between keys. Add Shift to jump between bookmarks."
                  aria-keyshortcuts="PageUp PageDown Shift+PageUp Shift+PageDown"
                  tabindex="0">
             <div class="key-lane" [style.width.%]="timeline.zoom() * 100">
+                <div aria-hidden="true" class="timing-ruler">
+                    <div class="ruler-labels">
+                        <span>0 ms</span><span>{{ rulerMidpoint() }} ms</span><span>{{ timeline.duration() }} ms</span>
+                    </div>
+                    <div class="ruler-track">
+                        @for (point of rulerKeys(); track point.key.id ?? point.key.at) {
+                            <span class="ruler-key" [class.current]="selected() === point.key" [style.left.%]="point.percent"></span>
+                        }
+                        @for (point of rulerBookmarks(); track point.marker.id) {
+                            <span class="ruler-bookmark" [style.left.%]="point.percent"></span>
+                        }
+                        <span #rulerCursor class="ruler-playhead" [style.left.%]="rulerPlayhead()"></span>
+                    </div>
+                </div>
                 <label class="playhead-lane">Scrub clip
                     <input #scrub type="range" min="0" [max]="timeline.duration()" [value]="timeline.playhead()"
                            (input)="timeline.seek(scrub.valueAsNumber)"/>

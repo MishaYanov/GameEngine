@@ -1,4 +1,7 @@
-import {Component, computed, effect, inject, input, linkedSignal, output, signal, untracked} from '@angular/core';
+import {
+    afterNextRender, Component, computed, effect, ElementRef, inject, Injector, input, linkedSignal, output,
+    signal, untracked, viewChild,
+} from '@angular/core';
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import type {ClipAssetDocument, ClipKey, ClipKeyValue, ClipTimelineDraft, Quaternion, TimelineEdit} from '../../../../core/editor/authored-clip.models';
 import type {Vec3} from '../../../../core/editor/editor.models';
@@ -32,6 +35,9 @@ export class ClipTimeline {
     readonly closed = output<void>();
     readonly saved = output<ClipTimelineDraft>();
     protected readonly timeline = inject(TimelineEditService);
+    private readonly injector = inject(Injector);
+    private readonly scrollLane = viewChild<ElementRef<HTMLElement>>('scrollLane');
+    private readonly rulerCursor = viewChild<ElementRef<HTMLElement>>('rulerCursor');
     protected readonly track = signal(0);
     private readonly key = signal('');
     private readonly marker = signal('');
@@ -53,6 +59,11 @@ export class ClipTimeline {
         ? {previous: null, next: null} : adjacentMoments(this.identifiedKeys(), this.timeline.playhead()));
     protected readonly adjacentBookmarks = computed(() => this.navigationBlocked()
         ? {previous: null, next: null} : adjacentMoments(this.markers(), this.timeline.playhead()));
+    protected readonly rulerKeys = computed(() => this.keys().map(key => ({key, percent: this.percentAt(key.at)})));
+    protected readonly rulerBookmarks = computed(() =>
+        this.markers().map(marker => ({marker, percent: this.percentAt(marker.at)})));
+    protected readonly rulerPlayhead = computed(() => this.percentAt(this.timeline.playhead()));
+    protected readonly rulerMidpoint = computed(() => Math.floor(this.timeline.duration() / 2));
 
     constructor() {
         effect(() => {
@@ -64,8 +75,7 @@ export class ClipTimeline {
     protected selectKey(key: ClipKey<Vec3 | Quaternion>): void {
         if (!key.id) return;
         this.key.set(key.id);
-        this.timeline.stop();
-        this.timeline.seek(key.at, false);
+        this.seekSelection(key.at);
     }
 
     protected selectTrack(value: number): void {
@@ -104,8 +114,7 @@ export class ClipTimeline {
 
     protected selectMarker(id: string, at: number): void {
         this.marker.set(id);
-        this.timeline.stop();
-        this.timeline.seek(at, false);
+        this.seekSelection(at);
     }
 
     protected jump(direction: JumpDirection, target: 'key' | 'bookmark'): boolean {
@@ -235,6 +244,32 @@ export class ClipTimeline {
         return track.kind === 'local_position'
             ? {kind: 'position', value: values as unknown as Vec3}
             : {kind: 'rotation', value: values as unknown as Quaternion};
+    }
+
+    private seekSelection(tick: number): void {
+        this.timeline.stop();
+        this.timeline.seek(tick, false);
+        const draftId = this.timeline.draft()?.draft_id;
+        afterNextRender({
+            earlyRead: () => {
+                const lane = this.scrollLane()?.nativeElement;
+                const cursor = this.rulerCursor()?.nativeElement;
+                if (!lane || !cursor || !lane.clientWidth || this.timeline.playhead() !== tick ||
+                    this.timeline.draft()?.draft_id !== draftId) return null;
+                const left = lane.getBoundingClientRect().left + lane.clientLeft;
+                const right = left + lane.clientWidth;
+                const marker = cursor.getBoundingClientRect();
+                const delta = marker.left < left ? marker.left - left : Math.max(0, marker.right - right);
+                return delta ? {lane, offset: lane.scrollLeft + delta} : null;
+            },
+            write: scroll => {
+                if (scroll) scroll.lane.scrollLeft = scroll.offset;
+            },
+        }, {injector: this.injector});
+    }
+
+    private percentAt(tick: number): number {
+        return Math.min(100, Math.max(0, tick / Math.max(1, this.timeline.duration()) * 100));
     }
 
     private edit(edit: TimelineEdit): Promise<void> {
