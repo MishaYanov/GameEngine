@@ -30,8 +30,21 @@
                     </label>
                 </div>
                 <nav aria-label="Asset folders" class="folder-location" [hidden]="searching()">
-                    <button (click)="upOneFolder(location)" [disabled]="!folder()" type="button">Up</button>
-                    <span #location tabindex="-1">{{ folder() ? 'Assets / ' + folder() : 'Assets' }}</span>
+                    <button (click)="upOneFolder()" [disabled]="!folder()" type="button">Up</button>
+                    <ol>
+                        @for (crumb of folderCrumbs(); track crumb.path; let first = $first; let current = $last) {
+                            <li>
+                                @if (!first) {
+                                    <span aria-hidden="true">/</span>
+                                }
+                                @if (current) {
+                                    <span #location aria-current="location" tabindex="-1">{{ crumb.label }}</span>
+                                } @else {
+                                    <button (click)="openFolder(crumb.path)" type="button">{{ crumb.label }}</button>
+                                }
+                            </li>
+                        }
+                    </ol>
                 </nav>
                 @if (error(); as message) {
                     <p role="alert">{{ message }}</p>
@@ -66,7 +79,7 @@
                 <ul [attr.aria-label]="searching() ? 'Asset file results' : 'Folder contents'">
                     @for (folder of folderContents().folders; track folder[1]) {
                         <li>
-                            <button (click)="openFolder(folder[1], location)" type="button">
+                            <button (click)="openFolder(folder[1])" type="button">
                                 <editor-icon name="folder"/>
                                 {{ folder[0] }}
                             </button>

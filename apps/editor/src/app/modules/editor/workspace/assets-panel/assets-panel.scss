@@ -50,6 +50,25 @@ li button {
   display: none;
 }
 
+.folder-location ol,
+.folder-location li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.folder-location ol {
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-location li button {
+  overflow-wrap: anywhere;
+}
+
 .asset-controls input,
 .asset-filter select {
   min-height: var(--space-7);

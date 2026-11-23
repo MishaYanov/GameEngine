@@ -52,6 +52,11 @@ interface AssetMenuContext {
     readonly sceneId: SceneId | null;
 }
 
+interface FolderCrumb {
+    readonly path: string;
+    readonly label: string;
+}
+
 function searchable(text: string): string {
     return text.trim().replaceAll('\\', '/').toLocaleLowerCase();
 }
@@ -86,6 +91,7 @@ export class AssetsPanel {
     protected readonly animatorWorkspace = inject(AnimatorWorkspaceService, {optional: true});
     protected readonly controlsWorkspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
+    private readonly folderLocation = viewChild<ElementRef<HTMLElement>>('location');
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
@@ -140,9 +146,9 @@ export class AssetsPanel {
         return filter === 'all' ? this.entries() : this.entries().filter(entry => entry.kind === filter);
     });
     private readonly selection = linkedSignal({
-        source: this.visibleEntries,
-        computation: (entries, previous): AssetEntry | null => {
-            const selected = previous?.value;
+        source: () => ({entries: this.visibleEntries(), generation: this.editor.workspaceGeneration()}),
+        computation: ({entries, generation}, previous): AssetEntry | null => {
+            const selected = previous?.source.generation === generation ? previous.value : null;
             if (!selected) return null;
             return entries.find(entry => this.sameFile(entry, selected)) ?? null;
         },
@@ -152,11 +158,22 @@ export class AssetsPanel {
         return selected && selected.kind !== 'scene' ? selected : null;
     });
     protected readonly folder = linkedSignal({
-        source: this.entries,
-        computation: (entries, previous): string => {
-            const folder = previous?.value ?? '';
+        source: () => ({entries: this.entries(), generation: this.editor.workspaceGeneration()}),
+        computation: ({entries, generation}, previous): string => {
+            const folder = previous?.source.generation === generation ? previous.value : '';
             return entries.some(entry => entry.path.startsWith(`${folder}/`)) ? folder : '';
         },
+    });
+    protected readonly folderCrumbs = computed<readonly FolderCrumb[]>(() => {
+        const crumbs: FolderCrumb[] = [{path: '', label: 'Assets'}];
+        const folder = this.folder();
+        if (!folder) return crumbs;
+        let path = '';
+        for (const label of folder.split('/')) {
+            path = path ? `${path}/${label}` : label;
+            crumbs.push({path, label});
+        }
+        return crumbs;
     });
     protected readonly folderContents = computed(() => {
         const folder = this.folder();
@@ -320,9 +337,9 @@ export class AssetsPanel {
         }, {injector: this.injector});
     }
 
-    protected upOneFolder(location: HTMLElement): void {
+    protected upOneFolder(): void {
         const path = this.folder();
-        this.openFolder(path.slice(0, Math.max(0, path.lastIndexOf('/'))), location);
+        if (path) this.openFolder(path.slice(0, Math.max(0, path.lastIndexOf('/'))));
     }
 
     protected filterAssets(value: string): void {
@@ -330,10 +347,16 @@ export class AssetsPanel {
         if (filter) this.assetFilter.set(filter.value);
     }
 
-    protected openFolder(path: string, location: HTMLElement): void {
+    protected openFolder(path: string): void {
+        if (this.searching() || (path && !this.entries().some(entry => entry.path.startsWith(`${path}/`)))) return;
+        const generation = this.editor.workspaceGeneration();
         this.folder.set(path);
         this.selection.set(null);
-        location.focus();
+        afterNextRender(() => {
+            if (this.editor.workspaceGeneration() === generation && !this.searching() && this.folder() === path) {
+                this.folderLocation()?.nativeElement.focus();
+            }
+        }, {injector: this.injector});
     }
 
     protected selectFile(file: AssetEntry): void {

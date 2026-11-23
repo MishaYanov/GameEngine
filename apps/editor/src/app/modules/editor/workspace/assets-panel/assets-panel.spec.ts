@@ -181,7 +181,7 @@ describe('AssetsPanel', () => {
         expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
         expect(panel.root.querySelector('[aria-label="Selected asset"]')).toBeNull();
         await panel.search('');
-        expect(panel.root.querySelector('.folder-location')?.textContent).toContain('Assets / props');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('props');
         expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
     });
 
@@ -314,7 +314,7 @@ describe('AssetsPanel', () => {
         await panel.search('unrelated search');
         reveal.reveal({sourceId: source.asset_id!, workspaceGeneration: 1, sceneId: 'main'});
         await panel.fixture.whenStable();
-        expect(panel.root.textContent).toContain('Assets / props/moved');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('moved');
         expect(panel.root.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('');
         const selected = panel.file(source.path);
         expect(selected.getAttribute('aria-pressed')).toBe('true');
@@ -466,12 +466,47 @@ describe('AssetsPanel', () => {
         expect(panel.loadPrefab).toHaveBeenCalledExactlyOnceWith('prefabs/actor.json', [0, 0, 0], 1, 1);
         expect(panel.importModel).not.toHaveBeenCalled();
     });
+    it('navigates directly to ancestors, moves focus to the current crumb, and resets on project replacement', async () => {
+        const ramp: ModelAsset = {name: 'Ramp', path: 'props/outdoor/stairs/ramp.glb', asset_id: 'ramp-id'};
+        const panel = await createPanel({models: [ramp]});
+        for (const name of ['props', 'outdoor', 'stairs']) {
+            panel.button(name).click();
+            await panel.fixture.whenStable();
+        }
+        panel.file(ramp.path).click();
+        await panel.fixture.whenStable();
+        const nav = panel.root.querySelector('[aria-label="Asset folders"]')!;
+        const currentCrumb = () => nav.querySelector('[aria-current="location"]');
+        expect(currentCrumb()?.textContent).toBe('stairs');
+        const props = [...nav.querySelectorAll('button')].find(button => button.textContent.trim() === 'props')!;
+        props.focus();
+        props.click();
+        await panel.fixture.whenStable();
+        expect(currentCrumb()?.textContent).toBe('props');
+        expect(panel.root.ownerDocument.activeElement).toBe(currentCrumb());
+        expect(panel.root.querySelector('[aria-label="Selected asset"]')).toBeNull();
+        expect(panel.button('outdoor')).toBeTruthy();
+
+        panel.button('Assets').click();
+        await panel.fixture.whenStable();
+        expect(currentCrumb()?.textContent).toBe('Assets');
+        expect(panel.root.ownerDocument.activeElement).toBe(currentCrumb());
+        expect(panel.button('Up').disabled).toBe(true);
+
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        panel.workspaceGeneration.set(2);
+        await panel.fixture.whenStable();
+        expect(currentCrumb()?.textContent).toBe('Assets');
+        expect(panel.button('props')).toBeTruthy();
+    });
+
     it('discovers props automatically and keeps the current folder and selected file when refreshed', async () => {
         const panel = await createPanel();
         expect(panel.assets).toHaveBeenCalledExactlyOnceWith(false);
         panel.button('scenes').click();
         await panel.fixture.whenStable();
-        expect(panel.root.textContent).toContain('Assets / scenes');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('scenes');
 
         panel.button('Up').click();
         await panel.fixture.whenStable();
@@ -483,7 +518,7 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         expect(panel.assets).toHaveBeenCalledTimes(2);
         expect(panel.assets).toHaveBeenLastCalledWith(true);
-        expect(panel.root.textContent).toContain('Assets / props');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('props');
         expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
         expect(panel.root.querySelector('.asset-details')?.textContent).toContain(robot.path);
     });
