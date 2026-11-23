@@ -1,6 +1,7 @@
 //! Read-only agent bundle and native tool boundary for editor guidance.
 
 mod bundle;
+pub mod knowledge;
 mod tools;
 
 pub use bundle::{Bundle, BundleError, CorpusId};
