@@ -17,8 +17,7 @@ describe('WorkspaceTabs', () => {
     });
 
     it('moves roving focus without selecting and activates the focused tab with Enter or Space', async () => {
-        fixture.componentRef.setInput('propAvailable', true);
-        fixture.componentRef.setInput('animationAvailable', true);
+        fixture.componentRef.setInput('availableViews', ['scene-viewport', 'game-preview', 'prop-workspace', 'animation-workspace']);
         fixture.componentRef.setInput('activeViewKind', 'prop-workspace');
         await fixture.whenStable();
         const buttons = [...fixture.nativeElement.querySelectorAll('[role=tab]')] as HTMLButtonElement[];
@@ -71,6 +70,25 @@ describe('WorkspaceTabs', () => {
         expect(document.activeElement).toBe(outside);
         expect(scene.tabIndex).toBe(0);
         expect(game.tabIndex).toBe(-1);
+    });
+
+    it('keeps the panel label and roving focus valid if the focused tab is removed', async () => {
+        fixture.componentRef.setInput('availableViews', ['scene-viewport', 'game-preview', 'controls-graph']);
+        fixture.componentRef.setInput('activeViewKind', 'controls-graph');
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const [scene, , controls] = root.querySelectorAll<HTMLButtonElement>('[role=tab]');
+        controls.focus();
+        expect(component.activeTabId()).toBe(controls.id);
+
+        fixture.componentRef.setInput('availableViews', ['scene-viewport', 'game-preview']);
+        await fixture.whenStable();
+
+        expect(root.contains(controls)).toBe(false);
+        expect(component.activeTabId()).toBe(scene.id);
+        expect(scene.getAttribute('aria-selected')).toBe('true');
+        expect(scene.tabIndex).toBe(0);
+        expect(document.activeElement).toBe(scene);
     });
 
     it('should create', () => {

@@ -1,4 +1,5 @@
-import {Component, computed, ElementRef, input, output, signal, viewChildren} from '@angular/core';
+import {DOCUMENT} from '@angular/common';
+import {afterRenderEffect, Component, computed, ElementRef, inject, input, output, signal, viewChildren} from '@angular/core';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
 import {EditorIcon, type EditorIconName,} from '../../../../shared/icons/editor-icon';
 
@@ -27,24 +28,24 @@ let nextWorkspaceTabsId = 0;
 })
 export class WorkspaceTabs {
     readonly activeViewKind = input<WorkspaceViewKind>('scene-viewport');
-    readonly propAvailable = input(false);
-    readonly animationAvailable = input(false);
-    readonly animatorAvailable = input(false);
-    readonly controlsGraphAvailable = input(false);
+    readonly availableViews = input<readonly WorkspaceViewKind[]>(['scene-viewport', 'game-preview']);
     readonly viewSelected = output<WorkspaceViewKind>();
 
-    readonly tabs = computed(() =>
-        WORKSPACE_TABS.filter(tab =>
-            (tab.kind !== 'prop-workspace' || this.propAvailable()) &&
-            (tab.kind !== 'animation-workspace' || this.animationAvailable()) &&
-            (tab.kind !== 'animation-controller' || this.animatorAvailable()) &&
-            (tab.kind !== 'controls-graph' || this.controlsGraphAvailable()),
-        ).map(tab => ({
-            ...tab,
-            active: tab.kind === this.activeViewKind(),
-        })),
+    private readonly availableTabs = computed(() =>
+        WORKSPACE_TABS.filter(tab => this.availableViews().includes(tab.kind)),
+    );
+    private readonly activeTab = computed(() =>
+        this.availableTabs().find(tab => tab.kind === this.activeViewKind())?.kind ?? this.availableTabs()[0]?.kind,
+    );
+    protected readonly tabs = computed(() =>
+        this.availableTabs().map(tab => ({...tab, active: tab.kind === this.activeTab()})),
     );
     readonly panelId = `workspace-panel-${nextWorkspaceTabsId++}`;
+    readonly activeTabId = computed(() => {
+        const kind = this.activeTab();
+        return kind ? this.buttonId(kind) : null;
+    });
+    private readonly document = inject(DOCUMENT);
     private readonly focusedTab = signal<WorkspaceViewKind | null>(null);
     protected readonly focusableTab = computed(() => {
         const tabs = this.tabs();
@@ -53,6 +54,16 @@ export class WorkspaceTabs {
     });
     private readonly tabButtons =
         viewChildren<ElementRef<HTMLButtonElement>>('tabButton');
+
+    constructor() {
+        afterRenderEffect(() => {
+            const focused = this.focusedTab();
+            if (!focused || this.availableViews().includes(focused)) return;
+            this.focusedTab.set(null);
+            const active = this.activeTab();
+            if (active && this.document.activeElement === this.document.body) this.focusTab(active);
+        });
+    }
 
     protected buttonId(kind: WorkspaceViewKind): string {
         return `${this.panelId}-tab-${kind}`;

@@ -48,10 +48,7 @@
         }
     </div>
     <workspace-tabs #tabs (viewSelected)="workspaceView.selectView($event)"
-                    [propAvailable]="!!propWorkspace.document() && !editorService.playing()"
-                    [animationAvailable]="!!editorService.snapshot() && !editorService.playing()"
-                    [animatorAvailable]="!!editorService.snapshot() && animatorAssets.supported() && !editorService.playing()"
-                    [controlsGraphAvailable]="!!editorService.snapshot() && controlsGraph.supported() && !editorService.playing()"
+                    [availableViews]="workspaceView.availableViews()"
                     [activeViewKind]="workspaceView.activeViewKind()"/>
 
     <div class="workspace-main">
@@ -79,7 +76,7 @@
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
-                    [attr.aria-labelledby]="tabs.panelId + '-tab-' + workspaceView.activeViewKind()"
+                    [attr.aria-labelledby]="tabs.activeTabId()"
                     [id]="tabs.panelId"
                     class="workspace-panel"
                     role="tabpanel"

@@ -184,6 +184,11 @@ export class EditorWorkspace {
     });
 
     constructor() {
+        this.workspaceView.setAuthoringAvailability({
+            prop: () => this.propWorkspace.document()?.scope.generation === this.editorService.workspaceGeneration(),
+            animator: this.animatorAssets.supported,
+            controlsGraph: this.controlsGraph.supported,
+        });
         let previousView = this.workspaceView.activeViewKind();
         effect(() => {
             const next = this.workspaceView.activeViewKind();

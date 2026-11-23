@@ -4,6 +4,14 @@ import type {ViewportView} from '../../../../core/editor/viewport-editor.models'
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
 
+interface AuthoringAvailability {
+    readonly prop: () => boolean;
+    readonly animator: () => boolean;
+    readonly controlsGraph: () => boolean;
+}
+
+const PRIMARY_VIEWS = ['scene-viewport', 'game-preview'] as const;
+
 /** Coordinates workspace tabs with the native viewport and the current play run. */
 @Injectable()
 export class WorkspaceViewService {
@@ -25,8 +33,23 @@ export class WorkspaceViewService {
         const state = this.viewport.state();
         return state?.settings.view === 'game' && state.focused;
     });
+    private readonly authoringAvailability = signal<AuthoringAvailability | null>(null);
+    readonly availableViews = computed<readonly WorkspaceViewKind[]>(() => {
+        if (this.editor.playing() || !this.editor.snapshot()) return PRIMARY_VIEWS;
+        const authoring = this.authoringAvailability();
+        const views: WorkspaceViewKind[] = [...PRIMARY_VIEWS];
+        if (authoring?.prop()) views.push('prop-workspace');
+        views.push('animation-workspace');
+        if (authoring?.animator()) views.push('animation-controller');
+        if (authoring?.controlsGraph()) views.push('controls-graph');
+        return views;
+    });
     private readonly activeView = signal<WorkspaceViewKind>('scene-viewport');
-    readonly activeViewKind = this.activeView.asReadonly();
+    readonly activeViewKind = computed(() => {
+        const selected = this.activeView();
+        if (this.availableViews().includes(selected)) return selected;
+        return this.editor.playing() ? 'game-preview' : 'scene-viewport';
+    });
     private readonly restartFailure = signal<{ runId: string; generation: number; message: string } | null>(null);
     readonly gameError = computed(() => {
         const status = this.gameStatus();
@@ -42,13 +65,15 @@ export class WorkspaceViewService {
     constructor() {
         effect(() => {
             const playing = this.editor.playing();
+            const available = this.availableViews();
             untracked(() => {
+                const previous = this.activeView();
                 if (playing && !this.wasPlaying) {
-                    const previous = this.activeViewKind();
                     this.returnFromPlay = previous === 'game-preview' ? 'scene-viewport' : previous;
                     this.activeView.set('game-preview');
-                } else if (!playing && this.wasPlaying) {
-                    this.activeView.set(this.returnFromPlay);
+                } else {
+                    const intended = this.wasPlaying && !playing ? this.returnFromPlay : previous;
+                    this.activeView.set(available.includes(intended) ? intended : 'scene-viewport');
                 }
                 this.wasPlaying = playing;
             });
@@ -65,8 +90,12 @@ export class WorkspaceViewService {
         });
     }
 
+    setAuthoringAvailability(availability: AuthoringAvailability): void {
+        this.authoringAvailability.set(availability);
+    }
+
     selectView(kind: WorkspaceViewKind): void {
-        if ((kind === 'prop-workspace' || kind === 'animation-workspace' || kind === 'animation-controller' || kind === 'controls-graph') && this.editor.playing()) return;
+        if (!this.availableViews().includes(kind)) return;
         if (kind === 'animation-workspace' && !this.animationView()) {
             this.animationScope.set(this.propView() ? 'prop' : 'scene');
         }
