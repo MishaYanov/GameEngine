@@ -185,6 +185,8 @@ export class EditorGraph {
     private readonly chosenKind = linkedSignal(() => this.palette()[0]);
     protected readonly paletteForm = form(this.chosenKind);
     private readonly connections = computed(() => this.store.document().connections);
+    protected readonly canFrameSelection = computed(() =>
+        this.store.selected() !== null || this.store.selectedConnection() !== null);
     protected readonly connected = computed(
         () =>
             new Set(
@@ -339,12 +341,23 @@ export class EditorGraph {
     }
 
     protected fit(): void {
+        if (!this.frameCards(this.cards())) this.view.set({x: 40, y: 40, zoom: 1});
+    }
+
+    protected frameSelection(): boolean {
+        const selected = this.store.selected();
+        const connection = this.store.selectedConnection();
+        const edge = connection ? this.connections().find(candidate => candidate.id === connection) : undefined;
+        if (!selected && !edge) return false;
+        return this.frameCards(this.cards().filter(card => {
+            const id = card.node().id;
+            return id === selected || id === edge?.from.node || id === edge?.to.node;
+        }));
+    }
+
+    private frameCards(cards: readonly GraphNodeCard[]): boolean {
         const stage = this.stage()?.nativeElement;
-        const cards = this.cards();
-        if (!stage || !cards.length) {
-            this.view.set({x: 40, y: 40, zoom: 1});
-            return;
-        }
+        if (!stage || cards.length === 0) return false;
         const left = Math.min(...cards.map((card) => card.node().position.x));
         const top = Math.min(...cards.map((card) => card.node().position.y));
         const right = Math.max(
@@ -366,6 +379,7 @@ export class EditorGraph {
             y: (stage.clientHeight - (bottom - top) * zoom) / 2 - top * zoom,
             zoom,
         });
+        return true;
     }
 
     protected zoomBy(factor: number, point?: GraphPoint): void {
@@ -480,7 +494,13 @@ export class EditorGraph {
     }
 
     protected key(event: KeyboardEvent): void {
-        if ((event.target as Element).closest('input, select, textarea')) return;
+        if ((event.target as Element).closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+        if (event.key.toLowerCase() === 'f' && !event.altKey && !event.ctrlKey && !event.metaKey &&
+            !this.gesture && this.frameSelection()) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         if (event.key === 'Escape') {
             this.pending.set(null);
             this.store.clearError();

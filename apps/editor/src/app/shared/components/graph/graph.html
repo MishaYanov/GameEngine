@@ -27,6 +27,9 @@
             <button (click)="fit()" aria-label="Fit graph" class="icon-button" type="button">
                 <editor-icon name="maximize"/>
             </button>
+            <button (click)="frameSelection()" [disabled]="!canFrameSelection()" type="button" title="F on the graph canvas">
+                Frame Selection
+            </button>
         </div>
     </header>
     <div class="workspace">
@@ -163,7 +166,7 @@
     </div>
     <footer>
 		<span [id]="instructionsId"
-        >Drag to pan · Wheel to zoom · Connect matching ports · Delete to remove</span
+        >Drag to pan · Wheel to zoom · F to frame selection · Connect matching ports · Delete to remove</span
         ><span
     >{{ store.document().nodes.length }} nodes ·
         {{ store.document().connections.length }} connections</span

@@ -62,6 +62,38 @@ describe('Graph editor', () => {
         expect(element.querySelectorAll('editor-graph-node')).toHaveLength(3);
         expect(component.graph().connections).toHaveLength(2);
     });
+    it('frames selected nodes or edge endpoints with F or the toolbar without editing the graph', async () => {
+        const {fixture, component, element} = await setup();
+        const store = fixture.debugElement.injector.get(GraphStore);
+        const stage = element.querySelector<HTMLElement>('.stage')!;
+        const button = Array.from(element.querySelectorAll('button'))
+            .find(button => button.textContent?.trim() === 'Frame Selection')!;
+        const original = component.graph();
+        Object.defineProperties(stage, {clientWidth: {value: 800}, clientHeight: {value: 440}});
+        for (const card of element.querySelectorAll<HTMLElement>('editor-graph-node')) {
+            Object.defineProperties(card, {offsetWidth: {value: 100}, offsetHeight: {value: 80}});
+        }
+        expect(button.disabled).toBe(true);
+        const node = original.nodes.find(node => node.id === 'color')!;
+        store.select(node.id);
+        fixture.detectChanges();
+        expect(button.disabled).toBe(false);
+
+        const key = new KeyboardEvent('keydown', {key: 'f', bubbles: true, cancelable: true});
+        stage.dispatchEvent(key);
+        fixture.detectChanges();
+        expect(key.defaultPrevented).toBe(true);
+        expect(stage.style.backgroundPosition).toBe(`${350 - node.position.x}px ${180 - node.position.y}px`);
+        const nodePosition = stage.style.backgroundPosition;
+
+        store.selectConnection(original.connections.find(edge => edge.from.node === 'color')!.id);
+        fixture.detectChanges();
+        button.click();
+        fixture.detectChanges();
+        expect(stage.style.backgroundPosition).not.toBe(nodePosition);
+        expect(component.graph()).toBe(original);
+    });
+
     it('adds palette nodes and replaces the document when the domain changes', async () => {
         const {fixture, element, component} = await setup();
         [...element.querySelectorAll('button')]
