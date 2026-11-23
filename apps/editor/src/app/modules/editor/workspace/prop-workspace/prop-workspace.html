@@ -4,9 +4,9 @@
             <nav aria-label="Prop location">
                 <span>{{ document.kind === 'source' ? 'Assets' : 'Scene' }}</span>
                 <span aria-hidden="true">/</span>
-                @for (ancestor of prop.breadcrumbs(); track $index) {
+                @for (ancestor of prop.breadcrumbs(); track ancestor.draftId) {
                     <button (click)="backTo($index)" [disabled]="!prop.canOpen()"
-                            [attr.aria-label]="'Back to ' + ancestor" type="button">{{ ancestor }}</button>
+                            [attr.aria-label]="'Back to ' + ancestor.label" type="button">{{ ancestor.label }}</button>
                     <span aria-hidden="true">/</span>
                 }
                 <strong aria-current="page">{{ document.name }}</strong>
@@ -86,6 +86,9 @@
                 @if (prop.selectedPlacement(); as placement) {
                     <h4>{{ placement.name }}</h4>
                     <dl class="properties">
+                        @if (prop.placementAddress(); as address) {
+                            <dt>Placement address</dt><dd>{{ address.placement_path.join(' › ') }}</dd>
+                        }
                         <dt>Placement ID</dt><dd>{{ placement.id }}</dd>
                         <dt>Linked source</dt><dd>{{ placementSource()?.path ?? placement.target.asset_id }}</dd>
                         <dt>Saved version</dt><dd>{{ placement.target.fingerprint }}</dd>
@@ -96,7 +99,9 @@
                         <p role="status">Source unavailable. The saved pin is still shown in the Prop preview.</p>
                     }
                     <div class="preview-actions">
-                        <button (click)="openSelectedSource()" [disabled]="!placementAsset() || !prop.canOpenNested()" type="button">Open Nested Source</button>
+                        <button (click)="openSelectedSource()" [disabled]="!placementAsset()?.fingerprint || !prop.canOpenNested()"
+                                title="Open the current source in its own draft. The saved placement version is kept."
+                                type="button">Open Nested Source</button>
                         @if (newerFingerprint()) {
                             <button (click)="reviewPlacementRefresh()" [disabled]="!prop.canEditDraft() || prop.nestedReviewPending()" type="button">Review Refresh…</button>
                         }

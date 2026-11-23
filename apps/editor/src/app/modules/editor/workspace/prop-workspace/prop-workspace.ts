@@ -169,7 +169,15 @@ export class PropWorkspace {
         if (await this.prop.backTo(index)) {
             this.nestedTarget.set(null);
             this.refreshTarget.set(null);
-            this.focusHeading();
+            const selectedPlacement = this.prop.selectedPlacement()?.id;
+            if (selectedPlacement) {
+                afterNextRender(() => {
+                    const heading = this.heading()?.nativeElement;
+                    const button = [...(heading?.closest('.prop-document')?.querySelectorAll<HTMLButtonElement>(
+                        '[data-prop-placement]') ?? [])].find(candidate => candidate.dataset['propPlacement'] === selectedPlacement);
+                    (button ?? heading)?.focus({preventScroll: true});
+                }, {injector: this.injector});
+            } else this.focusHeading();
         }
     }
 

@@ -8,7 +8,7 @@ import type {EntityKey, ModelAsset, SceneEntity, SceneId, Transform} from '../..
 import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {
-    NestedPropPlacement, NestedPropPlacementRequest, NestedPropSource, PrefabSourceDraft, PropDraftEdit,
+    NestedPropPlacement, NestedPropPlacementRequest, NestedPropSource, PrefabSourceDraft, PropAddress, PropDraftEdit,
 } from '../../../../core/editor/linked-prefabs.models';
 import {readPrefabSource} from '../prefabs/prefab-source-values';
 import {SceneEditingService} from '../scene-editing.service';
@@ -101,7 +101,17 @@ export class PropWorkspaceService {
     private destroyed = false;
 
     readonly error = this.failure.asReadonly();
-    readonly breadcrumbs = computed(() => this.ancestors().map(route => route.tab.name));
+    readonly breadcrumbs = computed(() => this.ancestors().map(route => ({
+        draftId: route.tab.draft.draft_id, label: route.tab.name, placementId: route.placementId,
+    })));
+    readonly placementAddress = computed<PropAddress | null>(() => {
+        const placement = this.selectedPlacement();
+        if (!placement) return null;
+        return {kind: 'placement', placement_path: [
+            ...this.ancestors().flatMap(route => route.placementId === null ? [] : [route.placementId]),
+            placement.id,
+        ]};
+    });
     readonly pending = computed(() => this.opening() !== null);
     readonly draftPending = this.editingDraft.asReadonly();
     readonly nestedReview = this.nestedSource.asReadonly();
@@ -229,10 +239,16 @@ export class PropWorkspaceService {
             this.failure.set('This source is already open in the Prop breadcrumb trail.');
             return false;
         }
-        return this.loadSource(asset, true);
+        if (!asset.fingerprint) {
+            this.failure.set('The nested source version is unavailable. Refresh Assets and try again.');
+            return false;
+        }
+        return this.loadSource(asset, true, asset.fingerprint);
     }
 
-    private async loadSource(asset: Pick<ModelAsset, 'asset_id' | 'path' | 'name'>, nested: boolean): Promise<boolean> {
+    private async loadSource(
+        asset: Pick<ModelAsset, 'asset_id' | 'path' | 'name'>, nested: boolean, expectedFingerprint?: string,
+    ): Promise<boolean> {
         return this.open(async (scope, revision, current) => {
             const draft = await this.editor.openPrefabSource(asset.path, scope.generation, revision);
             if (!current()) {
@@ -242,6 +258,9 @@ export class PropWorkspaceService {
             try {
                 if (asset.asset_id && draft.asset_id !== asset.asset_id) {
                     throw new Error('The Prop asset has changed. Refresh Assets and open it again.');
+                }
+                if (expectedFingerprint !== undefined && draft.fingerprint !== expectedFingerprint) {
+                    throw new Error('The nested source changed on disk. Refresh Assets and open its current version.');
                 }
                 readPrefabSource(draft.prefab);
             } catch (error) {
