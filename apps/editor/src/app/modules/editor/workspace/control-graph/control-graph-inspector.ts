@@ -7,13 +7,13 @@ import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
 @Component({
     selector: 'editor-control-graph-inspector',
     template: `
-        @if (workspace?.supported() && actor().player_controller) {
+        @if (workspace && workspace.supported() && actor().player_controller) {
             <fieldset class="controls">
                 <legend>Controls Graph</legend>
                 <label>Control route
                     <select #choice [value]="selected()" (change)="selected.set(choice.value)" [disabled]="!available()">
                         <option value="" [selected]="!selected()">Built-in Controller</option>
-                        @for (asset of workspace?.assets() ?? []; track asset.id) {
+                        @for (asset of workspace.assets(); track asset.id) {
                             <option [value]="asset.id" [selected]="asset.id === selected()">{{ asset.path }}</option>
                         }
                         @if (selected() && !listed()) {
@@ -21,9 +21,9 @@ import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
                         }
                     </select>
                 </label>
-                <button type="button" [disabled]="!available() || workspace?.loadingCatalog()" (click)="workspace?.refresh()">Refresh Controls Graphs</button>
-                <button type="button" [disabled]="!available() || !selected()" (click)="workspace?.open(selected())">Open Controls Graph</button>
-                <button type="button" [disabled]="!available()" (click)="workspace?.create()">New Controls Graph</button>
+                <button type="button" [disabled]="!available() || workspace.loadingCatalog()" (click)="workspace.refresh()">Refresh Controls Graphs</button>
+                <button type="button" [disabled]="!available() || !selected()" (click)="workspace.open(selected())">Open Controls Graph</button>
+                <button type="button" [disabled]="!available()" (click)="workspace.create()">New Controls Graph</button>
                 <button type="button" (click)="apply()" [disabled]="!available() || selected() === attached() || (!!selected() && !listed())">
                     Apply Control Route
                 </button>

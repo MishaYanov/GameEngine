@@ -450,12 +450,19 @@ fn workspace_switch_preserves_drafts_and_saves_only_active_scene_then_reopens_st
 			name: "First saved".into(),
 		},
 	);
-	run(
-		&mut workspace,
-		Command::SwitchScene {
-			scene_id: second.clone(),
-		},
-	);
+	assert!(workspace.scene_switch.is_none());
+	let (_, preview_closed) = workspace.with_viewport_update(|workspace| {
+		run(
+			workspace,
+			Command::SwitchScene {
+				scene_id: second.clone(),
+			},
+		);
+	});
+	assert!(!preview_closed);
+	let (revision, requested, installed) = workspace.scene_switch.unwrap();
+	assert_eq!(revision, workspace.backend.session().scene_revision());
+	assert!(requested <= installed);
 	assert_eq!(
 		workspace.scene_path,
 		fixture.0.join("scenes/second.json").canonicalize().unwrap()

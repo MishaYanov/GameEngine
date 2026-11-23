@@ -57,6 +57,7 @@
     <div class="workspace-main">
         <scene-entities-panel
                 data-editor-shortcut-scope="hierarchy"
+                drawerMaxWidth="var(--workspace-hierarchy-max)"
                 [scene]="sceneEntities()"
                 [selectedKeys]="editorService.selection()"
                 [disabled]="!sceneEditing.ready()"
@@ -165,10 +166,11 @@
             </div>
         </section>
         @if (workspaceView.gameView() && editorService.playing()) {
-            <editor-runtime-inspector [opening]="workspaceActionBlocked()"/>
+            <editor-runtime-inspector [opening]="workspaceActionBlocked()" drawerMaxWidth="var(--workspace-inspector-max)"/>
         } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()) {
         <inspector-panel
                 data-editor-shortcut-scope="inspector"
+                drawerMaxWidth="var(--workspace-inspector-max)"
                 [entity]="sceneEditing.entity()"
                 [contextKey]="sceneContext()"
                 [editable]="sceneEditing.editable()"

@@ -42,14 +42,11 @@ pub struct PickHit {
 	pub normal: Vec3,
 }
 pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<PickHit> {
-	let mut nearest = ray.max_distance;
-	let mut hit = None;
+	let mut hit: Option<PickHit> = None;
 	for target in targets {
-		if let Some(distance) = target
-			.bounds
-			.ray_distance(ray.origin, ray.direction, nearest)
-		{
-			if hit.is_some() && distance >= nearest {
+		let limit = hit.as_ref().map_or(ray.max_distance, |hit| hit.distance);
+		if let Some(distance) = target.bounds.ray_distance(ray.origin, ray.direction, limit) {
+			if hit.as_ref().is_some_and(|hit| distance >= hit.distance) {
 				continue;
 			}
 			let position = ray.origin + ray.direction * distance;
@@ -67,7 +64,6 @@ pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<PickHit> {
 					}
 				}
 			}
-			nearest = distance;
 			hit = Some(PickHit {
 				key: target.key.clone(),
 				distance,

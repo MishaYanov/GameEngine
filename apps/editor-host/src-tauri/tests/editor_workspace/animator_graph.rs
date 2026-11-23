@@ -137,9 +137,26 @@ fn one_animator_asset_validates_each_actors_visual_children() {
 		assert_eq!(pose[0].entity_key, key(child));
 		assert_eq!(pose[0].position, [0.0, 1.0, 0.0]);
 	}
-	workspace
-		.save_all(workspace.backend.session().revision())
+	let revision = workspace.backend.session().revision();
+	let preview = workspace
+		.open_authored_clip_preview(
+			&clip_asset.id,
+			&clip_asset.fingerprint,
+			None,
+			revision,
+			workspace.generation,
+			1,
+		)
 		.unwrap();
+	let sample = workspace.sample_authored_clip_preview(&preview.token, 500).unwrap();
+	let frame = workspace.active_authored_clip_aperture().unwrap();
+	assert_eq!(frame.visual_pose.unwrap().poses.as_ref(), sample.poses.as_slice());
+	let (saved, preview_closed) = workspace.with_viewport_update(|workspace| {
+		workspace.save_all(revision)
+	});
+	saved.unwrap();
+	assert!(preview_closed);
+	assert!(workspace.active_authored_clip_aperture().is_none());
 	let authored = fs::read(&scene_path).unwrap();
 	let prepared = workspace
 		.prepare_build(workspace.backend.session().revision())

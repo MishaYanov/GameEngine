@@ -67,6 +67,7 @@
                         <path
                                 [attr.d]="wire.path"
                                 [attr.data-type]="wire.type"
+                                [style.--wire-color]="wire.color"
                                 [attr.marker-end]="
 								wire.kind === 'transition' ? 'url(#' + instructionsId + '-arrow)' : null
 							"

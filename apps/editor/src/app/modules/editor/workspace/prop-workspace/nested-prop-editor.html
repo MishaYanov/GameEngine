@@ -20,7 +20,7 @@
             </fieldset>
             @for (slot of source.slots; track slot) {
                 <label>{{ slot }}
-                    <select #binding [value]="bindings()[slot] ?? ''" (change)="assign(slot, binding.value)">
+                    <select #binding [value]="bindings().get(slot) ?? ''" (change)="assign(slot, binding.value)">
                         <option value="">Choose a binding</option>
                         @for (choice of choices(); track choice.value) {
                             <option [value]="choice.value">{{ choice.label }}</option>

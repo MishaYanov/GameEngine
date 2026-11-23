@@ -39,7 +39,7 @@ export class NestedPropEditor {
     protected readonly selected = signal('');
     protected readonly name = signal('');
     protected readonly position = signal<readonly [string, string, string]>(['0', '0', '0']);
-    protected readonly bindings = signal<Readonly<Record<string, string>>>({});
+    protected readonly bindings = signal<ReadonlyMap<string, string>>(new Map());
     protected readonly axes = ['X', 'Y', 'Z'];
     protected readonly available = computed(() => this.assets().filter(asset =>
         asset.kind === 'prefab' && asset.asset_id && asset.asset_id !== this.ownerAssetId() && asset.fingerprint,
@@ -67,7 +67,7 @@ export class NestedPropEditor {
         const slotChoices = new Map(this.choices().map(choice => [choice.value, choice.target]));
         const bindings: [string, NestedPropBinding][] = [];
         for (const slot of review.slots) {
-            const target = slotChoices.get(this.bindings()[slot]);
+            const target = slotChoices.get(this.bindings().get(slot) ?? '');
             if (!target) return null;
             bindings.push([slot, target]);
         }
@@ -80,7 +80,7 @@ export class NestedPropEditor {
 
     protected chooseAsset(assetId: string): void {
         this.selected.set(assetId);
-        this.bindings.set({});
+        this.bindings.set(new Map());
         const asset = this.available().find(item => item.asset_id === assetId);
         this.name.set(asset?.name ?? '');
         if (asset?.asset_id && asset.fingerprint) {
@@ -95,7 +95,7 @@ export class NestedPropEditor {
     }
 
     protected assign(slot: string, value: string): void {
-        this.bindings.update(current => ({...current, [slot]: value}));
+        this.bindings.update(current => new Map(current).set(slot, value));
     }
 
     protected place(event: Event): void {

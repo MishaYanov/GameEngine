@@ -1,5 +1,6 @@
 use super::*;
 use bridge::viewport::PropPreviewTargetDto;
+use editor::prop_preview::PropPreviewEnvironment;
 use editor::prefab_sources::{PrefabSourceDraftDto, PropDraftEdit};
 
 const PROP_PATH: &str = "prefabs/table.json";
@@ -38,7 +39,16 @@ fn source_preview_selection_and_frame_are_scoped_without_editing_the_scene() {
 	assert!(workspace
 		.open_prop_preview(target, revision, generation, 1)
 		.is_err());
-	assert_eq!(workspace.active_prop_preview().unwrap().frame_request, 0);
+	let frame = workspace.active_prop_preview().unwrap();
+	assert_eq!(frame.frame_request, 0);
+	assert!(frame.editable_source);
+	assert!(workspace.prop_scene_environment(&preview.token).is_none());
+	workspace
+		.set_prop_preview_environment(&preview.token, PropPreviewEnvironment::Scene)
+		.unwrap();
+	let environment = workspace.prop_scene_environment(&preview.token).unwrap();
+	assert!(environment.sky.is_none());
+	assert!(environment.lights.is_empty());
 	let selected = workspace
 		.select_prop_preview(&preview.token, Some(EntityKey::new("a").unwrap()))
 		.unwrap();
@@ -89,7 +99,9 @@ fn pinned_inspection_stays_available_without_its_source_and_invalidates_on_scene
 			1,
 		)
 		.unwrap();
-	let render_document = workspace.active_prop_preview().unwrap().document;
+	let frame = workspace.active_prop_preview().unwrap();
+	assert!(!frame.editable_source);
+	let render_document = frame.document;
 	assert_eq!(render_document.entities.len(), 2);
 	assert!(render_document
 		.entities

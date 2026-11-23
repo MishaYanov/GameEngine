@@ -13,25 +13,6 @@ pub struct EditorCamera {
 }
 
 impl EditorCamera {
-	/// Preserve the authored pose once, then navigate a separate editor value.
-	pub fn from_camera(camera: &runtime::Camera) -> Self {
-		if camera.view_projection(1.0).is_err() {
-			return Self::default();
-		}
-		let distance = 10.0;
-		Self {
-			pivot: Vec3::from_array(camera.position)
-				+ Vec3::from_array(camera.forward()) * distance,
-			yaw: camera.yaw,
-			pitch: camera.pitch.clamp(-pole_limit(), pole_limit()),
-			distance,
-			ortho_height: 2.0 * distance * (camera.vertical_fov * 0.5).tan(),
-			vertical_fov: camera.vertical_fov,
-			near: camera.near,
-			far: camera.far,
-		}
-	}
-
 	pub fn forward(&self) -> Vec3 {
 		Vec3::new(
 			self.yaw.sin() * self.pitch.cos(),

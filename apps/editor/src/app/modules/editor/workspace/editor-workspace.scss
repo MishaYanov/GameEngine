@@ -13,12 +13,19 @@
 }
 
 .workspace-main {
+  // Keep room for the viewport even when both saved drawer widths are at their limits.
+  --workspace-hierarchy-max: 30%;
+  --workspace-inspector-max: 35%;
   display: flex;
   flex: 1;
   gap: var(--space-2);
   min-width: 0;
   min-height: 0;
   padding: 0 var(--space-2);
+}
+
+.workspace-main:not(:has(inspector-panel, editor-runtime-inspector)) {
+  --workspace-hierarchy-max: 55%;
 }
 
 .workspace-controls {
@@ -214,7 +221,10 @@ scene-viewport[hidden] {
 }
 
 @container (max-width: 45rem) {
-  .workspace-main {
+  .workspace-main,
+  .workspace-main:not(:has(inspector-panel, editor-runtime-inspector)) {
+    --workspace-hierarchy-max: 48%;
+    --workspace-inspector-max: 48%;
     flex-wrap: wrap;
     align-content: flex-start;
     overflow: auto;

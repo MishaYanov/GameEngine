@@ -267,6 +267,27 @@ impl EditorWorkspace {
 			receipt,
 		})
 	}
+	/// Keep preview lifetimes and scene timing in sync after a host operation.
+	pub(crate) fn with_viewport_update<T>(
+		&mut self,
+		operation: impl FnOnce(&mut Self) -> T,
+	) -> (T, bool) {
+		use std::time::Instant;
+
+		let scene = self.backend.session().active_scene_id().clone();
+		let requested = Instant::now();
+		let (result, camera_closed) = self.with_camera_preview_cleanup(operation);
+		let prop_closed = self.discard_stale_prop_preview();
+		let animation_closed = self.discard_stale_animation_preview();
+		let clip_closed = self.discard_stale_authored_clip_preview();
+		self.discard_stale_audio_audition();
+		let current = self.backend.session();
+		if current.active_scene_id() != &scene {
+			self.scene_switch = Some((current.scene_revision(), requested, Instant::now()));
+		}
+		(result, camera_closed || prop_closed || animation_closed || clip_closed)
+	}
+
 	pub fn execute_receipt(
 		&mut self,
 		request: EditorCommandRequest,

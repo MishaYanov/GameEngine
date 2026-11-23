@@ -1,5 +1,7 @@
 :host {
+    container-type: inline-size;
     display: block;
+    min-width: 0;
     min-height: 0;
     height: 100%;
 }
@@ -62,3 +64,11 @@ li .failure { display: block; }
 .failure { color: var(--color-danger, #ef8a8a); }
 .digest { overflow-wrap: anywhere; }
 button[aria-pressed='true'] { outline: 1px solid currentColor; }
+@container (max-width: 27rem) {
+    .editor {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(15rem, 42vh) auto;
+    }
+
+    .outline { overflow: visible; }
+}

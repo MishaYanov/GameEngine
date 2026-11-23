@@ -3,10 +3,11 @@ import {FormControl, FormGroup, ReactiveFormsModule, Validators} from '@angular/
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {EditorService} from '../../core/editor/editor.service';
 import {ProjectService, type ProjectCreationResult} from '../../core/project/project.service';
+import {ProjectSetupPreview} from './project-setup-preview';
 
 @Component({
     selector: 'app-project-setup',
-    imports: [ReactiveFormsModule, RouterLink],
+    imports: [ReactiveFormsModule, RouterLink, ProjectSetupPreview],
     templateUrl: './project-setup.html',
     styleUrl: './project-setup.scss',
 })

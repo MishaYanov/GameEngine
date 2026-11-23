@@ -43,30 +43,36 @@
   text-transform: capitalize;
 }
 
-header {
+header,
+header button,
+.port {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+header {
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--color-graph-node-edge);
 }
 
-header button {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+header button,
+.port {
   min-width: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+  text-align: left;
+}
+
+header button {
   min-height: var(--layout-subject-control-height);
   flex: 1;
   padding: 0;
-  border: 0;
-  background: transparent;
   color: var(--color-text);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  text-align: left;
   cursor: var(--cursor-drag);
-  touch-action: none;
 }
 
 header button span {
@@ -114,26 +120,20 @@ header editor-icon {
 }
 
 .port {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   height: var(--layout-graph-port-height);
-  min-width: 0;
   padding: 0 var(--space-3);
-  border: 0;
-  background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   cursor: var(--cursor-connect);
-  touch-action: none;
-  text-align: left;
 }
 
+.composite-summary button:hover,
 .port:hover {
   background: var(--color-control-hover);
   color: var(--color-text);
 }
 
+.composite-summary button:active,
 .port:active {
   background: var(--color-control-pressed);
   color: var(--color-text);
@@ -158,20 +158,6 @@ header editor-icon {
 .port.connected::before,
 .port.connected::after {
   background: var(--port-color);
-}
-
-[data-type='float'] {
-  --port-color: var(--color-graph-float);
-}
-
-[data-type='vector2'],
-[data-type='delta2'],
-[data-type='vector3'] {
-  --port-color: var(--color-graph-vector);
-}
-
-[data-type='pose'] {
-  --port-color: var(--color-graph-pose);
 }
 
 .port:focus-visible {
@@ -201,32 +187,6 @@ editor-graph-values {
   padding: var(--space-2);
   cursor: var(--cursor-action);
   font: inherit;
-}
-
-.composite-summary button:hover {
-  background: var(--color-control-hover);
-  color: var(--color-text);
-}
-
-.composite-summary button:active {
-  background: var(--color-control-pressed);
-  color: var(--color-text);
-}
-
-[data-type='transition'],
-[data-type='rootMotion'] {
-  --port-color: var(--color-text-secondary);
-}
-
-[data-type='button'],
-[data-type='bool'],
-[data-type='trigger'],
-[data-type='events'] {
-  --port-color: var(--color-graph-vector);
-}
-
-[data-type='int'] {
-  --port-color: var(--color-graph-float);
 }
 
 :host(.highlighted) {

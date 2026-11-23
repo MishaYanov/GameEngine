@@ -80,6 +80,7 @@ let nextHierarchyId = 0;
 })
 export class SceneEntitiesPanel {
     readonly scene = input.required<SceneEntitiesModel>();
+    readonly drawerMaxWidth = input('60%');
     readonly selectedKeys = input<readonly EntityKey[]>([]);
     readonly disabled = input(false);
     readonly foldersEnabled = input(false);

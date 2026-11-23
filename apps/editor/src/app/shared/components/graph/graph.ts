@@ -35,6 +35,7 @@ import {
     nodeAllowed,
 } from './graph.models';
 import {GraphStore} from './graph.store';
+import {graphPortColor} from './graph-colors';
 import {EditorDialog} from '../dialog/dialog';
 import {Drawer} from '../drawer/drawer';
 import {EditorPane} from '../pane/pane';
@@ -138,6 +139,7 @@ export class EditorGraph {
                         ...edge,
                         path: edge.from.node === edge.to.node ? this.loop(from, to) : this.curve(from, to),
                         type: port.type,
+                        color: port.type === 'rootMotion' ? null : graphPortColor(port.type),
                         label: `${edge.kind === 'transition' ? 'Edit transition' : 'Remove connection'} ${edge.from.node} ${edge.from.port} to ${edge.to.node} ${edge.to.port}`,
                     },
                 ]

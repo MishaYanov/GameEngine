@@ -39,14 +39,7 @@ h1 {
   margin: var(--space-4) 0;
 }
 
-h2 {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
-  margin-top: var(--space-7);
-}
-
-.intro,
-aside p {
+.intro {
   color: var(--color-text-secondary);
   line-height: var(--font-line-height-relaxed);
 }
@@ -62,14 +55,18 @@ label {
   font-weight: var(--font-weight-medium);
 }
 
-input {
+input,
+button {
   width: 100%;
   min-height: var(--layout-control-height);
+  border-radius: var(--radius-md);
+}
+
+input {
   padding: var(--space-3) var(--space-4);
   color: var(--color-text);
   background: var(--color-input);
   border: var(--border-width) solid var(--color-input-edge);
-  border-radius: var(--radius-md);
 }
 
 input::placeholder {
@@ -100,8 +97,6 @@ input[aria-invalid='true'] {
 }
 
 button {
-  width: 100%;
-  min-height: var(--layout-control-height);
   margin-top: var(--space-6);
   display: flex;
   justify-content: space-between;
@@ -109,7 +104,6 @@ button {
   color: var(--setup-button-text, var(--color-on-action));
   padding: var(--space-4);
   border: 0;
-  border-radius: var(--radius-md);
   font-weight: var(--font-weight-semibold);
   cursor: var(--cursor-action);
   transition: background-color var(--duration-fast) var(--easing-standard);
@@ -136,35 +130,6 @@ input:disabled {
   background: var(--color-control-disabled);
   color: var(--color-text-disabled);
   cursor: not-allowed;
-}
-
-ol {
-  padding-left: var(--space-6);
-  color: var(--color-text-secondary);
-  line-height: var(--font-line-height-relaxed);
-  font-size: var(--font-size-md);
-}
-
-.project-contents {
-  margin: var(--space-5) 0 0;
-  padding: 0;
-  list-style: none;
-  color: var(--color-text);
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-sm);
-  line-height: 2;
-
-  ul {
-    padding-left: var(--space-5);
-    list-style: none;
-    border-left: var(--border-width) solid var(--color-border);
-  }
-
-  small {
-    margin-left: var(--space-2);
-    color: var(--color-text-secondary);
-    font-family: var(--font-family-sans);
-  }
 }
 
 .open-created {

@@ -44,6 +44,7 @@ let nextInspectorId = 0;
 })
 export class InspectorPanel {
     readonly entity = input<SceneEntity | null>(null);
+    readonly drawerMaxWidth = input('45%');
     readonly contextKey = input('');
     readonly editable = input(false);
     readonly editError = input<string | null>(null);

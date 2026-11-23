@@ -19,6 +19,7 @@ import type { Config } from '../../../../shared/models/config.model';
 })
 export class RuntimeInspector {
 	readonly opening = input(false);
+	readonly drawerMaxWidth = input('45%');
 	private readonly editor = inject(EditorService);
 	private readonly viewport = inject(ViewportEditorService);
 	protected readonly drawerConfig: Config<DrawerSettings> = {

@@ -5,7 +5,7 @@
         preferenceKey="editor.object-inspector"
         resizeLabel="Resize Inspector"
         type="right"
-        maxWidth="45%"
+        [maxWidth]="drawerMaxWidth()"
 >
     <editor-pane icon="object" title="Inspector">
         @for (selection of selectedEntities(); track selection.identity) {

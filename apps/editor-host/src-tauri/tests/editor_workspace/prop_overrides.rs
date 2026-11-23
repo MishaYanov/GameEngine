@@ -114,4 +114,20 @@ fn applying_a_reviewed_placement_override_writes_the_root_source_and_preserves_t
 	assert!(status.source_changed);
 	assert_eq!(status.source_fingerprint, pinned);
 	assert_eq!(workspace.backend.session().revision(), current);
+
+	let review = workspace
+		.review_linked_source_overrides(root, &applied.draft.draft_id, None, current)
+		.unwrap();
+	assert_eq!(review.len(), 1);
+	assert_eq!(review[0].incoming.as_ref(), Some(&review[0].local));
+	assert!(!review[0].conflict);
+	workspace
+		.update_linked_source_reviewed(root, &applied.draft.draft_id, None, Vec::new(), current)
+		.unwrap();
+	let updated = workspace
+		.linked_prefab_status(root, workspace.backend.session().revision())
+		.unwrap()
+		.unwrap();
+	assert!(!updated.source_changed);
+	assert_eq!(updated.source_fingerprint, applied.draft.fingerprint);
 }

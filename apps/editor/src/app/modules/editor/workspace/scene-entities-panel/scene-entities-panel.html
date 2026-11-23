@@ -1,4 +1,4 @@
-<app-drawer [config]="drawerConfig" icon="object" label="Hierarchy" maxWidth="60%"
+<app-drawer [config]="drawerConfig" icon="object" label="Hierarchy" [maxWidth]="drawerMaxWidth()"
             preferenceKey="editor.scene-objects" resizeLabel="Resize Hierarchy" type="left">
     <editor-pane icon="object" title="Hierarchy">
         @if (scene().projectOpen) {

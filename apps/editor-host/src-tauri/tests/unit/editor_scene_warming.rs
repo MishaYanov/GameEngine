@@ -61,10 +61,11 @@ fn replaced_warm_jobs_cannot_publish_and_a_matching_document_is_claimed_once() {
 		mode: SceneWarmingMode::References,
 		..Default::default()
 	};
-	assert!(matches!(
-		warming.claim(1, &key("garden", 3).scene, &new),
-		WarmClaim::Hit(_)
-	));
+	let (scene, outcome) = warming.claim(1, &key("garden", 3).scene, &new).into_scene();
+	assert_eq!(outcome, "hit");
+	let scene = scene.unwrap();
+	assert!(scene.references.matches(&new));
+	assert!(scene.models.is_none());
 	assert!(matches!(
 		warming.claim(1, &key("garden", 3).scene, &new),
 		WarmClaim::Unrequested

@@ -5,8 +5,13 @@
   min-width: 0;
 }
 
-.graph {
+.graph,
+.stage {
   position: relative;
+  overflow: hidden;
+}
+
+.graph {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -15,17 +20,20 @@
   color: var(--color-text);
   border: var(--border-width) solid var(--color-pane-edge);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+}
+
+.toolbar,
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  background: var(--color-graph-toolbar);
 }
 
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-3);
-  background: var(--color-graph-toolbar);
   border-bottom: var(--border-width) solid var(--color-graph-node-edge);
 }
 
@@ -45,9 +53,15 @@
   color: var(--color-graph-accent);
 }
 
-.domain {
+.domain,
+.zoom,
+footer,
+.notice {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+}
+
+.domain {
   text-transform: capitalize;
 }
 
@@ -92,42 +106,39 @@ button {
 }
 
 .add {
-  background: var(--color-action);
-  border-color: var(--color-action);
+  --add-fill: var(--color-action);
+}
+
+.add,
+.add:enabled:is(:hover, :active) {
+  background: var(--add-fill);
+  border-color: var(--add-fill);
   color: var(--color-on-action);
 }
 
 .add:enabled:hover {
-  background: var(--color-action-hover);
-  border-color: var(--color-action-hover);
-  color: var(--color-on-action);
+  --add-fill: var(--color-action-hover);
 }
 
 .add:enabled:active {
-  background: var(--color-action-pressed);
-  border-color: var(--color-action-pressed);
-  color: var(--color-on-action);
-}
-
-.add:disabled {
-  border-color: var(--color-input-edge);
+  --add-fill: var(--color-action-pressed);
 }
 
 .zoom {
   min-width: var(--space-10);
   text-align: center;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
 }
 
-.stage {
-  min-width: 0;
-  background-size: calc(var(--layout-graph-grid-size) * var(--graph-zoom)) calc(var(--layout-graph-grid-size) * var(--graph-zoom));
-  position: relative;
+.stage,
+.workspace {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  min-width: 0;
+}
+
+.stage {
+  background-size: calc(var(--layout-graph-grid-size) * var(--graph-zoom)) calc(var(--layout-graph-grid-size) * var(--graph-zoom));
   background-image: radial-gradient(
           circle,
           var(--color-graph-grid) var(--border-width),
@@ -139,42 +150,17 @@ button {
 
 .workspace {
   display: flex;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
 }
 
-.workspace app-drawer {
-  min-height: 0;
-}
-
-.workspace editor-pane {
-  height: 100%;
-  min-height: 0;
-}
-
-.wire[data-type='transition'] {
-  stroke: var(--color-text-secondary);
+[data-type='transition'] {
   stroke-dasharray: 6 3;
-}
-
-.wire[data-type='button'],
-.wire[data-type='bool'],
-.wire[data-type='trigger'],
-.wire[data-type='events'] {
-  stroke: var(--color-graph-vector);
-}
-
-.wire[data-type='int'] {
-  stroke: var(--color-graph-float);
 }
 
 .stage:focus-visible {
   outline-offset: calc(-1 * var(--focus-width));
 }
 
-.stage.interacting,
-.stage.interacting :is([data-node-handle], .port) {
+.stage.interacting {
   cursor: var(--cursor-dragging);
 }
 
@@ -203,23 +189,9 @@ button {
 }
 
 .wire {
-  stroke: var(--color-graph-accent);
+  stroke: var(--wire-color, var(--color-graph-accent));
   stroke-width: var(--layout-graph-wire-width);
   pointer-events: none;
-}
-
-.wire[data-type='float'] {
-  stroke: var(--color-graph-float);
-}
-
-.wire[data-type='vector2'],
-.wire[data-type='delta2'],
-.wire[data-type='vector3'] {
-  stroke: var(--color-graph-vector);
-}
-
-.wire[data-type='pose'] {
-  stroke: var(--color-graph-pose);
 }
 
 .wire.selected-wire {
@@ -275,14 +247,8 @@ button {
 }
 
 footer {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  background: var(--color-graph-toolbar);
   border-top: var(--border-width) solid var(--color-graph-node-edge);
 }
 
@@ -290,10 +256,8 @@ footer {
   margin: 0;
   padding: var(--space-1) var(--space-3);
   min-height: var(--space-6);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
 }
 
-.notice.error {
+.error {
   color: var(--color-danger);
 }

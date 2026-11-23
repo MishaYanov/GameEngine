@@ -1,33 +1,6 @@
 use super::*;
 
 #[test]
-fn initialization_preserves_authored_pose_but_navigation_only_changes_the_editor_value() {
-	let authored = runtime::Camera {
-		position: [4.0, 2.0, 8.0],
-		yaw: -0.3,
-		pitch: -0.2,
-		..Default::default()
-	};
-	let before = authored.view_projection(1.5).unwrap();
-	let mut editor = EditorCamera::from_camera(&authored);
-	approx(editor.position(), Vec3::from_array(authored.position));
-	editor.orbit(Vec2::new(80.0, 30.0));
-	editor.pan(
-		Vec2::new(30.0, -20.0),
-		[1200, 800],
-		ViewportProjection::Perspective,
-	);
-	editor.zoom(0.7);
-	assert_eq!(authored.view_projection(1.5).unwrap(), before);
-	assert!(
-		editor
-			.position()
-			.distance(Vec3::from_array(authored.position))
-			> 1.0
-	);
-}
-
-#[test]
 fn project_and_ray_round_trip_in_both_projection_modes() {
 	let camera = camera();
 	for projection in [

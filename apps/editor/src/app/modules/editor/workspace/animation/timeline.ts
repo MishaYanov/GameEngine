@@ -22,7 +22,7 @@ export class ClipTimeline {
     protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
     protected readonly tracks = computed(() => this.timeline.draft()?.clip.tracks ?? []);
     protected readonly keys = computed<readonly ClipKey<Vec3 | Quaternion>[]>(() => this.tracks()[this.track()]?.track.keys ?? []);
-    protected readonly selected = computed(() => this.keys().find(key => key.id === this.key()) ?? this.keys()[0] ?? null);
+    protected readonly selected = computed(() => this.keys().find(key => key.id === this.key()) ?? this.keys().at(0) ?? null);
     protected readonly values = linkedSignal(() => this.selected()?.value.map(String) ?? []);
     protected readonly markers = computed(() => this.timeline.draft()?.clip.markers ?? []);
     protected readonly selectedMarker = computed(() => this.markers().find(marker => marker.id === this.marker()) ?? null);

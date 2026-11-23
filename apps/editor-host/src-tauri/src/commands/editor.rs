@@ -101,19 +101,7 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 		let (result, preview_closed) = {
 			let mut slot = shared.lock().map_err(|_| "Editor state lock failed".to_owned())?;
 			let workspace = slot.as_mut().ok_or_else(|| "Open a scene before using the editor".to_owned())?;
-			let scene = workspace.backend.session().active_scene_id().clone();
-			let requested = Instant::now();
-			let (result, camera_preview_closed) = workspace.with_camera_preview_cleanup(operation);
-			let prop_preview_closed = workspace.discard_stale_prop_preview();
-			let animation_preview_closed = workspace.discard_stale_animation_preview();
-			let authored_clip_closed = workspace.discard_stale_authored_clip_preview();
-			workspace.discard_stale_audio_audition();
-			let preview_closed = prop_preview_closed || camera_preview_closed || animation_preview_closed || authored_clip_closed;
-			let current = workspace.backend.session();
-			if current.active_scene_id() != &scene {
-				workspace.scene_switch = Some((current.scene_revision(), requested, Instant::now()));
-			}
-			(result, preview_closed)
+			workspace.with_viewport_update(operation)
 		};
 		// Never hold the workspace mutex while taking the viewport mutex.
 		if preview_closed || (invalidate && result.is_ok()) {

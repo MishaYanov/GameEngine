@@ -10,6 +10,15 @@
   overflow: hidden;
 }
 
+.scene-root,
+.hierarchy-actions button {
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
 .scene-root {
   display: flex;
   align-items: center;
@@ -17,21 +26,20 @@
   flex: none;
   min-height: 32px;
   width: 100%;
-  padding: var(--space-1) var(--space-2);
   border: 1px solid transparent;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: var(--font-size-xs);
   text-align: left;
 }
 
-.scene-root span {
-  flex: 1;
+.scene-root span,
+.entity-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.scene-root span {
+  flex: 1;
 }
 
 .scene-root small {
@@ -96,7 +104,7 @@
   cursor: var(--cursor-action);
 }
 
-.entity-button:where(:enabled:hover), .scene-root:where(:enabled:hover) {
+:is(.entity-button, .scene-root):where(:enabled:hover) {
   background: var(--color-control-hover);
 }
 
@@ -109,9 +117,7 @@
   background: var(--color-selected-hover);
 }
 
-.entity-button:where(:enabled:active),
-.entity-button.selected:where(:enabled:active),
-.scene-root:where(:enabled:active) {
+:is(.entity-button, .entity-button.selected, .scene-root):where(:enabled:active) {
   background: var(--color-control-pressed);
 }
 
@@ -120,11 +126,11 @@
   outline-offset: calc(-1 * var(--focus-width));
 }
 
-.entity-button:disabled, .scene-root:disabled, .hierarchy-actions button:disabled {
+:is(.entity-button, .scene-root, .hierarchy-actions button):disabled {
   color: var(--color-text-disabled);
 }
 
-.scene-root:disabled, .hierarchy-actions button:disabled {
+:is(.scene-root, .hierarchy-actions button):disabled {
   background: var(--color-control-disabled);
 }
 
@@ -165,13 +171,6 @@ editor-icon {
   --layout-icon-size: 14px;
 }
 
-.entity-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
 .hierarchy-actions {
   flex: none;
   display: flex;
@@ -183,13 +182,8 @@ editor-icon {
 
 .hierarchy-actions button {
   min-height: 28px;
-  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: var(--font-size-xs);
 }
 
 .hierarchy-actions button:hover:enabled {

@@ -3,6 +3,7 @@ import {form} from '@angular/forms/signals';
 import {EditorIcon} from '../../icons/editor-icon';
 import {SubjectFields} from '../subject/subject';
 import {graphDefinition, GraphEndpoint, GraphNode, graphPorts, GraphValues} from './graph.models';
+import {graphPortColor} from './graph-colors';
 
 export interface GraphPortEvent {
     readonly endpoint: GraphEndpoint;
@@ -60,6 +61,7 @@ export class GraphNodeValuesEditor {
 						data-port-direction="input"
 						[attr.data-port-id]="port.id"
 						[attr.data-type]="port.type"
+                        [style.--port-color]="portColor(port.type)"
 						[class.connected]="connected().has(node().id + ':input:' + port.id)"
 						[attr.aria-label]="node().id + ' ' + port.label + ' input, ' + port.type"
 						[title]="port.type"
@@ -79,6 +81,7 @@ export class GraphNodeValuesEditor {
 						data-port-direction="output"
 						[attr.data-port-id]="port.id"
 						[attr.data-type]="port.type"
+                        [style.--port-color]="portColor(port.type)"
 						[class.connected]="connected().has(node().id + ':output:' + port.id)"
 						[attr.aria-label]="node().id + ' ' + port.label + ' output, ' + port.type"
 						[title]="port.type"
@@ -141,6 +144,7 @@ export class GraphNodeCard {
     readonly inspect = output<void>();
     readonly openMachine = output<void>();
     readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    protected readonly portColor = graphPortColor;
     protected readonly definition = computed(() => graphDefinition(this.node().kind));
     protected readonly hasValues = computed(() => Object.keys(this.node().values).length > 0);
     protected readonly stateMotion = computed(() => {

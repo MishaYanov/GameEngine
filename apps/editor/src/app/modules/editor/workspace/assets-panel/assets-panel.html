@@ -16,11 +16,11 @@
             @if (!projectOpen()) {
                 <p>Open a project to browse its assets.</p>
             } @else {
-                @if (animatorAssets?.supported() && animatorAssets?.assets()?.length) {
+                @if (animatorAssets && animatorAssets.supported() && animatorAssets.assets().length) {
                     <details>
                         <summary>Animators</summary>
                         <ul aria-label="Animator assets">
-                            @for (asset of animatorAssets?.assets(); track asset.id) {
+                            @for (asset of animatorAssets.assets(); track asset.id) {
                                 <li><button type="button" (click)="animatorWorkspace?.open(asset.id)" [disabled]="!canRunAction()"
                                     [attr.aria-label]="'Open Animator ' + asset.path">{{ asset.path }}</button></li>
                             }

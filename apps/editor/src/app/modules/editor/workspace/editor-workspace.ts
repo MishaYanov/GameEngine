@@ -189,7 +189,7 @@ export class EditorWorkspace {
             const next = this.workspaceView.activeViewKind();
             const previous = previousView;
             previousView = next;
-            if (previous === next || previous !== 'controls-graph' && next !== 'controls-graph') return;
+            if (previous === next) return;
             afterNextRender(() => {
                 if (this.workspaceView.activeViewKind() === next && this.document.activeElement === this.document.body) {
                     this.workspaceTabs()?.focusTab(next);
