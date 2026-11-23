@@ -40,6 +40,7 @@ import {
     type ViewportEditorState
 } from '../../../core/editor/viewport-editor.models';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
+import {AnimationWorkspaceService} from './animation/animation-workspace.service';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -1784,6 +1785,30 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         expectActive('Animation');
         const importedClips = root.querySelector<HTMLButtonElement>('editor-animation-workspace .clip-kind button')!;
+        const tools = root.querySelector('editor-animation-workspace')!;
+        const sharedViewport = root.querySelector('scene-viewport')!;
+        expect(tools.nextElementSibling).toBe(sharedViewport);
+        expect(tools.parentElement?.classList.contains('animation-layout')).toBe(true);
+        expect(root.querySelector('scene-entities-panel')?.hasAttribute('hidden')).toBe(true);
+        expect(root.querySelector('editor-assets-panel')?.hasAttribute('hidden')).toBe(true);
+        root.querySelector<HTMLButtonElement>('editor-animation-workspace .clip-kind button:nth-child(2)')!.click();
+        await fixture.whenStable();
+        const animation = fixture.debugElement.injector.get(AnimationWorkspaceService);
+        const review = vi.fn(async () => false);
+        const release = animation.registerTimelineReview(review);
+        importedClips.click();
+        await fixture.whenStable();
+        expect(animation.library()).toBe('authored');
+        tab('Scene')!.click();
+        await fixture.whenStable();
+        expectActive('Animation');
+        expect(review).toHaveBeenCalledTimes(2);
+        expect(await fixture.componentInstance.reviewProjectNavigation()).toBe(false);
+        action('Play').click();
+        await fixture.whenStable();
+        expect(editor.playing()).toBe(false);
+        expect(review).toHaveBeenCalledTimes(4);
+        release();
         importedClips.focus();
         action('Play').click();
         await vi.waitFor(() => expect(editor.playing()).toBe(true));
@@ -1809,6 +1834,27 @@ describe('Workspace live editing flow', () => {
         expectActive('Scene');
         expect(document.activeElement).toBe(tab('Scene'));
         expect(tabs().filter(button => button.tabIndex === 0)).toEqual([tab('Scene')]);
+    });
+
+    it('opens the existing asset filters and creates a camera through the Objects actions', async () => {
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        const workspace = fixture.componentInstance;
+        const root = fixture.nativeElement as HTMLElement;
+        expect(workspace.availableObjectActions()).toEqual(expect.arrayContaining(['browse_props', 'browse_models', 'create_camera']));
+        const filter = root.querySelector<HTMLSelectElement>('.asset-filter select')!;
+        await workspace.runObjectAction('browse_props');
+        await fixture.whenStable();
+        expect(filter.value).toBe('prefab');
+        expect(document.activeElement).toBe(root.querySelector('input[aria-label="Search Assets"]'));
+        await workspace.runObjectAction('browse_models');
+        await fixture.whenStable();
+        expect(filter.value).toBe('model');
+
+        await workspace.runObjectAction('create_camera');
+        await fixture.whenStable();
+        expect(commands).toContainEqual({type: 'create_camera'});
+        expect(editor.selection()).toEqual(['camera-1']);
     });
 
     it('opens a pinned instance with unavailable source and restores its read-only tab after Play', async () => {

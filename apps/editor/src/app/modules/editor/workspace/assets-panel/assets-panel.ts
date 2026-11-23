@@ -96,6 +96,7 @@ export class AssetsPanel {
     protected readonly controlsWorkspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
     private readonly folderLocation = viewChild<ElementRef<HTMLElement>>('location');
+    private readonly searchInput = viewChild<ElementRef<HTMLInputElement>>('search');
     private readonly assetRows = viewChildren<ElementRef<HTMLButtonElement>>('assetRow');
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
@@ -313,6 +314,21 @@ export class AssetsPanel {
             request.workspaceGeneration === this.editor.workspaceGeneration() &&
             request.sceneId === this.editor.snapshot()?.active_scene_id &&
             this.editor.snapshot()?.mode === 'edit';
+    }
+
+    browse(filter: 'model' | 'prefab'): void {
+        if (!this.projectOpen() || this.opening()) return;
+        const context = this.editor.workspaceGeneration();
+        this.drawer()?.config.update(config => ({...config, expanded: true, collapsed: false}));
+        this.searchQuery.set('');
+        this.folder.set('');
+        this.selection.set(null);
+        this.assetFilter.set(filter);
+        afterNextRender(() => {
+            if (context === this.editor.workspaceGeneration() && this.assetFilter() === filter) {
+                this.searchInput()?.nativeElement.focus({preventScroll: true});
+            }
+        }, {injector: this.injector});
     }
 
     private async revealProp(request: PropAssetReveal): Promise<void> {

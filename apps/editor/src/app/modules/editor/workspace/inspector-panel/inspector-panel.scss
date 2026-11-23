@@ -154,3 +154,47 @@ h3 span,
     height: 12rem;
   }
 }
+
+:host-context(html[data-theme='workbench']) {
+  .inspector-content {
+    --inspector-label-width: clamp(5.25rem, 32%, 6rem);
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .placeholder,
+  .edit-error {
+    padding: var(--space-2);
+  }
+
+  .name-field,
+  .entity-reference {
+    display: grid;
+    grid-template-columns: var(--inspector-label-width) minmax(0, 1fr);
+    column-gap: var(--space-1);
+  }
+
+  .name-field {
+    align-items: center;
+  }
+
+  .entity-reference dt {
+    color: var(--color-text-muted);
+  }
+
+  input {
+    min-height: var(--layout-control-height);
+  }
+
+  .transform {
+    gap: var(--space-1);
+    padding-block-start: 0;
+    border-color: var(--color-pane-edge);
+  }
+
+  h3 {
+    align-items: center;
+    min-height: var(--layout-control-height);
+    font-size: var(--font-size-md);
+  }
+}

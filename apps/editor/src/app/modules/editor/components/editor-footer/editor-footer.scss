@@ -20,3 +20,9 @@ footer {
     display: none;
   }
 }
+
+:host-context(html[data-theme='workbench']) footer {
+  padding: 2px var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-chrome);
+}

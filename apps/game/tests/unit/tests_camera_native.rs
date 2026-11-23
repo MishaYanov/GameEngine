@@ -786,5 +786,69 @@ fn accessible_player_overlay_renders_with_a_persisted_high_contrast_profile() {
 	println!("Large high-contrast Player screenshot: {}", image.display());
 }
 
+#[test]
+#[ignore = "requires native Windows Vulkan"]
+fn particle_batch_is_submitted_as_one_world_draw_and_can_be_cleared() {
+	use runtime::particle_draw::{ParticleDraw, ParticleSample};
+
+	with_native_window(|events| {
+		let window = Arc::new(
+			events
+				.create_window(
+					Window::default_attributes()
+						.with_visible(false)
+						.with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+				)
+				.unwrap(),
+		);
+		let mut renderer = WindowRenderer::new(window, 320, 240).unwrap();
+		let camera = CameraUniform::perspective(
+			[0., 0., 3.],
+			[0.; 3],
+			[0., 1., 0.],
+			1.0,
+			4.0 / 3.0,
+			0.1,
+			20.0,
+		);
+		let mut draw = None;
+		let particle = ParticleSample {
+			position: [0.; 3],
+			size: 0.6,
+			color: [1.0, 0.3, 0.1],
+		};
+		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[particle, particle]).unwrap();
+		let batch = draw.as_ref().and_then(ParticleDraw::object).unwrap();
+		let status = renderer.draw(&camera, &[batch]).unwrap();
+		let stats = renderer.last_metrics();
+		renderer.wait_idle().unwrap();
+		assert_eq!(status, renderer::DrawStatus::Rendered);
+		assert_eq!(stats.draw_calls, 1);
+		assert_eq!(stats.triangles, 4);
+
+		// Submit the nearer diamond first so the rear diamond only disappears
+		// when the world depth test rejects it. The SDK layer can capture this frame.
+		let foreground = ParticleSample {
+			position: [0., 0., 1.],
+			color: [0.1, 0.45, 1.0],
+			..particle
+		};
+		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[foreground, particle]).unwrap();
+		let batch = draw.as_ref().and_then(ParticleDraw::object).unwrap();
+		let status = renderer.draw(&camera, &[batch]).unwrap();
+		renderer.wait_idle().unwrap();
+		assert_eq!(status, renderer::DrawStatus::Rendered);
+
+		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[]).unwrap();
+		assert!(draw.as_ref().and_then(ParticleDraw::object).is_none());
+		let status = renderer.draw(&camera, &[]).unwrap();
+		let stats = renderer.last_metrics();
+		renderer.wait_idle().unwrap();
+		assert_eq!(status, renderer::DrawStatus::Rendered);
+		assert_eq!(stats.draw_calls, 0);
+		renderer.retire_resources(draw).unwrap();
+	});
+}
+
 #[path = "../../../../tests/support/project_fixture.rs"]
 mod test_project;

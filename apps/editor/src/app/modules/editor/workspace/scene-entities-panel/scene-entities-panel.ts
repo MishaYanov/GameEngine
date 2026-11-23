@@ -65,12 +65,15 @@ interface FolderMenuContext {
 
 type HierarchyDrop = {readonly key: HierarchyKey | null; readonly valid: boolean};
 
-interface HierarchyDragSession {
+type HierarchyDragSession = {
     readonly context: string;
-    readonly roots: readonly EntityKey[];
-}
+    readonly rowKey: HierarchyKey;
+} & (
+    | { readonly kind: 'entity'; readonly key: EntityKey; readonly roots: readonly EntityKey[] }
+    | { readonly kind: 'folder'; readonly id: FolderId }
+    );
 
-const ENTITY_DRAG_TYPE = 'application/x-game-engine-hierarchy-entity';
+const HIERARCHY_DRAG_TYPE = 'application/x-game-engine-hierarchy-item';
 let nextHierarchyId = 0;
 
 @Component({
@@ -104,7 +107,6 @@ export class SceneEntitiesPanel {
     protected readonly focusKey = signal<HierarchyKey | null>(null);
     protected readonly parentingChild = signal<EntityKey | null>(null);
     protected readonly keepWorld = signal(true);
-    protected readonly dragKey = signal<EntityKey | null>(null);
     protected readonly dropTarget = signal<HierarchyDrop | null>(null);
     protected readonly search = signal('');
     protected readonly folderEdit = signal<FolderEdit | null>(null);
@@ -122,7 +124,8 @@ export class SceneEntitiesPanel {
     private previousSelectionIdentity = '';
     private previousRowParents: ReadonlyMap<HierarchyKey, HierarchyKey | null> = new Map();
     private selectionAnchor: EntityKey | null = null;
-    private dragSession: HierarchyDragSession | null = null;
+    private readonly dragSession = signal<HierarchyDragSession | null>(null);
+    protected readonly dragActive = computed(() => this.dragSession() !== null);
     private typeahead = '';
     private typeaheadTime = 0;
 
@@ -178,8 +181,12 @@ export class SceneEntitiesPanel {
         }
         return destinations;
     });
+    private readonly draggedEntityKey = computed(() => {
+        const drag = this.dragSession();
+        return drag?.kind === 'entity' ? drag.key : null;
+    });
     private readonly forbiddenParents = computed(() => {
-        const source = this.dragKey() ?? this.parentingChild();
+        const source = this.draggedEntityKey() ?? this.parentingChild();
         return source ? hierarchySubtreeKeys(this.forest(), this.parentingKeys(source)) : new Set<EntityKey>();
     });
 
@@ -450,7 +457,7 @@ export class SceneEntitiesPanel {
 
     protected keydown(event: KeyboardEvent): void {
         if (this.disabled() || event.isComposing) return;
-        if (this.parentingChild() || this.dragKey()) event.stopPropagation();
+        if (this.parentingChild() || this.dragSession()) event.stopPropagation();
         const rows = this.rows();
         const index = this.activeKey() ? this.rowIndices().get(this.activeKey()!) ?? 0 : 0;
         const row = rows[index];
@@ -492,9 +499,10 @@ export class SceneEntitiesPanel {
                 break;
             case 'Escape':
                 event.preventDefault();
-                if (this.parentingChild() || this.dragKey()) {
+                if (this.parentingChild() || this.dragSession()) {
+                    const dragged = this.dragSession();
                     this.cancelParenting();
-                    this.status.set('Parenting cancelled.');
+                    this.status.set(dragged ? 'Drag cancelled.' : 'Parenting cancelled.');
                 } else if (this.search()) this.search.set('');
                 break;
             case 'F2':
@@ -526,8 +534,8 @@ export class SceneEntitiesPanel {
         const child = key === undefined ? this.primary() : this.forest().byKey.get(key);
         if (!child || this.disabled()) return;
         this.folderEdit.set(null);
+        this.dragEnded();
         this.parentingChild.set(child.key);
-        this.dragKey.set(null);
         this.localError.set(null);
         this.keepWorld.set(true);
         const count = this.parentingKeys(child.key).length;
@@ -552,8 +560,14 @@ export class SceneEntitiesPanel {
         this.status.set(null);
     }
 
-    protected dragStarted(event: DragEvent, key: EntityKey): void {
-        if (this.disabled() || !event.dataTransfer || !this.forest().byKey.has(key)) {
+    protected canDrag(item: HierarchyItem): boolean {
+        if (this.disabled() || !this.scene().projectOpen) return false;
+        return item.kind === 'entity' ? this.forest().byKey.has(item.entity.key)
+            : this.canEditFolders() && this.forest().folders.has(item.folder.id);
+    }
+
+    protected dragStarted(event: DragEvent, item: HierarchyItem): void {
+        if (!event.dataTransfer || !this.canDrag(item)) {
             event.preventDefault();
             return;
         }
@@ -561,31 +575,44 @@ export class SceneEntitiesPanel {
         this.parentingChild.set(null);
         this.keepWorld.set(true);
         this.localError.set(null);
-        this.dragSession = {context: this.contextKey(), roots: [...this.dragSelection(key)]};
-        this.dragKey.set(key);
+        const context = this.contextKey();
+        this.dragSession.set(item.kind === 'folder'
+            ? {context, rowKey: item.key, kind: 'folder', id: item.folder.id}
+            : {
+                context, rowKey: item.key, kind: 'entity', key: item.entity.key,
+                roots: [...this.dragSelection(item.entity.key)]
+            });
         event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData(ENTITY_DRAG_TYPE, key);
-        this.status.set(this.foldersEnabled()
-            ? 'Drop scene root objects onto a folder, or drop an object onto another object to parent it.'
-            : 'Drop onto an entity to parent it, or onto Scene root to remove its parent.');
+        event.dataTransfer.setData(HIERARCHY_DRAG_TYPE, item.key);
+        if (item.kind === 'folder') {
+            this.status.set('Drop onto another folder or Scene root to move this folder.');
+        } else {
+            this.status.set(this.foldersEnabled()
+                ? 'Drop scene root objects onto a folder, or drop an object onto another object to parent it.'
+                : 'Drop onto an entity to parent it, or onto Scene root to remove its parent.');
+        }
     }
 
     protected dragEnded(): void {
-        if (this.dragKey()) this.status.set(null);
-        this.dragSession = null;
-        this.dragKey.set(null);
+        if (this.dragSession()) this.status.set(null);
+        this.dragSession.set(null);
         this.dropTarget.set(null);
     }
 
     protected dragOver(event: DragEvent, item: HierarchyItem | null): void {
-        const key = this.dragKey();
-        const drag = this.dragSession;
-        if (!key || !drag || drag.context !== this.contextKey() || this.disabled()) return;
+        const drag = this.dragSession();
+        if (!drag || drag.context !== this.contextKey() || this.disabled()) return;
         const target = item?.key ?? null;
-        const valid = item === null ? this.canDropOnRoot(key, drag.roots) :
-            item.kind === 'folder'
-                ? this.canEditFolders() && this.canOrganize(drag.roots, item.folder.id)
-                : this.canReparent(key, item.entity.key);
+        let valid: boolean;
+        if (drag.kind === 'folder') {
+            valid = item?.kind !== 'entity' && this.canEditFolders() && this.canMoveFolder(drag.id, item?.folder.id ?? null);
+        } else if (item === null) {
+            valid = this.canDropOnRoot(drag.key, drag.roots);
+        } else if (item.kind === 'folder') {
+            valid = this.canEditFolders() && this.canOrganize(drag.roots, item.folder.id);
+        } else {
+            valid = this.canReparent(drag.key, item.entity.key);
+        }
         if (valid) {
             event.preventDefault();
             event.stopPropagation();
@@ -596,17 +623,23 @@ export class SceneEntitiesPanel {
     }
 
     protected dropped(event: DragEvent, item: HierarchyItem | null): void {
-        const key = this.dragKey();
-        const drag = this.dragSession;
-        if (!key || !drag || drag.context !== this.contextKey()) return;
+        const drag = this.dragSession();
+        if (!drag || drag.context !== this.contextKey() || this.disabled()) return;
         event.preventDefault();
         event.stopPropagation();
-        const sameSession = event.dataTransfer?.getData(ENTITY_DRAG_TYPE) === key;
+        const sameSession = event.dataTransfer?.getData(HIERARCHY_DRAG_TYPE) === drag.rowKey;
         this.dragEnded();
-        if (sameSession) {
-            if (item === null) this.requestDropOnRoot(key, drag.roots);
-            else if (item.kind === 'entity') this.requestReparent(key, item.entity.key);
-            else this.submitFolderEdit({type: 'move_roots_to_folder', roots: drag.roots, folder: item.folder.id});
+        if (!sameSession) return;
+        if (drag.kind === 'folder') {
+            if (item?.kind !== 'entity') {
+                this.submitFolderEdit({type: 'move_folder', id: drag.id, parent: item?.folder.id ?? null});
+            }
+        } else if (item === null) {
+            this.requestDropOnRoot(drag.key, drag.roots);
+        } else if (item.kind === 'entity') {
+            this.requestReparent(drag.key, item.entity.key);
+        } else {
+            this.submitFolderEdit({type: 'move_roots_to_folder', roots: drag.roots, folder: item.folder.id});
         }
     }
 
@@ -798,7 +831,7 @@ export class SceneEntitiesPanel {
         if (this.disabled()) return false;
         const forest = this.forest();
         const keys = this.parentingKeys(key);
-        if ((this.dragKey() === key || this.parentingChild() === key) &&
+        if ((this.draggedEntityKey() === key || this.parentingChild() === key) &&
             parent !== null && this.forbiddenParents().has(parent)) return false;
         return keys.every(candidate => forest.byKey.has(candidate) &&
             (forest.parents.get(candidate) === parent ||

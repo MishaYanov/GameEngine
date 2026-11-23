@@ -24,7 +24,7 @@
   align-items: center;
   gap: var(--space-2);
   flex: none;
-  min-height: 32px;
+  min-height: min(32px, var(--layout-subject-control-height));
   width: 100%;
   border: 1px solid transparent;
   text-align: left;
@@ -89,8 +89,6 @@
   gap: 4px;
   width: 100%;
   height: 28px;
-  min-height: 28px;
-  box-sizing: border-box;
   min-width: 0;
   padding-block: 0;
   padding-inline-end: var(--space-2);
@@ -214,6 +212,17 @@ editor-icon {
 
 .hierarchy-error {
   color: var(--color-danger);
+}
+
+.hierarchy-status.drag-status {
+  // Keep the drag announcement out of the tree layout.
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .drop-target:enabled {

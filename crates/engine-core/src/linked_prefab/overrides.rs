@@ -13,6 +13,9 @@ pub(crate) fn properties(entities: &[&EntityData]) -> BTreeSet<LinkedPrefabPrope
 		Animation,
 	]);
 	for entity in entities {
+		if entity.particle_emitter.is_some() {
+			properties.insert(ParticleEmitter);
+		}
 		for component in &entity.native_behaviors {
 			properties.insert(NativeBehavior {
 				component_id: component.id.clone(),
@@ -39,6 +42,10 @@ pub(crate) fn value(entity: &EntityData, property: &LinkedPrefabProperty) -> Lin
 				.component_records()
 				.into_iter()
 				.find(|r| r.type_id() == crate::components::ANIMATION_TYPE),
+		),
+		ParticleEmitter => LinkedPrefabValue::Component(
+			entity.component_records().into_iter()
+				.find(|record| record.type_id() == crate::components::PARTICLE_EMITTER_TYPE),
 		),
 		Name => LinkedPrefabValue::Name(entity.name.clone()),
 		TransformPosition => LinkedPrefabValue::Vector(entity.transform.position),
@@ -98,6 +105,7 @@ pub(crate) fn apply_value(
 					Animation => component.type_id() == crate::components::ANIMATION_TYPE,
 					MeshRenderer => component.type_id() == crate::components::MESH_TYPE,
 					Collider => component.type_id() == crate::components::COLLIDER_TYPE,
+					ParticleEmitter => component.type_id() == crate::components::PARTICLE_EMITTER_TYPE,
 					NativeBehavior { component_id } => {
 						component.type_id() == crate::components::NATIVE_TYPE
 							&& &component.id == component_id

@@ -3,7 +3,7 @@ use crate::EntityKey;
 use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
 use crate::scene_data::{
-	CameraData, ColliderData, FolderId, LightData, MaterialOverrideData, SceneData,
+	CameraData, ColliderData, FolderId, LightData, LightKind, MaterialOverrideData, SceneData,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -124,6 +124,11 @@ pub enum EditorCommandDto {
 	CreatePlayer,
 	CreateAudioSource,
 	CreateSky,
+	CreateEmpty,
+	CreateLight {
+		light_kind: LightKind,
+	},
+	CreateParticleEmitter,
 	SetActiveSky {
 		key: Option<EntityKey>,
 	},

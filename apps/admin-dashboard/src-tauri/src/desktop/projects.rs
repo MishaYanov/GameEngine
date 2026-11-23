@@ -7,6 +7,9 @@ pub(super) async fn preview_project(
 	service: State<'_, Service>,
 	input: builder::Input,
 ) -> Result<builder::Preview, String> {
+	if input.source.trim().is_empty() {
+		return Err("Choose a source checkout to preview project files.".into());
+	}
 	let request = service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())

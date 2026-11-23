@@ -61,18 +61,10 @@ My Game/
   project-name.txt
   README.txt
   assets/
-    textures/
-      crate.png
-      bricks.jpg
+    asset-catalog.json
+    actors/
+    audio/
     scenes/
-      courtyard.json
-      finish.json
-      robots.json
-    props/
-      capsule.glb
-      cube.glb
-      robot.glb
-      sphere.glb
 ```
 
 Launch the installed demo:
@@ -81,9 +73,9 @@ Launch the installed demo:
 & 'D:\Projects\My Game\game.exe'
 ```
 
-The window title uses the project name. The installer packages the bundled Courtyard Run manifest, catalogued
-scenes and model dependencies. Keep the executable, manifest and asset tree
-together. [Play the bundled route](apps/game/README.md#demo-progress-and-new-game).
+The window title uses the project name. The CLI packages the Cinder Oath sample with its catalogued scenes and
+assets. Keep the executable, manifest, and asset tree together. See `projects/cinder-oath/README.md` for the controls
+and gameplay.
 
 The CLI installs the project; it does not automatically launch it. The first build can take several minutes. Compiler output from the game build is collected and reported if it fails.
 
@@ -106,15 +98,13 @@ scene/project saves. [Five building-blocks review](building-blocks-review.md).
 
 Assets opens registered scenes and loads/refreshes models explicitly. Add to Scene places a selected model at the origin; dragging it into Scene uses a native preview and asynchronous adoption. Escape/cancellation ends a pending gesture. Native selection and placement currently approximate model bounds. Read [native scene editor implementation](viewport-implementation.md) for the complete workflow and limits, including Windows airspace and the desktop acceptance checklist.
 
-Open the bundled `apps/game/project.json` to try Courtyard Run. Gameplay Roles binds Player, Key, Exit and Finish
-to entities in the active authored scene. Select Courtyard and click Play, then focus Game and use WASD. Game shows
-the objective, runtime scene and score. Restart Run uses the startup scene and clears progress. Source game
-execution defaults to Development, while installed games default to Player. Use `--player` to launch the source
-demo as a player. [Editor and player walkthrough](viewport-implementation.md#15-scene-and-game-share-one-surface).
+Use **File → Open Sample…** to create an editable copy of Cinder Oath. Press **Play**, focus **Game**, and use
+the sample's controls to watch the introduction and fight the Warden. The installed game starts in Player mode.
+See `projects/cinder-oath/README.md` for sample controls and export instructions.
 
 ## 3. Use the editor project setup screen
 
-Start the Angular editor inside its Tauri desktop host:
+Open the packaged Windows Editor or start the Tauri desktop host from the development checkout.
 
 ```powershell
 Set-Location 'D:\Coding\Game Engine'
@@ -129,14 +119,10 @@ python launcher.py --run client
 
 In the setup screen:
 
-1. Enter a **Project name**, such as `My Game`.
-2. Enter an existing **Destination folder**, such as `D:\Projects`, or use **Browse…** to choose one in the native
-   folder dialog. Cancelling keeps the current path. Browsing and creation cannot run at the same time.
-3. Click **Create project**.
-4. Wait for validated starter manifest/assets creation. The form disables submission while working.
-5. The created manifest opens in the editor. If opening is cancelled or fails, retain the created path and use **Open in Editor** to retry.
-
-This authoring-only operation retains the compiler's destination and no-overwrite validation but does not compile or launch a player. It is distinct from the CLI's packaged game installation.
+1. Choose **Blank project** for a Main scene with a Game Camera and directional light. Choose **Cinder Oath sample**
+   to copy the playable project. The File menu offers these as **New Project…** and **Open Sample…**.
+2. Enter a project name and choose an existing destination folder. The Editor creates a new child folder.
+3. Choose **Create project**. If opening is cancelled or fails, use **Open in Editor** to retry with the created folder.
 
 A browser-only preview cannot perform native project creation/opening, Vulkan editing or player export. Use the Tauri desktop application for these actions.
 
@@ -146,11 +132,12 @@ A browser-only preview cannot perform native project creation/opening, Vulkan ed
 2. Choose Export Game and select an existing output parent such as `D:\Exports`.
 3. Preparation checks the saved catalog and selected module, then stages the verified assets and manifest in a new child
    named after the project.
-4. Continue editing while the release player compiles from the staged inputs.
-5. If compilation fails, Retry Export reuses its staged token/output instead of creating the same folder again.
-6. After success, review the output path and choose Run Exported Game explicitly.
+4. The packaged Windows Editor adds its bundled Player. The development checkout can build it with Cargo.
+5. If export fails after staging, **Retry Export** continues from the same staged files.
+6. Choose **Run Exported Game** to launch the result in Player mode. Keep the executable and assets together.
 
-The player starts with the exported folder as its working directory and player mode selected. Process-spawn success is separate from actual Vulkan startup, gameplay acceptance and another-machine verification. The editor's compiler still relies on this engine source checkout and Rust/Cargo when producing a player.
+See the [Windows release walkthrough](../designs/editor-viewport/windows-release-step-1.md#step-1-walkthrough) for the
+install and export checks.
 
 ## 4. Launch the admin dashboard
 

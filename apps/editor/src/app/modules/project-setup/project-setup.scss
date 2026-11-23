@@ -6,19 +6,6 @@
   letter-spacing: var(--font-tracking-label);
 }
 
-.badge,
-.eyebrow {
-  font-size: var(--font-size-sm);
-  letter-spacing: var(--font-tracking-label);
-  color: var(--color-text-muted);
-}
-
-.badge {
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-pill);
-  padding: var(--space-2) var(--space-3);
-}
-
 .back-to-editor {
   display: inline-block;
   margin-bottom: var(--space-3);
@@ -56,13 +43,15 @@ label {
 }
 
 input,
+select,
 button {
   width: 100%;
   min-height: var(--layout-control-height);
   border-radius: var(--radius-md);
 }
 
-input {
+input,
+select {
   padding: var(--space-3) var(--space-4);
   color: var(--color-text);
   background: var(--color-input);
@@ -80,6 +69,7 @@ input[aria-invalid='true'] {
 
 .destination-picker {
   display: grid;
+  align-items: center;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
 
@@ -126,7 +116,8 @@ button:enabled:active {
 }
 
 button:disabled,
-input:disabled {
+input:disabled,
+select:disabled {
   background: var(--color-control-disabled);
   color: var(--color-text-disabled);
   cursor: not-allowed;

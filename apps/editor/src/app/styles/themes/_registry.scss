@@ -1,8 +1,10 @@
 @use 'sass:map';
 @use 'graphite';
+@use 'workbench';
 
-$default-theme: 'graphite';
+$default-theme: 'workbench';
 $themes: (
+        'workbench': workbench.workbench(),
         'graphite': graphite.graphite(),
 );
 
@@ -13,15 +15,13 @@ $themes: (
 }
 
 @mixin registered-themes {
-  :root {
+  :root:not([data-theme]) {
     @include properties(map.get($themes, $default-theme));
   }
 
   @each $name, $theme in $themes {
-    @if $name != $default-theme {
-      :root[data-theme='#{$name}'] {
-        @include properties($theme);
-      }
+    :root[data-theme='#{$name}'] {
+      @include properties($theme);
     }
   }
 }

@@ -1,20 +1,24 @@
 <main>
-    <header><span class="brand">△ GAME ENGINE</span><span class="badge">PROJECT SETUP</span></header>
+    <header><span class="brand">△ GAME ENGINE</span></header>
     <div class="workspace">
         <section aria-labelledby="setup-title" class="setup">
             @if (fromEditor) {
                 <a class="back-to-editor" routerLink="/editor"><span aria-hidden="true">←</span> Back to Editor</a>
             }
-            <p class="eyebrow">START SOMETHING NEW</p>
             <h1 id="setup-title">Create your project.</h1>
             <p class="intro">
-                Give it a name and a home. We’ll create starter scenes and assets, then open your project in the editor.
+                Choose what to start with, then give your project a name and a destination.
             </p>
             <form
                     (ngSubmit)="createProject()"
                     [attr.aria-busy]="busy() || choosingDestination()"
                     [formGroup]="form"
             >
+                <label for="project-template">Start with</label>
+                <select formControlName="template" id="project-template">
+                    <option value="blank">Blank project</option>
+                    <option value="cinder_oath">Cinder Oath sample</option>
+                </select>
                 <label for="project-name">Project name</label>
                 <input
                         [attr.aria-invalid]="form.controls.name.touched && form.controls.name.invalid"
@@ -62,9 +66,6 @@
                 <button [disabled]="busy() || choosingDestination() || !desktop || result() !== null" type="submit">
                     {{ buttonLabel() }} <span aria-hidden="true">↗</span>
                 </button>
-                <p class="hint">
-                    Includes starter scenes, models, and textures. Export a playable game from the editor when you’re ready.
-                </p>
             </form>
             <div aria-live="polite" role="status">
                 @if (openMessage()) {

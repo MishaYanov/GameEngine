@@ -47,3 +47,25 @@ p {
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
+
+:host-context(html[data-theme='workbench']) {
+  .script-reference {
+    margin-bottom: var(--space-2);
+  }
+
+  label {
+    display: grid;
+    grid-template-columns: minmax(3.5rem, .75fr) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  select:enabled {
+    border-color: var(--color-input-edge-subtle);
+    background: var(--color-control);
+  }
+
+  select:enabled:hover {
+    background: var(--color-control-hover);
+  }
+}

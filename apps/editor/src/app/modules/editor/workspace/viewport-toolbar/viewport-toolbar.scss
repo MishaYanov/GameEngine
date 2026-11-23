@@ -58,3 +58,23 @@ kbd {
   color: var(--color-danger);
   overflow-wrap: anywhere;
 }
+
+:host-context(html[data-theme='workbench']) {
+  .viewport-tools {
+    gap: 2px 5px;
+    padding: 3px var(--space-2);
+    background: var(--color-pane);
+    border-start-start-radius: var(--radius-pane);
+    border-start-end-radius: var(--radius-pane);
+  }
+
+  :is(button, select, input) {
+    min-height: var(--layout-control-height);
+    padding: 1px var(--space-1);
+  }
+
+  button:enabled:not([aria-pressed='true'], :hover, :active) {
+    border-color: transparent;
+    background: transparent;
+  }
+}

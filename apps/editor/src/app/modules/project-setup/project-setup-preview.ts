@@ -9,23 +9,14 @@ import {Component} from '@angular/core';
                 <li>project.json</li>
                 <li>assets/
                     <ul>
-                        <li>scenes/ <small>Starter scenes</small></li>
-                        <li>props/ <small>Models</small></li>
-                        <li>textures/ <small>Textures</small></li>
+                        <li>scenes/ <small>Saved scenes</small></li>
                     </ul>
                 </li>
             </ul>
         </div>
-        <h2>A project ready to edit.</h2>
-        <p>
-            Start with sample scenes and reusable assets. Arrange entities, edit their properties,
-            and preview your game in the editor.
-        </p>
-        <ol>
-            <li>Create your project folder</li>
-            <li>Copy starter scenes and assets</li>
-            <li>Open the project in the editor</li>
-        </ol>
+        <h2>Project choices</h2>
+        <p><strong>Blank project</strong> starts with one scene and a Game Camera.</p>
+        <p><strong>Cinder Oath sample</strong> creates an editable copy of the game with its scenes and assets.</p>
     `,
     styleUrl: './project-setup-preview.scss',
 })

@@ -42,3 +42,8 @@ h3 {
 		grid-template-columns: 1fr;
 	}
 }
+
+:host-context(html[data-theme='workbench']) li button[aria-pressed='true'] {
+  border-color: var(--color-selection-edge);
+  background: var(--color-selected);
+}

@@ -84,6 +84,7 @@ struct GameApp {
 	editor: SceneEditor,
 	tools: EditorTools,
 	selection_overlay: Option<SelectionOverlay>,
+	particle_draw: Option<runtime::particle_draw::ParticleDraw>,
 	game_hud: Option<renderer::ui::ScreenOverlay>,
 	asset_manager: Option<AssetManager>,
 	renderer: Option<WindowRenderer>,
@@ -1289,6 +1290,7 @@ impl Drop for GameApp {
 					std::mem::take(&mut self.editor),
 					std::mem::take(&mut self.tools),
 					self.selection_overlay.take(),
+					self.particle_draw.take(),
 					self.game_hud.take(),
 					self.asset_manager.take(),
 				))

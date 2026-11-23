@@ -187,6 +187,10 @@ impl EditorSession {
 		self.control_graph_resolver = Some(resolver);
 		Ok(())
 	}
+	pub fn particles(&self) -> impl Iterator<Item=crate::particles::ParticleSample> + '_ {
+		self.play.iter().flat_map(|run| run.active().particles())
+	}
+
 	pub fn animations(&self) -> Option<&crate::animation::AnimationBank> {
 		self.play.as_ref().map(|run| run.active().animations())
 	}

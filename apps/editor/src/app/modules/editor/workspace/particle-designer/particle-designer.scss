@@ -1,0 +1,51 @@
+.owner {
+  margin-block: .1rem .65rem;
+}
+
+.designer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: .9rem;
+}
+
+.preview h3 {
+  margin-block: 0 .45rem;
+}
+
+fieldset {
+  display: grid;
+  gap: .45rem;
+  min-inline-size: 0;
+}
+
+label {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: .2rem .5rem;
+  align-items: center;
+}
+
+label :is(input, select) {
+  max-inline-size: 100%;
+  inline-size: 100%;
+}
+
+small {
+  grid-column: 1 / -1;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-block-start: .5rem;
+}
+
+.error,
+small {
+  color: var(--color-danger);
+}
+
+.close-review {
+  margin-block-start: .6rem;
+}

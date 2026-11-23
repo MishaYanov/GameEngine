@@ -2,7 +2,7 @@ import {Component, computed, DestroyRef, inject, signal} from '@angular/core';
 import {FormControl, FormGroup, ReactiveFormsModule, Validators} from '@angular/forms';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {EditorService} from '../../core/editor/editor.service';
-import {ProjectService, type ProjectCreationResult} from '../../core/project/project.service';
+import {ProjectService, type ProjectCreationResult, type ProjectTemplate} from '../../core/project/project.service';
 import {ProjectSetupPreview} from './project-setup-preview';
 
 @Component({
@@ -23,12 +23,15 @@ export class ProjectSetup {
     protected readonly result = signal<ProjectCreationResult | null>(null);
     protected readonly openMessage = signal('');
     protected readonly desktop = this.projects.nativeAvailable;
-    protected readonly fromEditor = inject(ActivatedRoute).snapshot.queryParamMap.get('from') === 'editor';
+    private readonly entry = inject(ActivatedRoute).snapshot.queryParamMap;
+    private readonly initialTemplate: ProjectTemplate = this.entry.get('template') === 'cinder_oath' ? 'cinder_oath' : 'blank';
+    protected readonly fromEditor = this.entry.get('from') === 'editor';
     protected readonly buttonLabel = computed(() =>
         this.creating() ? 'Creating project…' : this.result() ? 'Project created' : 'Create project',
     );
     protected readonly form = new FormGroup({
-        name: new FormControl('', {
+        template: new FormControl<ProjectTemplate>(this.initialTemplate, {nonNullable: true}),
+        name: new FormControl(this.initialTemplate === 'cinder_oath' ? 'Cinder Oath' : '', {
             nonNullable: true,
             validators: [
                 Validators.required,
@@ -67,11 +70,12 @@ export class ProjectSetup {
         if (this.form.invalid || !this.desktop) return;
         this.creating.set(true);
         this.error.set('');
-        this.openMessage.set('Creating the project and copying starter assets…');
+        this.openMessage.set(this.form.controls.template.value === 'blank'
+            ? 'Creating a blank project…' : 'Creating an editable copy of Cinder Oath…');
         this.form.disable();
         try {
             const values = this.form.getRawValue();
-            const project = await this.projects.create(values.name, values.destination);
+            const project = await this.projects.create(values.name, values.destination, values.template);
             if (this.destroyed) return;
             this.result.set(project);
             this.creating.set(false);

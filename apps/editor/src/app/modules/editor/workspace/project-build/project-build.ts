@@ -3,6 +3,7 @@ import type {ProjectBuildPreparation, ProjectBuildResult} from '../../../../core
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ProjectService} from '../../../../core/project/project.service';
 import {SceneEditingService} from '../scene-editing.service';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 
 @Component({
     selector: 'editor-project-build',
@@ -13,6 +14,7 @@ export class ProjectBuild {
     readonly opening = input(false);
     protected readonly editor = inject(EditorService);
     private readonly projects = inject(ProjectService);
+    private readonly drafts = inject(WorkspaceDraftReview);
     private readonly editing = inject(SceneEditingService, {optional: true});
     protected readonly pending = signal<'choose' | 'build' | 'run' | null>(null);
     protected readonly result = signal<ProjectBuildResult | null>(null);
@@ -25,7 +27,7 @@ export class ProjectBuild {
     protected readonly destination = signal('');
     protected readonly unsaved = computed(() => this.editor.dirty() || this.editing?.hasChanges() === true);
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
-        !this.opening() && !this.pending() && !this.unsaved() && (this.editing?.ready() ??
+        !this.opening() && !this.pending() && !this.drafts.pending() && !this.unsaved() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
     private readonly projectIdentity = this.editor.workspaceGeneration;
     private destroyed = false;
@@ -53,27 +55,29 @@ export class ProjectBuild {
         this.pending.set('choose');
         this.error.set(null);
         this.exportError.set(null);
-        const identity = this.projectIdentity();
+        const target = this.drafts.capture();
         try {
             const destination = await this.projects.chooseDestination(this.destination() || null);
-            if (destination === null || this.destroyed || this.opening() || identity !== this.projectIdentity()) return;
+            if (destination === null || this.destroyed || this.opening() || !this.drafts.current(target)) return;
             this.destination.set(destination);
             const captured: {preparation?: ProjectBuildPreparation} = {};
-            const capture = async () => {
-                if (this.editor.dirty() || this.editor.playing()) throw new Error('Save All and stop Play before exporting.');
-                captured.preparation = await this.editor.prepareBuild(destination);
-            };
-            const accepted = this.editing ? await this.editing.withCommittedEdit(capture) : (await capture(), true);
-            if (this.destroyed || identity !== this.projectIdentity()) return;
-            if (!accepted || !captured.preparation) {
-                this.reportExportFailure(this.editing?.error() ?? 'Finish the current edit and try exporting again.');
-                return;
-            }
+            const reviewed = await this.drafts.run(target, async () => {
+                const capture = async () => {
+                    const snapshot = this.editor.snapshot();
+                    if (!snapshot || this.opening() || !this.drafts.current(target)) return;
+                    if (this.editor.dirty() || this.editor.playing()) throw new Error('Save All and stop Play before exporting.');
+                    captured.preparation = await this.editor.prepareBuild(destination, target.generation, snapshot.revision);
+                };
+                if (this.editing && !await this.editing.withCommittedEdit(capture)) {
+                    this.reportExportFailure(this.editing.error() ?? 'Finish the current edit and try exporting again.');
+                } else if (!this.editing) await capture();
+            });
+            if (!reviewed || this.destroyed || !this.drafts.current(target) || !captured.preparation) return;
             this.pending.set('build');
             this.retryPreparation.set(captured.preparation);
-            await this.compile(captured.preparation, identity);
+            await this.finish(captured.preparation, target.generation);
         } catch (error) {
-            if (!this.destroyed && identity === this.projectIdentity()) {
+            if (!this.destroyed && this.drafts.current(target)) {
                 this.reportExportFailure(error);
                 this.status.set(null);
             }
@@ -90,7 +94,7 @@ export class ProjectBuild {
         this.exportError.set(null);
         const identity = this.projectIdentity();
         try {
-            await this.compile(preparation, identity);
+            await this.finish(preparation, identity);
         } catch (error) {
             if (!this.destroyed && identity === this.projectIdentity()) {
                 this.reportExportFailure(error);
@@ -107,8 +111,8 @@ export class ProjectBuild {
         this.exportError.set(message);
     }
 
-    private async compile(preparation: ProjectBuildPreparation, identity: number): Promise<void> {
-        this.status.set('Building the staged project. You can continue editing and saving while the standalone player compiles.');
+    private async finish(preparation: ProjectBuildPreparation, identity: number): Promise<void> {
+        this.status.set('Finishing export. You can continue editing and saving while the standalone game is prepared.');
         const result = await this.editor.finishBuild(preparation.build_id);
         if (this.destroyed) return;
         if (identity !== this.projectIdentity()) return;

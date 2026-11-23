@@ -38,11 +38,11 @@ pub struct AdminService {
 	pub jobs: jobs::Jobs,
 	pub board: board::Board,
 	pub builder: builder::Builder,
-	pub workspace: PathBuf,
+	pub workspace: Option<PathBuf>,
 	pub data: PathBuf,
 }
 impl AdminService {
-	pub fn new(workspace: PathBuf, logs: PathBuf, data: PathBuf) -> Self {
+	pub fn new(workspace: impl Into<Option<PathBuf>>, logs: PathBuf, data: PathBuf) -> Self {
 		let registry = fs::File::open(data.join("components.json"))
 			.ok()
 			.and_then(|file| serde_json::from_reader(file.take(512 * 1024)).ok())
@@ -54,7 +54,7 @@ impl AdminService {
 			jobs: jobs::Jobs::new(&data),
 			board: board::Board::new(&data),
 			builder: builder::Builder::new(&data),
-			workspace,
+			workspace: workspace.into(),
 			data,
 		};
 		for run in service.processes.history_ref() {
@@ -107,7 +107,11 @@ impl AdminService {
 			collector.checkpoint_error = Some(error.into());
 		}
 		DashboardSnapshot {
-			workspace: self.workspace.to_string_lossy().into_owned(),
+			workspace: self
+				.workspace
+				.as_ref()
+				.map(|path| path.to_string_lossy().into_owned())
+				.unwrap_or_default(),
 			log_directory: self.collector.directory.to_string_lossy().into_owned(),
 			data_directory: self.data.to_string_lossy().into_owned(),
 			collector,
@@ -125,7 +129,11 @@ impl AdminService {
 			projects: self.builder.runs.clone(),
 			project_storage_error: self.builder.storage_error.clone(),
 			job_storage_error: self.jobs.storage_error.clone(),
-			targets: Processes::targets(&self.workspace),
+			targets: self
+				.workspace
+				.as_deref()
+				.map(Processes::targets)
+				.unwrap_or_default(),
 			process_storage_error: self.processes.persistence_error.clone(),
 			process_output_drops: self
 				.processes

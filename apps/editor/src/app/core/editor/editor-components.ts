@@ -1,5 +1,6 @@
 import {validAudioSourceSettings, type AudioSourceSettings} from './audio-source.models';
 import {validSkySettings, type SkySettings} from './sky.models';
+import {validParticleEmitterSettings, type ParticleEmitterSettings} from './particle-emitter.models';
 import type { CameraComponentSettings, Collider, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
@@ -65,6 +66,7 @@ export type ComponentData =
 	| { readonly kind: 'animator'; readonly settings: AnimatorSettings }
 	| { readonly kind: 'camera'; readonly settings: CameraComponentSettings }
 	| { readonly kind: 'sky'; readonly settings: SkySettings }
+    | { readonly kind: 'particle_emitter'; readonly settings: ParticleEmitterSettings }
     | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
 	| { readonly kind: 'script'; readonly settings: ScriptSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
@@ -209,6 +211,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	}
 	if (data['kind'] === 'audio_source') return validAudioSourceSettings(data['settings']);
 	if (data['kind'] === 'sky') return validSkySettings(data['settings']);
+    if (data['kind'] === 'particle_emitter') return Object.keys(data).length === 2 && validParticleEmitterSettings(data['settings']);
 	if (data['kind'] === 'script') return validScriptSettings(data['settings']);
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
@@ -274,6 +277,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
 		value.filter((component) => component.data.kind === 'animator').length <= 1 &&
 		value.filter((component) => component.data.kind === 'camera').length <= 1 &&
+        value.filter((component) => component.data.kind === 'particle_emitter').length <= 1 &&
         value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
 		value.filter((component) => component.data.kind === 'script').length <= 8 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
@@ -299,6 +303,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'animator',
 					'camera',
 					'sky',
+                    'particle_emitter',
                     'interactable',
 				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&

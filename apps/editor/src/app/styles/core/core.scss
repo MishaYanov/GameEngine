@@ -51,3 +51,38 @@
     }
   }
 }
+
+:root[data-theme='workbench'] {
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+:root[data-theme='workbench'] :where(*) {
+  scrollbar-width: thin;
+}
+
+$_editor-text-input: 'input:not(:where([type=button], [type=checkbox], [type=color], [type=file], [type=hidden], [type=image], [type=radio], [type=range], [type=reset], [type=submit]))';
+
+:root[data-theme='workbench'] :is(#{$_editor-text-input}, select, textarea) {
+  // Override component-local field chrome while keeping their fills and sizing.
+  border: 0 !important;
+  border-radius: 0 !important;
+
+  &:focus-visible {
+    outline-offset: calc(-1 * var(--focus-width));
+  }
+
+  &:enabled[aria-invalid='true'] {
+    box-shadow: inset 3px 0 var(--color-danger);
+  }
+}
+
+:root[data-theme='graphite'] :is(
+  #{$_editor-text-input},
+  select:where(:not([multiple], [size]), [size='1']:not([multiple]))
+) {
+  // Override field heights set by individual components and allow larger text to fit.
+  min-block-size: 1.75rem !important;
+  block-size: max(1.75rem, calc(1lh + 6px)) !important;
+  padding-block: 2px !important;
+}

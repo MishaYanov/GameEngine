@@ -9,6 +9,7 @@ mod entities;
 use entities::{duplicate, fresh_key};
 mod organization;
 mod parenting;
+mod scene_objects;
 mod player;
 pub(super) use player::create_player;
 mod sky;
@@ -74,6 +75,11 @@ pub(super) fn apply(
 			*selection = vec![audio_source::create_audio_source(data)?];
 		}
 		EditorCommandDto::CreateSky => *selection = vec![sky::create_sky(data)?],
+		EditorCommandDto::CreateEmpty => *selection = vec![scene_objects::create_object(data, false)?],
+		EditorCommandDto::CreateLight { light_kind } => scene_objects::create_light(data, light_kind)?,
+		EditorCommandDto::CreateParticleEmitter => {
+			*selection = vec![scene_objects::create_object(data, true)?];
+		}
 		EditorCommandDto::SetActiveSky { key } => data.set_active_sky(key)?,
 		EditorCommandDto::SetSceneEnvironment {
 			ambient_linear,

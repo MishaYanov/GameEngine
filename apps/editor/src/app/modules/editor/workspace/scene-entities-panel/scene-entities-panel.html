@@ -35,13 +35,13 @@
                                         (click)="choose(row, $event)"
                                         (dragend)="dragEnded()"
                                         (dragleave)="dragLeft($event)" (dragover)="dragOver($event, row.item)"
-                                        (dragstart)="entity && dragStarted($event, entity.key)"
+                                        (dragstart)="dragStarted($event, row.item)"
                                         [attr.aria-expanded]="row.children ? row.expanded : null"
                                         (drop)="dropped($event, row.item)"
                                         [attr.aria-label]="folder ? row.item.name + ' folder' : entity?.linked_prefab ? row.item.name + ' linked Prop' : entity?.player_controller ? row.item.name + ' player object' : entity?.camera ? row.item.name + ' camera object' : row.item.name"
                                         [class.drop-target]="isDropTarget(row.key) && dropTarget()?.valid"
                                         [class.drop-rejected]="isDropTarget(row.key) && !dropTarget()?.valid"
-                                        [disabled]="disabled()" [draggable]="!disabled() && entity !== null"
+                                        [disabled]="disabled()" [draggable]="canDrag(row.item)"
                                         [attr.aria-level]="row.level"
                                         [attr.aria-posinset]="row.position"
                                         [title]="entity ? entity.name + ' · ' + entity.model_path : row.item.name"
@@ -106,7 +106,7 @@
                     <p class="entity-details" [title]="selected.model_path">{{ selected.model_path }}</p>
                 }
                 @if (status(); as message) {
-                    <p class="hierarchy-status" role="status">{{ message }}</p>
+                    <p [class.drag-status]="dragActive()" class="hierarchy-status" role="status">{{ message }}</p>
                 }
                 @if (error(); as message) {
                     <p class="hierarchy-error" role="alert">{{ message }}</p>

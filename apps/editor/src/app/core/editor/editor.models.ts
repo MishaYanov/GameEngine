@@ -9,6 +9,9 @@ import type {
 import type {CharacterControllerAttachment} from './character-controller.models';
 import type {AnimationAttachment} from './animation.models';
 import type {MachineDescriptor} from './state-machine.models';
+import type {ParticleEmitterComponent} from './particle-emitter.models';
+
+export type {ParticleEmitterComponent, ParticleEmitterSettings} from './particle-emitter.models';
 
 export type SceneId = string;
 
@@ -148,6 +151,7 @@ export interface SceneEntity {
     readonly animator?: import('./animator.models').AnimatorAttachment | null;
     readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
     readonly sky?: import('./sky.models').SkyAttachment | null;
+    readonly particle_emitter?: ParticleEmitterComponent | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
 
@@ -162,10 +166,10 @@ export interface Light {
     readonly range: number;
 }
 
-export type SceneSchemaVersion = 3 | 4 | 5 | 6 | 7;
+export type SceneSchemaVersion = 3 | 4 | 5 | 6 | 7 | 8;
 
 export function isSceneSchemaVersion(value: unknown): value is SceneSchemaVersion {
-    return value === 3 || value === 4 || value === 5 || value === 6 || value === 7;
+    return value === 3 || value === 4 || value === 5 || value === 6 || value === 7 || value === 8;
 }
 
 export type FolderId = string;
@@ -298,6 +302,9 @@ export type EditorCommand =
     | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'create_camera' }
     | { readonly type: 'create_sky' }
+    | { readonly type: 'create_empty' }
+    | { readonly type: 'create_light'; readonly light_kind: Light['kind'] }
+    | { readonly type: 'create_particle_emitter' }
     | { readonly type: 'set_active_sky'; readonly key: EntityKey | null }
     | { readonly type: 'set_scene_environment'; readonly ambient_linear: Vec3; readonly sky_exposure_ev: number }
     | { readonly type: 'create_player' }

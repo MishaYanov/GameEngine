@@ -37,6 +37,7 @@ import {sceneReferenceOptions} from '../scene-reference-options';
 import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {skyColorChannels} from './sky-component-draft';
 import {SkyPanoramaPicker} from './sky-panorama-picker';
+import {PARTICLE_NUMBER_FIELDS} from '../../../../core/editor/particle-emitter.models';
 import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
 import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
@@ -74,6 +75,8 @@ export class ComponentEditor {
     readonly inputActionAssets = input<readonly InputActionsAsset[]>([]);
     readonly inputActionAssetsEnabled = input(false);
     readonly skyPanoramaAssetsEnabled = input(false);
+    readonly particleDesignerAvailable = input(false);
+    readonly particleDesignerRequested = output<void>();
 	readonly ownerKey = input('');
 	readonly contextKey = input('');
 	readonly editable = input(false);
@@ -107,6 +110,11 @@ export class ComponentEditor {
 				JSON.stringify(this.draft().animation?.source)
 		);
 	});
+    protected readonly particleFields = PARTICLE_NUMBER_FIELDS;
+    protected readonly particleChannels = [{key: 'r', label: 'Red'}, {key: 'g', label: 'Green'}, {
+        key: 'b',
+        label: 'Blue'
+    }] as const;
     protected readonly audioGameplaySignals = audioGameplaySignals;
     protected readonly legacyCombatCues = legacyCombatCues;
     protected chooseAudioEventClip(id: string): void {
@@ -271,6 +279,7 @@ export class ComponentEditor {
 		if (component.data.kind === 'audio_source') return 'Audio Source';
 		if (component.data.kind === 'camera') return 'Camera';
 		if (component.data.kind === 'sky') return 'Sky';
+        if (component.data.kind === 'particle_emitter') return 'Particle Emitter';
 		if (component.data.kind === 'player_controller') return 'Player Controller';
         if (component.data.kind === 'script') {
             const id = component.data.settings.script_id;

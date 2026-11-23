@@ -6,6 +6,7 @@ import {EditorService} from '../../../../core/editor/editor.service';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {SceneEditingService} from '../scene-editing.service';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 
 @Component({
@@ -24,6 +25,7 @@ export class WorkspaceToolbar {
     protected readonly paletteShortcut = editorShortcutLabel('palette.open');
     protected readonly editorService = inject(EditorService);
     protected readonly sceneEditing = inject(SceneEditingService, {optional: true});
+    private readonly drafts = inject(WorkspaceDraftReview);
     private readonly viewportEditor = inject(ViewportEditorService, {optional: true});
     protected readonly actionError = signal<string | null>(null);
     protected readonly canEditScene = computed(() => {
@@ -71,6 +73,7 @@ export class WorkspaceToolbar {
     private async runAction(action: WorkspaceAction): Promise<void> {
         this.pendingAction.set(true);
         this.actionError.set(null);
+        const playTarget = action === 'play' ? this.drafts.capture() : null;
         try {
             const executeAction = async () => {
                 const snapshot = this.editorService.snapshot();
@@ -89,12 +92,21 @@ export class WorkspaceToolbar {
                     await this.editorService.execute(CommandBuilder.select(keys));
                     return;
                 }
+                if (playTarget) {
+                    if (!snapshot || this.opening() || !this.drafts.current(playTarget)) return;
+                    await this.editorService.execute(CommandBuilder.play(), playTarget.generation, snapshot.revision);
+                    if (this.drafts.current(playTarget)) this.viewSelected.emit('game-preview');
+                    return;
+                }
                 await this.editorService.execute(CommandBuilder[action]());
-                if (action === 'play') this.viewSelected.emit('game-preview');
                 if (action === 'stop') this.viewSelected.emit('scene-viewport');
             };
-            if (this.sceneEditing && action !== 'stop') await this.sceneEditing.withCommittedEdit(executeAction);
-            else await executeAction();
+            const dispatch = async () => {
+                if (this.sceneEditing && action !== 'stop') await this.sceneEditing.withCommittedEdit(executeAction);
+                else await executeAction();
+            };
+            if (playTarget) await this.drafts.run(playTarget, dispatch);
+            else await dispatch();
         } catch (error) {
             this.actionError.set(error instanceof Error ? error.message : String(error));
         } finally {

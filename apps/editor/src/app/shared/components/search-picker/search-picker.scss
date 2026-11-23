@@ -96,3 +96,42 @@ button:disabled {
 .empty {
   margin: 0;
 }
+
+:host-context(html[data-theme='workbench']) {
+  input,
+  button {
+    padding-block: 0;
+    border-color: var(--color-input-edge-subtle);
+  }
+
+  button:enabled {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  button:enabled:hover {
+    background: var(--color-control-hover);
+  }
+
+  input[aria-invalid='true']:enabled {
+    border-color: var(--color-danger-border);
+  }
+
+  .results {
+    border-color: var(--color-border);
+    background: var(--color-surface-raised);
+  }
+
+  [role='option'] {
+    gap: 1px;
+    align-content: center;
+    border-inline-start: 2px solid transparent;
+    border-radius: 0;
+  }
+
+  [role='option'][aria-selected='true'] {
+    border: 0;
+    border-inline-start: 2px solid var(--color-selection-edge);
+    background: var(--color-selected);
+  }
+}

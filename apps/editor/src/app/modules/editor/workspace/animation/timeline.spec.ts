@@ -75,8 +75,20 @@ function setup(draft = initial) {
     const sample = vi.fn(async (_token: string, tick: number, _drag: TimelineKeyMove | null, _generation: number) =>
         ({...preview, tick}));
     const close = vi.fn(async (_token: string) => undefined);
+    let review: (() => Promise<boolean>) | null = null;
+    const reviewNavigation = () => review?.() ?? Promise.resolve(true);
     TestBed.configureTestingModule({providers: [
-        {provide: AnimationWorkspaceService, useValue: {authoredReady: showPreview}},
+            {
+                provide: AnimationWorkspaceService, useValue: {
+                    authoredReady: showPreview,
+                    registerTimelineReview: (callback: () => Promise<boolean>) => {
+                        review = callback;
+                        return () => {
+                            review = null;
+                        };
+                    },
+                }
+            },
         {provide: EditorService, useValue: {
             nativeAvailable: true, snapshot: () => ({mode: 'edit', revision: 2, transaction: null}),
             workspaceGeneration: () => 1,
@@ -91,7 +103,10 @@ function setup(draft = initial) {
     ]});
     const fixture = TestBed.createComponent(ClipTimeline);
     fixture.componentRef.setInput('asset', draft);
-    return {fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, timeline: fixture.debugElement.injector.get(TimelineEditService)};
+    return {
+        fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, reviewNavigation,
+        timeline: fixture.debugElement.injector.get(TimelineEditService)
+    };
 }
 
 function apply(clip: ClipTimelineDraft['clip'], edit: TimelineEdit): ClipTimelineDraft['clip'] {
@@ -198,7 +213,7 @@ describe('Authored clip timeline', () => {
             this.dispatchEvent(new Event('close'));
         }});
         try {
-            const {fixture, timeline, saveDraft, closeDraft} = setup();
+            const {fixture, timeline, saveDraft, closeDraft, reviewNavigation} = setup();
             await fixture.whenStable();
             const root = fixture.nativeElement as HTMLElement;
             const trigger = button(root, 'Close Timeline');
@@ -209,17 +224,18 @@ describe('Authored clip timeline', () => {
             await fixture.whenStable();
 
             trigger.focus();
-            trigger.click();
+            const kept = reviewNavigation();
             await fixture.whenStable();
             const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
             button(dialog, 'Keep Editing').focus();
             button(dialog, 'Keep Editing').click();
             await fixture.whenStable();
+            expect(await kept).toBe(false);
             expect(document.activeElement).toBe(trigger);
             expect(timeline.draft()?.dirty).toBe(true);
             expect(closeDraft).not.toHaveBeenCalled();
 
-            trigger.click();
+            const navigation = reviewNavigation();
             await fixture.whenStable();
             saveDraft.mockRejectedValueOnce(new Error('Cannot save the clip.'));
             button(dialog, 'Save and Close Timeline').click();
@@ -230,6 +246,7 @@ describe('Authored clip timeline', () => {
 
             button(dialog, 'Save and Close Timeline').click();
             await fixture.whenStable();
+            expect(await navigation).toBe(true);
             expect(saveDraft).toHaveBeenLastCalledWith('draft-clip', 1, 1, 2);
             expect(closeDraft).toHaveBeenCalledExactlyOnceWith('draft-clip', false);
             expect(events).toEqual(['saved', 'closed']);

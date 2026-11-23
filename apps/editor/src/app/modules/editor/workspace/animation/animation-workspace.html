@@ -1,9 +1,11 @@
 <section aria-label="Animation clips" class="animation">
     <div class="clip-kind" aria-label="Clip library source">
         <button type="button" [attr.aria-pressed]="animation.library() === 'imported'"
-                (click)="animation.library.set('imported')">Imported Clips</button>
+                (click)="animation.selectLibrary('imported')">Imported Clips
+        </button>
         <button type="button" [attr.aria-pressed]="animation.library() === 'authored'"
-                (click)="animation.library.set('authored')">Authored Clips</button>
+                (click)="animation.selectLibrary('authored')">Authored Clips
+        </button>
     </div>
     @if (animation.propAvailable()) {
         <label>

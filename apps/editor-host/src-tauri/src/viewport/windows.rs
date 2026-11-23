@@ -210,6 +210,7 @@ pub(super) fn spawn(
 struct GpuState {
 	scene: Scene,
 	prop_preview: Option<prop_preview::PropGpuPreview>,
+	particle_draw: Option<runtime::particle_draw::ParticleDraw>,
 	assets: ManuallyDrop<AssetManager>,
 	renderer: WindowRenderer,
 	asset_root: PathBuf,
@@ -224,6 +225,7 @@ struct RenderPacket {
 	warm_requested: bool,
 	warming: crate::editor::scene_warming::WarmingContext,
 	animations: Option<runtime::animation::AnimationBank>,
+	particles: Vec<runtime::particle_draw::ParticleSample>,
 	animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 	document: Option<Arc<runtime::SceneData>>,
 	game_camera: Option<Camera>,
@@ -284,6 +286,7 @@ impl Drop for GpuState {
 			.retire_resources((
 				std::mem::take(&mut self.scene),
 				self.prop_preview.take(),
+				self.particle_draw.take(),
 				assets,
 			))
 			.is_err()

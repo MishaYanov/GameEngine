@@ -9,8 +9,17 @@ main {
   padding: var(--space-6);
 }
 
+.workbench-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-end: var(--space-6);
+}
+
 h1 {
-  margin: 0 0 var(--space-6);
+  margin: 0;
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-semibold);
 }

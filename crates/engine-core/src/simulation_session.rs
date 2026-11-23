@@ -6,6 +6,7 @@ use crate::{
 	EntityKey,
 	collision::{CameraExclusions, CollisionStats, CollisionWorld, InteractionMatrix},
 	game_camera::{GameCameraController, OrbitRuntimeState, obstruction_query},
+	particles::{ParticleBank, ParticleSample},
 	project::{BehaviorSettings, ProjectData},
 	scene_data::{EntityData, SceneData},
 	simulation::FixedStepper,
@@ -52,6 +53,9 @@ pub struct TickOutcome {
 	/// Fulfill/reject pending spawns, then call tick(0.0) before new elapsed time.
 	#[serde(default)]
 	pub pending_steps: u32,
+	/// A committed particle frame needs presentation without a scene document change.
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub particles_changed: bool,
 	pub dropped_seconds: f64,
 	pub changes: WorldChange,
 	#[serde(default)]
@@ -78,6 +82,7 @@ pub struct SimulationSession {
 	characters: crate::character_controller::CharacterRuntime,
 	lifecycle: crate::runtime_lifecycle::RuntimeLifecycle,
 	object_scripts: object_scripts::ObjectScripts,
+	particles: ParticleBank,
 	project: Arc<ProjectData>,
 	world: RuntimeWorld,
 	collisions: CollisionWorld,
@@ -210,6 +215,7 @@ impl SimulationSession {
 		let camera_input = CameraInputLatch::default();
 		let camera_objects = camera_objects::CameraObjects::new(&world, &lifecycle);
 		let control_graph_ready = control_graph::first_configured_actor(world.data()).is_none();
+		let particles = ParticleBank::new(&world);
 
 		Ok(Self {
 			animations: Default::default(),
@@ -219,6 +225,7 @@ impl SimulationSession {
 			characters,
 			lifecycle,
 			object_scripts,
+			particles,
 			project,
 			world,
 			collisions,
@@ -256,6 +263,11 @@ impl SimulationSession {
 	pub fn world(&self) -> &RuntimeWorld {
 		&self.world
 	}
+	/// Samples only particles from the committed runtime step.
+	pub fn particles(&self) -> impl Iterator<Item=ParticleSample> + '_ {
+		self.particles.samples(self.project.fixed_hz)
+	}
+
 	pub fn camera(&self) -> &crate::Camera {
 		self.camera.camera()
 	}
@@ -314,7 +326,8 @@ impl SimulationSession {
 	}
 	pub fn needs_tick(&self) -> bool {
 		!self.paused
-			&& (self.animations.needs_tick()
+			&& (self.particles.needs_tick()
+			|| self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
 				|| self.object_scripts.needs_tick(&self.inputs)
@@ -340,7 +353,8 @@ impl SimulationSession {
 
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
-			&& (self.animations.needs_tick()
+			&& (self.particles.needs_tick()
+			|| self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
 				|| self.object_scripts.needs_tick(&self.inputs)
@@ -558,6 +572,7 @@ impl SimulationSession {
 		self.characters = characters;
 		self.lifecycle = lifecycle;
 		self.object_scripts = object_scripts;
+		self.particles.admit(&prepared.entities);
 		self.triggers.structural_change(&self.world);
 		Ok(WorldChange {
 			changed_entities: keys,
@@ -645,6 +660,8 @@ impl SimulationSession {
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
 		let mut object_scripts = self.object_scripts.clone();
+		let mut particles = self.particles.clone();
+		let mut particles_changed = false;
 		let mut retired_scripts = object_scripts::ObjectScripts::default();
 		let input_layout = self
 			.conditional_input
@@ -1210,6 +1227,7 @@ impl SimulationSession {
 						previous,
 					)
 				});
+				particles_changed |= particles.step(&self.world, self.project.fixed_hz);
 				steps += 1;
 				if requested_scene.is_some() {
 					// A new scene starts at the next step, after the host commits it.
@@ -1257,6 +1275,8 @@ impl SimulationSession {
 		outcome.tick = self.tick;
 		outcome.steps = steps;
 		outcome.pending_steps = pending_steps;
+		outcome.particles_changed = particles_changed;
+		self.particles = particles;
 		outcome.dropped_seconds = report.dropped_seconds
 			+ f64::from(report.steps - steps - pending_steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();

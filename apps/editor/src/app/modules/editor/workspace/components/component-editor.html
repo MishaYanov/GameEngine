@@ -30,14 +30,15 @@
                 <p>Edit the Prop source or unpack this instance to change its {{ label(component) }}.</p>
             } @else {
 			<div class="actions">
-				<button
-					type="button"
-					[disabled]="!available() || open()"
-					(click)="start(component)"
-					[attr.aria-label]="'Edit ' + label(component)"
-				>
-					Edit
-				</button>
+                @if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
+                    <button (click)="particleDesignerRequested.emit()" [disabled]="!available() || open()" aria-haspopup="dialog"
+                            type="button">Edit Particles…
+                    </button>
+                } @else {
+                    <button (click)="start(component)" [attr.aria-label]="'Edit ' + label(component)"
+                            [disabled]="!available() || open()" type="button">Edit
+                    </button>
+                }
 				<button
 					type="button"
 					[disabled]="!available() || open()"
@@ -80,6 +81,22 @@
 			<p>Apply accepts one undoable change. Discard leaves the component unchanged.</p>
 			<label class="check"><input type="checkbox" [formField]="fields.enabled" />Enabled</label>
 			@switch (draft().kind) {
+                @case ('particle_emitter') {
+                    @for (field of particleFields; track field.key) {
+                        <label>{{ field.label }}
+                            <input [attr.inputmode]="field.key === 'seed' ? 'numeric' : 'decimal'" [formField]="fields.particle[field.key]"
+                                   type="text"/>
+                        </label>
+                    }
+                    <fieldset>
+                        <legend>Color (0–1)</legend>
+                        @for (channel of particleChannels; track channel.key) {
+                            <label>{{ channel.label }}
+                                <input [formField]="fields.particle[channel.key]" inputmode="decimal" type="text"/>
+                            </label>
+                        }
+                    </fieldset>
+                }
                 @case ('audio_source') {
                     <div data-component-reference-field="Audio Clip"
                          (dragover)="allowAudioDrop($event)" (drop)="dropAudioClip($event)">

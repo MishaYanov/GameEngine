@@ -3,6 +3,7 @@ mod audio_source;
 mod entity;
 mod interactable;
 mod native_behavior;
+mod particle_emitter;
 mod player_controller;
 mod scene_validation;
 mod script;
@@ -20,6 +21,7 @@ pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
+pub use particle_emitter::{MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterComponent, ParticleEmitterSettings};
 pub use player_controller::{
 	InputActionsRef, PlayerControllerComponent, PlayerControllerSettings, PlayerMovementSpace,
 };
@@ -51,6 +53,7 @@ pub const CAMERA_TYPE: &str = "engine.camera";
 pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
 pub const AUDIO_SOURCE_TYPE: &str = "engine.audio_source";
 pub const SKY_TYPE: &str = "engine.sky";
+pub const PARTICLE_EMITTER_TYPE: &str = "engine.particle_emitter";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -87,6 +90,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	ParticleEmitter {
+		settings: ParticleEmitterSettings,
+	},
 	Sky {
 		settings: SkySettings,
 	},
@@ -142,6 +148,7 @@ impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
 			ComponentData::Sky { .. } => SKY_TYPE,
+			ComponentData::ParticleEmitter { .. } => PARTICLE_EMITTER_TYPE,
 			ComponentData::AudioSource { .. } => AUDIO_SOURCE_TYPE,
 			ComponentData::PlayerController { .. } => PLAYER_CONTROLLER_TYPE,
 			ComponentData::Camera { .. } => CAMERA_TYPE,
@@ -162,6 +169,7 @@ impl ComponentRecord {
 		}
 		match &self.data {
 			ComponentData::Sky { settings } => settings.validate(),
+			ComponentData::ParticleEmitter { settings } => settings.validate(),
 			ComponentData::AudioSource { settings } => settings.validate(),
 			ComponentData::PlayerController { settings } if settings.local && !self.enabled => {
 				Err("A disabled Player Controller cannot own local input".into())
@@ -210,6 +218,13 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			PARTICLE_EMITTER_TYPE,
+			"particle_emitter",
+			"Particle Emitter",
+			"Emits visual particles during Play.",
+			1,
+		),
 		(
 			SKY_TYPE,
 			"sky",

@@ -349,6 +349,7 @@ impl Scene {
 					player_controller: entity.player_controller.clone(),
 					audio_source: entity.audio_source.clone(),
 					sky: entity.sky.clone(),
+					particle_emitter: entity.particle_emitter.clone(),
 				}
 			};
 			entry.parent.clone_from(&entity.parent);

@@ -7,6 +7,7 @@ rust-version = "1.89"
 [features]
 default = []
 desktop = ["dep:tauri", "dep:tauri-build"]
+custom-protocol = ["tauri/custom-protocol"]
 
 [lib]
 name = "engine_admin"

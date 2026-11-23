@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn dashboard_without_checkout_collects_logs_and_can_save_log_settings() {
+	let fixture = Fixture::new();
+	let log_dir = fixture.logs();
+	let mut service = AdminService::new(None, log_dir.clone(), fixture.data());
+	assert!(service.snapshot().workspace.is_empty());
+	assert!(service.snapshot().targets.is_empty());
+
+	service.configure("", log_dir.to_str().unwrap()).unwrap();
+	let entry = record("game-123-1", 1);
+	fixture.write(&entry);
+	service.tick();
+	assert!(service.collector.find(1).is_some());
+
+	let settings: serde_json::Value =
+		serde_json::from_slice(&fs::read(fixture.data().join("settings.json")).unwrap()).unwrap();
+	assert_eq!(settings["workspace"], serde_json::Value::Null);
+}
+
 fn fixture_command(mode: &str) -> Command {
 	#[cfg(windows)]
 	{

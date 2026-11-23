@@ -8,10 +8,11 @@ import {EditorSettingsService} from '../../core/editor/settings/editor-settings.
 import {EditorDialog} from '../../shared/components/dialog/dialog';
 import {EditorFormSection} from '../../shared/components/form-section/form-section';
 import {EditorTree} from '../../shared/components/tree/tree';
+import {EditorThemePicker} from './editor-theme-picker';
 
 @Component({
     selector: 'editor-settings-dialog',
-    imports: [EditorDialog, EditorFormSection, EditorTree],
+    imports: [EditorDialog, EditorFormSection, EditorThemePicker, EditorTree],
     templateUrl: './editor-settings-dialog.html',
     styleUrl: './editor-settings-dialog.scss',
 })

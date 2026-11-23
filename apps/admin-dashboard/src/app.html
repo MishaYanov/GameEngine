@@ -79,6 +79,9 @@
             </section>
             <section class="panel">
                 <h2>Managed applications</h2>
+                @if (state() && !state()?.workspace) {
+                    <p class="muted">Set a source checkout in Workspace settings to manage development applications.</p>
+                }
                 @for (target of state()?.targets ?? []; track target.id) {
                     <div class="process-target">
                         <strong>{{ target.label }}</strong
@@ -150,7 +153,7 @@
                 <summary>Workspace settings</summary>
                 <form (ngSubmit)="configure()">
                     <label
-                    >Workspace<input
+                    >Source checkout (optional)<input
                             [(ngModel)]="workspace"
                             name="workspace"/></label
                     ><label
@@ -187,6 +190,9 @@
                     raw output. Test command outcomes do not imply structured test
                     counts.
                 </p>
+                @if (state() && !state()?.workspace) {
+                    <p class="muted">Set a source checkout under Overview → Workspace settings to run Cargo jobs.</p>
+                }
                 <form (ngSubmit)="queueJob()">
                     <label
                     >Package<select [(ngModel)]="jobPackage" name="package">
@@ -200,7 +206,7 @@
                     <option value="release">Release</option>
                 </select></label
                 >
-                    <button [disabled]="!api.desktop || !!busy()" class="primary">
+                    <button [disabled]="!api.desktop || !state()?.workspace || !!busy()" class="primary">
                         Queue {{ section() === 'Builds' ? 'build' : 'tests' }}
                     </button>
                 </form>

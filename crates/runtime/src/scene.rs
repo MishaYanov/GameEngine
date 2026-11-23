@@ -51,6 +51,7 @@ struct SceneEntry {
 	player_controller: Option<Box<engine_core::components::PlayerControllerComponent>>,
 	audio_source: Option<Box<engine_core::components::AudioSourceComponent>>,
 	sky: Option<Box<engine_core::components::SkyComponent>>,
+	particle_emitter: Option<engine_core::components::ParticleEmitterComponent>,
 }
 
 impl SceneEntry {
@@ -94,6 +95,7 @@ impl SceneEntry {
 		self.player_controller.clone_from(&entity.player_controller);
 		self.audio_source.clone_from(&entity.audio_source);
 		self.sky.clone_from(&entity.sky);
+		self.particle_emitter.clone_from(&entity.particle_emitter);
 	}
 }
 
@@ -315,6 +317,7 @@ impl Scene {
 						&& entry.player_controller == saved.player_controller
 						&& entry.audio_source == saved.audio_source
 						&& entry.sky == saved.sky
+						&& entry.particle_emitter == saved.particle_emitter
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -600,6 +603,7 @@ impl Scene {
 			player_controller: None,
 			audio_source: None,
 			sky: None,
+			particle_emitter: None,
 		});
 		self.authored_children = None;
 
@@ -720,6 +724,7 @@ impl Scene {
 				player_controller: entry.player_controller.clone(),
 				audio_source: entry.audio_source.clone(),
 				sky: entry.sky.clone(),
+				particle_emitter: entry.particle_emitter.clone(),
 			});
 		}
 
@@ -879,6 +884,7 @@ impl Scene {
 		entry.player_controller = source_metadata.player_controller;
 		entry.audio_source = source_metadata.audio_source;
 		entry.sky = source_metadata.sky;
+		entry.particle_emitter = source_metadata.particle_emitter;
 		if let Some(controller) = &mut entry.player_controller {
 			controller.settings.local = false;
 		}

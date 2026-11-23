@@ -11,7 +11,7 @@ export function isEditorWarmingMode(value: unknown): value is EditorWarmingMode 
     return EDITOR_WARMING_MODES.some(option => option.value === value);
 }
 
-export type EditorSettingsPage = 'editor' | 'editor.keymap';
+export type EditorSettingsPage = 'editor' | 'editor.appearance' | 'editor.keymap';
 
 export interface EditorSettingsState {
     readonly open: boolean;
@@ -25,7 +25,14 @@ interface EditorSettingsNode {
 }
 
 export const EDITOR_SETTINGS_TREE: readonly EditorSettingsNode[] = [
-    {id: 'editor', label: 'Editor', children: [{id: 'editor.keymap', label: 'Keymap'}]},
+    {
+        id: 'editor',
+        label: 'Editor',
+        children: [
+            {id: 'editor.appearance', label: 'Appearance'},
+            {id: 'editor.keymap', label: 'Keymap'},
+        ],
+    },
 ];
 
 interface EditorKeymapSection {

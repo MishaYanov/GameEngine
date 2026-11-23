@@ -16,6 +16,7 @@ mod game_content_rect;
 pub mod gizmo;
 pub mod input;
 pub mod model_instance;
+pub mod particle_draw;
 pub mod picking;
 pub mod scene;
 pub mod scene_audio;

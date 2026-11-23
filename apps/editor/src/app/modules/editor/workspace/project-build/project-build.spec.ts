@@ -5,6 +5,7 @@ import type {EditorSnapshot, ProjectBuildResult} from '../../../../core/editor/e
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ProjectService} from '../../../../core/project/project.service';
 import {SceneEditingService} from '../scene-editing.service';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {ProjectBuild} from './project-build';
 
 const output: ProjectBuildResult = {path: 'D:\\Exports\\Demo', asset_count: 7, asset_bytes: 1572864};
@@ -49,6 +50,7 @@ async function createBuild() {
         }
     });
     TestBed.configureTestingModule({providers: [
+            WorkspaceDraftReview,
         {provide: EditorService, useValue: {
             nativeAvailable: true, snapshot: current, busy, workspaceGeneration,
             playing: computed(() => current().mode === 'play'),
@@ -65,16 +67,44 @@ async function createBuild() {
     const root: HTMLElement = fixture.nativeElement;
     const exportButton = () => root.querySelector<HTMLButtonElement>('button')!;
     const runButton = () => [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Run Exported Game'))!;
-    return {fixture, root, current, busy, hasChanges, workspaceGeneration, reserved, chooseDestination, prepareBuild, finishBuild, runBuild, withCommittedEdit, exportButton, runButton};
+    return {
+        fixture,
+        root,
+        current,
+        busy,
+        hasChanges,
+        drafts: TestBed.inject(WorkspaceDraftReview),
+        workspaceGeneration,
+        reserved,
+        chooseDestination,
+        prepareBuild,
+        finishBuild,
+        runBuild,
+        withCommittedEdit,
+        exportButton,
+        runButton
+    };
 }
 
 describe('ProjectBuild', () => {
     it('cancels destination selection without building or launching a game', async () => {
-        const {fixture, root, chooseDestination, prepareBuild, finishBuild, runBuild, exportButton} = await createBuild();
+        const {
+            fixture,
+            root,
+            drafts,
+            chooseDestination,
+            prepareBuild,
+            finishBuild,
+            runBuild,
+            exportButton
+        } = await createBuild();
+        const review = vi.fn(() => true);
+        drafts.setReviewers([review]);
         chooseDestination.mockResolvedValueOnce(null);
         exportButton().click();
         await fixture.whenStable();
         expect(chooseDestination).toHaveBeenCalledExactlyOnceWith(null);
+        expect(review).not.toHaveBeenCalled();
         expect(prepareBuild).not.toHaveBeenCalled();
         expect(finishBuild).not.toHaveBeenCalled();
         expect(runBuild).not.toHaveBeenCalled();
@@ -121,11 +151,40 @@ describe('ProjectBuild', () => {
         expect(root.querySelector('[role="alert"]')?.textContent).toContain('Save All and stop Play');
     });
 
+    it('waits for local drafts before staging and uses the new revision when a draft saves', async () => {
+        const {fixture, current, drafts, prepareBuild, withCommittedEdit, exportButton} = await createBuild();
+        let approve!: (accepted: boolean) => void;
+        const review = vi.fn(() => new Promise<boolean>(resolve => approve = resolve));
+        drafts.setReviewers([review]);
+        exportButton().click();
+        await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+        expect(withCommittedEdit).not.toHaveBeenCalled();
+        current.update(value => ({...value, revision: 4}));
+        approve(true);
+        await fixture.whenStable();
+        expect(prepareBuild).toHaveBeenCalledExactlyOnceWith('D:\\Exports', 1, 4);
+    });
+
+    it('does not stage when the active scene changes during draft review', async () => {
+        const {fixture, current, drafts, prepareBuild, finishBuild, exportButton} = await createBuild();
+        let approve!: (accepted: boolean) => void;
+        const review = vi.fn(() => new Promise<boolean>(resolve => approve = resolve));
+        drafts.setReviewers([review]);
+        exportButton().click();
+        await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+        current.update(value => ({...value, active_scene_id: 'other', revision: 2}));
+        approve(true);
+        await fixture.whenStable();
+        expect(prepareBuild).not.toHaveBeenCalled();
+        expect(finishBuild).not.toHaveBeenCalled();
+        expect(exportButton().disabled).toBe(false);
+    });
+
     it('shows export contents and launches only after the explicit Run action using its expected path', async () => {
         const {fixture, root, prepareBuild, finishBuild, runBuild, exportButton, runButton} = await createBuild();
         exportButton().click();
         await fixture.whenStable();
-        expect(prepareBuild).toHaveBeenCalledExactlyOnceWith('D:\\Exports');
+        expect(prepareBuild).toHaveBeenCalledExactlyOnceWith('D:\\Exports', 1, 1);
         expect(finishBuild).toHaveBeenCalledExactlyOnceWith(prepared.build_id);
         expect(root.textContent).toContain(output.path);
         expect(root.textContent).toContain('7 assets · 1.5 MiB');

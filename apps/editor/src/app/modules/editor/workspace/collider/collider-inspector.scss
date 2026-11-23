@@ -135,3 +135,42 @@ input[type='checkbox'] {
   margin: 0;
   accent-color: var(--color-action);
 }
+
+:host-context(html[data-theme='workbench']) {
+  .collider {
+    gap: var(--space-1);
+    padding-block-start: 0;
+    border-color: var(--color-pane-edge);
+  }
+
+  h3 {
+    min-height: var(--layout-control-height);
+    align-items: center;
+    font-size: var(--font-size-md);
+  }
+
+  .shape {
+    grid-template-columns: var(--inspector-label-width, 5.25rem) minmax(0, 1fr);
+    font-size: var(--font-size-sm);
+  }
+
+  input:not([type='checkbox']),
+  select {
+    min-height: var(--layout-control-height);
+    padding-block: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input:not([type='checkbox']):enabled:not([aria-invalid='true']),
+  select:enabled {
+    border-color: var(--color-input-edge-subtle);
+    background: var(--color-control);
+  }
+
+  fieldset {
+    padding: var(--space-1) 0 0;
+    border: 0;
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+    border-radius: 0;
+  }
+}

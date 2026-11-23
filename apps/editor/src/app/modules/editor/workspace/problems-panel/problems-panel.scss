@@ -48,3 +48,25 @@ button:enabled:hover {
 button:disabled, button:disabled span {
   color: var(--color-text-disabled);
 }
+
+:host-context(html[data-theme='workbench']) {
+  section {
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+  }
+
+  ul {
+    gap: 0;
+  }
+
+  button {
+    gap: 2px;
+    padding: var(--space-1) var(--space-2);
+    border-color: transparent;
+    background: transparent;
+  }
+
+  button:focus-visible {
+    outline-offset: calc(-1 * var(--focus-width));
+  }
+}

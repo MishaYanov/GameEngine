@@ -1,12 +1,13 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
         <workspace-toolbar (paletteRequested)="openPalette()"
-                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()"
+                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()" (repairRequested)="repairSceneDependency($event)"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
         <editor-camera-settings [opening]="workspaceActionBlocked()"/>
         <editor-physics-layers [opening]="workspaceActionBlocked()"/>
+        <editor-scene-lights [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
         @if (editorService.snapshot()) {
             <button (click)="openProblems()" [disabled]="workspaceActionBlocked()" aria-haspopup="dialog"
@@ -48,12 +49,13 @@
             }
         }
     </div>
-    <workspace-tabs #tabs (viewSelected)="workspaceView.selectView($event)"
+    <workspace-tabs #tabs (viewSelected)="requestWorkspaceView($event)"
                     [availableViews]="workspaceView.availableViews()"
                     [activeViewKind]="workspaceView.activeViewKind()"/>
 
-    <div class="workspace-main">
+    <div [class.animation-active]="workspaceView.animationView()" class="workspace-main">
         <scene-entities-panel
+                [hidden]="workspaceView.animationView()"
                 data-editor-shortcut-scope="hierarchy"
                 drawerMaxWidth="var(--workspace-hierarchy-max)"
                 [scene]="sceneEntities()"
@@ -85,7 +87,7 @@
             >
                 <editor-pane [icon]="workspaceView.animationView() || workspaceView.animatorView() || workspaceView.controlsGraphView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
                              [title]="workspaceView.controlsGraphView() ? 'Controls Graph' : workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
-                    @if (!workspaceView.propView() && sceneProgress(); as progress) {
+                    @if (!workspaceView.propView() && !workspaceView.animationView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
                             <progress
@@ -104,42 +106,47 @@
                               role="status">{{
                                 workspaceView.gameKeyboardCaptured() ? 'Game keyboard active · Esc releases' : 'Click Game to capture the keyboard'
                             }}</span>
-                    } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
+                    } @else if (!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.gameView() && viewportEditor.state()?.gesture === 'fly') {
                         <span class="viewport-keyboard-hint" pane-actions role="status">WASD to move · Mouse to look · Esc exits</span>
-                    } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.gameView() && assetDrag.message(); as message) {
+                    } @else if (!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.gameView() && assetDrag.message(); as message) {
                         <span [title]="message" class="viewport-keyboard-hint" pane-actions
                               role="status">{{ message }}</span>
                     }
                     @if (editorService.snapshot(); as snapshot) {
-                        <scene-viewport
-                                (editorActionRequested)="handleNativeShortcut($event)"
-                                [enabled]="showingViewport() && !opening()"
-                                [hidden]="!showingViewport()"
-                                [class.prop-aperture]="workspaceView.propView() || workspaceView.animationView()"
-                                [label]="workspaceView.animationView() ? 'Isolated Animation viewport' :
-                                    workspaceView.propView() ? 'Isolated Prop viewport' : selectedCameraPreview.active() ? 'Selected camera preview viewport' :
-                                    workspaceView.gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
-                        />
-                        @if (workspaceView.propView()) {
-                            <editor-prop-workspace (closed)="closePropWorkspace()"/>
-                        } @else if (workspaceView.animationView()) {
-                            <editor-animation-workspace/>
-                        } @else if (workspaceView.animatorView()) {
-                            <editor-animator-workspace/>
-                        } @else if (workspaceView.controlsGraphView()) {
-                            <editor-control-graph-workspace/>
-                        } @else if (!showingViewport()) {
-                            <div class="empty-scene">
-                                <div class="empty-content">
-                                    <h3>{{ workspaceView.gameView() ? 'Game preview is stopped' : 'Game preview is running' }}</h3>
-                                    @if (workspaceView.gameView() && missingGameCamera()) {
-                                        <p>Select an enabled Camera in the Hierarchy and choose Set as Game Camera.</p>
-                                    } @else {
-                                        <p>{{ workspaceView.gameView() ? 'Select Play to start the preview.' : 'Select Stop to return to scene editing.' }}</p>
-                                    }
+                        <div [class.animation-layout]="workspaceView.animationView()" [class.animation-preview-visible]="workspaceView.animationView() && showingViewport()"
+                             class="workspace-content">
+                            @if (workspaceView.animationView()) {
+                                <editor-animation-workspace/>
+                            }
+                            <scene-viewport
+                                    (editorActionRequested)="handleNativeShortcut($event)"
+                                    [class.prop-aperture]="workspaceView.propView()"
+                                    [enabled]="showingViewport() && !opening()"
+                                    [hidden]="!showingViewport()"
+                                    [label]="workspaceView.animationView() ? 'Isolated Animation viewport' :
+                                        workspaceView.propView() ? 'Isolated Prop viewport' : selectedCameraPreview.active() ? 'Selected camera preview viewport' :
+                                        workspaceView.gameView() ? 'Game preview viewport' : snapshot.active_scene_id + ' scene viewport'"
+                            />
+                            @if (workspaceView.propView()) {
+                                <editor-prop-workspace (closed)="closePropWorkspace()"/>
+                            } @else if (workspaceView.animatorView()) {
+                                <editor-animator-workspace/>
+                            } @else if (workspaceView.controlsGraphView()) {
+                                <editor-control-graph-workspace/>
+                            } @else if (!workspaceView.animationView() && !showingViewport()) {
+                                <div class="empty-scene">
+                                    <div class="empty-content">
+                                        <h3>{{ workspaceView.gameView() ? 'Game preview is stopped' : 'Game preview is running' }}</h3>
+                                        @if (workspaceView.gameView() && missingGameCamera()) {
+                                            <p>Select an enabled Camera in the Hierarchy and choose Set as Game
+                                                Camera.</p>
+                                        } @else {
+                                            <p>{{ workspaceView.gameView() ? 'Select Play to start the preview.' : 'Select Stop to return to scene editing.' }}</p>
+                                        }
+                                    </div>
                                 </div>
-                            </div>
-                        }
+                            }
+                        </div>
                     } @else {
                         <div class="empty-scene">
                             <div class="empty-content">
@@ -167,6 +174,7 @@
             <editor-runtime-inspector [opening]="workspaceActionBlocked()" drawerMaxWidth="var(--workspace-inspector-max)"/>
         } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()) {
         <inspector-panel
+                [hidden]="workspaceView.animationView()"
                 data-editor-shortcut-scope="inspector"
                 drawerMaxWidth="var(--workspace-inspector-max)"
                 [entity]="sceneEditing.entity()"
@@ -186,8 +194,10 @@
         />
         }
     </div>
-    <editor-assets-panel [opening]="workspaceActionBlocked()" data-editor-shortcut-scope="assets"/>
+    <editor-assets-panel [hidden]="workspaceView.animationView()" [opening]="workspaceActionBlocked()"
+                         data-editor-shortcut-scope="assets"/>
 </section>
+<editor-particle-designer/>
 <editor-command-palette (commandRequested)="dispatchEditorAction($event)" [(open)]="paletteOpen"
                         [canRun]="canRunPaletteCommand"/>
 <editor-find-usages (closed)="closeUsages()" (revealRequested)="revealUsage($event)" [contextKey]="sceneContext()"

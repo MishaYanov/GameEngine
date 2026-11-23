@@ -1,5 +1,8 @@
 use crate::{AdminService, collector::Collector, health::Registry, jobs, processes, save_json};
-use std::{fs, io, path::PathBuf};
+use std::{
+	fs, io,
+	path::{Path, PathBuf},
+};
 
 impl AdminService {
 	pub fn configure(&mut self, workspace: &str, logs: &str) -> io::Result<()> {
@@ -28,10 +31,11 @@ impl AdminService {
 				"Stop managed applications before changing workspace",
 			));
 		}
-		let workspace = PathBuf::from(workspace).canonicalize()?;
-		if !workspace.join("Cargo.toml").is_file() {
-			return Err(io::Error::other("Workspace must contain Cargo.toml"));
-		}
+		let workspace = if workspace.trim().is_empty() {
+			None
+		} else {
+			Some(resolve_workspace(Path::new(workspace))?)
+		};
 		let logs = PathBuf::from(logs);
 		fs::create_dir_all(&logs)?;
 		let logs = logs.canonicalize()?;
@@ -50,4 +54,12 @@ impl AdminService {
 		self.tick();
 		Ok(())
 	}
+}
+
+pub(crate) fn resolve_workspace(workspace: &Path) -> io::Result<PathBuf> {
+	let workspace = workspace.canonicalize()?;
+	if !workspace.join("Cargo.toml").is_file() {
+		return Err(io::Error::other("Workspace must contain Cargo.toml"));
+	}
+	Ok(workspace)
 }

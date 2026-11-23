@@ -1,0 +1,40 @@
+.animation-layout {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.animation-layout.animation-preview-visible {
+  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr);
+}
+
+.animation-layout > * {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.animation-layout editor-animation-workspace {
+  overflow: auto;
+}
+
+scene-entities-panel[hidden],
+inspector-panel[hidden],
+editor-assets-panel[hidden] {
+  display: none;
+}
+
+@container (max-width: 45rem) {
+  .workspace-main.animation-active {
+    flex-wrap: nowrap;
+    align-content: normal;
+    overflow: hidden;
+  }
+
+  .animation-active .workspace-center {
+    min-height: 0;
+  }
+
+  .animation-layout.animation-preview-visible {
+    grid-template: minmax(0, 1fr) minmax(4rem, 32%) / minmax(0, 1fr);
+  }
+}

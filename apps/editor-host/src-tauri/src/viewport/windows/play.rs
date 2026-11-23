@@ -134,7 +134,7 @@ impl Worker {
 			self.interaction
 				.sync_game_status_after_tick(workspace, &outcome);
 			let outcome = outcome.map_err(|error| error.to_string())?;
-			self.dirty |= !outcome.changes.is_empty();
+			self.dirty |= !outcome.changes.is_empty() || outcome.particles_changed;
 			let transition = outcome.requested_scene.and_then(|target| {
 				let status = workspace.backend.play_status()?;
 				let timing = SceneLoadTiming::new("editor", LoadScope::Play, Instant::now());

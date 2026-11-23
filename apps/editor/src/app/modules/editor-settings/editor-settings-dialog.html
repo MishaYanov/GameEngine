@@ -16,7 +16,11 @@
         </div>
 
         <div class="settings-detail">
-            @if (settings.state().page === 'editor.keymap') {
+            @if (settings.state().page === 'editor.appearance') {
+                <editor-form-section title="Appearance">
+                    <editor-theme-picker/>
+                </editor-form-section>
+            } @else if (settings.state().page === 'editor.keymap') {
                 <editor-form-section description="Default editor shortcuts, grouped by where they work." title="Keymap">
                     @for (section of sections; track section.title) {
                         <div class="keymap-section">

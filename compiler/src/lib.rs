@@ -19,11 +19,15 @@ pub use dependencies::verification::{
 	inspect_scene_dependencies,
 };
 pub use export::{
-	complete_staged_project, finish_staged_project, install_authored_project,
-	install_prepared_project, install_project_from_manifest, stage_prepared_project,
+	complete_staged_project, complete_staged_project_with_player, finish_staged_project,
+	install_authored_project, install_prepared_project, install_project_from_manifest,
+	stage_prepared_project,
 };
 pub use preflight::prepare_project;
-pub use scaffold::{create_authoring_project, install_project, project_path};
+pub use scaffold::{
+	create_authoring_project, create_authoring_project_from_template, create_blank_project,
+	install_project, project_path,
+};
 
 use export::{copy_prepared_project, validate_export_snapshot};
 #[cfg(test)]

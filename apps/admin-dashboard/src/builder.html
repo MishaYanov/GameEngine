@@ -23,7 +23,7 @@
     >Source workspace<input
             (ngModelChange)="invalidate()"
             [(ngModel)]="draft.source"
-            [placeholder]="state()?.workspace ?? 'Absolute source workspace'"
+            [placeholder]="state()?.workspace || 'Absolute source workspace'"
             name="source"/></label
     ><label
     >New destination folder<input
@@ -57,7 +57,7 @@
             type="checkbox"
     />Use cached Cargo dependencies (offline)</label
     >
-        <button [disabled]="!api.desktop || busy()" class="primary">
+        <button [disabled]="!api.desktop || busy() || !(draft.source.trim() || state()?.workspace)" class="primary">
             Preview files
         </button>
     </form>

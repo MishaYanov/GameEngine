@@ -120,3 +120,52 @@ input[type='checkbox']:disabled {
 [hidden] {
   display: none !important;
 }
+
+:host-context(html[data-theme='workbench']) {
+  gap: var(--space-1);
+
+  legend {
+    margin-bottom: var(--space-1);
+  }
+
+  .number-control,
+  .text-control {
+    display: grid;
+    grid-template-columns: var(--subject-field-columns, minmax(3.5rem, .75fr) minmax(0, 1fr));
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .number-control > span,
+  .text-control > span {
+    overflow-wrap: anywhere;
+  }
+
+  input:not([type='checkbox']),
+  select {
+    padding: 0 var(--space-1);
+    border-color: var(--color-input-edge-subtle);
+  }
+
+  input:not([type='checkbox']):enabled,
+  select:enabled {
+    background: var(--color-control);
+  }
+
+  input:not([type='checkbox']):enabled:hover,
+  select:enabled:hover {
+    border-color: var(--color-input-edge);
+  }
+
+  input[aria-invalid='true']:enabled {
+    border-color: var(--color-danger);
+  }
+
+  input[type='number'] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+:host(.vector) {
+  --subject-field-columns: auto minmax(0, 1fr);
+}

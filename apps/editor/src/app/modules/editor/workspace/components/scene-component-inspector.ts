@@ -10,6 +10,7 @@ import { InputActionsCatalog } from '../game-input/input-actions-catalog.service
 import { AnimatorInspector } from '../animator/animator-inspector';
 import {ControlGraphInspector} from '../control-graph/control-graph-inspector';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
+import {ParticleDesignerSession} from '../particle-designer/particle-designer-session';
 
 @Component({
 	selector: 'editor-scene-component-inspector',
@@ -28,6 +29,8 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[inputActionAssets]="inputActions?.assets() ?? []"
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[skyPanoramaAssetsEnabled]="skyPanoramaAssetsEnabled()"
+		[particleDesignerAvailable]="particleDesigner !== null"
+		(particleDesignerRequested)="openParticleDesigner()"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[audioScope]="audioScope()"
@@ -87,6 +90,7 @@ export class SceneComponentInspector {
     private readonly componentEditor = viewChild(ComponentEditor);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
+    protected readonly particleDesigner = inject(ParticleDesignerSession, {optional: true});
 	private readonly viewport = inject(ViewportEditorService, {optional: true});
 	private readonly views = inject(WorkspaceViewService, {optional: true});
 	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
@@ -269,6 +273,11 @@ export class SceneComponentInspector {
 			this.pending.set(false);
 		}
 	}
+
+    protected openParticleDesigner(): void {
+        const key = this.entity()?.key;
+        if (key && this.available()) this.particleDesigner?.open(key);
+    }
 
 	protected async setSceneSky(assign: boolean): Promise<void> {
 		const key = this.entity()?.key;

@@ -1,5 +1,6 @@
 import {NgComponentOutlet} from '@angular/common';
 import {Component, signal} from '@angular/core';
+import {EditorThemePicker} from '../../../src/app/modules/editor-settings/editor-theme-picker';
 import type {ComponentPreview} from './component-registry';
 import {componentRegistry} from './component-registry.generated';
 
@@ -11,7 +12,7 @@ interface Section extends ComponentPreview {
 
 @Component({
     selector: 'editor-design-workbench',
-    imports: [NgComponentOutlet],
+    imports: [EditorThemePicker, NgComponentOutlet],
     templateUrl: './workbench.html',
     styleUrl: './workbench.scss',
 })

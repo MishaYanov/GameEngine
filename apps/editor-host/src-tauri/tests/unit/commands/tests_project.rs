@@ -7,6 +7,20 @@ use crate::{
 use bridge::editor::{EditorCommandDto, EditorCommandRequest};
 use runtime::animation::TimelineEdit;
 
+#[test]
+fn project_template_wire_names_are_explicit_and_default_to_blank() {
+	assert!(matches!(ProjectTemplate::default(), ProjectTemplate::Blank));
+	assert!(matches!(
+		serde_json::from_str::<ProjectTemplate>(r#""blank""#).unwrap(),
+		ProjectTemplate::Blank
+	));
+	assert!(matches!(
+		serde_json::from_str::<ProjectTemplate>(r#""cinder_oath""#).unwrap(),
+		ProjectTemplate::CinderOath
+	));
+	assert!(serde_json::from_str::<ProjectTemplate>(r#""other""#).is_err());
+}
+
 fn open_workspace_for_exit() -> EditorWorkspace {
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../../headless/tests/fixtures/authoring-controller/project.json");

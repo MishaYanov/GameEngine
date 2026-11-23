@@ -109,10 +109,32 @@
   .rail-toggle {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--drawer-label-gap, var(--space-2));
     width: auto;
     margin: 0;
-    padding-inline: var(--space-3);
+    padding-inline: var(--drawer-label-padding, var(--space-3));
     font-size: var(--font-size-sm);
+  }
+}
+
+:host-context(html[data-theme='workbench']) {
+  --drawer-label-gap: var(--space-1);
+  --drawer-label-padding: var(--space-2);
+
+  .subject-rail {
+    gap: 2px;
+    border: var(--border-width) solid var(--color-pane-edge);
+    padding: 2px;
+  }
+
+  .subject-rail button {
+    height: var(--layout-subject-control-height);
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  .rail-toggle {
+    margin: 0;
+    color: var(--color-text-secondary);
   }
 }

@@ -2,6 +2,7 @@
 use crate::{
 	EntityKey,
 	components::{ComponentRecord, NO_MESH_PATH},
+	linked_prefab::LinkedPrefabProperty,
 	scene_data::{
 		CURRENT_SCHEMA_VERSION, CameraData, EntityData, LightData, LightKind, MAX_SCENE_BYTES,
 		ParsedScene, SceneData, SceneEnvironment, SceneOrganization, TransformData,
@@ -210,8 +211,36 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 	{
 		return Err("Sky requires scene schema 7".into());
 	}
+	if version < 8 && uses_particle_emitter_schema(&scene.entities) {
+		return Err("Particle Emitter requires scene schema 8".into());
+	}
 	scene.refresh_game_camera_projection()?;
 	Ok(scene)
+}
+
+/// Version checks cover retained source records as well as the materialized scene.
+fn uses_particle_emitter_schema(entities: &[EntityData]) -> bool {
+	let mut pending = vec![entities];
+	while let Some(entities) = pending.pop() {
+		for entity in entities {
+			if entity.particle_emitter.is_some() {
+				return true;
+			}
+			if let Some(link) = &entity.linked_prefab {
+				if link
+					.overrides
+					.iter()
+					.any(|target| target.property == LinkedPrefabProperty::ParticleEmitter)
+				{
+					return true;
+				}
+				let prefab = &link.source.prefab;
+				pending.push(&prefab.entities);
+				pending.extend(prefab.composition.pins.iter().map(|pin| pin.entities.as_slice()));
+			}
+		}
+	}
+	false
 }
 
 struct StoredEntityRef<'a>(&'a EntityData);

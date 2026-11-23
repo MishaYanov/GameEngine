@@ -5,6 +5,7 @@ mod commands;
 mod editor;
 mod layout_preferences;
 mod project_location;
+mod release_resources;
 mod state;
 mod viewport;
 mod viewport_interaction;

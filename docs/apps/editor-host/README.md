@@ -140,9 +140,21 @@ From the root:
 cargo check -p app --all-targets --locked --offline
 ```
 
-Tauri configuration uses the editor server on port 4200 and production `apps/editor/dist/editor/browser`. Build a bundle
-from apps/editor-host using the editor's installed tauri CLI. Windows prerequisites and the SDK apply when exercising
-native rendering.
+Tauri uses the editor server on port 4200 for development and bundles the production UI in the Windows executable.
+Install npm dependencies in `apps/editor` and `apps/admin-dashboard`, then run the release wrapper from the
+repository root. Follow the [Windows Editor quickstart](../../windows-editor-quickstart.md) for the full build, install,
+and export steps.
+
+```powershell
+.\apps\editor-host\build-windows-release.ps1
+```
+
+The wrapper builds the Player from the locked checkout and bundles it with the editable Cinder Oath sample. The
+packaged Editor uses those resources for Export and Open Sample. The default build produces the x64 NSIS installer,
+which offers the optional Admin Dashboard on a fresh interactive install. Pass `-PortableOnly` to produce the Editor
+folder without building the Dashboard. Keep the `release` resource directory alongside the Editor executable.
+Pass `-Offline` to use the local Cargo cache. See the
+[Step 1 walkthrough](../../../designs/editor-viewport/windows-release-step-1.md) for the clean-machine checks.
 
 Read [steps 21–35](../../editor-steps-21-35.md) for examples and learning resources, and [testing](../../testing.md) for
 exact verification. An implemented command path or passing fake-driver test does not itself establish visible child-window/GPU acceptance or installed-player execution.

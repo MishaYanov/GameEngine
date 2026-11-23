@@ -63,3 +63,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+:host-context(html[data-theme='workbench']) .tree-row {
+  min-height: var(--layout-control-height);
+  border-radius: 0;
+}

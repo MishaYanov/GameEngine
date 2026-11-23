@@ -1422,6 +1422,21 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.snapshot()?.revision).toBe(2);
     });
 
+    it('does not stage an export queued against a replaced workspace', async () => {
+        const replacement = deferred<EditorSnapshot>();
+        vi.mocked(invoke).mockResolvedValueOnce(snapshot(8)).mockReturnValueOnce(replacement.promise);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('first/project.json');
+        const generation = service.workspaceGeneration();
+        const opening = service.openProject('second/project.json');
+        const staging = expect(service.prepareBuild('D:/Exports', generation, 8)).rejects.toThrow('workspace changed');
+
+        replacement.resolve(snapshot(9));
+        await opening;
+        await staging;
+        expect(invoke).toHaveBeenCalledTimes(2);
+    });
+
     it('saves all documents through the revision queue and explicitly runs a recorded export', async () => {
         vi.mocked(invoke)
             .mockResolvedValueOnce({...snapshot(7), dirty: true, project_dirty: true})

@@ -1,0 +1,11 @@
+{
+  "schema_version": 3,
+  "name": "Particle Workbench",
+  "scenes": [
+    {
+      "id": "workbench",
+      "asset_path": "scenes/workbench.json"
+    }
+  ],
+  "startup_scene_id": "workbench"
+}

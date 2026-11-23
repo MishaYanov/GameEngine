@@ -82,6 +82,7 @@ import type {
 export {EditorClientError, type EditorErrorKind} from './editor-client-error';
 
 export interface ProjectOpenOptions {
+    readonly expectedGeneration?: number;
     readonly expectedRevision?: number | null;
     readonly discardUnsaved?: boolean;
 }
@@ -215,11 +216,13 @@ export class EditorService {
         }
     }
 
-    requestExit(): Promise<boolean> {
-        return this.enqueue('editor_exit', () =>
-                this.native<boolean>('editor_exit', {expectedRevision: this.snapshotState()?.revision ?? null}),
-            true,
-        );
+    requestExit(expectedGeneration?: number, expectedRevision?: number | null): Promise<boolean> {
+        return this.enqueue('editor_exit', () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<boolean>('editor_exit', {
+                expectedRevision: expectedRevision === undefined ? this.snapshotState()?.revision ?? null : expectedRevision,
+            });
+        }, true, expectedGeneration);
     }
 
     openProject(manifestPath: string, options: ProjectOpenOptions = {}): Promise<EditorSnapshot> {
@@ -228,6 +231,7 @@ export class EditorService {
             ? this.snapshotState()?.revision ?? null
             : options.expectedRevision;
         return this.enqueue('editor_open_project', async () => {
+            this.requireGeneration(options.expectedGeneration);
             const result = await this.native<EditorSnapshot>('editor_open_project', {
                 manifestPath,
                 expectedRevision,
@@ -236,7 +240,7 @@ export class EditorService {
             this.assetsState.set(null);
             this.workspaceGenerationState.update(generation => generation + 1);
             return this.accept(result);
-        });
+        }, false, options.expectedGeneration);
     }
 
     setSceneWarmingMode(mode: import('./viewport-editor.models').EditorWarmingMode, expectedGeneration: number): Promise<number> {
@@ -268,8 +272,8 @@ export class EditorService {
         });
     }
 
-    switchScene(sceneId: SceneId): Promise<EditorSnapshot> {
-        return this.execute({type: 'switch_scene', scene_id: sceneId});
+    switchScene(sceneId: SceneId, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.execute({type: 'switch_scene', scene_id: sceneId}, expectedGeneration, expectedRevision);
     }
 
     registerScene(path: string): Promise<EditorSnapshot> {
@@ -288,11 +292,13 @@ export class EditorService {
         return this.snapshotOperation('editor_save_all');
     }
 
-    prepareBuild(destination: string): Promise<ProjectBuildPreparation> {
-        return this.enqueue('editor_prepare_project_build', () =>
-            this.native<ProjectBuildPreparation>('editor_prepare_project_build', {
-                destination, expectedRevision: this.revision(),
-            }), true);
+    prepareBuild(destination: string, expectedGeneration?: number, expectedRevision?: number): Promise<ProjectBuildPreparation> {
+        return this.enqueue('editor_prepare_project_build', () => {
+            this.requireGeneration(expectedGeneration);
+            return this.native<ProjectBuildPreparation>('editor_prepare_project_build', {
+                destination, expectedRevision: expectedRevision ?? this.revision(),
+            });
+        }, true, expectedGeneration);
     }
 
     /** Inputs are staged before compilation, which does not occupy the edit queue. */
@@ -376,8 +382,8 @@ export class EditorService {
         );
     }
 
-    save(): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_save');
+    save(expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_save', {}, false, {expectedGeneration, expectedRevision});
     }
 
     reload(): Promise<EditorSnapshot> {

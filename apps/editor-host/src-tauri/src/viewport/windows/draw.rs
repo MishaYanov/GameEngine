@@ -1,4 +1,5 @@
 use super::*;
+use runtime::particle_draw::ParticleDraw;
 use bridge::viewport::{
 	SceneWarmingMode, SceneWarmingResultDto, WarmingCacheDto, WarmingCacheState,
 	WarmingLoadIdentityDto, WarmingSessionRowDto, WarmingViewportDto,
@@ -144,6 +145,7 @@ impl Worker {
 						warming: workspace.scene_warming.context(),
 						warmed,
 						animations: session.animations().cloned(),
+						particles: session.particles().collect(),
 						animation_preview: workspace.active_animation_preview(),
 						document,
 						game_camera,
@@ -171,6 +173,7 @@ impl Worker {
 			warm_requested,
 			warming,
 			animations,
+			particles,
 			animation_preview,
 			mut document,
 			game_camera,
@@ -372,6 +375,7 @@ impl Worker {
 			self.gpu = Some(GpuState {
 				scene,
 				prop_preview: None,
+				particle_draw: None,
 				assets: ManuallyDrop::new(assets),
 				renderer,
 				asset_root,
@@ -579,7 +583,11 @@ impl Worker {
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
 		)?;
-		let (objects, _) = gpu.scene.try_render_visible(Some(&frustum))?;
+		ParticleDraw::prepare(&mut gpu.particle_draw, &gpu.renderer, &uniform, &particles)?;
+		let (mut objects, _) = gpu.scene.try_render_visible(Some(&frustum))?;
+		if let Some(object) = gpu.particle_draw.as_ref().and_then(ParticleDraw::object) {
+			objects.push(object);
+		}
 		let frame_status = match game_rect {
 			Some(rect) => gpu
 				.renderer

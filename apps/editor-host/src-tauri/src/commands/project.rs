@@ -1,8 +1,9 @@
 use crate::{
 	editor::EditorWorkspace,
+	release_resources::EditorResources,
 	state::{EditorExitState, EditorState, WindowCloseReview},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
@@ -323,15 +324,28 @@ pub struct ProjectResult {
 	manifest_path: String,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectTemplate {
+	#[default]
+	Blank,
+	CinderOath,
+}
+
 #[tauri::command]
 pub async fn create_project(
 	window: tauri::WebviewWindow,
 	name: String,
 	destination: String,
+	template: Option<ProjectTemplate>,
 ) -> Result<ProjectResult, String> {
 	super::editor::trusted_window(&window)?;
+	let resources = EditorResources::for_window(&window)?;
 	tauri::async_runtime::spawn_blocking(move || {
-		let path = compiler::create_authoring_project(&name, &destination)?;
+		let path = match template.unwrap_or_default() {
+			ProjectTemplate::Blank => compiler::create_blank_project(&name, &destination)?,
+			ProjectTemplate::CinderOath => resources.create_sample(&name, &destination)?,
+		};
 		Ok(ProjectResult {
 			manifest_path: path.join("project.json").to_string_lossy().into_owned(),
 			path: path.to_string_lossy().into_owned(),

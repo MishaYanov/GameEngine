@@ -16,7 +16,11 @@ describe('ProjectService', () => {
         const result = {path: 'D:\\Projects\\Demo', manifestPath: 'D:\\Projects\\Demo\\project.json'};
         vi.mocked(invoke).mockResolvedValue(result);
         expect(await TestBed.inject(ProjectService).create(' Demo ', ' D:\\Projects ')).toEqual(result);
-        expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {name: 'Demo', destination: 'D:\\Projects'});
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {
+            name: 'Demo',
+            destination: 'D:\\Projects',
+            template: 'blank'
+        });
     });
 
     it('uses the shared destination picker with optional initial directory', async () => {

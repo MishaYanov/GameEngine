@@ -1,10 +1,9 @@
 import {Component, inject, input, output} from '@angular/core';
-import {RouterLink} from '@angular/router';
+import type {ProjectTemplate} from '../../../../core/project/project.service';
 import {EditorService} from "../../../../core/editor/editor.service";
 
 @Component({
     selector: 'editor-file-menu',
-    imports: [RouterLink],
     templateUrl: './editor-file-menu.html',
     styleUrl: './editor-file-menu.scss',
 })
@@ -14,6 +13,7 @@ export class EditorFileMenu {
     readonly canExit = input(false);
     readonly opening = input(false);
     readonly openProjectRequested = output<void>();
+    readonly projectSetupRequested = output<ProjectTemplate>();
     readonly settingsRequested = output<void>();
     readonly exitRequested = output<void>();
 

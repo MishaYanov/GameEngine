@@ -43,3 +43,15 @@ button:disabled {
 p {
 	margin: 0;
 }
+
+:host-context(html[data-theme='workbench']) {
+  fieldset {
+    padding: var(--space-1) 0 0;
+    border: 0;
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+  }
+
+  legend {
+    color: var(--color-text-secondary);
+  }
+}

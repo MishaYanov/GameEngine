@@ -108,6 +108,7 @@ export type LinkedPrefabPropertyKind =
     | 'collider'
     | 'character_controller'
     | 'animation'
+    | 'particle_emitter'
     | 'native_behavior'
     | 'script';
 

@@ -93,3 +93,56 @@ fieldset {
 .error {
 	color: var(--color-danger);
 }
+
+:host-context(html[data-theme='workbench']) {
+  .components,
+  .component-form {
+    gap: var(--space-2);
+  }
+
+  .component,
+  .component-form,
+  .component-form fieldset {
+    margin-inline: 0;
+    padding: var(--space-1) 0 0;
+    border: 0;
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+    border-radius: 0;
+  }
+
+  h3 {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .component > span {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+  }
+
+  .component .actions > button:enabled {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  button:enabled:hover {
+    background: var(--color-control-hover);
+  }
+
+  :is(button, select, input:not([type='checkbox'])) {
+    padding-block: 0;
+  }
+
+  input[type='checkbox'] {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    accent-color: var(--color-action);
+  }
+
+  .binding-row {
+    gap: var(--space-1);
+    padding-block: var(--space-1);
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+  }
+}

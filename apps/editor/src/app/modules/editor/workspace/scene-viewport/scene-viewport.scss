@@ -57,3 +57,9 @@ p {
   background: var(--color-danger-bg);
   color: var(--color-danger);
 }
+
+:host-context(html[data-theme='workbench']) .viewport {
+  border: 0;
+  border-radius: 0;
+  background: var(--color-canvas);
+}

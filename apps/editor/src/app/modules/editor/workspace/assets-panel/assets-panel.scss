@@ -172,3 +172,53 @@ p[role='status'] {
 .search-feedback[role='status'] {
   color: var(--color-text-secondary);
 }
+
+:host-context(html[data-theme='workbench']) {
+  app-drawer {
+    margin-top: var(--space-1);
+  }
+
+  .asset-browser {
+    padding: var(--space-1) var(--space-2);
+  }
+
+  ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+    gap: 2px var(--space-1);
+  }
+
+  li > button {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--layout-subject-control-height);
+    padding: 2px var(--space-1);
+    text-align: start;
+  }
+
+  li > button:enabled {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  li > button:enabled:hover {
+    background: var(--color-control-hover);
+  }
+
+  li > button.selected:enabled {
+    border-inline-start-color: var(--color-selection-edge);
+    background: var(--color-selected);
+  }
+
+  li > button.selected:enabled:hover {
+    background: var(--color-selected-hover);
+  }
+
+  li > :is(button, button.selected):enabled:active {
+    background: var(--color-control-pressed);
+  }
+
+  li > button:focus-visible {
+    outline-offset: calc(-1 * var(--focus-width));
+  }
+}

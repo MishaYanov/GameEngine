@@ -3,6 +3,7 @@
         <editor-file-menu
                 (exitRequested)="exitRequested.emit()"
                 (openProjectRequested)="openProjectRequested.emit()"
+                (projectSetupRequested)="projectSetupRequested.emit($event)"
                 (settingsRequested)="settingsRequested.emit()"
                 [canExit]="canExit()"
                 [canOpenSettings]="canOpenSettings()"
@@ -31,6 +32,11 @@
         <button #controlsTrigger class="controls-trigger" type="button" aria-haspopup="dialog"
                 [disabled]="opening() || !canOpenControls()"
                 (click)="controlsTrigger.focus(); controlsRequested.emit()">Controls</button>
+        <button #objectsTrigger (click)="openObjects(objectsTrigger)" (keydown)="openObjectsFromKeyboard($event, objectsTrigger)" [attr.aria-expanded]="contextMenu.request()?.owner === objectsTrigger"
+                [disabled]="opening() || !availableObjectActions().length"
+                aria-haspopup="menu"
+                class="objects-trigger"
+                type="button">Objects <span aria-hidden="true">▾</span></button>
     </div>
 
     <div class="breadcrumb">

@@ -1,11 +1,12 @@
 import {
-    afterNextRender, Component, computed, effect, ElementRef, inject, Injector, input, linkedSignal, output,
+    afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, output,
     signal, untracked, viewChild,
 } from '@angular/core';
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import type {ClipAssetDocument, ClipKey, ClipKeyValue, ClipTimelineDraft, Quaternion, TimelineEdit} from '../../../../core/editor/authored-clip.models';
 import type {Vec3} from '../../../../core/editor/editor.models';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {AnimationWorkspaceService} from './animation-workspace.service';
 import {TimelineEditService} from './timeline-edit.service';
 
 type JumpDirection = 'previous' | 'next';
@@ -51,6 +52,7 @@ export class ClipTimeline {
     protected readonly label = linkedSignal(() => this.selectedMarker()?.label ?? '');
     protected readonly closing = signal(false);
     protected readonly resolvingClose = signal(false);
+    private navigationAnswer: ((allowed: boolean) => void) | null = null;
     protected readonly closePending = computed(() => this.resolvingClose() || this.timeline.busy());
     private readonly navigationBlocked = computed(() =>
         this.timeline.playing() || this.timeline.drag() !== null || this.closePending() || this.closing());
@@ -66,6 +68,11 @@ export class ClipTimeline {
     protected readonly rulerMidpoint = computed(() => Math.floor(this.timeline.duration() / 2));
 
     constructor() {
+        const release = inject(AnimationWorkspaceService).registerTimelineReview(() => this.reviewNavigation());
+        inject(DestroyRef).onDestroy(() => {
+            release();
+            this.navigationAnswer?.(false);
+        });
         effect(() => {
             const asset = this.asset(), scope = this.scope();
             untracked(() => this.timeline.connect(asset, scope));
@@ -155,32 +162,45 @@ export class ClipTimeline {
         if (saved) this.saved.emit(saved);
     }
 
-    protected async requestClose(): Promise<void> {
-        if (this.closePending()) return;
+    reviewNavigation(): Promise<boolean> {
+        if (this.closePending() || this.closing()) return Promise.resolve(false);
+        this.timeline.stop();
         if (this.timeline.draft()?.dirty) {
-            this.timeline.stop();
             this.closing.set(true);
-        } else {
-            await this.resolveClose('close');
+            return new Promise(resolve => this.navigationAnswer = resolve);
         }
+        return this.resolveClose('close');
     }
 
-    protected async resolveClose(choice: 'save' | 'discard' | 'close'): Promise<void> {
+    protected keepEditing(): void {
         if (this.closePending()) return;
+        this.closing.set(false);
+        this.answerNavigation(false);
+    }
+
+    protected async resolveClose(choice: 'save' | 'discard' | 'close'): Promise<boolean> {
+        if (this.closePending()) return false;
         this.resolvingClose.set(true);
         try {
             if (choice === 'save') {
                 const saved = await this.timeline.save();
-                if (!saved) return;
+                if (!saved) return false;
                 this.saved.emit(saved);
             }
-            if (await this.timeline.close(choice === 'discard')) {
-                this.closing.set(false);
-                this.closed.emit();
-            }
+            if (!await this.timeline.close(choice === 'discard')) return false;
+            this.closing.set(false);
+            this.answerNavigation(true);
+            this.closed.emit();
+            return true;
         } finally {
             this.resolvingClose.set(false);
         }
+    }
+
+    private answerNavigation(allowed: boolean): void {
+        const answer = this.navigationAnswer;
+        this.navigationAnswer = null;
+        answer?.(allowed);
     }
 
     protected onKeys(event: KeyboardEvent): void {

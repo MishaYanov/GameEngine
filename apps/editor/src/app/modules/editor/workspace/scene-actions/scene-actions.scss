@@ -92,3 +92,47 @@ p { margin: 0; font-size: var(--font-size-xs); }
 .warming-result {
   margin: 0;
 }
+
+:host-context(html[data-theme='workbench']) {
+  .scene-actions {
+    gap: 5px;
+    padding-block: 3px;
+  }
+
+  .scene-actions button,
+  select,
+  input {
+    min-height: var(--layout-control-height);
+    padding-block: 1px;
+  }
+
+  .scene-actions button:enabled {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .scene-actions button:enabled:hover {
+    background: var(--color-control-hover);
+  }
+
+  .scene-actions button:enabled:active {
+    background: var(--color-control-pressed);
+  }
+
+  select:enabled, input:enabled {
+    background: var(--color-control);
+  }
+
+  .scene-actions select {
+    max-inline-size: min(42vw, 18rem);
+  }
+
+  .scene-files {
+    background: var(--color-pane);
+  }
+
+  .gameplay-roles {
+    border: 0;
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+  }
+}

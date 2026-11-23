@@ -1,12 +1,7 @@
-import {Component} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
-import {provideRouter, Router} from '@angular/router';
 import {vi} from 'vitest';
 
 import {EditorFileMenu} from './editor-file-menu';
-
-@Component({template: ''})
-class ProjectSetupStub {}
 
 describe('EditorFileMenu', () => {
     let component: EditorFileMenu;
@@ -15,7 +10,6 @@ describe('EditorFileMenu', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [EditorFileMenu],
-            providers: [provideRouter([{path: 'setup', component: ProjectSetupStub}])],
         }).compileComponents();
 
         fixture = TestBed.createComponent(EditorFileMenu);
@@ -39,32 +33,35 @@ describe('EditorFileMenu', () => {
         button.click();
         await fixture.whenStable();
         expect(hidePopover).not.toHaveBeenCalled();
-        expect(TestBed.inject(Router).url).toBe('/');
     });
 
-    it('closes the menu and opens setup with the editor return context', async () => {
+    it('requests blank and sample setup through the workspace review', async () => {
         fixture.componentRef.setInput('canOpen', true);
         await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
-        const button = root.querySelector<HTMLButtonElement>('.file-menu button')!;
         const menu = root.querySelector<HTMLElement>('.file-menu')!;
         const hidePopover = vi.fn();
         Object.defineProperty(menu, 'hidePopover', {value: hidePopover});
-        expect(button.disabled).toBe(false);
+        const setupRequests: string[] = [];
+        component.projectSetupRequested.subscribe(template => setupRequests.push(template));
 
-        button.click();
-        await fixture.whenStable();
-        expect(hidePopover).toHaveBeenCalledOnce();
-        expect(TestBed.inject(Router).url).toBe('/setup?from=editor');
+        const [blank, sample] = menu.querySelectorAll<HTMLButtonElement>('button');
+        expect(blank.textContent).toContain('New Project');
+        expect(sample.textContent).toContain('Open Sample');
+        blank.click();
+        sample.click();
+
+        expect(hidePopover).toHaveBeenCalledTimes(2);
+        expect(setupRequests).toEqual(['blank', 'cinder_oath']);
     });
 
-    it('disables both project actions if the editor becomes busy or starts Play', async () => {
+    it('disables all project actions if the editor becomes busy or starts Play', async () => {
         fixture.componentRef.setInput('canOpen', true);
         await fixture.whenStable();
         fixture.componentRef.setInput('canOpen', false);
         await fixture.whenStable();
         const buttons = [...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.file-menu button')];
-        expect(buttons.map(button => button.disabled)).toEqual([true, true, false, true]);
+        expect(buttons.map(button => button.disabled)).toEqual([true, true, true, false, true]);
     });
 
     it('closes the File popover before requesting Settings or Exit', async () => {

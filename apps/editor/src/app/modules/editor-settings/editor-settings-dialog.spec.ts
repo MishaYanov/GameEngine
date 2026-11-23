@@ -49,6 +49,11 @@ describe('Editor Settings dialog', () => {
         await fixture.whenStable();
         const dialog = root.querySelector<HTMLDialogElement>('dialog')!;
         expect(dialog.open).toBe(true);
+        const choice = (label: string) => [...dialog.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+            .find(item => item.getAttribute('aria-label') === label)!;
+        expect(choice('Appearance').getAttribute('aria-selected')).toBe('true');
+        choice('Keymap').click();
+        await fixture.whenStable();
         expect(dialog.querySelector('[role="treeitem"][aria-selected="true"]')?.textContent).toContain('Keymap');
         expect(dialog.textContent).toContain('Ctrl/Cmd + S');
         expect(dialog.textContent).toContain('Shift + backtick');
@@ -68,6 +73,39 @@ describe('Editor Settings dialog', () => {
         await fixture.whenStable();
         expect(dialog.open).toBe(false);
         expect(settings.state()).toEqual({open: false, page: 'editor'});
+    });
+
+    it('offers both themes when Settings opens and applies the selected theme', async () => {
+        TestBed.configureTestingModule({
+            providers: [{
+                provide: LAYOUT_PREFERENCES_STORAGE,
+                useValue: {load: async () => null, save: async () => undefined},
+            }],
+        });
+        const host = document.documentElement;
+        const previousTheme = host.getAttribute('data-theme');
+        const storageKey = 'game-engine.editor.theme';
+        const previousChoice = localStorage.getItem(storageKey);
+        localStorage.removeItem(storageKey);
+        try {
+            const settings = TestBed.inject(EditorSettingsService);
+            const fixture = TestBed.createComponent(EditorSettingsDialog);
+            settings.setOpen(true);
+            await fixture.whenStable();
+            const root: HTMLElement = fixture.nativeElement;
+            const select = root.querySelector<HTMLSelectElement>('editor-theme-picker select')!;
+            expect([...select.options].map(option => option.textContent?.trim())).toEqual(['Workbench', 'Graphite (Classic)']);
+            expect(select.value).toBe('workbench');
+            select.value = 'graphite';
+            select.dispatchEvent(new Event('change'));
+            expect(host.dataset['theme']).toBe('graphite');
+            expect(localStorage.getItem(storageKey)).toBe('graphite');
+        } finally {
+            if (previousTheme === null) host.removeAttribute('data-theme');
+            else host.setAttribute('data-theme', previousTheme);
+            if (previousChoice === null) localStorage.removeItem(storageKey);
+            else localStorage.setItem(storageKey, previousChoice);
+        }
     });
 
     it('restores and saves the warming mode through local editor preferences', async () => {

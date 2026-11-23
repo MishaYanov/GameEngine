@@ -72,3 +72,37 @@
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
+
+:host-context(html[data-theme='workbench']) {
+  .workspace-actions {
+    gap: 3px;
+    padding: 3px var(--space-2);
+  }
+
+  .action-group {
+    gap: 2px;
+  }
+
+  .action-group + .action-group {
+    padding-inline-start: 4px;
+  }
+
+  .action-group button {
+    min-height: var(--layout-control-height);
+    padding-block: 1px;
+  }
+
+  .action-group .play-action:enabled {
+    background: var(--color-selected);
+    color: var(--color-success);
+  }
+
+  .action-group .play-action:enabled:hover {
+    background: var(--color-selected-hover);
+    color: var(--color-text);
+  }
+
+  .action-group .play-action:enabled:active {
+    background: var(--color-control-pressed);
+  }
+}

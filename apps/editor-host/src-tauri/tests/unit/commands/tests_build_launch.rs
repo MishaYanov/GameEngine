@@ -9,6 +9,34 @@ fn launch_requires_a_successful_build() {
 }
 
 #[test]
+fn finishing_an_installed_editor_export_copies_the_supplied_player() {
+	let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../../../target")
+		.join(format!("qa-bundled-player-finish-{}", std::process::id()));
+	std::fs::create_dir_all(root.parent().unwrap()).unwrap();
+	std::fs::create_dir(&root).unwrap();
+	let destination = root.to_str().unwrap();
+	let source = compiler::create_blank_project("Bundled Player Demo", destination).unwrap();
+	let project = runtime::project::ProjectData::load(source.join("project.json")).unwrap();
+	let prepared = compiler::prepare_project(&project, &source.join("assets")).unwrap();
+	let exports = root.join("exports");
+	std::fs::create_dir(&exports).unwrap();
+	let staged = compiler::stage_prepared_project(&prepared, exports.to_str().unwrap()).unwrap();
+	let player = root.join("player-resource.exe");
+	let bytes = b"prebuilt player fixture";
+	std::fs::write(&player, bytes).unwrap();
+
+	let last_build = Mutex::new(None);
+	let result = finish_project_build(staged, Some(&player), &last_build).unwrap();
+	let installed = last_build.lock().unwrap();
+	let command = build_launch_command(installed.as_ref(), Path::new(&result.path)).unwrap();
+	assert_eq!(std::fs::read(command.get_program()).unwrap(), bytes);
+	assert_eq!(std::fs::read(&player).unwrap(), bytes);
+	drop(installed);
+	std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 #[ignore = "builds a real release player"]
 fn launch_uses_the_exported_executable_and_its_asset_working_directory() {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"))

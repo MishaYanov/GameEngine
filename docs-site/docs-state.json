@@ -1,9 +1,91 @@
 {
-  "last_checked_commit": "3632784f74b7a061dbf5b4054518e3e62efa1267",
+  "last_checked_commit": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
   "last_checked_date": "2026-11-23",
-  "last_documentation_update_commit": "e8b5012eefa741785f0cdc0fe38644b045a9bca0",
+  "last_documentation_update_commit": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "The inspection commit covers the editor authoring workflows and close lifecycle review. last_documentation_update_commit identifies the preceding committed documentation. Older entries retain historical evidence.",
+  "baseline_note": "The inspection compares the conditional Controls and object script proposal with the current editor and engine. Older entries retain their original verification evidence.",
+  "conditional_controls_and_object_scripts_proposal": {
+    "inspected_head": "932b5376eb8f81587e5c45b3fcdb9bcd149dcaaf",
+    "path": "designs/editor-viewport/conditional-controls-and-object-scripts.md",
+    "scope": "Proposed Controls dialog, condition-based layouts, and typed object script attachments.",
+    "status": "design proposal",
+    "verification": [
+      "Documentation build generated and link-checked 68 pages. All eight site tests passed.",
+      "The two JSON examples parsed and the Airborne mapping has no duplicate effective physical bindings.",
+      "An interactive draft was exercised at 320 and 736 pixels in headless Edge. It correctly selected Default or Airborne, changed devices, and restored menu focus on close."
+    ],
+    "verification_limits": [
+      "The design was checked against the current source. Game-loop behavior and editor workflows described by the proposal are future implementation acceptance checks."
+    ]
+  },
+  "windows_editor_quickstart": {
+    "inspected_head": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+    "path": "docs/windows-editor-quickstart.md",
+    "scope": "Build the Windows installer, install the Editor with the optional Dashboard, and edit and export a playable Cinder Oath copy.",
+    "verification": [
+      "Checked installer flags, output names, runtime requirements and the optional Dashboard prompt against the current working tree and the locally verified installer.",
+      "Checked the project setup, scene picker, lighting edit, Play entry scene, and export actions against the current Editor source and Cinder Oath manifest.",
+      "The static documentation site generated and link-checked 72 pages. All eight site tests passed."
+    ],
+    "verification_limits": [
+      "This documentation update did not repeat the full native desktop authoring walkthrough or a clean Windows installation."
+    ]
+  },
+  "windows_release_refactors_step_1": {
+    "inspected_head": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+    "path": "designs/editor-viewport/windows-release-step-1.md",
+    "scope": "Standalone Windows Editor resource packaging, Blank and Cinder Oath creation, and shared draft review.",
+    "status": "implemented and verified in the working tree",
+    "verification": [
+      "The Windows Rust workspace passed 1,288 tests. The default run skipped 24 opt-in cases.",
+      "All 690 Angular tests passed and the production bundle check completed without warnings.",
+      "The documentation site built and link-checked 71 pages and passed eight checks.",
+      "A portable x64 Windows Editor was built with a byte-verified Player and Cinder Oath sample.",
+      "The x64 NSIS installer was built unsigned. Its packaging manifest includes the Editor, matching Player, and Cinder Oath assets.",
+      "A packaged-resource smoke check copied Cinder Oath without changing its template, created and reopened the Blank project, exported the exact bundled Player with Cargo off PATH, and presented a Vulkan frame from an unrelated working directory."
+    ],
+    "verification_limits": [
+      "The automated smoke check used the native compiler and Player entry points. Manual packaged Editor interaction remains a separate check.",
+      "Independent clean-machine acceptance and public release qualification remain separate."
+    ]
+  },
+  "editor_access_and_particles_154_162": {
+    "inspected_head": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+    "path": "designs/editor-viewport/editor-access-and-particles-154-162.md",
+    "scope": "Milestones 154–162 covering Animation workspace layout, Objects and Scene Lights, and a Particle Designer with native Play and Player rendering.",
+    "status": "implemented and verified in the working tree",
+    "verification": [
+      "All 679 Angular tests passed. The production bundle check passed without a component style budget warning.",
+      "The Rust workspace passed 1,282 tests. The default run skipped 24 opt-in cases.",
+      "A separate Windows Vulkan check rendered particles. Pixel captures verified orange color, blue foreground depth occlusion and clean removal.",
+      "The Particle Workbench export retained both emitters and its Windows Player launched from an unrelated directory.",
+      "Isolated Headless Edge checks exercised wide and narrow Animation and Particle Designer layout geometry.",
+      "Python passed 151 tests. The static documentation site built and link-checked 70 pages and passed all eight tests.",
+      "A follow-up Testing, Documentation, Security and Rust Best Practices review verified scale-independent particle launches, linked Prop schema checks, fresh scene ownership across Play review and bounded numeric parsing. The Windows Vulkan batch test passed after the fixes."
+    ],
+    "verification_limits": [
+      "Browser layout checks used the actual styles and representative markup. Manual interaction with the native desktop Editor remains open.",
+      "The packaged Player verification covered startup. Particle pixel output was verified in a separate Vulkan test."
+    ]
+  },
+  "conditional_authoring_roadmap_134_153": {
+    "inspected_head": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+    "path": "designs/editor-viewport/authoring-roadmap-134-153.md",
+    "scope": "Twenty implementation milestones for conditional Controls layouts, typed object scripts and project physics interaction.",
+    "status": "implemented and verified",
+    "verification": [
+      "Recorded 20 individual commits for Milestones 134 through 153. Both the design proposal and the roadmap are tracked.",
+      "The roadmap has the original file-level guidance, code examples, checks and resources for all 20 milestones.",
+      "All 666 Angular tests and the production bundle check passed. The editor tests exercise Controls and Physics Layers pending-change protection.",
+      "The Rust workspace passed 1,272 tests on Windows. The default workspace run skipped 23 opt-in cases.",
+      "All four Conditional Door Lab acceptance cases passed, including standalone Windows Vulkan Player startup, matching source and package replays, and both negative cases.",
+      "Python passed 151 tests. The documentation site generated and link-checked 69 pages and passed eight tests."
+    ],
+    "verification_limits": [
+      "The installed Windows Player check exercised startup. Full gameplay was checked with shared simulation and headless replay.",
+      "Physical input devices and manual desktop Editor interaction were outside these automated checks."
+    ]
+  },
   "authoring_workflow_milestones_122_133": {
     "inspected_head": "3632784f74b7a061dbf5b4054518e3e62efa1267",
     "scope": "Milestones 122–133 and the follow-up close lifecycle review. The guide includes editor exercises, exact source paths, code excerpts, acceptance checks, and resources.",

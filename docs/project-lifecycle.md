@@ -11,7 +11,7 @@ linked prefab and runtime inspection workflows, see the [Milestone 4–6 review]
 
 ## Project format and scene identity
 
-Project manifests use **schema 3**, while individual scene documents save as **schema 4**. These versions are
+Project manifests use **schema 3**, while individual scene documents save as **schema 8**. These versions are
 independent of **editor protocol 2**. `ProjectData::from_json` upgrades a schema-2 manifest containing only inline
 behaviors to schema 3 in memory. Subsequent serialization writes schema 3. Schema 2 rejects
 `behavior_definitions`, shared behavior attachments, `input_profile`, and `gameplay_module`. Unsupported versions,
@@ -65,12 +65,11 @@ entity keys.
 
 ## Gameplay module selection
 
-Project schema 3 accepts an optional `gameplay_module`. The bundled demo opts in with
-`"gameplay_module": "courtyard_run"`. Omission or `null` uses the built-in configured movement and spin
-behaviors. New Project keeps the starter scenes and behaviors and uses that generic default.
+Project schema 3 accepts an optional `gameplay_module`. A Blank project starts with the generic configured
+behavior module and one editable Main scene. Open Sample copies Cinder Oath with its authored `cinder_oath` module.
 
 A module ID starts with a lowercase ASCII letter and uses up to 32 lowercase ASCII letters, digits, or underscores.
-The manifest parser checks that format. The shared native resolver recognizes `courtyard_run`, and an unsupported
+The manifest parser checks that format. The shared native resolver recognizes `cinder_oath`, and an unsupported
 ID fails when starting Play or preparing an export. The editor resolves the current in-memory project each time
 Play starts, so project edits and Undo/Redo affect the next run. The Player and headless runner use the same resolver.
 
@@ -129,7 +128,7 @@ not contribute to scene/project dirty flags or change saved baselines.
 
 ## Gameplay role bindings
 
-A scene's `bindings` map, retained in schema 4, stores role names and entity keys in that authored document. In Edit,
+A scene's `bindings` map stores role names and entity keys in that authored document. In Edit,
 **Gameplay Roles** presents the selected module's advertised roles for the active scene. The host catalog supplies
 default roles and explicit per-scene overrides; an empty override intentionally presents no roles. Courtyard's
 course roles are **Player**, **Key** and **Exit**, with **Player** and **Finish** for `finish`. Choose **Unassigned**
@@ -201,8 +200,9 @@ build; saving the manifest alone cannot make those documents clean.
 
 ## Angular and host contract
 
-The host advertises editor protocol 2 / scene schema 4. `EditorService.loadCapabilities()` requires protocol 2 and
-accepts scene schema 4 or legacy 3. Models mirror project schema 3, scene descriptors, scene-scoped/shared behaviors,
+The host advertises editor protocol 2 and scene schema 8. `EditorService.loadCapabilities()` requires protocol 2 and
+accepts scene schema versions 3 through 8. Models mirror project schema 3, scene descriptors, scene-scoped/shared
+behaviors,
 typed component views and expanded snapshots. The current workspace connects scene controls, component editing and
 linked prefab authoring; [editor workspace](editor-workspace.md) records the controls and their limits.
 
@@ -226,7 +226,9 @@ migration.
 ## Build and player/headless behavior
 
 Host build preparation requires clean Edit state, no grouped edit, a manifest matching memory and **every catalog scene
-** matching its retained document on disk. Compilation runs after releasing the workspace lock. Compiler preparation
+** matching its retained document on disk. Completing the staged export runs after releasing the workspace lock.
+A packaged Windows Editor supplies its bundled Player. The developer export path can build the Player with Cargo.
+Compiler preparation
 requires catalog scenes and referenced models to belong to the captured asset list. With a selected gameplay module,
 it also prepares each scene with that module to validate game-specific bindings and destination requirements. Copied
 output uses the same validation pass against its canonical asset root. Scene failures include ID/path context in stable

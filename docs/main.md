@@ -1,6 +1,11 @@
 # Game Engine documentation
 
-Start with [setup and usage](usage.md), then read [architecture](architecture.md). Project guides follow the source layout under `apps`, `crates`, and `compiler`. Run commands from the directory stated in each guide.
+To build the Windows installer, open the Editor, and export a playable game, follow
+the [Windows Editor quickstart](windows-editor-quickstart.md).
+
+For development setup and command-line workflows, see [setup and usage](usage.md) and [architecture](architecture.md).
+Project guides follow the source layout under `apps`, `crates`, and `compiler`. Run commands from the directory stated
+in each guide.
 
 Read the [five building-blocks review](building-blocks-review.md) for the current playable proof of concept,
 module/role authoring, Collider Inspector, sensors/filtering, optimization boundaries and attributed verification.

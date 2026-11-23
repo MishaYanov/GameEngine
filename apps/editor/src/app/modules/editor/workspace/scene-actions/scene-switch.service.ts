@@ -2,6 +2,7 @@ import {computed, DestroyRef, inject, Injectable, signal} from '@angular/core';
 import type {EditorSnapshot, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {SceneEditingService} from '../scene-editing.service';
+import {type WorkspaceDraftTarget, WorkspaceDraftReview} from '../workspace-draft-review';
 
 interface SceneDestination {
     readonly sceneId: SceneId;
@@ -24,12 +25,13 @@ type SceneChoice = 'save' | 'keep' | 'cancel';
 @Injectable()
 export class SceneSwitchService {
     private readonly editor = inject(EditorService);
+    private readonly drafts = inject(WorkspaceDraftReview);
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly pendingState = signal(false);
     readonly pending = this.pendingState.asReadonly();
     readonly canSwitch = computed(() => {
         const snapshot = this.editor.snapshot();
-        return this.editor.nativeAvailable && !this.pending() && snapshot?.mode === 'edit' &&
+        return this.editor.nativeAvailable && !this.pending() && !this.drafts.pending() && snapshot?.mode === 'edit' &&
             (this.editing?.ready() ?? (!this.editor.busy() && snapshot.transaction === null));
     });
     private readonly loadingState = signal<SceneDestination | null>(null);
@@ -55,14 +57,14 @@ export class SceneSwitchService {
     async request(sceneId: SceneId): Promise<boolean> {
         const snapshot = this.editor.snapshot();
         if (this.destroyed || !this.canSwitch() || !snapshot || snapshot.active_scene_id === sceneId) return false;
-        const generation = this.editor.workspaceGeneration();
+        const scope = this.drafts.capture();
         const fromId = snapshot.active_scene_id;
         this.pendingState.set(true);
         this.clearFeedback();
 
         let switched = false;
         const open = async () => {
-            const previous = this.currentFor(generation, fromId);
+            const previous = this.currentFor(scope);
             const from = previous.scenes.find(scene => scene.id === fromId);
             const to = previous.scenes.find(scene => scene.id === sceneId);
             if (!from || !to) throw new Error('The scene is no longer registered. Choose a scene again.');
@@ -71,20 +73,25 @@ export class SceneSwitchService {
             if (from.dirty) {
                 const decision = await this.confirm(from.asset_path, to.asset_path);
                 if (decision === 'cancel') return;
-                if (this.currentFor(generation, fromId).revision !== previous.revision) {
+                if (this.currentFor(scope).revision !== previous.revision) {
                     throw new Error('The scene changed while the confirmation was open. Try again.');
                 }
                 if (decision === 'save') {
-                    await this.editor.save();
-                    this.currentFor(generation, fromId);
+                    await this.editor.save(scope.generation, previous.revision);
+                    this.currentFor(scope);
                 } else kept = true;
             }
 
             const destination = {sceneId, path: to.asset_path};
+            const refreshed = this.currentFor(scope);
             this.loadingState.set(destination);
-            const opened = await this.editor.switchScene(sceneId);
-            if (this.destroyed || this.editor.workspaceGeneration() !== generation) return;
-            this.completedState.set({...destination, sceneRevision: opened.scene_revision, generation});
+            const opened = await this.editor.switchScene(sceneId, scope.generation, refreshed.revision);
+            if (this.destroyed || this.editor.workspaceGeneration() !== scope.generation) return;
+            this.completedState.set({
+                ...destination,
+                sceneRevision: opened.scene_revision,
+                generation: scope.generation
+            });
             this.messageState.set(kept
                 ? `Opened ${destination.path}. Edits to ${from.asset_path} are kept in this session.`
                 : `Opened ${destination.path}.`);
@@ -92,11 +99,13 @@ export class SceneSwitchService {
         };
 
         try {
-            if (this.editing) {
-                if (!await this.editing.withCommittedEdit(open)) {
+            await this.drafts.run(scope, async () => {
+                if (!this.editing) {
+                    await open();
+                } else if (!await this.editing.withCommittedEdit(open)) {
                     this.errorState.set(this.editing.error() ?? 'Finish the current edit and try again.');
                 }
-            } else await open();
+            });
         } catch (error) {
             this.errorState.set(error instanceof Error ? error.message : String(error));
         } finally {
@@ -126,10 +135,10 @@ export class SceneSwitchService {
         });
     }
 
-    private currentFor(generation: number, sceneId: SceneId): EditorSnapshot {
+    private currentFor(scope: WorkspaceDraftTarget): EditorSnapshot {
         const snapshot = this.editor.snapshot();
-        if (this.destroyed || this.editor.workspaceGeneration() !== generation || snapshot?.mode !== 'edit' ||
-            snapshot.active_scene_id !== sceneId || snapshot.transaction !== null || this.editor.busy()) {
+        if (this.destroyed || !this.drafts.current(scope) || snapshot?.mode !== 'edit' ||
+            snapshot.transaction !== null || this.editor.busy()) {
             throw new Error('The editor state changed. Try opening the scene again.');
         }
         return snapshot;

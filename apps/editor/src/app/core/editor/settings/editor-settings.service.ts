@@ -10,7 +10,7 @@ const SCENE_WARMING_PREFERENCE_KEY = 'editor:scene-warming';
 @Service()
 export class EditorSettingsService {
     private readonly preferences = inject(LayoutPreferencesService);
-    private readonly current = signal<EditorSettingsState>({open: false, page: 'editor.keymap'});
+    private readonly current = signal<EditorSettingsState>({open: false, page: 'editor.appearance'});
     readonly state = this.current.asReadonly();
     readonly persistenceError = this.preferences.error;
     private readonly warmingModeState = signal<EditorWarmingMode>('off');
@@ -41,6 +41,8 @@ export class EditorSettingsService {
     }
 
     select(page: string | null): void {
-        if (page === 'editor' || page === 'editor.keymap') this.current.update(state => ({...state, page}));
+        if (page === 'editor' || page === 'editor.appearance' || page === 'editor.keymap') {
+            this.current.update(state => ({...state, page}));
+        }
     }
 }

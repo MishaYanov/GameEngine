@@ -384,6 +384,9 @@ impl CommandFactory {
 			| EditorCommandDto::CreatePlayer
 			| EditorCommandDto::CreateAudioSource
 			| EditorCommandDto::CreateSky
+			| EditorCommandDto::CreateEmpty
+			| EditorCommandDto::CreateLight { .. }
+			| EditorCommandDto::CreateParticleEmitter
 			| EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
 			| EditorCommandDto::CommitTransaction
@@ -400,6 +403,9 @@ impl CommandFactory {
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
 			("create_sky", "Create Sky", "component", true, false),
+			("create_empty", "Create Empty Object", "scene", true, false),
+			("create_light", "Create Light", "scene", true, false),
+			("create_particle_emitter", "Create Particle Emitter", "component", true, false),
 			(
 				"set_active_sky",
 				"Set as Scene Sky",

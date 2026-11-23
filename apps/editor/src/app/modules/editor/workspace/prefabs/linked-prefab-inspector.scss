@@ -48,3 +48,38 @@ dd {
 	display: grid;
 	gap: var(--space-1);
 }
+
+:host-context(html[data-theme='workbench']) {
+  .linked-prefab {
+    gap: var(--space-1);
+    padding-block-start: var(--space-1);
+    border-color: var(--color-pane-edge);
+  }
+
+  .linked-prefab + .linked-prefab {
+    margin-block-start: var(--space-2);
+  }
+
+  h3 {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .linked-prefab p:not(.error), .linked-prefab dt {
+    color: var(--color-text-secondary);
+  }
+
+  .actions, ul, li {
+    gap: var(--space-1);
+  }
+
+  ul > li {
+    padding-block: var(--space-1);
+    border-block-start: var(--border-width) solid var(--color-pane-edge);
+  }
+
+  dl {
+    grid-template-columns: minmax(3.5rem, .75fr) minmax(0, 1fr);
+    margin: 0;
+  }
+}

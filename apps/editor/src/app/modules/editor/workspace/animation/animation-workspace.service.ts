@@ -54,6 +54,7 @@ export class AnimationWorkspaceService {
     private nextOpen: OpenPreview | null = null;
     private nextSeek: ScrubPreview | null = null;
     private request = 0;
+    private reviewTimeline: (() => Promise<boolean>) | null = null;
 
     readonly scope = signal<'scene' | 'prop'>('scene');
     readonly library = signal<'imported' | 'authored'>('imported');
@@ -145,6 +146,22 @@ export class AnimationWorkspaceService {
         if (this.editor.playing()) return;
         this.library.set('authored');
         this.views.selectView('animation-workspace');
+    }
+
+    registerTimelineReview(review: () => Promise<boolean>): () => void {
+        this.reviewTimeline = review;
+        return () => {
+            if (this.reviewTimeline === review) this.reviewTimeline = null;
+        };
+    }
+
+    reviewNavigation(): Promise<boolean> {
+        return this.reviewTimeline?.() ?? Promise.resolve(true);
+    }
+
+    async selectLibrary(library: 'imported' | 'authored'): Promise<void> {
+        if (library === this.library() || !await this.reviewNavigation() || !this.views.animationView()) return;
+        this.library.set(library);
     }
 
     chooseTarget(key: string): void {

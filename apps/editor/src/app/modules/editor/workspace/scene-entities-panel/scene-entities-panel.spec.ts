@@ -75,8 +75,16 @@ describe('SceneEntitiesPanel hierarchy', () => {
             setData: (type: string, value: string) => values.set(type, value),
             getData: (type: string) => values.get(type) ?? ''} as unknown as DataTransfer;
     }
-    async function drag(key: string): Promise<DataTransfer> {
-        const data = transfer(); row(key).dispatchEvent(dragEvent('dragstart', data)); await fixture.whenStable(); return data;
+
+    async function dragRow(source: HTMLElement): Promise<DataTransfer> {
+        const data = transfer();
+        source.dispatchEvent(dragEvent('dragstart', data));
+        await fixture.whenStable();
+        return data;
+    }
+
+    function drag(key: string): Promise<DataTransfer> {
+        return dragRow(row(key));
     }
     function action(label: string): HTMLButtonElement {
         return [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')].find(button => button.textContent?.trim() === label)!;
@@ -329,7 +337,9 @@ describe('SceneEntitiesPanel hierarchy', () => {
     });
 
     it('ignores external or stale drag payloads', async () => {
-        await open(); const data = transfer(); data.setData('application/x-game-engine-hierarchy-entity', 'other');
+        await open();
+        const data = transfer();
+        data.setData('application/x-game-engine-hierarchy-item', 'entity:other');
         row('parent').dispatchEvent(dragEvent('drop', data));
         expect(reparented).not.toHaveBeenCalled();
         const internal = await drag('other');
@@ -527,6 +537,53 @@ describe('SceneEntitiesPanel hierarchy', () => {
         await fixture.whenStable();
         folder('floor').dispatchEvent(dragEvent('drop', stale));
         expect(organized).toHaveBeenCalledTimes(1);
+    });
+
+    it('drags folders into another folder or to Scene root using folder moves', async () => {
+        await openFolders({
+            folders: [...floorFolders.folders, {id: 'decals', name: 'Decals', parent: null},
+                {id: 'tiles', name: 'Tiles', parent: 'floor'}],
+            root_membership: {},
+        });
+        expect(folder('decals').draggable).toBe(true);
+        const decals = await dragRow(folder('decals'));
+        const hover = dragEvent('dragover', decals);
+        folder('floor').dispatchEvent(hover);
+        await fixture.whenStable();
+        expect(hover.defaultPrevented).toBe(true);
+        expect(folder('floor').classList.contains('drop-target')).toBe(true);
+        folder('floor').dispatchEvent(dragEvent('drop', decals));
+        expect(organized).toHaveBeenLastCalledWith({type: 'move_folder', id: 'decals', parent: 'floor'});
+
+        const tiles = await dragRow(folder('tiles'));
+        root.querySelector('.scene-root')!.dispatchEvent(dragEvent('drop', tiles));
+        expect(organized).toHaveBeenLastCalledWith({type: 'move_folder', id: 'tiles', parent: null});
+        expect(organized).toHaveBeenCalledTimes(2);
+        expect(reparented).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid folder drop targets and stale folder drags', async () => {
+        await openFolders({
+            folders: [...floorFolders.folders, {id: 'decals', name: 'Decals', parent: null},
+                {id: 'tiles', name: 'Tiles', parent: 'floor'}],
+            root_membership: {},
+        });
+        for (const target of [folder('floor'), folder('tiles'), row('floor1')]) {
+            const data = await dragRow(folder('floor'));
+            const hover = dragEvent('dragover', data);
+            target.dispatchEvent(hover);
+            expect(hover.defaultPrevented).toBe(false);
+            target.dispatchEvent(dragEvent('drop', data));
+        }
+        const unchanged = await dragRow(folder('tiles'));
+        folder('floor').dispatchEvent(dragEvent('drop', unchanged));
+
+        const stale = await dragRow(folder('floor'));
+        fixture.componentRef.setInput('contextKey', 'different-scene');
+        await fixture.whenStable();
+        folder('decals').dispatchEvent(dragEvent('drop', stale));
+        expect(organized).not.toHaveBeenCalled();
+        expect(reparented).not.toHaveBeenCalled();
     });
 
     it('creates and renames folders with a keyboard form and focuses the parent after removal', async () => {

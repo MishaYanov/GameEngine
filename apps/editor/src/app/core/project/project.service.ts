@@ -1,6 +1,8 @@
 import {Service} from '@angular/core';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 
+export type ProjectTemplate = 'blank' | 'cinder_oath';
+
 export interface ProjectCreationResult {
     readonly path: string;
     readonly manifestPath: string;
@@ -11,11 +13,12 @@ export interface ProjectCreationResult {
 export class ProjectService {
     readonly nativeAvailable = typeof window !== 'undefined' && isTauri();
 
-    create(name: string, destination: string): Promise<ProjectCreationResult> {
+    create(name: string, destination: string, template: ProjectTemplate = 'blank'): Promise<ProjectCreationResult> {
         if (!this.nativeAvailable) return this.unavailable();
         return invoke<ProjectCreationResult>('create_project', {
             name: name.trim(),
             destination: destination.trim(),
+            template,
         });
     }
 

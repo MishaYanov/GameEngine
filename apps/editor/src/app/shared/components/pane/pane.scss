@@ -86,3 +86,24 @@ h2 {
   gap: var(--layout-subject-gap);
   padding: var(--space-2);
 }
+
+:host-context(html[data-theme='workbench']) {
+  .pane {
+    box-shadow: none;
+  }
+
+  .pane-header {
+    flex: none;
+    min-height: var(--layout-pane-header-height, 2rem);
+    padding-inline: var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .pane-title {
+    gap: var(--space-1);
+  }
+
+  .pane-title h2 {
+    font-weight: var(--font-weight-semibold);
+  }
+}

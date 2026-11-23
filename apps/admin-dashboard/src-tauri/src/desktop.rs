@@ -1,4 +1,6 @@
-use crate::{AdminService, DashboardSnapshot, processes::ProcessRun};
+use crate::{
+	AdminService, DashboardSnapshot, processes::ProcessRun, workspace_config::resolve_workspace,
+};
 use std::{
 	path::PathBuf,
 	sync::{Arc, Mutex},
@@ -31,7 +33,7 @@ fn configure_workspace(
 #[tauri::command]
 fn start_application(service: State<Service>, id: String) -> Result<ProcessRun, String> {
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let workspace = service.workspace.clone();
+	let workspace = developer_workspace(&service)?;
 	let logs = service.collector.directory.clone();
 	service
 		.processes
@@ -50,8 +52,8 @@ fn stop_application(service: State<Service>, id: String) -> Result<(), String> {
 #[tauri::command]
 fn restart_application(service: State<Service>, id: String) -> Result<ProcessRun, String> {
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+	let workspace = developer_workspace(&service)?;
 	service.processes.stop(&id).map_err(error)?;
-	let workspace = service.workspace.clone();
 	let logs = service.collector.directory.clone();
 	service
 		.processes
@@ -66,7 +68,7 @@ fn queue_job(
 	profile: String,
 ) -> Result<crate::jobs::Run, String> {
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let workspace = service.workspace.clone();
+	let workspace = developer_workspace(&service)?;
 	service
 		.jobs
 		.queue(&workspace, kind, package, profile)
@@ -143,7 +145,7 @@ fn queue_card_job(
 	{
 		return Err("Card unavailable or link limit reached".into());
 	}
-	let workspace = service.workspace.clone();
+	let workspace = developer_workspace(&service)?;
 	let job = service
 		.jobs
 		.queue(&workspace, kind, package, profile)
@@ -169,12 +171,16 @@ pub fn run() {
 		.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
 	let workspace = std::env::var_os("ENGINE_WORKSPACE_DIR")
 		.map(PathBuf::from)
+		.and_then(|path| resolve_workspace(&path).ok())
 		.or_else(|| {
 			settings
 				.as_ref()
 				.and_then(|s| s["workspace"].as_str().map(PathBuf::from))
-		})
-		.unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+				.and_then(|path| resolve_workspace(&path).ok())
+		});
+	#[cfg(not(feature = "custom-protocol"))]
+	let workspace =
+		workspace.or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")));
 	let logs = std::env::var_os("ENGINE_LOG_DIR")
 		.map(PathBuf::from)
 		.or_else(|| {
@@ -221,4 +227,11 @@ pub fn run() {
 		}
 	});
 	engine_logger::info!(target: "admin", "Admin dashboard stopped");
+}
+
+fn developer_workspace(service: &AdminService) -> Result<PathBuf, String> {
+	service
+		.workspace
+		.clone()
+		.ok_or_else(|| "Select a source checkout under Overview → Workspace settings.".into())
 }

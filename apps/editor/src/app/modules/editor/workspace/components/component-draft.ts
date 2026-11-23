@@ -7,6 +7,10 @@ import {
 import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
+import {
+    DEFAULT_PARTICLE_EMITTER, PARTICLE_NUMBER_FIELDS, validParticleEmitterSettings,
+    type ParticleEmitterSettings, type ParticleNumberKey,
+} from '../../../../core/editor/particle-emitter.models';
 import {cameraComponentDraft, cameraComponentFromDraft, type CameraComponentDraft} from './camera-component-draft';
 import {skyComponentDraft, skyComponentFromDraft, type SkyComponentDraft} from './sky-component-draft';
 import type {InputActionsRef, PlayerMovementSpace} from '../../../../core/editor/player-controller.models';
@@ -54,6 +58,7 @@ export interface ComponentDraft {
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
 	sky: SkyComponentDraft;
+    particle: Record<ParticleNumberKey | 'r' | 'g' | 'b', string>;
     audioSource: {
         clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus;
         spatial: 'two_d' | 'spatial'; near: string; far: string;
@@ -103,6 +108,7 @@ export function componentDraft(
 		animation: null,
 		camera: cameraComponentDraft(),
 		sky: skyComponentDraft(),
+        particle: particleDraft(value?.data.kind === 'particle_emitter' ? value.data.settings : DEFAULT_PARTICLE_EMITTER),
         audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects',
             spatial: 'two_d', near: '1', far: '20', eventKind: 'none', signal: 'activated',
             eventClip: '', eventMarker: '', replacesCue: ''},
@@ -203,6 +209,33 @@ export function componentDraft(
 	return draft;
 }
 
+function particleDraft(settings: ParticleEmitterSettings): ComponentDraft['particle'] {
+    return {
+        rate_per_second: String(settings.rate_per_second),
+        lifetime_seconds: String(settings.lifetime_seconds),
+        speed: String(settings.speed),
+        spread_degrees: String(settings.spread_degrees),
+        gravity: String(settings.gravity),
+        size: String(settings.size),
+        seed: String(settings.seed),
+        r: String(settings.color[0]),
+        g: String(settings.color[1]),
+        b: String(settings.color[2]),
+    };
+}
+
+function particleSettings(draft: ComponentDraft['particle']): ParticleEmitterSettings {
+    const value = {
+        ...Object.fromEntries(PARTICLE_NUMBER_FIELDS.map(({key, label, min, max}) => [
+            key,
+            key === 'seed' ? uint(draft[key], label, min, max) : finite(draft[key], label, Math.fround(min), Math.fround(max)),
+        ])),
+        color: [finite(draft.r, 'Red', 0, 1), finite(draft.g, 'Green', 0, 1), finite(draft.b, 'Blue', 0, 1)],
+    };
+    if (!validParticleEmitterSettings(value)) throw new Error('Review the Particle Emitter settings.');
+    return value;
+}
+
 export function relativeAssetPath(value: string): boolean {
 	return (
 		value.trim().length > 0 &&
@@ -248,6 +281,8 @@ export function componentFromDraft(
 	if (draft.kind === 'script') {
         const previous = original?.data.kind === 'script' ? original.data.settings : undefined;
         data = {kind: 'script', settings: scriptSettings(draft.script, scriptTypes, targets, previous, scriptSlots)};
+    } else if (draft.kind === 'particle_emitter') {
+        data = {kind: 'particle_emitter', settings: particleSettings(draft.particle)};
     } else if (draft.kind === 'sky') {
 		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
 	} else if (draft.kind === 'audio_source') {

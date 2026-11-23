@@ -2,14 +2,19 @@
 
 <div #fileMenu class="file-menu" id="editor-file-menu" popover>
     <button
-            (click)="canOpen() && fileMenu.hidePopover()"
+            (click)="fileMenu.hidePopover(); fileTrigger.focus(); projectSetupRequested.emit('blank')"
             [disabled]="!canOpen()"
-            [queryParams]="{from: 'editor'}"
-            [routerLink]="canOpen() ? '/setup' : null"
             [title]="nativeAvailable ? 'Create a new authoring project' : 'Create projects in the desktop editor'"
             autofocus
             type="button"
     >New Project…</button>
+    <button
+            (click)="fileMenu.hidePopover(); fileTrigger.focus(); projectSetupRequested.emit('cinder_oath')"
+            [disabled]="!canOpen()"
+            title="Open an editable copy of Cinder Oath"
+            type="button"
+    >Open Sample…
+    </button>
     <button
             (click)="fileMenu.hidePopover(); openProjectRequested.emit()"
             [attr.aria-busy]="opening()"

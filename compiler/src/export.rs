@@ -96,7 +96,7 @@ pub fn complete_staged_project(staged: StagedProject) -> Result<InstalledProject
 			staged.path.display()
 		)
 	})?;
-	install_staged_player(staged, &executable)
+	complete_staged_project_with_player(staged, &executable)
 }
 
 fn compile_player() -> Result<PathBuf, String> {
@@ -166,7 +166,8 @@ pub(super) fn validate_export_snapshot(
 	check().map_err(|error| format!("Export snapshot changed or is unavailable: {error}"))
 }
 
-pub(super) fn install_staged_player(
+/// Verify a staged export and publish a trusted, existing Player executable.
+pub fn complete_staged_project_with_player(
 	staged: StagedProject,
 	executable: &Path,
 ) -> Result<InstalledProject, String> {
@@ -183,7 +184,7 @@ pub(super) fn install_staged_player(
 		));
 		let metadata = fs::metadata(executable)?;
 		if !metadata.is_file() {
-			return Err(io::Error::other("Compiled player must be a regular file"));
+			return Err(io::Error::other("Player must be a regular file"));
 		}
 		let mut writer = fs::OpenOptions::new()
 			.write(true)

@@ -4,6 +4,7 @@ import {provideRouter} from '@angular/router';
 import {vi} from 'vitest';
 
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ContextMenuService} from '../../../../shared/components/context-menu/context-menu.service';
 import {EditorHeader} from './editor-header';
 
 describe('EditorHeader', () => {
@@ -19,7 +20,7 @@ describe('EditorHeader', () => {
             imports: [EditorHeader],
             providers: [
                 provideRouter([]),
-                {provide: EditorService, useValue: {snapshot, nativeAvailable: true}},
+                {provide: EditorService, useValue: {snapshot, nativeAvailable: true, workspaceGeneration: () => 1}},
             ],
         }).compileComponents();
 
@@ -84,5 +85,34 @@ describe('EditorHeader', () => {
         fixture.componentRef.setInput('opening', true);
         await fixture.whenStable();
         expect(trigger.disabled).toBe(true);
+    });
+
+    it('opens the keyboard menu for supported Objects actions and restores the trigger on selection', async () => {
+        const trigger = root.querySelector<HTMLButtonElement>('.objects-trigger')!;
+        const menu = TestBed.inject(ContextMenuService);
+        const execute = vi.fn(() => expect(document.activeElement).toBe(trigger));
+        component.objectActionRequested.subscribe(execute);
+        expect(trigger.disabled).toBe(true);
+        snapshot.set(projectSnapshot);
+        fixture.componentRef.setInput('availableObjectActions', ['browse_props', 'create_camera']);
+        await fixture.whenStable();
+
+        trigger.focus();
+        const down = new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true});
+        trigger.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+        await fixture.whenStable();
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(menu.request()?.label).toBe('Objects');
+        const camera = menu.request()!.items.find(item => item.id === 'create_camera')!;
+        const particle = menu.request()!.items.find(item => item.id === 'create_particle_emitter')!;
+        expect(camera).toMatchObject({label: 'Camera', disabled: false});
+        expect(particle).toMatchObject({label: 'Particle Emitter', disabled: true});
+        menu.execute(particle);
+        expect(execute).not.toHaveBeenCalled();
+        menu.execute(camera);
+        await fixture.whenStable();
+        expect(execute).toHaveBeenCalledExactlyOnceWith('create_camera');
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
     });
 });

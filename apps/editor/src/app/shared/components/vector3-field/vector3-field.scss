@@ -7,11 +7,17 @@ fieldset {
   min-width: 0;
   margin: 0;
   padding: 0;
+  padding-inline-start: var(--vector-field-inset, 0);
   border: 0;
+  position: relative;
 }
 
 legend {
-  margin-bottom: var(--space-2);
+  position: var(--vector-legend-position, static);
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  width: var(--vector-legend-width, auto);
+  margin-bottom: var(--vector-legend-margin, var(--space-2));
   padding: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
@@ -20,7 +26,8 @@ legend {
 .legend-content {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  min-height: var(--vector-control-height, 0);
+  gap: var(--vector-legend-gap, var(--space-2));
 }
 
 .axis-lock {
@@ -30,9 +37,9 @@ legend {
   width: var(--space-6);
   height: var(--space-6);
   padding: 0;
-  border: var(--border-width) solid var(--color-input-edge);
+  border: var(--border-width) solid var(--vector-lock-surface, var(--color-input-edge));
   border-radius: var(--radius-sm);
-  background: var(--color-control);
+  background: var(--vector-lock-surface, var(--color-control));
   color: var(--color-text-secondary);
 }
 
@@ -63,13 +70,14 @@ legend {
 }
 
 .unit {
+  display: var(--vector-unit-display, inline);
   font-size: var(--font-size-xs);
 }
 
 .axis-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
+  gap: var(--vector-axis-gap, var(--space-2));
 }
 
 .axis-field {
@@ -85,11 +93,11 @@ input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: var(--space-7);
+  min-height: var(--vector-control-height, var(--space-7));
   padding: 0.125rem 0.1875rem;
   border: 0.5px solid var(--color-input-edge-subtle);
   border-radius: var(--radius-sm);
-  background: var(--color-input);
+  background: var(--vector-input-fill, var(--color-input));
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-sm);
@@ -109,7 +117,62 @@ input:disabled {
 }
 
 .error {
-  margin: var(--space-2) 0 0;
+  margin: var(--vector-legend-margin, var(--space-2)) 0 0;
   color: var(--color-danger);
   font-size: var(--font-size-xs);
+}
+
+:host-context(html[data-theme='workbench']) {
+  container: vector-field / inline-size;
+  --vector-legend-width: var(--inspector-label-width, 5.5rem);
+  --vector-field-inset: calc(var(--vector-legend-width) + var(--space-1));
+  --vector-legend-position: absolute;
+  --vector-legend-margin: 0;
+  --vector-control-height: var(--layout-control-height);
+  --vector-legend-gap: 0;
+  --vector-unit-display: block;
+  --vector-axis-gap: 3px;
+  --vector-lock-surface: transparent;
+  --vector-input-fill: var(--color-control);
+
+  .legend-content > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :is(input, button):focus-visible {
+    outline-offset: calc(-1 * var(--focus-width));
+  }
+
+  input {
+    appearance: textfield;
+    padding: 0 var(--space-1);
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+  }
+
+  input::-webkit-inner-spin-button,
+  input::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+}
+
+@container vector-field (max-width: 17rem) {
+  fieldset {
+    --vector-field-inset: 0;
+    --vector-legend-position: static;
+    --vector-legend-width: 100%;
+    --vector-legend-margin: 2px;
+    --vector-legend-gap: var(--space-1);
+    --vector-unit-display: inline;
+  }
+
+  .axis-field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+  }
 }

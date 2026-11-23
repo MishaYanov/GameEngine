@@ -3,7 +3,7 @@
         <header>
             <h3>{{ draft.clip.name }} Timeline</h3>
             @if (draft.dirty) { <span>Unsaved changes</span> }
-            <button type="button" [disabled]="closePending()" (click)="requestClose()">Close Timeline</button>
+            <button (click)="reviewNavigation()" [disabled]="closePending()" type="button">Close Timeline</button>
         </header>
         <div class="toolbar">
             <button type="button" [disabled]="timeline.playing() || !timeline.preview()" (click)="timeline.play()">Play Clip</button>
@@ -127,12 +127,13 @@
     } @else if (timeline.busy()) {
         <p role="status">Opening the Timeline…</p>
     } @else {
-        <button type="button" [disabled]="closePending()" (click)="requestClose()">Close Timeline</button>
+        <button (click)="reviewNavigation()" [disabled]="closePending()" type="button">Close Timeline</button>
     }
     @if (!closing() && timeline.error(); as error) { <p role="alert">{{ error }}</p> }
 </section>
 
-<editor-dialog title="Unsaved Timeline changes" [(open)]="closing" [renderFields]="false"
+<editor-dialog (openChange)="!$event && keepEditing()" [open]="closing()" [renderFields]="false"
+               title="Unsaved Timeline changes"
                [config]="{width: '30rem', draggable: false, resizable: false, expandable: false}"
                [closeBlocked]="closePending()" closeLabel="Keep Editing">
     @if (timeline.draft()?.dirty) {

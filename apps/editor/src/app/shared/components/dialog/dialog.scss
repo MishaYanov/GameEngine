@@ -185,3 +185,18 @@ footer.resizable {
 .resize-handle:focus-visible {
   outline-offset: calc(-1 * var(--focus-width));
 }
+
+:host-context(html[data-theme='workbench']) {
+  .body {
+    padding: 10px;
+  }
+
+  header, footer {
+    gap: 6px;
+    padding: 6px 10px;
+  }
+
+  footer.resizable {
+    padding-inline-end: var(--space-8);
+  }
+}

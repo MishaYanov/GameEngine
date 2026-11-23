@@ -146,6 +146,27 @@ describe('desktop close review', () => {
         await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('editor_set_window_close_review', {owner, enabled: false}));
     });
 
+    it('keeps local drafts untouched when the Open Project picker is canceled', async () => {
+        const review = vi.spyOn(EditorWorkspace.prototype, 'reviewProjectNavigation').mockResolvedValue(false);
+        const useNative = vi.mocked(invoke).getMockImplementation()!;
+        let manifest: string | null = null;
+        vi.mocked(invoke).mockImplementation((command, payload, options) =>
+            command === 'choose_project_manifest' ? Promise.resolve(manifest) : useNative(command, payload, options));
+        const fixture = TestBed.createComponent(Editor);
+        await fixture.whenStable();
+        const header = fixture.debugElement.query(By.directive(EditorHeader)).componentInstance as EditorHeader;
+
+        header.openProjectRequested.emit();
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('choose_project_manifest', undefined));
+        await fixture.whenStable();
+        expect(review).not.toHaveBeenCalled();
+
+        manifest = 'D:/Projects/Example/project.json';
+        header.openProjectRequested.emit();
+        await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+        expect(invoke).not.toHaveBeenCalledWith('editor_open_project', expect.anything());
+    });
+
     it('keeps File → Exit available if registering the title-bar listener fails', async () => {
         const useNative = vi.mocked(invoke).getMockImplementation()!;
         vi.mocked(invoke).mockImplementation((command, payload, options) =>

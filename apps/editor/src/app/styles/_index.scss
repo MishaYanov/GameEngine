@@ -2,5 +2,6 @@
 // ($graphite: (color-action: #335cc7), $layout: (workspace-gap: 3rem));
 @forward 'abstracts/variables';
 @forward 'themes/graphite' show $graphite;
+@forward 'themes/workbench' show $workbench;
 @forward 'themes/registry';
 @forward 'abstracts/cursors';

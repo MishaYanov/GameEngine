@@ -1,0 +1,70 @@
+<editor-dialog (closeAttempted)="session.requestCloseReview()" (closed)="didClose()" (openChange)="setDialogOpen($event)"
+               [closeBlocked]="session.pending() || session.dirty()" [config]="dialogConfig" [open]="session.active()"
+               [renderFields]="false" preferenceKey="particle-designer"
+               title="Particle Designer">
+    @if (session.active()) {
+        <p class="owner">Emitter on <strong>{{ session.objectName() }}</strong></p>
+        <div class="designer">
+            <section aria-labelledby="particle-preview-heading" class="preview">
+                <h3 id="particle-preview-heading">Preview</h3>
+                <editor-particle-preview [restart]="restart()" [running]="running()" [settings]="session.candidate()"/>
+                <div class="actions">
+                    <button (click)="running.set(!running())" type="button">{{ running() ? 'Pause' : 'Play' }}</button>
+                    <button (click)="restartPreview()" type="button">Restart</button>
+                </div>
+                @if (!session.candidate()) {
+                    <p role="status">Finish the settings to resume preview.</p>
+                }
+            </section>
+            <fieldset [disabled]="session.pending()">
+                <legend>Emitter settings</legend>
+                <label>
+                    Preset
+                    <select #preset (change)="session.pickPreset(preset.value)" [value]="session.preset()">
+                        <option disabled value="">Custom</option>
+                        @for (item of presets; track item.label) {
+                            <option [value]="item.label">{{ item.label }}</option>
+                        }
+                    </select>
+                </label>
+                @for (field of numberFields; track field.key) {
+                    @let error = fieldError(field);
+                    <label>
+                        {{ field.label }}
+                        <input [attr.aria-describedby]="error ? 'particle-error-' + field.key : null" [attr.aria-invalid]="error ? 'true' : null"
+                               [formField]="fields[field.key]" [inputMode]="field.key === 'seed' ? 'numeric' : 'decimal'"
+                               type="text">
+                        @if (error) {
+                            <small [id]="'particle-error-' + field.key">{{ error }}</small>
+                        }
+                    </label>
+                }
+                <label>Color <input [formField]="fields.color" type="color"></label>
+            </fieldset>
+        </div>
+        @if (session.targetError() ?? session.error(); as message) {
+            <p class="error" role="alert">{{ message }}</p>
+        }
+        @if (session.announcement(); as message) {
+            <p role="status">{{ message }}</p>
+        }
+        @if (session.closeReview()) {
+            <fieldset [disabled]="session.pending()" class="close-review">
+                <legend>Unsaved particle settings</legend>
+                <div class="actions">
+                    <button (click)="session.apply(true)" [disabled]="!session.canApply()" type="button">
+                        Apply and Close
+                    </button>
+                    <button (click)="session.discardAndClose()" type="button">Discard and Close</button>
+                    <button (click)="session.closeReview.set(false)" type="button">Keep Editing</button>
+                </div>
+                @if (session.pending()) {
+                    <p role="status">Applying particle settings…</p>
+                }
+            </fieldset>
+        }
+    }
+    <button (click)="session.apply()" [disabled]="!session.canApply()" class="primary"
+            dialog-actions type="button">Apply
+    </button>
+</editor-dialog>

@@ -3,6 +3,9 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(emitter) = &self.particle_emitter {
+			bytes = bytes.saturating_add(emitter.id.as_str().len());
+		}
 		if let Some(sky) = &self.sky {
 			bytes = bytes
 				.saturating_add(std::mem::size_of_val(sky.as_ref()))
@@ -111,6 +114,14 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len() + self.scripts.len());
+		if let Some(emitter) = &self.particle_emitter {
+			records.push(ComponentRecord {
+				id: emitter.id.clone(),
+				schema_version: 1,
+				enabled: emitter.enabled,
+				data: ComponentData::ParticleEmitter { settings: emitter.settings },
+			});
+		}
 		if let Some(sky) = &self.sky {
 			records.push(ComponentRecord {
 				id: sky.id.clone(),
@@ -293,6 +304,13 @@ impl EntityData {
 			return Err("Object component count exceeds its limit".into());
 		}
 		match component.data {
+			ComponentData::ParticleEmitter { settings } => {
+				self.particle_emitter = Some(ParticleEmitterComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				});
+			}
 			ComponentData::Sky { settings } => {
 				self.sky = Some(Box::new(SkyComponent {
 					id: component.id,
@@ -405,6 +423,7 @@ impl EntityData {
 		match record.data {
 			ComponentData::AudioSource { .. } => self.audio_source = None,
 			ComponentData::Sky { .. } => self.sky = None,
+			ComponentData::ParticleEmitter { .. } => self.particle_emitter = None,
 			ComponentData::PlayerController { .. } => self.player_controller = None,
 			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,

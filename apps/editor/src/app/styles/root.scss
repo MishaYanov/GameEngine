@@ -5,8 +5,6 @@
 @layer theme, base;
 
 @layer theme {
-  @include tokens.registered-themes;
-
   :root {
     @include tokens.properties(tokens.typography(), 'font-');
     @include tokens.properties(tokens.spacing(), 'space-');
@@ -18,4 +16,6 @@
     color-scheme: var(--color-scheme);
     accent-color: var(--color-action);
   }
+
+  @include tokens.registered-themes;
 }

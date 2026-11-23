@@ -1,0 +1,75 @@
+<editor-dialog [(open)]="open" [closeBlocked]="pending()" [config]="dialogConfig" [renderFields]="false"
+               closeLabel="Cancel" title="Scene Lights">
+    @if (open()) {
+        <fieldset [disabled]="pending()">
+            @if (lights().length) {
+                <label>Light
+                    <select #light (change)="select(light.value)" [disabled]="changed()" [value]="draft()?.key ?? ''">
+                        @if (!draft()) {
+                            <option value="">Choose a light</option>
+                        }
+                        @for (item of lights(); track item.key) {
+                            <option [value]="item.key">{{ item.name }}
+                                ({{ item.kind === 'point' ? 'Point' : 'Directional' }})
+                            </option>
+                        }
+                    </select>
+                </label>
+            } @else {
+                <p>Add a Point Light or Directional Light from Objects.</p>
+            }
+            @if (draft(); as light) {
+                <label>Name
+                    <input #name (input)="updateName(name.value)" [value]="light.name" maxlength="1024" type="text">
+                </label>
+                @let field = light.kind === 'point' ? 'position' : 'direction';
+                <fieldset class="vector">
+                    <legend>{{ light.kind === 'point' ? 'Position' : 'Direction' }}</legend>
+                    @for (axis of axes; track axis) {
+                        <label>{{ vectorNames[axis] }}
+                            <input #value (input)="updateVector(field, axis, value.value)" [maxLength]="maxNumberLength" [value]="light[field][axis]"
+                                   inputmode="decimal"
+                                   type="text">
+                        </label>
+                    }
+                </fieldset>
+                <fieldset class="vector">
+                    <legend>Color (linear RGB)</legend>
+                    @for (axis of axes; track axis) {
+                        <label>{{ colorNames[axis] }}
+                            <input #value (input)="updateVector('color', axis, value.value)" [maxLength]="maxNumberLength" [value]="light.color[axis]"
+                                   inputmode="decimal"
+                                   type="text">
+                        </label>
+                    }
+                </fieldset>
+                <label>Intensity
+                    <input #intensity (input)="updateScalar('intensity', intensity.value)" [maxLength]="maxNumberLength" [value]="light.intensity"
+                           inputmode="decimal"
+                           type="text">
+                </label>
+                @if (light.kind === 'point') {
+                    <label>Range
+                        <input #range (input)="updateScalar('range', range.value)" [maxLength]="maxNumberLength" [value]="light.range"
+                               inputmode="decimal" type="text">
+                    </label>
+                }
+            }
+        </fieldset>
+        @if (changed() && !canApply()) {
+            <p role="status">Enter a name and valid numeric values before applying. Direction and range must be
+                nonzero.</p>
+        }
+        @if (error(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
+    }
+    <ng-container dialog-actions>
+        @if (draft()) {
+            <button (click)="remove()" [disabled]="pending() || changed() || !canRemove()" type="button">Remove Light
+            </button>
+            <button (click)="revert()" [disabled]="pending() || !changed()" type="button">Revert Draft</button>
+            <button (click)="apply()" [disabled]="pending() || !canApply()" type="button">Apply</button>
+        }
+    </ng-container>
+</editor-dialog>

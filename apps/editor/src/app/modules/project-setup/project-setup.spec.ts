@@ -1,6 +1,6 @@
 import {TestBed} from '@angular/core/testing';
 import {signal} from '@angular/core';
-import {provideRouter, Router} from '@angular/router';
+import {ActivatedRoute, convertToParamMap, provideRouter, Router} from '@angular/router';
 import {vi} from 'vitest';
 import {invoke, isTauri} from '@tauri-apps/api/core';
 import axe from 'axe-core';
@@ -58,6 +58,30 @@ describe('Project setup', () => {
         const root = fixture.nativeElement as HTMLElement;
         expect(root.querySelector('h1')?.textContent).toContain('Create your project');
         expect(root.querySelectorAll('input').length).toBe(2);
+        expect(root.querySelector<HTMLSelectElement>('#project-template')?.value).toBe('blank');
+    });
+
+    it('preselects Cinder Oath from Open Sample and asks the host for an editable copy', async () => {
+        const snapshot = TestBed.inject(ActivatedRoute).snapshot;
+        vi.spyOn(snapshot, 'queryParamMap', 'get').mockReturnValue(convertToParamMap({
+            from: 'editor', template: 'cinder_oath',
+        }));
+        vi.mocked(invoke).mockResolvedValue(created);
+        const fixture = TestBed.createComponent(ProjectSetup);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        expect(root.querySelector<HTMLSelectElement>('#project-template')?.value).toBe('cinder_oath');
+        expect(root.querySelector<HTMLInputElement>('#project-name')?.value).toBe('Cinder Oath');
+        fill(root);
+        submit(root);
+        await fixture.whenStable();
+
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {
+            name: 'Demo', destination: 'D:\\Projects', template: 'cinder_oath',
+        });
+        expect(openProject).toHaveBeenCalledWith(created.manifestPath, {
+            expectedRevision: null, discardUnsaved: false,
+        });
     });
 
     it('validates inputs before creating a project', async () => {
@@ -91,7 +115,7 @@ describe('Project setup', () => {
         vi.mocked(invoke).mockResolvedValueOnce({path: `${destination}\\Demo`, manifestPath: `${destination}\\Demo\\project.json`});
         root.querySelector('form')!.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
         await fixture.whenStable();
-        expect(invoke).toHaveBeenLastCalledWith('create_project', {name: 'Demo', destination});
+        expect(invoke).toHaveBeenLastCalledWith('create_project', {name: 'Demo', destination, template: 'blank'});
         expect(openProject).toHaveBeenCalledWith(`${destination}\\Demo\\project.json`, {
             expectedRevision: null, discardUnsaved: false,
         });
@@ -202,6 +226,7 @@ describe('Project setup', () => {
         expect(invoke).toHaveBeenCalledWith('create_project', {
             name: 'Demo',
             destination: 'D:\\Projects',
+            template: 'blank',
         });
         expect(root.textContent).toContain('Project created');
         expect(root.textContent).toContain(created.manifestPath);
@@ -230,7 +255,11 @@ describe('Project setup', () => {
         expect(openProject).toHaveBeenCalledExactlyOnceWith(created.manifestPath, {
             expectedRevision: 4, discardUnsaved: true,
         });
-        expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {name: 'Demo', destination: 'D:\\Projects'});
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {
+            name: 'Demo',
+            destination: 'D:\\Projects',
+            template: 'blank'
+        });
     });
 
     it('captures the reviewed revision before waiting for discard confirmation', async () => {

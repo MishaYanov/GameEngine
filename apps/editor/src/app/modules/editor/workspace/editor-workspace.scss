@@ -35,7 +35,7 @@
   align-items: flex-start;
   border: var(--border-width) solid var(--color-pane-edge);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  background: var(--color-chrome, var(--color-surface));
 }
 
 .workspace-controls > * {
@@ -108,6 +108,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.workspace-content {
+  block-size: 100%;
 }
 
 scene-viewport.prop-aperture {
@@ -235,4 +239,9 @@ scene-viewport[hidden] {
     flex: 1 0 100%;
     min-height: 24rem;
   }
+}
+
+:host-context(html[data-theme='workbench']) .workspace-main {
+  gap: 4px;
+  padding-inline: 5px;
 }

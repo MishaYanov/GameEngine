@@ -5,6 +5,7 @@ import {validCameraComponentSettings, validComponentViews} from './editor-compon
 import {validPlayerControllerSettings} from './player-controller.models';
 import {validAnimatorSettings} from './animator.models';
 import {validSceneEnvironment, validSkyAttachment} from './sky.models';
+import {validParticleEmitterComponent} from './particle-emitter.models';
 
 const maxSceneFolders = 1_024;
 const maxFolderDepth = 32;
@@ -67,6 +68,7 @@ function entity(value: unknown): value is SceneEntity {
         (value['camera'] == null || (record(value['camera']) && typeof value['camera']['id'] === 'string' &&
             typeof value['camera']['enabled'] === 'boolean' && validCameraComponentSettings(value['camera']['settings']))) &&
         (value['sky'] == null || validSkyAttachment(value['sky'])) &&
+        (value['particle_emitter'] == null || validParticleEmitterComponent(value['particle_emitter'])) &&
         (controller == null || (record(controller) && typeof controller['id'] === 'string' &&
             typeof controller['enabled'] === 'boolean' && validPlayerControllerSettings(controller['settings']) &&
             (controller['enabled'] || !controller['settings'].local))) &&
@@ -144,13 +146,15 @@ function validDocument(value: unknown): boolean {
         value['lights'].every(light) &&
         Array.isArray(value['entities']) &&
         value['entities'].every(entity) &&
+        (value['schema_version'] >= 8 || value['entities'].every(item => item.particle_emitter == null &&
+            !item.component_views?.some(component => component.data.kind === 'particle_emitter'))) &&
         atMostOneLocalPlayer(value['entities']) &&
         new Set(value['entities'].map((item) => item.key)).size === value['entities'].length &&
         (value['organization'] === undefined ||
             (value['schema_version'] >= 6 && validOrganization(value['organization'], value['entities']))) &&
         (value['environment'] === undefined ||
-            (value['schema_version'] === 7 && environment(value['environment'], value['entities']))) &&
-        (value['default_game_camera'] == null || (value['schema_version'] === 7 &&
+            (value['schema_version'] >= 7 && environment(value['environment'], value['entities']))) &&
+        (value['default_game_camera'] == null || (value['schema_version'] >= 7 &&
             value['entities'].some(item => item.key === value['default_game_camera'] && item.camera?.enabled === true)))
     );
 }

@@ -225,6 +225,7 @@ impl Worker {
 			self.gpu = Some(GpuState {
 				scene: Scene::default(),
 				prop_preview: None,
+				particle_draw: None,
 				assets: ManuallyDrop::new(assets),
 				renderer,
 				asset_root,

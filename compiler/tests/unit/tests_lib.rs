@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use engine_core::{project::BehaviorSpec, scene_catalog::SceneDescriptor, scene_data::SceneData};
 
-use super::export::{install_staged_player, publish_player};
+use super::export::publish_player;
 use super::preflight::{OMISSION_NOTICE, append_scene_error, prepared_asset_path, read_scene_file};
 #[path = "tests_dependencies.rs"]
 mod dependency_tests;
@@ -129,6 +129,74 @@ mod authoring {
 				.exists()
 		);
 		assert!(!project_path.join("README.txt").exists());
+	}
+
+	#[test]
+	fn blank_project_can_open_and_stage_with_its_own_camera() {
+		let fixture = AssetFixture::new();
+		let destination = fixture.0.to_str().unwrap();
+		let path = create_blank_project("  Blank world  ", destination).unwrap();
+		let project = ProjectData::load(path.join("project.json")).unwrap();
+		assert_eq!(project.name, "Blank world");
+		assert!(project.gameplay_module.is_none());
+		assert!(project.behaviors.is_empty());
+		assert_eq!(project.scenes.iter().count(), 1);
+		assert_eq!(project.startup_scene_path().unwrap(), "scenes/main.json");
+
+		let assets = path.join("assets");
+		let scene = read_authored_scene(&assets, project.startup_scene_path().unwrap()).unwrap();
+		let [camera] = scene.entities.as_slice() else {
+			panic!("blank project must contain just its assigned Camera");
+		};
+		assert_eq!(scene.default_game_camera.as_ref(), Some(&camera.key));
+		assert!(camera.camera.is_some());
+		assert!(!camera.renderable);
+		assert_eq!(scene.lights.len(), 1);
+		assert!(
+			!path
+				.join(format!("game{}", std::env::consts::EXE_SUFFIX))
+				.exists()
+		);
+
+		let mut installed_project = project;
+		installed_project.name = "Blank export".into();
+		let prepared = prepare_project(&installed_project, &assets).unwrap();
+		let staged = stage_prepared_project(&prepared, destination).unwrap();
+		let player = fixture.0.join("supplied-player.bin");
+		fs::write(&player, b"supplied test executable; do not launch").unwrap();
+		let installed = complete_staged_project_with_player(staged, &player).unwrap();
+		assert_eq!(
+			fs::read(installed.verified_executable().unwrap()).unwrap(),
+			fs::read(player).unwrap()
+		);
+	}
+
+	#[test]
+	fn explicit_template_copy_uses_the_selected_manifest_and_owns_its_files() {
+		let fixture = AssetFixture::new();
+		let template = fixture.0.join("source");
+		let (project, scene) = authored_scene_fixture(&template.join("assets"));
+		let manifest = template.join("project.json");
+		let source_manifest = project.to_json().unwrap();
+		fs::write(&manifest, &source_manifest).unwrap();
+
+		let copy = create_authoring_project_from_template(
+			"Editable sample",
+			fixture.0.to_str().unwrap(),
+			&manifest,
+		)
+			.unwrap();
+		let editable = ProjectData::load(copy.join("project.json")).unwrap();
+		assert_eq!(editable.name, "Editable sample");
+		assert_eq!(editable.startup_scene_id, project.startup_scene_id);
+		let copied_scene = copy.join("assets/scenes/main.json");
+		assert_eq!(read_scene_file(&copied_scene).unwrap(), scene);
+		fs::write(copied_scene, b"draft").unwrap();
+		assert_eq!(fs::read_to_string(&manifest).unwrap(), source_manifest);
+		assert_eq!(
+			read_scene_file(&template.join("assets/scenes/main.json")).unwrap(),
+			scene
+		);
 	}
 
 	#[test]
@@ -271,7 +339,7 @@ mod staging {
 		let player = fixture.0.join("compiled-player.bin");
 		fs::write(&player, b"compiled fixture; never execute").unwrap();
 		// Complete the installation boundary without invoking Cargo or reopening source assets.
-		let finished = install_staged_player(staged, &player).unwrap();
+		let finished = complete_staged_project_with_player(staged, &player).unwrap();
 		assert_eq!(finished.path(), staged_path);
 		assert_eq!(
 			fs::read(finished.path().join("assets/scenes/main.json")).unwrap(),
@@ -331,7 +399,7 @@ mod staging {
 
 		let player = fixture.0.join("compiled-audio-player.bin");
 		fs::write(&player, b"frozen binary fixture").unwrap();
-		let installed = install_staged_player(staged, &player).unwrap();
+		let installed = complete_staged_project_with_player(staged, &player).unwrap();
 		assert!(installed.verified_executable().unwrap().is_file());
 		assert_eq!(fs::read(clip).unwrap(), CLIP);
 	}
@@ -420,7 +488,7 @@ mod staging {
 
 		let player = fixture.0.join("compiled-catalogued-audio.bin");
 		fs::write(&player, b"compiled player fixture").unwrap();
-		let installed = install_staged_player(staged, &player).unwrap();
+		let installed = complete_staged_project_with_player(staged, &player).unwrap();
 		assert!(installed.verified_executable().unwrap().is_file());
 		assert_eq!(fs::read(clip).unwrap(), WAV);
 	}
@@ -454,16 +522,16 @@ mod staging {
 		);
 		fs::remove_file(extra).unwrap();
 
-		assert!(install_staged_player(staged.clone(), &executable).is_err());
+		assert!(complete_staged_project_with_player(staged.clone(), &executable).is_err());
 		assert!(!installed.exists());
 		fs::write(&executable, b"compiler output").unwrap();
 		fs::write(&installed, b"existing user file").unwrap();
-		assert!(install_staged_player(staged.clone(), &executable).is_err());
+		assert!(complete_staged_project_with_player(staged.clone(), &executable).is_err());
 		assert_eq!(fs::read(&installed).unwrap(), b"existing user file");
 		assert!(publish_player(&executable, &installed).is_err());
 		assert_eq!(fs::read(&installed).unwrap(), b"existing user file");
 		fs::remove_file(&installed).unwrap();
-		let installed = install_staged_player(staged, &executable).unwrap();
+		let installed = complete_staged_project_with_player(staged, &executable).unwrap();
 		assert_eq!(
 			fs::read(installed.verified_executable().unwrap()).unwrap(),
 			b"compiler output"

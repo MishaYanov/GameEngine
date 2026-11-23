@@ -1,6 +1,7 @@
 use super::*;
 use gameplay_catalog::cinder_oath::Phase;
 use renderer::ui::{ScreenOverlay, ScreenOverlayLayout};
+use runtime::particle_draw::ParticleDraw;
 
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
@@ -144,7 +145,14 @@ impl GameApp {
 		} else {
 			None
 		};
+		let particles: Vec<_> = self.editor.play_particles().collect();
+		ParticleDraw::prepare(&mut self.particle_draw, renderer, &camera_uniform, &particles)?;
 		let (mut objects, mut stats) = self.scene.try_render_visible(frustum.as_ref())?;
+		if let Some(object) = self.particle_draw.as_ref().and_then(ParticleDraw::object) {
+			stats.draw_calls += 1;
+			stats.triangles += object.mesh().index_count() as usize / 3;
+			objects.push(object);
+		}
 		if !self.standalone_runtime
 			&& self.authored.is_none()
 			&& let Some(object) = self

@@ -26,7 +26,8 @@ impl AdminService {
 		let root = project
 			.map(|r| r.destination.as_path())
 			.or(job_workspace)
-			.unwrap_or(&self.workspace);
+			.or(self.workspace.as_deref())
+			.ok_or_else(|| io::Error::other("Select a source checkout to open source files"))?;
 		let mut source = PathBuf::from(file);
 		if let Some(project) = project
 			&& let Some(relative) = relative_to(&source, &project.staging)

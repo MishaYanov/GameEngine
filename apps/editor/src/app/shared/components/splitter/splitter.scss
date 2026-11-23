@@ -26,8 +26,8 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: var(--space-1);
-  height: var(--space-6);
+  width: var(--splitter-grip-thickness, var(--space-1));
+  height: var(--splitter-grip-length, var(--space-6));
   transform: translate(-50%, -50%);
   border-radius: var(--radius-pill);
   background: var(--color-border-strong);
@@ -43,11 +43,11 @@
 }
 
 :host(.dragging)::before {
-  background: var(--color-control-pressed);
+  background: var(--splitter-active-color, var(--color-control-pressed));
 }
 
 :host(.dragging)::after {
-  background: var(--color-text);
+  background: var(--splitter-active-color, var(--color-text));
 }
 
 :host(:focus-visible)::before,
@@ -70,6 +70,13 @@
 }
 
 :host(.horizontal)::after {
-  width: var(--space-6);
-  height: var(--space-1);
+  width: var(--splitter-grip-length, var(--space-6));
+  height: var(--splitter-grip-thickness, var(--space-1));
+}
+
+// The guide gets narrower in Workbench, but the pointer and keyboard target stays the same.
+:host-context(html[data-theme='workbench']) {
+  --splitter-grip-thickness: var(--border-width);
+  --splitter-grip-length: var(--space-4);
+  --splitter-active-color: var(--color-selection-edge);
 }

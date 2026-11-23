@@ -77,3 +77,15 @@ editor-portal {
 .open-error button:active {
   background: var(--color-control-pressed);
 }
+
+:host-context(html[data-theme='workbench']) {
+  padding: 0;
+
+  .open-status.has-message,
+  .open-error {
+    margin: 0;
+    padding: 5px var(--space-2);
+    border-inline: 0;
+    border-radius: 0;
+  }
+}

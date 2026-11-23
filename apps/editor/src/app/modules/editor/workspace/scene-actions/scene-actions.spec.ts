@@ -12,6 +12,7 @@ import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-pre
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneActions} from './scene-actions';
 import {SceneSwitchService} from './scene-switch.service';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 
 const sampleModule: GameplayModuleDescriptor = {
     id: 'sample_module', label: 'Sample module', description: 'A test module with per-scene role metadata.',
@@ -106,7 +107,7 @@ async function createActions(
         return true;
     });
     TestBed.configureTestingModule({providers: [
-            SceneSwitchService,
+            SceneSwitchService, WorkspaceDraftReview,
             {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
             {provide: EditorSettingsService, useValue: {sceneWarmingReady: signal(true), sceneWarmingMode: mode}},
             {
@@ -167,6 +168,7 @@ async function createActions(
         mode,
         capabilities,
         sceneSwitch,
+        drafts: TestBed.inject(WorkspaceDraftReview),
         switchScene,
         warmScene,
         setSceneWarmingMode,
@@ -245,7 +247,7 @@ describe('SceneActions', () => {
         await fixture.whenStable();
         button('Open selected scene').click();
         await fixture.whenStable();
-        expect(switchScene).toHaveBeenCalledWith('second');
+        expect(switchScene).toHaveBeenCalledWith('second', 1, 1);
         expect(current().active_scene_id).toBe('second');
     });
 
@@ -260,7 +262,7 @@ describe('SceneActions', () => {
 
         try {
             button('Open selected scene').click();
-            await vi.waitFor(() => expect(switchScene).toHaveBeenCalledExactlyOnceWith('second'));
+            await vi.waitFor(() => expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1));
             expect(current().active_scene_id).toBe('second');
         } finally {
             finishWarm();
@@ -276,7 +278,7 @@ describe('SceneActions', () => {
         expect(button('Prepare scene').disabled).toBe(true);
         choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
         await fixture.whenStable();
-        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
         expect(warmScene).not.toHaveBeenCalled();
     });
 
@@ -456,7 +458,7 @@ describe('SceneActions', () => {
         choose(select, 'second');
         await fixture.whenStable();
         expect(withCommittedEdit).toHaveBeenCalledOnce();
-        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
         expect(current().active_scene_id).toBe('second');
         expect(select.value).toBe('second');
         expect(root.querySelector('.status[role="status"]')?.textContent).toContain('Opened scenes/second.json.');
@@ -464,6 +466,27 @@ describe('SceneActions', () => {
             sceneId: 'second', path: 'scenes/second.json', sceneRevision: 2, generation: 1,
         });
         expect(sceneSwitch.loading()).toBeNull();
+    });
+
+    it('reviews local drafts ahead of the scene reservation and uses the revision after an accepted save', async () => {
+        const {current, drafts, sceneSwitch, switchScene, withCommittedEdit} = await createActions();
+        let approve!: (accepted: boolean) => void;
+        drafts.setReviewers([() => new Promise<boolean>(resolve => approve = resolve)]);
+        const request = sceneSwitch.request('second');
+        expect(withCommittedEdit).not.toHaveBeenCalled();
+        expect(await sceneSwitch.request('second')).toBe(false);
+        current.update(value => ({...value, revision: 4}));
+        approve(true);
+        expect(await request).toBe(true);
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 4);
+    });
+
+    it('leaves the active scene and draft alone when local draft review is canceled', async () => {
+        const {drafts, sceneSwitch, switchScene, withCommittedEdit} = await createActions();
+        drafts.setReviewers([() => false]);
+        expect(await sceneSwitch.request('second')).toBe(false);
+        expect(withCommittedEdit).not.toHaveBeenCalled();
+        expect(switchScene).not.toHaveBeenCalled();
     });
 
     it('saves only the outgoing scene from a switch confirmation while Scene Information is closed', async () => {
@@ -483,8 +506,8 @@ describe('SceneActions', () => {
         expect(switchScene).not.toHaveBeenCalled();
 
         button('Save and Open').click();
-        await vi.waitFor(() => expect(switchScene).toHaveBeenCalledExactlyOnceWith('second'));
-        expect(save).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 2));
+        expect(save).toHaveBeenCalledExactlyOnceWith(1, 1);
         expect(save.mock.invocationCallOrder[0]).toBeLessThan(switchScene.mock.invocationCallOrder[0]);
         expect(sceneSwitch.loading()).toEqual({sceneId: 'second', path: 'scenes/second.json'});
         expect(current().scenes.map(scene => scene.dirty)).toEqual([false, true]);
@@ -624,7 +647,7 @@ describe('SceneActions', () => {
         });
         choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
         await fixture.whenStable();
-        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second');
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
         expect([...player.options].map(option => option.value)).toEqual(['', 'scout']);
         expect(player.value).toBe('scout');
     });

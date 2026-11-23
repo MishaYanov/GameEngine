@@ -1,6 +1,8 @@
 import {afterNextRender, Component, computed, DOCUMENT, effect, inject, Injector, input, output, signal, viewChild} from '@angular/core';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
+import {OBJECT_MENU_GROUPS, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
+import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {EditorPane} from '../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../shared/icons/editor-icon';
 import {EditorDialog} from '../../../shared/components/dialog/dialog';
@@ -28,6 +30,7 @@ import {PropAssetSelection} from './prefabs/prop-asset-selection';
 import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.model';
 import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
+import {WorkspaceDraftReview} from './workspace-draft-review';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
 import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
@@ -39,9 +42,12 @@ import {GameInputManager} from './game-input/game-input-manager';
 import {InputActionsCatalog} from './game-input/input-actions-catalog.service';
 import {CameraSettings} from './game-settings/camera-settings';
 import {PhysicsLayersDialog} from './physics-layers/physics-layers-dialog';
+import {SceneLightsDialog} from './scene-lights/scene-lights-dialog';
+import {ParticleDesigner} from './particle-designer/particle-designer';
+import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
-import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
+import {CommandBuilder, type EditorCommand, type EntityKey} from '../../../core/editor/editor.models';
 import type {SceneDependencyRequest} from '../../../core/editor/scene-verification.models';
 import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
@@ -52,18 +58,19 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
 @Component({
     selector: 'editor-workspace',
     providers: [
-        SceneEditingService, ViewportEditorService, ViewportAssetDragService,
+        SceneEditingService, WorkspaceDraftReview, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
         SelectedCameraPreviewService, InputActionsCatalog,
-        AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService,
+        AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, PhysicsLayersDialog, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
+        CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector,
+        CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
-    styleUrl: './editor-workspace.scss',
+    styleUrls: ['./editor-workspace.scss', './animation/animation-workspace-layout.scss'],
     host: {'(keydown)': 'handleEditorShortcut($event)', 'data-editor-shortcut-scope': 'workspace'},
 })
 export class EditorWorkspace {
@@ -82,6 +89,8 @@ export class EditorWorkspace {
     protected readonly animatorAssets = inject(AnimatorAssets);
     protected readonly animatorWorkspace = inject(AnimatorWorkspaceService);
     protected readonly controlsGraph = inject(ControlGraphWorkspaceService);
+    private readonly particles = inject(ParticleDesignerSession);
+    private readonly draftReview = inject(WorkspaceDraftReview);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
     protected readonly selectedCameraPreview = inject(SelectedCameraPreviewService);
     protected readonly missingGameCamera = computed(() => {
@@ -97,6 +106,14 @@ export class EditorWorkspace {
     protected readonly hierarchyCreation = computed(() => (['create_camera', 'create_player', 'create_audio_source', 'create_sky'] as const).filter(
         type => this.editorService.capabilities()?.commands?.some(command => command.name === type),
     ));
+    readonly availableObjectActions = computed<readonly ObjectMenuAction[]>(() => {
+        if (!this.editorService.nativeAvailable || this.workspaceActionBlocked() || !this.sceneEditing.ready() ||
+            this.editorService.snapshot()?.mode !== 'edit') return [];
+        const commands = new Set(this.editorService.capabilities()?.commands?.map(command => command.name));
+        return OBJECT_MENU_GROUPS.flatMap(group => group.filter(
+            item => !('capability' in item) || commands.has(item.capability),
+        ).map(item => item.id));
+    });
     protected readonly batchParentingEnabled = computed(() =>
         this.editorService.capabilities()?.commands?.some(command => command.name === 'reparent_objects') ?? false,
     );
@@ -142,6 +159,8 @@ export class EditorWorkspace {
     private readonly sceneActions = viewChild(SceneActions);
     private readonly gameInput = viewChild(GameInputManager);
     private readonly physicsLayers = viewChild(PhysicsLayersDialog);
+    private readonly lights = viewChild(SceneLightsDialog);
+    private readonly assets = viewChild(AssetsPanel);
     private readonly projectBuild = viewChild(ProjectBuild);
     protected readonly paletteOpen = signal(false);
     protected readonly problemsOpen = signal(false);
@@ -190,6 +209,16 @@ export class EditorWorkspace {
     });
 
     constructor() {
+        this.draftReview.setReviewers([
+            () => this.gameInput()?.canLeaveProject() ?? true,
+            () => this.physicsLayers()?.canLeaveProject() ?? true,
+            () => this.lights()?.canLeaveProject() ?? true,
+            () => this.particles.canLeaveProject(),
+            () => this.animationPreview.reviewNavigation(),
+            () => this.reviewPropNavigation(),
+            () => this.animatorWorkspace.reviewNavigation(),
+            () => this.controlsGraph.reviewNavigation(),
+        ]);
         this.workspaceView.setAuthoringAvailability({
             prop: () => this.propWorkspace.document()?.scope.generation === this.editorService.workspaceGeneration(),
             animator: this.animatorAssets.supported,
@@ -283,6 +312,39 @@ export class EditorWorkspace {
         return this.physicsLayers()?.show() ?? false;
     }
 
+    protected async requestWorkspaceView(view: WorkspaceViewKind): Promise<void> {
+        const context = this.sceneContext();
+        if (this.workspaceView.animationView() && view !== 'animation-workspace' &&
+            !await this.animationPreview.reviewNavigation()) return;
+        if (context === this.sceneContext()) this.workspaceView.selectView(view);
+    }
+
+    async runObjectAction(action: ObjectMenuAction): Promise<void> {
+        if (!this.availableObjectActions().includes(action) || this.document.querySelector('dialog[open]')) return;
+        const context = this.sceneContext();
+        if (this.workspaceView.animationView() && !await this.animationPreview.reviewNavigation()) return;
+        if (context !== this.sceneContext() || !this.availableObjectActions().includes(action)) return;
+        this.workspaceView.selectView('scene-viewport');
+        switch (action) {
+            case 'browse_props':
+            case 'browse_models':
+                this.assets()?.browse(action === 'browse_props' ? 'prefab' : 'model');
+                return;
+            case 'edit_lights':
+                this.lights()?.show();
+                return;
+            case 'create_point_light':
+            case 'create_directional_light':
+                await this.createSceneObject({
+                    type: 'create_light',
+                    light_kind: action === 'create_point_light' ? 'point' : 'directional'
+                });
+                return;
+            default:
+                await this.createSceneObject({type: action});
+        }
+    }
+
     protected showUsages(key: EntityKey): void {
         if (this.canRevealReference()) this.usage.set({key, context: this.sceneContext()});
     }
@@ -291,12 +353,8 @@ export class EditorWorkspace {
         if (await this.reviewPropNavigation()) this.propWorkspace.close(true, () => this.workspaceTabs()?.focusTab('scene-viewport'));
     }
 
-    async reviewProjectNavigation(): Promise<boolean> {
-        if (this.gameInput()?.canLeaveProject() === false || this.physicsLayers()?.canLeaveProject() === false) {
-            return false;
-        }
-        return await this.reviewPropNavigation() && await this.animatorWorkspace.reviewNavigation() &&
-            await this.controlsGraph.reviewNavigation();
+    reviewProjectNavigation(): Promise<boolean> {
+        return this.draftReview.run(this.draftReview.capture());
     }
 
     reviewPropNavigation(): Promise<boolean> {
@@ -456,19 +514,33 @@ export class EditorWorkspace {
 
     protected async createHierarchyObject(type: HierarchyCreateCommand): Promise<void> {
         if (!this.hierarchyCreation().includes(type) || this.workspaceActionBlocked()) return;
+        await this.createSceneObject({type});
+    }
+
+    private async createSceneObject(command: EditorCommand): Promise<void> {
         const context = this.sceneContext();
         this.hierarchyError.set(null);
+        let light: EntityKey | undefined;
+        let emitter: EntityKey | undefined;
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             if (context !== this.sceneContext() || this.workspaceActionBlocked()) return;
             const current = this.editorService.snapshot();
             if (!current) return;
-            const snapshot = await this.editorService.execute({type}, this.editorService.workspaceGeneration(), current.revision);
+            const snapshot = await this.editorService.execute(command, this.editorService.workspaceGeneration(), current.revision);
             if (context !== this.sceneContext()) return;
+            if (command.type === 'create_light') {
+                light = snapshot.document.lights.find(item => !current.document.lights.some(previous => previous.key === item.key))?.key;
+                return;
+            }
             const key = snapshot.selection[0];
             if (key) this.hierarchy()?.revealEntity(key);
+            if (command.type === 'create_particle_emitter') emitter = key;
         });
-        if (!accepted && context === this.sceneContext()) {
+        if (context !== this.sceneContext()) return;
+        if (!accepted) {
             this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
         }
+        if (light) this.lights()?.show(light);
+        if (emitter) this.particles.open(emitter);
     }
 }

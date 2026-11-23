@@ -52,6 +52,7 @@ pub enum LinkedPrefabProperty {
 	Collider,
 	CharacterController,
 	Animation,
+	ParticleEmitter,
 	NativeBehavior { component_id: ComponentId },
 	Script { component_id: ComponentId },
 }

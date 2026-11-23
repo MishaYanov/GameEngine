@@ -14,7 +14,7 @@ pub use organization::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 pub const MAX_SCENE_ENTITIES: usize = 100_000;
 pub const MAX_SCENE_LIGHTS: usize = 16;
 pub const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
@@ -77,6 +77,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub sky: Option<Box<crate::components::SkyComponent>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub particle_emitter: Option<crate::components::ParticleEmitterComponent>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
@@ -110,6 +112,7 @@ impl EntityData {
 			player_controller: None,
 			audio_source: None,
 			sky: None,
+			particle_emitter: None,
 			linked_prefab: None,
 		}
 	}
@@ -187,6 +190,8 @@ struct EntityProjection {
 	#[serde(default)]
 	sky: Option<Box<crate::components::SkyComponent>>,
 	#[serde(default)]
+	particle_emitter: Option<crate::components::ParticleEmitterComponent>,
+	#[serde(default)]
 	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 	/// A read-only transport projection; commands never take this as mutation authority.
 	#[serde(default)]
@@ -226,6 +231,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			player_controller: value.player_controller,
 			audio_source: value.audio_source,
 			sky: value.sky,
+			particle_emitter: value.particle_emitter,
 			linked_prefab: value.linked_prefab,
 		})
 	}
@@ -287,6 +293,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.sky {
 			map.serialize_entry("sky", value)?;
+		}
+		if let Some(value) = &self.particle_emitter {
+			map.serialize_entry("particle_emitter", value)?;
 		}
 		if let Some(value) = &self.linked_prefab {
 			map.serialize_entry("linked_prefab", value)?;

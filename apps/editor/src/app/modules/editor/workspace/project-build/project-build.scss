@@ -36,3 +36,28 @@ p { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .success {
   color: var(--color-success);
 }
+
+:host-context(html[data-theme='workbench']) {
+  section {
+    gap: 5px;
+    padding-block: 3px;
+  }
+
+  button {
+    min-height: var(--layout-control-height);
+    padding-block: 1px;
+  }
+
+  button:enabled {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  button:enabled:hover {
+    background: var(--color-control-hover);
+  }
+
+  button:enabled:active {
+    background: var(--color-control-pressed);
+  }
+}

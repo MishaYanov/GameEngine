@@ -1,4 +1,5 @@
 use super::*;
+use crate::release_resources::EditorResources;
 
 #[derive(Serialize)]
 pub struct ProjectBuildDto {
@@ -25,12 +26,14 @@ pub async fn editor_prepare_project_build(
 	destination: String,
 ) -> Result<PreparedBuildDto, String> {
 	trusted_window(&window)?;
+	let resources = EditorResources::for_window(&window)?;
 	let pending_build = Arc::clone(&state.pending_build);
 	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
 		w.prepare_build(expected_revision)
 	})
 	.await?;
 	tauri::async_runtime::spawn_blocking(move || {
+		resources.player()?;
 		let mut pending = pending_build
 			.lock()
 			.map_err(|_| "Build state lock failed")?;
@@ -64,11 +67,12 @@ pub async fn editor_finish_project_build(
 	build_id: u64,
 ) -> Result<ProjectBuildDto, String> {
 	trusted_window(&window)?;
+	let resources = EditorResources::for_window(&window)?;
 	let pending_build = Arc::clone(&state.pending_build);
 	let last_build = Arc::clone(&state.last_build);
 	tauri::async_runtime::spawn_blocking(move || {
 		finish_prepared_build(&pending_build, build_id, |staged| {
-			finish_project_build(staged, &last_build)
+			finish_project_build(staged, resources.player()?.as_deref(), &last_build)
 		})
 	})
 	.await
@@ -116,12 +120,17 @@ fn stage_project_build(
 
 fn finish_project_build(
 	staged: compiler::StagedProject,
+	player: Option<&Path>,
 	last_build: &Mutex<Option<compiler::InstalledProject>>,
 ) -> Result<ProjectBuildDto, String> {
 	let asset_count = staged.asset_count();
 	let asset_bytes = staged.asset_bytes();
 	engine_logger::info!(target:"project_build","Build started: assets={asset_count}, bytes={asset_bytes}");
-	let installed = compiler::complete_staged_project(staged).inspect_err(|_| {
+	let result = match player {
+		Some(executable) => compiler::complete_staged_project_with_player(staged, executable),
+		None => compiler::complete_staged_project(staged),
+	};
+	let installed = result.inspect_err(|_| {
 		engine_logger::error!(target:"project_build","Build failed: operation=finish_staged_project");
 	})?;
 	let path = installed.path().to_string_lossy().into_owned();
@@ -142,14 +151,16 @@ pub async fn editor_build_project(
 	destination: String,
 ) -> Result<ProjectBuildDto, String> {
 	trusted_window(&window)?;
+	let resources = EditorResources::for_window(&window)?;
 	let last_build = Arc::clone(&state.last_build);
 	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
 		w.prepare_build(expected_revision)
 	})
 	.await?;
 	tauri::async_runtime::spawn_blocking(move || {
+		let player = resources.player()?;
 		let staged = stage_project_build(&prepared, &destination)?;
-		finish_project_build(staged, &last_build)
+		finish_project_build(staged, player.as_deref(), &last_build)
 	})
 	.await
 	.map_err(|e| format!("Project build worker failed: {e}"))?

@@ -17,8 +17,15 @@ pub fn validate_scene_components_with_slots(
         .collect();
     let mut active = 0usize;
     let mut local_player = None;
+	let mut emitters = 0;
     for entity in &scene.entities {
         entity.validate_components()?;
+	    if entity.particle_emitter.as_ref().is_some_and(|emitter| emitter.enabled) {
+		    emitters += 1;
+		    if emitters > MAX_ENABLED_PARTICLE_EMITTERS {
+			    return Err(format!("Scene exceeds {MAX_ENABLED_PARTICLE_EMITTERS} enabled Particle Emitters"));
+		    }
+	    }
         if let Some(animator) = &entity.animator {
             if animator.enabled
                 && entity
