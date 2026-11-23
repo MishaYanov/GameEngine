@@ -1,4 +1,5 @@
 import {Routes} from '@angular/router';
+import type {Editor} from './modules/editor/editor';
 
 export const applicationRoutes: Routes = [
     {
@@ -6,5 +7,9 @@ export const applicationRoutes: Routes = [
         loadComponent: () =>
             import('./modules/project-setup/project-setup').then((m) => m.ProjectSetup),
     },
-    {path: 'editor', loadComponent: () => import('./modules/editor/editor').then((m) => m.Editor)},
+    {
+        path: 'editor',
+        loadComponent: () => import('./modules/editor/editor').then((m) => m.Editor),
+        canDeactivate: [(component: Editor) => component.reviewRouteDeparture()],
+    },
 ];

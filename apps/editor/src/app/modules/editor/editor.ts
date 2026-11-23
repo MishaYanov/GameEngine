@@ -40,14 +40,14 @@ export class Editor {
     protected openMessage = signal<string | null>(null);
     protected openError = signal<string | null>(null);
     protected readonly opening = computed(() => this.openMessage() !== null);
-    private readonly reviewingExit = signal(false);
-    private readonly canStartExit = computed(() =>
+    private readonly reviewingDeparture = signal(false);
+    private readonly idle = computed(() =>
         this.editorService.nativeAvailable &&
         !this.opening() &&
         !this.editorService.busy() &&
         !this.editorService.snapshot()?.transaction
     );
-    protected readonly canExit = computed(() => this.canStartExit() && !this.reviewingExit());
+    protected readonly canExit = computed(() => this.idle() && !this.reviewingDeparture());
     protected readonly canOpenProject = computed(() => this.canExit() && !this.editorService.playing());
     private readonly workspace = viewChild(EditorWorkspace);
     private stopWatchingClose?: () => void;
@@ -72,10 +72,10 @@ export class Editor {
     }
 
     protected async openProject(): Promise<void> {
-        if (!this.canOpenProject()) return;
-        const workspace = this.workspace();
-        if ((workspace && !await workspace.reviewProjectNavigation()) || !this.canOpenProject()) return;
+        await this.withReviewedWorkspace('open', () => this.openSelectedProject());
+    }
 
+    private async openSelectedProject(): Promise<void> {
         this.openError.set(null);
         this.openMessage.set(OpenMessages.CREATING);
 
@@ -141,8 +141,8 @@ export class Editor {
     }
 
     protected async exitEditor(fromTitleBar = false): Promise<void> {
-        if (this.destroyed || this.reviewingExit()) return;
-        if (!this.canStartExit()) {
+        if (this.destroyed || this.reviewingDeparture()) return;
+        if (!this.idle()) {
             if (fromTitleBar && this.openMessage() !== OpenMessages.EXITING) {
                 this.openError.set(this.editorService.snapshot()?.transaction
                     ? 'Finish the current edit before closing the editor.'
@@ -150,21 +150,39 @@ export class Editor {
             }
             return;
         }
-        this.reviewingExit.set(true);
-        let closing = false;
+        await this.withReviewedWorkspace('exit', async () => {
+            this.openError.set(null);
+            this.openMessage.set(OpenMessages.EXITING);
+            let closing = false;
+            try {
+                closing = await this.editorService.requestExit();
+            } finally {
+                if (!closing) this.openMessage.set(null);
+            }
+        });
+    }
+
+    reviewRouteDeparture(): Promise<boolean> {
+        if (!this.editorService.nativeAvailable) return Promise.resolve(true);
+        return this.withReviewedWorkspace('open', () => undefined);
+    }
+
+    private async withReviewedWorkspace(intent: 'open' | 'exit', proceed: () => void | Promise<void>): Promise<boolean> {
+        if (this.destroyed || !(intent === 'open' ? this.canOpenProject() : this.canExit())) return false;
+        this.reviewingDeparture.set(true);
         try {
             const workspace = this.workspace();
             const generation = this.editorService.workspaceGeneration();
-            if (workspace && !await workspace.reviewProjectNavigation()) return;
-            if (this.destroyed || !this.canStartExit() || generation !== this.editorService.workspaceGeneration()) return;
-            this.openError.set(null);
-            this.openMessage.set(OpenMessages.EXITING);
-            closing = await this.editorService.requestExit();
+            if (workspace && !await workspace.reviewProjectNavigation()) return false;
+            if (this.destroyed || !this.idle() || (intent === 'open' && this.editorService.playing()) ||
+                generation !== this.editorService.workspaceGeneration()) return false;
+            await proceed();
+            return true;
         } catch (error: unknown) {
             if (!this.destroyed) this.openError.set(error instanceof Error ? error.message : String(error));
+            return false;
         } finally {
-            if (!closing && this.openMessage() === OpenMessages.EXITING) this.openMessage.set(null);
-            this.reviewingExit.set(false);
+            this.reviewingDeparture.set(false);
         }
     }
 
