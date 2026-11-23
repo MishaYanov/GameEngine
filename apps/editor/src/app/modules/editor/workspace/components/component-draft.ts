@@ -1,7 +1,6 @@
 import type {AudioEventBinding, AudioGameplaySignal, AudioSourceBus, AudioSourcePlayback, LegacyCombatCue} from '../../../../core/editor/audio-source.models';
 import {
     validInteractionReach,
-    validScriptSettings,
     type ComponentData,
     type ComponentRecord
 } from '../../../../core/editor/editor-components';
@@ -27,9 +26,14 @@ import {
 	type AnimationSettings,
 } from '../../../../core/editor/animation.models';
 
+import type {ScriptDescriptor} from '../../../../core/editor/object-scripts.models';
+import {scriptDraft, scriptSettings, type ScriptDraft} from './script-component-draft';
+
 export interface ComponentTarget {
 	readonly key: string;
 	readonly name: string;
+	readonly collider?: Collider | null;
+	readonly collision_enabled?: boolean;
     readonly parent?: string | null;
 	readonly component_views?: readonly ComponentRecord[];
 	readonly components?: readonly ComponentRecord[];
@@ -39,7 +43,7 @@ export interface ComponentDraft {
 	kind: ComponentData['kind'];
 	enabled: boolean;
 	model_path: string;
-	scriptId: string;
+	script: ScriptDraft;
 	mesh_index: string;
 	tint: boolean;
 	color: { r: string; g: string; b: string; a: string };
@@ -83,7 +87,7 @@ export function componentDraft(
 		kind,
 		enabled: value?.enabled ?? true,
 		model_path: '',
-		scriptId: '',
+		script: scriptDraft(),
 		mesh_index: '',
 		tint: false,
 		color: { r: '1', g: '1', b: '1', a: '1' },
@@ -163,7 +167,7 @@ export function componentDraft(
     } else if (value.data.kind === 'interactable') {
         draft.interactable = {action: value.data.settings.action, reach: String(value.data.settings.reach)};
 	} else if (value.data.kind === 'script') {
-		draft.scriptId = value.data.settings.script_id;
+		draft.script = scriptDraft(value.data.settings);
 	} else if (value.data.kind === 'native_behavior') {
 		const behavior = value.data.behavior;
 		draft.behavior_kind = behavior.kind;
@@ -231,6 +235,7 @@ export function componentFromDraft(
 	targets: readonly ComponentTarget[],
 	models: readonly ModelAsset[],
 	original?: ComponentRecord,
+	scriptTypes: readonly ScriptDescriptor[] = [],
 ): ComponentRecord {
 	const reference = (key: string, label: string): string => {
 		if (!targets.some((target) => target.key === key))
@@ -240,11 +245,8 @@ export function componentFromDraft(
 	const optionalReference = (key: string, label: string) => (key ? reference(key, label) : null);
 	let data: ComponentData;
 	if (draft.kind === 'script') {
-        const previous = original?.data.kind === 'script' ? original.data.settings : null;
-        const script_id = draft.scriptId.trim();
-        const settings = previous?.script_id === script_id ? previous : {script_id, config_version: 1};
-        if (!validScriptSettings(settings)) throw new Error('Enter a valid project script ID.');
-        data = {kind: 'script', settings};
+        const previous = original?.data.kind === 'script' ? original.data.settings : undefined;
+        data = {kind: 'script', settings: scriptSettings(draft.script, scriptTypes, targets, previous)};
     } else if (draft.kind === 'sky') {
 		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
 	} else if (draft.kind === 'audio_source') {

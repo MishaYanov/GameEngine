@@ -136,6 +136,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 	EditorCapabilitiesDto {
 		state_machines: Some(runtime::state_machine::descriptor()),
 		component_types: runtime::components::descriptors(),
+		object_scripts: gameplay_catalog::script_descriptors(),
 		incremental_commands: true,
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,

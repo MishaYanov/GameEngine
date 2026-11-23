@@ -25,6 +25,8 @@ import {
 	type ColliderKind,
 } from '../collider/collider';
 import { componentDraft, componentFromDraft, type ComponentTarget } from './component-draft';
+import type {ScriptDescriptor, ScriptField, ScriptReferenceField} from '../../../../core/editor/object-scripts.models';
+import {scriptDraft, servesScriptReference} from './script-component-draft';
 import { MachineEditor } from './machine-editor';
 import { CONTROLLER_FIELDS } from '../../../../core/editor/character-controller.models';
 import type { MachineDefinition } from '../../../../core/editor/state-machine.models';
@@ -62,6 +64,7 @@ export type ComponentEditIntent =
 export class ComponentEditor {
 	readonly components = input<readonly ComponentRecord[]>([]);
 	readonly types = input<readonly ComponentTypeDescriptor[]>([]);
+	readonly scriptTypes = input<readonly ScriptDescriptor[]>([]);
 	readonly entities = input<readonly ComponentTarget[]>([]);
 	readonly models = input<readonly ModelAsset[]>([]);
     readonly gameActions = input<readonly string[]>([]);
@@ -166,6 +169,7 @@ export class ComponentEditor {
 					this.draft().kind === 'camera' ? this.cameraTargets() : this.entities(),
 					this.models(),
 					this.original(),
+					this.scriptTypes(),
 				),
 				error: null,
 			};
@@ -173,6 +177,30 @@ export class ComponentEditor {
 			return { value: null, error: error instanceof Error ? error.message : String(error) };
 		}
 	});
+    protected readonly scriptType = computed(() => this.scriptTypes().find(type => type.id === this.draft().script.id));
+    protected chooseScript(id: string): void {
+        if (!this.scriptTypes().some(type => type.id === id)) return;
+        this.draft.update(value => value.script.id === id ? value : {...value, script: {...scriptDraft(), id}});
+    }
+    protected scriptValue(field: ScriptField): string | boolean {
+        return this.draft().script.properties[field.key] ?? String(field.default);
+    }
+    protected scriptChecked(field: ScriptField & {kind: 'boolean'}): boolean {
+        return (this.draft().script.properties[field.key] ?? field.default) === true;
+    }
+    protected setScriptValue(key: string, next: string | boolean): void {
+        this.draft.update(value => ({...value, script: {...value.script, properties: {...value.script.properties, [key]: next}}}));
+    }
+    protected scriptTargets(field: ScriptReferenceField): readonly ComponentTarget[] {
+        return this.entities().filter(target => servesScriptReference(target, field.requires));
+    }
+    protected scriptTarget(key: string): string {
+        const reference = this.draft().script.references[key];
+        return reference && 'entity' in reference ? reference.entity : '';
+    }
+    protected setScriptTarget(key: string, entity: string): void {
+        this.draft.update(value => ({...value, script: {...value.script, references: {...value.script.references, [key]: {entity}}}}));
+    }
 	protected readonly references = computed<
 		readonly {
 			key: 'actor' | 'key_trigger' | 'door' | 'key_visual' | 'trigger' | 'visual';
@@ -227,6 +255,10 @@ export class ComponentEditor {
 		if (component.data.kind === 'camera') return 'Camera';
 		if (component.data.kind === 'sky') return 'Sky';
 		if (component.data.kind === 'player_controller') return 'Player Controller';
+        if (component.data.kind === 'script') {
+            const id = component.data.settings.script_id;
+            return this.scriptTypes().find(script => script.id === id)?.label ?? 'Script: ' + id;
+        }
 		if (component.data.kind === 'native_behavior')
 			return {
 				key_door: 'Key and Door',

@@ -19,6 +19,7 @@ import {
 import {applyEditorUpdate} from './editor-updates';
 import {ViewportAttachment} from './viewport/viewport-attachment';
 import {validGameplayModules} from './gameplay-modules';
+import {validScriptDescriptors} from './object-scripts.models';
 import {type SceneVerificationReport, validSceneVerification} from './scene-verification.models';
 import {validComponentTypes} from './editor-components';
 import {CameraPreviewController, readCameraPreview} from './camera-preview';
@@ -167,6 +168,9 @@ export class EditorService {
                         'editor_capabilities',
                         'The native editor returned invalid gameplay module metadata.',
                     );
+                }
+                if (capabilities.object_scripts !== undefined && !validScriptDescriptors(capabilities.object_scripts)) {
+                    throw new EditorClientError('backend', 'editor_capabilities', 'The native editor returned invalid Script metadata.');
                 }
                 if (capabilities.component_types !== undefined && !validComponentTypes(capabilities.component_types)) {
                     throw new EditorClientError('backend', 'editor_capabilities', 'The native editor returned invalid component metadata.');

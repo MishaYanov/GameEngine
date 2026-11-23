@@ -421,6 +421,8 @@ pub struct EditorCapabilitiesDto {
 	pub state_machines: Option<crate::state_machine::MachineDescriptor>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub component_types: Vec<crate::components::ComponentTypeDescriptor>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub object_scripts: Vec<crate::components::ScriptDescriptor>,
 	#[serde(default)]
 	pub incremental_commands: bool,
 	#[serde(default)]

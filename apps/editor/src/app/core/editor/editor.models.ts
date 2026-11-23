@@ -429,6 +429,7 @@ export interface EditorCapabilities {
     readonly incremental_commands?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
     readonly component_types?: readonly ComponentTypeDescriptor[];
+    readonly object_scripts?: readonly import('./object-scripts.models').ScriptDescriptor[];
 }
 
 export interface GameplayRoleDescriptor {

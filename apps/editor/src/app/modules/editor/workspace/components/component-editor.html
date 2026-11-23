@@ -224,7 +224,42 @@
 					/>
 				}
                 @case ('script') {
-                    <label>Script ID<input [formField]="fields.scriptId" /></label>
+                    <label>Script
+                        <select #script [value]="draft().script.id" (change)="chooseScript(script.value)">
+                            @if (!scriptType()) {
+                                <option [value]="draft().script.id" disabled>
+                                    {{ draft().script.id || 'Choose a registered script' }}
+                                </option>
+                            }
+                            @for (type of scriptTypes(); track type.id) {
+                                <option [value]="type.id">{{ type.label }}</option>
+                            }
+                        </select>
+                    </label>
+                    @if (scriptType(); as type) {
+                        @for (field of type.fields; track field.key) {
+                            <label>{{ field.label }}
+                                @if (field.kind === 'boolean') {
+                                    <input #flag type="checkbox" [checked]="scriptChecked(field)" (change)="setScriptValue(field.key, flag.checked)" />
+                                } @else {
+                                    <input #value type="text" [attr.inputmode]="field.kind === 'number' ? 'decimal' : null"
+                                        [value]="scriptValue(field)" (input)="setScriptValue(field.key, value.value)" />
+                                }
+                            </label>
+                        }
+                        @for (field of type.references; track field.key) {
+                            <label>{{ field.label }}
+                                <select #target [value]="scriptTarget(field.key)" (change)="setScriptTarget(field.key, target.value)">
+                                    <option value="">Choose an object</option>
+                                    @for (object of scriptTargets(field); track object.key) {
+                                        <option [value]="object.key">{{ object.name }}</option>
+                                    }
+                                </select>
+                            </label>
+                        }
+                    } @else if (draft().script.id) {
+                        <p role="status">This script is unavailable. Choose a registered replacement or leave this attachment disabled.</p>
+                    }
                 }
 				@case ('native_behavior') {
 					<label

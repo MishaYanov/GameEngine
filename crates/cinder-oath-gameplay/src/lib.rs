@@ -1,6 +1,9 @@
 //! Native gameplay for the authored Cinder Oath project.
 
 mod duel;
+mod scripts {
+	pub(super) mod open_door_on_trigger;
+}
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -167,6 +170,10 @@ pub fn intro_route(project: &ProjectData) -> Result<Option<(SceneId, SceneId)>, 
 	}
 	let settings = Settings::from_project(project)?;
 	Ok(Some((settings.intro_scene, settings.arena_scene)))
+}
+
+pub fn object_script_descriptor() -> engine_core::components::ScriptDescriptor {
+	scripts::open_door_on_trigger::descriptor()
 }
 
 pub fn descriptor() -> GameplayModuleDescriptorDto {

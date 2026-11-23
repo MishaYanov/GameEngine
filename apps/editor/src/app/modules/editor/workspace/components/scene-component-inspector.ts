@@ -17,6 +17,7 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 	template: `<editor-component-editor
 		[components]="basicComponents()"
 		[types]="types()"
+		[scriptTypes]="scriptTypes()"
 		[ownerKey]="entity()?.key ?? ''"
 		[contextKey]="context()"
 		[entities]="targets()"
@@ -91,7 +92,9 @@ export class SceneComponentInspector {
 	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
 	protected readonly inputActions = inject(InputActionsCatalog, {optional: true});
 	protected readonly basicComponents = computed(() => this.entity()?.component_views?.filter(component => component.data.kind !== 'animator') ?? []);
-	protected readonly types = computed(() => this.editor.capabilities()?.component_types?.filter(type => type.kind !== 'animator') ?? []);
+    protected readonly scriptTypes = computed(() => this.editor.capabilities()?.object_scripts ?? []);
+	protected readonly types = computed(() => this.editor.capabilities()?.component_types?.filter(type =>
+        type.kind !== 'animator' && (type.kind !== 'script' || this.scriptTypes().length > 0)) ?? []);
 	protected readonly animatorSupported = computed(() => this.editor.capabilities()?.animator_assets === true);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);

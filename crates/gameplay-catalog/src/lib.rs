@@ -15,6 +15,10 @@ pub fn descriptors() -> Vec<GameplayModuleDescriptorDto> {
 	vec![cinder_oath_gameplay::descriptor()]
 }
 
+pub fn script_descriptors() -> Vec<engine_core::components::ScriptDescriptor> {
+	vec![cinder_oath_gameplay::object_script_descriptor()]
+}
+
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
 	match project.gameplay_module.as_deref() {
 		Some(CINDER_OATH_ID) => cinder_oath_gameplay::resolve(project),
