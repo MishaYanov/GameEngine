@@ -90,6 +90,81 @@ fn conditional_layouts_wait_for_committed_motion_and_respect_first_matching_scen
 	assert_eq!(world.active_input_layout(), Some("world"));
 }
 
+#[test]
+fn conditional_remap_requires_fresh_keyboard_and_gamepad_presses() {
+	use engine_core::{
+		InputState,
+		input::{
+			ActionBinding, FaceButton, InputActionMap, InputBindingOverride, PhysicalGamepadSample,
+		},
+	};
+	for keyboard in [true, false] {
+		let mut map = InputActionMap::starter();
+		map.schema_version = 2;
+		map.layouts = motion_layouts();
+		map.layouts[1].overrides = vec![
+			InputBindingOverride {
+				action_id: "jump".into(),
+				bindings: vec![],
+			},
+			InputBindingOverride {
+				action_id: "attack".into(),
+				bindings: vec![
+					ActionBinding::Key { key: Key::Space },
+					ActionBinding::GamepadButton {
+						button: FaceButton::A,
+					},
+				],
+			},
+		];
+		let mut run = conditional_controls(|_| map);
+		tick(&mut run);
+		tick(&mut run);
+		let sample = |run: &mut SimulationSession, held: bool| {
+			let mut input = InputState::default();
+			let mut pad = PhysicalGamepadSample::default();
+			if keyboard && held {
+				input.press(Key::Space);
+			} else if held {
+				pad.face_buttons[FaceButton::A as usize] = true;
+			}
+			run.sample_action_keys(&input, pad).unwrap();
+		};
+		sample(&mut run, true);
+		let grouped = run.tick(2. / 60.).unwrap();
+		assert_eq!(run.active_input_layout(), Some("airborne"));
+		assert_eq!(
+			grouped
+				.accepted_action_presses
+				.iter()
+				.map(|event| event.id.as_str())
+				.collect::<Vec<_>>(),
+			vec!["jump"]
+		);
+
+		run.clear_input();
+		sample(&mut run, true);
+		assert!(
+			run.tick(1. / 60.)
+				.unwrap()
+				.accepted_action_presses
+				.is_empty()
+		);
+		sample(&mut run, false);
+		sample(&mut run, true);
+		sample(&mut run, false);
+		let grouped = run.tick(2. / 60.).unwrap();
+		assert_eq!(
+			grouped
+				.accepted_action_presses
+				.iter()
+				.map(|event| event.id.as_str())
+				.collect::<Vec<_>>(),
+			vec!["attack"]
+		);
+	}
+}
+
 fn run(editor: &mut EditorSession, command: Command) -> Result<(), String> {
 	editor.execute_command(EditorCommandRequest {
 		expected_revision: editor.revision(),

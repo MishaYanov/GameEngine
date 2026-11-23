@@ -2,9 +2,10 @@
 
 use crate::{
 	input::{
-		InputActionMap, InputLayoutCondition, InputState, Key, PhysicalGamepadSample,
-		ResolvedInputActions,
+		ActionBinding, InputActionMap, InputLayoutCondition, InputState, Key,
+		PhysicalGamepadSample, ResolvedInputActions,
 	},
+	runtime_lifecycle::RuntimeEntityHandle,
 	scene_catalog::SceneId,
 };
 use std::collections::{HashSet, VecDeque};
@@ -27,9 +28,12 @@ pub(super) struct ConditionalInputs {
 	default: InputActionMap,
 	layouts: Vec<PreparedLayout>,
 	active: Option<usize>,
+	owner: Option<Option<RuntimeEntityHandle>>,
 	physical_keys: Vec<(Key, String)>,
 	last_sample: PhysicalActionSample,
 	pending: VecDeque<PhysicalActionSample>,
+	muted_keys: HashSet<String>,
+	muted_buttons: [bool; 4],
 }
 
 impl ConditionalInputs {
@@ -63,9 +67,12 @@ impl ConditionalInputs {
 			},
 			layouts,
 			active: None,
+			owner: None,
 			physical_keys,
 			last_sample: PhysicalActionSample::default(),
 			pending: VecDeque::new(),
+			muted_keys: HashSet::new(),
+			muted_buttons: [false; 4],
 		})
 	}
 
@@ -96,8 +103,12 @@ impl ConditionalInputs {
 	}
 
 	pub(super) fn clear(&mut self) {
+		if let Some(latest) = self.pending.pop_back() {
+			self.last_sample = latest;
+		}
+		self.muted_keys.clone_from(&self.last_sample.keys);
+		self.muted_buttons = self.last_sample.pad.face_buttons;
 		self.pending.clear();
-		self.last_sample = PhysicalActionSample::default();
 	}
 
 	pub(super) fn has_pending(&self) -> bool {
@@ -108,26 +119,83 @@ impl ConditionalInputs {
 		&mut self,
 		scene: &SceneId,
 		grounded: Option<bool>,
+		owner: Option<RuntimeEntityHandle>,
 	) -> (bool, Vec<ResolvedInputActions>) {
+		let has_owner = owner.is_some();
+		let owner_changed = self
+			.owner
+			.replace(owner.clone())
+			.is_some_and(|old| old != owner);
+		if owner_changed {
+			self.clear();
+		}
 		let active = self
 			.layouts
 			.iter()
 			.position(|layout| layout.condition.matches(scene, grounded));
-		let changed = std::mem::replace(&mut self.active, active) != active;
-		let mut frames = Vec::with_capacity(self.pending.len() + usize::from(changed));
+		let changed = self.active != active;
 		if changed {
+			self.mute_remapped_buttons(active);
+			self.active = active;
+		}
+		let mut frames = Vec::with_capacity(self.pending.len() + usize::from(changed));
+		if owner_changed {
+			frames.push(ResolvedInputActions::default());
+		} else if changed && has_owner {
 			frames.push(self.resolve(&self.last_sample));
 		}
 		while let Some(sample) = self.pending.pop_front() {
-			frames.push(self.resolve(&sample));
+			self.muted_keys.retain(|key| sample.keys.contains(key));
+			for (muted, held) in self.muted_buttons.iter_mut().zip(sample.pad.face_buttons) {
+				*muted &= held;
+			}
+			if has_owner {
+				frames.push(self.resolve(&sample));
+			}
 			self.last_sample = sample;
 		}
-		(changed, frames)
+		(changed || owner_changed, frames)
+	}
+
+	fn mute_remapped_buttons(&mut self, active: Option<usize>) {
+		let layout_map = |index: usize| &self.layouts[index].map;
+		let previous = self.active.map_or(&self.default, layout_map);
+		let next = active.map_or(&self.default, layout_map);
+		for (key, code) in &self.physical_keys {
+			if self.last_sample.keys.contains(code)
+				&& changed_button(
+					previous,
+					next,
+					|binding| matches!(binding, ActionBinding::Key { key: bound } if bound == key),
+				) {
+				self.muted_keys.insert(code.clone());
+			}
+		}
+		for (index, held) in self.last_sample.pad.face_buttons.into_iter().enumerate() {
+			if held
+				&& changed_button(
+					previous,
+					next,
+					|binding| matches!(binding, ActionBinding::GamepadButton { button } if *button as usize == index),
+				) {
+				self.muted_buttons[index] = true;
+			}
+		}
 	}
 
 	fn resolve(&self, sample: &PhysicalActionSample) -> ResolvedInputActions {
-		self.current_map()
-			.resolve_codes(&sample.keys, sample.pad, [0.0; 2])
+		let mut pad = sample.pad;
+		for (held, muted) in pad.face_buttons.iter_mut().zip(self.muted_buttons) {
+			*held &= !muted;
+		}
+		let filtered;
+		let keys = if self.muted_keys.is_empty() {
+			&sample.keys
+		} else {
+			filtered = sample.keys.difference(&self.muted_keys).cloned().collect();
+			&filtered
+		};
+		self.current_map().resolve_codes(keys, pad, [0.0; 2])
 	}
 
 	fn sample_where(
@@ -153,4 +221,20 @@ impl ConditionalInputs {
 		self.pending.push_back(next);
 		Ok(())
 	}
+}
+
+fn changed_button(
+	previous: &InputActionMap,
+	next: &InputActionMap,
+	bound: impl Fn(&ActionBinding) -> bool,
+) -> bool {
+	fn action_for(map: &InputActionMap, bound: impl Fn(&ActionBinding) -> bool) -> Option<&str> {
+		map.actions
+			.iter()
+			.find(|action| action.bindings.iter().any(&bound))
+			.map(|action| action.id.as_str())
+	}
+	let before = action_for(previous, &bound);
+	let after = action_for(next, bound);
+	after.is_some() && before != after
 }

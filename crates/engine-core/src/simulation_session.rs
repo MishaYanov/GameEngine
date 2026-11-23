@@ -674,7 +674,7 @@ impl SimulationSession {
 					}
 				}
 				let mut camera_delta = camera_input.take_for_step();
-				if self.begin_input_layout_step(&characters)? {
+				if self.begin_input_layout_step(&characters, &lifecycle)? {
 					camera_delta.yaw_delta = 0.0;
 					camera_delta.pitch_delta = 0.0;
 				}

@@ -157,7 +157,7 @@ impl SimulationSession {
 			}
 		}
 		self.inputs.action_presses.extend(pressed);
-		if self.control_graph.is_some() {
+		if self.control_graph.is_some() || self.conditional_input.is_some() {
 			let releases = &mut self.inputs.control_sample.releases;
 			let available = MAX_GAME_INPUT_ACTIONS.saturating_sub(releases.len());
 			let mut released: Vec<_> = self

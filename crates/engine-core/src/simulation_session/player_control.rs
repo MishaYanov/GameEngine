@@ -155,15 +155,21 @@ impl SimulationSession {
 	pub(super) fn begin_input_layout_step(
 		&mut self,
 		characters: &crate::character_controller::CharacterRuntime,
+		lifecycle: &crate::runtime_lifecycle::RuntimeLifecycle,
 	) -> Result<bool, String> {
 		let Some(input) = &mut self.conditional_input else {
 			return Ok(false);
 		};
-		let grounded = characters
-			.local_input_owner(&self.world)
+		let actor = characters.local_input_owner(&self.world);
+		let grounded = actor
 			.and_then(|actor| characters.state(actor))
 			.and_then(crate::character_controller::CharacterState::committed_grounded);
-		let (changed, frames) = input.step(&self.scene_id, grounded);
+		let owner = actor.and_then(|actor| lifecycle.handle(actor));
+		if owner.is_none() {
+			self.inputs.controller_owned = false;
+			self.inputs.controller_movement = [0.0; 2];
+		}
+		let (changed, frames) = input.step(&self.scene_id, grounded, owner);
 		for frame in frames {
 			self.sample_input_actions(frame)?;
 		}
