@@ -26,6 +26,7 @@ import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entiti
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {AgentDrawer} from './agent-drawer/agent-drawer';
+import {AgentDrawerService} from './agent-drawer/agent-drawer.service';
 import {AgentSelectionContextService} from './agent-drawer/agent-selection-context';
 import {AUTHORING_DRAWER_CONFIG, type RightDrawerMode} from './agent-drawer/authoring-drawer';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
@@ -68,7 +69,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
-        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService,
+        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService, AgentDrawerService,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [

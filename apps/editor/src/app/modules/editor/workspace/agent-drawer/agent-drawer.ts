@@ -1,10 +1,11 @@
 import {Component, ElementRef, inject, viewChild} from '@angular/core';
 import {EditorPane} from '../../../../shared/components/pane/pane';
+import {EditorAgentConversation} from './agent-conversation';
 import {AgentSelectionContextService} from './agent-selection-context';
 
 @Component({
     selector: 'editor-agent-drawer',
-    imports: [EditorPane],
+    imports: [EditorPane, EditorAgentConversation],
     templateUrl: './agent-drawer.html',
     styleUrl: './agent-drawer.scss',
 })

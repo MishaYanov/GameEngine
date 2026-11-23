@@ -122,6 +122,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "authoring-agent",
  "bridge",
  "commands",
  "compiler",
@@ -272,6 +273,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "authoring-agent-worker"
+version = "0.1.0"
+dependencies = [
+ "authoring-agent",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

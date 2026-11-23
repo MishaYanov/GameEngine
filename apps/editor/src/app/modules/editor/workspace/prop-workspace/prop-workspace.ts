@@ -11,6 +11,7 @@ import {EditorService} from '../../../../core/editor/editor.service';
 import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
 import {PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {ComponentEditor} from '../components/component-editor';
+import {ComponentWorkspaceSession, type ComponentWorkspaceKind} from '../components/component-workspace-session';
 
 interface PlacementRefresh {
     readonly draftId: string;
@@ -29,6 +30,9 @@ export class PropWorkspace {
     readonly closed = output<void>();
     readonly inspectorVisible = input(true);
     protected readonly prop = inject(PropWorkspaceService);
+    private readonly componentWorkspace = inject(ComponentWorkspaceSession, {optional: true});
+    protected readonly componentWorkspaceAvailable = computed(() =>
+        this.componentWorkspace !== null && this.prop.inspectorSubject()?.access === 'prop-edit');
     protected readonly preview = inject(PropPreviewService);
     private readonly injector = inject(Injector);
     private readonly editor = inject(EditorService);
@@ -37,6 +41,11 @@ export class PropWorkspace {
         const document = this.prop.document();
         return document?.kind === 'source' ? document.draft.asset_id : null;
     });
+    protected openComponentWorkspace(view: ComponentWorkspaceKind, componentId: string): void {
+        const subject = this.prop.inspectorSubject();
+        if (subject?.access === 'prop-edit') void this.componentWorkspace?.open(view, subject, componentId);
+    }
+
     protected readonly assetGeneration = this.editor.workspaceGeneration;
     protected readonly authoringTypes = computed(() => this.editor.capabilities()?.component_types?.filter(
         type => canEditPropComponent(type.kind) && (type.kind !== 'script' || this.scriptTypes().length > 0),

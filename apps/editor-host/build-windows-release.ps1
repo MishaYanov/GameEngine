@@ -96,9 +96,17 @@ if ($Offline)
 Push-Location -LiteralPath $root
 try
 {
-    Invoke-Checked 'cargo' @('build', '--locked', '--release', '--target', $targetTriple, '-p', 'game', '-p', 'compiler')
+    Invoke-Checked 'cargo' @('build', '--locked', '--release', '--target', $targetTriple, '-p', 'game', '-p', 'compiler', '-p', 'authoring-agent-worker')
     $buildDirectory = Join-Path $cargoTarget "$targetTriple\release"
     $player = Join-Path $buildDirectory 'game.exe'
+    $agentFiles = [ordered]@{
+        'authoring-agent-worker.exe' = Join-Path $buildDirectory 'authoring-agent-worker.exe'
+        'bundle.json' = Join-Path $root 'agent-profiles/game-development-support/bundle.json'
+        'engine-help/editor-workspace.md' = Join-Path $root 'docs/editor-workspace.md'
+        'engine-help/0002-object-composition-and-components.md' = Join-Path $root 'docs/adr/0002-object-composition-and-components.md'
+        'engine-help/0004-authoring-play-and-editor-state.md' = Join-Path $root 'docs/adr/0004-authoring-play-and-editor-state.md'
+        'engine-help/game-creation-workflows.md' = Join-Path $root 'designs/editor-viewport/game-creation-workflows.md'
+    }
 
     $sampleManifest = Join-Path $root 'projects\cinder-oath\project.json'
     $sampleStaging = Join-Path $output 'sample-staging'
@@ -121,6 +129,15 @@ try
     $resources = @{ }
     $resources[$player.Replace('\', '/')] = 'release/player/game.exe'
     $resources[$sample.Replace('\', '/')] = 'release/samples/cinder-oath'
+    foreach ($relative in $agentFiles.Keys)
+    {
+        $agentFile = $agentFiles[$relative]
+        if (!(Test-Path -LiteralPath $agentFile -PathType Leaf))
+        {
+            throw "The Agent release file is missing: $agentFile"
+        }
+        $resources[$agentFile.Replace('\', '/')] = "release/agent/$relative"
+    }
     $overlay = Join-Path $output 'tauri-release.json'
     $config = @{
         mainBinaryName = $editorName
@@ -191,6 +208,10 @@ try
     Assert-EmbeddedFrontend (Join-Path $frontendOutput 'browser') $editorExe
     $builtResources = Join-Path $buildDirectory 'release'
     Assert-CopiedFile $player (Join-Path $builtResources 'player\game.exe')
+    foreach ($relative in $agentFiles.Keys)
+    {
+        Assert-CopiedFile $agentFiles[$relative] (Join-Path $builtResources "agent/$relative")
+    }
     foreach ($file in Get-ChildItem -LiteralPath $sample -File -Recurse)
     {
         $relative = $file.FullName.Substring($sample.Length + 1)
@@ -204,6 +225,13 @@ try
     [IO.Directory]::CreateDirectory($portableSamples) | Out-Null
     Copy-Item -LiteralPath $editorExe -Destination $portable
     Copy-Item -LiteralPath $player -Destination $portablePlayer
+    foreach ($relative in $agentFiles.Keys)
+    {
+        $destination = Join-Path $portable "release/agent/$relative"
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        Copy-Item -LiteralPath $agentFiles[$relative] -Destination $destination
+        Assert-CopiedFile $agentFiles[$relative] $destination
+    }
     Copy-Item -LiteralPath $sample -Destination (Join-Path $portableSamples 'cinder-oath') -Recurse
     Write-Output "Windows Editor: $portable"
 

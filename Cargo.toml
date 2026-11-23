@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "apps/admin-dashboard/src-tauri",
+    "apps/authoring-agent",
     "apps/editor-host/src-tauri",
     "apps/game",
     "compiler",

@@ -167,6 +167,10 @@
                             [entities]="document.objects" [scriptTypes]="scriptTypes()" [scriptSlots]="nestedOuterSlots()"
                             [ownerKey]="object.key" [contextKey]="componentContext()"
                             [models]="prop.assets()" [audioScope]="audioScope()" [assetGeneration]="assetGeneration()"
+                            [audioWorkspaceAvailable]="componentWorkspaceAvailable()"
+                            (audioWorkspaceRequested)="openComponentWorkspace('audio-workspace', $event)"
+                            [behaviorWorkspaceAvailable]="componentWorkspaceAvailable()"
+                            (behaviorWorkspaceRequested)="openComponentWorkspace('behavior-workspace', $event)"
                             [editable]="document.kind === 'source' && prop.canEditDraft()"
                             [pending]="prop.draftPending()" [acknowledged]="prop.draft()?.draft_revision ?? 0"
                             (actionRequested)="prop.editComponent(object.key, $event)"/>

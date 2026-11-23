@@ -5,6 +5,8 @@ use tauri::{Manager, WebviewWindow};
 
 const BUNDLED_PLAYER: &str = "release/player/game.exe";
 const BUNDLED_SAMPLE: &str = "release/samples/cinder-oath/project.json";
+const BUNDLED_AGENT_ROOT: &str = "release/agent";
+const BUNDLED_AGENT_WORKER: &str = "authoring-agent-worker.exe";
 
 pub(crate) enum EditorResources {
 	Development,
@@ -40,6 +42,42 @@ impl EditorResources {
 			Self::Installed(root) => bundled_file(root, BUNDLED_PLAYER, "Windows Player").map(Some),
 		}
 	}
+}
+
+/// The standalone worker is resolved only under the Editor's installed resource root.
+pub(crate) struct AgentResources {
+	pub(crate) root: PathBuf,
+	pub(crate) executable: PathBuf,
+}
+
+impl AgentResources {
+	pub(crate) fn for_window(window: &WebviewWindow) -> Result<Self, String> {
+		let resource_dir = window
+			.path()
+			.resource_dir()
+			.map_err(|error| error.to_string())?;
+		Self::from_root(&resource_dir)
+	}
+
+	fn from_root(resource_root: &Path) -> Result<Self, String> {
+		let root = bundled_directory(resource_root, BUNDLED_AGENT_ROOT)?;
+		let executable = bundled_file(&root, BUNDLED_AGENT_WORKER, "Agent worker")?;
+		bundled_file(&root, "bundle.json", "Agent profile")?;
+		bundled_directory(&root, "engine-help")?;
+		Ok(Self { root, executable })
+	}
+}
+
+fn bundled_directory(root: &Path, relative: &str) -> Result<PathBuf, String> {
+	let root = root.canonicalize().map_err(|error| error.to_string())?;
+	let candidate = root.join(relative);
+	let directory = candidate
+		.canonicalize()
+		.map_err(|error| error.to_string())?;
+	if directory != candidate || !directory.is_dir() {
+		return Err("The bundled Agent directory is not inside its approved resource root".into());
+	}
+	Ok(directory)
 }
 
 fn bundled_file(root: &Path, relative: &str, name: &str) -> Result<PathBuf, String> {

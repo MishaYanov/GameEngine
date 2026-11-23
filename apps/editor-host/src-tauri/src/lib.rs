@@ -2,6 +2,7 @@
 #[path = "../../../../tests/support/project_fixture.rs"]
 mod test_project;
 
+mod agent_session;
 mod animation_preview;
 mod asset_reimport_gpu;
 mod camera_preview;
@@ -41,10 +42,9 @@ pub fn run() {
 		.manage(EditorState::default())
 		.on_page_load(|webview, payload| {
 			if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Started) {
-				webview
-					.state::<EditorState>()
-					.exit
-					.reset_window_close_page();
+				let state = webview.state::<EditorState>();
+				state.agent_sessions.invalidate();
+				state.exit.reset_window_close_page();
 			}
 		})
 		.setup(|app| {
@@ -73,6 +73,8 @@ pub fn run() {
 		.invoke_handler(tauri::generate_handler![
 			engine_status,
 			editor_agent_context,
+			editor_agent_session_start,
+			editor_agent_session_stop,
 			editor_runtime_inspect,
 			create_project,
 			choose_project_destination,

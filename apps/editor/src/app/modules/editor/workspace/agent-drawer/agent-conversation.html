@@ -1,0 +1,40 @@
+@if (!nativeReady()) {
+    <p role="status">Open a project in the desktop Editor and stop Play to ask the Agent.</p>
+}
+<form (submit)="ask($event)">
+    <label for="agent-question">Question</label>
+    <textarea id="agent-question" maxlength="512" rows="3" #prompt [value]="question()"
+              (input)="question.set(prompt.value)" placeholder="Ask about this object or the Editor"></textarea>
+    @if (componentIds().length) {
+        <label for="agent-component">Ask about</label>
+        <select id="agent-component" #attachment (change)="componentId.set(attachment.value)">
+            <option value="" [selected]="!componentIds().includes(componentId())">Whole object</option>
+            @for (id of componentIds(); track id) {
+                <option [value]="id" [selected]="id === componentId()">{{ id }}</option>
+            }
+        </select>
+    }
+    <div class="controls">
+        <button type="submit" [disabled]="!canSubmit()">Ask</button>
+        @if (session.running()) {
+            <button type="button" (click)="session.stop()">Stop</button>
+        }
+    </div>
+</form>
+@if (session.failure(); as message) { <p role="alert">{{ message }}</p> }
+<section aria-label="Agent answers">
+    @for (answer of session.answers(); track answer.id) {
+        <article>
+            <h3>{{ answer.question }}</h3>
+            @if (answer.selection; as selection) { <p class="selection">{{ selection.label }}</p> }
+            @if (answer.text) { <p class="answer">{{ answer.text }}</p> }
+            @switch (answer.status) {
+                @case ('starting') { <p role="status">Starting local Agent…</p> }
+                @case ('streaming') { <p role="status">Finding guidance…</p> }
+                @case ('retrieval_only') { <p role="status">Keyword search completed.</p> }
+                @case ('cancelled') { <p role="status">Stopped.</p> }
+                @case ('error') { <p role="alert">{{ answer.message ?? 'The Agent could not complete this request.' }}</p> }
+            }
+        </article>
+    }
+</section>

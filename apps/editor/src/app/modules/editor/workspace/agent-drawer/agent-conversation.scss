@@ -1,0 +1,39 @@
+form, article {
+    display: grid;
+    gap: var(--space-2);
+    padding-block: var(--space-2);
+}
+
+article {
+    border-top: 1px solid var(--color-border);
+}
+
+h3, p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 4rem;
+    background: var(--color-control);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    padding: var(--space-2);
+    font: inherit;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.selection {
+    color: var(--color-text-secondary);
+}
+
+.answer {
+    white-space: pre-wrap;
+}

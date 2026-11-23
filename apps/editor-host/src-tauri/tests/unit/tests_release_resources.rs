@@ -80,3 +80,18 @@ fn installed_sample_opens_an_editable_copy_outside_the_bundle() {
 	assert!(created.starts_with(&projects));
 	assert_eq!(fs::read(&sample).unwrap(), sample_bytes);
 }
+
+#[test]
+fn agent_uses_fixed_paths_in_the_portable_or_installed_resource_root() {
+	let resources = TestDirectory::new();
+	let agent = resources.directory(BUNDLED_AGENT_ROOT);
+	let worker = agent.join(BUNDLED_AGENT_WORKER);
+	fs::write(&worker, b"worker fixture").unwrap();
+	assert!(AgentResources::from_root(&resources.0).is_err());
+	fs::write(agent.join("bundle.json"), b"bundle fixture").unwrap();
+	assert!(AgentResources::from_root(&resources.0).is_err());
+	resources.directory("release/agent/engine-help");
+	let resolved = AgentResources::from_root(&resources.0).unwrap();
+	assert_eq!(resolved.root, agent.canonicalize().unwrap());
+	assert_eq!(resolved.executable, worker.canonicalize().unwrap());
+}
