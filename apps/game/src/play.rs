@@ -131,11 +131,26 @@ impl GameApp {
 					prior,
 					after,
 					self.player_controls.feedback_mix(),
+					|cue| {
+						outcome.audio_onsets.iter().any(|onset| {
+							onset
+								.replaces_cue
+								.is_some_and(|replacement| replacement.id() == cue.id())
+						})
+					},
 				) && self.standalone_runtime
 					&& self.player_controls.display().cue_captions
 				{
 					self.feedback_captions.push(cue, Instant::now());
 				}
+			}
+			if !outcome.audio_onsets.is_empty()
+				&& let Some(status) = self.editor.play_status()
+			{
+				self.scene_audio.queue_onsets(
+					runtime::scene_audio::SceneAudioOwner::from_play(&status),
+					std::mem::take(&mut outcome.audio_onsets),
+				);
 			}
 			if let Some(trace) = self.play_trace.as_mut() {
 				trace.record_steps(outcome.steps);

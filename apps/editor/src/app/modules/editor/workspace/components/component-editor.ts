@@ -37,7 +37,8 @@ import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
 import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
 import {AudioSourceInspector} from '../audio-source/audio-source-inspector';
-import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
+import {audioGameplaySignals, legacyCombatCues, type AudioAuditionScope} from '../../../../core/editor/audio-source.models';
+import {AudioMarkerFields} from '../audio-source/audio-marker-fields';
 import {audioClipDragType, readAudioClipDrag} from '../audio-source/audio-clip-drag';
 
 export type ComponentEditIntent =
@@ -52,7 +53,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector, AudioMarkerFields],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -99,6 +100,14 @@ export class ComponentEditor {
 				JSON.stringify(this.draft().animation?.source)
 		);
 	});
+    protected readonly audioGameplaySignals = audioGameplaySignals;
+    protected readonly legacyCombatCues = legacyCombatCues;
+    protected chooseAudioEventClip(id: string): void {
+        if (this.fields.audioSource.eventClip().value() === id) return;
+        this.fields.audioSource.eventClip().value.set(id);
+        this.fields.audioSource.eventMarker().value.set('');
+    }
+
     protected readonly audioClips = computed(() => this.models().filter(asset => asset.kind === 'audio_clip' && asset.asset_id));
     protected readonly audioClipOptions = computed(() => this.audioClips().flatMap(clip =>
         clip.asset_id ? [{id: clip.asset_id, label: clip.name, description: clip.path}] : []

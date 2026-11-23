@@ -1,13 +1,20 @@
 //! Device-independent decisions for Audio Sources at committed scene boundaries.
 use crate::{
 	EntityKey, SceneData,
+	animation::MarkerId,
 	asset_catalog::AssetId,
 	command::PlayStatusDto,
-	components::{AudioSourceBus, AudioSourcePlayback, AudioSourceSpatial, ComponentId},
+	components::{
+		AudioEventBinding, AudioSourceBus, AudioSourcePlayback, AudioSourceSpatial, ComponentId,
+		LegacyCombatCue,
+	},
+	gameplay_events::Signal,
+	world::RuntimeWorld,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const MAX_SCENE_VOICES: usize = 16;
+const MAX_AUDIO_ONSETS_PER_STEP: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SceneAudioOwner {
@@ -15,7 +22,7 @@ pub struct SceneAudioOwner {
 	pub scene_generation: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneAudioVoice {
 	pub entity: EntityKey,
 	pub component: ComponentId,
@@ -26,12 +33,38 @@ pub struct SceneAudioVoice {
 	pub spatial: AudioSourceSpatial,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AudioOnsetCause {
+	GameplaySignal {
+		signal: Signal,
+	},
+	AnimationMarker {
+		clip: AssetId,
+		marker: MarkerId,
+		playback: u64,
+		loop_index: u64,
+	},
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommittedAudioOnset {
+	pub voice: SceneAudioVoice,
+	pub tick: u64,
+	pub cause: AudioOnsetCause,
+	pub replaces_cue: Option<LegacyCombatCue>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SceneAudioOp {
 	Start {
 		owner: SceneAudioOwner,
 		voice: SceneAudioVoice,
+	},
+	Trigger {
+		owner: SceneAudioOwner,
+		onset: CommittedAudioOnset,
 	},
 	StopOwner {
 		owner: SceneAudioOwner,
@@ -78,6 +111,75 @@ impl SceneAudioState {
 	pub fn owns(&self, owner: &SceneAudioOwner) -> bool {
 		self.owner.as_ref() == Some(owner)
 	}
+}
+
+pub(crate) fn available_onsets(output: &[CommittedAudioOnset], tick: u64) -> usize {
+	MAX_AUDIO_ONSETS_PER_STEP.saturating_sub(
+		output
+			.iter()
+			.rev()
+			.take_while(|onset| onset.tick == tick)
+			.count(),
+	)
+}
+
+pub(crate) fn record_onset(
+	world: &RuntimeWorld,
+	key: &EntityKey,
+	tick: u64,
+	cause: AudioOnsetCause,
+	output: &mut Vec<CommittedAudioOnset>,
+) {
+	if available_onsets(output, tick) == 0
+		|| output
+			.iter()
+			.rev()
+			.take_while(|onset| onset.tick == tick)
+			.any(|onset| onset.voice.entity == *key && onset.cause == cause)
+	{
+		return;
+	}
+	let Some(entity) = world.entity_index(key).map(|i| &world.data().entities[i]) else {
+		return;
+	};
+	let Some(source) = entity.audio_source.as_ref().filter(|source| source.enabled) else {
+		return;
+	};
+	let settings = &source.settings;
+	let matches = match (&settings.event, &cause) {
+		(
+			Some(AudioEventBinding::GameplaySignal { signal: expected }),
+			AudioOnsetCause::GameplaySignal { signal },
+		) => expected == signal,
+		(
+			Some(AudioEventBinding::AnimationMarker {
+				clip: expected_clip,
+				marker: expected_marker,
+			}),
+			AudioOnsetCause::AnimationMarker { clip, marker, .. },
+		) => expected_clip == clip && expected_marker == marker,
+		_ => false,
+	};
+	let Some(clip) = settings.clip.as_ref() else {
+		return;
+	};
+	if settings.playback != AudioSourcePlayback::OnEvent || !matches {
+		return;
+	}
+	output.push(CommittedAudioOnset {
+		voice: SceneAudioVoice {
+			entity: key.clone(),
+			component: source.id.clone(),
+			clip: clip.asset.clone(),
+			gain: settings.gain,
+			looping: false,
+			bus: settings.bus,
+			spatial: settings.spatial,
+		},
+		tick,
+		cause,
+		replaces_cue: settings.replaces_cue,
+	});
 }
 
 pub fn entry_voices(scene: &SceneData) -> Vec<SceneAudioVoice> {

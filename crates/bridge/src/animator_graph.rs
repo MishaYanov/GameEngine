@@ -5,7 +5,6 @@ use engine_core::{
 	animation::{
 		AnimationClipRef, AnimationPlayback, AnimationSettings, AnimatorBinding, AnimatorGraph,
 		AnimatorSettings, AuthoredClip, MAX_ANIMATOR_GRAPH_BYTES, MAX_AUTHORED_CLIP_BYTES,
-		ResolvedAuthoredClip,
 	},
 	asset_catalog::{
 		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset,
@@ -156,7 +155,32 @@ pub fn prepare_actor(
 			PreparedAnimatorClips::Visual(clips)
 		}
 	};
-	Ok(PreparedAnimator { graph, clips })
+	let prepared = PreparedAnimator { graph, clips };
+	if let Some(engine_core::components::AudioEventBinding::AnimationMarker { clip, marker }) =
+		actor
+			.audio_source
+			.as_ref()
+			.filter(|source| source.enabled)
+			.and_then(|source| source.settings.event.as_ref())
+	{
+		let found =
+			match &prepared.clips {
+				PreparedAnimatorClips::Imported(_) => false,
+				PreparedAnimatorClips::Visual(clips) => prepared
+					.graph
+					.states
+					.iter()
+					.zip(clips)
+					.any(|(state, authored)| {
+						matches!(&state.clip, AnimationClipRef::Authored { asset_id, .. } if asset_id == clip)
+							&& authored.markers().iter().any(|value| &value.id == marker)
+					}),
+			};
+		if !found {
+			return Err("Audio Source references a missing marker. Open Animation and choose a saved marker from this Animator.".into());
+		}
+	}
+	Ok(prepared)
 }
 
 pub fn prepare_scene(
@@ -168,6 +192,38 @@ pub fn prepare_scene(
 	let mut bindings = PreparedAnimatorBindings::new();
 	let mut retained = 0usize;
 	for actor in &scene.entities {
+		if let Some(event) = actor
+			.audio_source
+			.as_ref()
+			.filter(|source| source.enabled)
+			.and_then(|source| source.settings.event.as_ref())
+		{
+			use engine_core::components::{AudioEventBinding, NativeBehaviorSpec};
+			let issue = match event {
+				AudioEventBinding::AnimationMarker { .. }
+					if actor
+						.animator
+						.as_ref()
+						.is_none_or(|animator| !animator.enabled) =>
+				{
+					Some(
+						"Animation marker audio requires an enabled Animator on this object. Open Animation.",
+					)
+				}
+				AudioEventBinding::GameplaySignal { .. }
+					if !actor.native_behaviors.iter().any(|entry| {
+						entry.enabled
+							&& matches!(entry.behavior, NativeBehaviorSpec::StateMachine { .. })
+					}) =>
+				{
+					Some("Gameplay signal audio requires an enabled state machine on this object.")
+				}
+				_ => None,
+			};
+			if let Some(issue) = issue {
+				return Err(format!("Audio Source on {:?}: {issue}", actor.key.as_str()));
+			}
+		}
 		let Some(component) = actor.animator.as_ref().filter(|animator| animator.enabled) else {
 			continue;
 		};

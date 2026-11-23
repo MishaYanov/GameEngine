@@ -1,5 +1,7 @@
 use super::ComponentId;
-use crate::audio_clip::AudioClipRef;
+use crate::{
+	animation::MarkerId, asset_catalog::AssetId, audio_clip::AudioClipRef, gameplay_events::Signal,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,6 +16,35 @@ pub enum AudioSourcePlayback {
 pub enum AudioSourceBus {
 	Effects,
 	Music,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyCombatCue {
+	Swing,
+	Hit,
+	Hurt,
+	Victory,
+	Defeat,
+}
+
+impl LegacyCombatCue {
+	pub fn id(self) -> &'static str {
+		match self {
+			Self::Swing => "swing",
+			Self::Hit => "hit",
+			Self::Hurt => "hurt",
+			Self::Victory => "victory",
+			Self::Defeat => "defeat",
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AudioEventBinding {
+	GameplaySignal { signal: Signal },
+	AnimationMarker { clip: AssetId, marker: MarkerId },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -60,6 +91,10 @@ pub struct AudioSourceSettings {
 	pub bus: AudioSourceBus,
 	#[serde(default, skip_serializing_if = "AudioSourceSpatial::is_two_d")]
 	pub spatial: AudioSourceSpatial,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub event: Option<AudioEventBinding>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub replaces_cue: Option<LegacyCombatCue>,
 }
 
 impl Default for AudioSourceSettings {
@@ -71,12 +106,24 @@ impl Default for AudioSourceSettings {
 			playback: AudioSourcePlayback::OnSceneEnter,
 			bus: AudioSourceBus::Effects,
 			spatial: AudioSourceSpatial::TwoD,
+			event: None,
+			replaces_cue: None,
 		}
 	}
 }
 
 impl AudioSourceSettings {
 	pub fn validate(&self) -> Result<(), String> {
+		if self.event.is_some()
+			&& (self.playback != AudioSourcePlayback::OnEvent
+				|| self.r#loop
+				|| self.bus != AudioSourceBus::Effects)
+		{
+			return Err("Audio events require On Event, Effects and Loop off".into());
+		}
+		if self.replaces_cue.is_some() && (self.event.is_none() || self.clip.is_none()) {
+			return Err("Replacing a legacy cue requires an event and Audio Clip".into());
+		}
 		if self.gain.is_finite() && (0.0..=1.0).contains(&self.gain) {
 			self.spatial.validate()
 		} else {

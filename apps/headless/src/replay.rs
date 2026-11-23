@@ -236,10 +236,10 @@ impl Measurements {
 				break;
 			}
 			match &change {
-				SceneAudioOp::Start { .. } => self.audio_events.push(change),
+				SceneAudioOp::Start { .. } | SceneAudioOp::Trigger { .. } => self.audio_events.push(change),
 				SceneAudioOp::StopOwner { owner } => {
 					if self.audio_events.iter().rev().any(
-						|event| matches!(event, SceneAudioOp::Start { owner: started, .. } if owner == started),
+						|event| matches!(event, SceneAudioOp::Start { owner: started, .. } | SceneAudioOp::Trigger { owner: started, .. } if owner == started),
 					) {
 						self.audio_events.push(change);
 					}
@@ -499,6 +499,25 @@ fn advance(
 		let mut remaining_elapsed = elapsed;
 		loop {
 			let outcome = engine.tick(remaining_elapsed).map_err(|e| e.to_string())?;
+			if !outcome.audio_onsets.is_empty()
+				&& let Some(status) = engine.play_status()
+			{
+				use engine_core::scene_audio::{SceneAudioOp, SceneAudioOwner};
+				let owner = SceneAudioOwner::from_play(&status);
+				let available = 256usize.saturating_sub(measures.audio_events.len());
+				measures
+					.audio_events
+					.extend(
+						outcome
+							.audio_onsets
+							.into_iter()
+							.take(available)
+							.map(|onset| SceneAudioOp::Trigger {
+								owner: owner.clone(),
+								onset,
+							}),
+					);
+			}
 			if let Some(destination) = &outcome.requested_scene {
 				check_budget(started, budget)?;
 				let (prepared, _) = engine.prepare_pending_play_scene().map_err(|error| {

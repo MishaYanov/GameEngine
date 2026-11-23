@@ -194,6 +194,10 @@ impl AuthoredClip {
 }
 
 impl ResolvedAuthoredClip {
+	pub fn markers(&self) -> &[TimelineMarker] {
+		&self.clip.markers
+	}
+
 	pub fn retained_bytes(&self) -> usize {
 		let key_bytes = self
 			.clip

@@ -61,6 +61,8 @@ pub struct TickOutcome {
 	pub trigger_events: Vec<TriggerEvent>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub accepted_action_presses: Vec<CommittedInputAction>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub audio_onsets: Vec<crate::scene_audio::CommittedAudioOnset>,
 }
 pub struct SimulationSession {
 	animations: crate::animation::AnimationBank,
@@ -605,6 +607,7 @@ impl SimulationSession {
 		let mut camera_input = self.camera_input.clone();
 		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
+		let mut audio_onsets = Vec::new();
 		let mut accepted_action_presses = Vec::new();
 		let mut control_graph_step = None;
 		let mut trigger_event_bytes = 0usize;
@@ -641,6 +644,7 @@ impl SimulationSession {
 					self.tick + u64::from(steps) + 1,
 					&trigger_events[event_start..],
 					&mut gameplay_deliveries,
+					&mut audio_onsets,
 					&mut ActionWriter {
 						actions: &mut self.actions,
 					},
@@ -1111,6 +1115,8 @@ impl SimulationSession {
 						&step_actions,
 						cosmetics,
 						self.project.fixed_hz,
+						tick,
+						&mut audio_onsets,
 					)?;
 					changes.merge(WorldChange {
 						changed_entities: animated,
@@ -1206,6 +1212,7 @@ impl SimulationSession {
 		self.camera_input = camera_input;
 		self.camera_exclusions = camera_exclusions;
 		outcome.trigger_events = trigger_events;
+		outcome.audio_onsets = audio_onsets;
 		outcome.accepted_action_presses = accepted_action_presses;
 		Ok(outcome)
 	}

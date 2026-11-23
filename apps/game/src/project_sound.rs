@@ -174,17 +174,19 @@ impl ProjectSound {
 		prior: CombatSound,
 		after: CombatSound,
 		mix: FeedbackMix,
+		replaced: impl Fn(CombatCue) -> bool,
 	) -> Option<CombatCue> {
 		let cue = prior.cue(after)?;
 		#[cfg(windows)]
-		if let (Some(audio), Some(clip)) = (
-			&mut self.audio,
-			self.asset.as_ref().and_then(|asset| asset.effect(cue.id())),
-		) {
+		if !replaced(cue)
+			&& let (Some(audio), Some(clip)) = (
+				&mut self.audio,
+				self.asset.as_ref().and_then(|asset| asset.effect(cue.id())),
+			) {
 			audio.emit(cue.id(), clip.pcm_bytes(), cue.gain(mix));
 		}
 		#[cfg(not(windows))]
-		let _ = mix;
+		let _ = (mix, replaced);
 		Some(cue)
 	}
 

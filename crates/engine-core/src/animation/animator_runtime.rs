@@ -52,6 +52,7 @@ pub struct AnimatorInspection {
 struct AnimatorMachine {
 	index: usize,
 	state_ticks: u64,
+	playback: u64,
 	transition: Option<usize>,
 	blend_clock: Option<(u16, u16)>,
 }
@@ -88,6 +89,7 @@ impl AnimatorMachine {
 		Ok(Self {
 			index,
 			state_ticks: 0,
+			playback: 0,
 			transition: None,
 			blend_clock: None,
 		})
@@ -120,6 +122,7 @@ impl AnimatorMachine {
 					.position(|state| state.id == edge.to)
 					.ok_or("Animator transition destination is missing")?;
 				self.state_ticks = 0;
+				self.playback += 1;
 				self.transition = Some(index);
 				self.blend_clock = (edge.blend_ticks > 0).then_some((0, edge.blend_ticks));
 				return Ok(true);
@@ -356,6 +359,8 @@ impl AnimatorBank {
 		cosmetic: &BTreeMap<String, bool>,
 		fixed_hz: u32,
 		revision: u64,
+		tick: u64,
+		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	) -> Result<Vec<EntityKey>, String> {
 		let no_actions = HashSet::new();
 		let mut changed = BTreeSet::new();
@@ -372,7 +377,9 @@ impl AnimatorBank {
 				accepted_actions: if local { accepted_actions } else { &no_actions },
 				cosmetic: local.then_some(cosmetic),
 			};
+			let before_ticks = instance.machine.state_ticks;
 			let transition = instance.machine.advance(&instance.prepared.graph, &input)?;
+			instance.record_marker(world, tick, fixed_hz, before_ticks, transition, onsets);
 			if transition && instance.machine.blend_clock.is_some() {
 				instance.fade_start = Some(instance.pose.clone());
 			}
@@ -419,6 +426,118 @@ impl AnimatorBank {
 		Ok(changed.into_iter().collect())
 	}
 }
+impl AnimatorInstance {
+	fn record_marker(
+		&self,
+		world: &RuntimeWorld,
+		tick: u64,
+		fixed_hz: u32,
+		before_ticks: u64,
+		transition: bool,
+		output: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
+	) {
+		use crate::{
+			components::AudioEventBinding,
+			scene_audio::{AudioOnsetCause, available_onsets, record_onset},
+		};
+
+		let available = available_onsets(output, tick);
+		if available == 0 {
+			return;
+		}
+		let key = &self.owner.key;
+		let Some(index) = world.entity_index(key) else {
+			return;
+		};
+		let Some(audio) = world.data().entities[index]
+			.audio_source
+			.as_ref()
+			.filter(|audio| audio.enabled)
+		else {
+			return;
+		};
+		let Some(AudioEventBinding::AnimationMarker { clip, marker }) = &audio.settings.event
+		else {
+			return;
+		};
+		let state = &self.prepared.graph.states[self.machine.index];
+		let AnimationClipRef::Authored { asset_id, .. } = &state.clip else {
+			return;
+		};
+		let PreparedAnimatorClips::Visual(clips) = &self.prepared.clips else {
+			return;
+		};
+		if asset_id != clip {
+			return;
+		}
+		let authored = &clips[self.machine.index];
+		let Some(marker_data) = authored.markers().iter().find(|value| &value.id == marker) else {
+			return;
+		};
+		let to_millis = |ticks: u64| ticks.saturating_mul(1000) / u64::from(fixed_hz);
+		let from = if transition || (before_ticks == 0 && self.machine.playback == 0) {
+			0
+		} else {
+			to_millis(before_ticks) + 1
+		};
+		let through = to_millis(self.machine.state_ticks);
+		let marker_at = u64::from(marker_data.at);
+		let duration = u64::from(authored.duration_millis());
+		let occurrences = crossing_loops(from, through, marker_at, duration, state.looping);
+		for loop_index in occurrences.take(available) {
+			record_onset(
+				world,
+				key,
+				tick,
+				AudioOnsetCause::AnimationMarker {
+					clip: clip.clone(),
+					marker: marker.clone(),
+					playback: self.machine.playback,
+					loop_index,
+				},
+				output,
+			);
+		}
+	}
+}
+
+fn crossing_loops(
+	from: u64,
+	through: u64,
+	at: u64,
+	duration: u64,
+	loops: bool,
+) -> std::ops::Range<u64> {
+	if from > through || through < at {
+		return 0..0;
+	}
+	if !loops {
+		return 0..u64::from(from <= at);
+	}
+	let first = from.saturating_sub(at).div_ceil(duration);
+	let end = (through - at) / duration + 1;
+	first..end
+}
+
+#[cfg(test)]
+#[test]
+fn authored_marker_occurs_once_at_entry_and_each_crossed_loop() {
+	assert_eq!(crossing_loops(0, 0, 0, 100, true).collect::<Vec<_>>(), [0]);
+	assert_eq!(
+		crossing_loops(1, 115, 0, 100, true).collect::<Vec<_>>(),
+		[1]
+	);
+	assert_eq!(
+		crossing_loops(116, 312, 50, 100, true).collect::<Vec<_>>(),
+		[1, 2]
+	);
+	assert!(crossing_loops(51, 400, 50, 100, false).is_empty());
+	assert_eq!(
+		crossing_loops(95, 105, 100, 100, true).collect::<Vec<_>>(),
+		[0]
+	);
+}
+
 fn sample(
 	world: &RuntimeWorld,
 	key: &EntityKey,

@@ -270,6 +270,8 @@ impl AnimationBank {
 		accepted_actions: &std::collections::HashSet<String>,
 		cosmetic: &BTreeMap<String, bool>,
 		fixed_hz: u32,
+		tick: u64,
+		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	) -> Result<Vec<EntityKey>, String> {
 		if self.animators.is_empty() {
 			return Ok(Vec::new());
@@ -287,6 +289,8 @@ impl AnimationBank {
 			cosmetic,
 			fixed_hz,
 			revision,
+			tick,
+			onsets,
 		)?;
 		let matrices = self.animators.visual_matrices(world)?;
 		if matrices != *self.visual_matrices {

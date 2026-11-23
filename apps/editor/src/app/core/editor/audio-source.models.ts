@@ -7,6 +7,14 @@ export type AudioSourceSpatial = {readonly mode: 'two_d'} | {
     readonly far: number;
 };
 
+export const audioGameplaySignals = ['activated', 'released', 'collected', 'reset', 'jumped', 'landed'] as const;
+export const legacyCombatCues = ['swing', 'hit', 'hurt', 'victory', 'defeat'] as const;
+export type AudioGameplaySignal = typeof audioGameplaySignals[number];
+export type LegacyCombatCue = typeof legacyCombatCues[number];
+export type AudioEventBinding =
+    | {readonly kind: 'gameplay_signal'; readonly signal: AudioGameplaySignal}
+    | {readonly kind: 'animation_marker'; readonly clip: string; readonly marker: string};
+
 export interface AudioSourceSettings {
     readonly clip: {readonly asset: string} | null;
     readonly gain: number;
@@ -14,6 +22,8 @@ export interface AudioSourceSettings {
     readonly playback: AudioSourcePlayback;
     readonly bus: AudioSourceBus;
     readonly spatial?: AudioSourceSpatial;
+    readonly event?: AudioEventBinding;
+    readonly replaces_cue?: LegacyCombatCue;
 }
 
 export type AudioAuditionOwner =
@@ -58,10 +68,23 @@ function validSpatial(value: unknown): value is AudioSourceSpatial {
         Number.isFinite(near) && Number.isFinite(far) && near >= 0 && far > near && far <= 10_000;
 }
 
+function validEvent(value: unknown): value is AudioEventBinding {
+    if (!record(value)) return false;
+    const {kind, clip, marker, signal} = value;
+    const count = Object.keys(value).length;
+    return kind === 'gameplay_signal'
+        ? count === 2 && audioGameplaySignals.some(candidate => candidate === signal)
+        : kind === 'animation_marker' && count === 3 && validAudioIdentity(clip) &&
+            typeof marker === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(marker);
+}
+
 export function validAudioSourceSettings(value: unknown): value is AudioSourceSettings {
     if (!record(value)) return false;
-    const {clip, gain, loop, playback, bus, spatial} = value;
-    return Object.keys(value).length === (spatial === undefined ? 5 : 6) &&
+    const {clip, gain, loop, playback, bus, spatial, event, replaces_cue} = value;
+    const optionalCount = [spatial, event, replaces_cue].filter(entry => entry !== undefined).length;
+    return Object.keys(value).length === 5 + optionalCount &&
+        (event === undefined || (validEvent(event) && playback === 'on_event' && loop === false && bus === 'effects')) &&
+        (replaces_cue === undefined || (event !== undefined && clip !== null && legacyCombatCues.some(cue => cue === replaces_cue))) &&
         (spatial === undefined || validSpatial(spatial)) &&
         (clip === null || (record(clip) && Object.keys(clip).length === 1 && validAudioIdentity(clip['asset']))) &&
         validGain(gain) && typeof loop === 'boolean' &&

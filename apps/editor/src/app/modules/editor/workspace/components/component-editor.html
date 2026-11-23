@@ -98,6 +98,35 @@
                             <option value="on_event">On Event</option>
                         </select>
                     </label>
+                    @if (draft().audioSource.playback === 'on_event') {
+                        <label>Event source
+                            <select [formField]="fields.audioSource.eventKind">
+                                <option value="none">Unassigned</option>
+                                <option value="gameplay_signal">Gameplay signal</option>
+                                <option value="animation_marker">Animation marker</option>
+                            </select>
+                        </label>
+                        @if (draft().audioSource.eventKind === 'gameplay_signal') {
+                            <label>Local state machine signal
+                                <select [formField]="fields.audioSource.signal">
+                                    @for (signal of audioGameplaySignals; track signal) {
+                                        <option [value]="signal">{{ signal }}</option>
+                                    }
+                                </select>
+                            </label>
+                        } @else if (draft().audioSource.eventKind === 'animation_marker') {
+                            <editor-audio-marker-fields [clipId]="draft().audioSource.eventClip" [markerId]="draft().audioSource.eventMarker"
+                                (clipChange)="chooseAudioEventClip($event)" (markerChange)="fields.audioSource.eventMarker().value.set($event)"/>
+                        }
+                        @if (draft().audioSource.eventKind !== 'none') {
+                            <label>Replace legacy combat cue
+                                <select [formField]="fields.audioSource.replacesCue">
+                                    <option value="">None</option>
+                                    @for (cue of legacyCombatCues; track cue) { <option [value]="cue">{{ cue }}</option> }
+                                </select>
+                            </label>
+                        }
+                    }
                     <label>Bus
                         <select [formField]="fields.audioSource.bus">
                             <option value="effects">Effects</option>

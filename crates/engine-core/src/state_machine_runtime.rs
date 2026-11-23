@@ -63,11 +63,21 @@ pub(crate) fn plan(
 	step: u64,
 	triggers: &[TriggerEvent],
 	delivered: &mut usize,
+	onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	output: &mut ActionWriter<'_>,
 ) -> Result<usize, String> {
 	let mut inboxes = BTreeMap::<_, Vec<Envelope>>::new();
 	for event in lifecycle.events.take_due(step, delivered)? {
 		if live(world, lifecycle, &event.source) && live(world, lifecycle, &event.target) {
+			crate::scene_audio::record_onset(
+				world,
+				&event.target.owner.key,
+				step,
+				crate::scene_audio::AudioOnsetCause::GameplaySignal {
+					signal: event.signal,
+				},
+				onsets,
+			);
 			inboxes
 				.entry((
 					event.target.owner.key.clone(),

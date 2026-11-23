@@ -350,3 +350,131 @@ fn read_json(path: &Path) -> Value {
 fn write_json(path: &Path, value: &Value) {
 	fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
 }
+#[test]
+fn live_audio_markers_are_partition_independent_and_a_missing_marker_blocks_export() {
+	use engine_core::{
+		audio_clip::AudioClipRef,
+		components::{
+			AudioEventBinding, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings,
+			ComponentId,
+		},
+	};
+
+	const WAVE: &[u8] = include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
+	const WAV: &str = "bell.wav";
+	const CLIP_ID: &str = "90000000-0000-4000-8000-000000000007";
+	const MARKER: &str = "90000000-0000-4000-8000-000000000100";
+	let fixture = Fixture::new();
+	let root = fixture.copy_project(&fixture_source());
+	let manifest = root.join("project.json");
+	let assets = root.join("assets");
+	let scene_path = assets.join(SCENE);
+	let mut scene = SceneData::from_json(&fs::read_to_string(&scene_path).unwrap()).unwrap();
+	let clip_id = AssetId::generate();
+	let actor = scene
+		.entities
+		.iter_mut()
+		.find(|e| e.key.as_str() == "yard-player")
+		.unwrap();
+	let marker = serde_json::from_value(json!(MARKER)).unwrap();
+	actor.audio_source = Some(Box::new(AudioSourceComponent {
+		id: ComponentId::new("yard-bell").unwrap(),
+		enabled: true,
+		settings: AudioSourceSettings {
+			clip: Some(AudioClipRef {
+				asset: clip_id.clone(),
+			}),
+			playback: AudioSourcePlayback::OnEvent,
+			event: Some(AudioEventBinding::AnimationMarker {
+				clip: AssetId::new(CLIP_ID).unwrap(),
+				marker,
+			}),
+			..Default::default()
+		},
+	}));
+	fs::write(&scene_path, scene.to_json().unwrap()).unwrap();
+	fs::write(assets.join(WAV), WAVE).unwrap();
+	let animator = assets.join(ANIMATOR);
+	let mut graph = read_json(&animator);
+	graph["states"][3]["looping"] = json!(true);
+	graph["transitions"]
+		.as_array_mut()
+		.unwrap()
+		.retain(|edge| edge["id"] != "swing_finished");
+	write_json(&animator, &graph);
+	let catalog_path = assets.join(CATALOG);
+	let mut catalog = read_json(&catalog_path);
+	let entries = catalog["assets"].as_array_mut().unwrap();
+	let graph_entry = entries
+		.iter_mut()
+		.find(|entry| entry["path"] == ANIMATOR)
+		.unwrap();
+	let bytes = fs::read(&animator).unwrap();
+	graph_entry["bytes"] = json!(bytes.len());
+	graph_entry["fingerprint"] = json!(format!("{:x}", Sha256::digest(bytes)));
+	entries.push(
+		json!({"id": clip_id, "path": WAV, "kind":"audio_clip", "revision":1,
+		"fingerprint": format!("{:x}", Sha256::digest(WAVE)), "bytes": WAVE.len()}),
+	);
+	write_json(&catalog_path, &catalog);
+
+	let replay = |count, elapsed| {
+		fixture.replay(
+			&manifest,
+			&[
+				json!({"type":"command","command":{"type":"start_play"}}),
+				json!({"type":"tick","count":1}),
+				json!({"type":"keyboard_input","keys":["KeyF"]}),
+				json!({"type":"tick","count":1}),
+				json!({"type":"keyboard_input","keys":[]}),
+				json!({"type":"tick","count":count,"elapsed_seconds":elapsed}),
+				json!({"type":"command","command":{"type":"set_paused","paused":true}}),
+				json!({"type":"tick","count":10}),
+				json!({"type":"restart_run"}),
+				json!({"type":"tick","count":20}),
+				json!({"type":"command","command":{"type":"stop_play"}}),
+			],
+		)
+	};
+	let onsets = |checkpoint: &Checkpoint| {
+		checkpoint.report["scene_audio_events"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.filter(|event| event["kind"] == "trigger")
+			.map(|event| event["onset"].clone())
+			.collect::<Vec<_>>()
+	};
+	let first = replay(54, 1.0 / 60.0);
+	let next = replay(18, 3.0 / 60.0);
+	let first_onsets = onsets(&first);
+	assert_eq!(first_onsets, onsets(&next));
+	assert_eq!(first_onsets.len(), 3);
+	for (index, onset) in first_onsets.iter().enumerate() {
+		assert_eq!(onset["cause"]["loop_index"], index as u64);
+		assert_eq!(onset["cause"]["marker"], MARKER);
+		assert_eq!(onset["voice"]["entity"], "yard-player");
+	}
+	assert_eq!(first.report["scene_audio_events"][3]["kind"], "stop_owner");
+	assert_eq!(
+		SceneData::from_json(&fs::read_to_string(&scene_path).unwrap()).unwrap(),
+		first.document
+	);
+
+	let mut broken = read_json(&scene_path);
+	let components = broken["entities"][0]["components"].as_array_mut().unwrap();
+	let source = components
+		.iter_mut()
+		.find(|component| component["data"]["kind"] == "audio_source")
+		.unwrap();
+	source["data"]["settings"]["event"]["marker"] = json!("removed-marker");
+	write_json(&scene_path, &broken);
+	let project = ProjectData::load(&manifest).unwrap();
+	let error = compiler::prepare_project(&project, &assets)
+		.err()
+		.expect("missing marker must block export");
+	assert!(
+		error.contains("Open Animation") && error.contains("yard-player"),
+		"{error}"
+	);
+}

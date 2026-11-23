@@ -11,7 +11,7 @@ use crate::{
 	asset_catalog::AssetId,
 	scene_data::{ColliderData, EntityData, MaterialOverrideData, SceneData, validate_model_path},
 };
-pub use audio_source::{
+pub use audio_source::{AudioEventBinding, LegacyCombatCue,
 	AudioSourceBus, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings, AudioSourceSpatial,
 };
 pub use interactable::{

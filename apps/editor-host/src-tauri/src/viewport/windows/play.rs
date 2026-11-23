@@ -106,7 +106,7 @@ impl Worker {
 	}
 
 	pub(super) fn tick_play(&mut self, elapsed: f64) -> Result<(), String> {
-		let (transition, pending_steps) = {
+		let (transition, pending_steps, audio) = {
 			let mut workspace = self
 				.shared
 				.lock()
@@ -147,8 +147,20 @@ impl Worker {
 					timing,
 				))
 			});
-			(transition, outcome.pending_steps)
+			let audio = (!outcome.audio_onsets.is_empty())
+				.then(|| workspace.backend.play_status())
+				.flatten()
+				.map(|status| {
+					(
+						runtime::scene_audio::SceneAudioOwner::from_play(&status),
+						outcome.audio_onsets,
+					)
+				});
+			(transition, outcome.pending_steps, audio)
 		};
+		if let Some((owner, onsets)) = audio {
+			self.scene_audio.queue_onsets(owner, onsets);
+		}
 
 		if let Some((generation, target, run_id, scene_generation, prepared, timing)) = transition {
 			self.last_tick = None;
