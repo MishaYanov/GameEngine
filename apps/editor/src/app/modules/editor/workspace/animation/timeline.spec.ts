@@ -25,9 +25,28 @@ const initial: ClipTimelineDraft = {
     },
 };
 
-function setup() {
+const timedDraft: ClipTimelineDraft = {
+    ...initial,
+    clip: {
+        ...initial.clip,
+        tracks: [{
+            target: initial.clip.tracks[0].target,
+            track: {kind: 'local_position', interpolation: 'linear', keys: [
+                {id: 'start', at: 0, value: [0, 0, 0]},
+                {id: 'middle', at: 333, value: [1, 0, 0]},
+                {id: 'end', at: 1000, value: [2, 0, 0]},
+            ]},
+        }],
+        markers: [
+            {id: 'open', at: 79, label: 'Half-open'},
+            {id: 'locked', at: 876, label: 'Locked'},
+        ],
+    },
+};
+
+function setup(draft = initial) {
     let revision = 0, cursor = 0;
-    let history = [initial.clip];
+    let history = [draft.clip];
     const showPreview = signal(false);
     const edit = vi.fn(async (_id: string, _expected: number, operation: ClipDraftOperation): Promise<ClipTimelineDraft> => {
         if (operation.type === 'undo') cursor--;
@@ -61,7 +80,7 @@ function setup() {
         {provide: EditorService, useValue: {
             nativeAvailable: true, snapshot: () => ({mode: 'edit', revision: 2, transaction: null}),
             workspaceGeneration: () => 1,
-            openClipTimelineDraft: async () => structuredClone(initial),
+            openClipTimelineDraft: async () => structuredClone(draft),
             editClipTimelineDraft: edit,
             openClipTimelinePreview: open,
             sampleClipTimelinePreview: sample,
@@ -71,7 +90,7 @@ function setup() {
         }},
     ]});
     const fixture = TestBed.createComponent(ClipTimeline);
-    fixture.componentRef.setInput('asset', initial);
+    fixture.componentRef.setInput('asset', draft);
     return {fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, timeline: fixture.debugElement.injector.get(TimelineEditService)};
 }
 
@@ -221,6 +240,37 @@ describe('Authored clip timeline', () => {
             if (close) Object.defineProperty(prototype, 'close', close);
             else Reflect.deleteProperty(prototype, 'close');
         }
+    });
+
+    it('jumps between exact key and bookmark times while leaving the clip untouched', async () => {
+        const {fixture, timeline, edit, sample} = setup(timedDraft);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const lane = root.querySelector('.scroll-lane')!;
+        timeline.snap.set(true);
+        button(root, 'Next Key').click();
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(333);
+        expect(button(root, '333 ms').getAttribute('aria-pressed')).toBe('true');
+        expect(sample).toHaveBeenLastCalledWith(expect.any(String), 333, null, 1);
+
+        const key = new KeyboardEvent('keydown', {key: 'PageDown', shiftKey: true, bubbles: true, cancelable: true});
+        lane.dispatchEvent(key);
+        await fixture.whenStable();
+        expect(key.defaultPrevented).toBe(true);
+        expect(timeline.playhead()).toBe(876);
+        expect(button(root, 'Locked · 876 ms').getAttribute('aria-pressed')).toBe('true');
+        expect(button(root, 'Next Bookmark').disabled).toBe(true);
+
+        button(root, 'Previous Bookmark').click();
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(79);
+        expect(button(root, 'Previous Bookmark').disabled).toBe(true);
+        button(root, 'Previous Key').click();
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(0);
+        expect(button(root, 'Previous Key').disabled).toBe(true);
+        expect(edit).not.toHaveBeenCalled();
     });
 
     it('plays at the chosen editor speed without writing to the clip or its undo history', async () => {

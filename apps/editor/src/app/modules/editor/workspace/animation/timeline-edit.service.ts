@@ -111,9 +111,9 @@ export class TimelineEditService {
         if (snapshot) void this.loadDraft(owner, snapshot.revision);
     }
 
-    seek(tick: number): void {
+    seek(tick: number, snap = this.snap()): void {
         if (!Number.isFinite(tick)) return;
-        this.playhead.set(this.normalized(tick));
+        this.playhead.set(this.normalized(tick, snap));
         this.enqueueSeek();
     }
 
@@ -301,8 +301,8 @@ export class TimelineEditService {
         }
     }
 
-    private normalized(tick: number): number {
-        const step = this.snap() ? 10 : 1;
+    private normalized(tick: number, snap = this.snap()): number {
+        const step = snap ? 10 : 1;
         return Math.max(0, Math.min(this.duration(), Math.round(tick / step) * step));
     }
 

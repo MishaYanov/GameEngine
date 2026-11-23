@@ -5,6 +5,20 @@ import type {Vec3} from '../../../../core/editor/editor.models';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {TimelineEditService} from './timeline-edit.service';
 
+type JumpDirection = 'previous' | 'next';
+
+function adjacentMoments<T extends {readonly at: number}>(
+    moments: readonly T[], tick: number,
+): Readonly<Record<JumpDirection, T | null>> {
+    let previous: T | null = null;
+    let next: T | null = null;
+    for (const moment of moments) {
+        if (moment.at < tick && (previous === null || moment.at > previous.at)) previous = moment;
+        if (moment.at > tick && (next === null || moment.at < next.at)) next = moment;
+    }
+    return {previous, next};
+}
+
 @Component({
     selector: 'editor-clip-timeline',
     imports: [EditorDialog],
@@ -32,6 +46,13 @@ export class ClipTimeline {
     protected readonly closing = signal(false);
     protected readonly resolvingClose = signal(false);
     protected readonly closePending = computed(() => this.resolvingClose() || this.timeline.busy());
+    private readonly navigationBlocked = computed(() =>
+        this.timeline.playing() || this.timeline.drag() !== null || this.closePending() || this.closing());
+    private readonly identifiedKeys = computed(() => this.keys().filter(key => !!key.id));
+    protected readonly adjacentKeys = computed(() => this.navigationBlocked()
+        ? {previous: null, next: null} : adjacentMoments(this.identifiedKeys(), this.timeline.playhead()));
+    protected readonly adjacentBookmarks = computed(() => this.navigationBlocked()
+        ? {previous: null, next: null} : adjacentMoments(this.markers(), this.timeline.playhead()));
 
     constructor() {
         effect(() => {
@@ -43,7 +64,8 @@ export class ClipTimeline {
     protected selectKey(key: ClipKey<Vec3 | Quaternion>): void {
         if (!key.id) return;
         this.key.set(key.id);
-        this.timeline.seek(key.at);
+        this.timeline.stop();
+        this.timeline.seek(key.at, false);
     }
 
     protected selectTrack(value: number): void {
@@ -82,7 +104,21 @@ export class ClipTimeline {
 
     protected selectMarker(id: string, at: number): void {
         this.marker.set(id);
-        this.timeline.seek(at);
+        this.timeline.stop();
+        this.timeline.seek(at, false);
+    }
+
+    protected jump(direction: JumpDirection, target: 'key' | 'bookmark'): boolean {
+        if (target === 'key') {
+            const key = this.adjacentKeys()[direction];
+            if (!key) return false;
+            this.selectKey(key);
+        } else {
+            const bookmark = this.adjacentBookmarks()[direction];
+            if (!bookmark) return false;
+            this.selectMarker(bookmark.id, bookmark.at);
+        }
+        return true;
     }
 
     protected addMarker(): void {
@@ -152,6 +188,15 @@ export class ClipTimeline {
                 event.preventDefault();
                 event.stopPropagation();
                 void this.timeline.edit({type: event.shiftKey ? 'redo' : 'undo'});
+            }
+            return;
+        }
+        if ((event.key === 'PageUp' || event.key === 'PageDown') &&
+            event.target instanceof Element && event.target.closest('.scroll-lane')) {
+            const direction = event.key === 'PageUp' ? 'previous' : 'next';
+            if (this.jump(direction, event.shiftKey ? 'bookmark' : 'key')) {
+                event.preventDefault();
+                event.stopPropagation();
             }
             return;
         }

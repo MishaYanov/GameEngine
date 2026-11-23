@@ -25,6 +25,8 @@
                 <input #playhead type="number" min="0" [max]="timeline.duration()" [value]="timeline.playhead()"
                        (change)="timeline.seek(playhead.valueAsNumber)"/>
             </label>
+            <button type="button" [disabled]="!adjacentKeys().previous" (click)="jump('previous', 'key')">Previous Key</button>
+            <button type="button" [disabled]="!adjacentKeys().next" (click)="jump('next', 'key')">Next Key</button>
             <label><input type="checkbox" [checked]="timeline.snap()" (change)="timeline.snap.set(!timeline.snap())"/> Snap to 10 ms</label>
             <label>Zoom
                 <input #zoom type="range" min="1" max="8" step="1" [value]="timeline.zoom()" (input)="timeline.zoom.set(zoom.valueAsNumber)"/>
@@ -51,7 +53,8 @@
                 }
             </select>
         </label>
-        <section class="scroll-lane" aria-label="Timeline keys. Arrow keys scrub, Shift plus arrows move a key, Insert adds a key, Delete removes it."
+        <section class="scroll-lane" aria-label="Timeline keys. Arrow keys scrub, Page Up and Page Down jump between keys, Shift with Page Up or Page Down jumps between bookmarks."
+                 aria-keyshortcuts="PageUp PageDown Shift+PageUp Shift+PageDown"
                  tabindex="0">
             <div class="key-lane" [style.width.%]="timeline.zoom() * 100">
                 <label class="playhead-lane">Scrub clip
@@ -87,6 +90,10 @@
         }
         <section aria-label="Timeline bookmarks">
             <h4>Bookmarks</h4>
+            <div class="toolbar">
+                <button type="button" [disabled]="!adjacentBookmarks().previous" (click)="jump('previous', 'bookmark')">Previous Bookmark</button>
+                <button type="button" [disabled]="!adjacentBookmarks().next" (click)="jump('next', 'bookmark')">Next Bookmark</button>
+            </div>
             <ul class="keys">
                 @for (marker of markers(); track marker.id) {
                     <li><button type="button" [attr.aria-pressed]="selectedMarker()?.id === marker.id"
