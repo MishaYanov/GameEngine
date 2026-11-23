@@ -25,6 +25,7 @@ import {
     buildHierarchy,
     canReparentEntity,
     entityHierarchyKey,
+    expandHierarchyBranch,
     folderHierarchyKey,
     hierarchyAncestors,
     type HierarchyItem,
@@ -145,6 +146,9 @@ export class SceneEntitiesPanel {
     protected readonly primary = computed(() => this.forest().byKey.get(this.selectedKeys()[0]) ?? null);
     protected readonly totalHeight = computed(() => this.rows().length * this.rowHeight);
     protected readonly rows = computed(() => visibleHierarchyRows(this.forest(), this.collapsed(), this.search()));
+    protected readonly canCollapseAll = computed(() =>
+        !this.disabled() && !this.search().trim() && this.rows().some(row => row.expanded),
+    );
     protected readonly canMoveSelection = computed(() =>
         this.canEditFolders() && this.canOrganize(this.selectedKeys()),
     );
@@ -201,6 +205,9 @@ export class SceneEntitiesPanel {
             .icon('graph')
             .enabledWhen(context => this.canUseEntityMenu(context))
             .run(context => this.usagesRequested.emit(context.key)).build())
+        .action(ContextActionBuilder.create<EntityMenuContext>('entity.expand-branch', 'Expand Branch')
+            .enabledWhen(context => this.canUseEntityMenu(context) && this.canExpandBranch(entityHierarchyKey(context.key)))
+            .run(context => this.expandBranch(entityHierarchyKey(context.key))).build())
         .separator()
         .submenu('entity.parenting', 'Parenting', menu => menu
             .action(ContextActionBuilder.create<EntityMenuContext>('entity.set-parent', 'Make Child Of…')
@@ -216,6 +223,9 @@ export class SceneEntitiesPanel {
             .run(context => this.beginMoveObjects(this.dragSelection(context.key))).build())
         .submenu('entity.create', 'Create', items => this.creationMenu(items));
     private readonly folderMenuBuilder = ContextMenuBuilder.create<FolderMenuContext>()
+        .action(ContextActionBuilder.create<FolderMenuContext>('folder.expand-branch', 'Expand Branch')
+            .enabledWhen(context => context.contextKey === this.contextKey() && this.canExpandBranch(folderHierarchyKey(context.id)))
+            .run(context => this.expandBranch(folderHierarchyKey(context.id))).build())
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.create', 'New Subfolder…')
             .icon('folder')
             .enabledWhen(context => this.canUseFolderMenu(context))
@@ -393,6 +403,30 @@ export class SceneEntitiesPanel {
         if (this.disabled() || !row.children) return;
         this.setExpanded(row, !row.expanded);
         this.focus(row.key);
+    }
+
+    protected collapseAll(): void {
+        if (!this.canCollapseAll()) return;
+        const forest = this.forest();
+        const active = this.activeKey();
+        this.collapsed.set(new Set([...forest.rowChildren.keys()].filter(key => key !== null)));
+        if (active) {
+            const visible = this.rowIndices();
+            const target = visible.has(active) ? active :
+                hierarchyAncestors(forest, active).find(key => visible.has(key));
+            if (target) this.focus(target);
+        }
+    }
+
+    private canExpandBranch(key: HierarchyKey): boolean {
+        return this.scene().projectOpen && !this.disabled() && !this.search().trim() &&
+            this.forest().rowChildren.has(key);
+    }
+
+    private expandBranch(key: HierarchyKey): void {
+        if (!this.canExpandBranch(key)) return;
+        this.collapsed.update(collapsed => expandHierarchyBranch(this.forest(), collapsed, key));
+        this.focus(key);
     }
 
     private setExpanded(row: HierarchyRow, expanded: boolean): void {

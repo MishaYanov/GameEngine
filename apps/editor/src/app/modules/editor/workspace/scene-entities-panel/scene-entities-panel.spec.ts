@@ -439,6 +439,39 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(folder('site').getAttribute('aria-expanded')).toBe('false');
     });
 
+    it('collapses all branches and expands one through its context menu without changing selection', async () => {
+        await openFolders({...floorFolders, root_membership: {parent: 'floor'}}, ['grandchild'],
+            [...nested, entity('other-child', 'other')]);
+
+        action('Collapse All').click();
+        await fixture.whenStable();
+        expect(tree().getAttribute('aria-activedescendant')).toBe(folder('floor').id);
+        expect(document.activeElement).toBe(tree());
+        expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
+        expect(root.querySelector('[data-key="grandchild"]')).toBeNull();
+        expect(row('other').getAttribute('aria-expanded')).toBe('false');
+
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = 'floor';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(action('Collapse All').disabled).toBe(true);
+        expect(contextAction(tree(), 'folder.expand-branch').disabled).toBe(true);
+        expect(row('grandchild').getAttribute('aria-selected')).toBe('true');
+        search.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        await fixture.whenStable();
+        expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
+
+        contextAction(tree(), 'folder.expand-branch').execute();
+        await fixture.whenStable();
+        expect(row('parent').getAttribute('aria-expanded')).toBe('true');
+        expect(row('child').getAttribute('aria-expanded')).toBe('true');
+        expect(row('grandchild').getAttribute('aria-selected')).toBe('true');
+        expect(row('other').getAttribute('aria-expanded')).toBe('false');
+        expect(requested).not.toHaveBeenCalled();
+        expect(selectedSet).not.toHaveBeenCalled();
+    });
+
     it('moves roots dropped on a folder but preserves a transform child and a stale drag', async () => {
         // An omitted parent is the wire representation for a scene root.
         const rootObject = {...floors[0], parent: undefined};
@@ -500,6 +533,12 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
         await keydown('End');
         expect(tree().getAttribute('aria-activedescendant')).toBe(row('item-11999').id);
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
+        action('Collapse All').click();
+        await fixture.whenStable();
+        expect(root.querySelectorAll('[role="treeitem"]').length).toBe(1);
+        contextAction(tree(), 'folder.expand-branch').execute();
+        await fixture.whenStable();
         expect(root.querySelectorAll('[role="treeitem"]').length).toBeLessThan(40);
         const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
         search.value = 'item-6000';

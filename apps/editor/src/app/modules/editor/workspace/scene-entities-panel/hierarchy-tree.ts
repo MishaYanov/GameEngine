@@ -133,6 +133,26 @@ export function hierarchyAncestors({rowParents}: HierarchyForest, key: Hierarchy
     return ancestors;
 }
 
+export function expandHierarchyBranch(
+    {rowChildren}: HierarchyForest,
+    collapsed: ReadonlySet<HierarchyKey>,
+    root: HierarchyKey,
+): ReadonlySet<HierarchyKey> {
+    const remaining = new Set(collapsed);
+    const pending = [root];
+    const visited = new Set<HierarchyKey>();
+    while (remaining.size && pending.length) {
+        const key = pending.pop()!;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        remaining.delete(key);
+        for (const child of rowChildren.get(key) ?? []) {
+            if (rowChildren.has(child.key)) pending.push(child.key);
+        }
+    }
+    return remaining.size === collapsed.size ? collapsed : remaining;
+}
+
 function searchMatches({items, rowChildren, rowParents}: HierarchyForest, query: string): ReadonlySet<HierarchyKey> | null {
     if (!query) return null;
     const matches = new Set<HierarchyKey>();

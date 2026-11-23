@@ -85,6 +85,7 @@
                     <button (click)="moveToRoot()" [disabled]="!canMoveToRoot()"
                             type="button">Move to Root
                     </button>
+                    <button (click)="collapseAll()" [disabled]="!canCollapseAll()" type="button">Collapse All</button>
                     @if (foldersEnabled()) {
                         <button #newFolder (click)="createFolder()" [disabled]="disabled()" type="button">New Folder…</button>
                         <button (click)="moveSelectionToFolder()" [disabled]="!canMoveSelection()" type="button">Move to Folder…</button>
