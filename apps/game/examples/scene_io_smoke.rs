@@ -65,11 +65,13 @@ fn snapshot(loaded: &LoadedScene) -> String {
 }
 
 fn assert_loaded_robots(loaded: &LoadedScene) {
-	assert_eq!(loaded.entity_ids.len(), 2);
-	assert_eq!(loaded.scene.instances().count(), 2);
-	assert_ne!(loaded.entity_ids[0], loaded.entity_ids[1]);
-	assert_eq!(loaded.scene.name(loaded.entity_ids[0]), Some("Left Robot"));
-	assert_eq!(loaded.scene.name(loaded.entity_ids[1]), Some("Right Robot"));
+	assert_eq!(loaded.entity_ids.len(), 3);
+	assert_eq!(loaded.scene.instances().count(), 3);
+	let first_robot = loaded.scene.binding("robot_a").unwrap();
+	let second_robot = loaded.scene.binding("robot_b").unwrap();
+	assert_ne!(first_robot, second_robot);
+	assert_eq!(loaded.scene.name(first_robot), Some("Left Robot"));
+	assert_eq!(loaded.scene.name(second_robot), Some("Right Robot"));
 	let data = loaded.scene.to_data(&loaded.camera).unwrap();
 	assert_eq!(
 		data.schema_version,
@@ -87,14 +89,22 @@ fn assert_loaded_robots(loaded: &LoadedScene) {
 		loaded.scene.binding("robot_a"),
 		loaded.scene.binding("robot_b")
 	);
-	assert_eq!(data.entities.len(), 2);
-	for entity in &data.entities {
-		assert_eq!(entity.model_path, "props/robot.glb");
-	}
+	assert_eq!(data.entities.len(), 3);
+	let camera = data.default_game_camera.as_ref().unwrap();
+	assert!(
+		data.entities
+			.iter()
+			.any(|entity| &entity.key == camera && entity.camera.is_some())
+	);
+	let models = data.entities.iter().filter(|entity| &entity.key != camera);
+	assert!(
+		models
+			.into_iter()
+			.all(|entity| entity.model_path == "props/robot.glb")
+	);
 
-	let mut instances = loaded.scene.instances();
-	let first = instances.next().unwrap();
-	let second = instances.next().unwrap();
+	let first = loaded.scene.get(first_robot).unwrap();
+	let second = loaded.scene.get(second_robot).unwrap();
 	assert!(std::ptr::eq(first.model(), second.model()));
 	let parts = first.model().parts();
 	assert!(!parts.is_empty(), "loaded robot must have GPU-backed parts");
@@ -138,7 +148,8 @@ struct Smoke {
 impl Smoke {
 	fn save_and_load_candidate(&mut self) {
 		let active = self.active.as_mut().unwrap();
-		let first = active.scene.get_mut(active.entity_ids[0]).unwrap();
+		let first_robot = active.scene.binding("robot_a").unwrap();
+		let first = active.scene.get_mut(first_robot).unwrap();
 		first.transform_mut().position = [-0.4, 0.6, -0.2];
 		first.transform_mut().rotation = [0.2, 0.3, 0.4];
 		first.transform_mut().scale = [0.5, 0.6, 0.7];
@@ -166,7 +177,7 @@ impl Smoke {
 		// Live state diverges after saving; reload must restore saved values.
 		active
 			.scene
-			.get_mut(active.entity_ids[0])
+			.get_mut(first_robot)
 			.unwrap()
 			.transform_mut()
 			.position = [1.0, -1.0, -1.0];
