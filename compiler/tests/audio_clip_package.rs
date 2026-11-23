@@ -82,6 +82,7 @@ fn packaging_copies_only_reachable_verified_audio_clips() {
 		entities: vec![cube],
 		camera: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		lights: Vec::new(),
 		organization: Default::default(),
 	};

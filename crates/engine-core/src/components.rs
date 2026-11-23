@@ -5,6 +5,7 @@ mod interactable;
 mod native_behavior;
 mod player_controller;
 mod scene_validation;
+mod sky;
 
 use crate::{
 	EntityKey,
@@ -23,6 +24,7 @@ pub use player_controller::{
 };
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 use serde::{Deserialize, Deserializer, Serialize};
+pub use sky::{SceneEnvironment, SkyComponent, SkySettings};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const MAX_COMPONENTS_PER_OBJECT: usize = 16;
@@ -38,6 +40,7 @@ pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const CAMERA_TYPE: &str = "engine.camera";
 pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
 pub const AUDIO_SOURCE_TYPE: &str = "engine.audio_source";
+pub const SKY_TYPE: &str = "engine.sky";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -74,6 +77,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	Sky {
+		settings: SkySettings,
+	},
 	AudioSource {
 		settings: AudioSourceSettings,
 	},
@@ -122,6 +128,7 @@ pub struct ComponentRecord {
 impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
+			ComponentData::Sky { .. } => SKY_TYPE,
 			ComponentData::AudioSource { .. } => AUDIO_SOURCE_TYPE,
 			ComponentData::PlayerController { .. } => PLAYER_CONTROLLER_TYPE,
 			ComponentData::Camera { .. } => CAMERA_TYPE,
@@ -140,6 +147,7 @@ impl ComponentRecord {
 			return Err("Unsupported component schema version".into());
 		}
 		match &self.data {
+			ComponentData::Sky { settings } => settings.validate(),
 			ComponentData::AudioSource { settings } => settings.validate(),
 			ComponentData::PlayerController { settings } if settings.local && !self.enabled => {
 				Err("A disabled Player Controller cannot own local input".into())
@@ -187,6 +195,13 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			SKY_TYPE,
+			"sky",
+			"Sky",
+			"Gradient background for the Scene and Game views.",
+			1,
+		),
 		(
 			AUDIO_SOURCE_TYPE,
 			"audio_source",

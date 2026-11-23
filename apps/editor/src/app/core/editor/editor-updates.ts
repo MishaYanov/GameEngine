@@ -4,6 +4,7 @@ import {
 import {validCameraComponentSettings, validComponentViews} from './editor-components';
 import {validPlayerControllerSettings} from './player-controller.models';
 import {validAnimatorSettings} from './animator.models';
+import {validSceneEnvironment, validSkyAttachment} from './sky.models';
 
 const maxSceneFolders = 1_024;
 const maxFolderDepth = 32;
@@ -65,6 +66,7 @@ function entity(value: unknown): value is SceneEntity {
         typeof value['renderable'] === 'boolean' &&
         (value['camera'] == null || (record(value['camera']) && typeof value['camera']['id'] === 'string' &&
             typeof value['camera']['enabled'] === 'boolean' && validCameraComponentSettings(value['camera']['settings']))) &&
+        (value['sky'] == null || validSkyAttachment(value['sky'])) &&
         (controller == null || (record(controller) && typeof controller['id'] === 'string' &&
             typeof controller['enabled'] === 'boolean' && validPlayerControllerSettings(controller['settings']) &&
             (controller['enabled'] || !controller['settings'].local))) &&
@@ -146,9 +148,18 @@ function validDocument(value: unknown): boolean {
         new Set(value['entities'].map((item) => item.key)).size === value['entities'].length &&
         (value['organization'] === undefined ||
             (value['schema_version'] >= 6 && validOrganization(value['organization'], value['entities']))) &&
+        (value['environment'] === undefined ||
+            (value['schema_version'] === 7 && environment(value['environment'], value['entities']))) &&
         (value['default_game_camera'] == null || (value['schema_version'] === 7 &&
             value['entities'].some(item => item.key === value['default_game_camera'] && item.camera?.enabled === true)))
     );
+}
+
+function environment(value: unknown, entities: readonly SceneEntity[]): boolean {
+    if (!validSceneEnvironment(value)) return false;
+    const active = value.active_sky;
+    return active == null || entities.some(entity =>
+        entity.key === active && entity.parent == null && entity.linked_prefab == null && entity.sky?.enabled === true);
 }
 
 function atMostOneLocalPlayer(entities: readonly SceneEntity[]): boolean {

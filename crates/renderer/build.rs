@@ -17,6 +17,8 @@ fn main() {
 		"editor-grid.frag",
 		"editor-lines.vert",
 		"editor-lines.frag",
+		"sky.vert",
+		"sky.frag",
 	] {
 		println!("cargo:rerun-if-changed=shaders/{shader}");
 		compile_shader(&format!("shaders/{shader}"), &format!("{shader}.spv"));

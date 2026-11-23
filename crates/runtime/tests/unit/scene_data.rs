@@ -12,6 +12,7 @@ fn valid_data() -> SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		bindings: btm,
 		entities: [-0.8, 0.8]
 			.into_iter()

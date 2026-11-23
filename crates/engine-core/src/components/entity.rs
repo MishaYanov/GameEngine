@@ -3,6 +3,11 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(sky) = &self.sky {
+			bytes = bytes
+				.saturating_add(std::mem::size_of_val(sky.as_ref()))
+				.saturating_add(sky.id.as_str().len());
+		}
 		if let Some(source) = &self.audio_source {
 			bytes = bytes
 				.saturating_add(std::mem::size_of_val(source.as_ref()))
@@ -98,6 +103,16 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		if let Some(sky) = &self.sky {
+			records.push(ComponentRecord {
+				id: sky.id.clone(),
+				schema_version: 1,
+				enabled: sky.enabled,
+				data: ComponentData::Sky {
+					settings: sky.settings.clone(),
+				},
+			});
+		}
 		if let Some(source) = &self.audio_source {
 			records.push(ComponentRecord {
 				id: source.id.clone(),
@@ -258,6 +273,13 @@ impl EntityData {
 			return Err("Object component count exceeds its limit".into());
 		}
 		match component.data {
+			ComponentData::Sky { settings } => {
+				self.sky = Some(Box::new(SkyComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::AudioSource { settings } => {
 				self.audio_source = Some(Box::new(AudioSourceComponent {
 					id: component.id,
@@ -354,6 +376,7 @@ impl EntityData {
 			.ok_or("Component does not exist")?;
 		match record.data {
 			ComponentData::AudioSource { .. } => self.audio_source = None,
+			ComponentData::Sky { .. } => self.sky = None,
 			ComponentData::PlayerController { .. } => self.player_controller = None,
 			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,

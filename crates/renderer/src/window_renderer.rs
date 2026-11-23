@@ -22,6 +22,7 @@ struct RendererResources {
 	viewport_bounds: [f32; 2],
 	targets: Option<RenderTargets>,
 	editor: Option<crate::vulkan::editor::EditorPass>,
+	sky: Option<crate::vulkan::sky::SkyPass>,
 	pipelines: Option<VulkanMaterialPipelines>,
 	camera: VulkanCamera,
 	material_layout: Arc<VulkanMaterialLayout>,
@@ -55,6 +56,7 @@ pub struct WindowRenderer {
 	dirty: bool,
 	lighting: LightingUniform,
 	editor_visuals: crate::EditorVisuals,
+	sky: Option<SkyGradient>,
 	external_resources_retained: AtomicBool,
 }
 
@@ -85,6 +87,7 @@ impl WindowRenderer {
 				viewport_bounds: limits.viewport_bounds_range,
 				targets: None,
 				editor: None,
+				sky: None,
 				pipelines: None,
 				camera,
 				material_layout,
@@ -97,6 +100,7 @@ impl WindowRenderer {
 			dirty: true,
 			lighting: LightingUniform::default(),
 			editor_visuals: crate::EditorVisuals::default(),
+			sky: None,
 			external_resources_retained: AtomicBool::new(false),
 		};
 		renderer.prepare()?;
@@ -174,6 +178,11 @@ impl WindowRenderer {
 		Ok(())
 	}
 
+	/// Active scene background. An absent sky uses the existing color clear.
+	pub fn set_sky(&mut self, sky: Option<SkyGradient>) {
+		self.sky = sky;
+	}
+
 	/// Editor-only presentation; no scene entities/materials are created.
 	pub fn set_editor_visuals(&mut self, visuals: &crate::EditorVisuals) -> Result<(), String> {
 		visuals.validate()?;
@@ -225,6 +234,27 @@ impl WindowRenderer {
 			resources.viewport_bounds,
 		)?;
 		let targets = resources.targets.as_mut().expect("prepared render targets");
+		let sky = if let Some(gradient) = self.sky {
+			let color = targets.swapchain.format();
+			let depth = targets.depth.format();
+			if resources
+				.sky
+				.as_ref()
+				.is_none_or(|pass| !pass.supports_formats(color, depth))
+			{
+				resources.sky = Some(crate::vulkan::sky::SkyPass::new(
+					resources.device.raw(),
+					color,
+					depth,
+				)?);
+			}
+			Some((
+				resources.sky.as_ref().expect("sky pass initialized"),
+				gradient,
+			))
+		} else {
+			None
+		};
 		let editor = if self.editor_visuals.is_empty() {
 			None
 		} else {
@@ -257,6 +287,7 @@ impl WindowRenderer {
 				uniform: camera,
 				region,
 				editor,
+				sky,
 			},
 		);
 		finish_draw(&mut self.dirty, result)

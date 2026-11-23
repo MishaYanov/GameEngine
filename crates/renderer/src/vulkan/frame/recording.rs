@@ -174,6 +174,10 @@ impl VulkanFrame {
 			self.device
 				.cmd_set_scissor(self.command_buffer, 0, &[region]);
 
+			if let Some((pass, gradient)) = view.sky {
+				pass.record(self.command_buffer, view.uniform, gradient);
+			}
+
 			/*
 			 * Each render object may reference
 			 * a completely different mesh.

@@ -4,7 +4,7 @@ use crate::{
 	components::{ComponentRecord, NO_MESH_PATH},
 	scene_data::{
 		CURRENT_SCHEMA_VERSION, CameraData, EntityData, LightData, LightKind, MAX_SCENE_BYTES,
-		ParsedScene, SceneData, SceneOrganization, TransformData,
+		ParsedScene, SceneData, SceneEnvironment, SceneOrganization, TransformData,
 	},
 };
 use serde::{
@@ -26,6 +26,8 @@ struct ProjectionScene {
 	lights: Vec<LightData>,
 	#[serde(default)]
 	organization: SceneOrganization,
+	#[serde(default)]
+	environment: SceneEnvironment,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +44,8 @@ struct StoredScene {
 	lights: Vec<LightData>,
 	#[serde(default)]
 	organization: SceneOrganization,
+	#[serde(default)]
+	environment: SceneEnvironment,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -105,6 +109,9 @@ impl Serialize for SceneData {
 		if !self.organization.is_empty() {
 			map.serialize_entry("organization", &self.organization)?;
 		}
+		if !self.environment.is_empty() {
+			map.serialize_entry("environment", &self.environment)?;
+		}
 		map.end()
 	}
 }
@@ -147,6 +154,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 			default_game_camera: stored.default_game_camera,
 			lights: stored.lights,
 			organization: stored.organization,
+			environment: stored.environment,
 		}
 	} else {
 		let projection: ProjectionScene =
@@ -173,6 +181,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 			default_game_camera: projection.default_game_camera,
 			lights: projection.lights,
 			organization: projection.organization,
+			environment: projection.environment,
 		}
 	};
 	if version < 7 && scene.entities.iter().any(|entity| entity.camera.is_some()) {
@@ -193,6 +202,12 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 			.any(|entity| entity.audio_source.is_some())
 	{
 		return Err("Audio Source requires scene schema 7".into());
+	}
+	if version < 7
+		&& (!scene.environment.is_empty()
+			|| scene.entities.iter().any(|entity| entity.sky.is_some()))
+	{
+		return Err("Sky requires scene schema 7".into());
 	}
 	scene.refresh_game_camera_projection()?;
 	Ok(scene)
@@ -230,8 +245,10 @@ pub(crate) struct StoredSceneRef<'a>(pub &'a SceneData);
 impl Serialize for StoredSceneRef<'_> {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		let scene = self.0;
-		let mut map =
-			serializer.serialize_map(Some(5 + usize::from(!scene.organization.is_empty())))?;
+		let mut map = serializer.serialize_map(Some(
+			5 + usize::from(!scene.organization.is_empty())
+				+ usize::from(!scene.environment.is_empty()),
+		))?;
 		map.serialize_entry("schema_version", &CURRENT_SCHEMA_VERSION)?;
 		map.serialize_entry("bindings", &scene.bindings)?;
 		map.serialize_entry("entities", &StoredEntities(&scene.entities))?;
@@ -243,6 +260,9 @@ impl Serialize for StoredSceneRef<'_> {
 		map.serialize_entry("lights", &scene.lights)?;
 		if !scene.organization.is_empty() {
 			map.serialize_entry("organization", &scene.organization)?;
+		}
+		if !scene.environment.is_empty() {
+			map.serialize_entry("environment", &scene.environment)?;
 		}
 		map.end()
 	}
@@ -364,6 +384,7 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 					entities,
 					camera: legacy.camera,
 					default_game_camera: None,
+					environment: Default::default(),
 					lights,
 					organization: SceneOrganization::default(),
 				},
@@ -393,6 +414,7 @@ pub fn parse_json(source: &str) -> Result<ParsedScene, String> {
 					entities,
 					camera: legacy.camera,
 					default_game_camera: None,
+					environment: Default::default(),
 					lights,
 					organization: SceneOrganization::default(),
 				},

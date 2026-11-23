@@ -78,6 +78,7 @@ fn arena(enemy_z: f32, wall: bool) -> SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		bindings: BTreeMap::from([
 			("player".into(), entity_key("player")),
 			("enemy".into(), entity_key("warden")),
@@ -101,6 +102,7 @@ fn intro() -> SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		bindings: BTreeMap::from([
 			("camera_track".into(), entity_key("track")),
 			("knight".into(), entity_key("knight")),

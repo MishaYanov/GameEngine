@@ -14,6 +14,7 @@ fn lifecycle() -> RuntimeLifecycle {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		bindings: BTreeMap::new(),
 		entities: vec![EntityData::new(key("owner"), "Owner", "models/item.gltf")],
 		camera: CameraData {

@@ -233,6 +233,7 @@ impl CommandFactory {
 					schema_version: CURRENT_SCHEMA_VERSION,
 					organization: Default::default(),
 					default_game_camera: None,
+					environment: Default::default(),
 					bindings: BTreeMap::new(),
 					entities: Vec::new(),
 					camera: CameraData {
@@ -299,6 +300,11 @@ impl CommandFactory {
 			}
 			EditorCommandDto::SetCamera { camera } => camera.validate()?,
 			EditorCommandDto::SetDefaultGameCamera { key } => validate_key(key.as_str())?,
+			EditorCommandDto::SetActiveSky { key } => {
+				if let Some(key) = key {
+					validate_key(key.as_str())?;
+				}
+			}
 			EditorCommandDto::SetProject { project } => project.validate()?,
 			EditorCommandDto::OrbitCamera { yaw, pitch } => {
 				finite(&[*yaw, *pitch], "Camera orbit")?
@@ -368,6 +374,7 @@ impl CommandFactory {
 			EditorCommandDto::CreateCamera
 			| EditorCommandDto::CreatePlayer
 			| EditorCommandDto::CreateAudioSource
+			| EditorCommandDto::CreateSky
 			| EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
 			| EditorCommandDto::CommitTransaction
@@ -383,6 +390,14 @@ impl CommandFactory {
 
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
+			("create_sky", "Create Sky", "component", true, false),
+			(
+				"set_active_sky",
+				"Set as Scene Sky",
+				"component",
+				true,
+				false,
+			),
 			("create_player", "Create Player", "player", true, false),
 			(
 				"create_audio_source",

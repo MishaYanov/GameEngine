@@ -35,6 +35,75 @@ fn collider(id: &str, enabled: bool, offset: [f32; 3]) -> ComponentRecord {
 }
 
 #[test]
+fn sky_assignment_validates_and_undoes_edits_without_changing_legacy_clear() {
+	let data = scene(vec![]);
+	assert!(data.active_sky().is_none());
+	assert!(!data.to_json().unwrap().contains("\"environment\""));
+	let project = ProjectData::for_scene("Skies", "scenes/main.json", &data).unwrap();
+	let mut engine = Engine::new(data, project).unwrap();
+	run(&mut engine, Command::CreateSky);
+	let first = engine.session().selection()[0].clone();
+	run(&mut engine, Command::CreateSky);
+	let second = engine.session().selection()[0].clone();
+	run(
+		&mut engine,
+		Command::SetActiveSky {
+			key: Some(first.clone()),
+		},
+	);
+	let before = engine.session().authored_document();
+	let receipt = engine
+		.execute(EditorCommandRequest {
+			expected_revision: engine.session().revision(),
+			command: Command::SetActiveSky {
+				key: Some(second.clone()),
+			},
+		})
+		.unwrap();
+	assert!(receipt.changes.environment_changed);
+	let after = engine.session().authored_document();
+	assert_eq!(after.environment.active_sky.as_ref(), Some(&second));
+	assert_eq!(after.active_sky(), Some(&Default::default()));
+	assert_eq!(
+		SceneData::from_json(&after.to_json().unwrap()).unwrap(),
+		*after
+	);
+	assert!(
+		after
+			.entities
+			.iter()
+			.all(|entity| entity.collider.is_none())
+	);
+	run(&mut engine, Command::Undo);
+	assert_eq!(
+		engine.session().authored_document().environment,
+		before.environment
+	);
+	let missing = engine_core::EntityKey::new("missing-sky").unwrap();
+	assert!(
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: engine.session().revision(),
+				command: Command::SetActiveSky { key: Some(missing) },
+			})
+			.is_err()
+	);
+	run(
+		&mut engine,
+		Command::Select {
+			keys: vec![first.as_str().into()],
+		},
+	);
+	run(&mut engine, Command::DeleteSelection);
+	assert!(engine.session().authored_document().active_sky().is_none());
+	run(&mut engine, Command::Undo);
+	assert_eq!(
+		engine.session().authored_document().environment.active_sky,
+		Some(first)
+	);
+}
+
+#[test]
 fn audio_source_create_update_undo_duplication_and_save_are_atomic() {
 	use engine_core::{
 		asset_catalog::AssetId, audio_clip::AudioClipRef, components::AudioSourceSettings,

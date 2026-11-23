@@ -1,6 +1,7 @@
 mod hierarchy;
 mod organization;
 pub use crate::collider::{ColliderData, ColliderInteraction};
+pub use crate::components::SceneEnvironment;
 pub use crate::game_camera::{FollowCameraSettings, OrbitCameraSettings};
 pub use crate::scene_format::parse_json;
 use crate::{Transform, entity_key::EntityKey};
@@ -26,6 +27,7 @@ pub struct SceneData {
 	/// Compatibility projection of the default Camera for existing editor clients.
 	pub camera: CameraData,
 	pub default_game_camera: Option<EntityKey>,
+	pub environment: SceneEnvironment,
 	pub lights: Vec<LightData>,
 	pub organization: SceneOrganization,
 }
@@ -71,6 +73,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub audio_source: Option<Box<crate::components::AudioSourceComponent>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sky: Option<Box<crate::components::SkyComponent>>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
@@ -102,6 +106,7 @@ impl EntityData {
 			camera: None,
 			player_controller: None,
 			audio_source: None,
+			sky: None,
 			linked_prefab: None,
 		}
 	}
@@ -175,6 +180,8 @@ struct EntityProjection {
 	#[serde(default)]
 	audio_source: Option<Box<crate::components::AudioSourceComponent>>,
 	#[serde(default)]
+	sky: Option<Box<crate::components::SkyComponent>>,
+	#[serde(default)]
 	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 	/// A read-only transport projection; commands never take this as mutation authority.
 	#[serde(default)]
@@ -212,6 +219,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			camera: value.camera,
 			player_controller: value.player_controller,
 			audio_source: value.audio_source,
+			sky: value.sky,
 			linked_prefab: value.linked_prefab,
 		})
 	}
@@ -267,6 +275,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.audio_source {
 			map.serialize_entry("audio_source", value)?;
+		}
+		if let Some(value) = &self.sky {
+			map.serialize_entry("sky", value)?;
 		}
 		if let Some(value) = &self.linked_prefab {
 			map.serialize_entry("linked_prefab", value)?;
@@ -449,6 +460,7 @@ impl SceneData {
 		if self.bindings.len() > MAX_SCENE_ENTITIES {
 			return Err("Scene has too many named bindings".into());
 		}
+		self.validate_environment()?;
 		// Bound direct typed authoring as well as parsed files. The fixed charge
 		// conservatively covers pretty JSON field names, indentation and every
 		// optional numeric component; strings include JSON escaping. This avoids

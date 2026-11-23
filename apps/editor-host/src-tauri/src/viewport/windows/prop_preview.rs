@@ -309,8 +309,14 @@ impl Worker {
 		if let Some(visual) = &frame.visual_pose {
 			if preview.visual_revision != Some(visual.revision) {
 				for pose in visual.poses.iter() {
-					let id = preview.scene.entity_by_key(&pose.entity_key).ok_or("Animation Clip object is missing from the viewport")?;
-					let entity = preview.scene.get_mut(id).ok_or("Animation Clip object is missing from the viewport")?;
+					let id = preview
+						.scene
+						.entity_by_key(&pose.entity_key)
+						.ok_or("Animation Clip object is missing from the viewport")?;
+					let entity = preview
+						.scene
+						.get_mut(id)
+						.ok_or("Animation Clip object is missing from the viewport")?;
 					let target = entity.transform_mut();
 					let local = pose.transform();
 					target.position = local.position;
@@ -372,6 +378,7 @@ impl Worker {
 			self.dirty = true;
 			return Ok(());
 		}
+		gpu.renderer.set_sky(None);
 		let status = gpu.renderer.draw(&uniform, &objects)?;
 		if status == DrawStatus::NeedsRedraw {
 			self.dirty = true;

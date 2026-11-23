@@ -1,4 +1,5 @@
 import {validAudioSourceSettings, type AudioSourceSettings} from './audio-source.models';
+import {validSkySettings, type SkySettings} from './sky.models';
 import type { CameraComponentSettings, Collider, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
@@ -63,6 +64,7 @@ export type ComponentData =
 	| { readonly kind: 'animation'; readonly settings: AnimationSettings }
 	| { readonly kind: 'animator'; readonly settings: AnimatorSettings }
 	| { readonly kind: 'camera'; readonly settings: CameraComponentSettings }
+	| { readonly kind: 'sky'; readonly settings: SkySettings }
     | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
 
@@ -175,6 +177,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 		);
 	}
 	if (data['kind'] === 'audio_source') return validAudioSourceSettings(data['settings']);
+	if (data['kind'] === 'sky') return validSkySettings(data['settings']);
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
 	if (data['kind'] === 'player_controller') return validPlayerControllerSettings(data['settings']) &&
@@ -261,6 +264,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'animation',
 					'animator',
 					'camera',
+					'sky',
                     'interactable',
 				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&

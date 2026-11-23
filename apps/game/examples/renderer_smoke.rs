@@ -28,6 +28,7 @@ struct Smoke {
 	expected_parts: u64,
 	expected_triangles: u64,
 	pipeline_ids: Option<Vec<u64>>,
+	warmed_sky: bool,
 }
 
 fn pipeline_ids(renderer: &WindowRenderer) -> Option<Vec<u64>> {
@@ -161,6 +162,23 @@ impl ApplicationHandler for Smoke {
 			])
 			.unwrap();
 		check_upload_batch(&renderer);
+		if std::env::args_os().any(|arg| arg == "--sky") {
+			renderer.set_sky(Some(renderer::vulkan::SkyGradient {
+				zenith: [0.035, 0.075, 0.18],
+				horizon: [0.30, 0.46, 0.65],
+			}));
+			let camera = CameraUniform::perspective(
+				[0.0; 3],
+				[0.0, 0.0, -1.0],
+				[0.0, 1.0, 0.0],
+				1.0,
+				4.0 / 3.0,
+				0.1,
+				100.0,
+			);
+			self.warmed_sky = renderer.draw(&camera, &[]).unwrap() == DrawStatus::Rendered;
+			assert!(self.warmed_sky);
+		}
 		self.pipeline_ids = pipeline_ids(&renderer);
 		let mut assets = assets::AssetManager::new(
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
@@ -366,7 +384,7 @@ impl ApplicationHandler for Smoke {
 			assert_eq!(metrics.draw_calls, self.expected_parts);
 			assert_eq!(metrics.instanced_draw_calls, self.expected_parts);
 			assert_eq!(metrics.triangles, self.expected_triangles);
-			if self.frames == 1 {
+			if self.frames == 1 && !self.warmed_sky {
 				assert!(
 					metrics.gpu_time_ms.is_none(),
 					"first frame cannot have completed timestamp results"

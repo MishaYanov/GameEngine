@@ -84,6 +84,7 @@ fn fixture() -> SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		organization: Default::default(),
 		default_game_camera: None,
+		environment: Default::default(),
 		bindings: Default::default(),
 		entities,
 		camera: CameraData {

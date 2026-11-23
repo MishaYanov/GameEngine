@@ -213,6 +213,7 @@ pub fn instantiate_with_warming(
 	}
 	scene.set_lights(data.lights.clone());
 	scene.set_organization(&data.organization);
+	scene.set_environment(&data.environment);
 
 	let camera = authored_camera.to_camera();
 

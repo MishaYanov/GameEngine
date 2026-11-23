@@ -86,6 +86,7 @@ pub(crate) struct FrameView<'a> {
 	pub uniform: &'a CameraUniform,
 	pub region: vk::Rect2D,
 	pub editor: Option<FrameEditor<'a>>,
+	pub sky: Option<(&'a super::sky::SkyPass, super::SkyGradient)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -374,6 +375,7 @@ impl VulkanFrame {
 				uniform: camera_uniform,
 				region,
 				editor: None,
+				sky: None,
 			},
 		)
 	}

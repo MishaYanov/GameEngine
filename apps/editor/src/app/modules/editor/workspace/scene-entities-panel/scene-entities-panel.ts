@@ -49,7 +49,7 @@ export interface HierarchyReparentRequest {
     readonly keepWorld?: boolean;
 }
 
-export type HierarchyCreateCommand = 'create_camera' | 'create_player' | 'create_audio_source';
+export type HierarchyCreateCommand = 'create_camera' | 'create_player' | 'create_audio_source' | 'create_sky';
 interface CreationMenuContext {readonly contextKey: string}
 
 interface EntityMenuContext {
@@ -184,6 +184,7 @@ export class SceneEntitiesPanel {
     private readonly createCameraAction = this.creationAction('create_camera', 'Camera');
     private readonly createPlayerAction = this.creationAction('create_player', 'Player');
     private readonly createAudioSourceAction = this.creationAction('create_audio_source', 'Audio Source');
+    private readonly createSkyAction = this.creationAction('create_sky', 'Sky');
     private readonly createMenuBuilder = this.creationMenu(ContextMenuBuilder.create<CreationMenuContext>());
     protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey()});
     private readonly entityMenuBuilder = ContextMenuBuilder.create<EntityMenuContext>()
@@ -265,7 +266,8 @@ export class SceneEntitiesPanel {
     }
 
     private creationMenu<T extends CreationMenuContext>(menu: ContextMenuBuilder<T>): ContextMenuBuilder<T> {
-        return menu.action(this.createCameraAction).action(this.createPlayerAction).action(this.createAudioSourceAction);
+        return menu.action(this.createCameraAction).action(this.createPlayerAction)
+            .action(this.createAudioSourceAction).action(this.createSkyAction);
     }
 
     private canUseEntityMenu(context: EntityMenuContext): boolean {

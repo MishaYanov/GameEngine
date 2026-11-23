@@ -17,10 +17,10 @@ impl GameApp {
 		}
 		if matches!(result, Ok(renderer::DrawStatus::Rendered))
 			&& let (Some(prefetch), Some(current), Some(project)) = (
-			&mut self.scene_prefetch,
-			self.editor.play_scene_id(),
-			self.project.as_ref(),
-		) {
+				&mut self.scene_prefetch,
+				self.editor.play_scene_id(),
+				self.project.as_ref(),
+			) {
 			prefetch.prime(current, project);
 		}
 		result
@@ -90,7 +90,7 @@ impl GameApp {
 								} else {
 									"Click to aim  /  WASD Move"
 								}
-									.into(),
+								.into(),
 							);
 							rows.push("LMB or F Strike".into());
 						}
@@ -225,6 +225,7 @@ impl GameApp {
 		self.tools.stats = stats;
 
 		renderer.set_lights(&self.scene.renderer_lights())?;
+		renderer.set_sky(self.scene.renderer_sky());
 		match game_rect {
 			Some(rect) => renderer.draw_in_rect(&camera_uniform, &objects, rect.pixels()),
 			None => renderer.draw(&camera_uniform, &objects),
@@ -236,7 +237,7 @@ fn insert_captions(
 	rows: &mut Vec<String>,
 	mut after_required: usize,
 	capacity: usize,
-	captions: impl Iterator<Item=&'static str>,
+	captions: impl Iterator<Item = &'static str>,
 ) {
 	for caption in captions {
 		if after_required >= capacity {

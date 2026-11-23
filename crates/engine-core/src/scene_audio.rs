@@ -274,6 +274,7 @@ mod tests {
 			default_game_camera: None,
 			lights: Vec::new(),
 			organization: Default::default(),
+			environment: Default::default(),
 		};
 		let mut state = SceneAudioState::default();
 		let first = SceneAudioOwner {

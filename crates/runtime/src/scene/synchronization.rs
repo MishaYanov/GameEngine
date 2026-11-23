@@ -40,6 +40,7 @@ impl Scene {
 		self.bindings.clone_from(&data.bindings);
 		self.lights.clone_from(&data.lights);
 		self.set_organization(&data.organization);
+		self.set_environment(&data.environment);
 		self.synchronize_camera_settings(camera, &data.default_game_camera);
 		true
 	}
@@ -164,6 +165,9 @@ impl Scene {
 		if self.organization != data.organization {
 			self.set_organization(&data.organization);
 		}
+		if changes.environment_changed {
+			self.set_environment(&data.environment);
+		}
 		if changes.lights_changed {
 			self.lights.clone_from(&data.lights);
 		}
@@ -245,6 +249,9 @@ impl Scene {
 		if changes.lights_changed {
 			self.lights.clone_from(&world.data().lights);
 		}
+		if changes.environment_changed {
+			self.set_environment(&world.data().environment);
+		}
 		if changes.camera_changed {
 			self.synchronize_camera_settings(
 				&world.data().camera,
@@ -275,6 +282,7 @@ impl Scene {
 			bindings: data.bindings.clone(),
 			lights: data.lights.clone(),
 			organization: data.organization.clone(),
+			environment: data.environment.clone(),
 			..Scene::default()
 		};
 		next.synchronize_camera_settings(&camera, &data.default_game_camera);
@@ -339,6 +347,7 @@ impl Scene {
 					camera: entity.camera.clone(),
 					player_controller: entity.player_controller.clone(),
 					audio_source: entity.audio_source.clone(),
+					sky: entity.sky.clone(),
 				}
 			};
 			entry.parent.clone_from(&entity.parent);

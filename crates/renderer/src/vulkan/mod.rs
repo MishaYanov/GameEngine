@@ -15,6 +15,7 @@ pub mod push_constants;
 pub mod render_object;
 mod rollback;
 mod skinning;
+pub(crate) mod sky;
 mod surface;
 mod swapchain;
 #[cfg(test)]
@@ -39,6 +40,7 @@ pub use mesh::{VulkanMesh, VulkanMeshError};
 pub use pipeline::{VulkanGraphicsPipeline, VulkanMaterialPipelines};
 pub use push_constants::ModelPushConstants;
 pub use render_object::RenderObject;
+pub use sky::SkyGradient;
 pub use surface::{VulkanSurface, VulkanSurfaceError};
 pub use swapchain::{VulkanSwapchain, VulkanSwapchainError};
 pub use texture::{VulkanTexture, VulkanTextureError};

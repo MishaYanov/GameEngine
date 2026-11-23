@@ -124,6 +124,20 @@ impl Scene {
 		Ok(count)
 	}
 
+	pub fn renderer_sky(&self) -> Option<renderer::vulkan::SkyGradient> {
+		let key = self.environment.active_sky.as_ref()?;
+		let id = self.key_ids.get(key)?;
+		let entry = &self.entries[*self.id_indices.get(id)?];
+		let sky = entry
+			.sky
+			.as_ref()
+			.filter(|sky| sky.enabled && entry.parent.is_none())?;
+		Some(renderer::vulkan::SkyGradient {
+			zenith: sky.settings.zenith,
+			horizon: sky.settings.horizon,
+		})
+	}
+
 	pub fn renderer_lights(&self) -> Vec<renderer::vulkan::Light> {
 		self.lights
 			.iter()

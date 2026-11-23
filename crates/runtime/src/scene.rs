@@ -11,7 +11,8 @@ use crate::entity_key::EntityKey;
 use crate::model_instance::ModelInstance;
 use crate::scene_data::{
 	CURRENT_SCHEMA_VERSION, CameraData, ColliderData, EntityData, FolderId, LightData,
-	MaterialOverrideData, SceneOrganization, TransformData, resolve_world_matrices,
+	MaterialOverrideData, SceneEnvironment, SceneOrganization, TransformData,
+	resolve_world_matrices,
 };
 use crate::{Camera, SceneData};
 
@@ -48,6 +49,7 @@ struct SceneEntry {
 	camera: Option<Box<CameraComponent>>,
 	player_controller: Option<Box<engine_core::components::PlayerControllerComponent>>,
 	audio_source: Option<Box<engine_core::components::AudioSourceComponent>>,
+	sky: Option<Box<engine_core::components::SkyComponent>>,
 }
 
 impl SceneEntry {
@@ -89,6 +91,7 @@ impl SceneEntry {
 		self.camera.clone_from(&entity.camera);
 		self.player_controller.clone_from(&entity.player_controller);
 		self.audio_source.clone_from(&entity.audio_source);
+		self.sky.clone_from(&entity.sky);
 	}
 }
 
@@ -101,6 +104,7 @@ pub struct EntitySnapshot {
 	orbit_target_settings: Option<Box<OrbitCameraSettings>>,
 	camera_rig_targets: Vec<(EntityKey, CameraRig)>,
 	was_game_camera: bool,
+	was_active_sky: bool,
 	folder: Option<FolderId>,
 }
 
@@ -128,6 +132,7 @@ pub struct Scene {
 	entries: Vec<SceneEntry>,
 	bindings: BTreeMap<String, EntityKey>,
 	organization: SceneOrganization,
+	environment: SceneEnvironment,
 	next_id: u64,
 	lights: Vec<LightData>,
 	camera_follow: Option<FollowCameraSettings>,
@@ -271,6 +276,7 @@ impl Scene {
 		let saved_camera = &data.camera;
 		self.bindings == data.bindings
 			&& self.organization == data.organization
+			&& self.environment == data.environment
 			&& self.lights == data.lights
 			&& self.default_game_camera == data.default_game_camera
 			&& self.camera_follow == data.camera.follow
@@ -305,6 +311,7 @@ impl Scene {
 						&& entry.camera == saved.camera
 						&& entry.player_controller == saved.player_controller
 						&& entry.audio_source == saved.audio_source
+						&& entry.sky == saved.sky
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -351,6 +358,7 @@ impl Scene {
 					.collect()
 			}),
 			was_game_camera: entry.key.is_some() && entry.key == self.default_game_camera,
+			was_active_sky: entry.key.is_some() && entry.key == self.environment.active_sky,
 			entry,
 			index,
 			bindings,
@@ -407,6 +415,9 @@ impl Scene {
 		if snapshot.was_game_camera && self.default_game_camera.is_some() {
 			return Err("Cannot restore Game Camera: another object is assigned".into());
 		}
+		if snapshot.was_active_sky && self.environment.active_sky.is_some() {
+			return Err("Cannot restore Scene Sky: another object is assigned".into());
+		}
 		let rig_indices = snapshot
 			.camera_rig_targets
 			.iter()
@@ -461,6 +472,9 @@ impl Scene {
 		}
 		if snapshot.was_game_camera {
 			self.default_game_camera.clone_from(&entry.key);
+		}
+		if snapshot.was_active_sky {
+			self.environment.active_sky.clone_from(&entry.key);
 		}
 		for (id, (_, rig)) in rig_indices.into_iter().zip(&snapshot.camera_rig_targets) {
 			self.entries[self.id_indices[&id]]
@@ -581,6 +595,7 @@ impl Scene {
 			camera: None,
 			player_controller: None,
 			audio_source: None,
+			sky: None,
 		});
 		self.authored_children = None;
 
@@ -632,6 +647,9 @@ impl Scene {
 			}
 			if self.default_game_camera.as_ref() == Some(key) {
 				self.default_game_camera = None;
+			}
+			if self.environment.active_sky.as_ref() == Some(key) {
+				self.environment.active_sky = None;
 			}
 			for camera in self
 				.entries
@@ -696,12 +714,14 @@ impl Scene {
 				camera: entry.camera.clone(),
 				player_controller: entry.player_controller.clone(),
 				audio_source: entry.audio_source.clone(),
+				sky: entry.sky.clone(),
 			});
 		}
 
 		let mut data = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
 			organization: self.organization.clone(),
+			environment: self.environment.clone(),
 			default_game_camera: self.default_game_camera.clone(),
 			bindings: self.bindings.clone(),
 			entities,
@@ -849,6 +869,7 @@ impl Scene {
 		entry.camera = source_metadata.camera;
 		entry.player_controller = source_metadata.player_controller;
 		entry.audio_source = source_metadata.audio_source;
+		entry.sky = source_metadata.sky;
 		if let Some(controller) = &mut entry.player_controller {
 			controller.settings.local = false;
 		}
@@ -894,6 +915,10 @@ impl Scene {
 
 	pub(crate) fn set_organization(&mut self, organization: &SceneOrganization) {
 		self.organization.clone_from(organization);
+	}
+
+	pub(crate) fn set_environment(&mut self, environment: &SceneEnvironment) {
+		self.environment.clone_from(environment);
 	}
 
 	pub fn world_matrices(&self) -> Result<Vec<glam::Mat4>, String> {

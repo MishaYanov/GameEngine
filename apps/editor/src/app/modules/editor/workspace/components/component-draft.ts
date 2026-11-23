@@ -8,6 +8,7 @@ import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
 import { parseF32 } from '../../../../core/editor/authoring-number';
 import {cameraComponentDraft, cameraComponentFromDraft, type CameraComponentDraft} from './camera-component-draft';
+import {skyComponentDraft, skyComponentFromDraft, type SkyComponentDraft} from './sky-component-draft';
 import type {InputActionsRef, PlayerMovementSpace} from '../../../../core/editor/player-controller.models';
 import {
 	defaultMachine,
@@ -46,6 +47,7 @@ export interface ComponentDraft {
 	playerController: {input: InputActionsRef; space: PlayerMovementSpace; control_graph?: string};
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
+	sky: SkyComponentDraft;
     audioSource: {
         clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus;
         spatial: 'two_d' | 'spatial'; near: string; far: string;
@@ -93,6 +95,7 @@ export function componentDraft(
 		playerController: {input: {kind: 'project_default'}, space: 'camera_relative'},
 		animation: null,
 		camera: cameraComponentDraft(),
+		sky: skyComponentDraft(),
         audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects',
             spatial: 'two_d', near: '1', far: '20', eventKind: 'none', signal: 'activated',
             eventClip: '', eventMarker: '', replacesCue: ''},
@@ -152,6 +155,8 @@ export function componentDraft(
             eventMarker: event?.kind === 'animation_marker' ? event.marker : '', replacesCue: replaces_cue ?? ''};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
+	} else if (value.data.kind === 'sky') {
+		draft.sky = skyComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
         draft.interactable = {action: value.data.settings.action, reach: String(value.data.settings.reach)};
 	} else if (value.data.kind === 'native_behavior') {
@@ -229,7 +234,9 @@ export function componentFromDraft(
 	};
 	const optionalReference = (key: string, label: string) => (key ? reference(key, label) : null);
 	let data: ComponentData;
-	if (draft.kind === 'audio_source') {
+	if (draft.kind === 'sky') {
+		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
+	} else if (draft.kind === 'audio_source') {
         const {clipId, gain, loop, playback, bus, spatial, near, far, eventKind, signal, eventClip, eventMarker, replacesCue} = draft.audioSource;
         if (clipId && !models.some(asset => asset.kind === 'audio_clip' && asset.asset_id === clipId)) {
             throw new Error('Assign an Audio Clip from this project.');

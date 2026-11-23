@@ -49,6 +49,19 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
         }
         <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
     }
+    @if (supportsSceneSky() && entity()?.sky; as sky) {
+        @if (isSceneSky()) {
+            <p role="status">Active Scene Sky</p>
+        } @else if (!sky.enabled) {
+            <p>Enable the Sky component to use it as the scene background.</p>
+        } @else if (!canUseSceneSky()) {
+            <p>Choose a Sky on an independent root object.</p>
+        }
+        <button type="button" [disabled]="!available() || (!isSceneSky() && !canUseSceneSky())"
+                (click)="setSceneSky(!isSceneSky())">
+            {{ isSceneSky() ? 'Clear Scene Sky' : 'Set as Scene Sky' }}
+        </button>
+    }
     @if (entity(); as actor) {
         @if (actor.player_controller) { <editor-control-graph-inspector [actor]="actor" [editable]="editable()"/> }
     }
@@ -128,6 +141,13 @@ export class SceneComponentInspector {
 		(this.editor.capabilities()?.commands?.some(command => command.name === 'align_camera_to_scene_view') ?? false));
 	protected readonly supportsDefaultCamera = computed(() =>
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') ?? false);
+	protected readonly supportsSceneSky = computed(() =>
+		this.editor.capabilities()?.commands?.some(command => command.name === 'set_active_sky') ?? false);
+	protected readonly isSceneSky = computed(() => {
+		const key = this.entity()?.key;
+		return key !== undefined && this.editor.document()?.environment?.active_sky === key;
+	});
+	protected readonly canUseSceneSky = computed(() => sceneSkyCandidate(this.entity()));
 	protected readonly supportsPlayerOwnership = computed(() =>
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_local_player') ?? false);
 	protected readonly playerBodyIssue = computed(() => playerBodyIssue(this.entity()));
@@ -245,6 +265,33 @@ export class SceneComponentInspector {
 		}
 	}
 
+	protected async setSceneSky(assign: boolean): Promise<void> {
+		const key = this.entity()?.key;
+		const context = this.context();
+		const generation = this.editor.workspaceGeneration();
+		if (!key || !this.available() || !this.supportsSceneSky() || assign === this.isSceneSky() ||
+			(assign && !this.canUseSceneSky())) return;
+		this.pending.set(true);
+		this.error.set(null);
+		try {
+			const accepted = await this.editing.withCommittedEdit(async () => {
+				const snapshot = this.editor.snapshot();
+				if (context !== this.context() || snapshot?.mode !== 'edit') return;
+				const latest = snapshot.document.entities.find(entity => entity.key === key);
+				const active = snapshot.document.environment?.active_sky;
+				if (assign ? !sceneSkyCandidate(latest) || active === key : active !== key) return;
+				await this.editor.execute({type: 'set_active_sky', key: assign ? key : null}, generation, snapshot.revision);
+			});
+			if (!accepted && context === this.context()) {
+				this.error.set(this.editing.error() ?? 'Finish the current edit before choosing the Scene Sky.');
+			}
+		} catch (error) {
+			if (context === this.context()) this.error.set(error instanceof Error ? error.message : String(error));
+		} finally {
+			this.pending.set(false);
+		}
+	}
+
 	protected async apply(intent: ComponentEditIntent): Promise<void> {
 		const entity = this.entity();
 		const context = this.context();
@@ -312,6 +359,10 @@ export class SceneComponentInspector {
 			this.pending.set(false);
 		}
 	}
+}
+
+function sceneSkyCandidate(entity: SceneEntity | null | undefined): boolean {
+	return entity?.sky?.enabled === true && entity.parent == null && entity.linked_prefab == null;
 }
 
 function playerBodyIssue(entity: SceneEntity | null): string | null {

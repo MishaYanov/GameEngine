@@ -203,7 +203,7 @@ impl Worker {
 			|| self
 				.authored_load
 				.as_ref()
-			.is_some_and(|load| Some(&load.key) != key.as_ref())
+				.is_some_and(|load| Some(&load.key) != key.as_ref())
 		{
 			self.authored_load = None;
 		}
@@ -570,6 +570,7 @@ impl Worker {
 			)?
 		};
 		gpu.renderer.set_editor_visuals(&visuals)?;
+		gpu.renderer.set_sky(gpu.scene.renderer_sky());
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
 		)?;

@@ -123,6 +123,10 @@ pub enum EditorCommandDto {
 	CreateCamera,
 	CreatePlayer,
 	CreateAudioSource,
+	CreateSky,
+	SetActiveSky {
+		key: Option<EntityKey>,
+	},
 	SetLocalPlayer {
 		key: Option<EntityKey>,
 	},

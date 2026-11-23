@@ -145,6 +145,7 @@ export interface SceneEntity {
     readonly animation?: AnimationAttachment | null;
     readonly animator?: import('./animator.models').AnimatorAttachment | null;
     readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
+    readonly sky?: import('./sky.models').SkyAttachment | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
 
@@ -186,6 +187,7 @@ export interface SceneDocument {
     readonly default_game_camera?: EntityKey | null;
     readonly lights: readonly Light[];
     readonly organization?: SceneOrganization;
+    readonly environment?: import('./sky.models').SceneEnvironment;
 }
 
 export interface CopiedPrefab {
@@ -293,6 +295,8 @@ export type EditorCommand =
     | { readonly type: 'unpack_linked_prefab_outer'; readonly root_key: EntityKey }
     | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'create_camera' }
+    | { readonly type: 'create_sky' }
+    | { readonly type: 'set_active_sky'; readonly key: EntityKey | null }
     | { readonly type: 'create_player' }
     | { readonly type: 'create_audio_source' }
     | { readonly type: 'set_local_player'; readonly key: EntityKey | null }

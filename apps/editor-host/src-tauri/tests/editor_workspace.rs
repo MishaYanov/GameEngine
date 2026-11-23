@@ -46,6 +46,7 @@ impl Fixture {
 			schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 			organization: Default::default(),
 			default_game_camera: None,
+			environment: Default::default(),
 			bindings: Default::default(),
 			entities: vec![EntityData::new(
 				EntityKey::new("a").unwrap(),

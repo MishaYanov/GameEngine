@@ -20,7 +20,7 @@
                 <p>{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
             }
             @if (pinned(component.data.kind)) {
-                <p>Edit the prefab source or unpack this instance to change its {{ label(component) }}.</p>
+                <p>Edit the Prop source or unpack this instance to change its {{ label(component) }}.</p>
             } @else {
 			<div class="actions">
 				<button
@@ -149,6 +149,21 @@
 					</fieldset>
 					<editor-camera-rig-fields [draft]="draft().camera.rig" [fields]="fields.camera.rig"
 					                          [targets]="cameraOptions()" [disabled]="!available()"/>
+				}
+				@case ('sky') {
+					<fieldset>
+						<legend>Zenith color (linear RGB)</legend>
+						@for (channel of skyChannels; track channel.key) {
+							<label>{{ channel.label }}<input inputmode="decimal" [formField]="fields.sky.zenith[channel.key]"/></label>
+						}
+					</fieldset>
+					<fieldset>
+						<legend>Horizon color (linear RGB)</legend>
+						@for (channel of skyChannels; track channel.key) {
+							<label>{{ channel.label }}<input inputmode="decimal" [formField]="fields.sky.horizon[channel.key]"/></label>
+						}
+					</fieldset>
+					<label>Yaw (degrees)<input inputmode="decimal" [formField]="fields.sky.yawDegrees"/></label>
 				}
 				@case ('mesh_renderer') {
 					<label

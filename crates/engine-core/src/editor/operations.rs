@@ -11,6 +11,7 @@ mod organization;
 mod parenting;
 mod player;
 pub(super) use player::create_player;
+mod sky;
 mod transform;
 use std::collections::{HashMap, HashSet};
 use transform::{
@@ -72,6 +73,8 @@ pub(super) fn apply(
 		EditorCommandDto::CreateAudioSource => {
 			*selection = vec![audio_source::create_audio_source(data)?];
 		}
+		EditorCommandDto::CreateSky => *selection = vec![sky::create_sky(data)?],
+		EditorCommandDto::SetActiveSky { key } => data.set_active_sky(key)?,
 		EditorCommandDto::SetLocalPlayer { key } => player::set_local_player(data, key.as_ref())?,
 		EditorCommandDto::AlignCameraToSceneView {
 			key,
@@ -379,6 +382,7 @@ pub(super) fn apply(
 		},
 		_ => return Err("This command is a session operation rather than a scene mutation".into()),
 	}
+	data.clear_unavailable_sky();
 	Ok(())
 }
 

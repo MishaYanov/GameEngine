@@ -208,6 +208,7 @@ impl PrefabData {
 			schema_version: CURRENT_SCHEMA_VERSION,
 			organization: Default::default(),
 			default_game_camera: None,
+			environment: Default::default(),
 			entities,
 			bindings: self
 				.gameplay

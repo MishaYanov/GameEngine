@@ -11,6 +11,8 @@ pub struct WorldChange {
 	pub topology_changed: bool,
 	pub camera_changed: bool,
 	pub lights_changed: bool,
+	#[serde(default)]
+	pub environment_changed: bool,
 	pub full_resync: bool,
 }
 impl WorldChange {
@@ -20,12 +22,14 @@ impl WorldChange {
 			&& !self.topology_changed
 			&& !self.camera_changed
 			&& !self.lights_changed
+			&& !self.environment_changed
 			&& !self.full_resync
 	}
 	pub fn merge(&mut self, other: Self) {
 		self.topology_changed |= other.topology_changed;
 		self.camera_changed |= other.camera_changed;
 		self.lights_changed |= other.lights_changed;
+		self.environment_changed |= other.environment_changed;
 		self.full_resync |= other.full_resync;
 		if self.full_resync {
 			self.changed_entities.clear();
@@ -74,6 +78,7 @@ impl WorldChange {
 			camera_changed: before.camera != after.camera
 				|| before.default_game_camera != after.default_game_camera,
 			lights_changed: before.lights != after.lights,
+			environment_changed: before.environment != after.environment,
 			..Self::default()
 		};
 		for entity in &after.entities {
@@ -125,6 +130,7 @@ impl ChangeAccumulator {
 		self.change.topology_changed |= other.topology_changed;
 		self.change.camera_changed |= other.camera_changed;
 		self.change.lights_changed |= other.lights_changed;
+		self.change.environment_changed |= other.environment_changed;
 		if self.change.full_resync {
 			return;
 		}

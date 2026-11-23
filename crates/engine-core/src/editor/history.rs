@@ -2,7 +2,10 @@ use crate::{
 	EntityKey,
 	project::ProjectData,
 	scene_catalog::SceneId,
-	scene_data::{CameraData, EntityData, FolderRecord, LightData, SceneData, SceneOrganization},
+	scene_data::{
+		CameraData, EntityData, FolderRecord, LightData, SceneData, SceneEnvironment,
+		SceneOrganization,
+	},
 };
 use std::{
 	collections::{HashMap, HashSet, VecDeque},
@@ -32,6 +35,7 @@ pub(super) struct Patch {
 		std::collections::BTreeMap<String, EntityKey>,
 	)>,
 	organization: Option<(SceneOrganization, SceneOrganization)>,
+	environment: Option<(SceneEnvironment, SceneEnvironment)>,
 	selection: (Vec<EntityKey>, Vec<EntityKey>),
 	bytes: usize,
 	_label: String,
@@ -98,6 +102,8 @@ impl Patch {
 			.then(|| (before.bindings.clone(), after.bindings.clone()));
 		let organization = (before.organization != after.organization)
 			.then(|| (before.organization.clone(), after.organization.clone()));
+		let environment = (before.environment != after.environment)
+			.then(|| (before.environment.clone(), after.environment.clone()));
 		// Count owned Rust storage, including the two selection snapshots and
 		// heap strings. JSON length alone undercounts these allocations.
 		let mut bytes = size_of::<Self>()
@@ -171,6 +177,11 @@ impl Patch {
 				.saturating_add(organization_storage(a))
 				.saturating_add(organization_storage(b));
 		}
+		if let Some((a, b)) = &environment {
+			bytes = bytes
+				.saturating_add(a.retained_bytes())
+				.saturating_add(b.retained_bytes());
+		}
 		let project = (project_before != project_after)
 			.then(|| (project_before.clone(), project_after.clone()));
 		if let Some((a, b)) = &project {
@@ -214,6 +225,7 @@ impl Patch {
 			lights,
 			bindings,
 			organization,
+			environment,
 			selection: (selection_before.to_vec(), selection_after.to_vec()),
 			bytes,
 			_label: label,
@@ -227,6 +239,7 @@ impl Patch {
 			&& self.lights.is_none()
 			&& self.bindings.is_none()
 			&& self.organization.is_none()
+			&& self.environment.is_none()
 	}
 	fn apply(
 		&self,
@@ -293,6 +306,7 @@ impl Patch {
 		let mut next = SceneData {
 			schema_version: current.schema_version,
 			organization: current.organization.clone(),
+			environment: current.environment.clone(),
 			bindings: current.bindings.clone(),
 			entities,
 			camera: current.camera.clone(),
@@ -328,6 +342,12 @@ impl Patch {
 				return Err("Undo scene folder state no longer matches".into());
 			}
 			next.organization = if forward { b } else { a }.clone();
+		}
+		if let Some((a, b)) = &self.environment {
+			if &current.environment != if forward { a } else { b } {
+				return Err("History source Scene Environment no longer matches".into());
+			}
+			next.environment = if forward { b } else { a }.clone();
 		}
 		next.validate()?;
 		let selection = if forward {
