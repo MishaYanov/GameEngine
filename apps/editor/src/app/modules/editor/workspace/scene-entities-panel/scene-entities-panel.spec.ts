@@ -140,6 +140,21 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(created).toHaveBeenCalledTimes(2);
     });
 
+    it('opens primitive creation from the keyboard and keeps the root creation scope', async () => {
+        await openFolders();
+        fixture.componentRef.setInput('creationActions', ['create_cube']);
+        await fixture.whenStable();
+        const trigger = action('Create');
+        const created = vi.fn();
+        component.creationRequested.subscribe(created);
+        trigger.focus();
+        trigger.dispatchEvent(new KeyboardEvent('keydown', {key: 'ContextMenu', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        await contextAction(trigger, 'hierarchy.create_cube').execute();
+        expect(created).toHaveBeenCalledExactlyOnceWith({action: 'create_cube', folder: null});
+    });
+
     it('builds entity actions for the clicked row independently of the current selection', async () => {
         await open(nested, ['parent']);
         const usages = vi.fn();

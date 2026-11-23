@@ -91,6 +91,21 @@ describe('WorkspaceTabs', () => {
         expect(document.activeElement).toBe(scene);
     });
 
+    it('mounts a focused specialist tab without moving the only tab stop out of the workspace', async () => {
+        fixture.componentRef.setInput('availableViews', ['scene-viewport', 'game-preview', 'audio-workspace']);
+        fixture.componentRef.setInput('activeViewKind', 'audio-workspace');
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const [scene, , audio] = root.querySelectorAll<HTMLButtonElement>('[role=tab]');
+        audio.focus();
+        fixture.componentRef.setInput('availableViews', ['scene-viewport', 'game-preview']);
+        fixture.componentRef.setInput('activeViewKind', 'scene-viewport');
+        await fixture.whenStable();
+        expect(document.activeElement).toBe(scene);
+        expect(root.querySelectorAll('[role=tab][tabindex="0"]')).toHaveLength(1);
+        expect(component.activeTabId()).toBe(scene.id);
+    });
+
     it('should create', () => {
         expect(component).toBeTruthy();
     });
