@@ -124,6 +124,39 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(row('parent').getAttribute('aria-selected')).toBe('true');
     });
 
+    it('selects an authored parent or direct children from a row or keyboard context', async () => {
+        await openFolders({...floorFolders, root_membership: {parent: 'floor'}}, ['other'],
+            [...nested, entity('sibling', 'parent')]);
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = 'grandchild';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(contextAction(row('parent'), 'entity.select-parent').disabled).toBe(true);
+        expect(contextAction(row('grandchild'), 'entity.select-children').disabled).toBe(true);
+        expect(root.querySelector('[data-key="sibling"]')).toBeNull();
+
+        contextAction(row('parent'), 'entity.select-children').execute();
+        fixture.componentRef.setInput('selectedKeys', ['child', 'sibling']);
+        await fixture.whenStable();
+        expect(selectedSet).toHaveBeenCalledExactlyOnceWith(['child', 'sibling']);
+        expect(search.value).toBe('');
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('child').id);
+        expect(document.activeElement).toBe(tree());
+
+        contextAction(tree(), 'entity.select-parent').execute();
+        fixture.componentRef.setInput('selectedKeys', ['parent']);
+        await fixture.whenStable();
+        expect(selectedSet).toHaveBeenLastCalledWith(['parent']);
+        expect(tree().getAttribute('aria-activedescendant')).toBe(row('parent').id);
+        expect(requested).not.toHaveBeenCalled();
+
+        const stale = contextAction(tree(), 'entity.select-children');
+        fixture.componentRef.setInput('contextKey', 'another-scene-with-the-same-keys');
+        await fixture.whenStable();
+        stale.execute();
+        expect(selectedSet).toHaveBeenCalledTimes(2);
+    });
+
     it('uses the active descendant for keyboard context actions and rechecks stale hierarchy contexts', async () => {
         await open(nested, ['parent']);
         await keydown('ArrowDown');

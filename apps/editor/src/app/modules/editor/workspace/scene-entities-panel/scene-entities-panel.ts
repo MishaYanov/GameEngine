@@ -208,6 +208,18 @@ export class SceneEntitiesPanel {
         .action(ContextActionBuilder.create<EntityMenuContext>('entity.expand-branch', 'Expand Branch')
             .enabledWhen(context => this.canUseEntityMenu(context) && this.canExpandBranch(entityHierarchyKey(context.key)))
             .run(context => this.expandBranch(entityHierarchyKey(context.key))).build())
+        .submenu('entity.selection', 'Selection', menu => menu
+            .action(ContextActionBuilder.create<EntityMenuContext>('entity.select-parent', 'Select Parent')
+                .enabledWhen(context => this.canUseEntityMenu(context) && !!this.forest().parents.get(context.key))
+                .run(context => {
+                    const parent = this.forest().parents.get(context.key);
+                    if (parent) this.selectRelated([parent]);
+                }).build())
+            .action(ContextActionBuilder.create<EntityMenuContext>('entity.select-children', 'Select Children')
+                .enabledWhen(context => this.canUseEntityMenu(context) && this.forest().children.has(context.key))
+                .run(context => this.selectRelated(
+                    this.forest().children.get(context.key)?.map(child => child.key) ?? [],
+                )).build()))
         .separator()
         .submenu('entity.parenting', 'Parenting', menu => menu
             .action(ContextActionBuilder.create<EntityMenuContext>('entity.set-parent', 'Make Child Of…')
@@ -731,6 +743,15 @@ export class SceneEntitiesPanel {
     private selectSingle(key: EntityKey): void {
         this.selectionAnchor = key;
         this.selectionRequested.emit(key);
+    }
+
+    private selectRelated(keys: readonly EntityKey[]): void {
+        const primary = keys[0];
+        if (!primary) return;
+        this.cancelParenting();
+        this.revealEntity(primary);
+        this.selectionAnchor = primary;
+        this.selectionSetRequested.emit(keys);
     }
 
     private toggleSelection(key: EntityKey): void {
