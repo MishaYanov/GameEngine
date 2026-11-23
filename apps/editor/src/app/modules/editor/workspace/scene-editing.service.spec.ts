@@ -83,6 +83,7 @@ class EditorBridge {
                     this.snapshot.set({...previous, transaction: command.label});
                     break;
                 case 'set_transforms':
+                    if (previous.transaction === null) this.history.push(previous.document);
                     this.snapshot.set({
                         ...previous, dirty: true,
                         document: {...previous.document, entities: previous.document.entities.map(entity => {
@@ -184,6 +185,28 @@ describe('SceneEditingService', () => {
         viewportState.set({...state, gesture: null});
         expect(editing.entity()?.transform.position).toEqual([0, 0, 0]);
         expect(bridge.execute).not.toHaveBeenCalled();
+    });
+
+    it('resets the local transform in one undoable edit without changing a sibling or recording a no-op', async () => {
+        bridge.setVector('position', [8, 2, -3]);
+        bridge.setVector('rotation', [1, 2, 3]);
+        bridge.setVector('scale', [2, 3, 4]);
+        const previous = bridge.snapshot().document;
+
+        await editing.resetTransform();
+        await editing.resetTransform();
+
+        expect(bridge.commands).toEqual([{
+            type: 'set_transforms', space: 'local', snap: false,
+            edits: [{key: 'left', transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]}}],
+        }]);
+        expect(bridge.history).toEqual([previous]);
+        expect(bridge.snapshot().document.entities[1]).toBe(previous.entities[1]);
+        expect(editing.entity()).toEqual({
+            ...previous.entities[0], transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+        });
+        bridge.snapshot.update(snapshot => ({...snapshot, mode: 'play'}));
+        expect(await editing.resetTransform()).toBe(false);
     });
 
     it('adds, changes and removes collider shapes as atomic edits preserving offsets', async () => {

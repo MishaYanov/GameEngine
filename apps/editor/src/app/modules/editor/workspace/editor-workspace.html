@@ -175,6 +175,7 @@
                 (editStarted)="sceneEditing.begin($event)"
                 (nameChanged)="sceneEditing.rename($event)"
                 (transformChanged)="sceneEditing.transform($event)"
+                (transformResetRequested)="sceneEditing.resetTransform()"
                 (colliderChanged)="sceneEditing.collider($event)"
                 (colliderInvalid)="sceneEditing.invalidateCollider()"
                 (colliderShapeChanged)="sceneEditing.replaceCollider($event)"

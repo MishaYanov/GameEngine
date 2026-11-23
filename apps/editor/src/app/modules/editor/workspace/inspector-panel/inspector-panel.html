@@ -77,6 +77,8 @@
                             (editCommitted)="editCommitted.emit()"
                             (editCancelled)="editCancelled.emit()"
                     />
+                    <button class="reset-transform" type="button" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit()">Reset Transform</button>
                 </section>
                 @if (selected.component_views !== undefined) {
                     <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>

@@ -78,6 +78,10 @@ dd {
   border-top: var(--border-width) solid var(--color-input-edge);
 }
 
+.reset-transform {
+  align-self: flex-start;
+}
+
 h3 {
   display: flex;
   justify-content: space-between;

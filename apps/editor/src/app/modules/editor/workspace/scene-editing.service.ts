@@ -5,6 +5,7 @@ import {
     type EditorCommand,
     type EntityKey,
     type SceneEntity,
+    type Transform,
     type Vec3
 } from '../../../core/editor/editor.models';
 import {EditorService} from '../../../core/editor/editor.service';
@@ -176,6 +177,24 @@ export class SceneEditingService {
             key: edit.entity.key,
             transform: edit.entity.transform
         }], 'local'));
+    }
+
+    resetTransform(): Promise<boolean> {
+        const context = this.editor.snapshot();
+        const generation = this.editor.workspaceGeneration();
+        const key = context?.selection[0];
+        if (!context || !key || !this.editable()) return Promise.resolve(false);
+        const transform: Transform = {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]};
+        return this.withCommittedEdit(async () => {
+            const snapshot = this.editor.snapshot();
+            if (this.editor.workspaceGeneration() !== generation || snapshot?.active_scene_id !== context.active_scene_id ||
+                snapshot.mode !== 'edit' || snapshot.transaction !== null || snapshot.selection[0] !== key) return;
+            const entity = snapshot.document.entities.find(candidate => candidate.key === key);
+            if (!entity || (['position', 'rotation', 'scale'] as const).every(field =>
+                entity.transform[field].every((value, axis) => value === transform[field][axis]))) return;
+            await this.execute(CommandBuilder.transforms([{key, transform}], 'local'), generation);
+            this.errorState.set(null);
+        });
     }
 
     /** Finish queued preview updates before Save, Play, Undo, or selection changes. */
