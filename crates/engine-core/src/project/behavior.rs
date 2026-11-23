@@ -201,6 +201,9 @@ impl ProjectData {
 				return Err("Escape is reserved for leaving game input".into());
 			}
 		}
+		if let Some(physics_layers) = &self.physics_layers {
+			physics_layers.validate()?;
+		}
 		if let Some(id) = &self.gameplay_module {
 			let mut bytes = id.bytes();
 			let valid = id.len() <= 32

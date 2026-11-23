@@ -1,6 +1,7 @@
 //! Authored player configuration. Behavior targets use persistent scene keys;
 //! no engine policy depends on demo roles, keyboard mappings, or editor layout.
 mod behavior;
+mod physics_layers;
 use crate::project_format::SizeBudget;
 pub use behavior::{
 	BehaviorDefinition, BehaviorSettings, BehaviorSpace, BehaviorSpec, ResolvedBehavior,
@@ -8,6 +9,7 @@ pub use behavior::{
 };
 use std::collections::{HashMap, HashSet};
 
+pub use physics_layers::{COLLISION_LAYER_COUNT, PhysicsLayer, PhysicsLayers};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -76,6 +78,9 @@ pub struct ProjectData {
 	pub behavior_definitions: Vec<BehaviorDefinition>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub input_profile: Option<InputProfile>,
+	/// An optional v3 extension. Omission preserves the legacy all-allowed pair policy.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub physics_layers: Option<PhysicsLayers>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub gameplay_module: Option<String>,
 	/// Native modules own the typed schema. Core bounds the generic payload.
@@ -123,6 +128,7 @@ impl ProjectData {
 			behaviors: Vec::new(),
 			behavior_definitions: Vec::new(),
 			input_profile: None,
+			physics_layers: None,
 			gameplay_module: None,
 			gameplay_settings: None,
 		};

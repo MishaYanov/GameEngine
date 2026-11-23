@@ -32,6 +32,9 @@ impl ProjectData {
 			if fields.get("input_profile").is_some() {
 				return Err("An authored input profile requires project schema version 3".into());
 			}
+			if fields.get("physics_layers").is_some() {
+				return Err("Physics layers require project schema version 3".into());
+			}
 			if fields.get("gameplay_module").is_some() {
 				return Err("gameplay_module requires project schema version 3".into());
 			}
