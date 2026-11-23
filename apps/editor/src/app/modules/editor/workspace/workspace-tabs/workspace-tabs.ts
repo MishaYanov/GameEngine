@@ -1,4 +1,4 @@
-import {Component, computed, ElementRef, input, output, viewChildren,} from '@angular/core';
+import {Component, computed, ElementRef, input, output, signal, viewChildren} from '@angular/core';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
 import {EditorIcon, type EditorIconName,} from '../../../../shared/icons/editor-icon';
 
@@ -45,9 +45,12 @@ export class WorkspaceTabs {
         })),
     );
     readonly panelId = `workspace-panel-${nextWorkspaceTabsId++}`;
-    protected readonly focusableTab = computed(() =>
-        this.tabs().find(tab => tab.active)?.kind ?? WORKSPACE_TABS[0]?.kind,
-    );
+    private readonly focusedTab = signal<WorkspaceViewKind | null>(null);
+    protected readonly focusableTab = computed(() => {
+        const tabs = this.tabs();
+        const focused = this.focusedTab();
+        return tabs.find(tab => tab.kind === focused)?.kind ?? tabs.find(tab => tab.active)?.kind ?? tabs[0]?.kind;
+    });
     private readonly tabButtons =
         viewChildren<ElementRef<HTMLButtonElement>>('tabButton');
 
@@ -57,6 +60,16 @@ export class WorkspaceTabs {
 
     focusTab(kind: WorkspaceViewKind): void {
         this.tabButtons().find(button => button.nativeElement.id === this.buttonId(kind))?.nativeElement.focus();
+    }
+
+    protected onTabFocus(kind: WorkspaceViewKind): void {
+        this.focusedTab.set(kind);
+    }
+
+    protected onTabListFocusOut(event: FocusEvent): void {
+        if (!this.tabButtons().some(button => button.nativeElement === event.relatedTarget)) {
+            this.focusedTab.set(null);
+        }
     }
 
     protected selectView(kind: WorkspaceViewKind): void {
@@ -72,6 +85,12 @@ export class WorkspaceTabs {
         currentKind: WorkspaceViewKind,
     ): void {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            if (!event.repeat) this.selectView(currentKind);
+            return;
+        }
 
         const available = this.tabs();
         const currentIndex = available.findIndex(tab => tab.kind === currentKind);
@@ -106,8 +125,6 @@ export class WorkspaceTabs {
         if (!next) return;
 
         event.preventDefault();
-        this.selectView(next.kind);
-
         this.focusTab(next.kind);
     }
 }

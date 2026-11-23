@@ -1,9 +1,10 @@
 <nav aria-label="Workspace views" class="workspace-tabs">
-    <div aria-label="Workspace views" class="tabs" role="tablist">
+    <div (focusout)="onTabListFocusOut($event)" aria-label="Workspace views" class="tabs" role="tablist">
         @for (tab of tabs(); track tab.kind) {
             <button
                 #tabButton
                 (click)="selectView(tab.kind)"
+                (focus)="onTabFocus(tab.kind)"
                 (keydown)="onTabKeydown($event, tab.kind)"
                 [attr.aria-controls]="panelId"
                 [attr.aria-selected]="tab.active"
