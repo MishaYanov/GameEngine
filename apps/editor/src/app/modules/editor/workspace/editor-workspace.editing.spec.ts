@@ -20,6 +20,7 @@ import type {
     ViewportStatus
 } from '../../../core/editor/editor.models';
 import type {ComponentRecord} from '../../../core/editor/editor-components';
+import type {SceneIssue} from '../../../core/editor/scene-verification.models';
 import type {CharacterControllerSettings} from '../../../core/editor/character-controller.models';
 import type {PlayerControllerSettings} from '../../../core/editor/player-controller.models';
 import type {InputActionMap, InputActionsAsset, InputActionsCapture, InputActionsDocument} from '../../../core/game-input/input-actions.models';
@@ -208,6 +209,7 @@ describe('Workspace live editing flow', () => {
     let inputActions: Map<string, InputActionsDocument>;
     let animatorSupported: boolean;
     let animators: Map<string, AnimatorDocument>;
+    let verificationIssues: readonly SceneIssue[] | null;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -245,6 +247,7 @@ describe('Workspace live editing flow', () => {
         inputActions = new Map();
         animatorSupported = false;
         animators = new Map();
+        verificationIssues = null;
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -270,6 +273,7 @@ describe('Workspace live editing flow', () => {
                 gameplay_modules: [gameplayModule],
                 input_action_assets: inputActionsSupported,
                 animator_assets: animatorSupported,
+                scene_verification_supported: verificationIssues !== null,
             };
             if (operation === 'editor_open_project') {
                 nativeState = {...initialSnapshot(), revision: nativeState.revision + 1,
@@ -290,6 +294,15 @@ describe('Workspace live editing flow', () => {
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
+            if (operation === 'editor_check_scenes') return {
+                generation: viewportEditorState.workspace_generation,
+                revision: nativeState.revision,
+                active_scene_id: nativeState.active_scene_id,
+                scenes: nativeState.scenes.map(scene => ({
+                    id: scene.id, content_stamp: '0000000000000000-1111111111111111', checked: true,
+                })),
+                issues: verificationIssues ?? [],
+            };
             if (operation === 'editor_assets') return assets;
             if (operation === 'editor_animation_clips') return [authoredClip.asset];
             if (operation === 'editor_open_authored_clip') return authoredClip;
@@ -640,7 +653,8 @@ describe('Workspace live editing flow', () => {
                     break;
                 default: throw new Error(`Unexpected command: ${command.type}`);
             }
-            nativeState = {...nativeState, revision: nativeState.revision + 1, scene_revision: nativeState.scene_revision + 1};
+            nativeState = {...nativeState, revision: nativeState.revision + 1,
+                scene_revision: nativeState.scene_revision + (command.type === 'select' ? 0 : 1)};
             return {
                 kind: 'snapshot', snapshot: structuredClone(nativeState),
                 receipt: {
@@ -1101,6 +1115,60 @@ describe('Workspace live editing flow', () => {
         expect(root.querySelector('editor-problems-panel dialog[open]')).toBeNull();
         focusedRole();
         expect(commands).toEqual([]);
+    });
+
+    it('reveals a current dependency owner in the Inspector from Check Scenes', async () => {
+        verificationIssues = [{
+            scene_id: 'main', scope: 'scene', role: null, suggestion: null, message: 'The panorama is unavailable.',
+            dependency: {
+                code: 'sky_panorama_missing', severity: 'error', owner: {key: 'robot', name: 'Robot'},
+                target: {path: 'sky/overcast.png'}, open: {kind: 'inspector'},
+            },
+        }];
+        await editor.loadCapabilities();
+        expect(fixture.componentInstance.openSceneInformation()).toBe(true);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const modal = () => root.querySelector('editor-scene-actions dialog[open]');
+        const check = Array.from(modal()?.querySelectorAll('button') ?? []).find(button =>
+            button.textContent?.trim() === 'Check Scenes');
+        expect(check).toBeDefined();
+        check?.click();
+        await fixture.whenStable();
+        const inspect = modal()?.querySelector<HTMLButtonElement>('button[aria-label="Inspect owner Robot"]');
+        expect(inspect).toBeDefined();
+        inspect?.click();
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['robot']));
+        await fixture.whenStable();
+        expect(modal()).toBeNull();
+        expect(document.activeElement).toBe(root.querySelector('[data-reference-entity]'));
+    });
+
+    it('opens the Authored Clips library for an audio marker dependency without an imported Animation', async () => {
+        verificationIssues = [{
+            scene_id: 'main', scope: 'scene', role: null, suggestion: null, message: 'The contact marker is missing.',
+            dependency: {
+                code: 'audio_marker_missing', severity: 'error', owner: {key: 'robot', name: 'Robot'},
+                target: {path: 'animations/bell.clip.json'}, open: {kind: 'animation'},
+            },
+        }];
+        await editor.loadCapabilities();
+        expect(fixture.componentInstance.openSceneInformation()).toBe(true);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const button = (label: string) => Array.from(root.querySelectorAll('button')).find(item => item.textContent?.trim() === label);
+        expect(button('Check Scenes')).toBeDefined();
+        button('Check Scenes')?.click();
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(button('Open in Animation')?.disabled).toBe(false);
+        });
+        button('Open in Animation')?.click();
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(editor.selection()).toEqual(['robot']);
+            expect(button('Authored Clips')?.getAttribute('aria-pressed')).toBe('true');
+        });
     });
 
     it('opens the palette from the hierarchy shortcut and dispatches Save Scene through the existing toolbar', async () => {

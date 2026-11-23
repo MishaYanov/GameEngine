@@ -89,7 +89,7 @@ describe('Interactable Inspector', () => {
         panel.fixture.componentRef.setInput('interactablePinned', true);
         await panel.fixture.whenStable();
         expect(panel.host.textContent).toContain('1.25 m');
-        expect(panel.host.textContent).toContain('Edit the prefab source');
+        expect(panel.host.textContent).toContain('Edit the Prop source');
         expect(panel.host.querySelector('[aria-label="Edit Interactable"]')).toBeNull();
         expect(panel.button('Add Component').disabled).toBe(true);
     });

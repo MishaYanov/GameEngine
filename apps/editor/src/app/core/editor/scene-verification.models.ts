@@ -1,4 +1,5 @@
 import type {EntityKey, SceneId} from './editor.models';
+import {validInputActionsId} from '../game-input/input-actions.models';
 
 export type SceneIssueScope = 'intro' | 'arena' | 'scene' | 'project';
 
@@ -8,6 +9,36 @@ export interface SceneIssue {
     readonly message: string;
     readonly role: string | null;
     readonly suggestion: { readonly entity_key: EntityKey; readonly entity_name: string } | null;
+    readonly dependency?: SceneDependencyProblem | null;
+}
+
+export interface SceneDependencyOwner {
+    readonly key: EntityKey;
+    readonly name: string;
+    readonly component_id?: string | null;
+}
+
+export type SceneDependencyAction =
+    | {readonly kind: 'inspector'}
+    | {readonly kind: 'prop'; readonly key: EntityKey}
+    | {readonly kind: 'animation'; readonly key?: EntityKey | null}
+    | {readonly kind: 'animator' | 'controls_graph'; readonly asset_id: string};
+
+export interface SceneDependencyProblem {
+    readonly code: string;
+    readonly severity: 'warning' | 'error';
+    readonly owner?: SceneDependencyOwner | null;
+    readonly target?: {readonly asset_id?: string | null; readonly path?: string | null; readonly key?: EntityKey | null} | null;
+    readonly open?: SceneDependencyAction | null;
+}
+
+export interface SceneDependencyRequest {
+    readonly scene: SceneId;
+    readonly generation: number;
+    readonly nativeGeneration: number;
+    readonly revision: number;
+    readonly owner: SceneDependencyOwner;
+    readonly action: SceneDependencyAction;
 }
 
 export interface CheckedScene {
@@ -42,13 +73,45 @@ function validScene(value: unknown): value is CheckedScene {
 }
 
 function validIssue(value: unknown, ids: ReadonlySet<SceneId>): value is SceneIssue {
-    if (!record(value) || !text(value['message'])) return false;
+    if (!record(value) || !text(value['message']) ||
+        value['dependency'] != null && !validDependency(value['dependency'])) return false;
     const {scope, scene_id: sceneId, role, suggestion} = value;
     if (scope === 'project') return sceneId === null && role === null && suggestion === null;
     if (!(scope === 'intro' || scope === 'arena' || scope === 'scene') ||
         !text(sceneId) || !ids.has(sceneId) || !(role === null || text(role))) return false;
     return suggestion === null || (text(role) && record(suggestion) &&
         text(suggestion['entity_key']) && text(suggestion['entity_name']));
+}
+
+function entityKey(value: unknown): value is EntityKey {
+    return text(value) && value.length <= 1024 && !/\s/.test(value);
+}
+
+function projectRelativePath(value: unknown): boolean {
+    return text(value) && value.length <= 1024 && !/[:\\\p{Cc}]/u.test(value) &&
+        value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+function validDependency(value: unknown): value is SceneDependencyProblem {
+    if (!record(value) || !text(value['code']) || !/^[a-z][a-z0-9_-]{0,63}$/.test(value['code']) ||
+        value['severity'] !== 'warning' && value['severity'] !== 'error') return false;
+    const {owner, target, open} = value;
+    if (owner != null && (!record(owner) || !entityKey(owner['key']) || !text(owner['name']) ||
+        owner['name'].length > 1024 || owner['component_id'] != null &&
+        (!text(owner['component_id']) || !/^[A-Za-z0-9_-]{1,128}$/.test(owner['component_id'])))) return false;
+    if (target != null && (!record(target) || target['path'] != null && !projectRelativePath(target['path']) ||
+        target['asset_id'] != null && !validInputActionsId(target['asset_id']) ||
+        target['key'] != null && !entityKey(target['key']))) return false;
+    if (open == null) return true;
+    if (owner == null || !record(open)) return false;
+    switch (open['kind']) {
+        case 'inspector': return true;
+        case 'prop': return entityKey(open['key']);
+        case 'animation': return open['key'] == null || entityKey(open['key']);
+        case 'animator':
+        case 'controls_graph': return validInputActionsId(open['asset_id']);
+        default: return false;
+    }
 }
 
 export function validSceneVerification(value: unknown): value is SceneVerificationReport {

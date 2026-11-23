@@ -50,7 +50,10 @@ impl Closure<'_> {
 					.ok_or("Animation Clip requires a registered owning Prop")?
 					.path
 					.clone();
-				let bytes = self.file(Path::new(&path))?;
+				let bytes = match self.pinned_clip_sources.get(asset_id) {
+					Some(bytes) => bytes.clone(),
+					None => self.file(Path::new(&path))?,
+				};
 				let prop = PrefabData::from_json(
 					std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,
 				)?;

@@ -430,6 +430,25 @@ mod prefab_dependencies {
 			"live source contents are not read for a pinned instance"
 		);
 		fs::remove_file(source.join("prefabs/source.json")).unwrap();
+		let authored = session.authored_document();
+		let warnings = crate::inspect_scene_dependencies(
+			&project,
+			&project.startup_scene_id,
+			&authored,
+			&source,
+		)
+		.unwrap();
+		assert_eq!(warnings.len(), 1);
+		let warning = &warnings[0];
+		assert_eq!(warning.code, "prop_editing_source_unavailable");
+		assert_eq!(warning.severity, crate::DependencySeverity::Warning);
+		assert_eq!(
+			warning.target.as_ref().unwrap().path.as_deref(),
+			Some("prefabs/source.json")
+		);
+		assert!(matches!(&warning.open,
+			Some(crate::DependencyOpen::Prop {key}) if key == &warning.owner.as_ref().unwrap().key));
+
 		let prepared = prepare_project(&project, &source).unwrap();
 		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
 		validate_export_snapshot(&staged, None).unwrap();
@@ -453,6 +472,15 @@ mod prefab_dependencies {
 		assert_eq!(catalog.assets.len(), 1);
 		let second = fixture.0.join("second");
 		fs::create_dir(&second).unwrap();
+		let unchanged = stage_prepared_project(&prepared, second.to_str().unwrap()).unwrap();
+		assert!(
+			prepare_assets(&exported).unwrap()
+				== prepare_assets(&unchanged.path().join("assets")).unwrap(),
+			"identical dependencies and digests"
+		);
+		let third = fixture.0.join("third");
+		fs::create_dir(&third).unwrap();
+
 		let mut changed = (*session.authored_document()).clone();
 		changed
 			.entities
@@ -461,8 +489,8 @@ mod prefab_dependencies {
 			.unwrap()
 			.name = "Changed anchor".into();
 		fs::write(source.join("scenes/main.json"), changed.to_json().unwrap()).unwrap();
-		assert!(stage_prepared_project(&prepared, second.to_str().unwrap()).is_err());
-		assert!(!second.join(&project.name).exists());
+		assert!(stage_prepared_project(&prepared, third.to_str().unwrap()).is_err());
+		assert!(!third.join(&project.name).exists());
 	}
 
 	#[test]

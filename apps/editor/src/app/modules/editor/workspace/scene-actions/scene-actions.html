@@ -144,7 +144,7 @@
                 </fieldset>
             }
             @if (editor.capabilities()?.scene_verification_supported) {
-                <editor-scene-verification (inspectRole)="revealBinding($event)" [available]="available()"
+                <editor-scene-verification (inspectRole)="revealBinding($event)" (inspectDependency)="requestRepair($event)" [available]="available()"
                                            [open]="informationOpen()"/>
             }
             @if (sceneSwitch.error() ?? error() ?? warmingError(); as failure) {

@@ -15,7 +15,7 @@ import {
 import type {EditorSnapshot, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {
-    SceneIssue, SceneIssueScope, SceneVerificationReport,
+    SceneDependencyAction, SceneDependencyRequest, SceneIssue, SceneIssueScope, SceneVerificationReport,
 } from '../../../../core/editor/scene-verification.models';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {SceneEditingService} from '../scene-editing.service';
@@ -48,6 +48,7 @@ export class SceneVerification {
     readonly open = input.required<boolean>();
     readonly available = input.required<boolean>();
     readonly inspectRole = output<string>();
+    readonly inspectDependency = output<SceneDependencyRequest>();
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService);
     private readonly sceneSwitch = inject(SceneSwitchService);
@@ -87,7 +88,7 @@ export class SceneVerification {
     protected readonly actionableOnly = linkedSignal({source: this.generation, computation: () => false});
     protected readonly visible = computed(() => this.report()?.issues.filter(issue =>
         (this.scope() === 'all' || issue.scope === this.scope()) &&
-        (!this.actionableOnly() || issue.role !== null),
+        (!this.actionableOnly() || issue.role !== null || issue.dependency?.owner != null),
     ) ?? []);
     protected readonly pendingSuggestion = computed(() => {
         const issue = this.preview();
@@ -107,15 +108,21 @@ export class SceneVerification {
     private readonly sceneIssues = computed(() =>
         new Set(this.report()?.issues.flatMap(issue => issue.scene_id === null ? [] : [issue.scene_id])),
     );
+    private readonly sceneErrors = computed(() => new Set(this.report()?.issues.flatMap(issue =>
+        issue.scene_id === null || issue.dependency?.severity === 'warning' ? [] : [issue.scene_id],
+    )));
     protected readonly summary = computed(() => {
         const report = this.report();
         if (!report) return null;
         const scenes = report.scenes.map(scene => {
             const visit = this.visits().get(scene.id);
             const checked = scene.checked && visit?.stamp === scene.content_stamp;
-            const hasIssues = this.sceneIssues().has(scene.id);
-            const passed = checked && !hasIssues && visit.passed;
-            const result = hasIssues ? 'Issues' : passed ? 'Passed' : scene.checked ? 'Needs visit' : 'Blocked';
+            const errors = this.sceneErrors().has(scene.id);
+            const warnings = !errors && this.sceneIssues().has(scene.id);
+            const passed = checked && !errors && visit.passed;
+            const result = errors ? 'Issues' :
+                passed ? (warnings ? 'Passed with warnings' : 'Passed') :
+                    warnings ? 'Warnings' : scene.checked ? 'Needs visit' : 'Blocked';
             return {id: scene.id, result, passed};
         });
         const passed = scenes.filter(scene => scene.passed).length;
@@ -147,7 +154,8 @@ export class SceneVerification {
             if (active) {
                 visits.set(active.id, {
                     stamp: active.content_stamp,
-                    passed: !report.issues.some(issue => issue.scene_id === active.id),
+                    passed: !report.issues.some(issue =>
+                        issue.scene_id === active.id && issue.dependency?.severity !== 'warning'),
                 });
             }
             this.visits.set(visits);
@@ -183,6 +191,28 @@ export class SceneVerification {
     protected inspect(issue: SceneIssue): void {
         if (!this.canCheck() || issue.scene_id !== this.activeScene() || !issue.role || !this.visible().includes(issue)) return;
         this.inspectRole.emit(issue.role);
+    }
+
+    protected repair(issue: SceneIssue, action: SceneDependencyAction): void {
+        const accepted = this.accepted();
+        const owner = issue.dependency?.owner;
+        if (!accepted || !owner || !this.canCheck() || !issue.scene_id ||
+            issue.scene_id !== this.activeScene() || !this.visible().includes(issue) ||
+            !this.matches(accepted, this.editor.snapshot())) return;
+        this.inspectDependency.emit({
+            action, owner, scene: issue.scene_id, generation: accepted.owner,
+            nativeGeneration: accepted.report.generation, revision: accepted.report.revision,
+        });
+    }
+
+    protected repairLabel(action: SceneDependencyAction): string {
+        switch (action.kind) {
+            case 'inspector': return 'Inspect Owner';
+            case 'prop': return 'Open in Prop';
+            case 'animation': return 'Open in Animation';
+            case 'animator': return 'Open in Animator';
+            case 'controls_graph': return 'Open in Controls Graph';
+        }
     }
 
     protected review(issue: SceneIssue): void {
@@ -238,7 +268,7 @@ export class SceneVerification {
     }
 
     protected issueKey(issue: SceneIssue): string {
-        return JSON.stringify([issue.scene_id, issue.role, issue.message]);
+        return JSON.stringify([issue.scene_id, issue.role, issue.message, issue.dependency]);
     }
 
     private matches(accepted: AcceptedReport, snapshot: EditorSnapshot | null): boolean {

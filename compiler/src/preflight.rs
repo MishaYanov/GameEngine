@@ -104,8 +104,6 @@ fn validate_catalog_snapshot(
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result = validate_catalog_scene(scene_targets, root, entry, &packaged, generated)
 			.and_then(|scene| {
-				bridge::controls_graph::prepare_scene(root, &project, &scene, None)
-					.map_err(|cause| scene_error(entry, cause))?;
 				for actor in &scene.entities {
 					if let Some(component) = &actor.animator {
 						bridge::animator_graph::prepare_actor(
@@ -143,7 +141,20 @@ fn validate_catalog_snapshot(
 				game.set_animation_resolver(Arc::new(move |scene| {
 					bridge::animation_asset::prepare_scene(&animation_root, scene)
 				}))
-				.map_err(|cause| scene_error(entry, cause))
+				.map_err(|cause| scene_error(entry, cause))?;
+				let input_root = root.to_path_buf();
+				game.set_input_actions_resolver(Arc::new(move |scene| {
+					bridge::input_actions::load_scene(&input_root, scene)
+				}))
+				.map_err(|cause| scene_error(entry, cause))?;
+				let controls_root = root.to_path_buf();
+				game.set_control_graph_resolver(Arc::new(move |project, scene, input| {
+					bridge::controls_graph::prepare_scene(&controls_root, project, scene, input)
+				}))
+				.map_err(|cause| scene_error(entry, cause))?;
+				game.active()
+					.require_control_graph_ready()
+					.map_err(|cause| scene_error(entry, cause))
 			});
 		if let Err(error) = result {
 			append_scene_error(&mut report, &error, &mut truncated);

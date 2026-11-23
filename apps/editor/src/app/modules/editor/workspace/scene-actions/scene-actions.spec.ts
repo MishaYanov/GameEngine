@@ -4,7 +4,7 @@ import {vi} from 'vitest';
 import axe from 'axe-core';
 import type {EditorSnapshot, GameplayModuleDescriptor, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
-import type {SceneIssue, SceneVerificationReport} from '../../../../core/editor/scene-verification.models';
+import {type SceneIssue, type SceneVerificationReport, validSceneVerification} from '../../../../core/editor/scene-verification.models';
 import {EditorSettingsService} from '../../../../core/editor/settings/editor-settings.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {EditorWarmingMode, SceneWarmingResult} from '../../../../core/editor/viewport-editor.models';
@@ -929,6 +929,14 @@ const arenaIssue: SceneIssue = {
 const projectIssue: SceneIssue = {
     scope: 'project', scene_id: null, message: 'Check project settings.', role: null, suggestion: null,
 };
+const pinnedPropIssue: SceneIssue = {
+    scope: 'scene', scene_id: 'main', message: 'The editing source is missing. The saved Prop is complete.',
+    role: null, suggestion: null,
+    dependency: {
+        code: 'missing_prop_source', severity: 'warning', owner: {key: 'bell', name: 'Bell Prop'},
+        target: {path: 'props/bell.json'}, open: {kind: 'prop', key: 'gate'},
+    },
+};
 
 function verification(revision: number, sceneId: string, issues: readonly SceneIssue[] = []): SceneVerificationReport {
     return {
@@ -954,6 +962,56 @@ async function createVerification(initial = snapshot(), modules = [sampleModule]
 }
 
 describe('Scene Information verification', () => {
+    it('shows pinned repair warnings and opens only a current owning scene', async () => {
+        const {button, check, checkScenes, execute, fixture, openDialog, section} = await createVerification();
+        const repair = vi.fn();
+        fixture.componentInstance.repairRequested.subscribe(repair);
+        checkScenes.mockResolvedValueOnce(verification(1, 'main', [
+            pinnedPropIssue, {
+                ...pinnedPropIssue, scene_id: 'second', message: 'The Prop in the second scene is incomplete.',
+                dependency: {
+                    code: 'missing_prop_member', severity: 'error', owner: {key: 'member', name: 'Nested Member'},
+                    open: {kind: 'prop', key: 'other-root'},
+                },
+            },
+        ]));
+        await check();
+        expect(section.textContent).toContain('main · Passed with warnings');
+        expect(section.textContent).toContain('second · Issues');
+        expect(section.textContent).toContain('Bell Prop');
+        expect(section.textContent).toContain('props/bell.json');
+        const prop = button('Open in Prop');
+        const actions = Array.from(section.querySelectorAll('button')).filter(item => item.textContent?.trim() === 'Open in Prop');
+        expect(actions).toEqual([prop]);
+        prop.click();
+        await fixture.whenStable();
+        expect(repair).toHaveBeenCalledExactlyOnceWith({
+            action: {kind: 'prop', key: 'gate'}, owner: {key: 'bell', name: 'Bell Prop'}, scene: 'main',
+            generation: 1, nativeGeneration: 17, revision: 1,
+        });
+        expect(execute).not.toHaveBeenCalled();
+        expect(openDialog('Scene Information')).toBeUndefined();
+    });
+
+    it('rejects malformed dependency locations and actions from stale reports', async () => {
+        const wrongPath = {
+            ...pinnedPropIssue,
+            dependency: {...pinnedPropIssue.dependency!, target: {path: '../outside.json'}},
+        };
+        expect(validSceneVerification(verification(1, 'main', [wrongPath]))).toBe(false);
+        expect(validSceneVerification(verification(1, 'main', [pinnedPropIssue]))).toBe(true);
+        const {button, check, checkScenes, current, fixture} = await createVerification();
+        const repair = vi.fn();
+        fixture.componentInstance.repairRequested.subscribe(repair);
+        checkScenes.mockResolvedValueOnce(verification(1, 'main', [pinnedPropIssue]));
+        await check();
+        const pending = button('Open in Prop');
+        current.update(frame => ({...frame, revision: frame.revision + 1}));
+        pending.click();
+        await fixture.whenStable();
+        expect(repair).not.toHaveBeenCalled();
+    });
+
     it('filters issues without changing the report summary or issuing native commands', async () => {
         const {button, check, checkScenes, execute, fixture, section, switchScene} = await createVerification();
         checkScenes.mockResolvedValue(verification(1, 'main', [reviewIssue, manualIssue, arenaIssue, projectIssue]));

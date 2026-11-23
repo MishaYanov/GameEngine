@@ -141,6 +141,12 @@ export class AnimationWorkspaceService {
         if (value === 'scene' || value === 'prop') this.scope.set(value);
     }
 
+    openAuthored(): void {
+        if (this.editor.playing()) return;
+        this.library.set('authored');
+        this.views.selectView('animation-workspace');
+    }
+
     chooseTarget(key: string): void {
         if (this.options().some(option => option.key === key)) this.targetKey.set(key);
     }

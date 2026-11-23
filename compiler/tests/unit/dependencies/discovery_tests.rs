@@ -120,3 +120,30 @@ fn recognized_invalid_legacy_assemblies_are_reported_instead_of_silently_omitted
 		.unwrap();
 	assert!(error.contains("invalid-assembly.json"), "{error}");
 }
+
+#[test]
+fn camera_free_scenes_for_another_manifest_are_excluded_from_loose_prefab_discovery() {
+	let fixture = Fixture::new();
+	let scene = serde_json::json!({
+		"schema_version": engine_core::scene_data::CURRENT_SCHEMA_VERSION,
+		"bindings": {},
+		"entities": [],
+	});
+	let bytes = serde_json::to_vec(&scene).unwrap();
+	let other = fixture.root.join("scenes/other-project.json");
+	fs::write(&other, &bytes).unwrap();
+	let prepared = prepare_project(&fixture.project, &fixture.root).unwrap();
+	let staged = stage_prepared_project(&prepared, fixture.parent.to_str().unwrap()).unwrap();
+	assert!(
+		!staged
+			.path()
+			.join("assets/scenes/other-project.json")
+			.exists()
+	);
+	fs::create_dir(fixture.root.join("prefabs")).unwrap();
+	fs::write(fixture.root.join("prefabs/misplaced-scene.json"), &bytes).unwrap();
+	let error = prepare_project(&fixture.project, &fixture.root)
+		.err()
+		.unwrap();
+	assert!(error.contains("misplaced-scene.json"), "{error}");
+}

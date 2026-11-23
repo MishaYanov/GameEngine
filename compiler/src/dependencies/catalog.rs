@@ -9,16 +9,47 @@ use super::{
 };
 
 impl Closure<'_> {
+	pub(super) fn record_expected(&mut self, id: &AssetId, kind: AssetKind) -> Result<(), String> {
+		if self
+			.catalog
+			.by_id(id)
+			.is_none_or(|asset| asset.kind != kind)
+		{
+			return Err(format!(
+				"Missing or invalid {kind:?} asset identity {}",
+				id.as_str()
+			));
+		}
+		self.record(id)
+	}
+
 	pub(super) fn record(&mut self, id: &AssetId) -> Result<(), String> {
-		if !self.ids.insert(id.clone()) {
+		if self.ids.contains(id) {
 			return Ok(());
 		}
-		if self.depth == 64 {
+		if let Some(message) = self.asset_failures.get(id) {
+			return Err(message.clone());
+		}
+		if self.asset_stack.contains(id) {
+			return Err(format!(
+				"Cyclic asset dependency at identity {}",
+				id.as_str()
+			));
+		}
+		if self.asset_stack.len() == 64 {
 			return Err("Asset dependency nesting exceeds 64 levels".into());
 		}
-		self.depth += 1;
+		self.asset_stack.insert(id.clone());
 		let result = self.record_contents(id);
-		self.depth -= 1;
+		self.asset_stack.remove(id);
+		match &result {
+			Ok(()) => {
+				self.ids.insert(id.clone());
+			}
+			Err(message) => {
+				self.asset_failures.insert(id.clone(), message.clone());
+			}
+		}
 		result
 	}
 
@@ -28,6 +59,14 @@ impl Closure<'_> {
 			.by_id(id)
 			.ok_or("Unresolved dependency asset identity")?
 			.clone();
+		if let Some(bytes) = self.pinned_clip_sources.get(id).cloned() {
+			let prefab = engine_core::editor::PrefabData::from_json(
+				std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,
+			)?;
+			self.entities(&prefab.expanded_entities()?)?;
+			self.generate(asset.path.into(), bytes)?;
+			return Ok(());
+		}
 		let bytes = self.file_for_kind(Path::new(&asset.path), Some(asset.kind))?;
 		if bytes.len() as u64 != asset.bytes
 			|| format!("{:x}", Sha256::digest(&bytes)) != asset.fingerprint
@@ -102,6 +141,14 @@ impl Closure<'_> {
 		exported.assets.retain(|asset| self.ids.contains(&asset.id));
 		for asset in &mut exported.assets {
 			asset.source_path = None;
+			if self.pinned_clip_sources.contains_key(&asset.id)
+				&& let Some(bytes) = self.generated_files.get(Path::new(&asset.path))
+			{
+				asset.bytes = bytes.len() as u64;
+				asset.fingerprint = format!("{:x}", Sha256::digest(bytes));
+				asset.dependencies.retain(|id| self.ids.contains(id));
+				continue;
+			}
 			if let Ok(path) = checked_asset_path(self.root, Path::new(&asset.path))
 				&& let Ok(relative) = path.strip_prefix(self.root)
 				&& let Some(bytes) = self.generated_files.get(relative)

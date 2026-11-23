@@ -13,7 +13,7 @@
         } @else if (checkedBefore()) {
             Needs check. Check Scenes to refresh the results.
         } @else {
-            Check gameplay setup for all scenes. Visit each scene to verify it while open.
+            Check gameplay setup and asset references for all scenes. Visit each scene to verify it while open.
         }
     </p>
     @if (error(); as failure) {
@@ -54,7 +54,12 @@
         @if (projectIssues().length) {
             <ul aria-label="Project issues" class="issues">
                 @for (issue of projectIssues(); track $index) {
-                    <li>{{ issue.message }}</li>
+                    <li>
+                        @if (issue.dependency; as dependency) {
+                            <strong>{{ dependency.severity === 'warning' ? 'Warning' : 'Error' }}</strong>
+                        }
+                        {{ issue.message }}
+                    </li>
                 }
             </ul>
         }
@@ -64,7 +69,35 @@
                 <ul class="issues">
                     @for (issue of group.issues; track issueKey(issue)) {
                         <li>
+                            @if (issue.dependency; as dependency) {
+                                <strong>{{ dependency.severity === 'warning' ? 'Warning' : 'Error' }}</strong>
+                            }
                             {{ issue.message }}
+                            @if (issue.dependency; as dependency) {
+                                <dl class="dependency">
+                                    @if (dependency.owner; as owner) {
+                                        <dt>Owner</dt>
+                                        <dd>{{ owner.name }} <small>{{ owner.key }}</small></dd>
+                                    }
+                                    @if (dependency.target?.path ?? dependency.target?.asset_id ?? dependency.target?.key; as target) {
+                                        <dt>Reference</dt>
+                                        <dd>{{ target }}</dd>
+                                    }
+                                </dl>
+                                @if (group.id === activeScene() && dependency.owner; as owner) {
+                                    <div class="verification-controls">
+                                        <button type="button" [disabled]="!canCheck()"
+                                                [attr.aria-label]="'Inspect owner ' + owner.name"
+                                                (click)="repair(issue, {kind: 'inspector'})">Inspect Owner</button>
+                                        @if (dependency.open; as action) {
+                                            @if (action.kind !== 'inspector') {
+                                                <button type="button" [disabled]="!canCheck()"
+                                                        (click)="repair(issue, action)">{{ repairLabel(action) }}</button>
+                                            }
+                                        }
+                                    </div>
+                                }
+                            }
                             @if (group.id === activeScene() && issue.role) {
                                 <div class="verification-controls">
                                     <button (click)="inspect(issue)" [disabled]="!canCheck()" type="button">

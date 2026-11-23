@@ -6,8 +6,8 @@ use engine_core::{
 	},
 	asset_catalog::{AssetCatalog, AssetId, AssetKind, PersistentAsset},
 	components::NO_MESH_PATH,
-	editor::PrefabData,
-	linked_prefab::PropAddress,
+	editor::{EditorSession, PrefabData},
+	linked_prefab::{LinkedPrefabSource, PropAddress},
 	project::ProjectData,
 	scene_data::{EntityData, SceneData},
 };
@@ -166,6 +166,43 @@ fn packages_registered_clip_with_its_prop_and_rejects_missing_file_or_object() {
 	);
 	assert!(exported.join("lever.json").is_file());
 	assert!(exported.join("props/cube.glb").is_file());
+
+	let mut session = EditorSession::for_project(scene, project.clone()).unwrap();
+	session
+		.instantiate_linked_prefab(
+			LinkedPrefabSource {
+				source_id: prop_id.clone(),
+				path: "lever.json".into(),
+				fingerprint: catalog.by_id(&prop_id).unwrap().fingerprint.clone(),
+				prefab,
+			},
+			[0.0; 3],
+			Default::default(),
+		)
+		.unwrap();
+	let authored = session.authored_document();
+	fs::write(assets.join("room.json"), authored.to_json().unwrap()).unwrap();
+	fs::remove_file(assets.join("lever.json")).unwrap();
+	let issues = compiler::inspect_scene_dependencies(
+		&project,
+		&project.startup_scene_id,
+		&authored,
+		&assets,
+	)
+	.unwrap();
+	assert_eq!(issues.len(), 1);
+	assert_eq!(issues[0].severity, compiler::DependencySeverity::Warning);
+	let repaired = compiler::prepare_project(&project, &assets).unwrap();
+	let another = fixture.0.join("pinned");
+	fs::create_dir(&another).unwrap();
+	let repaired = compiler::stage_prepared_project(&repaired, another.to_str().unwrap()).unwrap();
+	let recovered = repaired.path().join("assets");
+	assert_eq!(
+		fs::read(recovered.join("prefabs/lever-turn.clip.json")).unwrap(),
+		clip_bytes
+	);
+	assert!(recovered.join("lever.json").is_file());
+	assert!(!assets.join("lever.json").exists());
 
 	clip.tracks[0].target = VisualTargetId::Prop {
 		address: PropAddress::Object {

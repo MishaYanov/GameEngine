@@ -1,5 +1,5 @@
 import {
-    afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, signal,
+    afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, output, signal,
     viewChild,
 } from '@angular/core';
 import {disabled, form, FormField, required} from '@angular/forms/signals';
@@ -14,6 +14,7 @@ import {SceneVerification} from './scene-verification';
 import {SceneEnvironmentInspector} from './scene-environment-inspector';
 import {rolesForScene} from '../../../../core/editor/gameplay-modules';
 import type {EditorCommand, SceneId} from '../../../../core/editor/editor.models';
+import type {SceneDependencyRequest} from '../../../../core/editor/scene-verification.models';
 
 interface WarmingContext {
     readonly generation: number;
@@ -30,6 +31,7 @@ interface WarmingContext {
 })
 export class SceneActions {
     readonly opening = input(false);
+    readonly repairRequested = output<SceneDependencyRequest>();
     protected readonly editor = inject(EditorService);
     protected readonly sceneSwitch = inject(SceneSwitchService);
     private readonly editing = inject(SceneEditingService, {optional: true});
@@ -139,6 +141,12 @@ export class SceneActions {
         if (this.opening() || !this.editor.snapshot()) return false;
         this.informationOpen.set(true);
         return true;
+    }
+
+    protected requestRepair(request: SceneDependencyRequest): void {
+        if (!this.informationOpen() || !this.available()) return;
+        this.informationOpen.set(false);
+        this.repairRequested.emit(request);
     }
 
     revealBinding(name: string): void {

@@ -41,6 +41,7 @@ import {CameraSettings} from './game-settings/camera-settings';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
 import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
+import type {SceneDependencyRequest} from '../../../core/editor/scene-verification.models';
 import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
 import {collectSceneReferences, type SceneReference} from './find-usages/scene-references';
@@ -309,6 +310,71 @@ export class EditorWorkspace {
 
     protected revealProblem(problem: EditorProblem): void {
         void this.revealReference(problem.location, problem.field);
+    }
+
+    protected async repairSceneDependency(request: SceneDependencyRequest): Promise<void> {
+        const before = this.editorService.snapshot();
+        const {action, owner} = request;
+        if (!this.canRevealReference() || before?.mode !== 'edit' || before.revision !== request.revision ||
+            !before.document.entities.some(entity => entity.key === owner.key)) return;
+        const current = () => {
+            const snapshot = this.editorService.snapshot();
+            const nativeGeneration = this.viewportEditor.state()?.workspace_generation;
+            return this.editorService.workspaceGeneration() === request.generation &&
+                (nativeGeneration == null || nativeGeneration === request.nativeGeneration) &&
+                snapshot?.mode === 'edit' && snapshot.active_scene_id === request.scene &&
+                snapshot.scene_revision === before.scene_revision;
+        };
+        if (!current() || !await this.reviewProjectNavigation() || !current() ||
+            this.editorService.snapshot()?.revision !== request.revision) return;
+        const inspect = async () => {
+            if (!current()) return;
+            this.workspaceView.selectView('scene-viewport');
+            await this.revealReference({kind: 'entity', key: owner.key, componentId: owner.component_id ?? undefined});
+        };
+        switch (action.kind) {
+            case 'inspector':
+                await inspect();
+                return;
+            case 'prop':
+                if (await this.propWorkspace.openInstance(action.key)) {
+                    if (current()) this.workspaceTabs()?.focusTab('prop-workspace');
+                    return;
+                }
+                break;
+            case 'animation': {
+                const key = action.key ?? owner.key;
+                if (action.key && !before.document.entities.some(entity => entity.key === key && entity.animation?.enabled)) break;
+                await this.sceneEditing.select(key);
+                if (!current() || this.sceneEditing.entity()?.key !== key) return;
+                if (!action.key) {
+                    this.animationPreview.openAuthored();
+                    this.workspaceTabs()?.focusTab('animation-workspace');
+                    return;
+                }
+                this.animationPreview.library.set('imported');
+                this.workspaceView.selectView('animation-workspace');
+                this.animationPreview.chooseScope('scene');
+                this.workspaceTabs()?.focusTab('animation-workspace');
+                return;
+            }
+            case 'animator':
+                if (this.animatorAssets.supported() && await this.animatorWorkspace.open(action.asset_id)) {
+                    if (current()) this.workspaceTabs()?.focusTab('animation-controller');
+                    return;
+                }
+                break;
+            case 'controls_graph':
+                if (!this.controlsGraph.supported()) break;
+                await this.sceneEditing.select(owner.key);
+                if (!current() || this.sceneEditing.entity()?.key !== owner.key) return;
+                if (await this.controlsGraph.open(action.asset_id)) {
+                    if (current()) this.workspaceTabs()?.focusTab('controls-graph');
+                    return;
+                }
+                break;
+        }
+        await inspect();
     }
 
     private async revealReference(location: ProblemLocation, field?: string): Promise<void> {

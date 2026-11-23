@@ -13,6 +13,10 @@ mod export;
 mod preflight;
 mod scaffold;
 
+pub use dependencies::verification::{
+	DependencyOpen, DependencyOwner, DependencyProblem, DependencySeverity, DependencyTarget,
+	inspect_scene_dependencies,
+};
 pub use export::{
 	complete_staged_project, finish_staged_project, install_authored_project,
 	install_prepared_project, install_project_from_manifest, stage_prepared_project,
@@ -169,7 +173,11 @@ fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
 	if let Some(audio) = bridge::project_audio::load(root).map_err(io::Error::other)? {
 		for (name, _) in audio.files().filter(|(name, _)| name.ends_with(".wav")) {
 			let path = checked_asset_path(root, Path::new(name))?;
-			cue_files.insert(path.strip_prefix(root).map_err(io::Error::other)?.to_path_buf());
+			cue_files.insert(
+				path.strip_prefix(root)
+					.map_err(io::Error::other)?
+					.to_path_buf(),
+			);
 		}
 	}
 	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, &cue_files)?;

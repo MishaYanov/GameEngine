@@ -156,7 +156,9 @@ pub(super) fn prefab_paths_excluding(
 		{
 			continue;
 		}
-		if path.file_name().and_then(|name| name.to_str())
+		if path
+			.file_name()
+			.and_then(|name| name.to_str())
 			.is_some_and(|name| name.to_ascii_lowercase().ends_with(".clip.json"))
 		{
 			continue;
@@ -195,6 +197,7 @@ pub(super) fn prefab_paths_excluding(
 					&& value.get("schema_version").is_some()
 					&& value.get("entities").is_some()
 					&& value.get("camera").is_none()
+					&& value.get("bindings").is_none()
 			});
 		if strict_prefab_folder || recognizable {
 			result.push(relative.to_owned());

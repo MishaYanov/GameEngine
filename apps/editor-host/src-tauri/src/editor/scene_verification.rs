@@ -1,5 +1,9 @@
 //! Validate a revision of retained authored scenes through the native Play path.
-use super::{animation_resolver, EditorWorkspace};
+use super::{
+	animation_resolver, animator_resolver, control_graph_resolver, input_actions_resolver,
+	EditorWorkspace,
+};
+use compiler::{inspect_scene_dependencies, DependencyProblem, DependencySeverity};
 use runtime::{
 	game_session::GameSession, project::ProjectData, scene_catalog::SceneId,
 	simulation_session::GameModuleFactory, EntityKey, SceneData,
@@ -12,6 +16,8 @@ use std::{
 	path::PathBuf,
 	sync::{Arc, Mutex, OnceLock},
 };
+
+const MAX_SCENE_ISSUES: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +41,8 @@ pub struct SceneIssue {
 	pub message: String,
 	pub role: Option<String>,
 	pub suggestion: Option<BindingSuggestion>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub dependency: Option<DependencyProblem>,
 }
 
 #[derive(Serialize)]
@@ -160,21 +168,59 @@ impl SceneVerificationInput {
 				message: message.clone(),
 				role: None,
 				suggestion: None,
+				dependency: None,
 			});
 		}
 
+		let mut omitted = false;
 		for (id, document) in &self.scenes {
 			let stamp = format!("{project_stamp}-{}", content_stamp(&**document)?);
 			report.scenes.push(CheckedScene {
 				id: id.clone(),
 				content_stamp: stamp,
-				checked: factory.is_ok(),
+				checked: factory.is_ok() && report.issues.len() < MAX_SCENE_ISSUES,
 			});
+			if report.issues.len() >= MAX_SCENE_ISSUES {
+				omitted = true;
+				continue;
+			}
 			let Ok(factory) = &factory else { continue };
 			let scope = match &route {
 				Some((intro, _)) if intro == id => SceneScope::Intro,
 				Some((_, arena)) if arena == id => SceneScope::Arena,
 				_ => SceneScope::Scene,
+			};
+
+			let dependencies =
+				inspect_scene_dependencies(&self.project, id, document, &self.asset_root);
+			let dependency_errors = match dependencies {
+				Ok(problems) => {
+					let has_errors = problems
+						.iter()
+						.any(|problem| problem.severity == DependencySeverity::Error);
+					report
+						.issues
+						.extend(problems.into_iter().map(|problem| SceneIssue {
+							scope,
+							scene_id: Some(id.clone()),
+							message: problem.message.clone(),
+							role: None,
+							suggestion: None,
+							dependency: Some(problem),
+						}));
+					has_errors
+				}
+				Err(message) => {
+					report.issues.push(SceneIssue {
+						scope,
+						scene_id: Some(id.clone()),
+						message,
+						role: None,
+						suggestion: None,
+						dependency: None,
+					});
+					true
+				}
 			};
 
 			let roles = descriptor.as_ref().and_then(|module| {
@@ -199,9 +245,10 @@ impl SceneVerificationInput {
 					message: format!("Assign the {} role. {}", role.label, role.requirement_hint),
 					role: Some(role.name.clone()),
 					suggestion: self.suggest_binding(id, document, scope, &role.name, factory),
+					dependency: None,
 				});
 			}
-			if missing_roles {
+			if missing_roles || dependency_errors {
 				continue;
 			}
 
@@ -209,7 +256,13 @@ impl SceneVerificationInput {
 				self.open_scene(id, Arc::clone(document), factory)
 					.and_then(|mut game| {
 						game.set_animation_resolver(Arc::clone(&resolver))?;
-						game.active().require_animation_ready()
+						game.set_animator_resolver(animator_resolver(&self.asset_root))?;
+						game.set_input_actions_resolver(input_actions_resolver(&self.asset_root))?;
+						game.set_control_graph_resolver(control_graph_resolver(&self.asset_root))?;
+						game.active().require_animation_ready()?;
+						game.active().require_animators_ready()?;
+						game.active().require_input_actions_ready()?;
+						game.active().require_control_graph_ready()
 					});
 			if let Err(message) = checked {
 				report.issues.push(SceneIssue {
@@ -218,8 +271,20 @@ impl SceneVerificationInput {
 					message,
 					role: None,
 					suggestion: None,
+					dependency: None,
 				});
 			}
+		}
+		if omitted || report.issues.len() > MAX_SCENE_ISSUES {
+			report.issues.truncate(MAX_SCENE_ISSUES);
+			report.issues.push(SceneIssue {
+				scope: SceneScope::Project,
+				scene_id: None,
+				message: "Further scene diagnostics were omitted.".into(),
+				role: None,
+				suggestion: None,
+				dependency: None,
+			});
 		}
 		Ok(report)
 	}

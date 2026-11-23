@@ -12,7 +12,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 mod animation_clip;
 mod catalog;
 mod model;
+mod pins;
 mod prefab;
+
+pub mod verification;
 
 pub(super) use catalog::read_catalog;
 use prefab::prefab_paths_excluding;
@@ -41,14 +44,51 @@ struct Closure<'a> {
     generated_files: BTreeMap<PathBuf, Vec<u8>>,
     generated_bytes: u64,
     linked_sources: HashSet<String>,
+	clip_owners: HashSet<AssetId>,
+	pinned_clip_sources: HashMap<AssetId, Vec<u8>>,
+	pinned_clip_bytes: usize,
     resolved_paths: HashMap<PathBuf, PathBuf>,
     bytes: u64,
-    depth: usize,
+	asset_stack: HashSet<AssetId>,
+	asset_failures: HashMap<AssetId, String>,
     uri_edges: usize,
     #[cfg(test)]
     file_reads: usize,
 }
-impl Closure<'_> {
+impl<'a> Closure<'a> {
+	fn new(project: &'a ProjectData, root: &'a Path, catalog: AssetCatalog) -> Self {
+		let clip_owners = catalog
+			.assets
+			.iter()
+			.filter(|asset| asset.kind == AssetKind::AnimationClip && asset.dependencies.len() == 1)
+			.map(|asset| asset.dependencies[0].clone())
+			.collect();
+		Self {
+			root,
+			project,
+			catalog,
+			files: BTreeMap::new(),
+			ids: HashSet::new(),
+			models: HashMap::new(),
+			animations: HashMap::new(),
+			animation_bytes: 0,
+			prefabs: HashSet::new(),
+			prefab_stack: HashSet::new(),
+			generated_files: BTreeMap::new(),
+			generated_bytes: 0,
+			linked_sources: HashSet::new(),
+			clip_owners,
+			pinned_clip_sources: HashMap::new(),
+			pinned_clip_bytes: 0,
+			resolved_paths: HashMap::new(),
+			bytes: 0,
+			asset_stack: HashSet::new(),
+			asset_failures: HashMap::new(),
+			uri_edges: 0,
+			#[cfg(test)]
+			file_reads: 0,
+		}
+	}
     fn generate(&mut self, path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
         let prior = self
             .generated_files
@@ -239,13 +279,22 @@ impl Closure<'_> {
     }
 
     fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
-        if let Some(image) = entity.sky.as_ref().and_then(|sky| sky.settings.background.image()) {
+		if let Some(image) = entity
+			.sky
+			.as_ref()
+			.and_then(|sky| sky.settings.background.image())
+		{
             self.catalog.sky_panorama(image)?;
             self.record(image)?;
         }
-		if let Some(clip) = entity.audio_source.as_ref().and_then(|source| source.settings.clip.as_ref()) {
+		if let Some(clip) = entity
+			.audio_source
+			.as_ref()
+			.and_then(|source| source.settings.clip.as_ref())
+		{
 			self.catalog.audio_clip(&clip.asset)?;
-			self.record(&clip.asset).map_err(|error| format!("Audio Source {}: {error}", entity.key.as_str()))?;
+			self.record(&clip.asset)
+				.map_err(|error| format!("Audio Source {}: {error}", entity.key.as_str()))?;
 		}
         if let Some(animator) = &entity.animator {
             let id = &animator.settings.asset_id;
@@ -289,40 +338,7 @@ impl Closure<'_> {
             self.record(asset_id)?;
         }
         if let Some(component) = &entity.animation {
-            let id = &component.settings.source.asset_id;
-            let source = self
-                .catalog
-                .by_id(id)
-                .ok_or("Animation source identity is missing from the catalog")?
-                .clone();
-            if source.kind != AssetKind::Model {
-                return Err("Animation source must be a model asset".into());
-            }
-            let asset = if let Some(asset) = self.animations.get(id) {
-                Arc::clone(asset)
-            } else {
-                let asset = bridge::animation_asset::load(self.root, &component.settings.source)?;
-                self.animation_bytes = self
-                    .animation_bytes
-                    .checked_add(asset.retained_bytes())
-                    .filter(|bytes| *bytes <= 128 * 1024 * 1024)
-                    .ok_or("Export animation preparation exceeds 128 MiB")?;
-                self.animations.insert(id.clone(), Arc::clone(&asset));
-                asset
-            };
-            asset.validate_settings(&component.settings)?;
-            let mesh = self.catalog.by_path(&entity.model_path);
-            if !entity.has_mesh_component()
-                || mesh.is_none_or(|mesh| &mesh.id != id)
-                || entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
-                || entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
-            {
-                return Err(
-                    "Animation requires its source model and selected mesh on the same entity"
-                        .into(),
-                );
-            }
-            self.record(id)?;
+			self.animation(entity, component)?;
         }
         for component in entity
             .native_behaviors
@@ -366,8 +382,7 @@ impl Closure<'_> {
             .and_then(|value| value.to_str())
             .is_some_and(|extension| {
                 extension.eq_ignore_ascii_case("glb") || extension.eq_ignore_ascii_case("gltf")
-            })
-        {
+			}) {
             if !entity.renderable {
                 return Ok(());
             }
@@ -380,33 +395,54 @@ impl Closure<'_> {
             .map_err(|error| format!("Model '{}' preflight failed: {error}", entity.model_path))?;
         Ok(())
     }
+
+	fn animation(
+		&mut self,
+		entity: &EntityData,
+		component: &engine_core::animation::AnimationComponent,
+	) -> Result<(), String> {
+		let id = &component.settings.source.asset_id;
+		let source = self
+			.catalog
+			.by_id(id)
+			.ok_or("Animation source identity is missing from the catalog")?
+			.clone();
+		if source.kind != AssetKind::Model {
+			return Err("Animation source must be a model asset".into());
+		}
+		let asset = if let Some(asset) = self.animations.get(id) {
+			Arc::clone(asset)
+		} else {
+			let asset = bridge::animation_asset::load(self.root, &component.settings.source)?;
+			self.animation_bytes = self
+				.animation_bytes
+				.checked_add(asset.retained_bytes())
+				.filter(|bytes| *bytes <= 128 * 1024 * 1024)
+				.ok_or("Export animation preparation exceeds 128 MiB")?;
+			self.animations.insert(id.clone(), Arc::clone(&asset));
+			asset
+		};
+		asset.validate_settings(&component.settings)?;
+		let mesh = self.catalog.by_path(&entity.model_path);
+		if !entity.has_mesh_component()
+			|| mesh.is_none_or(|mesh| &mesh.id != id)
+			|| entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
+			|| entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
+		{
+			return Err(
+				"Animation requires its source model and selected mesh on the same entity".into(),
+			);
+		}
+		self.record(id)?;
+		Ok(())
+	}
 }
 
 // Old authoring allowed saving a prefab at any relative JSON path. Discover
 // recognizable assemblies globally without adding unrelated JSON to the export.
 pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySnapshot, String> {
     let (catalog, catalog_source) = catalog::capture_catalog(root)?;
-    let mut closure = Closure {
-        root,
-        project,
-        catalog,
-        files: BTreeMap::new(),
-        ids: HashSet::new(),
-        models: HashMap::new(),
-        animations: HashMap::new(),
-        animation_bytes: 0,
-        prefabs: HashSet::new(),
-        prefab_stack: HashSet::new(),
-        generated_files: BTreeMap::new(),
-        generated_bytes: 0,
-        linked_sources: HashSet::new(),
-        resolved_paths: HashMap::new(),
-        bytes: 0,
-        depth: 0,
-        uri_edges: 0,
-        #[cfg(test)]
-        file_reads: 0,
-    };
+	let mut closure = Closure::new(project, root, catalog);
     if let Some(audio) = bridge::feedback_audio::load(root)? {
         audio.mix().validate_scenes(&project.scenes)?;
         for (path, bytes) in audio.files() {
@@ -438,6 +474,7 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
                 }
             }
             closure.linked_authoring_sources(&scene);
+			closure.capture_clip_owner_pins(&scene)?;
             if engine_core::linked_prefab::needs_runtime_projection(&scene) {
                 let runtime = engine_core::linked_prefab::resolve_scene(&scene);
                 closure.entities(&runtime.entities)?;

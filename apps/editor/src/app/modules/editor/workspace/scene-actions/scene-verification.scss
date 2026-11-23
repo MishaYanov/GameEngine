@@ -43,6 +43,17 @@ ul {
   padding-inline-start: var(--space-2);
 }
 
+.dependency {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  margin-block: var(--space-1);
+}
+
+.dependency dd {
+  margin: 0;
+}
+
 button, select {
   min-height: 1.75rem;
   padding: var(--space-1) var(--space-2);

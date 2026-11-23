@@ -3,7 +3,7 @@
         <workspace-toolbar (paletteRequested)="openPalette()"
                            [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
-        <editor-scene-actions [opening]="opening()"/>
+        <editor-scene-actions [opening]="opening()" (repairRequested)="repairSceneDependency($event)"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
         <editor-camera-settings [opening]="workspaceActionBlocked()"/>
         <editor-project-build [opening]="workspaceActionBlocked()"/>
