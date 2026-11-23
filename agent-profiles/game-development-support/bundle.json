@@ -1,0 +1,7 @@
+{
+  "id": "game-development",
+  "version": 1,
+  "profile": "editor-guidance",
+  "tools": ["editor.inspect", "assets.query", "knowledge.search"],
+  "corpora": ["engine-help", "active-project"]
+}
