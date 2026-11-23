@@ -46,7 +46,10 @@ export interface ComponentDraft {
 	playerController: {input: InputActionsRef; space: PlayerMovementSpace; control_graph?: string};
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
-    audioSource: {clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus};
+    audioSource: {
+        clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus;
+        spatial: 'two_d' | 'spatial'; near: string; far: string;
+    };
     interactable: { action: string; reach: string };
 	actor: string;
 	key_trigger: string;
@@ -88,7 +91,8 @@ export function componentDraft(
 		playerController: {input: {kind: 'project_default'}, space: 'camera_relative'},
 		animation: null,
 		camera: cameraComponentDraft(),
-        audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects'},
+        audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects',
+            spatial: 'two_d', near: '1', far: '20'},
         interactable: {action: 'interact', reach: '1'},
 		actor: '',
 		key_trigger: '',
@@ -136,8 +140,10 @@ export function componentDraft(
 		const {input, space, control_graph} = value.data.settings;
 		draft.playerController = {input, space, ...(control_graph ? {control_graph} : {})};
 	} else if (value.data.kind === 'audio_source') {
-        const {clip, gain, loop, playback, bus} = value.data.settings;
-        draft.audioSource = {clipId: clip?.asset ?? '', gain: String(gain), loop, playback, bus};
+        const {clip, gain, loop, playback, bus, spatial} = value.data.settings;
+        const distance = spatial?.mode === 'spatial' ? spatial : undefined;
+        draft.audioSource = {clipId: clip?.asset ?? '', gain: String(gain), loop, playback, bus,
+            spatial: spatial?.mode ?? 'two_d', near: String(distance?.near ?? 1), far: String(distance?.far ?? 20)};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
@@ -218,12 +224,17 @@ export function componentFromDraft(
 	const optionalReference = (key: string, label: string) => (key ? reference(key, label) : null);
 	let data: ComponentData;
 	if (draft.kind === 'audio_source') {
-        const {clipId, gain, loop, playback, bus} = draft.audioSource;
+        const {clipId, gain, loop, playback, bus, spatial, near, far} = draft.audioSource;
         if (clipId && !models.some(asset => asset.kind === 'audio_clip' && asset.asset_id === clipId)) {
             throw new Error('Assign an Audio Clip from this project.');
         }
+        const distances = spatial === 'spatial' ?
+            {mode: 'spatial' as const, near: finite(near, 'Near distance', 0, 10_000),
+                far: finite(far, 'Far distance', 0, 10_000)} : undefined;
+        if (distances && distances.far <= distances.near) throw new Error('Far distance must exceed near distance.');
         data = {kind: 'audio_source', settings: {
             clip: clipId ? {asset: clipId} : null, gain: finite(gain, 'Gain', 0, 1), loop, playback, bus,
+            ...(distances ? {spatial: distances} : {}),
         }};
     } else if (draft.kind === 'mesh_renderer') {
 		if (!relativeAssetPath(draft.model_path) || draft.model_path === '__no_mesh__')

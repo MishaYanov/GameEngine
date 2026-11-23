@@ -24,8 +24,11 @@ impl Worker {
 			)
 		});
 		let shared = &self.shared;
-		self.scene_audio
-			.synchronize(next, audible, SceneAudioMix::default(), |owner| {
+		self.scene_audio.synchronize(
+			next,
+			audible,
+			SceneAudioMix::default(),
+			|owner| {
 				shared.lock().ok().is_some_and(|guard| {
 					guard
 						.as_ref()
@@ -35,7 +38,23 @@ impl Worker {
 								&& status.scene_generation == owner.scene_generation
 						})
 				})
-			});
+			},
+			|voice| {
+				shared
+					.lock()
+					.ok()
+					.and_then(|guard| {
+						let session = guard.as_ref()?.backend.session();
+						Some(runtime::scene_audio::scene_stereo_gains(
+							session.render_world()?,
+							&session.render_camera(),
+							&voice.entity,
+							voice.spatial,
+						))
+					})
+					.unwrap_or([0.0; 2])
+			},
+		);
 	}
 
 	pub(super) fn poll_gamepad(&mut self, now: Instant) -> Option<Instant> {

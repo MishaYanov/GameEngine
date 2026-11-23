@@ -87,6 +87,10 @@ impl SceneEditor {
 			.prepare_restored_game(scene_id, document, progress)
 	}
 
+	pub fn play_world(&self) -> Option<&engine_core::world::RuntimeWorld> {
+		self.session.as_ref()?.render_world()
+	}
+
 	pub fn play_document(&self) -> Option<Arc<SceneData>> {
 		let session = self.session.as_ref()?;
 		session.is_playing().then(|| session.render_document())

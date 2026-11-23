@@ -12,7 +12,7 @@ use crate::{
 	scene_data::{ColliderData, EntityData, MaterialOverrideData, SceneData, validate_model_path},
 };
 pub use audio_source::{
-	AudioSourceBus, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings,
+	AudioSourceBus, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings, AudioSourceSpatial,
 };
 pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,

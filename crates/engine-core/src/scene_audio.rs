@@ -3,7 +3,7 @@ use crate::{
 	EntityKey, SceneData,
 	asset_catalog::AssetId,
 	command::PlayStatusDto,
-	components::{AudioSourceBus, AudioSourcePlayback, ComponentId},
+	components::{AudioSourceBus, AudioSourcePlayback, AudioSourceSpatial, ComponentId},
 };
 use serde::Serialize;
 
@@ -23,6 +23,7 @@ pub struct SceneAudioVoice {
 	pub gain: f32,
 	pub looping: bool,
 	pub bus: AudioSourceBus,
+	pub spatial: AudioSourceSpatial,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -121,6 +122,7 @@ pub fn entry_voices(scene: &SceneData) -> Vec<SceneAudioVoice> {
 			gain: source.settings.gain,
 			looping: source.settings.r#loop,
 			bus: source.settings.bus,
+			spatial: source.settings.spatial,
 		})
 		.collect()
 }

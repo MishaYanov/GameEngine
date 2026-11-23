@@ -1,6 +1,8 @@
 //! Host-owned playback for committed Audio Sources.
+mod spatial;
 #[cfg(windows)]
 mod winmm;
+pub use spatial::scene_stereo_gains;
 
 #[cfg(windows)]
 pub use winmm::{WaveOutput, WinmmError, scaled_pcm};
@@ -39,7 +41,7 @@ struct Voice {
 #[cfg(windows)]
 enum VoiceState {
 	Ready(bridge::audio_clip::AudioClip),
-	Playing { output: WaveOutput, gain: f32 },
+	Playing { output: WaveOutput, gain: [f32; 2] },
 	Finished,
 }
 
@@ -60,13 +62,14 @@ impl NativeSceneAudio {
 		audible: bool,
 		mix: SceneAudioMix,
 		is_current: impl Fn(&SceneAudioOwner) -> bool,
+		gains: impl Fn(&engine_core::scene_audio::SceneAudioVoice) -> [f32; 2],
 	) {
 		let changes = self.state.sync(
 			next.as_ref()
 				.map(|(owner, scene, _)| (owner.clone(), *scene)),
 		);
 		#[cfg(not(windows))]
-		let _ = (&changes, audible, mix, is_current);
+		let _ = (&changes, audible, mix, is_current, gains);
 		#[cfg(windows)]
 		{
 			self.apply_changes(changes, next.as_ref().map(|(_, _, path)| *path));
@@ -75,7 +78,7 @@ impl NativeSceneAudio {
 					self.clear();
 					return;
 				}
-				self.update_voices(audible, mix);
+				self.update_voices(audible, mix, gains);
 			}
 		}
 	}
@@ -135,14 +138,22 @@ impl NativeSceneAudio {
 					});
 				}
 				Err(error) => {
-					engine_logger::warn!("Scene Audio Source {} cannot play: {error}", voice.entity.as_str())
+					engine_logger::warn!(
+						"Scene Audio Source {} cannot play: {error}",
+						voice.entity.as_str()
+					)
 				}
 			}
 		}
 	}
 
 	#[cfg(windows)]
-	fn update_voices(&mut self, audible: bool, mix: SceneAudioMix) {
+	fn update_voices(
+		&mut self,
+		audible: bool,
+		mix: SceneAudioMix,
+		gains: impl Fn(&engine_core::scene_audio::SceneAudioVoice) -> [f32; 2],
+	) {
 		use engine_core::components::AudioSourceBus;
 
 		let was_audible = std::mem::replace(&mut self.audible, audible);
@@ -153,14 +164,15 @@ impl NativeSceneAudio {
 			};
 			let gain =
 				voice.spec.gain * f32::from(mix.master_percent) * f32::from(bus_percent) / 10_000.0;
+			let gain = gains(&voice.spec).map(|channel| channel * gain);
 			let result = match &mut voice.state {
 				VoiceState::Ready(clip) if audible => {
 					WaveOutput::open_stereo(true).and_then(|mut output| {
-						let hardware_gain = output.set_gain([gain; 2]).is_ok();
+						let hardware_gain = output.set_gain(gain).is_ok();
 						let pcm_gain = if hardware_gain {
 							100
 						} else {
-							(gain * 100.0).round() as u8
+							(gain[0].max(gain[1]) * 100.0).round() as u8
 						};
 						output.submit(clip.pcm_bytes(), pcm_gain, voice.spec.looping)?;
 						Ok(Some(VoiceState::Playing { output, gain }))
@@ -174,7 +186,7 @@ impl NativeSceneAudio {
 						Ok(Some(VoiceState::Finished))
 					} else {
 						if *previous != gain {
-							let _ = output.set_gain([gain; 2]);
+							let _ = output.set_gain(gain);
 							*previous = gain;
 						}
 						match (was_audible, audible) {

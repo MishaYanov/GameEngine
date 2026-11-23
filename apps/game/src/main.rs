@@ -224,6 +224,14 @@ impl GameApp {
 				music_percent: 100,
 			},
 			|_| true,
+			|voice| {
+				match (self.editor.play_world(), self.editor.render_camera()) {
+					(Some(world), Some(camera)) => runtime::scene_audio::scene_stereo_gains(
+						world, &camera, &voice.entity, voice.spatial,
+					),
+					_ => [0.0; 2],
+				}
+			},
 		);
 		if self.project_sound.has_soundtrack() {
 			self.project_sound.update(

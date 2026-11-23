@@ -1,12 +1,19 @@
 export type AudioSourcePlayback = 'on_scene_enter' | 'on_event';
 export type AudioSourceBus = 'effects' | 'music';
 
+export type AudioSourceSpatial = {readonly mode: 'two_d'} | {
+    readonly mode: 'spatial';
+    readonly near: number;
+    readonly far: number;
+};
+
 export interface AudioSourceSettings {
     readonly clip: {readonly asset: string} | null;
     readonly gain: number;
     readonly loop: boolean;
     readonly playback: AudioSourcePlayback;
     readonly bus: AudioSourceBus;
+    readonly spatial?: AudioSourceSpatial;
 }
 
 export type AudioAuditionOwner =
@@ -42,10 +49,21 @@ function validGain(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+function validSpatial(value: unknown): value is AudioSourceSpatial {
+    if (!record(value)) return false;
+    const {mode, near, far} = value;
+    const count = Object.keys(value).length;
+    if (mode === 'two_d') return count === 1;
+    return mode === 'spatial' && count === 3 && typeof near === 'number' && typeof far === 'number' &&
+        Number.isFinite(near) && Number.isFinite(far) && near >= 0 && far > near && far <= 10_000;
+}
+
 export function validAudioSourceSettings(value: unknown): value is AudioSourceSettings {
-    if (!record(value) || Object.keys(value).length !== 5) return false;
-    const {clip, gain, loop, playback, bus} = value;
-    return (clip === null || (record(clip) && Object.keys(clip).length === 1 && validAudioIdentity(clip['asset']))) &&
+    if (!record(value)) return false;
+    const {clip, gain, loop, playback, bus, spatial} = value;
+    return Object.keys(value).length === (spatial === undefined ? 5 : 6) &&
+        (spatial === undefined || validSpatial(spatial)) &&
+        (clip === null || (record(clip) && Object.keys(clip).length === 1 && validAudioIdentity(clip['asset']))) &&
         validGain(gain) && typeof loop === 'boolean' &&
         (playback === 'on_scene_enter' || playback === 'on_event') && (bus === 'effects' || bus === 'music');
 }

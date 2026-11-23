@@ -82,6 +82,16 @@
                     </div>
                     <label>Gain<input type="text" inputmode="decimal" [formField]="fields.audioSource.gain"/></label>
                     <label class="check"><input type="checkbox" [formField]="fields.audioSource.loop"/>Loop</label>
+                    <label>Audio mode
+                        <select [formField]="fields.audioSource.spatial">
+                            <option value="two_d">2D</option>
+                            <option value="spatial">Spatial</option>
+                        </select>
+                    </label>
+                    @if (draft().audioSource.spatial === 'spatial') {
+                        <label>Near distance<input inputmode="decimal" [formField]="fields.audioSource.near"/></label>
+                        <label>Far distance<input inputmode="decimal" [formField]="fields.audioSource.far"/></label>
+                    }
                     <label>Playback
                         <select [formField]="fields.audioSource.playback">
                             <option value="on_scene_enter">On Scene Enter</option>
