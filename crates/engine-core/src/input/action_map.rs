@@ -50,6 +50,15 @@ pub enum InputLayoutCondition {
 	SceneIs { scene_id: SceneId },
 }
 
+impl InputLayoutCondition {
+	pub fn matches(&self, scene: &SceneId, grounded: Option<bool>) -> bool {
+		match self {
+			Self::CharacterGrounded { value } => grounded == Some(*value),
+			Self::SceneIs { scene_id } => scene == scene_id,
+		}
+	}
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputBindingOverride {
@@ -352,28 +361,33 @@ impl InputActionMap {
 	}
 
 	pub fn contains_key(&self, key: Key) -> bool {
-		self.actions
-			.iter()
-			.flat_map(|action| &action.bindings)
-			.any(|binding| {
-				binding
-					.controls()
-					.contains(&Some(PhysicalControl::Key(key)))
-			})
+		self.keys().any(|current| current == key)
 	}
 
 	pub fn held_keyboard_codes(&self, keyboard: &InputState) -> Vec<String> {
-		self.actions
-			.iter()
-			.flat_map(|action| &action.bindings)
-			.flat_map(|binding| binding.controls().into_iter().flatten())
-			.filter_map(|control| match control {
-				PhysicalControl::Key(key) if keyboard.is_held(key) => Some(key.physical_code()),
-				_ => None,
-			})
+		self.keys()
+			.filter(|&key| keyboard.is_held(key))
+			.map(Key::physical_code)
 			.collect::<BTreeSet<_>>()
 			.into_iter()
 			.collect()
+	}
+
+	pub(crate) fn keys(&self) -> impl Iterator<Item = Key> + '_ {
+		self.actions
+			.iter()
+			.flat_map(|action| &action.bindings)
+			.chain(
+				self.layouts
+					.iter()
+					.flat_map(|layout| &layout.overrides)
+					.flat_map(|entry| &entry.bindings),
+			)
+			.flat_map(|binding| binding.controls().into_iter().flatten())
+			.filter_map(|control| match control {
+				PhysicalControl::Key(key) => Some(key),
+				_ => None,
+			})
 	}
 
 	pub fn uses_pointer_look(&self) -> bool {

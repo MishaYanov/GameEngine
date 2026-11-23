@@ -8,6 +8,88 @@ use engine_core::{
 };
 use std::collections::HashSet;
 
+fn conditional_controls(
+	configure: impl FnOnce(&SceneId) -> engine_core::input::InputActionMap,
+) -> SimulationSession {
+	use engine_core::{
+		asset_catalog::AssetId,
+		components::{InputActionsRef, PlayerControllerComponent, PlayerControllerSettings},
+		simulation_session::InputActionsResolver,
+	};
+	let mut data = room(vec![]);
+	let project = project(&data);
+	data.entities[0].player_controller = Some(Box::new(PlayerControllerComponent {
+		id: ComponentId::new("player_controller").unwrap(),
+		enabled: true,
+		settings: PlayerControllerSettings {
+			local: true,
+			input: InputActionsRef::Asset {
+				asset_id: AssetId::generate(),
+			},
+			..Default::default()
+		},
+	}));
+	let mut run = SimulationSession::new(project, Arc::new(data)).unwrap();
+	let map = configure(run.scene_id());
+	let resolver: InputActionsResolver = Arc::new(move |_| Ok(Some(map.clone())));
+	run.set_input_actions_resolver(&resolver).unwrap();
+	run
+}
+
+fn motion_layouts() -> Vec<engine_core::input::ConditionalInputLayout> {
+	use engine_core::input::{ConditionalInputLayout, InputLayoutCondition};
+	[("land", true), ("airborne", false)]
+		.into_iter()
+		.map(|(id, value)| ConditionalInputLayout {
+			id: id.into(),
+			label: id.into(),
+			when: InputLayoutCondition::CharacterGrounded { value },
+			overrides: vec![],
+		})
+		.collect()
+}
+
+#[test]
+fn conditional_layouts_wait_for_committed_motion_and_respect_first_matching_scene() {
+	use engine_core::input::{ConditionalInputLayout, InputActionMap, InputLayoutCondition};
+	let mut map = InputActionMap::starter();
+	map.schema_version = 2;
+	map.layouts = motion_layouts();
+	let mut run = conditional_controls(|_| map.clone());
+	assert_eq!(run.active_input_layout(), Some("default"));
+	tick(&mut run);
+	assert_eq!(run.active_input_layout(), Some("default"));
+	tick(&mut run);
+	assert_eq!(run.active_input_layout(), Some("land"));
+
+	let mut keyboard = engine_core::InputState::default();
+	keyboard.press(Key::Space);
+	run.sample_action_keys(&keyboard, Default::default())
+		.unwrap();
+	tick(&mut run);
+	tick(&mut run);
+	assert_eq!(run.active_input_layout(), Some("airborne"));
+
+	let mut world = conditional_controls(|scene_id| {
+		map.layouts.insert(
+			0,
+			ConditionalInputLayout {
+				id: "world".into(),
+				label: "World".into(),
+				when: InputLayoutCondition::SceneIs {
+					scene_id: scene_id.clone(),
+				},
+				overrides: vec![],
+			},
+		);
+		map
+	});
+	tick(&mut world);
+	assert_eq!(world.active_input_layout(), Some("world"));
+	tick(&mut world);
+	assert_eq!(world.active_input_layout(), Some("world"));
+}
+
 fn run(editor: &mut EditorSession, command: Command) -> Result<(), String> {
 	editor.execute_command(EditorCommandRequest {
 		expected_revision: editor.revision(),

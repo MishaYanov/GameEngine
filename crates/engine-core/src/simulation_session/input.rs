@@ -50,6 +50,9 @@ impl InputFrame {
 
 impl SimulationSession {
 	pub fn clear_input(&mut self) {
+		if let Some(input) = &mut self.conditional_input {
+			input.clear();
+		}
 		self.characters.clear_input();
 		self.camera_input.clear();
 		self.inputs.movement.clear();

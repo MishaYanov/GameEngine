@@ -105,6 +105,11 @@ impl SimulationSession {
 			map.validate()?;
 			map.validate_scenes(&self.project.scenes)?;
 		}
+		self.conditional_input = candidate
+			.as_ref()
+			.filter(|map| !map.layouts.is_empty())
+			.map(super::conditional_input::ConditionalInputs::new)
+			.transpose()?;
 		self.input_action_map = candidate;
 		Ok(())
 	}
@@ -131,6 +136,40 @@ impl SimulationSession {
 		self.input_action_map.as_ref()
 	}
 
+	pub fn active_input_layout(&self) -> Option<&str> {
+		self.input_action_map.as_ref().map(|_| {
+			self.conditional_input.as_ref().map_or(
+				"default",
+				super::conditional_input::ConditionalInputs::active_id,
+			)
+		})
+	}
+
+	pub(super) fn effective_input_map(&self) -> Option<&InputActionMap> {
+		self.conditional_input
+			.as_ref()
+			.map(super::conditional_input::ConditionalInputs::current_map)
+			.or(self.input_action_map.as_ref())
+	}
+
+	pub(super) fn begin_input_layout_step(
+		&mut self,
+		characters: &crate::character_controller::CharacterRuntime,
+	) -> Result<bool, String> {
+		let Some(input) = &mut self.conditional_input else {
+			return Ok(false);
+		};
+		let grounded = characters
+			.local_input_owner(&self.world)
+			.and_then(|actor| characters.state(actor))
+			.and_then(crate::character_controller::CharacterState::committed_grounded);
+		let (changed, frames) = input.step(&self.scene_id, grounded);
+		for frame in frames {
+			self.sample_input_actions(frame)?;
+		}
+		Ok(changed)
+	}
+
 	pub fn authored_action_binds_key(&self, key: Key) -> Option<bool> {
 		self.input_action_map
 			.as_ref()
@@ -138,7 +177,7 @@ impl SimulationSession {
 	}
 
 	pub fn uses_pointer_look(&self) -> bool {
-		self.input_action_map.as_ref().is_none_or(|map| {
+		self.effective_input_map().is_none_or(|map| {
 			if self.control_graph.is_some() {
 				super::control_graph::pointer_action(map).is_some()
 			} else {
@@ -152,6 +191,12 @@ impl SimulationSession {
 		keyboard: &InputState,
 		physical: PhysicalGamepadSample,
 	) -> Result<bool, String> {
+		if let Some(input) = &mut self.conditional_input {
+			if !self.paused {
+				input.sample_keys(keyboard, physical)?;
+			}
+			return Ok(true);
+		}
 		let Some(map) = &self.input_action_map else {
 			return Ok(false);
 		};
@@ -165,6 +210,12 @@ impl SimulationSession {
 		keyboard: &HashSet<String>,
 		physical: PhysicalGamepadSample,
 	) -> Result<bool, String> {
+		if let Some(input) = &mut self.conditional_input {
+			if !self.paused {
+				input.sample_codes(keyboard, physical)?;
+			}
+			return Ok(true);
+		}
 		let Some(map) = &self.input_action_map else {
 			return Ok(false);
 		};

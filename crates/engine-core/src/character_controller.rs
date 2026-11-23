@@ -147,6 +147,10 @@ pub struct CommittedMotion {
 	pub landed_at_tick: Option<u64>,
 }
 impl CharacterState {
+	pub(crate) fn committed_grounded(&self) -> Option<bool> {
+		self.initialized.then_some(self.grounded)
+	}
+
 	pub fn motion(&self, entity: crate::runtime_lifecycle::RuntimeEntityHandle) -> CommittedMotion {
 		CommittedMotion {
 			entity,

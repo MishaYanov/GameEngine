@@ -222,7 +222,7 @@ impl SimulationSession {
 		camera: CameraIntent,
 	) -> Option<(ControlGraphOutput, u128)> {
 		let graph = self.control_graph.as_ref()?;
-		let pointer_action = match self.input_action_map.as_ref() {
+		let pointer_action = match self.effective_input_map() {
 			Some(map) => pointer_action(map),
 			None => Some("look"),
 		};

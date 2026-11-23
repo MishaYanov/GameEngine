@@ -18,6 +18,7 @@ use std::{collections::HashMap, sync::Arc};
 
 mod animator_graphs;
 mod camera_objects;
+mod conditional_input;
 mod control_graph;
 mod gameplay;
 mod input;
@@ -87,6 +88,7 @@ pub struct SimulationSession {
 	camera: GameCameraController,
 	camera_objects: camera_objects::CameraObjects,
 	input_action_map: Option<crate::input::InputActionMap>,
+	conditional_input: Option<conditional_input::ConditionalInputs>,
 	control_graph: Option<crate::input::CompiledControlGraph>,
 	control_graph_ready: bool,
 	control_graph_step: Option<control_graph::CommittedControlStep>,
@@ -215,6 +217,7 @@ impl SimulationSession {
 			camera,
 			camera_objects,
 			input_action_map: None,
+			conditional_input: None,
 			control_graph: None,
 			control_graph_ready,
 			control_graph_step: None,
@@ -299,6 +302,10 @@ impl SimulationSession {
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
+				|| self
+					.conditional_input
+					.as_ref()
+					.is_some_and(|input| input.has_pending())
 				|| self.inputs.controller_movement != [0.0; 2]
 				|| self.inputs.controller_look != [0.0; 2]
 				|| self.inputs.control_sample.needs_tick()
@@ -320,6 +327,10 @@ impl SimulationSession {
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
+				|| self
+					.conditional_input
+					.as_ref()
+					.is_some_and(|input| input.has_pending())
 				|| self.inputs.controller_movement != [0.0; 2]
 				|| self.inputs.controller_look != [0.0; 2]
 				|| self.inputs.control_sample.needs_tick()
@@ -663,6 +674,10 @@ impl SimulationSession {
 					}
 				}
 				let mut camera_delta = camera_input.take_for_step();
+				if self.begin_input_layout_step(&characters)? {
+					camera_delta.yaw_delta = 0.0;
+					camera_delta.pitch_delta = 0.0;
+				}
 				let controls = self.evaluate_control_graph(camera_delta);
 				let routed = controls
 					.as_ref()
