@@ -1,5 +1,9 @@
 //! Project names and pair policy for the existing 32 collider membership bits.
 
+mod diagnostics;
+pub use diagnostics::{PhysicsContactIssue, inspect_physics_contacts};
+pub(crate) use diagnostics::validate_required_physics_contacts;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

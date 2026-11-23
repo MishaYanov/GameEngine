@@ -1,8 +1,9 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import type {Collider} from '../../../../core/editor/editor.models';
+import {EditorService} from '../../../../core/editor/editor.service';
 import {ColliderInspector} from './collider-inspector';
-import type {ColliderInteractionChange} from './collider';
+import {changeColliderInteraction, type ColliderInteractionChange} from './collider';
 
 describe('ColliderInspector', () => {
     let fixture: ComponentFixture<ColliderInspector>;
@@ -152,5 +153,52 @@ describe('ColliderInspector', () => {
         expect(buttons().every(button => button.disabled)).toBe(true);
         buttons()[2].click();
         expect(changes).toHaveLength(1);
+    });
+});
+
+describe('named collider layers', () => {
+    it('assigns an unsigned named bit and previews Sensor conversion without changing the mask', async () => {
+        const project = {
+            physics_layers: {
+                layers: [
+                    {id: 'world', label: 'World', bit: 0},
+                    {id: 'trigger', label: 'Trigger', bit: 31},
+                    {id: 'retired', label: 'Retired', bit: 5, archived: true},
+                ],
+            },
+        };
+        TestBed.configureTestingModule({
+            providers: [{provide: EditorService, useValue: {snapshot: () => ({project})}}],
+        });
+        const fixture = TestBed.createComponent(ColliderInspector);
+        const collider: Collider = {
+            kind: 'sphere', radius: 0.5, offset: [0, 0, 0],
+            interaction: {layers: 1, sensor: false, mask: 7},
+        };
+        fixture.componentRef.setInput('editable', true);
+        fixture.componentRef.setInput('collider', collider);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const select = root.querySelector<HTMLSelectElement>('[aria-label="Collision layer"]')!;
+        const buttons = () => [...root.querySelectorAll('button')];
+        const emitted: Collider[] = [];
+        fixture.componentInstance.interactionChanged.subscribe(change =>
+            emitted.push(changeColliderInteraction(collider, change)));
+        expect([...select.options].map(option => option.textContent?.trim())).toEqual([
+            'Custom membership', 'World', 'Trigger',
+        ]);
+        expect(root.querySelector('[aria-label="Belongs to layer 6"]')?.parentElement?.textContent).toContain('Retired');
+
+        select.value = '31';
+        select.dispatchEvent(new Event('change'));
+        expect(select.value).toBe('0');
+        expect(emitted).toEqual([{...collider, interaction: {layers: 2 ** 31, sensor: false, mask: 7}}]);
+
+        buttons().find(button => button.textContent?.trim() === 'Preview Trigger preset')!.click();
+        await fixture.whenStable();
+        expect(root.textContent).toContain('make this collider a Sensor');
+        expect(emitted).toHaveLength(1);
+        buttons().find(button => button.textContent?.trim() === 'Apply Trigger preset')!.click();
+        expect(emitted[1]).toEqual({...collider, interaction: {layers: 2 ** 31, sensor: true, mask: 7}});
     });
 });

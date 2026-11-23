@@ -1,5 +1,7 @@
-import {Component, computed, effect, input, output, signal} from '@angular/core';
+import {Component, computed, effect, inject, input, output, signal} from '@angular/core';
 import type {Collider} from '../../../../core/editor/editor.models';
+import {EditorService} from '../../../../core/editor/editor.service';
+import {PHYSICS_LAYER_COUNT} from '../../../../core/editor/physics-layers.models';
 import {
     changeColliderNumber, colliderLayerEnabled, colliderNumber, COLLIDER_NUMBER_ERROR,
     normalizeColliderInteraction, parseColliderNumber,
@@ -36,7 +38,17 @@ export class ColliderInspector {
     protected readonly numberError = COLLIDER_NUMBER_ERROR;
     protected readonly kind = computed(() => this.collider()?.kind ?? 'none');
     protected readonly interaction = computed(() => normalizeColliderInteraction(this.collider()?.interaction));
-    protected readonly collisionLayers = Array.from({length: 32}, (_value, bit) => ({bit, label: bit + 1}));
+    private readonly editor = inject(EditorService, {optional: true});
+    private readonly projectLayers = computed(() => this.editor?.snapshot?.()?.project.physics_layers?.layers ?? []);
+    protected readonly namedLayers = computed(() => this.projectLayers().filter(layer => !layer.archived));
+    protected readonly selectedLayer = computed(() => this.namedLayers().find(layer =>
+        this.interaction().layers === 2 ** layer.bit) ?? null);
+    protected readonly triggerLayer = computed(() => this.namedLayers().find(layer => layer.id === 'trigger') ?? null);
+    protected readonly reviewingTrigger = signal(false);
+    protected readonly collisionLayers = computed(() => {
+        const labels = new Map(this.projectLayers().map(layer => [layer.bit, layer.label]));
+        return Array.from({length: PHYSICS_LAYER_COUNT}, (_value, bit) => ({bit, label: bit + 1, name: labels.get(bit)}));
+    });
     protected readonly filterGroups = [
         {field: 'layers', label: 'Belongs to layers', checkboxLabel: 'Belongs to layer', allLabel: 'Belong to all layers', noneLabel: 'Belong to no layers'},
         {field: 'mask', label: 'Detects layers', checkboxLabel: 'Detects layer', allLabel: 'Detect all layers', noneLabel: 'Detect no layers'},
@@ -67,6 +79,13 @@ export class ColliderInspector {
             this.editable();
             this.active.set(null);
         });
+        effect(() => {
+            this.contextKey();
+            this.kind();
+            this.editable();
+            this.triggerLayer();
+            this.reviewingTrigger.set(false);
+        });
     }
 
     protected display(field: NumberField): string {
@@ -88,6 +107,20 @@ export class ColliderInspector {
         if (this.editable() && this.collider() && (mode === 'blocking' || mode === 'sensor')) {
             this.interactionChanged.emit({kind: 'sensor', sensor: mode === 'sensor'});
         }
+    }
+
+    protected chooseLayer(select: HTMLSelectElement): void {
+        const selected = this.namedLayers().find(layer => select.value === String(layer.bit));
+        const current = this.selectedLayer();
+        select.value = current === null ? '' : String(current.bit);
+        if (selected && selected !== current) this.changeFilter('layers', 2 ** selected.bit);
+    }
+
+    protected useTriggerPreset(): void {
+        const layer = this.triggerLayer();
+        if (!layer || !this.editable() || !this.collider() || !this.reviewingTrigger()) return;
+        this.reviewingTrigger.set(false);
+        this.interactionChanged.emit({kind: 'preset', layers: 2 ** layer.bit, sensor: true});
     }
 
     protected layerEnabled(field: 'layers' | 'mask', bit: number): boolean {

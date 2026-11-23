@@ -5,6 +5,7 @@ export type ColliderKind = 'none' | Collider['kind'];
 export type ColliderNumberField = 'offset' | 'half_extents' | 'radius';
 export type ColliderInteractionChange =
     | {readonly kind: 'sensor'; readonly sensor: boolean}
+    | {readonly kind: 'preset'; readonly layers: number; readonly sensor: boolean}
     | {readonly kind: 'filter'; readonly field: 'layers' | 'mask'; readonly value: number}
     | {readonly kind: 'layer'; readonly field: 'layers' | 'mask'; readonly bit: number; readonly enabled: boolean};
 
@@ -35,6 +36,9 @@ export function colliderLayerEnabled(value: number, bit: number): boolean {
 
 export function changeColliderInteraction(collider: Collider, change: ColliderInteractionChange): Collider {
     const interaction = normalizeColliderInteraction(collider.interaction);
+    if (change.kind === 'preset') {
+        return {...collider, interaction: normalizeColliderInteraction({...interaction, layers: change.layers, sensor: change.sensor})};
+    }
     if (change.kind === 'sensor') {
         return normalizeCollider({...collider, interaction: {...interaction, sensor: change.sensor}})!;
     }

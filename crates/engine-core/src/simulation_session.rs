@@ -149,6 +149,10 @@ impl SimulationSession {
 		} else {
 			document
 		};
+		let matrix = InteractionMatrix::compile(project.physics_layers.as_ref())?;
+		if project.physics_layers.is_some() {
+			crate::project::validate_required_physics_contacts(&runtime_document, &matrix)?;
+		}
 		let world = RuntimeWorld::new(runtime_document)?;
 		let characters = crate::character_controller::CharacterRuntime::new(&world, &project)?;
 		let mut controlled_targets = Vec::new();
@@ -185,7 +189,6 @@ impl SimulationSession {
 			document: world.data(),
 			behaviors,
 		})?;
-		let matrix = InteractionMatrix::compile(project.physics_layers.as_ref())?;
 		let collisions = CollisionWorld::with_matrix(&world, matrix)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
@@ -462,6 +465,9 @@ impl SimulationSession {
 			return Err("Resume Play before admitting runtime entities".into());
 		}
 		let data = self.runtime_spawn_document(&prepared)?;
+		if self.project.physics_layers.is_some() {
+			crate::project::validate_required_physics_contacts(&data, &self.collisions.matrix())?;
+		}
 		if self.visibility_capabilities.is_some()
 			&& prepared.entities.iter().any(|entity| {
 				entity.renderable

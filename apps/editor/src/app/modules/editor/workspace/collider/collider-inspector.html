@@ -31,9 +31,30 @@
             </select>
         </label>
         <p class="hint">Sensors detect overlaps without blocking movement. Sensor outlines are dashed pink. Blocking outlines are cyan.</p>
+        @if (namedLayers().length) {
+            <label class="shape">Collision layer
+                <select #namedLayer aria-label="Collision layer" [disabled]="!editable()" (change)="chooseLayer(namedLayer)">
+                    <option value="" [selected]="!selectedLayer()">Custom membership</option>
+                    @for (layer of namedLayers(); track layer.bit) {
+                        <option [value]="layer.bit" [selected]="selectedLayer()?.bit === layer.bit">{{ layer.label }}</option>
+                    }
+                </select>
+            </label>
+        }
+        @if (triggerLayer(); as layer) {
+            @if (reviewingTrigger()) {
+                <p class="hint" role="status">Set membership to {{ layer.label }} and make this collider a Sensor. Its mask is preserved.</p>
+                <div class="filter-actions">
+                    <button type="button" [disabled]="!editable()" (click)="useTriggerPreset()">Apply Trigger preset</button>
+                    <button type="button" (click)="reviewingTrigger.set(false)">Cancel preset</button>
+                </div>
+            } @else {
+                <button type="button" [disabled]="!editable()" (click)="reviewingTrigger.set(true)">Preview Trigger preset</button>
+            }
+        }
         <details>
-            <summary>Collision layers</summary>
-            <p class="hint" [id]="filterHelpId">Both colliders must detect each other's layers to interact.</p>
+            <summary>Advanced collision filters</summary>
+            <p class="hint" [id]="filterHelpId">The project matrix and both collider masks must allow the same layer pair.</p>
             @for (group of filterGroups; track group.field) {
                 <fieldset [disabled]="!editable()" [attr.aria-describedby]="filterHelpId">
                     <legend>{{ group.label }}</legend>
@@ -44,13 +65,13 @@
                                 (click)="changeFilter(group.field, 0)">None</button>
                     </div>
                     <div class="layer-grid">
-                        @for (layer of collisionLayers; track layer.bit) {
+                        @for (layer of collisionLayers(); track layer.bit) {
                             <label class="layer-choice">
                                 <input #layerInput type="checkbox" [checked]="layerEnabled(group.field, layer.bit)"
                                        [disabled]="!editable()"
                                        [attr.aria-label]="group.checkboxLabel + ' ' + layer.label"
                                        (change)="changeLayer(group.field, layer.bit, layerInput)"/>
-                                <span>{{ layer.label }}</span>
+                                <span>{{ layer.name ?? layer.label }}</span>
                             </label>
                         }
                     </div>

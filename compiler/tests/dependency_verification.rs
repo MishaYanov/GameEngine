@@ -2,13 +2,14 @@ use compiler::{DependencyOpen, DependencySeverity, inspect_scene_dependencies, p
 use engine_core::{
 	EntityKey, SceneData,
 	asset_catalog::{AssetCatalog, AssetId, AssetKind, MeshSignature, PersistentAsset},
+	command::{EditorCommandDto, EditorCommandRequest},
 	components::{
-		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, ScriptComponent,
-		ScriptReference, ScriptSettings, SkyBackground, SkySettings,
+		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, NativeBehaviorComponent,
+		NativeBehaviorSpec, ScriptComponent, ScriptReference, ScriptSettings, SkyBackground, SkySettings,
 	},
 	editor::{EditorSession, PrefabData},
 	linked_prefab::{LinkedPrefabSource, NestedPlacement, PinnedAssetVersion, PlacementId},
-	project::ProjectData,
+	project::{PhysicsLayer, PhysicsLayers, ProjectData},
 	scene_data::{
 		CURRENT_SCHEMA_VERSION, ColliderData, ColliderInteraction, EntityData, TransformData,
 	},
@@ -427,6 +428,144 @@ fn catalog_cycles_are_blocked_without_looping_or_losing_the_owner() {
 			.unwrap()
 			.contains("Cyclic asset dependency")
 	);
+}
+
+#[test]
+fn linked_collider_layer_override_reports_optional_and_required_contacts_during_preflight() {
+	let fixture = Fixture::new();
+	let root = fixture.0.join("assets");
+	let scene = SceneData {
+		schema_version: CURRENT_SCHEMA_VERSION,
+		organization: Default::default(),
+		default_game_camera: None,
+		environment: Default::default(),
+		bindings: Default::default(),
+		entities: vec![],
+		lights: vec![],
+		camera: Default::default(),
+	};
+	let mut project = ProjectData::for_scene("Linked Sensor", "scenes/main.json", &scene).unwrap();
+	project.physics_layers = Some(PhysicsLayers {
+		layers: vec![PhysicsLayer {
+			id: "trigger".into(),
+			label: "Trigger".into(),
+			bit: 31,
+			archived: false,
+		}],
+		ignored_pairs: vec![[0, 31]],
+	});
+	let mut editor = EditorSession::for_project(scene, project).unwrap();
+	apply(&mut editor, EditorCommandDto::CreatePlayer);
+	let actor = editor.selection()[0].clone();
+	apply(
+		&mut editor,
+		EditorCommandDto::SetLocalPlayer {
+			key: Some(actor.clone()),
+		},
+	);
+
+	let collider = |layers| ColliderData::Box {
+		half_extents: [0.5; 3],
+		offset: [0.0; 3],
+		interaction: ColliderInteraction {
+			sensor: true,
+			layers,
+			..Default::default()
+		},
+	};
+	let source = linked_source(
+		"prefabs/sensor.json",
+		EntityData::new(EntityKey::new("sensor").unwrap(), "Sensor", NO_MESH_PATH)
+			.with_renderable(false)
+			.with_collider(Some(collider(1))),
+	);
+	editor
+		.instantiate_linked_prefab(source, [0.0; 3], Default::default())
+		.unwrap();
+	let instantiated = editor.authored_document();
+	let sensor = instantiated
+		.entities
+		.iter()
+		.find(|entity| {
+			entity
+				.collider
+				.as_ref()
+				.is_some_and(|collider| collider.interaction().sensor)
+		})
+		.unwrap()
+		.key
+		.clone();
+	let anchor = instantiated
+		.entities
+		.iter()
+		.find(|entity| entity.linked_prefab.is_some())
+		.unwrap()
+		.key
+		.clone();
+	apply(
+		&mut editor,
+		EditorCommandDto::SetCollider {
+			key: sensor.as_str().into(),
+			collider: Some(collider(1 << 31)),
+		},
+	);
+	let project = editor.project();
+	let mut scene = (*editor.authored_document()).clone();
+	let inspect = |scene: &SceneData| {
+		inspect_scene_dependencies(project, &project.startup_scene_id, scene, &root).unwrap()
+	};
+	let persist = |scene: &SceneData| {
+		fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap()
+	};
+	persist(&scene);
+
+	let optional = inspect(&scene)
+		.into_iter()
+		.find(|issue| issue.code == "sensor_player_pair_ignored")
+		.unwrap();
+	assert_eq!(optional.severity, DependencySeverity::Warning);
+	assert!(matches!(&optional.open, Some(DependencyOpen::Prop { key }) if key == &anchor));
+	assert!(prepare_project(project, &root).is_ok());
+
+	let owner = scene
+		.entities
+		.iter_mut()
+		.find(|entity| entity.key == actor)
+		.unwrap();
+	let component_id = ComponentId::new("pickup").unwrap();
+	owner.native_behaviors.push(NativeBehaviorComponent {
+		id: component_id.clone(),
+		enabled: true,
+		behavior: NativeBehaviorSpec::Collectible {
+			actor,
+			trigger: sensor.clone(),
+			visual: None,
+			despawn_owner: false,
+		},
+	});
+	persist(&scene);
+	let required = inspect(&scene)
+		.into_iter()
+		.find(|issue| issue.code == "required_physics_pair_ignored")
+		.unwrap();
+	assert_eq!(required.severity, DependencySeverity::Error);
+	assert_eq!(required.owner.unwrap().component_id, Some(component_id));
+	assert_eq!(required.target.unwrap().key, Some(sensor));
+	assert!(
+		prepare_project(project, &root)
+			.err()
+			.unwrap()
+			.contains(&required.message)
+	);
+}
+
+fn apply(editor: &mut EditorSession, command: EditorCommandDto) {
+	editor
+		.execute_command(EditorCommandRequest {
+			expected_revision: editor.revision(),
+			command,
+		})
+		.unwrap();
 }
 
 fn linked_source(path: &str, entity: EntityData) -> LinkedPrefabSource {

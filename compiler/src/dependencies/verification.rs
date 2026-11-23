@@ -7,8 +7,10 @@ use engine_core::{
 	EntityKey,
 	animation::{AnimationClipRef, AnimatorGraph},
 	asset_catalog::{AssetId, AssetKind},
+	collision::InteractionMatrix,
 	components::{AudioEventBinding, ComponentId, InputActionsRef, ScriptDescriptor, ScriptIssue},
 	linked_prefab,
+	project::inspect_physics_contacts,
 	scene_catalog::SceneId,
 	scene_data::EntityData,
 };
@@ -94,6 +96,28 @@ pub fn inspect_scene_dependencies(
 		}
 		verification.linked_source(entity);
 		verification.entity(scene_id, scene, entity);
+	}
+	if let Some(policy) = project.physics_layers.as_ref() {
+		let matrix = InteractionMatrix::compile(Some(policy))?;
+		let remaining = MAX_PROBLEMS.saturating_sub(verification.problems.len());
+		for issue in inspect_physics_contacts(scene, &matrix, remaining) {
+			let (code, severity) = if issue.component.is_some() {
+				("required_physics_pair_ignored", DependencySeverity::Error)
+			} else {
+				("sensor_player_pair_ignored", DependencySeverity::Warning)
+			};
+			verification.push(DependencyProblem {
+				code,
+				severity,
+				owner: Some(owner(issue.owner, issue.component)),
+				target: Some(DependencyTarget {
+					key: Some(issue.sensor.clone()),
+					..Default::default()
+				}),
+				open: Some(verification.open(issue.owner, None)),
+				message: issue.message(),
+			});
+		}
 	}
 	Ok(verification.problems)
 }
