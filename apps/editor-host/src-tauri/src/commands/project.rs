@@ -1,4 +1,7 @@
-use crate::{editor::EditorWorkspace, state::EditorState};
+use crate::{
+	editor::EditorWorkspace,
+	state::{EditorExitState, EditorState},
+};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
@@ -24,7 +27,8 @@ struct ExitReview {
 	generation: Option<u64>,
 	revision: Option<u64>,
 	timeline_revisions: Vec<(String, u64)>,
-	warning: Option<&'static str>,
+	prop_revisions: Vec<(String, u64)>,
+	unsaved_changes: Option<&'static str>,
 }
 
 impl ExitReview {
@@ -42,11 +46,18 @@ impl ExitReview {
 		}
 		let scene_dirty = session.is_some_and(|session| session.is_dirty());
 		let timeline_dirty = workspace.is_some_and(EditorWorkspace::has_dirty_clip_timelines);
-		let warning = match (scene_dirty, timeline_dirty) {
-			(false, false) => None,
-			(true, false) => Some("Exiting the editor will discard all unsaved scene and project changes."),
-			(false, true) => Some("Exiting the editor will discard unsaved Animation Clip Timeline changes."),
-			(true, true) => Some("Exiting the editor will discard unsaved scene, project, and Animation Clip Timeline changes."),
+		let props_dirty = workspace.is_some_and(EditorWorkspace::has_dirty_prop_sources);
+		let unsaved_changes = match (scene_dirty, timeline_dirty, props_dirty) {
+			(false, false, false) => None,
+			(true, false, false) => Some("scene and project changes"),
+			(false, true, false) => Some("Animation Clip Timeline changes"),
+			(false, false, true) => Some("Prop source changes"),
+			(true, true, false) => Some("scene, project, and Animation Clip Timeline changes"),
+			(true, false, true) => Some("scene, project, and Prop source changes"),
+			(false, true, true) => Some("Animation Clip Timeline and Prop source changes"),
+			(true, true, true) => {
+				Some("scene, project, Animation Clip Timeline, and Prop source changes")
+			}
 		};
 		Ok(Self {
 			generation: workspace.map(|workspace| workspace.generation),
@@ -54,15 +65,30 @@ impl ExitReview {
 			timeline_revisions: workspace
 				.map(|workspace| workspace.clip_timeline_drafts.revisions())
 				.unwrap_or_default(),
-			warning,
+			prop_revisions: workspace
+				.map(EditorWorkspace::prop_source_draft_revisions)
+				.unwrap_or_default(),
+			unsaved_changes,
 		})
 	}
 
 	fn verify(&self, workspace: Option<&EditorWorkspace>) -> Result<(), String> {
 		if Self::capture(workspace, self.revision)? != *self {
-			return Err("Revision conflict: the project or its Animation Clip Timeline changed. Try Exit again.".into());
+			return Err(
+				"The project or an open draft changed during review. Try Exit again.".into(),
+			);
 		}
 		Ok(())
+	}
+
+	fn retire(
+		&self,
+		workspace: &mut Option<EditorWorkspace>,
+		exit: &EditorExitState,
+	) -> Result<Option<EditorWorkspace>, String> {
+		self.verify(workspace.as_ref())?;
+		exit.commit();
+		Ok(workspace.take())
 	}
 }
 
@@ -134,27 +160,30 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 	let state = window.state::<EditorState>();
 	let editor = Arc::clone(&state.editor);
 	let viewport = Arc::clone(&state.viewport);
-	let exit_review_gate = Arc::clone(&state.exit_review_gate);
+	let exit = Arc::clone(&state.exit);
 	tauri::async_runtime::spawn_blocking(move || {
-		let Some(_permit) = exit_review_permit(&exit_review_gate)? else {
+		let Some(_permit) = exit_review_permit(&exit.review_gate)? else {
 			return Ok(false);
 		};
 		let review = {
 			let workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
+			if exit.is_committed() {
+				return Ok(false);
+			}
 			let expected_revision = request.reviewed_revision(workspace.as_ref());
 			ExitReview::capture(workspace.as_ref(), expected_revision)?
 		};
-		if let Some(message) = review.warning {
-			if !confirm_discard(&window, message, "Discard and exit", "Keep editing") {
+		if let Some(changes) = review.unsaved_changes {
+			let message = format!("Exiting the editor will discard unsaved {changes}.");
+			if !confirm_discard(&window, &message, "Discard and exit", "Keep editing") {
 				return Ok(false);
 			}
 		}
 
 		let mut host = viewport.lock().map_err(|_| "Viewport state lock failed")?;
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
-		review.verify(workspace.as_ref())?;
-		// Retire the reviewed workspace before background completions can adopt more edits.
-		let retired = workspace.take();
+		// Close the slot to late edits and prepared project opens at the same time.
+		let retired = review.retire(&mut workspace, &exit)?;
 		drop(workspace);
 		host.close_parent_when_ready(window);
 		drop(host);

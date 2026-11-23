@@ -358,25 +358,29 @@ export class EditorGraph {
     private frameCards(cards: readonly GraphNodeCard[]): boolean {
         const stage = this.stage()?.nativeElement;
         if (!stage || cards.length === 0) return false;
-        const left = Math.min(...cards.map((card) => card.node().position.x));
-        const top = Math.min(...cards.map((card) => card.node().position.y));
-        const right = Math.max(
-            ...cards.map((card) => card.node().position.x + card.element.offsetWidth),
-        );
-        const bottom = Math.max(
-            ...cards.map((card) => card.node().position.y + card.element.offsetHeight),
-        );
+        let left = Infinity;
+        let top = Infinity;
+        let right = -Infinity;
+        let bottom = -Infinity;
+        for (const card of cards) {
+            const {x, y} = card.node().position;
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x + card.element.offsetWidth);
+            bottom = Math.max(bottom, y + card.element.offsetHeight);
+        }
+        const {clientWidth, clientHeight} = stage;
         const zoom = Math.max(
             0.3,
             Math.min(
                 1,
-                (stage.clientWidth - 80) / Math.max(1, right - left),
-                (stage.clientHeight - 80) / Math.max(1, bottom - top),
+                (clientWidth - 80) / Math.max(1, right - left),
+                (clientHeight - 80) / Math.max(1, bottom - top),
             ),
         );
         this.view.set({
-            x: (stage.clientWidth - (right - left) * zoom) / 2 - left * zoom,
-            y: (stage.clientHeight - (bottom - top) * zoom) / 2 - top * zoom,
+            x: (clientWidth - (right - left) * zoom) / 2 - left * zoom,
+            y: (clientHeight - (bottom - top) * zoom) / 2 - top * zoom,
             zoom,
         });
         return true;

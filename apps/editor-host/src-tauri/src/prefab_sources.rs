@@ -243,6 +243,18 @@ impl EditorWorkspace {
 			.any(|capture| capture.history.document().as_ref() != capture.saved.as_ref())
 	}
 
+	/// A stable snapshot of up to four open Prop drafts, independent of scene revision.
+	pub(crate) fn prop_source_draft_revisions(&self) -> Vec<(String, u64)> {
+		let mut revisions: Vec<_> = self
+			.prefab_source_drafts
+			.captures
+			.iter()
+			.map(|(id, capture)| (id.clone(), capture.history.revision()))
+			.collect();
+		revisions.sort_unstable();
+		revisions
+	}
+
 	fn editable_prop_draft(&self, id: &str, expected: u64) -> Result<&Capture, String> {
 		if self.backend.session().is_playing() || self.backend.session().has_transaction() {
 			return Err(

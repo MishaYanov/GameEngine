@@ -38,6 +38,7 @@ async fn open_workspace(
 	trusted_window(&window)?;
 	let shared = Arc::clone(&state.editor);
 	let viewport = Arc::clone(&state.viewport);
+	let exit = Arc::clone(&state.exit);
 	tauri::async_runtime::spawn_blocking(move || {
 		let notify_editor = Arc::clone(&shared);
 		let notify_viewport = Arc::clone(&viewport);
@@ -57,6 +58,7 @@ async fn open_workspace(
 		}))?;
 		let snapshot = {
 			let mut current = shared.lock().map_err(|_| "Editor state lock failed")?;
+			exit.ensure_project_can_open()?;
 			if current.as_ref().is_some_and(EditorWorkspace::has_dirty_clip_timelines) {
 				return Err("Save or discard open Animation Clip changes before opening another project".into());
 			}

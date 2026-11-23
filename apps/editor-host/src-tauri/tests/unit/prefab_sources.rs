@@ -431,6 +431,10 @@ fn source_draft_saves_canonical_components_and_conflicts_with_external_disk_edit
 		.save_prefab_source(&draft.draft_id, value.clone(), revision)
 		.unwrap();
 	assert_ne!(saved.draft.fingerprint, draft.fingerprint);
+	assert_eq!(
+		workspace.prop_source_draft_revisions(),
+		vec![(saved.draft.draft_id.clone(), saved.draft.draft_revision)]
+	);
 	let path = workspace.asset_root.join("prefabs/prop.json");
 	let catalog = std::fs::read(
 		workspace

@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
 	animation_preview::timeline::{ClipDraftDto, ClipDraftOperation},
+	editor::prefab_sources::PropDraftEdit,
 	project_location::ProjectLocation,
 };
 use bridge::editor::{EditorCommandDto, EditorCommandRequest};
@@ -44,7 +45,7 @@ fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
 	assert_eq!(
 		ExitReview::capture(Some(&workspace), revision)
 			.unwrap()
-			.warning,
+			.unsaved_changes,
 		None
 	);
 
@@ -53,7 +54,7 @@ fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
 	assert!(!workspace.backend.session().is_dirty());
 	assert!(ExitReview::capture(Some(&workspace), revision)
 		.unwrap()
-		.warning
+		.unsaved_changes
 		.unwrap()
 		.contains("Animation Clip Timeline"));
 
@@ -63,7 +64,7 @@ fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
 	assert_eq!(
 		ExitReview::capture(Some(&workspace), revision)
 			.unwrap()
-			.warning,
+			.unsaved_changes,
 		None
 	);
 }
@@ -82,8 +83,8 @@ fn exit_review_refuses_new_edits_in_an_already_dirty_timeline() {
 	assert_eq!(
 		ExitReview::capture(Some(&workspace), revision)
 			.unwrap()
-			.warning,
-		review.warning
+			.unsaved_changes,
+		review.unsaved_changes
 	);
 	assert!(review.verify(Some(&workspace)).is_err());
 
@@ -119,6 +120,77 @@ fn exit_review_refuses_replacement_and_scene_edits_after_review() {
 }
 
 #[test]
+fn accepted_exit_rejects_a_late_project_open_even_from_the_welcome_screen() {
+	let exit = EditorExitState::default();
+	let review = ExitReview::capture(None, None).unwrap();
+	let mut changed = Some(open_workspace_for_exit());
+	assert!(review.retire(&mut changed, &exit).is_err());
+	assert!(changed.is_some());
+	assert!(exit.ensure_project_can_open().is_ok());
+
+	let mut current = None;
+	assert!(review.retire(&mut current, &exit).unwrap().is_none());
+	assert!(exit.ensure_project_can_open().is_err());
+}
+
+#[test]
+fn exit_review_covers_prop_source_changes_and_rejects_new_edits_at_the_same_scene_revision() {
+	let (mut workspace, timeline) = open_timeline();
+	let revision = workspace.backend.session().revision();
+	let prop = workspace
+		.open_prefab_source("prefabs/training-blade.prefab.json", revision)
+		.unwrap();
+	let mut prefab = prop.prefab;
+	prefab["entities"][0]["name"] = "Edited blade".into();
+	let dirty = workspace
+		.edit_prop_draft(
+			&prop.draft_id,
+			prop.draft_revision,
+			PropDraftEdit::Apply { prefab },
+		)
+		.unwrap();
+	let review = ExitReview::capture(Some(&workspace), Some(revision)).unwrap();
+	assert_eq!(review.unsaved_changes, Some("Prop source changes"));
+	review.verify(Some(&workspace)).unwrap();
+
+	let mut prefab = dirty.prefab;
+	prefab["entities"][0]["name"] = "Revised blade".into();
+	workspace
+		.edit_prop_draft(
+			&dirty.draft_id,
+			dirty.draft_revision,
+			PropDraftEdit::Apply { prefab },
+		)
+		.unwrap();
+	assert_eq!(workspace.backend.session().revision(), revision);
+	assert_eq!(
+		ExitReview::capture(Some(&workspace), Some(revision))
+			.unwrap()
+			.unsaved_changes,
+		review.unsaved_changes
+	);
+	assert!(review.verify(Some(&workspace)).is_err());
+
+	add_marker(&mut workspace, &timeline, 100);
+	workspace
+		.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: EditorCommandDto::Rename {
+				key: "yard-player".into(),
+				name: "Reviewed player".into(),
+			},
+		})
+		.unwrap();
+	let revision = workspace.backend.session().revision();
+	assert_eq!(
+		ExitReview::capture(Some(&workspace), Some(revision))
+			.unwrap()
+			.unsaved_changes,
+		Some("scene, project, Animation Clip Timeline, and Prop source changes"),
+	);
+}
+
+#[test]
 fn exit_review_gate_rejects_a_second_request_until_the_first_finishes() {
 	let gate = Mutex::new(());
 	let first = exit_review_permit(&gate).unwrap().unwrap();
@@ -141,7 +213,7 @@ fn window_close_reviews_current_revision_and_file_exit_checks_the_caller_revisio
 	assert_eq!(
 		ExitReview::capture(Some(&workspace), close.reviewed_revision(Some(&workspace)))
 			.unwrap()
-			.warning,
+			.unsaved_changes,
 		None
 	);
 	assert!(ExitReview::capture(

@@ -210,6 +210,7 @@ describe('Workspace live editing flow', () => {
     let animatorSupported: boolean;
     let animators: Map<string, AnimatorDocument>;
     let verificationIssues: readonly SceneIssue[] | null;
+    let incrementalSelection: boolean;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -248,6 +249,7 @@ describe('Workspace live editing flow', () => {
         animatorSupported = false;
         animators = new Map();
         verificationIssues = null;
+        incrementalSelection = false;
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
@@ -655,16 +657,21 @@ describe('Workspace live editing flow', () => {
             }
             nativeState = {...nativeState, revision: nativeState.revision + 1,
                 scene_revision: nativeState.scene_revision + (command.type === 'select' ? 0 : 1)};
+            const receipt = {
+                revision: nativeState.revision, scene_revision: nativeState.scene_revision,
+                change_cursor: nativeState.revision, active_scene_id: nativeState.active_scene_id,
+                affected_scenes: [nativeState.active_scene_id],
+                state_changed: true, project_changed: false,
+                changes: {changed_entities: [], removed_entities: [], camera_changed: false,
+                    lights_changed: false, topology_changed: false, full_resync: false},
+            };
+            if (command.type === 'select' && incrementalSelection) {
+                const {document, project, ...state} = structuredClone(nativeState);
+                return {kind: 'delta', state, receipt, entities: [], camera: null, lights: null};
+            }
             return {
                 kind: 'snapshot', snapshot: structuredClone(nativeState),
-                receipt: {
-                    revision: nativeState.revision, scene_revision: nativeState.scene_revision,
-                    change_cursor: nativeState.revision, active_scene_id: nativeState.active_scene_id,
-                    affected_scenes: [nativeState.active_scene_id],
-                    state_changed: true, project_changed: false,
-                    changes: {changed_entities: [], removed_entities: [], camera_changed: false,
-                        lights_changed: false, topology_changed: false, full_resync: false},
-                },
+                receipt,
             };
         });
         await TestBed.configureTestingModule({imports: [EditorWorkspace]})
@@ -704,6 +711,26 @@ describe('Workspace live editing flow', () => {
         field.dispatchEvent(new Event('input', {bubbles: true}));
         await fixture.whenStable();
     }
+
+    it('keeps the hierarchy model stable for selection deltas and updates it for entity changes', async () => {
+        incrementalSelection = true;
+        const hierarchy = fixture.debugElement.query(By.directive(SceneEntitiesPanel)).componentInstance as SceneEntitiesPanel;
+        const scene = hierarchy.scene();
+        const revision = editor.snapshot()!.revision;
+        await selectRobot();
+        expect(editor.snapshot()!.revision).toBeGreaterThan(revision);
+        expect(hierarchy.scene()).toBe(scene);
+
+        await editor.execute({type: 'select', keys: []});
+        await fixture.whenStable();
+        expect(hierarchy.scene()).toBe(scene);
+        expect(hierarchy.selectedKeys()).toEqual([]);
+
+        await editor.execute({type: 'rename', key: 'robot', name: 'Scout'});
+        await fixture.whenStable();
+        expect(hierarchy.scene()).not.toBe(scene);
+        expect(hierarchy.scene().entities.find(entity => entity.key === 'robot')?.name).toBe('Scout');
+    });
 
     it('creates and selects Camera objects from the Hierarchy and commits lens and alignment as separate Undo steps', async () => {
         await editor.loadCapabilities();

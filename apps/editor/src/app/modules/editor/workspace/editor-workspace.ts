@@ -181,6 +181,9 @@ export class EditorWorkspace {
             entities: snapshot?.document.entities ?? [],
             organization: snapshot?.document.organization,
         };
+    }, {
+        equal: (previous, next) => previous.projectOpen === next.projectOpen &&
+            previous.entities === next.entities && previous.organization === next.organization,
     });
 
     constructor() {

@@ -1,6 +1,6 @@
-// Node 26 can reserve the global without providing usable browser storage.
+// Use the storage for this jsdom window even when Node also exposes localStorage.
 const {jsdom} = globalThis as typeof globalThis & { jsdom?: { window: Window } };
-if (typeof globalThis.localStorage === 'undefined' && jsdom) {
+if (jsdom) {
     Object.defineProperty(globalThis, 'localStorage', {
         configurable: true,
         value: jsdom.window.localStorage,

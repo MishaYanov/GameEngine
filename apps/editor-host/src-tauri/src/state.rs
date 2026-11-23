@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+	atomic::{AtomicBool, Ordering},
+	Arc, Mutex,
+};
 
 use bridge::EngineStatusDto;
 
@@ -13,11 +16,36 @@ pub struct ProjectBuildState {
 	pub pending: Option<PendingProjectBuild>,
 }
 
+#[derive(Default)]
+pub(crate) struct EditorExitState {
+	pub(crate) review_gate: Mutex<()>,
+	committed: AtomicBool,
+}
+
+impl EditorExitState {
+	pub(crate) fn is_committed(&self) -> bool {
+		self.committed.load(Ordering::Relaxed)
+	}
+
+	/// Call with the workspace slot locked while retiring the reviewed workspace.
+	pub(crate) fn commit(&self) {
+		self.committed.store(true, Ordering::Relaxed);
+	}
+
+	/// Check under the same workspace lock before adopting a prepared project.
+	pub(crate) fn ensure_project_can_open(&self) -> Result<(), String> {
+		if self.is_committed() {
+			return Err("The editor is closing.".into());
+		}
+		Ok(())
+	}
+}
+
 pub struct EditorState {
 	pub engine_status: Arc<Mutex<Option<EngineStatusDto>>>,
 	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
 	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
-	pub exit_review_gate: Arc<Mutex<()>>,
+	pub(crate) exit: Arc<EditorExitState>,
 	pub last_build: Arc<Mutex<Option<compiler::InstalledProject>>>,
 	pub pending_build: Arc<Mutex<ProjectBuildState>>,
 }
@@ -32,7 +60,7 @@ impl Default for EditorState {
 			engine_status: Arc::new(Mutex::new(None)),
 			editor,
 			viewport,
-			exit_review_gate: Arc::new(Mutex::new(())),
+			exit: Arc::new(EditorExitState::default()),
 			last_build: Arc::new(Mutex::new(None)),
 			pending_build: Arc::new(Mutex::new(ProjectBuildState::default())),
 		}
