@@ -1,0 +1,54 @@
+{
+  "schema_version": 2,
+  "name": "Training Blade Walk",
+  "owner": {
+    "kind": "prop",
+    "asset_id": "90000000-0000-4000-8000-000000000003"
+  },
+  "duration_ticks": 400,
+  "tracks": [
+    {
+      "target": {
+        "kind": "prop",
+        "address": {
+          "kind": "object",
+          "placement_path": [],
+          "source_entity": "training-blade"
+        }
+      },
+      "track": {
+        "kind": "local_position",
+        "interpolation": "linear",
+        "keys": [
+          {
+            "id": "90000000-0000-4000-8000-000000000050",
+            "at": 0,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000051",
+            "at": 200,
+            "value": [
+              0.5,
+              0.28,
+              0.18
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000052",
+            "at": 400,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

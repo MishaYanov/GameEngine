@@ -1,3 +1,5 @@
+mod graph;
+
 use super::{
 	args::Options,
 	replay::{Measurements, check_budget},
@@ -85,6 +87,8 @@ pub(super) struct Summary {
 	camera_runtime_hash: String,
 	camera_runtime_hash_bytes: usize,
 	runtime: Option<engine_core::runtime_lifecycle::RuntimeInspectionDto>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	graph_runtime: Option<serde_json::Value>,
 	schema_version: u32,
 	project: String,
 	mode: &'static str,
@@ -167,6 +171,15 @@ pub(super) fn finish(
 	let mut camera_hash = StateHash::new(MAX_CAMERA_REPLAY_BYTES);
 	serde_json::to_writer(&mut camera_hash, &camera_runtime)
 		.map_err(|error| format!("Cannot hash camera replay: {error}"))?;
+	let runtime = engine.runtime_inspection(0, 128).ok();
+	let graph_runtime = runtime
+		.as_ref()
+		.and_then(|inspection| {
+			graph::GraphReplay::capture(inspection, engine.session().animations())
+		})
+		.map(serde_json::to_value)
+		.transpose()
+		.map_err(|error| format!("Cannot serialize graph replay: {error}"))?;
 	let summary = Summary {
 		replay_identity: replay.identity,
 		markers: replay.markers,
@@ -183,7 +196,8 @@ pub(super) fn finish(
 				pitch: camera.pitch,
 			}
 		}),
-		runtime: engine.runtime_inspection(0, 128).ok(),
+		runtime,
+		graph_runtime,
 		schema_version: 1,
 		project: engine.session().project().name.clone(),
 		mode: if engine.session().is_playing() {

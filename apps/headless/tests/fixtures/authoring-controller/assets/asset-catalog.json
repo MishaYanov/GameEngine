@@ -23,6 +23,83 @@
           "primitives": 1
         }
       ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000003",
+      "path": "prefabs/training-blade.prefab.json",
+      "kind": "prefab",
+      "revision": 1,
+      "fingerprint": "1e95cdbb4169b02074a3db43782d06889ca40cbc52c9ddf5d7cbb8574ff72397",
+      "bytes": 1267,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000001"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000004",
+      "path": "animations/yard-idle.clip.json",
+      "kind": "animation_clip",
+      "revision": 1,
+      "fingerprint": "b70be69c1c1c97d499c1c5ef4135352cd081aa193e27700ea26f628792dd6f6b",
+      "bytes": 1113,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000005",
+      "path": "animations/yard-walk.clip.json",
+      "kind": "animation_clip",
+      "revision": 1,
+      "fingerprint": "e373dbe3a28947a355e7aa2a959fbf6768bb97cf49e9185a4e2498276ce0f21d",
+      "bytes": 1114,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000006",
+      "path": "animations/yard-jump.clip.json",
+      "kind": "animation_clip",
+      "revision": 1,
+      "fingerprint": "2d57b8c4d18fc44e82358cc61a53bab4d60522d66219760cc6c7f71b8a26f57b",
+      "bytes": 1113,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000007",
+      "path": "animations/yard-swing.clip.json",
+      "kind": "animation_clip",
+      "revision": 1,
+      "fingerprint": "14bf00c5cf00ccc2a5f8ac366c9d6dc3e7fd4c90e88ebbf6812bf0d1d64a8856",
+      "bytes": 1258,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000008",
+      "path": "animations/yard.animator.json",
+      "kind": "animator_graph",
+      "revision": 1,
+      "fingerprint": "b4597f7b98e479aaea568e3d79113fcda929218b8fcaa845aee6fdcbe9fa434c",
+      "bytes": 3787,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000004",
+        "90000000-0000-4000-8000-000000000005",
+        "90000000-0000-4000-8000-000000000006",
+        "90000000-0000-4000-8000-000000000007"
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000009",
+      "path": "controls/yard.controls.json",
+      "kind": "controls_graph",
+      "revision": 1,
+      "fingerprint": "6d143520cb0d0058d33cb4fcdd87c84e4dcfcb811cd0155e0434401d062c27d9",
+      "bytes": 1972
     }
   ]
 }

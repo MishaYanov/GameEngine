@@ -22,6 +22,10 @@ pub enum BehaviorSpec {
 		entity: EntityKey,
 		angular_velocity: [f32; 3],
 	},
+	AcceptAction {
+		entity: EntityKey,
+		action: String,
+	},
 	Shared {
 		entity: EntityKey,
 		definition: String,
@@ -33,6 +37,7 @@ impl BehaviorSpec {
 		match self {
 			Self::ControlledMove { entity, .. }
 			| Self::Spin { entity, .. }
+			| Self::AcceptAction { entity, .. }
 			| Self::Shared { entity, .. } => entity,
 		}
 	}
@@ -59,6 +64,7 @@ impl BehaviorSpec {
 				angular_velocity: *angular_velocity,
 			}
 			.validate(),
+			Self::AcceptAction { action, .. } => validate_action(action),
 			Self::Shared { definition, .. } => validate_definition_id(definition),
 		}
 	}
@@ -90,6 +96,9 @@ pub enum BehaviorSettings {
 	Spin {
 		angular_velocity: [f32; 3],
 	},
+	AcceptAction {
+		action: String,
+	},
 }
 
 impl BehaviorSettings {
@@ -108,6 +117,7 @@ impl BehaviorSettings {
 					return Err("Angular velocity must be finite and within ±1000000".into());
 				}
 			}
+			Self::AcceptAction { action } => validate_action(action)?,
 		}
 
 		Ok(())
@@ -126,6 +136,13 @@ impl BehaviorDefinition {
 		validate_definition_id(&self.id)?;
 		self.settings.validate()
 	}
+}
+
+fn validate_action(action: &str) -> Result<(), String> {
+	if !crate::input::valid_game_action_id(action) {
+		return Err("Accept Action requires a valid game action ID".into());
+	}
+	Ok(())
 }
 
 fn validate_definition_id(id: &str) -> Result<(), String> {
@@ -255,6 +272,9 @@ impl ProjectData {
 			} => BehaviorSettings::Spin {
 				angular_velocity: *angular_velocity,
 			},
+			BehaviorSpec::AcceptAction { action, .. } => BehaviorSettings::AcceptAction {
+				action: action.clone(),
+			},
 			BehaviorSpec::Shared { definition, .. } => {
 				let mut definitions = self
 					.behavior_definitions
@@ -298,6 +318,9 @@ impl ProjectData {
 						angular_velocity, ..
 					} => BehaviorSettings::Spin {
 						angular_velocity: *angular_velocity,
+					},
+					BehaviorSpec::AcceptAction { action, .. } => BehaviorSettings::AcceptAction {
+						action: action.clone(),
 					},
 					BehaviorSpec::Shared { definition, .. } => {
 						// The index and every reference were validated together above.
@@ -350,7 +373,11 @@ impl ProjectData {
 					behavior.entity().as_str()
 				));
 			}
-			if player_actors.contains(behavior.entity()) {
+			if player_actors.contains(behavior.entity())
+				&& !matches!(
+					self.resolve_behavior(behavior)?.settings,
+					BehaviorSettings::AcceptAction { .. }
+				) {
 				return Err("Player Controller owns this Character Controller's body; remove its configured movement or spin behavior".into());
 			}
 		}

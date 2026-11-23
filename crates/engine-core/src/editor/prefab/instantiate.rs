@@ -115,7 +115,8 @@ impl EditorSession {
 			for mut behavior in gameplay.behaviors {
 				match &mut behavior {
 					crate::project::BehaviorSpec::ControlledMove { entity, .. }
-					| crate::project::BehaviorSpec::Spin { entity, .. } => {
+					| crate::project::BehaviorSpec::Spin { entity, .. }
+					| crate::project::BehaviorSpec::AcceptAction { entity, .. } => {
 						*entity = remap
 							.get(entity)
 							.ok_or("Unresolved prefab behavior target")?

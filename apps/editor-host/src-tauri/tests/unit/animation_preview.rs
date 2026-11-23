@@ -610,3 +610,129 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 
 #[path = "../../../../../tests/support/project_fixture.rs"]
 mod test_project;
+
+#[test]
+fn practice_yard_graphs_reopen_and_discarding_a_prop_clip_edit_preserves_play() {
+	use crate::animation_preview::timeline::ClipDraftOperation;
+	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
+	use runtime::animation::{TimelineEdit, VisualTrack};
+	use std::collections::HashSet;
+
+	let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+	let source = repo.join("apps/headless/tests/fixtures/authoring-controller");
+	let fixture = Fixture(repo.join("target").join(format!(
+		"qa-authoring-graph-{}",
+		AssetId::generate().as_str()
+	)));
+	let assets = fixture.0.join("assets");
+	for folder in ["animations", "controls", "models", "prefabs", "scenes"] {
+		fs::create_dir_all(assets.join(folder)).unwrap();
+		for entry in fs::read_dir(source.join("assets").join(folder)).unwrap() {
+			let entry = entry.unwrap();
+			assert!(entry.file_type().unwrap().is_file());
+			fs::copy(entry.path(), assets.join(folder).join(entry.file_name())).unwrap();
+		}
+	}
+	fs::copy(
+		source.join("graph-project.json"),
+		fixture.0.join("project.json"),
+	)
+	.unwrap();
+	let catalog_file = assets.join("asset-catalog.json");
+	fs::copy(source.join("assets/asset-catalog.json"), &catalog_file).unwrap();
+	let catalog_bytes = fs::read(&catalog_file).unwrap();
+	let clip_file = assets.join("animations/yard-swing.clip.json");
+	let clip_bytes = fs::read(&clip_file).unwrap();
+	let clip_id = AssetId::new("90000000-0000-4000-8000-000000000007").unwrap();
+
+	let mut workspace = fixture.workspace();
+	let revision = workspace.backend.session().revision();
+	let timeline = workspace
+		.open_clip_timeline_draft(&clip_id, revision)
+		.unwrap();
+	let key = match &timeline.clip.tracks[0].track {
+		VisualTrack::LocalPosition { keys, .. } => keys[1].id.clone().unwrap(),
+		_ => panic!("expected a Training Blade position track"),
+	};
+	let edited = workspace
+		.edit_clip_timeline_draft(
+			&timeline.draft_id,
+			0,
+			ClipDraftOperation::Edit {
+				edit: TimelineEdit::MoveKey {
+					key_id: key,
+					at: 120,
+				},
+			},
+		)
+		.unwrap();
+	assert!(edited.dirty);
+	workspace
+		.close_clip_timeline_draft(&timeline.draft_id, true)
+		.unwrap();
+	assert_eq!(fs::read(&clip_file).unwrap(), clip_bytes);
+	assert_eq!(fs::read(&catalog_file).unwrap(), catalog_bytes);
+	assert_eq!(workspace.backend.session().revision(), revision);
+	drop(workspace);
+
+	let mut workspace = fixture.workspace();
+	assert_eq!(
+		workspace.open_authored_clip_asset(&clip_id).unwrap().clip,
+		timeline.clip
+	);
+	let execute = |workspace: &mut EditorWorkspace, command| {
+		workspace
+			.execute_receipt(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command,
+			})
+			.unwrap();
+	};
+	execute(&mut workspace, EditorCommandDto::StartPlay);
+	let authored = workspace.backend.session().authored_document();
+	workspace
+		.backend
+		.set_action_controls_from_codes(
+			&HashSet::from(["KeyF".to_owned()]),
+			Default::default(),
+			Default::default(),
+		)
+		.unwrap();
+	workspace.backend.tick(1.0 / 60.0).unwrap();
+	let inspection = workspace.backend.runtime_inspection(0, 32).unwrap();
+	assert_eq!(inspection.animators[0].state_id, "swing");
+	assert_eq!(
+		inspection.animators[0].transition.as_deref(),
+		Some("idle_to_swing")
+	);
+	let route = inspection.control_graph.unwrap();
+	assert_eq!(route.actor.key.as_str(), "yard-player");
+	assert!(route.output.intent.attack.pressed);
+	assert_eq!(route.output.presentation.get("aim"), Some(&true));
+	assert_eq!(
+		workspace
+			.backend
+			.session()
+			.animations()
+			.unwrap()
+			.visual_matrices()
+			.len(),
+		1
+	);
+
+	let status = workspace.backend.play_status().unwrap();
+	let (prepared, _) = workspace
+		.backend
+		.prepare_restart_play(&status.run_id, workspace.backend.session().revision())
+		.unwrap();
+	workspace.backend.commit_play_scene(prepared).unwrap();
+	workspace.backend.tick(1.0 / 60.0).unwrap();
+	let fresh = workspace.backend.runtime_inspection(0, 32).unwrap();
+	assert_ne!(inspection.run_id, fresh.run_id);
+	assert_eq!(fresh.animators[0].state_id, "idle");
+	assert!(!fresh.control_graph.unwrap().output.intent.attack.pressed);
+	execute(&mut workspace, EditorCommandDto::StopPlay);
+	assert!(workspace.backend.runtime_inspection(0, 32).is_err());
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+	assert_eq!(fs::read(&clip_file).unwrap(), clip_bytes);
+}

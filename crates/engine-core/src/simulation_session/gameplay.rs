@@ -45,6 +45,11 @@ pub enum SimulationAction {
 		entity: EntityKey,
 		material: Option<MaterialOverrideData>,
 	},
+	/// Acknowledge a routed semantic press after the gameplay rule admits it.
+	AcceptAction {
+		actor: EntityKey,
+		action: String,
+	},
 	/// Select a clip on an enabled, prepared animation for this Play run.
 	PlayAnimation {
 		entity: EntityKey,
@@ -70,6 +75,16 @@ impl ActionWriter<'_> {
 			action,
 		)?))
 	}
+	pub fn accept_action(&mut self, actor: EntityKey, action: &str) -> Result<(), String> {
+		if !crate::input::valid_game_action_id(action) {
+			return Err("Action acknowledgement requires a valid semantic action ID".into());
+		}
+		self.push(SimulationAction::AcceptAction {
+			actor,
+			action: action.into(),
+		})
+	}
+
 	pub fn push(&mut self, action: SimulationAction) -> Result<(), String> {
 		if self.actions.len() >= Self::MAX_ACTIONS {
 			return Err("Simulation action budget exceeded".into());
@@ -287,6 +302,7 @@ impl GameModule for ProjectModule {
 			.iter()
 			.any(|behavior| match &behavior.settings {
 				BehaviorSettings::Spin { .. } => false,
+				BehaviorSettings::AcceptAction { action } => input.action_pressed(action),
 				BehaviorSettings::ControlledMove { speed, .. } => {
 					*speed > 0.0 && input.movement(&behavior.entity) != [0.0; 3]
 				}
@@ -322,6 +338,16 @@ impl GameModule for ProjectModule {
 						entity: entity.clone(),
 						world_delta: (direction * *speed * step).to_array(),
 					})?;
+				}
+				BehaviorSettings::AcceptAction { action } => {
+					if input.action_pressed(action)
+						&& world
+							.data()
+							.local_player()
+							.is_some_and(|actor| &actor.key == entity)
+					{
+						output.accept_action(entity.clone(), action)?;
+					}
 				}
 				BehaviorSettings::Spin { angular_velocity } => {
 					if *angular_velocity == [0.0; 3] {

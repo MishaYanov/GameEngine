@@ -24,11 +24,13 @@ export type BehaviorSpec =
     readonly space: 'local' | 'world';
 }
     | { readonly kind: 'spin'; readonly entity: string; readonly angular_velocity: Vec3 }
+    | { readonly kind: 'accept_action'; readonly entity: string; readonly action: string }
     | { readonly kind: 'shared'; readonly entity: string; readonly definition: string };
 
 export type BehaviorSettings =
     | { readonly kind: 'controlled_move'; readonly speed: number; readonly space: 'local' | 'world' }
-    | { readonly kind: 'spin'; readonly angular_velocity: Vec3 };
+    | { readonly kind: 'spin'; readonly angular_velocity: Vec3 }
+    | { readonly kind: 'accept_action'; readonly action: string };
 
 export type SceneBindingTarget =
     | { readonly kind: 'assign'; readonly key: EntityKey }

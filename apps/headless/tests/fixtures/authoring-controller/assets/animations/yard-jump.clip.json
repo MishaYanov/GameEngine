@@ -1,0 +1,54 @@
+{
+  "schema_version": 2,
+  "name": "Training Blade Jump",
+  "owner": {
+    "kind": "prop",
+    "asset_id": "90000000-0000-4000-8000-000000000003"
+  },
+  "duration_ticks": 800,
+  "tracks": [
+    {
+      "target": {
+        "kind": "prop",
+        "address": {
+          "kind": "object",
+          "placement_path": [],
+          "source_entity": "training-blade"
+        }
+      },
+      "track": {
+        "kind": "local_position",
+        "interpolation": "linear",
+        "keys": [
+          {
+            "id": "90000000-0000-4000-8000-000000000060",
+            "at": 0,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000061",
+            "at": 400,
+            "value": [
+              0.5,
+              0.55,
+              0.2
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000062",
+            "at": 800,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -139,7 +139,13 @@ impl SimulationSession {
 		let mut seen = HashSet::new();
 
 		for (index, behavior) in behaviors.iter().enumerate() {
-			if characters.contains(&behavior.entity) {
+			if matches!(&behavior.settings, BehaviorSettings::AcceptAction { .. }) {
+				if characters.local_input_owner(&world) != Some(&behavior.entity) {
+					return Err(
+						"Accept Action behavior must target the local Player Controller".into(),
+					);
+				}
+			} else if characters.contains(&behavior.entity) {
 				return Err(
 					"Character controller owns its body's motion; remove configured movement/spin"
 						.into(),
@@ -685,17 +691,47 @@ impl SimulationSession {
 					camera.camera(),
 					controls.as_ref().map(|(graph, _)| graph.intent.jump),
 				)?;
+				let owner = characters.local_input_owner(&self.world);
+				let mut acknowledged = HashSet::new();
+				for action in &self.actions {
+					if let SimulationAction::AcceptAction { actor, action } = action {
+						if owner != Some(actor) || !step_input.action_pressed(action) {
+							return Err("Gameplay action acknowledgement must match a pressed action of the local player".into());
+						}
+						acknowledged.insert(action.clone());
+					}
+				}
 				// Later catch-up steps see held state only. A rejected tick
 				// rolls back its actions and clears all input on pause.
 				let mut step_actions = std::mem::take(&mut self.inputs.action_presses);
 				self.inputs.control_sample.finish_step();
 				if controls.is_some() {
-					// A routed press requests an action. It does not prove that a
-					// gameplay rule accepted it or that the motor jumped.
-					step_actions.clear();
+					step_actions = acknowledged;
+				}
+				// Structural removals become visible at the end of this step, after
+				let count = characters.keys().count();
+				actions_applied += count;
+				if actions_applied > Self::MAX_ACTIONS_PER_TICK {
+					return Err("Character action budget exceeded".into());
+				}
+				let tick = self.tick + u64::from(steps) + 1;
+				let character_change = characters.step(
+					&mut self.world,
+					&mut self.collisions,
+					tick,
+					report.step_seconds,
+					&mut collision_candidates_remaining,
+					&mut before,
+				)?;
+				if controls.is_some()
+					&& characters
+						.local_input_owner(&self.world)
+						.and_then(|key| characters.state(key))
+						.is_some_and(|state| state.jumped_at_tick == Some(tick))
+				{
+					step_actions.insert("jump".into());
 				}
 				if self.inputs.controller_owned && !step_actions.is_empty() {
-					let tick = self.tick + u64::from(steps) + 1;
 					let mut edges = step_actions.iter().cloned().collect::<Vec<_>>();
 					edges.sort_unstable();
 					accepted_action_presses.extend(
@@ -704,20 +740,6 @@ impl SimulationSession {
 							.map(|id| CommittedInputAction { id, tick }),
 					);
 				}
-				// Structural removals become visible at the end of this step, after
-				let count = characters.keys().count();
-				actions_applied += count;
-				if actions_applied > Self::MAX_ACTIONS_PER_TICK {
-					return Err("Character action budget exceeded".into());
-				}
-				let character_change = characters.step(
-					&mut self.world,
-					&mut self.collisions,
-					self.tick + u64::from(steps) + 1,
-					report.step_seconds,
-					&mut collision_candidates_remaining,
-					&mut before,
-				)?;
 				if !character_change.is_empty() {
 					triggers.invalidate();
 				}
@@ -794,6 +816,7 @@ impl SimulationSession {
 							progress_transaction.apply(&action)?;
 							continue;
 						}
+						SimulationAction::AcceptAction { .. } => continue,
 						SimulationAction::PlayAnimation {
 							entity,
 							clip_index,
@@ -844,6 +867,7 @@ impl SimulationSession {
 					let entity = match &action {
 						SimulationAction::Progress(_)
 						| SimulationAction::RequestScene { .. }
+						| SimulationAction::AcceptAction { .. }
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
 						| SimulationAction::SelectCamera { .. }
@@ -871,6 +895,7 @@ impl SimulationSession {
 					let change = match action {
 						SimulationAction::Progress(_)
 						| SimulationAction::RequestScene { .. }
+						| SimulationAction::AcceptAction { .. }
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
 						| SimulationAction::SelectCamera { .. }

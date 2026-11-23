@@ -543,7 +543,9 @@ fn play_routes_motor_and_gameplay_through_one_gate_per_step_and_requires_declare
 	sample(&mut engine, &["KeyF", "KeyG", "KeyW", "Space"]);
 	let outcome = engine.tick(STEP * 3.0).unwrap();
 	assert_eq!(outcome.steps, 3);
-	assert!(outcome.accepted_action_presses.is_empty());
+	assert_eq!(outcome.accepted_action_presses.len(), 1);
+	assert_eq!(outcome.accepted_action_presses[0].id, "jump");
+	assert_eq!(outcome.accepted_action_presses[0].tick, outcome.tick - 2);
 	let moved = position(&engine);
 	assert_ne!(moved[2], origin[2]);
 	assert!(moved[1] > origin[1]);

@@ -4,11 +4,24 @@
   "fixed_hz": 60,
   "max_catchup_steps": 8,
   "behavior_definitions": [],
-  "behaviors": [],
+  "behaviors": [
+    {
+      "scene_id": "graph-practice-yard",
+      "behavior": {
+        "kind": "accept_action",
+        "entity": "yard-player",
+        "action": "attack"
+      }
+    }
+  ],
   "scenes": [
     {
       "id": "practice-yard",
       "asset_path": "scenes/practice-yard.json"
+    },
+    {
+      "id": "graph-practice-yard",
+      "asset_path": "scenes/graph-practice-yard.json"
     }
   ],
   "startup_scene_id": "practice-yard",
