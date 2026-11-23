@@ -26,7 +26,7 @@ pub use player_controller::{
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 use serde::{Deserialize, Deserializer, Serialize};
 pub use script::{
-	MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField, ScriptProperty,
+	MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField, ScriptIssue, ScriptProperty,
 	ScriptReference, ScriptReferenceField, ScriptReferenceKind, ScriptSettings,
 };
 pub use sky::{

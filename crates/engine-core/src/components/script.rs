@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::EntityKey;
+use crate::{EntityKey, scene_data::EntityData};
 
 use super::ComponentId;
 
@@ -49,13 +49,18 @@ impl ScriptSettings {
 		}
 	}
 
-	pub(crate) fn bind_slots(&mut self, bindings: &BTreeMap<String, EntityKey>) -> Result<(), String> {
+	pub(crate) fn bind_slots(
+		&mut self,
+		bindings: &BTreeMap<String, EntityKey>,
+	) -> Result<(), String> {
 		for reference in self.references.values_mut() {
 			if let ScriptReference::Slot { slot } = reference {
 				let entity = bindings
 					.get(slot)
 					.ok_or_else(|| format!("Script reference slot '{slot}' is unbound"))?;
-				*reference = ScriptReference::Entity { entity: entity.clone() };
+				*reference = ScriptReference::Entity {
+					entity: entity.clone(),
+				};
 			}
 		}
 		Ok(())
@@ -213,8 +218,100 @@ pub struct ScriptDescriptor {
 	pub write_owner_transform: bool,
 }
 
+#[derive(Debug)]
+pub enum ScriptIssue {
+	MissingRegistration(String),
+	InvalidConfiguration(String),
+	InvalidReference {
+		field: String,
+		target: Option<EntityKey>,
+		reason: String,
+	},
+}
+
+impl ScriptIssue {
+	pub fn code(&self) -> &'static str {
+		match self {
+			Self::MissingRegistration(_) => "missing_script",
+			Self::InvalidConfiguration(_) => "script_configuration_invalid",
+			Self::InvalidReference { .. } => "script_reference_invalid",
+		}
+	}
+
+	pub fn message(&self) -> String {
+		match self {
+			Self::MissingRegistration(id) => format!("Unknown script {id}"),
+			Self::InvalidConfiguration(reason) | Self::InvalidReference { reason, .. } => {
+				reason.clone()
+			}
+		}
+	}
+
+	pub fn at_attachment(&self, owner: &EntityKey, component: &ComponentId) -> String {
+		format!(
+			"Object {} Script {} [{}]: {}",
+			owner.as_str(),
+			component.as_str(),
+			self.code(),
+			self.message(),
+		)
+	}
+}
+
 impl ScriptDescriptor {
-	pub fn validate_settings(&self, settings: &ScriptSettings) -> Result<(), String> {
+	/// External reference capabilities can be deferred when checking a reusable Prop.
+	pub fn validate_attachment<'a>(
+		&self,
+		settings: &ScriptSettings,
+		find_entity: impl Fn(&EntityKey) -> Option<&'a EntityData>,
+		is_external: impl Fn(&ScriptReference) -> bool,
+	) -> Result<(), ScriptIssue> {
+		self.validate_config(settings)
+			.map_err(ScriptIssue::InvalidConfiguration)?;
+		for field in &self.references {
+			let invalid = |target, reason| ScriptIssue::InvalidReference {
+				field: field.key.clone(),
+				target,
+				reason,
+			};
+			let reference = settings.references.get(&field.key).ok_or_else(|| {
+				invalid(
+					None,
+					format!("{} requires the {} reference", self.label, field.label),
+				)
+			})?;
+			if is_external(reference) {
+				continue;
+			}
+			let ScriptReference::Entity { entity } = reference else {
+				return Err(invalid(
+					None,
+					format!("Bind the {} slot before Play", field.label),
+				));
+			};
+			let target = find_entity(entity).ok_or_else(|| {
+				invalid(
+					Some(entity.clone()),
+					format!("Missing {} entity {entity:?}", field.label),
+				)
+			})?;
+			if field.requires == ScriptReferenceKind::TriggerCollider
+				&& !(target.collision_enabled
+					&& target
+						.collider
+						.as_ref()
+						.is_some_and(|collider| collider.interaction().sensor))
+			{
+				return Err(invalid(
+					Some(entity.clone()),
+					format!("{} must have an enabled trigger collider", field.label),
+				));
+			}
+		}
+		Ok(())
+	}
+
+	fn validate_config(&self, settings: &ScriptSettings) -> Result<(), String> {
 		settings.validate()?;
 		if settings.script_id != self.id || settings.config_version != self.config_version {
 			return Err(format!(
@@ -229,14 +326,6 @@ impl ScriptDescriptor {
 				.any(|field| field.key() == key && field.accepts(value))
 			{
 				return Err(format!("{} has an invalid property {key}", self.label));
-			}
-		}
-		for field in &self.references {
-			if !settings.references.contains_key(&field.key) {
-				return Err(format!(
-					"{} requires the {} reference",
-					self.label, field.label
-				));
 			}
 		}
 		for key in settings.references.keys() {

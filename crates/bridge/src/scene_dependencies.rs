@@ -1,5 +1,10 @@
 //! Diagnostic owners and repair routes shared by Check Scenes and build preflight.
-use engine_core::{EntityKey, asset_catalog::AssetId, components::ComponentId};
+use engine_core::{
+	EntityKey,
+	asset_catalog::AssetId,
+	components::{ComponentId, ScriptComponent, ScriptIssue},
+	scene_data::EntityData,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -31,6 +36,10 @@ pub struct DependencyTarget {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DependencyOpen {
 	Inspector,
+	Script {
+		#[serde(skip_serializing_if = "Option::is_none")]
+		field: Option<String>,
+	},
 	Prop {
 		key: EntityKey,
 	},
@@ -58,4 +67,31 @@ pub struct DependencyProblem {
 	pub open: Option<DependencyOpen>,
 	#[serde(skip)]
 	pub message: String,
+}
+
+impl DependencyProblem {
+	pub fn for_script(entity: &EntityData, script: &ScriptComponent, issue: ScriptIssue) -> Self {
+		let (field, target) = match &issue {
+			ScriptIssue::InvalidReference { field, target, .. } => (
+				Some(field.clone()),
+				target.clone().map(|key| DependencyTarget {
+					key: Some(key),
+					..Default::default()
+				}),
+			),
+			_ => (None, None),
+		};
+		Self {
+			code: issue.code(),
+			severity: DependencySeverity::Error,
+			owner: Some(DependencyOwner {
+				key: entity.key.clone(),
+				name: entity.name.chars().take(512).collect(),
+				component_id: Some(script.id.clone()),
+			}),
+			target,
+			open: Some(DependencyOpen::Script { field }),
+			message: issue.at_attachment(&entity.key, &script.id),
+		}
+	}
 }

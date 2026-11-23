@@ -7,7 +7,7 @@ use engine_core::{
 	EntityKey,
 	animation::{AnimationClipRef, AnimatorGraph},
 	asset_catalog::{AssetId, AssetKind},
-	components::{AudioEventBinding, ComponentId, InputActionsRef},
+	components::{AudioEventBinding, ComponentId, InputActionsRef, ScriptDescriptor, ScriptIssue},
 	linked_prefab,
 	scene_catalog::SceneId,
 	scene_data::EntityData,
@@ -20,6 +20,8 @@ struct Verification<'a> {
 	closure: Closure<'a>,
 	owners: HashMap<&'a EntityKey, &'a EntityKey>,
 	keys: HashSet<&'a EntityKey>,
+	entities: HashMap<&'a EntityKey, &'a EntityData>,
+	script_descriptors: Vec<ScriptDescriptor>,
 	problems: Vec<DependencyProblem>,
 }
 
@@ -55,6 +57,8 @@ pub fn inspect_scene_dependencies(
 			.flat_map(|(root, link)| link.entity_map.values().map(move |key| (key, root)))
 			.collect(),
 		keys: scene.entities.iter().map(|entity| &entity.key).collect(),
+		entities: scene.entities.iter().map(|entity| (&entity.key, entity)).collect(),
+		script_descriptors: gameplay_catalog::script_descriptors(),
 		problems: Vec::new(),
 	};
 	if let Err(message) = linked_prefab::validate_scene_links(scene) {
@@ -97,6 +101,21 @@ pub fn inspect_scene_dependencies(
 impl Verification<'_> {
 	fn entity(&mut self, scene_id: &SceneId, scene: &SceneData, entity: &EntityData) {
 		let initial = self.problems.len();
+		for script in entity.scripts.iter().filter(|script| script.enabled) {
+			let descriptor = self.script_descriptors.iter()
+				.find(|descriptor| descriptor.id == script.settings.script_id);
+			let result = match descriptor {
+				Some(descriptor) => descriptor.validate_attachment(
+					&script.settings,
+					|key| self.entities.get(key).copied(),
+					|_| false,
+				),
+				None => Err(ScriptIssue::MissingRegistration(script.settings.script_id.clone())),
+			};
+			if let Err(issue) = result {
+				self.push(DependencyProblem::for_script(entity, script, issue));
+			}
+		}
 		if let Some(component) = &entity.sky
 			&& let Some(image) = component.settings.background.image()
 		{

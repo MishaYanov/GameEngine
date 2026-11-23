@@ -180,9 +180,22 @@ export class ComponentEditor {
 		}
 	});
     protected readonly scriptType = computed(() => this.scriptTypes().find(type => type.id === this.draft().script.id));
+    protected readonly scriptCanReset = computed(() => {
+        const original = this.original()?.data;
+        const script = this.scriptType();
+        return original?.kind === 'script' && script?.id === original.settings.script_id &&
+            script.config_version !== original.settings.config_version && !this.draft().script.resetConfig;
+    });
     protected chooseScript(id: string): void {
         if (!this.scriptTypes().some(type => type.id === id)) return;
         this.draft.update(value => value.script.id === id ? value : {...value, script: {...scriptDraft(), id}});
+    }
+    protected resetScriptConfig(): void {
+        if (!this.scriptCanReset()) return;
+        this.draft.update(value => ({
+            ...value,
+            script: {...scriptDraft(), id: value.script.id, resetConfig: true},
+        }));
     }
     protected scriptValue(field: ScriptField): string | boolean {
         return this.draft().script.properties[field.key] ?? String(field.default);

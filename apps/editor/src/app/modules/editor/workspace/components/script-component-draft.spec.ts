@@ -31,4 +31,17 @@ describe('Script inspector draft', () => {
         const original = {script_id: 'project.old_script', config_version: 4, properties: {message: 'saved'}};
         expect(scriptSettings(scriptDraft(original), [door], [], original)).toBe(original);
     });
+
+    it('only upgrades a stale configuration after an explicit reset', () => {
+        const previous = {script_id: door.id, config_version: 2};
+        const draft = {...scriptDraft(previous), references: {sensor: {entity: 'sensor'}}};
+        expect(() => scriptSettings(draft, [door], [sensor], previous)).toThrow('unsupported configuration');
+        expect(scriptSettings({...draft, resetConfig: true}, [door], [sensor], previous).config_version).toBe(1);
+    });
+
+    it('saves only an explicitly declared Prop slot', () => {
+        const draft = {...scriptDraft(), id: door.id, references: {sensor: {slot: 'Exit'}}};
+        expect(() => scriptSettings(draft, [door], [])).toThrow('Trigger sensor');
+        expect(scriptSettings(draft, [door], [], undefined, ['Exit']).references).toEqual(draft.references);
+    });
 });

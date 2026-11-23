@@ -225,7 +225,7 @@
 				}
                 @case ('script') {
                     <label>Script
-                        <select #script [value]="draft().script.id" (change)="chooseScript(script.value)">
+                        <select #script data-component-reference-field="$script" [value]="draft().script.id" (change)="chooseScript(script.value)">
                             @if (!scriptType()) {
                                 <option [value]="draft().script.id" disabled>
                                     {{ draft().script.id || 'Choose a registered script' }}
@@ -236,6 +236,9 @@
                             }
                         </select>
                     </label>
+                    @if (scriptCanReset()) {
+                        <button type="button" (click)="resetScriptConfig()">Reset Script settings</button>
+                    }
                     @if (scriptType(); as type) {
                         @for (field of type.fields; track field.key) {
                             <label>{{ field.label }}
@@ -249,7 +252,8 @@
                         }
                         @for (field of type.references; track field.key) {
                             <label>{{ field.label }}
-                                <select #target [value]="scriptTarget(field.key)" (change)="setScriptTarget(field.key, target.value)">
+                                <select #target [attr.data-component-reference-field]="field.key" [value]="scriptTarget(field.key)"
+                                    (change)="setScriptTarget(field.key, target.value)">
                                     <option value="">Choose an object</option>
                                     @for (object of scriptTargets(field); track object.key) {
                                         <option [value]="'entity:' + object.key">{{ object.name }}</option>

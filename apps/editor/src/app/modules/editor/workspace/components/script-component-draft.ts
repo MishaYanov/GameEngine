@@ -7,6 +7,7 @@ export interface ScriptDraft {
     id: string;
     properties: Record<string, string | boolean>;
     references: Record<string, ScriptReference>;
+    resetConfig?: boolean;
 }
 
 export function scriptDraft(settings?: ScriptSettings): ScriptDraft {
@@ -39,8 +40,8 @@ export function scriptSettings(
         if (previous?.script_id === draft.id) return previous;
         throw new Error('Choose a script registered by this project.');
     }
-    if (previous?.script_id === draft.id && previous.config_version !== descriptor.config_version) {
-        throw new Error('This attachment uses an unsupported configuration version. Replace it with a current Script attachment.');
+    if (previous?.script_id === draft.id && previous.config_version !== descriptor.config_version && !draft.resetConfig) {
+        throw new Error('This attachment uses an unsupported configuration version. Reset its settings to use the current version.');
     }
     const properties: Record<string, ScriptProperty> = Object.create(null);
     for (const field of descriptor.fields) {

@@ -8,8 +8,8 @@ use std::{
 use crate::{
 	EntityKey,
 	components::{
-		ComponentId, ScriptComponent, ScriptDescriptor, ScriptReference, ScriptReferenceKind,
-		ScriptSettings,
+		ComponentId, ScriptComponent, ScriptDescriptor, ScriptIssue, ScriptReference,
+		ScriptReferenceKind, ScriptSettings,
 	},
 	runtime_lifecycle::{RuntimeEntityHandle, RuntimeLifecycle},
 	scene_data::{EntityData, TransformData},
@@ -174,34 +174,27 @@ impl Instance {
 		attachment: &ScriptComponent,
 		descriptor: &ScriptDescriptor,
 		registration: ObjectScriptRegistration,
-	) -> Result<Self, String> {
-		descriptor.validate_settings(&attachment.settings)?;
+	) -> Result<Self, ScriptIssue> {
+		descriptor.validate_attachment(
+			&attachment.settings,
+			|key| {
+				world
+					.entity_index(key)
+					.map(|index| &world.data().entities[index])
+			},
+			|_| false,
+		)?;
+		let invalid = |message: &str| ScriptIssue::InvalidConfiguration(message.into());
 		let mut references = BTreeMap::new();
 		let mut sensors = BTreeSet::new();
 		for field in &descriptor.references {
 			let reference = &attachment.settings.references[&field.key];
 			let ScriptReference::Entity { entity: target } = reference else {
-				return Err(format!("Bind the {} slot before Play", field.label));
+				return Err(invalid("Script reference must be bound to an entity"));
 			};
-			let index = world
-				.entity_index(target)
-				.ok_or_else(|| format!("Missing {} entity {target:?}", field.label))?;
-			let source = &world.data().entities[index];
-			if field.requires == ScriptReferenceKind::TriggerCollider
-				&& !(source.collision_enabled
-					&& source
-						.collider
-						.as_ref()
-						.is_some_and(|collider| collider.interaction().sensor))
-			{
-				return Err(format!(
-					"{} must have an enabled trigger collider",
-					field.label
-				));
-			}
 			let handle = lifecycle
 				.handle(target)
-				.ok_or("Script reference runtime handle is missing")?;
+				.ok_or_else(|| invalid("Script reference runtime handle is missing"))?;
 			references.insert(field.key.clone(), handle);
 			if field.requires == ScriptReferenceKind::TriggerCollider {
 				sensors.insert(target.clone());
@@ -210,8 +203,9 @@ impl Instance {
 		Ok(Self {
 			owner: lifecycle
 				.handle(&entity.key)
-				.ok_or("Script owner runtime handle is missing")?,
-			instance: (registration.instantiate)(&attachment.settings)?,
+				.ok_or_else(|| invalid("Script owner runtime handle is missing"))?,
+			instance: (registration.instantiate)(&attachment.settings)
+				.map_err(ScriptIssue::InvalidConfiguration)?,
 			started: false,
 			references: Arc::new(references),
 			write_owner_transform: descriptor.write_owner_transform,
@@ -278,7 +272,7 @@ impl ObjectScripts {
 						.registrations
 						.get(&attachment.settings.script_id)
 						.ok_or_else(|| {
-							format!("Unknown script {}", attachment.settings.script_id)
+							ScriptIssue::MissingRegistration(attachment.settings.script_id.clone())
 						})?;
 					Instance::prepare(
 						world,
@@ -289,13 +283,8 @@ impl ObjectScripts {
 						*registration,
 					)
 				};
-				let instance = prepare().map_err(|error| {
-					format!(
-						"Object {} Script {}: {error}",
-						entity.key.as_str(),
-						attachment.id.as_str()
-					)
-				})?;
+				let instance =
+					prepare().map_err(|error| error.at_attachment(&entity.key, &attachment.id))?;
 				for sensor in &instance.sensors {
 					Arc::make_mut(&mut self.subscribers)
 						.entry(sensor.clone())

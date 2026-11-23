@@ -208,6 +208,7 @@ export class SceneVerification {
     protected repairLabel(action: SceneDependencyAction): string {
         switch (action.kind) {
             case 'inspector': return 'Inspect Owner';
+            case 'script': return 'Open Script';
             case 'prop': return 'Open in Prop';
             case 'animation': return 'Open in Animation';
             case 'animator': return 'Open in Animator';

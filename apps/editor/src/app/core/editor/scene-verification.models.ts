@@ -20,6 +20,7 @@ export interface SceneDependencyOwner {
 
 export type SceneDependencyAction =
     | {readonly kind: 'inspector'}
+    | {readonly kind: 'script'; readonly field?: string}
     | {readonly kind: 'prop'; readonly key: EntityKey}
     | {readonly kind: 'animation'; readonly key?: EntityKey | null}
     | {readonly kind: 'animator' | 'controls_graph'; readonly asset_id: string};
@@ -106,6 +107,8 @@ function validDependency(value: unknown): value is SceneDependencyProblem {
     if (owner == null || !record(open)) return false;
     switch (open['kind']) {
         case 'inspector': return true;
+        case 'script': return text(owner['component_id']) &&
+            (open['field'] === undefined || typeof open['field'] === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(open['field']));
         case 'prop': return entityKey(open['key']);
         case 'animation': return open['key'] == null || entityKey(open['key']);
         case 'animator':

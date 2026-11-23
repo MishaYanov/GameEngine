@@ -1,7 +1,10 @@
 //! Discover runtime prefab documents and rewrite packaged prefab references.
 
+use std::collections::HashMap;
+
 use engine_core::{
 	asset_catalog::{AssetKind, CATALOG_FILE},
+	components::{ScriptIssue, ScriptReference},
 	editor::PrefabData,
 };
 
@@ -81,10 +84,44 @@ impl Closure<'_> {
 			prefab.entities = prefab.expanded_entities()?.into_owned();
 			prefab.composition = Default::default();
 		}
+		validate_scripts(&prefab)
+			.map_err(|error| format!("Prefab {}: {error}", relative.display()))?;
 		self.entities(&prefab.entities)?;
 		self.generate(relative.to_path_buf(), prefab.to_json()?.into_bytes())?;
 		Ok(())
 	}
+}
+
+fn validate_scripts(prefab: &PrefabData) -> Result<(), String> {
+	let entities: HashMap<_, _> = prefab
+		.entities
+		.iter()
+		.map(|entity| (&entity.key, entity))
+		.collect();
+	let slots: HashSet<_> = prefab.reference_slots.values().collect();
+	let descriptors = gameplay_catalog::script_descriptors();
+	for entity in &prefab.entities {
+		for script in entity.scripts.iter().filter(|script| script.enabled) {
+			let result = descriptors
+				.iter()
+				.find(|descriptor| descriptor.id == script.settings.script_id)
+				.ok_or_else(|| ScriptIssue::MissingRegistration(script.settings.script_id.clone()))
+				.and_then(|descriptor| {
+					descriptor.validate_attachment(
+						&script.settings,
+						|key| entities.get(key).copied(),
+						|reference| match reference {
+							ScriptReference::Entity { entity } => slots.contains(entity),
+							ScriptReference::Slot { slot } => {
+								prefab.reference_slots.contains_key(slot)
+							}
+						},
+					)
+				});
+			result.map_err(|issue| issue.at_attachment(&entity.key, &script.id))?;
+		}
+	}
+	Ok(())
 }
 
 #[cfg(test)]

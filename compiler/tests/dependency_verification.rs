@@ -3,17 +3,21 @@ use engine_core::{
 	EntityKey, SceneData,
 	asset_catalog::{AssetCatalog, AssetId, AssetKind, MeshSignature, PersistentAsset},
 	components::{
-		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, SkyBackground, SkySettings,
+		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, ScriptComponent,
+		ScriptReference, ScriptSettings, SkyBackground, SkySettings,
 	},
 	editor::{EditorSession, PrefabData},
 	linked_prefab::{LinkedPrefabSource, NestedPlacement, PinnedAssetVersion, PlacementId},
 	project::ProjectData,
-	scene_data::{EntityData, TransformData},
+	scene_data::{
+		CURRENT_SCHEMA_VERSION, ColliderData, ColliderInteraction, EntityData, TransformData,
+	},
 };
 use sha2::{Digest, Sha256};
 use std::{
 	fs,
 	path::{Path, PathBuf},
+	sync::Arc,
 };
 
 struct Fixture(PathBuf);
@@ -33,6 +37,104 @@ impl Drop for Fixture {
 	fn drop(&mut self) {
 		let _ = fs::remove_dir_all(&self.0);
 	}
+}
+
+#[test]
+fn script_diagnostics_match_play_and_package_preflight_until_repaired() {
+	let fixture = Fixture::new();
+	let root = fixture.0.join("assets");
+	let object = |name| {
+		EntityData::new(EntityKey::new(name).unwrap(), name, NO_MESH_PATH).with_renderable(false)
+	};
+	let mut owner = object("door");
+	let mut sensor = object("sensor");
+	let id = ComponentId::new("door-control").unwrap();
+	owner.scripts.push(ScriptComponent {
+		id: id.clone(),
+		enabled: true,
+		settings: ScriptSettings {
+			script_id: "project.removed_script".into(),
+			config_version: 1,
+			properties: Default::default(),
+			references: [(
+				"sensor".into(),
+				ScriptReference::Entity {
+					entity: sensor.key.clone(),
+				},
+			)]
+			.into(),
+		},
+	});
+	let mut scene = SceneData {
+		schema_version: CURRENT_SCHEMA_VERSION,
+		entities: vec![owner, sensor.clone()],
+		camera: Default::default(),
+		lights: vec![],
+		bindings: Default::default(),
+		organization: Default::default(),
+		default_game_camera: None,
+		environment: Default::default(),
+	};
+	let project = ProjectData::for_scene("Door diagnostics", "scenes/main.json", &scene).unwrap();
+	let factory = gameplay_catalog::resolve(&project).unwrap();
+	let diagnose = |scene: &SceneData, code: &str| {
+		fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+		let issues =
+			inspect_scene_dependencies(&project, &project.startup_scene_id, scene, &root).unwrap();
+		assert_eq!(issues.len(), 1);
+		assert_eq!(issues[0].code, code);
+		assert_eq!(
+			issues[0].owner.as_ref().unwrap().component_id.as_ref(),
+			Some(&id)
+		);
+		assert!(matches!(
+			issues[0].open,
+			Some(DependencyOpen::Script { .. })
+		));
+		let play_error = engine_core::simulation_session::SimulationSession::with_factory(
+			project.clone(),
+			Arc::new(scene.clone()),
+			factory.as_ref(),
+		)
+		.err()
+		.unwrap();
+		assert_eq!(issues[0].message, play_error);
+		let build_error = prepare_project(&project, &root).err().unwrap();
+		assert!(build_error.contains(&play_error), "{build_error}");
+	};
+	diagnose(&scene, "missing_script");
+	scene.entities[0].scripts[0].settings.script_id = "project.open_door_on_trigger".into();
+	diagnose(&scene, "script_reference_invalid");
+	sensor = sensor.with_collider(Some(ColliderData::Box {
+		half_extents: [0.5; 3],
+		offset: [0.; 3],
+		interaction: ColliderInteraction {
+			sensor: true,
+			..Default::default()
+		},
+	}));
+	scene.entities[1] = sensor;
+	fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+	assert!(
+		inspect_scene_dependencies(&project, &project.startup_scene_id, &scene, &root)
+			.unwrap()
+			.is_empty()
+	);
+	let package = prepare_project(&project, &root).unwrap();
+	let staged = compiler::stage_prepared_project(&package, fixture.0.to_str().unwrap()).unwrap();
+	let staged_scene = SceneData::from_json(
+		&fs::read_to_string(staged.path().join("assets/scenes/main.json")).unwrap(),
+	)
+	.unwrap();
+	assert_eq!(staged_scene.entities[0].scripts, scene.entities[0].scripts);
+	assert!(
+		engine_core::simulation_session::SimulationSession::with_factory(
+			project,
+			Arc::new(staged_scene),
+			factory.as_ref(),
+		)
+		.is_ok()
+	);
 }
 
 #[test]

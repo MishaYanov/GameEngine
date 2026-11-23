@@ -344,14 +344,17 @@ export class EditorWorkspace {
         };
         if (!current() || !await this.reviewProjectNavigation() || !current() ||
             this.editorService.snapshot()?.revision !== request.revision) return;
-        const inspect = async () => {
+        const inspect = async (field?: string) => {
             if (!current()) return;
             this.workspaceView.selectView('scene-viewport');
-            await this.revealReference({kind: 'entity', key: owner.key, componentId: owner.component_id ?? undefined});
+            await this.revealReference({kind: 'entity', key: owner.key, componentId: owner.component_id ?? undefined}, field);
         };
         switch (action.kind) {
             case 'inspector':
                 await inspect();
+                return;
+            case 'script':
+                await inspect(action.field ?? '$script');
                 return;
             case 'prop':
                 if (await this.propWorkspace.openInstance(action.key)) {
