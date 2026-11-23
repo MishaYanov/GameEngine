@@ -47,7 +47,7 @@ import {ParticleDesigner} from './particle-designer/particle-designer';
 import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
-import {CommandBuilder, type EditorCommand, type EntityKey, type FolderId} from '../../../core/editor/editor.models';
+import {CommandBuilder, type EditorCommand, type EditorSnapshot, type EntityKey, type FolderId, type PrimitiveKind} from '../../../core/editor/editor.models';
 import type {SceneDependencyRequest} from '../../../core/editor/scene-verification.models';
 import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
@@ -515,9 +515,10 @@ export class EditorWorkspace {
             const current = this.editorService.snapshot();
             if (!current) return;
             const generation = this.editorService.workspaceGeneration();
+            const create = (revision: number) => this.editorService.execute(command, generation, revision);
             const snapshot = folder
-                ? await this.createInFolder(command, folder, generation, current.revision)
-                : await this.editorService.execute(command, generation, current.revision);
+                ? await this.createInFolder(create, folder, generation, current.revision)
+                : await create(current.revision);
             if (context !== this.sceneContext()) return;
             if (command.type === 'create_light') {
                 light = snapshot.document.lights.find(item => !current.document.lights.some(previous => previous.key === item.key))?.key;
@@ -535,11 +536,48 @@ export class EditorWorkspace {
         if (emitter) this.particles.open(emitter);
     }
 
-    private async createInFolder(command: EditorCommand, folder: FolderId, generation: number, revision: number) {
+    async createPrimitive(kind: PrimitiveKind, folder: FolderId | null = null): Promise<void> {
+        const context = this.sceneContext();
+        const editor = this.editorService;
+        const generation = editor.workspaceGeneration();
+        const nativeGeneration = this.viewportEditor.state()?.workspace_generation;
+        if (nativeGeneration == null || this.workspaceActionBlocked()) return;
+
+        this.hierarchyError.set(null);
+        const current = () => context === this.sceneContext() && !this.workspaceActionBlocked() &&
+            nativeGeneration === this.viewportEditor.state()?.workspace_generation;
+        const accepted = await this.sceneEditing.withCommittedEdit(async () => {
+            const before = editor.snapshot();
+            if (!current() || !before) return;
+            const {active_scene_id: sceneId, revision} = before;
+            const {asset} = await editor.ensurePrimitive(kind, {workspaceGeneration: generation, nativeGeneration, revision});
+            const after = editor.snapshot();
+            if (!current() || !after || after.active_scene_id !== sceneId) return;
+            const create = (nextRevision: number) =>
+                editor.importModel(asset.path, [0, 0, 0], generation, nextRevision, {nativeGeneration, sceneId});
+            try {
+                const placed = folder
+                    ? await this.createInFolder(create, folder, generation, after.revision)
+                    : await create(after.revision);
+                const key = placed.selection[0];
+                if (key && current()) this.hierarchy()?.revealEntity(key);
+            } catch (cause) {
+                const detail = cause instanceof Error ? cause.message : String(cause);
+                throw new Error(`${asset.name} is available in Assets. ${detail}`, {cause});
+            }
+        });
+        if (!accepted && current()) {
+            this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
+        }
+    }
+
+    private async createInFolder(
+        create: (revision: number) => Promise<EditorSnapshot>, folder: FolderId, generation: number, revision: number,
+    ) {
         const editor = this.editorService;
         const started = await editor.execute({type: 'begin_transaction', label: 'Create object in folder'}, generation, revision);
         try {
-            const created = await editor.execute(command, generation, started.revision);
+            const created = await create(started.revision);
             const key = created.selection[0];
             if (!key) throw new Error('The editor did not select the new object.');
             const placed = await editor.execute({type: 'move_roots_to_folder', roots: [key], folder}, generation, created.revision);

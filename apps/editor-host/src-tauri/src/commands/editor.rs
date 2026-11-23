@@ -350,9 +350,18 @@ pub async fn editor_import_model(
 	path: String,
 	position: [f32; 3],
 	expected_revision: u64,
+	expected_generation: Option<u64>,
+	expected_scene: Option<runtime::scene_catalog::SceneId>,
 ) -> Result<EditorSnapshotDto, String> {
 	trusted_window(&window)?;
 	workspace(state, true, Some("import_model"), move |w| {
+		if expected_generation.is_some_and(|generation| generation != w.generation)
+			|| expected_scene
+				.as_ref()
+				.is_some_and(|scene| scene != w.backend.session().active_scene_id())
+		{
+			return Err("The model placement belongs to another workspace or scene".into());
+		}
 		w.import_model(&path, position, expected_revision)
 	})
 	.await

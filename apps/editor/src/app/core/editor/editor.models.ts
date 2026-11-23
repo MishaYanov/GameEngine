@@ -466,6 +466,8 @@ export interface ModelAsset {
     readonly mesh_count?: number | null;
 }
 
+export type PrimitiveKind = 'plane' | 'cube' | 'sphere' | 'capsule';
+
 export interface AssetOperation {
     readonly operation_id: string;
     readonly asset: ModelAsset;

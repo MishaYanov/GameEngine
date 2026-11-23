@@ -1118,6 +1118,29 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.modelAssets()).toEqual([asset]);
     });
 
+    it('places a published primitive with its current revision and the exact workspace and scene', async () => {
+        const asset = {name: 'Plane', path: 'models/primitives/v1/plane.glb', asset_id: 'plane-id', kind: 'model'};
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockResolvedValueOnce({operation_id: 'primitive', asset, snapshot: snapshot(2)})
+            .mockResolvedValueOnce(snapshot(3));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        const workspaceGeneration = service.workspaceGeneration();
+        const shape = await service.ensurePrimitive('plane', {workspaceGeneration, nativeGeneration: 17, revision: 1});
+        expect(invoke).toHaveBeenLastCalledWith('editor_ensure_primitive', {
+            kind: 'plane', expectedGeneration: 17, expectedRevision: 1,
+        });
+        await service.importModel(shape.asset.path, [0, 0, 0], workspaceGeneration, shape.snapshot.revision, {
+            nativeGeneration: 17, sceneId: shape.snapshot.active_scene_id,
+        });
+        expect(invoke).toHaveBeenLastCalledWith('editor_import_model', {
+            path: asset.path, position: [0, 0, 0], expectedRevision: 2,
+            expectedGeneration: 17, expectedScene: shape.snapshot.active_scene_id,
+        });
+        expect(service.snapshot()?.revision).toBe(3);
+    });
+
     it('ignores a pre-publication catalog reply and requests fresh entries after a move', async () => {
         const original: ModelAsset = {name: 'Actor', path: 'actor.glb', asset_id: 'actor-id'};
         const moved = {...original, path: 'moved.glb'};

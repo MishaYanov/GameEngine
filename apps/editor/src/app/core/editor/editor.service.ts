@@ -61,6 +61,7 @@ import type {
 } from './linked-prefabs.models';
 import type {
     AssetOperation,
+    PrimitiveKind,
     BuildLaunchResult,
     CollisionSnapshot,
     EditorCapabilities,
@@ -502,8 +503,14 @@ export class EditorService {
         }, false, scope.workspaceGeneration);
     }
 
-    importModel(path: string, position: Vec3, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_import_model', {path, position}, false, {expectedGeneration, expectedRevision});
+    importModel(
+        path: string, position: Vec3, expectedGeneration?: number, expectedRevision?: number,
+        target?: {readonly nativeGeneration: number; readonly sceneId: SceneId},
+    ): Promise<EditorSnapshot> {
+        const args = target
+            ? {path, position, expectedGeneration: target.nativeGeneration, expectedScene: target.sceneId}
+            : {path, position};
+        return this.snapshotOperation('editor_import_model', args, false, {expectedGeneration, expectedRevision});
     }
 
     chooseExternalGlb(scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>): Promise<string | null> {
@@ -614,6 +621,10 @@ export class EditorService {
         this.requireGeneration(expectedGeneration);
         return bytes;
     }
+    ensurePrimitive(kind: PrimitiveKind, scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_ensure_primitive', {kind}, scope);
+    }
+
     importExternalGlb(sourcePath: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
         return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, scope);
     }
