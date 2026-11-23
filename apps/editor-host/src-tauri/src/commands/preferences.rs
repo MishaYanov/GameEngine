@@ -1,12 +1,34 @@
 use crate::layout_preferences::{self, LayoutPreferences};
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 use tauri::Manager;
 
+const CONFIG_DIRECTORY_ENV: &str = "ENGINE_EDITOR_CONFIG_DIR";
+
 fn preferences_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-	app.path()
-		.app_config_dir()
-		.map(|directory| directory.join("editor-layout.json"))
-		.map_err(|error| error.to_string())
+	layout_path(std::env::var_os(CONFIG_DIRECTORY_ENV), || {
+		app.path()
+			.app_config_dir()
+			.map_err(|error| error.to_string())
+	})
+}
+
+fn layout_path(
+	override_directory: Option<OsString>,
+	default_directory: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+	let directory = match override_directory {
+		Some(path) => {
+			let path = PathBuf::from(path);
+			if !path.is_absolute() {
+				return Err(format!(
+					"{CONFIG_DIRECTORY_ENV} must be a nonempty absolute path"
+				));
+			}
+			path
+		}
+		None => default_directory()?,
+	};
+	Ok(directory.join("editor-layout.json"))
 }
 
 #[tauri::command]
@@ -28,4 +50,31 @@ pub async fn editor_layout_preferences_save(
 	tauri::async_runtime::spawn_blocking(move || layout_preferences::save(&path, &preferences))
 		.await
 		.map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn layout_override_uses_absolute_path_without_resolving_platform_defaults() {
+		let directory = std::env::current_dir().unwrap().join("editor-preferences");
+		let overridden = layout_path(Some(directory.clone().into_os_string()), || {
+			panic!("an explicit override should be used before platform defaults")
+		})
+		.unwrap();
+		assert_eq!(overridden, directory.join("editor-layout.json"));
+	}
+
+	#[test]
+	fn layout_defaults_when_unset_and_rejects_empty_or_relative_overrides() {
+		let default = std::env::current_dir().unwrap();
+		assert_eq!(
+			layout_path(None, || Ok(default.clone())).unwrap(),
+			default.join("editor-layout.json")
+		);
+		for invalid in ["", "relative"] {
+			assert!(layout_path(Some(invalid.into()), || Ok(default.clone())).is_err());
+		}
+	}
 }
