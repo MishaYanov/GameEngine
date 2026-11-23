@@ -1,0 +1,15 @@
+:host {
+  display: contents;
+}
+
+.agent-content {
+  min-width: 0;
+  padding: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.agent-content p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

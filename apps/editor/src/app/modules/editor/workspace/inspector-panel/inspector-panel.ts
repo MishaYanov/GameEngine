@@ -13,8 +13,8 @@ import {
 } from '@angular/core';
 import {Drawer} from "../../../../shared/components/drawer/drawer";
 import {EditorPane} from "../../../../shared/components/pane/pane";
-import type {Config} from '../../../../shared/models/config.model';
-import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
+import {NgTemplateOutlet} from '@angular/common';
+import {AUTHORING_DRAWER_CONFIG} from '../agent-drawer/authoring-drawer';
 import type {Collider, EntityKey, SceneEntity, Vec3} from '../../../../core/editor/editor.models';
 import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
@@ -39,6 +39,7 @@ let nextInspectorId = 0;
     selector: 'inspector-panel',
     imports: [
         Drawer,
+        NgTemplateOutlet,
         EditorPane,
         Vector3Field,
         ColliderInspector,
@@ -50,6 +51,7 @@ let nextInspectorId = 0;
 })
 export class InspectorPanel {
     readonly entity = input<SceneEntity | null>(null);
+    readonly embedded = input(false);
     readonly drawerMaxWidth = input('45%');
     readonly contextKey = input('');
     readonly editable = input(false);
@@ -68,6 +70,7 @@ export class InspectorPanel {
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly injector = inject(Injector);
     private readonly drawer = viewChild(Drawer);
+    private readonly parentDrawer = inject(Drawer, {optional: true});
     private readonly components = viewChild(SceneComponentInspector);
     private readonly editor = inject(EditorService, {optional: true});
     private readonly viewport = inject(ViewportEditorService, {optional: true});
@@ -79,11 +82,11 @@ export class InspectorPanel {
     protected readonly positionLinked = signal(false);
     protected readonly rotationLinked = signal(false);
     protected readonly scaleLinked = signal(false);
-    protected readonly drawerConfig: Config<DrawerSettings> = {
-        width: '20rem',
-        minWidth: '12rem',
-        maxWidth: '45%',
-    };
+    protected readonly drawerConfig = AUTHORING_DRAWER_CONFIG;
+
+    focus(): void {
+        this.element.querySelector<HTMLElement>('[data-reference-entity], .placeholder')?.focus({preventScroll: true});
+    }
 
     private readonly snapshot = computed(() => this.editor?.snapshot() ?? null);
     private readonly nativeGeneration = computed(() => this.viewport?.state()?.workspace_generation ?? null);
@@ -168,7 +171,7 @@ export class InspectorPanel {
         };
         afterNextRender(() => {
             if (this.selectionIdentity() !== identity) return;
-            const drawer = this.drawer();
+            const drawer = this.drawer() ?? this.parentDrawer;
             if (drawer && (drawer.collapsed() || !drawer.isExpanded())) {
                 drawer.config.update(config => ({...config, collapsed: false, expanded: true}));
                 afterNextRender(focus, {injector: this.injector});

@@ -1,121 +1,131 @@
-<app-drawer
-        [config]="drawerConfig"
-        icon="object"
-        label="Inspector"
-        preferenceKey="editor.object-inspector"
-        resizeLabel="Resize Inspector"
-        type="right"
-        [maxWidth]="drawerMaxWidth()"
->
+<ng-template #content>
+    @for (selection of selectedEntities(); track selection.identity) {
+        @let selected = selection.entity;
+        <div class="inspector-content">
+            <section aria-label="Object identity" class="object-identity">
+                @if (!editable()) {
+                    <p class="read-only">Properties are read-only while editing is unavailable.</p>
+                }
+                <label class="name-field">
+                    <span>Name</span>
+                    <input
+                            #nameInput
+                            type="text"
+                            maxlength="1024"
+                            autocomplete="off"
+                            [value]="nameValue()"
+                            [disabled]="!editable()"
+                            [attr.aria-invalid]="invalidName() ? 'true' : null"
+                            [attr.aria-describedby]="invalidName() ? nameErrorId : null"
+                            (focus)="startName(nameInput)"
+                            (input)="changeName(nameInput)"
+                            (blur)="finishName(nameInput)"
+                            (keydown)="nameKeydown($event, nameInput)"
+                    />
+                </label>
+                @if (invalidName()) {
+                    <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
+                }
+                <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
+                    <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
+                    @if (selected.component_views === undefined) {
+                        <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
+                    }
+                </dl>
+            </section>
+            <section class="transform" aria-label="Local transform">
+                <h3>Transform <span>Local space</span></h3>
+                <editor-vector3-field
+                        label="Position"
+                        [(locked)]="positionLinked"
+                        [lockable]="true"
+                        lockHint="Move all three axes by the same offset"
+                        [value]="selected.transform.position"
+                        [disabled]="!editable()"
+                        (editStarted)="editStarted.emit('position')"
+                        (valueChanged)="changeTransform('position', $event)"
+                        (editCommitted)="editCommitted.emit()"
+                        (editCancelled)="editCancelled.emit()"
+                />
+                <editor-vector3-field
+                        label="Rotation"
+                        unit="degrees"
+                        [(locked)]="rotationLinked"
+                        [lockable]="true"
+                        lockHint="Rotate all three axes by the same angle"
+                        [value]="rotationDegrees()"
+                        [disabled]="!editable()"
+                        (editStarted)="editStarted.emit('rotation')"
+                        (valueChanged)="changeTransform('rotation', $event)"
+                        (editCommitted)="editCommitted.emit()"
+                        (editCancelled)="editCancelled.emit()"
+                />
+                <editor-vector3-field
+                        label="Scale"
+                        [(locked)]="scaleLinked"
+                        [lockable]="true"
+                        lockHint="Scale all three axes by the same factor"
+                        [value]="selected.transform.scale"
+                        [disabled]="!editable()"
+                        (editStarted)="editStarted.emit('scale')"
+                        (valueChanged)="changeTransform('scale', $event)"
+                        (editCommitted)="editCommitted.emit()"
+                        (editCancelled)="editCancelled.emit()"
+                />
+                <div aria-label="Reset local transform" class="reset-transform" role="group">
+                    <button type="button" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('all')">Reset Transform</button>
+                    <button type="button" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('position')">Reset Position</button>
+                    <button type="button" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('rotation')">Reset Rotation</button>
+                    <button type="button" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('scale')">Reset Scale</button>
+                </div>
+            </section>
+            @if (selected.component_views !== undefined) {
+                <editor-scene-component-inspector [entity]="selected" [subject]="subject()" [editable]="editable()"/>
+                <editor-linked-prefab-inspector [editable]="editable()" [entity]="selected" [subject]="subject()"
+                                                aria-label="Linked prefab" data-reference-prefab tabindex="-1"/>
+            } @else if (selected.collider || !catalogCollider()) {
+            <editor-collider-inspector
+                [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"
+                (editStarted)="editStarted.emit('collider')" (colliderChanged)="colliderChanged.emit($event)"
+                (draftInvalid)="colliderInvalid.emit()" (shapeChanged)="colliderShapeChanged.emit($event)"
+                (interactionChanged)="colliderInteractionChanged.emit($event)"
+                (editCommitted)="editCommitted.emit()" (editCancelled)="editCancelled.emit()"/>
+            @if (physicsLayersAvailable()) {
+                <button type="button" [disabled]="!editable()" (click)="physicsLayersRequested.emit()">Physics Layers…</button>
+            }
+            }
+        </div>
+    } @empty {
+        <p class="placeholder" tabindex="-1">Select an entity to inspect its properties.</p>
+    }
+    @if (editError(); as error) {
+        <div class="edit-error" role="alert">
+            <p class="error">{{ error }}</p>
+            <button class="discard-edit" type="button" (click)="editCancelled.emit()">Discard edit</button>
+        </div>
+    }
+</ng-template>
+
+@if (embedded()) {
     <editor-pane icon="object" title="Inspector">
-        @for (selection of selectedEntities(); track selection.identity) {
-            @let selected = selection.entity;
-            <div class="inspector-content">
-                <section aria-label="Object identity" class="object-identity">
-                    @if (!editable()) {
-                        <p class="read-only">Properties are read-only while editing is unavailable.</p>
-                    }
-                    <label class="name-field">
-                        <span>Name</span>
-                        <input
-                                #nameInput
-                                type="text"
-                                maxlength="1024"
-                                autocomplete="off"
-                                [value]="nameValue()"
-                                [disabled]="!editable()"
-                                [attr.aria-invalid]="invalidName() ? 'true' : null"
-                                [attr.aria-describedby]="invalidName() ? nameErrorId : null"
-                                (focus)="startName(nameInput)"
-                                (input)="changeName(nameInput)"
-                                (blur)="finishName(nameInput)"
-                                (keydown)="nameKeydown($event, nameInput)"
-                        />
-                    </label>
-                    @if (invalidName()) {
-                        <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
-                    }
-                    <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
-                        <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
-                        @if (selected.component_views === undefined) {
-                            <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
-                        }
-                    </dl>
-                </section>
-                <section class="transform" aria-label="Local transform">
-                    <h3>Transform <span>Local space</span></h3>
-                    <editor-vector3-field
-                            label="Position"
-                            [(locked)]="positionLinked"
-                            [lockable]="true"
-                            lockHint="Move all three axes by the same offset"
-                            [value]="selected.transform.position"
-                            [disabled]="!editable()"
-                            (editStarted)="editStarted.emit('position')"
-                            (valueChanged)="changeTransform('position', $event)"
-                            (editCommitted)="editCommitted.emit()"
-                            (editCancelled)="editCancelled.emit()"
-                    />
-                    <editor-vector3-field
-                            label="Rotation"
-                            unit="degrees"
-                            [(locked)]="rotationLinked"
-                            [lockable]="true"
-                            lockHint="Rotate all three axes by the same angle"
-                            [value]="rotationDegrees()"
-                            [disabled]="!editable()"
-                            (editStarted)="editStarted.emit('rotation')"
-                            (valueChanged)="changeTransform('rotation', $event)"
-                            (editCommitted)="editCommitted.emit()"
-                            (editCancelled)="editCancelled.emit()"
-                    />
-                    <editor-vector3-field
-                            label="Scale"
-                            [(locked)]="scaleLinked"
-                            [lockable]="true"
-                            lockHint="Scale all three axes by the same factor"
-                            [value]="selected.transform.scale"
-                            [disabled]="!editable()"
-                            (editStarted)="editStarted.emit('scale')"
-                            (valueChanged)="changeTransform('scale', $event)"
-                            (editCommitted)="editCommitted.emit()"
-                            (editCancelled)="editCancelled.emit()"
-                    />
-                    <div aria-label="Reset local transform" class="reset-transform" role="group">
-                        <button type="button" [disabled]="!editable()"
-                                (click)="transformResetRequested.emit('all')">Reset Transform</button>
-                        <button type="button" [disabled]="!editable()"
-                                (click)="transformResetRequested.emit('position')">Reset Position</button>
-                        <button type="button" [disabled]="!editable()"
-                                (click)="transformResetRequested.emit('rotation')">Reset Rotation</button>
-                        <button type="button" [disabled]="!editable()"
-                                (click)="transformResetRequested.emit('scale')">Reset Scale</button>
-                    </div>
-                </section>
-                @if (selected.component_views !== undefined) {
-                    <editor-scene-component-inspector [entity]="selected" [subject]="subject()" [editable]="editable()"/>
-                    <editor-linked-prefab-inspector [editable]="editable()" [entity]="selected" [subject]="subject()"
-                                                    aria-label="Linked prefab" data-reference-prefab tabindex="-1"/>
-                } @else if (selected.collider || !catalogCollider()) {
-                <editor-collider-inspector
-                    [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"
-                    (editStarted)="editStarted.emit('collider')" (colliderChanged)="colliderChanged.emit($event)"
-                    (draftInvalid)="colliderInvalid.emit()" (shapeChanged)="colliderShapeChanged.emit($event)"
-                    (interactionChanged)="colliderInteractionChanged.emit($event)"
-                    (editCommitted)="editCommitted.emit()" (editCancelled)="editCancelled.emit()"/>
-                @if (physicsLayersAvailable()) {
-                    <button type="button" [disabled]="!editable()" (click)="physicsLayersRequested.emit()">Physics Layers…</button>
-                }
-                }
-            </div>
-        } @empty {
-            <p class="placeholder">Select an entity to inspect its properties.</p>
-        }
-        @if (editError(); as error) {
-            <div class="edit-error" role="alert">
-                <p class="error">{{ error }}</p>
-                <button class="discard-edit" type="button" (click)="editCancelled.emit()">Discard edit</button>
-            </div>
-        }
+        <ng-container [ngTemplateOutlet]="content"/>
     </editor-pane>
-</app-drawer>
+} @else {
+    <app-drawer
+            [config]="drawerConfig"
+            icon="object"
+            label="Inspector"
+            preferenceKey="editor.object-inspector"
+            resizeLabel="Resize Inspector"
+            type="right"
+            [maxWidth]="drawerMaxWidth()"
+    >
+        <editor-pane icon="object" title="Inspector">
+            <ng-container [ngTemplateOutlet]="content"/>
+        </editor-pane>
+    </app-drawer>
+}

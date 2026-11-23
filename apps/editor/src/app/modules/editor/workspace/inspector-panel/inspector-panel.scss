@@ -203,3 +203,7 @@ h3 span,
     font-size: var(--font-size-md);
   }
 }
+
+:host([hidden]) {
+  display: none;
+}

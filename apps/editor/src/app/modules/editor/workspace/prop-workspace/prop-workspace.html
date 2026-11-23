@@ -54,7 +54,7 @@
             <p role="alert">{{ message }}</p>
             <button (click)="preview.retry()" type="button">Retry Preview</button>
         }
-        <div class="document-panes">
+        <div class="document-panes" [class.single-pane]="!inspectorVisible()">
             <section aria-labelledby="prop-objects-heading">
                 <h3 id="prop-objects-heading">Objects</h3>
                 <ul aria-labelledby="prop-objects-heading" class="objects">
@@ -84,7 +84,7 @@
                     }
                 </ul>
             </section>
-            <section aria-label="Prop Inspector">
+            <section #inspector aria-label="Prop Inspector" [hidden]="!inspectorVisible()" tabindex="-1">
                 <h3>Inspector</h3>
                 @if (prop.selectedPlacement(); as placement) {
                     <h4>{{ placement.name }}</h4>

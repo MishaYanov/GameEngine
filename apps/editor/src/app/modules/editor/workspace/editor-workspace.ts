@@ -3,6 +3,7 @@ import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-a
 import {allowsFolder, availableObjectMenuActions, objectMenuEntry, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
+import {Drawer} from '../../../shared/components/drawer/drawer';
 import {EditorPane} from '../../../shared/components/pane/pane';
 import {EditorIcon} from '../../../shared/icons/editor-icon';
 import {EditorDialog} from '../../../shared/components/dialog/dialog';
@@ -24,6 +25,8 @@ import {PropPreviewService} from './prop-workspace/prop-preview.service';
 import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
+import {AgentDrawer} from './agent-drawer/agent-drawer';
+import {AUTHORING_DRAWER_CONFIG, type RightDrawerMode} from './agent-drawer/authoring-drawer';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
 import {AssetsPanel} from './assets-panel/assets-panel';
 import {PropAssetSelection} from './prefabs/prop-asset-selection';
@@ -68,13 +71,17 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
-        EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
+        Drawer, EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel, AgentDrawer,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
         CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector, AudioWorkspace, BehaviorWorkspace,
         CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
-    styleUrls: ['./editor-workspace.scss', './animation/animation-workspace-layout.scss'],
+    styleUrls: [
+        './editor-workspace.scss',
+        './animation/animation-workspace-layout.scss',
+        './agent-drawer/right-drawer-layout.scss',
+    ],
     host: {'(keydown)': 'handleEditorShortcut($event)', 'data-editor-shortcut-scope': 'workspace'},
 })
 export class EditorWorkspace {
@@ -158,6 +165,21 @@ export class EditorWorkspace {
     private readonly workspaceToolbar = viewChild(WorkspaceToolbar);
     private readonly hierarchy = viewChild(SceneEntitiesPanel);
     private readonly inspector = viewChild(InspectorPanel);
+    private readonly authoringDrawer = viewChild<Drawer>('authoringDrawer');
+    private readonly agentDrawer = viewChild(AgentDrawer);
+    private readonly propPanel = viewChild(PropWorkspace);
+    protected readonly authoringDrawerConfig = AUTHORING_DRAWER_CONFIG;
+    protected readonly rightDrawerMode = signal<RightDrawerMode>('inspector');
+    protected readonly rightDrawerView = computed(() => this.editorService.playing() ?
+        (this.workspaceView.gameView() ? 'runtime-inspector' : 'inspector') : this.rightDrawerMode());
+    protected readonly sceneInspectorVisible = computed(() =>
+        this.workspaceView.activeViewKind() === 'scene-viewport' || this.workspaceView.gameView());
+    protected readonly showingAuthoringDrawer = computed(() =>
+        this.rightDrawerView() === 'agent' || this.sceneInspectorVisible());
+    protected readonly rightDrawerLabel = computed(() => this.rightDrawerView() === 'agent' ? 'Agent' : 'Inspector');
+    protected readonly rightDrawerSwitchDisabled = computed(() =>
+        this.workspaceActionBlocked() || this.editorService.playing() ||
+        !this.editorService.snapshot());
     private readonly cameraSettings = viewChild(CameraSettings);
     private readonly sceneActions = viewChild(SceneActions);
     private readonly gameInput = viewChild(GameInputManager);
@@ -327,6 +349,39 @@ export class EditorWorkspace {
         if (context === this.sceneContext()) this.workspaceView.selectView(view);
     }
 
+    protected async requestRightDrawer(mode: RightDrawerMode): Promise<void> {
+        if (this.rightDrawerSwitchDisabled() || this.draftReview.pending()) return;
+        if (this.rightDrawerMode() === mode) {
+            this.focusRightDrawer(mode);
+            return;
+        }
+        const view = this.workspaceView.activeViewKind();
+        await this.draftReview.run(this.draftReview.capture(), async () => {
+            if (this.workspaceActionBlocked() || this.editorService.playing() ||
+                this.workspaceView.activeViewKind() !== view) return;
+            this.rightDrawerMode.set(mode);
+            this.focusRightDrawer(mode);
+        });
+    }
+
+    private focusRightDrawer(mode: RightDrawerMode): void {
+        const focus = () => {
+            if (this.rightDrawerView() !== mode) return;
+            if (mode === 'agent') this.agentDrawer()?.focus();
+            else if (this.workspaceView.propView()) this.propPanel()?.focusInspector();
+            else if (this.sceneInspectorVisible()) this.inspector()?.focus();
+            else this.workspaceTabs()?.focusTab(this.workspaceView.activeViewKind());
+        };
+        afterNextRender(() => {
+            if (this.rightDrawerView() !== mode) return;
+            const drawer = this.authoringDrawer();
+            if (this.showingAuthoringDrawer() && drawer && (drawer.collapsed() || !drawer.isExpanded())) {
+                drawer.config.update(config => ({...config, collapsed: false, expanded: true}));
+                afterNextRender(focus, {injector: this.injector});
+            } else focus();
+        }, {injector: this.injector});
+    }
+
     async runObjectAction(id: ObjectMenuAction, folder: FolderId | null = null): Promise<void> {
         const entry = objectMenuEntry(id);
         if (!entry || !this.availableObjectActions().includes(id) || this.document.querySelector('dialog[open]')) return;
@@ -478,13 +533,15 @@ export class EditorWorkspace {
                 const target = this.draftReview.capture();
                 const from = this.workspaceView.activeViewKind();
                 const current = () => this.draftReview.current(target) && this.canRevealReference();
-                if (from !== 'scene-viewport' && !await this.draftReview.run(target)) return;
+                if ((from !== 'scene-viewport' || this.rightDrawerMode() === 'agent') &&
+                    !await this.draftReview.run(target)) return;
                 if (!current() || this.workspaceView.activeViewKind() !== from) return;
 
                 await this.sceneEditing.select(location.key);
                 if (!current() || this.sceneEditing.entity()?.key !== location.key ||
                     this.workspaceView.activeViewKind() !== from) return;
                 this.workspaceView.selectView('scene-viewport');
+                if (location.section !== 'hierarchy') this.rightDrawerMode.set('inspector');
                 afterNextRender(() => {
                     if (!current() || this.workspaceView.activeViewKind() !== 'scene-viewport' ||
                         this.sceneEditing.entity()?.key !== location.key) return;

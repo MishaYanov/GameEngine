@@ -32,6 +32,10 @@ h2, h3, h4 {margin: 0 0 var(--space-1);}
     gap: var(--space-3);
 }
 
+.document-panes.single-pane {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .document-panes section {
     min-width: 0;
     padding: var(--space-2);

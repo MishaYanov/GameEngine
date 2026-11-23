@@ -1,4 +1,4 @@
-import {afterNextRender, Component, computed, ElementRef, inject, Injector, output, signal, viewChild} from '@angular/core';
+import {afterNextRender, Component, computed, ElementRef, inject, Injector, input, output, signal, viewChild} from '@angular/core';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey} from '../../../../core/editor/editor.models';
 import type {NestedPropPlacement, NestedPropPlacementRequest} from '../../../../core/editor/linked-prefabs.models';
@@ -27,6 +27,7 @@ interface PlacementRefresh {
 })
 export class PropWorkspace {
     readonly closed = output<void>();
+    readonly inspectorVisible = input(true);
     protected readonly prop = inject(PropWorkspaceService);
     protected readonly preview = inject(PropPreviewService);
     private readonly injector = inject(Injector);
@@ -124,6 +125,11 @@ export class PropWorkspace {
         }));
     });
     private readonly heading = viewChild<ElementRef<HTMLElement>>('heading');
+    private readonly inspector = viewChild<ElementRef<HTMLElement>>('inspector');
+
+    focusInspector(): void {
+        this.inspector()?.nativeElement.focus({preventScroll: true});
+    }
 
     protected showSourceInAssets(sourceId: string): void {
         const snapshot = this.editor.snapshot();

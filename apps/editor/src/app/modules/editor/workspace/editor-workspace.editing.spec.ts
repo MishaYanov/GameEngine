@@ -40,6 +40,7 @@ import {
     type ViewportEditorState
 } from '../../../core/editor/viewport-editor.models';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
+import {Drawer} from '../../../shared/components/drawer/drawer';
 import {AnimationWorkspaceService} from './animation/animation-workspace.service';
 import {WorkspaceViewService} from './scene-viewport/workspace-view.service';
 
@@ -1586,6 +1587,83 @@ describe('Workspace live editing flow', () => {
         expect(input('Position X').matches(':disabled')).toBe(false);
         expect(input('Position X').valueAsNumber).toBe(3);
         expect(fixture.nativeElement.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Scene');
+    });
+
+    it('shares the Inspector size and viewport with Agent and restores Agent after Play', async () => {
+        await selectRobot();
+        const root: HTMLElement = fixture.nativeElement;
+        const drawer = () => root.querySelector<HTMLElement>('.workspace-authoring-drawer')!;
+        const modeButton = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('.drawer-mode-switch button')]
+            .find(button => button.textContent?.trim() === label)!;
+        const inspector = drawer();
+        const viewport = root.querySelector('scene-viewport');
+        const resize = fixture.debugElement.query(By.css('.workspace-authoring-drawer')).componentInstance as Drawer;
+        await vi.waitFor(() => expect(resize.configReady()).toBe(true));
+        resize.config.update(config => ({...config, width: '276px', collapsed: true}));
+        await fixture.whenStable();
+        const before = commands.length;
+
+        modeButton('Agent').focus();
+        modeButton('Agent').click();
+        await vi.waitFor(() => expect(drawer().getAttribute('aria-label')).toBe('Agent'));
+        await fixture.whenStable();
+        expect(modeButton('Agent').getAttribute('aria-pressed')).toBe('true');
+        expect(root.querySelectorAll('scene-viewport')).toHaveLength(1);
+        expect(root.querySelector('scene-viewport')).toBe(viewport);
+        expect(drawer()).toBe(inspector);
+        expect(drawer().style.getPropertyValue('--drawer-width')).toBe('276px');
+        expect(drawer().classList.contains('collapsed')).toBe(false);
+        expect(root.ownerDocument.activeElement).toBe(root.querySelector('[aria-label="Agent guidance"]'));
+        expect(editor.selection()).toEqual(['robot']);
+        expect(commands).toHaveLength(before);
+
+        action('Play').click();
+        await vi.waitFor(() => expect(root.querySelector('editor-runtime-inspector')).not.toBeNull());
+        expect(root.querySelector('editor-agent-drawer')).toBeNull();
+        action('Stop').click();
+        await vi.waitFor(() => expect(drawer()?.getAttribute('aria-label')).toBe('Agent'));
+        await vi.waitFor(() => expect(drawer().style.getPropertyValue('--drawer-width')).toBe('276px'));
+        expect(root.querySelector('scene-viewport')).toBe(viewport);
+        expect(editor.selection()).toEqual(['robot']);
+
+        modeButton('Inspector').focus();
+        modeButton('Inspector').click();
+        await vi.waitFor(() => expect(drawer()?.getAttribute('aria-label')).toBe('Inspector'));
+        await fixture.whenStable();
+        expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-reference-entity]'));
+        expect(drawer().style.getPropertyValue('--drawer-width')).toBe('276px');
+    });
+
+    it('keeps Inspector and the dirty Prop open when the author cancels a switch to Agent', async () => {
+        openPropSource = async revision => ({...propSource(revision), draft_revision: 1, dirty: false});
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await vi.waitFor(() => expect(root.querySelector('prop-object-editor')).not.toBeNull());
+        const field = root.querySelector<HTMLInputElement>('input[aria-label="Prop local position X"]')!;
+        field.focus();
+        field.value = '3';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+        await vi.waitFor(() => expect(propDraft?.dirty).toBe(true));
+        const modeButton = [...root.querySelectorAll<HTMLButtonElement>('.drawer-mode-switch button')]
+            .find(button => button.textContent?.trim() === 'Agent')!;
+        modeButton.focus();
+        modeButton.click();
+        await vi.waitFor(() => expect(root.querySelector('dialog[open]')?.textContent).toContain('Unsaved Prop changes'));
+        const cancel = [...root.querySelectorAll<HTMLButtonElement>('dialog[open] button')]
+            .find(button => button.textContent?.trim() === 'Keep Editing')!;
+        cancel.click();
+        await vi.waitFor(() => expect(root.querySelector('dialog[open]')).toBeNull());
+        await fixture.whenStable();
+        expect(root.ownerDocument.activeElement).toBe(modeButton);
+        expect(modeButton.getAttribute('aria-pressed')).toBe('false');
+        expect(root.querySelector('editor-agent-drawer')).toBeNull();
+        expect(root.querySelector('[aria-label="Prop Inspector"]:not([hidden])')).not.toBeNull();
+        expect(propDraft?.dirty).toBe(true);
+        expect(commands).toEqual([]);
     });
 
     it('displays status for the current Play session and restarts only after native confirmation', async () => {

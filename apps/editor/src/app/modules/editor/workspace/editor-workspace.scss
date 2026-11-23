@@ -14,7 +14,7 @@
 
 .workspace-main {
   // Keep room for the viewport even when both saved drawer widths are at their limits.
-  --workspace-hierarchy-max: 30%;
+  --workspace-hierarchy-max: 55%;
   --workspace-inspector-max: 35%;
   display: flex;
   flex: 1;
@@ -24,8 +24,12 @@
   padding: 0 var(--space-2);
 }
 
-.workspace-main:not(:has(inspector-panel, editor-runtime-inspector)) {
-  --workspace-hierarchy-max: 55%;
+.workspace-main:where(:has(.workspace-authoring-drawer:not(.workspace-authoring-hidden), editor-runtime-inspector)) {
+  --workspace-hierarchy-max: 30%;
+}
+
+.workspace-authoring-drawer.workspace-authoring-hidden {
+  display: none;
 }
 
 .workspace-controls {
@@ -45,7 +49,6 @@
 
 .problems-button {
   min-height: var(--layout-subject-control-height);
-  margin: var(--space-1);
   padding-inline: var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -53,6 +56,7 @@
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-sm);
+  margin: var(--space-1);
 }
 
 .problems-button:enabled:hover {
@@ -119,11 +123,15 @@ scene-viewport.prop-aperture {
   min-block-size: 10rem;
 }
 
-.viewport-keyboard-hint {
-  min-width: 0;
+.viewport-keyboard-hint,
+.scene-load [role='status'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.viewport-keyboard-hint {
+  min-width: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
 }
@@ -139,12 +147,6 @@ scene-viewport.prop-aperture {
   min-width: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
-}
-
-.scene-load [role='status'] {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .scene-load progress {
@@ -225,8 +227,7 @@ scene-viewport[hidden] {
 }
 
 @container (max-width: 45rem) {
-  .workspace-main,
-  .workspace-main:not(:has(inspector-panel, editor-runtime-inspector)) {
+  .workspace-main {
     --workspace-hierarchy-max: 48%;
     --workspace-inspector-max: 48%;
     flex-wrap: wrap;
