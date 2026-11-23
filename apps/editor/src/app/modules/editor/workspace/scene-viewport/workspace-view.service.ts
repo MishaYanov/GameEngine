@@ -43,10 +43,11 @@ export class WorkspaceViewService {
         effect(() => {
             const playing = this.editor.playing();
             untracked(() => {
-                if (playing) {
-                    this.returnFromPlay = this.propView() || this.animatorView() || this.controlsGraphView() ? this.activeViewKind() : 'scene-viewport';
+                if (playing && !this.wasPlaying) {
+                    const previous = this.activeViewKind();
+                    this.returnFromPlay = previous === 'game-preview' ? 'scene-viewport' : previous;
                     this.activeView.set('game-preview');
-                } else if (this.wasPlaying) {
+                } else if (!playing && this.wasPlaying) {
                     this.activeView.set(this.returnFromPlay);
                 }
                 this.wasPlaying = playing;

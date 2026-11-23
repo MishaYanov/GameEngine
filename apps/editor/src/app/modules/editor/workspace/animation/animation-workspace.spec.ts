@@ -8,6 +8,7 @@ import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {SceneEntity, Transform} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {NestedPropPlacement, PrefabSourceDocument} from '../../../../core/editor/linked-prefabs.models';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {PropWorkspaceService, type PropWorkspaceDocument} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
@@ -36,7 +37,7 @@ const clips = [
     {index: 2, name: 'Turn', duration_seconds: 1},
 ];
 
-function setup() {
+function setup(useRealViews = false) {
     const selected = signal<SceneEntity | null>(actor);
     const entities = signal<readonly SceneEntity[]>([actor]);
     const generation = signal(1);
@@ -112,13 +113,16 @@ function setup() {
                 listAuthoredClips, openAuthoredClip, saveAuthoredClip, openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview,
             }},
             {provide: SceneEditingService, useValue: {entity: selected}},
-            {provide: WorkspaceViewService, useValue: {animationView: active, animationOrigin: origin}},
+            useRealViews ? WorkspaceViewService
+                : {provide: WorkspaceViewService, useValue: {animationView: active, animationOrigin: origin}},
+            {provide: ViewportEditorService, useValue: {state: signal(null), gameStatus: signal(null)}},
             {provide: PropWorkspaceService, useValue: {document: propSource, selectedObject: () => null, selectedPlacement: placement}},
         ],
     });
     const fixture = TestBed.createComponent(AnimationWorkspace);
     return {
         fixture, selected, generation, revision, active, origin, playing, entities, propSource, placement,
+        views: TestBed.inject(WorkspaceViewService),
         open, inspect, sample, close, frame, opened, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview, workspace: TestBed.inject(AnimationWorkspaceService),
     };
 }
@@ -198,8 +202,9 @@ describe('Animation workspace', () => {
         expect(close).toHaveBeenCalledWith(latest.token);
     });
 
-    it('binds equal source-local children to distinct scene instance owners and releases on Play', async () => {
-        const {fixture, selected, entities, revision, open, workspace, playing, close} = setup();
+    it('binds distinct scene instance owners and reopens an Animation preview after Play with a fresh lease', async () => {
+        const {fixture, selected, entities, revision, open, workspace, views, playing, close} = setup(true);
+        views.selectView('animation-workspace');
         const link = {source: {source_id: 'asset', path: 'knight.json'}, bindings: {}};
         const root = (key: string): SceneEntity => ({...actor, key, animation: null, renderable: false, linked_prefab: link});
         const first = {...actor, key: 'member-1', parent: 'anchor-1'};
@@ -219,8 +224,19 @@ describe('Animation workspace', () => {
         const active = workspace.preview()!;
         playing.set(true);
         await fixture.whenStable();
+        expect(views.activeViewKind()).toBe('game-preview');
         expect(workspace.preview()).toBeNull();
         expect(close).toHaveBeenCalledWith(active.token);
+        expect(open).toHaveBeenCalledTimes(2);
+        revision.set(6);
+        playing.set(false);
+        await fixture.whenStable();
+        expect(views.activeViewKind()).toBe('animation-workspace');
+        expect(views.animationOrigin()).toBe('scene');
+        const resumed = workspace.preview();
+        expect(resumed?.revision).toBe(6);
+        expect(resumed?.target.entity_key).toBe('member-2');
+        expect(resumed?.token).not.toBe(active.token);
     });
 
     it('targets a nested object in its retained Prop source draft and invalidates a changed draft', async () => {
