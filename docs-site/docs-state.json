@@ -1,9 +1,26 @@
 {
-  "last_checked_commit": "48e678c122e48f0acdeddcc724374bb6e86b54d7",
-  "last_checked_date": "2026-11-22",
-  "last_documentation_update_commit": "ba8985dc5d7510d56471395e30c0f1f4c42265f4",
+  "last_checked_commit": "36c3ee18072f863ce56eb742c7f25da53d5ba699",
+  "last_checked_date": "2026-11-23",
+  "last_documentation_update_commit": "2cec79f0d89930b17f368e8a90eb280ac4c0fc60",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "The Milestone 10 entries record the inspected HEAD and camera worktree fingerprints. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "baseline_note": "The inspection commit includes all source changes covered by the editor authoring polish guide. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "authoring_polish_milestones_110_121": {
+    "inspected_head": "36c3ee18072f863ce56eb742c7f25da53d5ba699",
+    "scope": "Editor warning and layout fixes, individual Milestones 110–121 and follow-up Angular and Rust changes. The guide contains source paths, snippets, verification and resources for every milestone.",
+    "verification": [
+      "The integrated Angular suite passed 634 tests. The production build and bundle boundary check passed without Angular template or stylesheet budget warnings.",
+      "The Rust workspace passed 1,241 tests on Windows, with 22 opt-in cases skipped. The all-targets check completed without compiler diagnostics.",
+      "Python tool tests passed 151 cases. The documentation site generated and link-checked 66 pages and passed eight tests.",
+      "Headless Edge measured nine layouts on representative markup styled with compiled editor SCSS. No case overflowed horizontally. With both drawers maximized the 1000 px fixture reserved 328 px in the center. The Animator and Controls Graph controls stacked below the graph at 390 px.",
+      "The separate test, documentation, optimization and Angular and Rust code review passes were completed. The follow-up reduced unnecessary Hierarchy and graph work and hardened native exit and candidate installation."
+    ],
+    "verification_limits": [
+      "The Windows title-bar close dialog and Vulkan viewport still need interactive verification. The Rust tests exercise native review and teardown state, and the Angular tests exercise the bridge contract with test doubles.",
+      "File → Exit also runs the Angular Animator and Controls Graph draft review. The title-bar button runs the native review.",
+      "The Windows workspace accepts a copy fallback when the incremental compiler cache cannot hard-link files on OneDrive. Some browser test doubles still log jsdom canvas support limitations.",
+      "Prior unrelated staged, unstaged and untracked work was read when checking the baseline and preserved during the scoped commits."
+    ]
+  },
   "courtyard_release_milestones_52_69": {
     "date": "2026-11-22",
     "inspected_head": "98ea86fb5df2017a9989566c9cad0532f501008c",

@@ -2,6 +2,9 @@
 
 The main `/editor` route connects project creation/opening, entity and Inspector editing, native Vulkan tools, scene/model actions, saving, Play and staged standalone export. The [native scene editor implementation](viewport-implementation.md) gives the complete control reference, ownership model, source map and verification boundaries. The [historical reports](project3-handoff.md) describe older milestones.
 
+The [authoring polish guide](editor-authoring-polish.md) covers workspace tab navigation, Assets and Hierarchy search,
+Inspector reset, graph framing, and Timeline and exit review. It includes step-by-step checks and the source files to edit.
+
 ## Open a desktop project
 
 1. Start the Tauri editor using `python launcher.py --run client` or `dev.ps1 editor` from the repository root.
@@ -24,14 +27,14 @@ The expected revision is null when no workspace is open. A direct caller replaci
 | Save Scene                | Calls `EditorService.save()` for the active authored scene; requires Edit, no transaction and overall dirty state. It does not save the manifest or other drafts |
 | Save All                  | Saves dirty retained scenes and project settings without switching scenes; partial failures preserve accurate remaining dirty baselines                          |
 | Undo / Redo               | Sends typed commands; enabled from snapshot history availability and Edit/queue state                                                                            |
-| Play / Stop               | Sends typed commands through the existing queue. Successful Play chooses the Game tab; Stop returns to Scene                                                     |
+| Play / Stop               | Sends typed commands through the existing queue. Successful Play chooses Game. Stop returns to the previous authoring pane if it is available, or to Scene |
 | Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
-| Scene / Game tabs         | Select the native view through editor-only actions, with arrow/Home/End keyboard navigation. They do not themselves start/stop Play or switch catalog scenes     |
+| Scene / Game tabs         | Select the native view through editor-only actions. Arrows, Home and End move tab focus. Enter, Space or click activate a tab |
 | Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
 | Inspector                 | Edits name/transform and typed Mesh Renderer, Collider and Native Behavior components; linked members expose overrides and explicit update/revert/unpack |
 | Runtime Inspector         | Game during Play exposes read-only handles, origins, component state and bounded entity pages through explicit Refresh |
 | Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                 |
-| Assets                    | Open scenes, place models, copy prefabs, create/edit linked sources and link instances with explicit external reference bindings |
+| Assets                    | Search by project path or name, open scenes, place models, copy prefabs, and edit and link Prop sources |
 | Scene controls            | Switch retained scenes, choose startup/gameplay module, assign module-aware Gameplay Roles, register scene files and save the active scene at a new path           |
 | Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                          |
 | Settings portal           | Placeholder component; not a completed settings editor                                                                                                           |

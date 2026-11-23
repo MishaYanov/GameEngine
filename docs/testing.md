@@ -3,6 +3,25 @@
 Run from the repository root after [setup](usage.md). Cache locked Rust dependencies and install frontend/docs
 dependencies first.
 
+## Editor authoring polish
+
+Run the workspace integration, Timeline, tab, and graph checks from `apps/editor`.
+
+```powershell
+npm.cmd test -- --watch=false --include=src/app/modules/editor/workspace/editor-workspace.editing.spec.ts --include=src/app/modules/editor/workspace/workspace-tabs/workspace-tabs.spec.ts --include=src/app/modules/editor/workspace/animation/timeline.spec.ts --include=src/app/shared/components/graph/graph.spec.ts
+npm.cmd run check:production
+```
+
+Run the native exit review cases from the repository root.
+
+```powershell
+cargo test --locked --offline -p app --lib commands::project
+```
+
+The Angular integration exercises the real workspace with a mocked native bridge. Exit review unit tests cover
+the native decision and its revision checks. The title-bar click and its dialog flow are separate desktop
+acceptance steps. [Milestones 110–121 and browser layout results](editor-authoring-polish.md).
+
 ## Camera authoring and host parity
 
 ```powershell
