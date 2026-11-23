@@ -52,7 +52,7 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 		(actionRequested)="apply($event)"
 	/>
     @if (animatorSupported() && entity(); as actor) {
-        <editor-animator-inspector [actor]="actor" [editable]="editable()"/>
+        <editor-animator-inspector [subject]="subject()" [actor]="actor" [editable]="editable()"/>
     }
     @if (canShowCameraActions()) {
         <button type="button" [disabled]="!canAlignCamera()" (click)="alignCamera()">Align Camera to Scene View</button>

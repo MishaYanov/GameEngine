@@ -8,7 +8,8 @@ import {SceneEditingService} from '../scene-editing.service';
 import {AnimatorAssetEditor} from './animator-asset-editor';
 import {animatorDescendants, type ActorGraph, reviewActorGraph} from './animator-actor-binding';
 import {AnimatorAssets} from './animator-assets.service';
-import {AnimatorWorkspaceService} from './animator-workspace.service';
+import {type AnimatorPaneTarget, AnimatorWorkspaceService} from './animator-workspace.service';
+import type {InspectorSubject} from '../inspector-panel/inspector-subject';
 
 interface ReviewedAnimator {
     readonly document: AnimatorDocument;
@@ -26,6 +27,7 @@ export class AnimatorInspector {
     protected readonly workspace = inject(AnimatorWorkspaceService, {optional: true});
     readonly actor = input.required<SceneEntity>();
     readonly editable = input(false);
+    readonly subject = input<InspectorSubject | null>(null);
     private readonly assetPicker = viewChild<ElementRef<HTMLSelectElement>>('asset');
     protected readonly library = inject(AnimatorAssets);
     private readonly editor = this.library.editor;
@@ -50,6 +52,11 @@ export class AnimatorInspector {
     });
     protected readonly available = computed(() => this.editable() && !this.pending() && !!this.library.scope() &&
         this.editor.snapshot()?.mode === 'edit');
+    protected readonly attachedAnimator = computed(() => {
+        const id = this.actor().animator?.settings.asset_id;
+        return id ? this.library.assets().find(asset => asset.id === id)?.path ?? 'Unavailable Animator' : null;
+    });
+    protected readonly canOpenAttached = computed(() => this.available() && !!this.paneTarget() && !this.workspace?.pending());
     protected readonly legacyActive = computed(() => this.actor().animation?.enabled === true ||
         this.actor().component_views?.some(component => component.enabled && component.data.kind === 'animation') === true);
     protected readonly plan = computed<{binding: AnimatorBinding | null; issue: string | null}>(() => {
@@ -109,6 +116,29 @@ export class AnimatorInspector {
 
     focusAttachment(): void {
         if (this.available()) this.assetPicker()?.nativeElement.focus();
+    }
+
+    protected async openAttached(): Promise<void> {
+        const workspace = this.workspace, target = this.paneTarget();
+        if (!workspace || !target || !this.canOpenAttached()) return;
+        this.error.set(null);
+        if (!await workspace.openScoped(target, () => this.paneTarget()) &&
+            this.paneTarget()?.actorKey === target.actorKey && workspace.error()) {
+            this.error.set(workspace.error());
+        }
+    }
+
+    private paneTarget(): AnimatorPaneTarget | null {
+        const subject = this.subject(), snapshot = this.editor.snapshot();
+        const key = this.actor().key;
+        if (!subject || subject.address.kind === 'prop' || snapshot?.mode !== 'edit' ||
+            snapshot.active_scene_id !== subject.address.scene || snapshot.selection[0] !== key ||
+            (subject.address.kind === 'scene' && subject.address.object !== key)) return null;
+        const attachment = snapshot.document.entities.find(entity => entity.key === key)?.animator;
+        if (!attachment) return null;
+        const id = attachment.settings.asset_id;
+        const asset = this.library.assets().find(candidate => candidate.id === id) ?? {id};
+        return {actorKey: key, subject, componentId: attachment.id, asset};
     }
 
     protected async review(id: string): Promise<void> {

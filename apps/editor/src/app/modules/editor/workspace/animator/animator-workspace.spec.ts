@@ -8,10 +8,12 @@ import {
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorGraph} from '../../../../shared/components/graph/graph';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
+import {ScopedPaneRequests} from '../scoped-pane-request';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {AnimatorAssets} from './animator-assets.service';
 import {runtimeDefinition} from './animator-draft';
 import {AnimatorWorkspace} from './animator-workspace';
-import {AnimatorWorkspaceService} from './animator-workspace.service';
+import {type AnimatorPaneTarget, AnimatorWorkspaceService} from './animator-workspace.service';
 
 const asset: AnimatorAsset = {
     id: '12345678-1234-4234-8234-123456789012', kind: 'animator_graph', path: 'animations/knight.animator.json',
@@ -36,18 +38,23 @@ async function setup() {
     const activeViewKind = signal('scene-viewport');
     const selectView = vi.fn((view: string) => activeViewKind.set(view));
     const accept = vi.fn();
+    const snapshot = signal({active_scene_id: 'main', revision: scope.revision, document: {entities: [
+        {key: 'knight', name: 'Knight', animator: {id: 'knight-animator', settings: {asset_id: asset.id}}},
+        {key: 'squire', name: 'Squire', animator: {id: 'squire-animator', settings: {asset_id: asset.id}}},
+    ]}});
     TestBed.configureTestingModule({
         imports: [AnimatorWorkspace],
         providers: [
-            AnimatorWorkspaceService,
+            AnimatorWorkspaceService, ScopedPaneRequests, WorkspaceDraftReview,
             {provide: EditorService, useValue: {
                 openAnimator: open, saveAnimator: save, workspaceGeneration, playing: signal(false),
-                snapshot: signal({active_scene_id: 'main'}),
+                snapshot,
             }},
             {provide: AnimatorAssets, useValue: {
                 scope: () => scope, current, accept, assets: signal([asset, alternate]), pending: signal(false), error: signal(null),
             }},
-            {provide: WorkspaceViewService, useValue: {selectView, activeViewKind}},
+            {provide: WorkspaceViewService, useValue: {selectView, activeViewKind,
+                availableViews: () => ['scene-viewport', 'animation-controller']}},
         ],
     });
     const fixture = TestBed.createComponent(AnimatorWorkspace);
@@ -62,10 +69,48 @@ async function setup() {
         .find(candidate => candidate.textContent?.trim().startsWith(label))!.querySelector('input')!;
     const select = (label: string) => [...element.querySelectorAll<HTMLLabelElement>('label')]
         .find(candidate => candidate.textContent?.trim().startsWith(label))!.querySelector('select')!;
-    return {fixture, workspace, element, input, select, button, open, save, accept, selectView, workspaceGeneration};
+    return {fixture, workspace, element, input, select, button, open, save, accept, selectView, workspaceGeneration, snapshot};
 }
 
 describe('Animator workspace', () => {
+    it('opens a revision-pinned shared asset for each actor without switching on cancellation or stale bytes', async () => {
+        const {fixture, workspace, snapshot, open, selectView} = await setup();
+        const binding = (actorKey: string): AnimatorPaneTarget => ({
+            actorKey, componentId: actorKey + '-animator', asset,
+            subject: {address: {kind: 'scene', scene: 'main', object: actorKey}, scope, contentRevision: 1, access: 'scene-edit'},
+        });
+        TestBed.inject(WorkspaceDraftReview).setReviewers([() => workspace.reviewNavigation()]);
+        selectView('scene-viewport');
+        selectView.mockClear();
+        workspace.edit({kind: 'update_state', state: {...graph.states[0], name: 'Edited'}});
+        const knight = binding('knight');
+        const canceled = workspace.openScoped(knight, () => knight);
+        await workspace.settleNavigation('cancel');
+        expect(await canceled).toBe(false);
+        expect(selectView).not.toHaveBeenCalled();
+        expect(workspace.dirty()).toBe(true);
+
+        open.mockResolvedValueOnce({asset: {...asset, revision: 4, fingerprint: 'b'.repeat(64)}, graph});
+        const stale = workspace.openScoped(knight, () => knight);
+        await workspace.settleNavigation('discard');
+        expect(await stale).toBe(false);
+        expect(selectView).not.toHaveBeenCalled();
+
+        expect(await workspace.openScoped(knight, () => knight)).toBe(true);
+        await fixture.whenStable();
+        expect(fixture.nativeElement.textContent).toContain('Opened from Knight');
+        selectView('scene-viewport');
+        const squire = binding('squire');
+        expect(await workspace.openScoped(squire, () => squire)).toBe(true);
+        expect(workspace.document()?.asset.id).toBe(asset.id);
+        expect(workspace.boundActor()?.key).toBe('squire');
+        snapshot.update(current => ({...current, document: {entities:
+            current.document.entities.map(entity => entity.key === 'squire'
+                ? {...entity, animator: {...entity.animator, settings: {asset_id: alternate.id}}} : entity),
+        }}));
+        expect(workspace.boundActor()).toBeNull();
+        expect(workspace.document()?.asset.id).toBe(asset.id);
+    });
     it('adds and focuses a state from the keyboard, explains unreachable states, and saves a connected draft once', async () => {
         const {fixture, workspace, element, input, select, button, save, accept, selectView} = await setup();
         expect(selectView).toHaveBeenCalledWith('animation-controller');

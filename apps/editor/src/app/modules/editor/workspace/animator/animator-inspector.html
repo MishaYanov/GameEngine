@@ -2,7 +2,7 @@
     <h3>Animator</h3>
     <editor-animator-asset-editor [actor]="actor()" [editable]="available()" (saved)="fromEditor($event)"/>
     @if (actor().animator; as attachment) {
-        <p>{{ attachment.enabled ? 'Enabled' : 'Disabled' }}</p>
+        <p>{{ attachment.enabled ? 'Enabled' : 'Disabled' }} · {{ attachedAnimator() }}</p>
     }
     <div class="asset-actions">
         <label>Animator asset
@@ -15,9 +15,8 @@
         </label>
         <button type="button" (click)="library.refresh()" [disabled]="!available() || library.pending()">Refresh Animators</button>
         <button type="button" (click)="review(selected())" [disabled]="!available() || !selected()">Review Asset</button>
-        @if (workspace; as animator) {
-            <button type="button" [disabled]="!available() || !selected() || animator.pending()"
-                    (click)="animator.open(selected())">Open Animator</button>
+        @if (workspace && actor().animator) {
+            <button type="button" [disabled]="!canOpenAttached()" (click)="openAttached()">Open Animator</button>
         }
     </div>
     @if (library.error(); as failure) {

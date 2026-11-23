@@ -1,4 +1,5 @@
 <section class="animator" aria-label="Animator">
+    @if (workspace.boundActor(); as actor) { <p>Opened from {{ actor.name }}</p> }
     @if (workspace.error(); as error) {
         <p class="failure" role="alert">{{ error }}</p>
     }

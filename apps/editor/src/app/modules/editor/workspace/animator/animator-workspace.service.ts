@@ -1,10 +1,18 @@
 import {computed, effect, inject, Injectable, signal, untracked} from '@angular/core';
 import {type AnimatorDocument, type AnimatorGraph, readAnimatorGraph} from '../../../../core/editor/animator.models';
+import type {EntityKey} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {GraphCanvasSelection} from '../../../../shared/components/graph/graph';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
+import {ScopedPaneRequests, type ScopedPaneAsset, type ScopedPaneTarget} from '../scoped-pane-request';
 import {AnimatorAssets} from './animator-assets.service';
 import {type AnimatorEdit, animatorIssues, applyAnimatorEdit, runtimeDefinition} from './animator-draft';
+
+export interface AnimatorPaneTarget extends ScopedPaneTarget {
+    readonly actorKey: EntityKey;
+    readonly componentId: string;
+    readonly asset: ScopedPaneAsset;
+}
 
 interface Draft {
     readonly document: AnimatorDocument;
@@ -20,10 +28,20 @@ export class AnimatorWorkspaceService {
     private readonly editor = inject(EditorService);
     private readonly assets = inject(AnimatorAssets);
     private readonly views = inject(WorkspaceViewService);
+    private readonly panes = inject(ScopedPaneRequests, {optional: true});
+    private readonly binding = signal<AnimatorPaneTarget | null>(null);
     private readonly draft = signal<Draft | null>(null);
     private request = 0;
     private resolveNavigation?: (allowed: boolean) => void;
     readonly document = computed(() => this.draft()?.document ?? null);
+    readonly boundActor = computed(() => {
+        const target = this.binding();
+        const snapshot = this.editor.snapshot();
+        if (!target || !snapshot || !this.assets.current(target.subject.scope) ||
+            target.subject.address.kind === 'prop' || snapshot.active_scene_id !== target.subject.address.scene) return null;
+        const actor = snapshot.document.entities.find(entity => entity.key === target.actorKey);
+        return actor?.animator?.id === target.componentId && actor.animator.settings.asset_id === target.asset.id ? actor : null;
+    });
     readonly graph = computed(() => this.draft()?.graph ?? null);
     readonly issues = computed(() => this.graph() ? animatorIssues(this.graph()!) : []);
     readonly dirty = computed(() => {
@@ -72,6 +90,7 @@ export class AnimatorWorkspaceService {
         const current = () => this.assets.current(origin) && !this.editor.playing() &&
             this.editor.snapshot()?.active_scene_id === scene && this.views.activeViewKind() === view;
         if (this.document()?.asset.id === assetId) {
+            this.binding.set(null);
             this.views.selectView('animation-controller');
             return true;
         }
@@ -85,9 +104,8 @@ export class AnimatorWorkspaceService {
             const document = await this.editor.openAnimator(assetId, scope);
             if (!current() || request !== this.request || this.assets.scope()?.revision !== scope.revision) return false;
             if (document.asset.id !== assetId) throw new Error('The editor opened a different Animator asset.');
-            this.draft.set({document, graph: document.graph, back: [], forward: []});
-            this.selectionState.set({kind: 'node', id: document.graph.entry});
-            this.revisionState.update(value => value + 1);
+            this.adopt(document);
+            this.binding.set(null);
             this.views.selectView('animation-controller');
             return true;
         } catch (error) {
@@ -96,6 +114,51 @@ export class AnimatorWorkspaceService {
         } finally {
             if (request === this.request) this.pendingState.set(false);
         }
+    }
+
+    async openScoped(request: AnimatorPaneTarget, resolve: () => AnimatorPaneTarget | null): Promise<boolean> {
+        if (!this.panes || !this.assets.scope() || this.pending() || this.editor.playing()) return false;
+        const origin = this.views.activeViewKind();
+        const current = () => origin === this.views.activeViewKind() && !this.editor.playing();
+        this.clearError();
+        return this.panes.open<AnimatorDocument>({...request, pane: 'animation-controller'}, {
+            resolve: () => {
+                const target = current() ? resolve() : null;
+                return target?.actorKey === request.actorKey ? target : null;
+            },
+            load: async target => {
+                const id = target.asset?.id;
+                if (!id || this.pending()) return null;
+                const capture = ++this.request;
+                this.pendingState.set(true);
+                try {
+                    const document = await this.editor.openAnimator(id, target.subject.scope);
+                    if (capture !== this.request) return null;
+                    return {value: document, asset: document.asset};
+                } catch (error) {
+                    if (capture === this.request && current()) this.showError(error);
+                    return null;
+                } finally {
+                    if (capture === this.request) this.pendingState.set(false);
+                }
+            },
+            activate: (document, target) => {
+                if (!this.views.availableViews().includes('animation-controller')) return false;
+                this.adopt(document);
+                this.binding.set({...request, subject: target.subject});
+                this.views.selectView('animation-controller');
+                return true;
+            },
+        });
+    }
+
+    private adopt(document: AnimatorDocument): void {
+        const previous = this.document()?.asset;
+        if (previous?.id === document.asset.id && previous.fingerprint === document.asset.fingerprint &&
+            previous.revision === document.asset.revision && !this.dirty()) return;
+        this.draft.set({document, graph: document.graph, back: [], forward: []});
+        this.selectionState.set({kind: 'node', id: document.graph.entry});
+        this.revisionState.update(value => value + 1);
     }
 
     async save(): Promise<boolean> {
@@ -199,6 +262,7 @@ export class AnimatorWorkspaceService {
         this.request++;
         this.pendingState.set(false);
         this.draft.set(null);
+        this.binding.set(null);
         this.selectionState.set(null);
         this.errorState.set(null);
         this.finishReview(false);
