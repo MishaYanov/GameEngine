@@ -23,8 +23,9 @@
                     <label class="asset-filter">
                         Asset kind
                         <select #kind [value]="assetFilter()" (change)="filterAssets(kind.value)">
-                            <option value="all">All assets</option>
-                            <option value="audio_clip">Audio Clips</option>
+                            @for (filter of assetFilters(); track filter.value) {
+                                <option [value]="filter.value">{{ filter.label }}</option>
+                            }
                         </select>
                     </label>
                 </div>
@@ -39,7 +40,7 @@
                     <p role="status">{{ message }}</p>
                 }
                 @if (animators().length) {
-                    <details [open]="searching()">
+                    <details [open]="searching() || assetFilter() === 'animator_graph'">
                         <summary>Animators</summary>
                         <ul aria-label="Animator assets">
                             @for (asset of animators(); track asset.id) {
@@ -51,7 +52,7 @@
                     </details>
                 }
                 @if (controlGraphs().length) {
-                    <details [open]="searching()">
+                    <details [open]="searching() || assetFilter() === 'controls_graph'">
                         <summary>Controls Graphs</summary>
                         <ul aria-label="Controls Graphs">
                             @for (asset of controlGraphs(); track asset.id) {
@@ -108,9 +109,9 @@
                         </li>
                     }
                 </ul>
-                @if (noSearchMatches()) {
+                @if (noMatches()) {
                     <p class="search-feedback" role="status">No matching assets.</p>
-                } @else if (!searching() && folderContents().folders.length === 0 && folderContents().files.length === 0) {
+                } @else if (assetFilter() === 'all' && !searching() && folderContents().folders.length === 0 && folderContents().files.length === 0) {
                     <p>No catalogued assets in this folder.</p>
                 }
                 @if (selected(); as file) {

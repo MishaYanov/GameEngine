@@ -34,6 +34,18 @@ type SceneAsset = AssetFile & { readonly kind: 'scene'; readonly sceneId: SceneI
 type AssetEntry = SceneAsset | (ModelAsset & {readonly kind: 'model' | 'prefab' | 'audio_clip'});
 type AssetAction = 'models' | 'add';
 
+const ASSET_FILTERS = [
+    {value: 'all', label: 'All assets'},
+    {value: 'model', label: 'Models'},
+    {value: 'prefab', label: 'Props'},
+    {value: 'scene', label: 'Scenes'},
+    {value: 'audio_clip', label: 'Audio Clips'},
+    {value: 'animator_graph', label: 'Animators'},
+    {value: 'controls_graph', label: 'Controls Graphs'},
+] as const;
+
+type AssetFilter = typeof ASSET_FILTERS[number]['value'];
+
 interface AssetMenuContext {
     readonly file: AssetEntry;
     readonly generation: number;
@@ -83,13 +95,24 @@ export class AssetsPanel {
     protected readonly canOpenScene = computed(() => this.canRunAction() && this.sceneSwitch.canSwitch());
     protected readonly projectOpen = computed(() => this.editor.snapshot() !== null);
     protected readonly models = this.editor.modelAssets;
-    protected readonly assetFilter = signal<'all' | 'audio_clip'>('all');
+    protected readonly assetFilters = computed(() => ASSET_FILTERS.filter(({value}) => {
+        if (value === 'animator_graph') return this.animatorAssets?.supported() === true;
+        if (value === 'controls_graph') return this.controlsWorkspace?.supported() === true;
+        return true;
+    }));
+    protected readonly assetFilter = linkedSignal({
+        source: this.assetFilters,
+        computation: (options, previous): AssetFilter =>
+            options.find(option => option.value === previous?.value)?.value ?? 'all',
+    });
     protected readonly searchQuery = linkedSignal({source: this.editor.workspaceGeneration, computation: () => ''});
     private readonly query = computed(() => searchable(this.searchQuery()));
     protected readonly searching = computed(() => this.query().length > 0);
-    protected readonly animators = computed(() => this.assetFilter() === 'all' && this.animatorAssets?.supported()
+    protected readonly animators = computed(() => (this.assetFilter() === 'all' || this.assetFilter() === 'animator_graph')
+        && this.animatorAssets?.supported()
         ? this.animatorAssets.assets().filter(asset => searchable(asset.path).includes(this.query())) : []);
-    protected readonly controlGraphs = computed(() => this.assetFilter() === 'all' && this.controlsWorkspace?.supported()
+    protected readonly controlGraphs = computed(() => (this.assetFilter() === 'all' || this.assetFilter() === 'controls_graph')
+        && this.controlsWorkspace?.supported()
         ? this.controlsWorkspace.assets().filter(asset => searchable(asset.path).includes(this.query())) : []);
     protected readonly canRunAction = computed(() => {
         const snapshot = this.editor.snapshot();
@@ -112,8 +135,10 @@ export class AssetsPanel {
         ...(this.models() ?? []).flatMap(model => model.kind === 'sky_panorama'
             ? [] : [{...model, kind: model.kind ?? 'model' as const}]),
     ]);
-    private readonly visibleEntries = computed(() => this.assetFilter() === 'audio_clip'
-        ? this.entries().filter(entry => entry.kind === 'audio_clip') : this.entries());
+    private readonly visibleEntries = computed(() => {
+        const filter = this.assetFilter();
+        return filter === 'all' ? this.entries() : this.entries().filter(entry => entry.kind === filter);
+    });
     private readonly selection = linkedSignal({
         source: this.visibleEntries,
         computation: (entries, previous): AssetEntry | null => {
@@ -127,7 +152,7 @@ export class AssetsPanel {
         return selected && selected.kind !== 'scene' ? selected : null;
     });
     protected readonly folder = linkedSignal({
-        source: this.visibleEntries,
+        source: this.entries,
         computation: (entries, previous): string => {
             const folder = previous?.value ?? '';
             return entries.some(entry => entry.path.startsWith(`${folder}/`)) ? folder : '';
@@ -163,7 +188,8 @@ export class AssetsPanel {
         const selection = this.selection();
         return selection && this.folderContents().files.includes(selection) ? selection : null;
     });
-    protected readonly noSearchMatches = computed(() => this.searching() &&
+    protected readonly noMatches = computed(() => (this.searching() || this.assetFilter() !== 'all') &&
+        !this.folderContents().folders.length &&
         !this.folderContents().files.length && !this.animators().length && !this.controlGraphs().length);
     private readonly assetMenuBuilder = ContextMenuBuilder.create<AssetMenuContext>()
         .action(ContextActionBuilder.create<AssetMenuContext>('asset.select', 'Select Asset')
@@ -300,7 +326,8 @@ export class AssetsPanel {
     }
 
     protected filterAssets(value: string): void {
-        this.assetFilter.set(value === 'audio_clip' ? 'audio_clip' : 'all');
+        const filter = this.assetFilters().find(option => option.value === value);
+        if (filter) this.assetFilter.set(filter.value);
     }
 
     protected openFolder(path: string, location: HTMLElement): void {

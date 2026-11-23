@@ -122,6 +122,12 @@ async function createPanel(options: PanelOptions = {}) {
         input.dispatchEvent(new Event('input', {bubbles: true}));
         await fixture.whenStable();
     };
+    const filterBy = async (value: string): Promise<void> => {
+        const select = root.querySelector<HTMLSelectElement>('.asset-filter select')!;
+        select.value = value;
+        select.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+    };
     const contextAction = (path: string, id: string): Extract<ContextMenuItem, { kind: 'action' }> => {
         const trigger = fixture.debugElement.queryAll(By.directive(EditorContextMenuTrigger))
             .find(candidate => candidate.nativeElement === file(path))!.injector.get(EditorContextMenuTrigger);
@@ -150,6 +156,7 @@ async function createPanel(options: PanelOptions = {}) {
         openAnimator,
         openControls,
         search,
+        filterBy,
         drag
     };
 }
@@ -208,6 +215,58 @@ describe('AssetsPanel', () => {
         expect(panel.root.querySelector('details')).toBeNull();
         await panel.search('robot');
         expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
+    });
+
+    it('limits search to the chosen file kind and preserves the browsing folder', async () => {
+        const prop: ModelAsset = {name: 'Robot assembly', path: 'blueprints/robot.json', kind: 'prefab', asset_id: 'robot-prop'};
+        const panel = await createPanel({models: [robot, prop, bell]});
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        panel.file(robot.path).click();
+        await panel.fixture.whenStable();
+
+        await panel.filterBy('prefab');
+        expect(panel.root.querySelector('[aria-label="Selected asset"]')).toBeNull();
+        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
+        expect(panel.root.querySelector('.asset-filter option[value="animator_graph"]')).toBeNull();
+        await panel.search('robot');
+        expect(panel.file(prop.path)).toBeTruthy();
+        expect(panel.root.querySelector('.asset-file[title="props/robot.glb"]')).toBeNull();
+
+        await panel.filterBy('model');
+        expect(panel.file(robot.path)).toBeTruthy();
+        expect(panel.root.querySelector('.asset-file[title="blueprints/robot.json"]')).toBeNull();
+        await panel.filterBy('scene');
+        await panel.search('scenes/main');
+        expect(panel.file('scenes/main.json').textContent).toContain('Active');
+        await panel.filterBy('all');
+        await panel.search('');
+        expect(panel.file(robot.path)).toBeTruthy();
+    });
+
+    it('opens the chosen graph registry when filtering without a search', async () => {
+        const animator: AnimatorAsset = {
+            id: 'animator', kind: 'animator_graph', path: 'graphs/idle.animator.json',
+            revision: 1, fingerprint: 'animator-fixture', bytes: 50,
+        };
+        const controls: ControlGraphAsset = {
+            id: 'controls', kind: 'controls_graph', path: 'graphs/idle.controls.json',
+            revision: 1, fingerprint: 'controls-fixture', bytes: 50,
+        };
+        const panel = await createPanel({models: [robot], animators: [animator], controls: [controls]});
+
+        await panel.filterBy('animator_graph');
+        expect(panel.root.querySelector('details')?.open).toBe(true);
+        expect(panel.root.querySelector('[aria-label^="Open Controls Graph"]')).toBeNull();
+        expect(panel.root.querySelector('.asset-file')).toBeNull();
+        expect(panel.root.querySelector('[role="status"]')).toBeNull();
+
+        await panel.filterBy('controls_graph');
+        const button = panel.root.querySelector<HTMLButtonElement>('[aria-label^="Open Controls Graph"]')!;
+        expect(button.closest('details')?.open).toBe(true);
+        expect(panel.root.querySelector('[aria-label^="Open Animator"]')).toBeNull();
+        button.click();
+        expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
     });
 
     it('filters Audio Clips and shows native duration, format and reverse references with focus on the row', async () => {
