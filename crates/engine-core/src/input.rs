@@ -7,7 +7,8 @@ mod mouse;
 mod profile;
 
 pub use action_map::{
-	ActionBinding, INPUT_ACTION_MAP_SUFFIX, InputActionKind, InputActionLayout, InputActionMap,
+	ActionBinding, ConditionalInputLayout, INPUT_ACTION_MAP_SUFFIX, InputActionKind, InputActionLayout,
+	InputActionMap, InputBindingOverride, InputLayoutCondition, MAX_CONDITIONAL_INPUT_LAYOUTS,
 	MAX_INPUT_ACTION_MAP_BYTES, NamedInputAction, ResolvedInputActions,
 };
 pub use button::InputButton;

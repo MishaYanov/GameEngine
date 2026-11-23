@@ -3,6 +3,7 @@ use super::{
 	PhysicalGamepadSample, valid_game_action_id,
 };
 use crate::asset_catalog::AssetId;
+use crate::scene_catalog::SceneId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -11,6 +12,7 @@ pub const MAX_INPUT_ACTION_MAP_BYTES: usize = 64 * 1024;
 pub const INPUT_ACTION_MAP_SUFFIX: &str = ".input-actions.json";
 const MAX_ACTIONS: usize = super::MAX_GAME_INPUT_ACTIONS;
 const MAX_BINDINGS: usize = 8;
+pub const MAX_CONDITIONAL_INPUT_LAYOUTS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,10 +44,35 @@ pub struct NamedInputAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputLayoutCondition {
+	CharacterGrounded { value: bool },
+	SceneIs { scene_id: SceneId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputBindingOverride {
+	pub action_id: String,
+	pub bindings: Vec<ActionBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConditionalInputLayout {
+	pub id: String,
+	pub label: String,
+	pub when: InputLayoutCondition,
+	pub overrides: Vec<InputBindingOverride>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputActionMap {
 	pub schema_version: u32,
 	pub actions: Vec<NamedInputAction>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub layouts: Vec<ConditionalInputLayout>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +153,7 @@ impl InputActionMap {
 		};
 		Self {
 			schema_version: 1,
+			layouts: Vec::new(),
 			actions: vec![
 				action(
 					"move",
@@ -190,10 +218,55 @@ impl InputActionMap {
 	}
 
 	pub fn validate(&self) -> Result<(), String> {
-		if self.schema_version != 1 || !(1..=MAX_ACTIONS).contains(&self.actions.len()) {
+		if !matches!(self.schema_version, 1 | 2) {
+			return Err("Unsupported Input Actions schema version".into());
+		}
+		if !(1..=MAX_ACTIONS).contains(&self.actions.len()) {
 			return Err(format!(
-				"Input Actions schema 1 requires between 1 and {MAX_ACTIONS} actions"
+				"Input Actions require between 1 and {MAX_ACTIONS} actions"
 			));
+		}
+		if self.schema_version == 1 && !self.layouts.is_empty() {
+			return Err("Conditional Input Actions layouts require schema 2".into());
+		}
+		if self.layouts.len() > MAX_CONDITIONAL_INPUT_LAYOUTS {
+			return Err("Input Actions support up to 16 conditional layouts".into());
+		}
+		let mut layout_ids = HashSet::new();
+		for layout in &self.layouts {
+			if !valid_game_action_id(&layout.id)
+				|| layout.id == "default"
+				|| !layout_ids.insert(layout.id.as_str())
+			{
+				return Err(format!(
+					"Invalid or duplicate Input Actions layout ID {:?}",
+					layout.id
+				));
+			}
+			if !valid_display_label(&layout.label) {
+				return Err(format!(
+					"Layout {:?} requires a display name of 1–96 bytes",
+					layout.id
+				));
+			}
+			if layout.overrides.len() > MAX_ACTIONS {
+				return Err(format!(
+					"Layout {:?} has too many action overrides",
+					layout.id
+				));
+			}
+			let mut override_ids = HashSet::new();
+			for entry in &layout.overrides {
+				if !valid_game_action_id(&entry.action_id)
+					|| !override_ids.insert(entry.action_id.as_str())
+					|| entry.bindings.len() > MAX_BINDINGS
+				{
+					return Err(format!(
+						"Layout {:?} has invalid or duplicate action overrides",
+						layout.id
+					));
+				}
+			}
 		}
 		let mut ids = HashSet::new();
 		let mut controls = HashSet::new();
@@ -204,11 +277,7 @@ impl InputActionMap {
 					action.id
 				));
 			}
-			if action.label.trim() != action.label
-				|| action.label.is_empty()
-				|| action.label.len() > 96
-				|| action.label.chars().any(char::is_control)
-			{
+			if !valid_display_label(&action.label) {
 				return Err(format!(
 					"Action {:?} requires a display name of 1–96 bytes",
 					action.id
@@ -403,6 +472,13 @@ impl InputActionMap {
 		}
 		resolved
 	}
+}
+
+fn valid_display_label(label: &str) -> bool {
+	label.trim() == label
+		&& !label.is_empty()
+		&& label.len() <= 96
+		&& !label.chars().any(char::is_control)
 }
 
 impl ResolvedInputActions {

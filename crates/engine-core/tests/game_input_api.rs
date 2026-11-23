@@ -339,11 +339,7 @@ fn action_asset_binds_stable_ids_to_keyboard_and_physical_controller() {
 	let mut renamed = map.clone();
 	renamed.actions[2].label = "Leap".into();
 	assert_eq!(renamed.binding_digest().unwrap(), digest);
-	assert!(
-		renamed
-			.with_layout(&AssetId::generate(), &layout)
-			.is_err()
-	);
+	assert!(renamed.with_layout(&AssetId::generate(), &layout).is_err());
 	let saved = InputActionMap::from_json(&renamed.to_json().unwrap()).unwrap();
 	let mut keyboard = InputState::default();
 	keyboard.press(Key::Space);
@@ -414,4 +410,44 @@ fn action_asset_binds_stable_ids_to_keyboard_and_physical_controller() {
 	let legacy = ResolvedInputActions::from_legacy(&profile(), &keys, Default::default());
 	assert!(legacy.buttons.contains("move_right"));
 	assert!(legacy.animation_parameters.contains("IsMoving"));
+}
+
+#[test]
+fn ordered_conditional_layouts_round_trip_without_changing_schema_one_assets() {
+	use engine_core::input::{
+		ConditionalInputLayout, InputActionMap, InputBindingOverride, InputLayoutCondition,
+	};
+	use engine_core::scene_catalog::SceneId;
+	let legacy = InputActionMap::starter();
+	let bytes = legacy.to_json().unwrap();
+	assert!(!std::str::from_utf8(&bytes).unwrap().contains("\"layouts\""));
+	assert_eq!(
+		InputActionMap::from_json(&bytes).unwrap().binding_digest(),
+		legacy.binding_digest()
+	);
+	let mut map = legacy;
+	map.schema_version = 2;
+	map.layouts = vec![
+		ConditionalInputLayout {
+			id: "airborne".into(),
+			label: "Airborne".into(),
+			when: InputLayoutCondition::CharacterGrounded { value: false },
+			overrides: vec![InputBindingOverride {
+				action_id: "jump".into(),
+				bindings: Vec::new(),
+			}],
+		},
+		ConditionalInputLayout {
+			id: "world".into(),
+			label: "World".into(),
+			when: InputLayoutCondition::SceneIs {
+				scene_id: SceneId::new("lobby").unwrap(),
+			},
+			overrides: Vec::new(),
+		},
+	];
+	let encoded = map.to_json().unwrap();
+	assert_eq!(InputActionMap::from_json(&encoded).unwrap(), map);
+	map.schema_version = 1;
+	assert!(map.to_json().unwrap_err().contains("schema 2"));
 }

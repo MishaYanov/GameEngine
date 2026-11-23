@@ -18,9 +18,26 @@ export interface NamedInputAction {
     readonly bindings: readonly InputActionBinding[];
 }
 
+export type InputLayoutCondition =
+    | {readonly kind: 'character_grounded'; readonly value: boolean}
+    | {readonly kind: 'scene_is'; readonly scene_id: string};
+
+export interface InputBindingOverride {
+    readonly action_id: string;
+    readonly bindings: readonly InputActionBinding[];
+}
+
+export interface ConditionalInputLayout {
+    readonly id: string;
+    readonly label: string;
+    readonly when: InputLayoutCondition;
+    readonly overrides: readonly InputBindingOverride[];
+}
+
 export interface InputActionMap {
-    readonly schema_version: 1;
+    readonly schema_version: 1 | 2;
     readonly actions: readonly NamedInputAction[];
+    readonly layouts?: readonly ConditionalInputLayout[];
 }
 
 export interface InputActionsAsset {
@@ -41,6 +58,7 @@ export type InputActionsCapture = Pick<InputActionsAsset, 'id' | 'fingerprint'>;
 export const INPUT_ACTIONS_SUFFIX = '.input-actions.json';
 export const MAX_INPUT_ACTIONS = 64;
 export const MAX_ACTION_BINDINGS = 8;
+export const MAX_CONDITIONAL_INPUT_LAYOUTS = 16;
 const MAX_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
 export const ACTION_VALUES = [
@@ -86,8 +104,28 @@ export function validInputActionsPath(path: string): boolean {
 }
 
 export function validateInputActions(map: InputActionMap): string | null {
-    if (map.schema_version !== 1 || !map.actions.length || map.actions.length > MAX_INPUT_ACTIONS) {
+    if (!map.actions.length || map.actions.length > MAX_INPUT_ACTIONS) {
         return 'Add between 1 and 64 input actions.';
+    }
+    const layouts = map.layouts ?? [];
+    if (map.schema_version === 1 && layouts.length) return 'Conditional layouts require Input Actions schema 2.';
+    if (layouts.length > MAX_CONDITIONAL_INPUT_LAYOUTS) return 'Add up to 16 conditional layouts.';
+    const layoutIds = new Set<string>();
+    for (const layout of layouts) {
+        if (!validGameActionId(layout.id) || layout.id === 'default' || layoutIds.has(layout.id)) {
+            return 'Each conditional layout needs a unique ID.';
+        }
+        layoutIds.add(layout.id);
+        if (!validLabel(layout.label)) return `Enter a display name of 1–96 bytes for layout ${layout.id}.`;
+        if (layout.when.kind === 'scene_is' && !sceneId(layout.when.scene_id)) return `Choose a scene for ${layout.label}.`;
+        if (layout.overrides.length > MAX_INPUT_ACTIONS) return `Layout ${layout.label} has too many action overrides.`;
+        const overrides = new Set<string>();
+        for (const entry of layout.overrides) {
+            if (!validGameActionId(entry.action_id) || overrides.has(entry.action_id) || entry.bindings.length > MAX_ACTION_BINDINGS) {
+                return `Layout ${layout.label} has invalid or repeated action overrides.`;
+            }
+            overrides.add(entry.action_id);
+        }
     }
     const ids = new Set<string>();
     const controls = new Set<string>();
@@ -96,8 +134,7 @@ export function validateInputActions(map: InputActionMap): string | null {
             return `Action ${index + 1} needs a unique ID such as jump or use_item.`;
         }
         ids.add(action.id);
-        if (!action.label || action.label.trim() !== action.label || /\p{Cc}/u.test(action.label) ||
-            encoder.encode(action.label).length > 96) return `Enter a display name of 1–96 bytes for ${action.id}.`;
+        if (!validLabel(action.label)) return `Enter a display name of 1–96 bytes for ${action.id}.`;
         const expected = action.id === 'move' ? 'vector2' : action.id === 'look' ? 'delta2'
             : ['jump', 'attack', 'interact'].includes(action.id) ? 'button' : action.value;
         if (expected !== action.value) return `${action.id} needs the ${expected} value type.`;
@@ -161,6 +198,14 @@ function key(value: unknown): value is string {
     return typeof value === 'string' && /^[a-z][a-z0-9_]{0,47}$/.test(value);
 }
 
+function validLabel(label: string): boolean {
+    return !!label && label.trim() === label && !/\p{Cc}/u.test(label) && encoder.encode(label).length <= 96;
+}
+
+function sceneId(value: unknown): value is string {
+    return typeof value === 'string' && !!value && encoder.encode(value).length <= 256 && !/[\p{White_Space}\p{Cc}]/u.test(value);
+}
+
 function bindingShape(value: unknown): boolean {
     if (!record(value)) return false;
     switch (value['kind']) {
@@ -179,9 +224,25 @@ function bindingShape(value: unknown): boolean {
     }
 }
 
+function layoutShape(value: unknown): boolean {
+    if (!record(value) || Object.keys(value).length !== 4 ||
+        typeof value['id'] !== 'string' || typeof value['label'] !== 'string') return false;
+    const condition = value['when'];
+    if (!record(condition) || Object.keys(condition).length !== 2 ||
+        !(condition['kind'] === 'character_grounded' && typeof condition['value'] === 'boolean' ||
+            condition['kind'] === 'scene_is' && sceneId(condition['scene_id']))) return false;
+    const overrides = value['overrides'];
+    return Array.isArray(overrides) && overrides.length <= MAX_INPUT_ACTIONS && overrides.every(item =>
+        record(item) && Object.keys(item).length === 2 && typeof item['action_id'] === 'string' &&
+        Array.isArray(item['bindings']) && item['bindings'].length <= MAX_ACTION_BINDINGS && item['bindings'].every(bindingShape));
+}
+
 function mapShape(value: unknown): value is InputActionMap {
-    if (!record(value) || Object.keys(value).length !== 2 || value['schema_version'] !== 1 || !Array.isArray(value['actions']) ||
+    if (!record(value) || Object.keys(value).some(key => !['schema_version', 'actions', 'layouts'].includes(key)) ||
+        (value['schema_version'] !== 1 && value['schema_version'] !== 2) || !Array.isArray(value['actions']) ||
         value['actions'].length > MAX_INPUT_ACTIONS) return false;
+    if ('layouts' in value && (!Array.isArray(value['layouts']) ||
+        value['layouts'].length > MAX_CONDITIONAL_INPUT_LAYOUTS || !value['layouts'].every(layoutShape))) return false;
     return value['actions'].every(action => record(action) && Object.keys(action).length === 4 && typeof action['id'] === 'string' &&
         typeof action['label'] === 'string' && ACTION_VALUES.some(item => item.value === action['value']) &&
         Array.isArray(action['bindings']) && action['bindings'].length <= MAX_ACTION_BINDINGS &&
