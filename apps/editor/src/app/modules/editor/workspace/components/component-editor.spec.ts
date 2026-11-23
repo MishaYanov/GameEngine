@@ -76,6 +76,34 @@ describe('Interactable Inspector', () => {
         })]);
     });
 
+    it('replaces a reviewed model with its catalog identity and preserves material', async () => {
+        const panel = await setup();
+        const material = {base_color_factor: [0.4, 0.5, 0.6, 1] as const};
+        const mesh: ComponentRecord = {id: 'mesh', schema_version: 1, enabled: true,
+            data: {kind: 'mesh_renderer', model_path: 'missing.glb', mesh_index: 3, material}};
+        panel.fixture.componentRef.setInput('components', [mesh]);
+        panel.fixture.componentRef.setInput('models', [
+            {name: 'Replacement Cube', path: 'models/cube.glb', asset_id: 'cube-id', kind: 'model'},
+            {name: 'Bell', path: 'audio/bell.wav', asset_id: 'bell-id', kind: 'audio_clip'},
+        ]);
+        await panel.fixture.whenStable();
+        panel.host.querySelector<HTMLButtonElement>('button[aria-label="Edit Mesh Renderer"]')!.click();
+        await panel.fixture.whenStable();
+        expect(panel.host.textContent).toContain('Missing target: missing.glb');
+        panel.host.querySelector<HTMLInputElement>('.component-form input[role="combobox"]')!.click();
+        await panel.fixture.whenStable();
+        const options = Array.from(panel.host.querySelectorAll<HTMLElement>('[role="option"]'));
+        expect(options.some(option => option.textContent?.includes('Bell'))).toBe(false);
+        options.find(option => option.textContent?.includes('Replacement Cube'))!.click();
+        await panel.fixture.whenStable();
+        panel.button('Apply Component').click();
+        expect(panel.intents).toEqual([{kind: 'replace', expected: JSON.stringify(mesh), component: {
+            ...mesh, data: {
+                kind: 'mesh_renderer', model_path: 'models/cube.glb', asset_id: 'cube-id', mesh_index: null, material,
+            },
+        }}]);
+    });
+
     it('keeps invalid input in a draft until selection changes', async () => {
         const panel = await setup();
         panel.button('Add Component').click();

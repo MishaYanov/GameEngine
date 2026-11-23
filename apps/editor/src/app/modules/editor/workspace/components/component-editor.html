@@ -9,7 +9,7 @@
             </header>
             @switch (component.data.kind) {
                 @case ('mesh_renderer') {
-                    <p class="binding" [title]="component.data.model_path">{{ component.data.model_path }}</p>
+                    <p class="binding" [title]="component.data.model_path">{{ modelLabel(component.data.model_path, component.data.asset_id) }}</p>
                 }
                 @case ('collider') {
                     <p class="binding">{{ component.data.collider.kind === 'box' ? 'Box' : 'Sphere' }} shape</p>
@@ -221,17 +221,9 @@
 					}
 				}
 				@case ('mesh_renderer') {
-					<label
-						>Model path<input
-							[formField]="fields.model_path"
-							[attr.list]="modelListId"
-							autocomplete="off"
-					/></label>
-					<datalist [id]="modelListId">
-						@for (model of meshModels(); track model.path) {
-							<option [value]="model.path">{{ model.name }}</option>
-						}
-					</datalist>
+                    <editor-search-picker label="Model asset" placeholder="Search project models…"
+                                          [options]="meshModelOptions()" [value]="draft().model_path || null"
+                                          [disabled]="!available()" (picked)="chooseMeshModel($event)"/>
 					<label
 						>Mesh index<input
 							[formField]="fields.mesh_index"

@@ -135,6 +135,9 @@ export class ComponentEditor {
         clip.asset_id ? [{id: clip.asset_id, label: clip.name, description: clip.path}] : []
     ));
     protected readonly meshModels = computed(() => this.models().filter(asset => !asset.kind || asset.kind === 'model'));
+    protected readonly meshModelOptions = computed(() => this.meshModels().map(model => ({
+        id: model.path, label: model.name, description: model.path,
+    })));
 	protected readonly available = computed(() => this.editable() && !this.pending());
     protected readonly choices = computed(() => addComponentCatalog(
         this.types(), this.components(), kind => this.pinned(kind), this.specialistAttachments(),
@@ -248,7 +251,6 @@ export class ComponentEditor {
 			{ key: 'visual', label: 'Visual', optional: true },
 		];
 	});
-	protected readonly modelListId = `component-models-${crypto.randomUUID()}`;
     protected readonly actionListId = 'component-actions-' + crypto.randomUUID();
 	protected readonly prefabListId = `component-prefabs-${crypto.randomUUID()}`;
 
@@ -316,6 +318,16 @@ export class ComponentEditor {
 
     protected pinned(kind: ComponentData['kind']): boolean {
         return (kind === 'interactable' || kind === 'audio_source') && this.interactablePinned();
+    }
+
+    protected modelLabel(path: string, id?: string | null): string {
+        return this.meshModels().find(model => id ? model.asset_id === id : model.path === path)?.name ?? path;
+    }
+
+    protected chooseMeshModel(path: string): void {
+        if (!this.available() || !this.open() || this.draft().kind !== 'mesh_renderer' ||
+            !this.meshModels().some(model => model.path === path) || path === this.draft().model_path) return;
+        this.draft.update(value => ({...value, model_path: path, mesh_index: ''}));
     }
 
     protected chooseAudioClip(id: string): void {
