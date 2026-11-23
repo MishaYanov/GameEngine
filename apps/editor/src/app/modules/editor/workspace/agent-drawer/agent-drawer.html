@@ -1,5 +1,22 @@
 <editor-pane icon="layers" title="Agent">
     <section #content class="agent-content" aria-label="Agent guidance" tabindex="-1">
-        <p>Select an object or Prop to work with it in context.</p>
+        <div class="selection-context">
+            <div aria-live="polite">
+                @if (selection.context(); as current) {
+                    <p>{{ selection.pinned() ? 'Pinned' : 'Following selection' }}</p>
+                    <p class="selection-label">{{ current.label }}</p>
+                } @else if (selection.pinnedLabel(); as label) {
+                    <p>Pinned selection unavailable</p>
+                    <p class="selection-label">{{ label }}</p>
+                } @else {
+                    <p>Select an object or Prop to work with it in context.</p>
+                }
+            </div>
+            @if (selection.context() || selection.pinned()) {
+                <button type="button" [attr.aria-pressed]="selection.pinned()" (click)="selection.togglePin()">
+                    {{ selection.pinned() ? 'Unpin' : 'Pin' }}
+                </button>
+            }
+        </div>
     </section>
 </editor-pane>

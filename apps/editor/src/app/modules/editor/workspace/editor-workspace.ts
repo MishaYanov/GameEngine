@@ -26,6 +26,7 @@ import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entiti
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {AgentDrawer} from './agent-drawer/agent-drawer';
+import {AgentSelectionContextService} from './agent-drawer/agent-selection-context';
 import {AUTHORING_DRAWER_CONFIG, type RightDrawerMode} from './agent-drawer/authoring-drawer';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
 import {AssetsPanel} from './assets-panel/assets-panel';
@@ -67,7 +68,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
-        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession,
+        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
@@ -233,6 +234,7 @@ export class EditorWorkspace {
     });
 
     constructor() {
+        inject(AgentSelectionContextService).setSceneSubject(() => this.inspector()?.subject() ?? null);
         this.draftReview.setReviewers([
             () => this.gameInput()?.canLeaveProject() ?? true,
             () => this.physicsLayers()?.canLeaveProject() ?? true,
