@@ -31,6 +31,7 @@ import {sameHierarchyScene, type SceneEntitiesModel} from './scene-entities-pane
 import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
 import {WorkspaceDraftReview} from './workspace-draft-review';
+import {ScopedPaneRequests} from './scoped-pane-request';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
 import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
@@ -58,7 +59,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
 @Component({
     selector: 'editor-workspace',
     providers: [
-        SceneEditingService, WorkspaceDraftReview, ViewportEditorService, ViewportAssetDragService,
+        SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
         SelectedCameraPreviewService, InputActionsCatalog,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
@@ -91,6 +92,7 @@ export class EditorWorkspace {
     protected readonly controlsGraph = inject(ControlGraphWorkspaceService);
     private readonly particles = inject(ParticleDesignerSession);
     private readonly draftReview = inject(WorkspaceDraftReview);
+    private readonly paneRequests = inject(ScopedPaneRequests);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
     protected readonly selectedCameraPreview = inject(SelectedCameraPreviewService);
     protected readonly missingGameCamera = computed(() => {
@@ -308,6 +310,7 @@ export class EditorWorkspace {
     }
 
     protected async requestWorkspaceView(view: WorkspaceViewKind): Promise<void> {
+        this.paneRequests.invalidate();
         const context = this.sceneContext();
         if (this.workspaceView.animationView() && view !== 'animation-workspace' &&
             !await this.animationPreview.reviewNavigation()) return;
