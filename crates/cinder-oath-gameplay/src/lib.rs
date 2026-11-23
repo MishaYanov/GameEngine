@@ -172,8 +172,11 @@ pub fn intro_route(project: &ProjectData) -> Result<Option<(SceneId, SceneId)>, 
 	Ok(Some((settings.intro_scene, settings.arena_scene)))
 }
 
-pub fn object_script_descriptor() -> engine_core::components::ScriptDescriptor {
-	scripts::open_door_on_trigger::descriptor()
+pub const fn object_script_registration() -> engine_core::simulation_session::ObjectScriptRegistration {
+	engine_core::simulation_session::ObjectScriptRegistration {
+		descriptor: scripts::open_door_on_trigger::descriptor,
+		instantiate: scripts::open_door_on_trigger::instantiate,
+	}
 }
 
 pub fn descriptor() -> GameplayModuleDescriptorDto {

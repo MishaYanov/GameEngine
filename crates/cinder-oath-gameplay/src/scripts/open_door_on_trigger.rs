@@ -1,8 +1,94 @@
-//! Authoring descriptor for the trigger-driven door.
+//! A compiled trigger-driven door with an authored opening angle and speed.
 
 use engine_core::components::{
-	ScriptDescriptor, ScriptField, ScriptReferenceField, ScriptReferenceKind,
+	ScriptDescriptor, ScriptField, ScriptProperty, ScriptReferenceField, ScriptReferenceKind,
+	ScriptSettings,
 };
+use engine_core::{
+	simulation_session::{
+		ObjectScript, ObjectScriptCommands, ObjectScriptContext, ObjectScriptTrigger,
+	},
+	triggers::TriggerPhase,
+};
+
+#[derive(Clone)]
+struct OpenDoorOnTrigger {
+	angle: f32,
+	speed: f32,
+	closed: f32,
+	opening: bool,
+	opened: bool,
+}
+
+impl ObjectScript for OpenDoorOnTrigger {
+	fn clone_instance(&self) -> Box<dyn ObjectScript> {
+		Box::new(self.clone())
+	}
+
+	fn needs_update(&self) -> bool {
+		self.opening
+	}
+
+	fn on_start(
+		&mut self,
+		context: &ObjectScriptContext<'_>,
+		_: &mut ObjectScriptCommands<'_, '_>,
+	) -> Result<(), String> {
+		self.closed = context.transform(context.owner())?.rotation[1];
+		Ok(())
+	}
+
+	fn on_trigger(
+		&mut self,
+		context: &ObjectScriptContext<'_>,
+		event: &ObjectScriptTrigger,
+		_: &mut ObjectScriptCommands<'_, '_>,
+	) -> Result<(), String> {
+		if !self.opened
+			&& event.phase == TriggerPhase::Enter
+			&& context.reference("sensor") == Some(&event.sensor)
+		{
+			self.opening = true;
+		}
+		Ok(())
+	}
+
+	fn on_fixed_update(
+		&mut self,
+		context: &ObjectScriptContext<'_>,
+		commands: &mut ObjectScriptCommands<'_, '_>,
+	) -> Result<(), String> {
+		let yaw = context.transform(context.owner())?.rotation[1];
+		let goal = self.closed + self.angle;
+		let difference = goal - yaw;
+		let advance = self.speed * context.step_seconds();
+		if difference.abs() <= advance {
+			if yaw != goal {
+				commands.set_local_yaw(goal)?;
+			}
+			self.opened = true;
+			self.opening = false;
+		} else {
+			commands.set_local_yaw(yaw + difference.signum() * advance)?;
+		}
+		Ok(())
+	}
+}
+
+pub(crate) fn instantiate(settings: &ScriptSettings) -> Result<Box<dyn ObjectScript>, String> {
+	let descriptor = descriptor();
+	let radians = |key| match descriptor.property(settings, key) {
+		Some(ScriptProperty::Number(value)) => Ok(value.to_radians()),
+		_ => Err(format!("Open Door requires numeric {key}")),
+	};
+	Ok(Box::new(OpenDoorOnTrigger {
+		angle: radians("open_angle_degrees")?,
+		speed: radians("speed_degrees_per_second")?,
+		closed: 0.,
+		opening: false,
+		opened: false,
+	}))
+}
 
 pub(crate) fn descriptor() -> ScriptDescriptor {
 	ScriptDescriptor {
