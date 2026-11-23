@@ -1,4 +1,5 @@
 <section aria-label="Components" class="components">
+    @if (!focusedComponent()) {
 	<h3>Components</h3>
     @for (component of orderedComponents(); track component.id) {
         <article [attr.aria-label]="label(component)" [attr.data-reference-component]="component.id" class="component"
@@ -21,10 +22,15 @@
                     <p class="binding">{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
                 }
                 @case ('audio_source') {
-                    <editor-audio-source-inspector [componentId]="component.id" [enabled]="component.enabled"
-                        [settings]="component.data.settings" [scope]="audioScope()" [clips]="audioClips()"
-                        [assignable]="available() && !open() && !pinned(component.data.kind)"
-                        (assign)="revealReference(component.id, 'Audio Clip')"/>
+                    @if (audioWorkspaceAvailable()) {
+                        <p class="binding">{{ audioClipPath(component.data.settings.clip?.asset) }}</p>
+                        <p class="binding">Gain {{ component.data.settings.gain }}</p>
+                    } @else {
+                        <editor-audio-source-inspector [componentId]="component.id" [enabled]="component.enabled"
+                            [settings]="component.data.settings" [scope]="audioScope()" [clips]="audioClips()"
+                            [assignable]="available() && !open() && !pinned(component.data.kind)"
+                            (assign)="revealReference(component.id, 'Audio Clip')"/>
+                    }
                 }
                 @case ('camera') {
                     <p class="binding">{{ component.data.settings.rig.mode.replaceAll('_', ' ') }}</p>
@@ -65,6 +71,9 @@
                     @if (component.data.kind === 'animation' && animationWorkspaceAvailable()) {
                         <button class="primary-action" type="button" [disabled]="!available() || open()"
                                 (click)="animationWorkspaceRequested.emit(component.id)">Open Animation</button>
+                    } @else if (component.data.kind === 'audio_source' && audioWorkspaceAvailable()) {
+                        <button class="primary-action" type="button" [disabled]="!available() || open()"
+                                (click)="audioWorkspaceRequested.emit(component.id)">Edit Audio</button>
                     } @else if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
                         <button class="primary-action" (click)="particleDesignerRequested.emit()"
                                 [disabled]="!available() || open()" aria-haspopup="dialog" type="button">Edit Particles…</button>
@@ -105,6 +114,7 @@
 			</button>
 		</div>
 	}
+    }
 	@if (error(); as message) {
 		<p class="error" role="alert">{{ message }}</p>
 	}
@@ -173,6 +183,7 @@
                             </label>
                         } @else if (draft().audioSource.eventKind === 'animation_marker') {
                             <editor-audio-marker-fields [clipId]="draft().audioSource.eventClip" [markerId]="draft().audioSource.eventMarker"
+                                [navigationEnabled]="!focusedComponent()"
                                 (clipChange)="chooseAudioEventClip($event)" (markerChange)="fields.audioSource.eventMarker().value.set($event)"/>
                         }
                         @if (draft().audioSource.eventKind !== 'none') {
@@ -491,7 +502,7 @@
 				<button type="button" [disabled]="!candidate().value || !available()" (click)="submit()">
 					Apply Component
 				</button>
-				<button type="button" [disabled]="pending()" (click)="open.set(false)">
+				<button type="button" [disabled]="pending()" (click)="discardDraft()">
 					Discard Component Draft
 				</button>
 			</div>

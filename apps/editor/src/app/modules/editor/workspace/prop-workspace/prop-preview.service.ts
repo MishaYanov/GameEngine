@@ -58,8 +58,9 @@ export class PropPreviewService {
         this.editor.capabilities()?.commands?.some(command => command.name === 'set_scene_environment') ?? false,
     );
     private readonly owner = computed<PreviewOwner | null>(() => {
-        if (!this.editor.nativeAvailable || this.views.activeViewKind() !== 'prop-workspace' ||
-            this.editor.playing()) return null;
+        const view = this.views.activeViewKind();
+        const sourceAudio = view === 'audio-workspace' && this.views.audioOrigin() === 'prop';
+        if (!this.editor.nativeAvailable || (view !== 'prop-workspace' && !sourceAudio) || this.editor.playing()) return null;
         const document = this.props.document();
         const snapshot = this.editor.snapshot();
         if (!document || !snapshot) return null;

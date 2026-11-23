@@ -16,12 +16,13 @@ import {EditorSearchPicker} from '../../../../shared/components/search-picker/se
         @if (clipId() && !loading() && markerId() && !markers().some(hasSelectedMarker)) {
             <p role="status">The saved marker is unavailable.</p>
         }
-        @if (animation) {
+        @if (animation && navigationEnabled()) {
             <button type="button" [disabled]="!clipId()" (click)="openAnimation()">Open Animation</button>
         }
     `,
 })
 export class AudioMarkerFields {
+    readonly navigationEnabled = input(true);
     readonly clipId = input.required<string>();
     readonly markerId = input.required<string>();
     readonly clipChange = output<string>();

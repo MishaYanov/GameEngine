@@ -1,7 +1,7 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
         <workspace-toolbar (paletteRequested)="openPalette()"
-                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()"
+                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()" (repairRequested)="repairSceneDependency($event)"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
@@ -75,7 +75,7 @@
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
-            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !previewingCamera()) {
+            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView() && !previewingCamera()) {
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
@@ -86,7 +86,7 @@
                     tabindex="0"
             >
                 <editor-pane [icon]="workspaceView.animationView() || workspaceView.animatorView() || workspaceView.controlsGraphView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="workspaceView.controlsGraphView() ? 'Controls Graph' : workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
+                             [title]="workspaceView.audioView() ? 'Audio' : workspaceView.controlsGraphView() ? 'Controls Graph' : workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
                     @if (!workspaceView.propView() && !workspaceView.animationView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
@@ -133,6 +133,8 @@
                                 <editor-animator-workspace/>
                             } @else if (workspaceView.controlsGraphView()) {
                                 <editor-control-graph-workspace/>
+                            } @else if (workspaceView.audioView()) {
+                                <editor-audio-workspace/>
                             } @else if (!workspaceView.animationView() && !showingViewport()) {
                                 <div class="empty-scene">
                                     <div class="empty-content">
@@ -172,7 +174,7 @@
         </section>
         @if (workspaceView.gameView() && editorService.playing()) {
             <editor-runtime-inspector [opening]="workspaceActionBlocked()" drawerMaxWidth="var(--workspace-inspector-max)"/>
-        } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView()) {
+        } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView()) {
         <inspector-panel
                 [hidden]="workspaceView.animationView()"
                 data-editor-shortcut-scope="inspector"
@@ -199,6 +201,16 @@
                          data-editor-shortcut-scope="assets"/>
 </section>
 <editor-particle-designer/>
+<editor-dialog title="Unsaved component changes" [open]="componentWorkspace.confirming()" [renderFields]="false"
+               (openChange)="!$event && componentWorkspace.settleNavigation('cancel')"
+               [closeBlocked]="componentWorkspace.pending()" closeLabel="Keep Editing">
+    <p>Save or discard the component draft for {{ componentWorkspace.description() }}.</p>
+    @if (componentWorkspace.error(); as message) { <p role="alert">{{ message }}</p> }
+    <button type="button" (click)="componentWorkspace.settleNavigation('save')"
+            [disabled]="!componentWorkspace.canSave()">Apply Component and Continue</button>
+    <button type="button" (click)="componentWorkspace.settleNavigation('discard')"
+            [disabled]="componentWorkspace.pending()">Discard Component Changes</button>
+</editor-dialog>
 <editor-command-palette (commandRequested)="dispatchEditorAction($event)" [(open)]="paletteOpen"
                         [canRun]="canRunPaletteCommand"/>
 <editor-find-usages (closed)="closeUsages()" (revealRequested)="revealUsage($event)" [contextKey]="sceneContext()"

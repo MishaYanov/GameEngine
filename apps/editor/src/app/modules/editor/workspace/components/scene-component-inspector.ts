@@ -15,6 +15,7 @@ import { AnimatorInspector } from '../animator/animator-inspector';
 import {ControlGraphInspector} from '../control-graph/control-graph-inspector';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 import type {SpecialistAttachment, SpecialistAttachmentChoice} from './add-component-catalog';
+import {ComponentWorkspaceSession} from './component-workspace-session';
 import {ParticleDesignerSession} from '../particle-designer/particle-designer-session';
 
 @Component({
@@ -38,6 +39,8 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 		[inputActionAssets]="inputActions?.assets() ?? []"
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[skyPanoramaAssetsEnabled]="skyPanoramaAssetsEnabled()"
+        [audioWorkspaceAvailable]="audioWorkspaceAvailable()"
+        (audioWorkspaceRequested)="openAudio($event)"
         [animationWorkspaceAvailable]="animationWorkspaceAvailable()"
         (animationWorkspaceRequested)="openAnimation($event)"
 		[particleDesignerAvailable]="particleDesigner !== null"
@@ -107,6 +110,9 @@ export class SceneComponentInspector {
 	readonly entity = input<SceneEntity | null>(null);
 	readonly editable = input(false);
     readonly subject = input<InspectorSubject | null>(null);
+    private readonly componentWorkspace = inject(ComponentWorkspaceSession, {optional: true});
+    protected readonly audioWorkspaceAvailable = computed(() =>
+        this.componentWorkspace !== null && this.subject()?.access === 'scene-edit');
     private readonly animation = inject(AnimationWorkspaceService, {optional: true});
     protected readonly animationWorkspaceAvailable = computed(() => this.animation !== null && this.subject() !== null);
     private readonly componentEditor = viewChild(ComponentEditor);
@@ -243,6 +249,11 @@ export class SceneComponentInspector {
 			this.error.set(null);
 		});
 	}
+
+    protected openAudio(componentId: string): void {
+        const subject = this.subject();
+        if (subject && this.available()) void this.componentWorkspace?.open('audio-workspace', subject, componentId);
+    }
 
     protected async openAnimation(componentId: string): Promise<void> {
         if (!this.animation || !this.available()) return;

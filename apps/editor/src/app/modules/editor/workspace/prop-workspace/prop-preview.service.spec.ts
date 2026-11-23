@@ -21,6 +21,7 @@ function reply(requestId: number, owner = 'native-token') {
 
 function setup() {
     const activeViewKind = signal<WorkspaceViewKind>('prop-workspace');
+    const audioOrigin = signal<'scene' | 'prop'>('scene');
     const requests = new Map<number, (value: unknown) => void>();
     const selectObject = vi.fn();
     vi.mocked(listen).mockReset().mockResolvedValue(vi.fn());
@@ -39,7 +40,7 @@ function setup() {
                 capabilities: () => ({commands: [{name: 'set_scene_environment'}]}),
             }},
             {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 7})}},
-            {provide: WorkspaceViewService, useValue: {activeViewKind}},
+            {provide: WorkspaceViewService, useValue: {activeViewKind, audioOrigin}},
             {provide: PropWorkspaceService, useValue: {
                 document: signal({kind: 'instance', root: 'root'}), selectObject,
             }},
@@ -47,7 +48,7 @@ function setup() {
     });
     const service = TestBed.inject(PropPreviewService);
     TestBed.tick();
-    return {service, activeViewKind, requests, selectObject};
+    return {service, activeViewKind, audioOrigin, requests, selectObject};
 }
 
 it('frames and selects using the current native token, then releases the preview on tab exit', async () => {
@@ -69,6 +70,22 @@ it('frames and selects using the current native token, then releases the preview
     TestBed.tick();
     expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'native-token'});
     expect(service.ready()).toBe(false);
+});
+
+it('preserves a Prop audition token only while its Audio workspace is active', async () => {
+    const {service, requests, activeViewKind, audioOrigin} = setup();
+    const [requestId, resolve] = Array.from(requests)[0];
+    resolve(reply(requestId));
+    await Promise.resolve();
+    audioOrigin.set('prop');
+    activeViewKind.set('audio-workspace');
+    TestBed.tick();
+    expect(service.currentState()?.token).toBe('native-token');
+    expect(invoke).not.toHaveBeenCalledWith('editor_prop_preview_close', {token: 'native-token'});
+    audioOrigin.set('scene');
+    TestBed.tick();
+    expect(service.ready()).toBe(false);
+    expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'native-token'});
 });
 
 it('closes a delayed old preview without applying selection after the tab changes', async () => {

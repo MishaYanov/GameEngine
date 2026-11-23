@@ -9,7 +9,8 @@ import {
     Injector,
     input,
     output,
-    signal
+    signal,
+    untracked
 } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import type {
@@ -82,6 +83,9 @@ export class ComponentEditor {
     readonly inputActionAssets = input<readonly InputActionsAsset[]>([]);
     readonly inputActionAssetsEnabled = input(false);
     readonly skyPanoramaAssetsEnabled = input(false);
+    readonly focusedComponent = input<ComponentRecord | null>(null);
+    readonly audioWorkspaceAvailable = input(false);
+    readonly audioWorkspaceRequested = output<string>();
     readonly animationWorkspaceAvailable = input(false);
     readonly animationWorkspaceRequested = output<string>();
     readonly particleDesignerAvailable = input(false);
@@ -103,6 +107,7 @@ export class ComponentEditor {
 	protected readonly open = signal(false);
 	protected readonly selectedKind = signal<AddComponentChoice['id']>('native_behavior');
 	protected readonly draft = signal(componentDraft('native_behavior', '', ''));
+    private readonly draftBaseline = signal('');
 	protected readonly fields = form(this.draft);
 	protected readonly collider = signal<Collider>(defaultCollider('box')!);
 	protected readonly colliderInvalid = signal(false);
@@ -261,8 +266,7 @@ export class ComponentEditor {
 		effect(() => {
 			this.contextKey();
 			this.acknowledged();
-			this.open.set(false);
-			this.colliderInvalid.set(false);
+			untracked(() => this.discardDraft());
 		});
 		effect(() => {
 			this.draftOpenChanged.emit(this.open());
@@ -333,6 +337,11 @@ export class ComponentEditor {
         this.draft.update(value => ({...value, model_path: path, mesh_index: ''}));
     }
 
+    protected audioClipPath(id: string | undefined): string {
+        return id ? this.audioClips().find(clip => clip.asset_id === id)?.path ?? 'Audio Clip unavailable'
+            : 'No Audio Clip assigned';
+    }
+
     protected chooseAudioClip(id: string): void {
         if (!this.available() || !this.open() || this.draft().kind !== 'audio_source') return;
         if (!id || this.audioClips().some(clip => clip.asset_id === id)) this.fields.audioSource.clipId().value.set(id);
@@ -370,10 +379,14 @@ export class ComponentEditor {
             return;
         }
         if (this.pinned(kind)) return;
-		this.original.set(component);
-		this.draft.set(
-			componentDraft(kind, component?.id ?? crypto.randomUUID(), this.ownerKey(), component),
-		);
+        this.initializeDraft(kind, component);
+    }
+
+    private initializeDraft(kind: ComponentData['kind'], component?: ComponentRecord): void {
+        this.original.set(component);
+        const draft = componentDraft(kind, component?.id ?? crypto.randomUUID(), this.ownerKey(), component);
+        this.draft.set(draft);
+        this.draftBaseline.set(JSON.stringify(draft));
 		this.collider.set(
 			component?.data.kind === 'collider' ? component.data.collider : this.initialCollider() ?? defaultCollider('box')!,
 		);
@@ -403,15 +416,31 @@ export class ComponentEditor {
         }, {injector: this.injector});
     }
 
-	protected submit(): void {
-		const component = this.candidate().value;
-        if (!component || this.pinned(component.data.kind) || !this.available() || !this.open()) return;
-		this.actionRequested.emit({
-			kind: this.original() ? 'replace' : 'add',
-			component,
-			expected: this.original() ? JSON.stringify(this.original()) : null,
-		});
-	}
+    draftDirty(): boolean {
+        return this.open() && JSON.stringify(this.draft()) !== this.draftBaseline();
+    }
+
+    discardDraft(): void {
+        const focused = this.focusedComponent();
+        if (focused) {
+            this.initializeDraft(focused.data.kind, focused);
+        } else {
+            this.open.set(false);
+            this.colliderInvalid.set(false);
+        }
+    }
+
+    prepareEdit(): ComponentEditIntent | null {
+        const component = this.candidate().value;
+        if (!component || this.pinned(component.data.kind) || !this.available() || !this.open()) return null;
+        const original = this.original();
+        return {kind: original ? 'replace' : 'add', component, expected: original ? JSON.stringify(original) : null};
+    }
+
+    protected submit(): void {
+        const intent = this.prepareEdit();
+        if (intent) this.actionRequested.emit(intent);
+    }
 
 	protected toggle(component: ComponentRecord): void {
         if (this.available() && !this.open() && !this.pinned(component.data.kind))

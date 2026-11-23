@@ -45,6 +45,8 @@ import {CameraSettings} from './game-settings/camera-settings';
 import {PhysicsLayersDialog} from './physics-layers/physics-layers-dialog';
 import {SceneLightsDialog} from './scene-lights/scene-lights-dialog';
 import {ParticleDesigner} from './particle-designer/particle-designer';
+import {AudioWorkspace} from './audio-source/audio-workspace';
+import {ComponentWorkspaceSession} from './components/component-workspace-session';
 import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
@@ -61,13 +63,13 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
-        SelectedCameraPreviewService, InputActionsCatalog,
+        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector,
+        CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector, AudioWorkspace,
         CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
@@ -91,6 +93,7 @@ export class EditorWorkspace {
     protected readonly animatorWorkspace = inject(AnimatorWorkspaceService);
     protected readonly controlsGraph = inject(ControlGraphWorkspaceService);
     private readonly particles = inject(ParticleDesignerSession);
+    protected readonly componentWorkspace = inject(ComponentWorkspaceSession);
     private readonly draftReview = inject(WorkspaceDraftReview);
     private readonly paneRequests = inject(ScopedPaneRequests);
     protected readonly previewingCamera = computed(() => this.cameraSettings()?.previewing() ?? false);
@@ -126,7 +129,7 @@ export class EditorWorkspace {
         return snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path.split('/').at(-1) ?? 'Scene';
     });
     protected readonly showingViewport = computed(() =>
-        this.workspaceView.animatorView() || this.workspaceView.controlsGraphView() ? false :
+        this.workspaceView.animatorView() || this.workspaceView.controlsGraphView() || this.workspaceView.audioView() ? false :
         this.workspaceView.animationView() ? this.animationPreview.ready() :
         this.workspaceView.propView() ? this.propPreview.ready() :
             this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing()
@@ -212,6 +215,7 @@ export class EditorWorkspace {
             () => this.lights()?.canLeaveProject() ?? true,
             () => this.particles.canLeaveProject(),
             () => this.animationPreview.reviewNavigation(),
+            () => this.componentWorkspace.reviewNavigation(),
             () => this.reviewPropNavigation(),
             () => this.animatorWorkspace.reviewNavigation(),
             () => this.controlsGraph.reviewNavigation(),
@@ -220,6 +224,7 @@ export class EditorWorkspace {
             prop: () => this.propWorkspace.document()?.scope.generation === this.editorService.workspaceGeneration(),
             animator: this.animatorAssets.supported,
             controlsGraph: this.controlsGraph.supported,
+            audio: () => this.componentWorkspace.available('audio-workspace'),
         });
         let previousView = this.workspaceView.activeViewKind();
         effect(() => {
@@ -314,6 +319,8 @@ export class EditorWorkspace {
         const context = this.sceneContext();
         if (this.workspaceView.animationView() && view !== 'animation-workspace' &&
             !await this.animationPreview.reviewNavigation()) return;
+        if (this.workspaceView.audioView() && view !== 'audio-workspace' &&
+            !await this.componentWorkspace.reviewNavigation()) return;
         if (context === this.sceneContext()) this.workspaceView.selectView(view);
     }
 

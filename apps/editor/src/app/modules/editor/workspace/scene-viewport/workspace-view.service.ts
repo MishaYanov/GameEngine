@@ -8,6 +8,7 @@ interface AuthoringAvailability {
     readonly prop: () => boolean;
     readonly animator: () => boolean;
     readonly controlsGraph: () => boolean;
+    readonly audio?: () => boolean;
 }
 
 const PRIMARY_VIEWS = ['scene-viewport', 'game-preview'] as const;
@@ -16,6 +17,9 @@ const PRIMARY_VIEWS = ['scene-viewport', 'game-preview'] as const;
 @Injectable()
 export class WorkspaceViewService {
     readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
+    readonly audioView = computed(() => this.activeViewKind() === 'audio-workspace');
+    private readonly audioOriginState = signal<'scene' | 'prop'>('scene');
+    readonly audioOrigin = this.audioOriginState.asReadonly();
     readonly propView = computed(() => this.activeViewKind() === 'prop-workspace');
     readonly controlsGraphView = computed(() => this.activeViewKind() === 'controls-graph');
     readonly animatorView = computed(() => this.activeViewKind() === 'animation-controller');
@@ -42,6 +46,7 @@ export class WorkspaceViewService {
         views.push('animation-workspace');
         if (authoring?.animator()) views.push('animation-controller');
         if (authoring?.controlsGraph()) views.push('controls-graph');
+        if (authoring?.audio?.()) views.push('audio-workspace');
         return views;
     });
     private readonly activeView = signal<WorkspaceViewKind>('scene-viewport');
@@ -80,7 +85,7 @@ export class WorkspaceViewService {
         });
         effect(() => {
             const state = this.viewport.state();
-            if (!state || this.propView() || this.animationView() || this.animatorView() || this.controlsGraphView()) return;
+            if (!state || this.propView() || this.animationView() || this.animatorView() || this.controlsGraphView() || this.audioView()) return;
             const view = this.gameView() ? 'game' : 'scene';
             if (state.settings.view === view || this.requestedView === view) return;
             this.requestedView = view;
@@ -94,8 +99,9 @@ export class WorkspaceViewService {
         this.authoringAvailability.set(availability);
     }
 
-    selectView(kind: WorkspaceViewKind): void {
+    selectView(kind: WorkspaceViewKind, origin?: 'scene' | 'prop'): void {
         if (!this.availableViews().includes(kind)) return;
+        if (kind === 'audio-workspace' && origin !== undefined) this.audioOriginState.set(origin);
         if (kind === 'animation-workspace' && !this.animationView()) {
             this.animationScope.set(this.propView() ? 'prop' : 'scene');
         }
