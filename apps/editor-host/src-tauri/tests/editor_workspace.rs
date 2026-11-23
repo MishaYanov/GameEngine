@@ -799,6 +799,8 @@ mod colliders;
 mod documents;
 #[path = "editor_workspace/incremental.rs"]
 mod incremental;
+#[path = "editor_workspace/object_authoring.rs"]
+mod object_authoring;
 #[path = "editor_workspace/nested_prop.rs"]
 mod nested_prop;
 #[path = "editor_workspace/play.rs"]

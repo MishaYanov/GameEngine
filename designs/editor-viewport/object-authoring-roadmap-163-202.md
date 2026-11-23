@@ -36,7 +36,7 @@ Generate the first four primitives as ordinary project GLBs using the existing m
 **Implementation.** Extend `apps/editor/src/app/modules/editor/workspace/editor-workspace.editing.spec.ts` with a blank-project fixture for creating and selecting one object. Record existing scene, Prop, Animation, and Controls behavior in `apps/editor/src/app/modules/editor/workspace/workspace-draft-review.spec.ts`. Use `apps/headless/tests/fixtures/authoring-controller/full/project.json` and `projects/cinder-oath/project.json` as older-project controls. Keep folder membership, transform parenting, authored component IDs, and preview state as distinct facts in the fixtures.
 
 ```ts
-expect(snapshot.active_scene_id).toBe('main');
+expect(snapshot.active_scene_id).toBe(snapshot.project.startup_scene_id);
 expect(object.components.map(component => component.id)).toEqual(initialIds);
 ```
 
