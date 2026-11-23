@@ -1,0 +1,54 @@
+{
+  "schema_version": 2,
+  "name": "Training Blade Idle",
+  "owner": {
+    "kind": "prop",
+    "asset_id": "90000000-0000-4000-8000-000000000003"
+  },
+  "duration_ticks": 800,
+  "tracks": [
+    {
+      "target": {
+        "kind": "prop",
+        "address": {
+          "kind": "object",
+          "placement_path": [],
+          "source_entity": "training-blade"
+        }
+      },
+      "track": {
+        "kind": "local_position",
+        "interpolation": "linear",
+        "keys": [
+          {
+            "id": "90000000-0000-4000-8000-000000000040",
+            "at": 0,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000041",
+            "at": 400,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000042",
+            "at": 800,
+            "value": [
+              0.5,
+              0.15,
+              0.1
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -7,8 +7,9 @@ use std::{
 
 use super::{
 	Digest, InstalledProject, PackageAsset, Path, PathBuf, PreparedProject, ProjectData, Sha256,
-	StagedProject, checked_asset_path, copy_and_hash, copy_prepared_assets, fs, io, prepare_assets,
-	prepare_project, project_json, project_path, validate_catalog_scenes, write_new,
+	StagedProject, checked_asset_path, copy_and_hash, copy_prepared_assets, fs, io,
+	prepare_project, project_json, project_path, validate_catalog_scenes,
+	verify_frozen_asset_inventory, write_new,
 };
 
 pub fn install_project_from_manifest(
@@ -159,9 +160,7 @@ pub(super) fn validate_export_snapshot(
 		}
 		let root = staged.path.join("assets");
 		check_export_folder(&root)?;
-		if prepare_assets(&root)?.as_slice() != staged.files.as_ref() {
-			return Err(io::Error::other("Staged assets changed"));
-		}
+		verify_frozen_asset_inventory(&root, &staged.files)?;
 		Ok(())
 	};
 	check().map_err(|error| format!("Export snapshot changed or is unavailable: {error}"))

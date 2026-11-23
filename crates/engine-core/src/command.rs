@@ -436,9 +436,11 @@ pub struct EditorCapabilitiesDto {
 	pub scene_warming_supported: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub scene_verification_supported: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub input_action_assets: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub animator_assets: bool,
-	#[serde(default)]
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub controls_graph_assets: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub sky_panorama_assets: bool,

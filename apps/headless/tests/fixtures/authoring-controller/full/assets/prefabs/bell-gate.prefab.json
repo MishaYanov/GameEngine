@@ -1,0 +1,284 @@
+{
+  "schema_version": 4,
+  "entities": [
+    {
+      "key": "gate-root",
+      "name": "Bell Gate",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": []
+    },
+    {
+      "key": "gate-left",
+      "name": "Left Post",
+      "transform": {
+        "position": [
+          -0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "gate-root",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "gate-right",
+      "name": "Right Post",
+      "transform": {
+        "position": [
+          0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "gate-root",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "gate-beam",
+      "name": "Top Beam",
+      "transform": {
+        "position": [
+          0.0,
+          2.45,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.04,
+          0.16,
+          0.22
+        ]
+      },
+      "parent": "gate-root",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.24,
+                0.35,
+                0.44,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "gameplay": null,
+  "reference_slots": {},
+  "composition": {
+    "placements": [
+      {
+        "id": "hanging-bell",
+        "name": "Hanging Bell",
+        "target": {
+          "asset_id": "90000000-0000-4000-8000-000000000051",
+          "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+        },
+        "parent": "gate-root",
+        "local": {
+          "position": [
+            0.0,
+            1.94,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "pins": [
+      {
+        "version": {
+          "asset_id": "90000000-0000-4000-8000-000000000051",
+          "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+        },
+        "path": "prefabs/bell.prefab.json",
+        "entities": [
+          {
+            "key": "bell-body",
+            "name": "Bell Body",
+            "transform": {
+              "position": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                0.4,
+                0.32,
+                0.4
+              ]
+            },
+            "components": [
+              {
+                "id": "mesh",
+                "schema_version": 1,
+                "enabled": true,
+                "data": {
+                  "kind": "mesh_renderer",
+                  "model_path": "models/cube.glb",
+                  "asset_id": "90000000-0000-4000-8000-000000000001",
+                  "mesh_index": 0,
+                  "material": {
+                    "base_color_factor": [
+                      0.88,
+                      0.53,
+                      0.13,
+                      1.0
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "key": "bell-skirt",
+            "name": "Bell Skirt",
+            "transform": {
+              "position": [
+                0.0,
+                -0.34,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.23,
+                0.3,
+                1.23
+              ]
+            },
+            "parent": "bell-body",
+            "components": [
+              {
+                "id": "mesh",
+                "schema_version": 1,
+                "enabled": true,
+                "data": {
+                  "kind": "mesh_renderer",
+                  "model_path": "models/cube.glb",
+                  "asset_id": "90000000-0000-4000-8000-000000000001",
+                  "mesh_index": 0,
+                  "material": {
+                    "base_color_factor": [
+                      0.72,
+                      0.29,
+                      0.08,
+                      1.0
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

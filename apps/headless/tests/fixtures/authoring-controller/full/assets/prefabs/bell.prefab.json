@@ -1,0 +1,90 @@
+{
+  "schema_version": 3,
+  "entities": [
+    {
+      "key": "bell-body",
+      "name": "Bell Body",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.4,
+          0.32,
+          0.4
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.88,
+                0.53,
+                0.13,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "bell-skirt",
+      "name": "Bell Skirt",
+      "transform": {
+        "position": [
+          0,
+          -0.34,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.23,
+          0.3,
+          1.23
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.72,
+                0.29,
+                0.08,
+                1
+              ]
+            }
+          }
+        }
+      ],
+      "parent": "bell-body"
+    }
+  ]
+}

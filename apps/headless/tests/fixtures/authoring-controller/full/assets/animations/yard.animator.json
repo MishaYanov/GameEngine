@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "entry": "idle",
+  "states": [
+    {
+      "id": "idle",
+      "name": "Idle",
+      "clip": {
+        "kind": "authored",
+        "asset_id": "90000000-0000-4000-8000-000000000004",
+        "expected_sha256": "b70be69c1c1c97d499c1c5ef4135352cd081aa193e27700ea26f628792dd6f6b"
+      },
+      "looping": true
+    },
+    {
+      "id": "walk",
+      "name": "Walk",
+      "clip": {
+        "kind": "authored",
+        "asset_id": "90000000-0000-4000-8000-000000000005",
+        "expected_sha256": "e373dbe3a28947a355e7aa2a959fbf6768bb97cf49e9185a4e2498276ce0f21d"
+      },
+      "looping": true
+    },
+    {
+      "id": "jump",
+      "name": "Jump",
+      "clip": {
+        "kind": "authored",
+        "asset_id": "90000000-0000-4000-8000-000000000006",
+        "expected_sha256": "2d57b8c4d18fc44e82358cc61a53bab4d60522d66219760cc6c7f71b8a26f57b"
+      },
+      "looping": false
+    },
+    {
+      "id": "swing",
+      "name": "Practice Swing",
+      "clip": {
+        "kind": "authored",
+        "asset_id": "90000000-0000-4000-8000-000000000007",
+        "expected_sha256": "14bf00c5cf00ccc2a5f8ac366c9d6dc3e7fd4c90e88ebbf6812bf0d1d64a8856"
+      },
+      "looping": false
+    }
+  ],
+  "parameters": [
+    {
+      "id": "moving",
+      "name": "Moving",
+      "source": {
+        "kind": "moving",
+        "minimum_mm_per_second": 100
+      }
+    },
+    {
+      "id": "grounded",
+      "name": "Grounded",
+      "source": {
+        "kind": "grounded"
+      }
+    },
+    {
+      "id": "takeoff",
+      "name": "Jumped",
+      "source": {
+        "kind": "jumped"
+      }
+    },
+    {
+      "id": "practice_swing",
+      "name": "Accepted practice swing",
+      "source": {
+        "kind": "action_accepted",
+        "action": "attack"
+      }
+    },
+    {
+      "id": "aim",
+      "name": "Aim",
+      "source": {
+        "kind": "boolean",
+        "default": false
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "id": "idle_to_jump",
+      "from": "idle",
+      "to": "jump",
+      "condition": {
+        "kind": "trigger",
+        "parameter": "takeoff"
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "walk_to_jump",
+      "from": "walk",
+      "to": "jump",
+      "condition": {
+        "kind": "trigger",
+        "parameter": "takeoff"
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "idle_to_swing",
+      "from": "idle",
+      "to": "swing",
+      "condition": {
+        "kind": "trigger",
+        "parameter": "practice_swing"
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "walk_to_swing",
+      "from": "walk",
+      "to": "swing",
+      "condition": {
+        "kind": "trigger",
+        "parameter": "practice_swing"
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "idle_to_walk",
+      "from": "idle",
+      "to": "walk",
+      "condition": {
+        "kind": "bool",
+        "parameter": "moving",
+        "value": true
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "walk_to_idle",
+      "from": "walk",
+      "to": "idle",
+      "condition": {
+        "kind": "bool",
+        "parameter": "moving",
+        "value": false
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "jump_landed",
+      "from": "jump",
+      "to": "idle",
+      "condition": {
+        "kind": "bool",
+        "parameter": "grounded",
+        "value": true
+      },
+      "blend_ticks": 2
+    },
+    {
+      "id": "swing_finished",
+      "from": "swing",
+      "to": "idle",
+      "condition": {
+        "kind": "always"
+      },
+      "blend_ticks": 2,
+      "exit_after_ticks": 18
+    }
+  ],
+  "layout": {
+    "idle": {
+      "x": 30,
+      "y": 40
+    },
+    "walk": {
+      "x": 290,
+      "y": 40
+    },
+    "jump": {
+      "x": 560,
+      "y": 40
+    },
+    "swing": {
+      "x": 290,
+      "y": 220
+    }
+  }
+}

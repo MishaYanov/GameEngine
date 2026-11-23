@@ -71,7 +71,7 @@ fn repeated_spawn_collect_replay_has_stable_outcome_and_restart_clears_lifecycle
 		assert_eq!(a["runtime"][key], b["runtime"][key]);
 	}
 	assert_eq!(a["runtime"]["topology_revision"], 20);
-	assert_eq!(a["runtime"]["total_entities"], 6);
+	assert_eq!(a["runtime"]["total_entities"], 7);
 	assert_eq!(a["runtime"]["timer_count"], 0);
 	assert!(a["runtime"]["last_error"].is_null());
 	actions.push(json!({"type":"restart_run"}));
@@ -110,7 +110,7 @@ fn failed_prefab_load_preserves_the_world_and_exposes_a_bounded_runtime_error() 
 		"--steps".as_ref(),
 		"120".as_ref(),
 	]);
-	assert_eq!(output["runtime"]["total_entities"], 6);
+	assert_eq!(output["runtime"]["total_entities"], 7);
 	assert_eq!(output["runtime"]["topology_revision"], 0);
 	assert_eq!(output["runtime"]["pending_spawns"], 0);
 	let error = output["runtime"]["last_error"].as_str().unwrap();

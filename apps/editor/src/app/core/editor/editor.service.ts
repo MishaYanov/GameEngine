@@ -110,6 +110,8 @@ export class EditorService {
     private readonly assetsState = signal<readonly ModelAsset[] | null>(null);
     readonly modelAssets = this.assetsState.asReadonly();
     private assetCatalogStale = false;
+    private readonly authoredClipCatalogVersionState = signal(0);
+    readonly authoredClipCatalogVersion = this.authoredClipCatalogVersionState.asReadonly();
     private readonly collisionsState = signal<CollisionSnapshot | null>(null);
     readonly collisions = this.collisionsState.asReadonly();
     readonly cameraPreview = new CameraPreviewController({
@@ -865,16 +867,20 @@ export class EditorService {
     }
 
     listAuthoredClips(generation: number): Promise<readonly ClipAssetIndex[]> {
-        return this.enqueue('editor_animation_clips', () => {
+        return this.enqueue('editor_animation_clips', async () => {
             this.requireGeneration(generation);
-            return this.native<readonly ClipAssetIndex[]>('editor_animation_clips');
+            const clips = await this.native<readonly ClipAssetIndex[]>('editor_animation_clips');
+            this.requireGeneration(generation);
+            return clips;
         }, false, generation);
     }
 
     openAuthoredClip(assetId: string, generation: number): Promise<ClipAssetDocument> {
-        return this.enqueue('editor_open_authored_clip', () => {
+        return this.enqueue('editor_open_authored_clip', async () => {
             this.requireGeneration(generation);
-            return this.native<ClipAssetDocument>('editor_open_authored_clip', {assetId});
+            const document = await this.native<ClipAssetDocument>('editor_open_authored_clip', {assetId});
+            this.requireGeneration(generation);
+            return document;
         }, false, generation);
     }
 
@@ -890,6 +896,7 @@ export class EditorService {
             this.requireGeneration(generation);
             this.accept(result.snapshot);
             this.invalidateAssetCatalog();
+            this.authoredClipCatalogVersionState.update(version => version + 1);
             return result.document;
         }, true, generation);
     }
@@ -937,6 +944,7 @@ export class EditorService {
             this.requireGeneration(generation);
             this.accept(result.snapshot);
             this.invalidateAssetCatalog();
+            this.authoredClipCatalogVersionState.update(version => version + 1);
             return result.draft;
         }, true, generation);
     }

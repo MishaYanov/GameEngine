@@ -237,6 +237,14 @@ pub(super) fn apply(
 		EditorCommandDto::DuplicateSelection { offset } => {
 			duplicate(data, selection, finite_vec(offset, "Duplicate offset")?)?
 		}
+		EditorCommandDto::DuplicateLinkedPrefab { root_key } => {
+			let anchor = &data.entities[entity_index(data, &root_key)?];
+			if anchor.linked_prefab.is_none() {
+				return Err("Select a linked Prop instance".into());
+			}
+			*selection = vec![anchor.key.clone()];
+			duplicate(data, selection, Vec3::ZERO)?;
+		}
 		EditorCommandDto::DeleteSelection => {
 			let hierarchy = hierarchy(data)?;
 			let roots = selection_roots(&hierarchy, selection)?;

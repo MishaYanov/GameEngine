@@ -736,3 +736,160 @@ fn practice_yard_graphs_reopen_and_discarding_a_prop_clip_edit_preserves_play() 
 	assert_eq!(workspace.backend.session().authored_document(), authored);
 	assert_eq!(fs::read(&clip_file).unwrap(), clip_bytes);
 }
+#[test]
+fn full_authoring_yard_edits_nested_prop_and_only_sounds_in_live_play() {
+	use crate::editor::prefab_sources::PropDraftEdit;
+	use bridge::viewport::PropPreviewTargetDto;
+	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
+
+	const GATE: &str = "prefabs/bell-gate.prefab.json";
+	const SCENE: &str = "scenes/full-practice-yard.json";
+	let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+	let source = repo.join("apps/headless/tests/fixtures/authoring-controller/full");
+	let fixture = Fixture(
+		repo.join("target")
+			.join(format!("qa-full-yard-{}", AssetId::generate().as_str())),
+	);
+	let assets = fixture.0.join("assets");
+	for folder in [
+		"animations",
+		"audio",
+		"controls",
+		"models",
+		"prefabs",
+		"scenes",
+		"textures",
+	] {
+		fs::create_dir_all(assets.join(folder)).unwrap();
+		for entry in fs::read_dir(source.join("assets").join(folder)).unwrap() {
+			let entry = entry.unwrap();
+			assert!(entry.file_type().unwrap().is_file());
+			fs::copy(entry.path(), assets.join(folder).join(entry.file_name())).unwrap();
+		}
+	}
+	fs::copy(
+		source.join("project.json"),
+		fixture.0.join("project.json"),
+	)
+	.unwrap();
+	fs::copy(
+		source.join("assets/asset-catalog.json"),
+		assets.join("asset-catalog.json"),
+	)
+	.unwrap();
+	let scene_bytes = fs::read(assets.join(SCENE)).unwrap();
+	let mut workspace = fixture.workspace();
+	let revision = workspace.backend.session().revision();
+	let generation = workspace.generation;
+	let draft = workspace.open_prefab_source(GATE, revision).unwrap();
+	let preview = workspace
+		.open_prop_preview(
+			PropPreviewTargetDto::Source {
+				draft_id: draft.draft_id.clone(),
+			},
+			revision,
+			generation,
+			1,
+		)
+		.unwrap();
+	let isolated = workspace.active_prop_preview().unwrap().document;
+	assert!(isolated
+		.entities
+		.iter()
+		.any(|entity| entity.name == "Bell Body"));
+	assert!(!isolated
+		.entities
+		.iter()
+		.any(|entity| entity.name == "Floor1"));
+	assert!(workspace.close_prop_preview(&preview.token));
+	let mut changed = draft.prefab.clone();
+	let beam = changed["entities"]
+		.as_array_mut()
+		.unwrap()
+		.iter_mut()
+		.find(|entity| entity["key"] == "gate-beam")
+		.unwrap();
+	beam["name"] = serde_json::json!("Gate Crossbar");
+	let edited = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			draft.draft_revision,
+			PropDraftEdit::Apply { prefab: changed },
+		)
+		.unwrap();
+	assert!(edited.dirty);
+	let published = workspace
+		.save_prop_draft(&edited.draft_id, edited.draft_revision)
+		.unwrap();
+	assert!(!published.draft.dirty);
+	assert_ne!(published.draft.fingerprint, draft.fingerprint);
+	drop(workspace);
+	let mut workspace = fixture.workspace();
+	assert!(workspace
+		.open_prefab_source(GATE, workspace.backend.session().revision())
+		.unwrap()
+		.prefab["entities"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.any(|entity| entity["name"] == "Gate Crossbar"));
+	let authored = workspace.backend.session().authored_document();
+	assert!(authored
+		.entities
+		.iter()
+		.any(|entity| entity.name == "Left Bell"));
+	assert!(authored.active_sky().unwrap().background.image().is_some());
+
+	let clip_id = AssetId::new("90000000-0000-4000-8000-000000000053").unwrap();
+	let clip = workspace.open_authored_clip_asset(&clip_id).unwrap();
+	let preview = workspace
+		.open_authored_clip_preview(
+			&clip_id,
+			&clip.asset.fingerprint,
+			None,
+			workspace.backend.session().revision(),
+			workspace.generation,
+			1,
+		)
+		.unwrap();
+	for time in [440, 450, 500, 430, 450] {
+		let sample = workspace
+			.sample_authored_clip_preview(&preview.token, time)
+			.unwrap();
+		assert_eq!(sample.tick, time);
+		assert_eq!(sample.poses[0].entity_key.as_str(), "active-bell-visual");
+	}
+	assert!(workspace.backend.play_status().is_none());
+	let edit_tick = workspace.backend.tick(0.1).unwrap();
+	assert_eq!(edit_tick.steps, 0);
+	assert!(edit_tick.audio_onsets.is_empty());
+
+	let execute = |workspace: &mut EditorWorkspace, command| {
+		workspace
+			.execute_receipt(EditorCommandRequest {
+				expected_revision: workspace.backend.session().revision(),
+				command,
+			})
+			.unwrap();
+	};
+	execute(&mut workspace, EditorCommandDto::StartPlay);
+	let mut onsets = Vec::new();
+	for _ in 0..70 {
+		onsets.extend(workspace.backend.tick(1.0 / 60.0).unwrap().audio_onsets);
+	}
+	assert_eq!(onsets.len(), 1);
+	assert_eq!(onsets[0].voice.entity.as_str(), "active-bell");
+	assert_eq!(onsets[0].tick, 27);
+	assert_eq!(
+		workspace
+			.backend
+			.runtime_inspection(0, 32)
+			.unwrap()
+			.animators
+			.len(),
+		2
+	);
+	execute(&mut workspace, EditorCommandDto::StopPlay);
+	assert_eq!(workspace.backend.session().authored_document(), authored);
+	assert_eq!(fs::read(assets.join(SCENE)).unwrap(), scene_bytes);
+}

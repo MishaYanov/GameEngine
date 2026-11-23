@@ -1,0 +1,119 @@
+{
+  "schema_version": 5,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "idle"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "ArrowRight"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "walk-enter"
+    },
+    {
+      "type": "tick",
+      "count": 11
+    },
+    {
+      "type": "mark",
+      "label": "walk"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "ArrowRight",
+        "KeyJ"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "jump"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 60
+    },
+    {
+      "type": "mark",
+      "label": "landed"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "KeyF"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "accepted-swing"
+    },
+    {
+      "type": "tick",
+      "count": 8
+    },
+    {
+      "type": "mark",
+      "label": "swing-pose"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 20
+    },
+    {
+      "type": "mark",
+      "label": "recovered"
+    },
+    {
+      "type": "restart_run"
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "restarted"
+    },
+    {
+      "type": "command",
+      "command": {
+        "type": "stop_play"
+      }
+    }
+  ]
+}

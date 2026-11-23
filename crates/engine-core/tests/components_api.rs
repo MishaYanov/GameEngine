@@ -277,9 +277,14 @@ fn version_three_migration_preserves_ids_assets_flags_and_optional_values() {
 		.unwrap()
 		.remove("component_views");
 	let migrated = SceneData::from_json(&legacy.to_string()).unwrap();
-	assert_eq!(migrated, data);
+	assert_eq!(migrated.entities[0], data.entities[0]);
+	assert_eq!(migrated.entities.len(), 2);
+	let camera = &migrated.entities[1];
+	assert_eq!(migrated.default_game_camera.as_ref(), Some(&camera.key));
+	assert!(camera.camera.as_ref().is_some_and(|component| component.enabled));
+	assert_eq!(migrated.camera, data.camera);
 	let saved = migrated.to_json().unwrap();
-	assert_eq!(SceneData::from_json(&saved).unwrap(), data);
+	assert_eq!(SceneData::from_json(&saved).unwrap(), migrated);
 	assert_eq!(
 		migrated.entities[0].component_id(MESH_TYPE).as_str(),
 		"mesh"

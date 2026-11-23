@@ -1,0 +1,39 @@
+{
+  "schema_version": 3,
+  "name": "Full Authoring Practice Yard",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behavior_definitions": [],
+  "behaviors": [
+    {
+      "scene_id": "full-practice-yard",
+      "behavior": {
+        "kind": "accept_action",
+        "entity": "yard-player",
+        "action": "attack"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "full-practice-yard",
+      "asset_path": "scenes/full-practice-yard.json"
+    }
+  ],
+  "startup_scene_id": "full-practice-yard",
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "jump",
+        "key": "space"
+      }
+    ]
+  }
+}

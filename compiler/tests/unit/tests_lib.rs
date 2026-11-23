@@ -337,6 +337,95 @@ mod staging {
 	}
 
 	#[test]
+	fn catalogued_audio_clip_installs_and_rejects_an_extra_wave_and_changed_bytes() {
+		use engine_core::{
+			EntityKey,
+			asset_catalog::{AssetCatalog, AssetId, AssetKind, PersistentAsset},
+			audio_clip::AudioClipRef,
+			components::{
+				AudioSourceSettings, ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH,
+			},
+			scene_data::EntityData,
+		};
+
+		const WAV: &[u8] =
+			include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
+		let fixture = AssetFixture::new();
+		let root = fixture.0.join("source");
+		let (project, mut scene) = authored_scene_fixture(&root);
+		let id = AssetId::generate();
+		let path = "clips/Bell.WAV";
+		let catalog = AssetCatalog {
+			schema_version: 1,
+			assets: vec![PersistentAsset {
+				id: id.clone(),
+				kind: AssetKind::AudioClip,
+				path: path.into(),
+				revision: 1,
+				fingerprint: format!("{:x}", Sha256::digest(WAV)),
+				bytes: WAV.len() as u64,
+				aliases: vec![],
+				source_path: None,
+				meshes: vec![],
+				dependencies: vec![],
+			}],
+		};
+		fs::create_dir(root.join("clips")).unwrap();
+		fs::write(root.join(path), WAV).unwrap();
+		fs::write(root.join("asset-catalog.json"), catalog.to_json().unwrap()).unwrap();
+		let mut emitter = EntityData::new(EntityKey::new("bell").unwrap(), "Bell", NO_MESH_PATH)
+			.with_renderable(false);
+		emitter
+			.put_component(
+				ComponentRecord {
+					id: ComponentId::new("play-bell").unwrap(),
+					schema_version: 1,
+					enabled: true,
+					data: ComponentData::AudioSource {
+						settings: AudioSourceSettings {
+							clip: Some(AudioClipRef { asset: id }),
+							..Default::default()
+						},
+					},
+				},
+				false,
+			)
+			.unwrap();
+		scene.entities.push(emitter);
+		fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
+
+		let prepared = prepare_project(&project, &root).unwrap();
+		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+		validate_export_snapshot(&staged, None).unwrap();
+		let assets = staged.path().join("assets");
+		let extra = assets.join("clips/extra.wav");
+		fs::write(&extra, WAV).unwrap();
+		assert!(
+			validate_export_snapshot(&staged, None)
+				.unwrap_err()
+				.contains("clips")
+		);
+		fs::remove_file(extra).unwrap();
+
+		let clip = assets.join(path);
+		let mut changed = WAV.to_vec();
+		*changed.last_mut().unwrap() ^= 1;
+		fs::write(&clip, changed).unwrap();
+		assert!(
+			validate_export_snapshot(&staged, None)
+				.unwrap_err()
+				.contains("Staged assets changed")
+		);
+		fs::write(&clip, WAV).unwrap();
+
+		let player = fixture.0.join("compiled-catalogued-audio.bin");
+		fs::write(&player, b"compiled player fixture").unwrap();
+		let installed = install_staged_player(staged, &player).unwrap();
+		assert!(installed.verified_executable().unwrap().is_file());
+		assert_eq!(fs::read(clip).unwrap(), WAV);
+	}
+
+	#[test]
 	fn changed_stage_and_occupied_player_are_rejected_without_losing_the_original_files() {
 		let fixture = AssetFixture::new();
 		let source = fixture.0.join("source");

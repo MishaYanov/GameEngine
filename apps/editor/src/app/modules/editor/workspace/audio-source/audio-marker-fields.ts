@@ -1,7 +1,7 @@
 import {Component, computed, effect, inject, input, output, signal, untracked} from '@angular/core';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {ClipAssetIndex, TimelineMarker} from '../../../../core/editor/authored-clip.models';
-import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
+import {AnimationWorkspaceService} from '../animation/animation-workspace.service';
 import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 
 @Component({
@@ -16,7 +16,7 @@ import {EditorSearchPicker} from '../../../../shared/components/search-picker/se
         @if (clipId() && !loading() && markerId() && !markers().some(hasSelectedMarker)) {
             <p role="status">The saved marker is unavailable.</p>
         }
-        @if (views) { <button type="button" (click)="views.selectView('animation-workspace')">Open Animation</button> }
+        @if (animation) { <button type="button" (click)="animation.openAuthored()">Open Animation</button> }
     `,
 })
 export class AudioMarkerFields {
@@ -24,7 +24,7 @@ export class AudioMarkerFields {
     readonly markerId = input.required<string>();
     readonly clipChange = output<string>();
     readonly markerChange = output<string>();
-    protected readonly views = inject(WorkspaceViewService, {optional: true});
+    protected readonly animation = inject(AnimationWorkspaceService, {optional: true});
     private readonly editor = inject(EditorService);
     private readonly clips = signal<readonly ClipAssetIndex[]>([]);
     protected readonly markers = signal<readonly TimelineMarker[]>([]);
@@ -39,33 +39,39 @@ export class AudioMarkerFields {
     constructor() {
         effect(onCleanup => {
             const generation = this.editor.workspaceGeneration();
+            const catalog = this.editor.authoredClipCatalogVersion();
             let active = true;
             onCleanup(() => { active = false; });
+            const owns = () => active && this.editor.workspaceGeneration() === generation &&
+                this.editor.authoredClipCatalogVersion() === catalog;
             untracked(() => {
                 this.clips.set([]);
                 void this.editor.listAuthoredClips(generation).then(clips => {
-                    if (active) this.clips.set(clips);
+                    if (owns()) this.clips.set(clips);
                 }).catch(() => {
-                    if (active) this.error.set('Animation Clips could not be listed.');
+                    if (owns()) this.error.set('Animation Clips could not be listed.');
                 });
             });
         });
         effect(onCleanup => {
             const id = this.clipId();
             const generation = this.editor.workspaceGeneration();
+            const catalog = this.editor.authoredClipCatalogVersion();
             let active = true;
             onCleanup(() => { active = false; });
+            const owns = () => active && this.clipId() === id && this.editor.workspaceGeneration() === generation &&
+                this.editor.authoredClipCatalogVersion() === catalog;
             untracked(() => {
                 this.markers.set([]);
                 this.loading.set(!!id);
                 this.error.set(null);
                 if (!id) return;
                 void this.editor.openAuthoredClip(id, generation).then(document => {
-                    if (active && document.asset.asset_id === id) this.markers.set(document.clip.markers ?? []);
+                    if (owns() && document.asset.asset_id === id) this.markers.set(document.clip.markers ?? []);
                 }).catch(() => {
-                    if (active) this.error.set('The saved Animation Clip is unavailable.');
+                    if (owns()) this.error.set('The saved Animation Clip is unavailable.');
                 }).finally(() => {
-                    if (active) this.loading.set(false);
+                    if (owns()) this.loading.set(false);
                 });
             });
         });

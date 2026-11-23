@@ -1,5 +1,7 @@
 # Controller Practice Yard
 
+For the full Bell Gate, audio, Sky, Check Scenes, and Windows export exercise, follow the [Practice Yard walkthrough](practice-yard.md) and open the [full yard project](full/project.json).
+
 This test project uses a scene-root Player, a separate Orbit Camera, a camera obstruction wall, and a step higher than the motor can climb without jumping. The Player’s visual objects are children of the motor root. The Arrow keys, J, and F are deliberate asset bindings that exercise Input Actions independently of the project's fallback controls.
 
 1. Copy this directory to a disposable project location and open `project.json` in the editor. Select **Player** and confirm that Player Controller owns local input and uses `controls/yard.input-actions.json`. Select **Orbit Camera** and confirm that it is the Game Camera and targets **Player**.

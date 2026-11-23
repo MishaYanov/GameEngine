@@ -1,4 +1,5 @@
 use std::{
+	collections::BTreeSet,
 	fs,
 	io::{self, Read, Write},
 	path::{Path, PathBuf},
@@ -156,10 +157,8 @@ pub fn copy_assets(source: &Path, destination: &Path) -> std::io::Result<()> {
 }
 
 fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
-	let mut files = Vec::new();
-	let mut total = 0;
 	let audio = bridge::feedback_audio::load(root).map_err(io::Error::other)?;
-	let mut cue_files = std::collections::BTreeSet::new();
+	let mut cue_files = BTreeSet::new();
 	if let Some(audio) = audio {
 		for (name, _) in audio.files().filter(|(name, _)| name.ends_with(".wav")) {
 			let path = checked_asset_path(root, Path::new(name))?;
@@ -180,7 +179,31 @@ fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
 			);
 		}
 	}
-	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, &cue_files)?;
+	scan_assets(root, &cue_files)
+}
+
+fn verify_frozen_asset_inventory(root: &Path, expected: &[PackageAsset]) -> io::Result<()> {
+	// Preflight already validated cue waves and catalogued Audio Clips.
+	let wave_files = expected
+		.iter()
+		.filter(|asset| {
+			asset
+				.relative
+				.extension()
+				.is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
+		})
+		.map(|asset| asset.relative.clone())
+		.collect();
+	if scan_assets(root, &wave_files)? != expected {
+		return Err(io::Error::other("Staged assets changed"));
+	}
+	Ok(())
+}
+
+fn scan_assets(root: &Path, wave_files: &BTreeSet<PathBuf>) -> io::Result<Vec<PackageAsset>> {
+	let mut files = Vec::new();
+	let mut total = 0;
+	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, wave_files)?;
 	files.sort_by(|a, b| a.0.cmp(&b.0));
 	files
 		.into_iter()
@@ -299,7 +322,7 @@ fn collect_assets(
 	files: &mut Vec<(PathBuf, u64)>,
 	total: &mut u64,
 	visited: &mut usize,
-	cue_files: &std::collections::BTreeSet<PathBuf>,
+	wave_files: &BTreeSet<PathBuf>,
 ) -> io::Result<()> {
 	*visited += 1;
 	if depth > 32 || *visited > 10_000 {
@@ -322,7 +345,7 @@ fn collect_assets(
 				files,
 				total,
 				visited,
-				cue_files,
+				wave_files,
 			)?;
 		}
 		return Ok(());
@@ -339,9 +362,12 @@ fn collect_assets(
 		.to_ascii_lowercase();
 	let relative = path.strip_prefix(root).map_err(io::Error::other)?;
 	if !["png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json"].contains(&extension.as_str())
-		&& !(extension == "wav" && cue_files.contains(relative))
+		&& !(extension == "wav" && wave_files.contains(relative))
 	{
-		return Err(io::Error::other("Unsupported packaged asset format"));
+		return Err(io::Error::other(format!(
+			"Unsupported packaged asset format: {}",
+			relative.display()
+		)));
 	}
 	if extension == "json" && metadata.len() > 16 * 1024 * 1024 {
 		return Err(io::Error::other("Asset JSON exceeds 16 MiB"));

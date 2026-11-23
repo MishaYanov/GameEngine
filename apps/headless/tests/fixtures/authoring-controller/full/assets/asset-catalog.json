@@ -1,0 +1,163 @@
+{
+  "assets": [
+    {
+      "bytes": 1216,
+      "fingerprint": "15647b8b751acb3f97b9f2dbd366f78a642d376ee8a74349995782038edd8d97",
+      "id": "90000000-0000-4000-8000-000000000002",
+      "kind": "input_actions",
+      "path": "controls/yard.input-actions.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1916,
+      "fingerprint": "14bbbf8651fe679f39b8c6c46cad49233d4f686fdf97b84545460a9cd68febdb",
+      "id": "90000000-0000-4000-8000-000000000001",
+      "kind": "model",
+      "meshes": [
+        {
+          "index": 0,
+          "name": "cube",
+          "primitives": 1
+        }
+      ],
+      "path": "models/cube.glb",
+      "revision": 1
+    },
+    {
+      "bytes": 1267,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000001"
+      ],
+      "fingerprint": "1e95cdbb4169b02074a3db43782d06889ca40cbc52c9ddf5d7cbb8574ff72397",
+      "id": "90000000-0000-4000-8000-000000000003",
+      "kind": "prefab",
+      "path": "prefabs/training-blade.prefab.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1113,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ],
+      "fingerprint": "b70be69c1c1c97d499c1c5ef4135352cd081aa193e27700ea26f628792dd6f6b",
+      "id": "90000000-0000-4000-8000-000000000004",
+      "kind": "animation_clip",
+      "path": "animations/yard-idle.clip.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1114,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ],
+      "fingerprint": "e373dbe3a28947a355e7aa2a959fbf6768bb97cf49e9185a4e2498276ce0f21d",
+      "id": "90000000-0000-4000-8000-000000000005",
+      "kind": "animation_clip",
+      "path": "animations/yard-walk.clip.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1113,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ],
+      "fingerprint": "2d57b8c4d18fc44e82358cc61a53bab4d60522d66219760cc6c7f71b8a26f57b",
+      "id": "90000000-0000-4000-8000-000000000006",
+      "kind": "animation_clip",
+      "path": "animations/yard-jump.clip.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1258,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000003"
+      ],
+      "fingerprint": "14bf00c5cf00ccc2a5f8ac366c9d6dc3e7fd4c90e88ebbf6812bf0d1d64a8856",
+      "id": "90000000-0000-4000-8000-000000000007",
+      "kind": "animation_clip",
+      "path": "animations/yard-swing.clip.json",
+      "revision": 1
+    },
+    {
+      "bytes": 3787,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000004",
+        "90000000-0000-4000-8000-000000000005",
+        "90000000-0000-4000-8000-000000000006",
+        "90000000-0000-4000-8000-000000000007"
+      ],
+      "fingerprint": "b4597f7b98e479aaea568e3d79113fcda929218b8fcaa845aee6fdcbe9fa434c",
+      "id": "90000000-0000-4000-8000-000000000008",
+      "kind": "animator_graph",
+      "path": "animations/yard.animator.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1972,
+      "fingerprint": "6d143520cb0d0058d33cb4fcdd87c84e4dcfcb811cd0155e0434401d062c27d9",
+      "id": "90000000-0000-4000-8000-000000000009",
+      "kind": "controls_graph",
+      "path": "controls/yard.controls.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1738,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000001"
+      ],
+      "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3",
+      "id": "90000000-0000-4000-8000-000000000051",
+      "kind": "prefab",
+      "path": "prefabs/bell.prefab.json",
+      "revision": 1
+    },
+    {
+      "bytes": 1498,
+      "fingerprint": "531c3f1dff64df4886a4eddacb80d95aa786dbab32a2bea2f3e77d7fd4d6d793",
+      "id": "90000000-0000-4000-8000-000000000053",
+      "kind": "animation_clip",
+      "path": "animations/practice-bell.clip.json",
+      "revision": 1
+    },
+    {
+      "bytes": 353,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000053"
+      ],
+      "fingerprint": "c81df8811a79b1801dab6b7d88561cd6eb7f1cc2a37f0b607dbe534f5ba6cec6",
+      "id": "90000000-0000-4000-8000-000000000054",
+      "kind": "animator_graph",
+      "path": "animations/practice-bell.animator.json",
+      "revision": 1
+    },
+    {
+      "bytes": 8364,
+      "fingerprint": "454b0e188f56b1f09856deff4a7724e0b84d20e6fe3fbc4f189bbb5d54694210",
+      "id": "90000000-0000-4000-8000-000000000055",
+      "kind": "audio_clip",
+      "path": "audio/practice-bell.wav",
+      "revision": 1
+    },
+    {
+      "bytes": 6219,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000001",
+        "90000000-0000-4000-8000-000000000051"
+      ],
+      "fingerprint": "179c8e1bc108c0687fc717e703229626bc2b7a060ac80cf8c24df23b3dd6e30c",
+      "id": "90000000-0000-4000-8000-000000000052",
+      "kind": "prefab",
+      "path": "prefabs/bell-gate.prefab.json",
+      "revision": 1
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000056",
+      "path": "textures/practice-yard-sky.png",
+      "kind": "sky_panorama",
+      "revision": 1,
+      "fingerprint": "f074114ef4ecbfa935c46dd828fc0ab3c1d33758c65a954f1bd409dba4e9e99b",
+      "bytes": 1495
+    }
+  ],
+  "schema_version": 1
+}

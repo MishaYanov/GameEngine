@@ -3,6 +3,7 @@ import {invoke, isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import {EditorService} from './editor.service';
+import type {ClipAssetDocument, ClipTimelineDraft} from './authored-clip.models';
 import {applyEditorUpdate} from './editor-updates';
 import type {
     Camera,
@@ -264,6 +265,40 @@ describe('EditorService native command and viewport queues', () => {
         vi.mocked(isTauri).mockReturnValue(true);
         vi.mocked(listen).mockReset().mockResolvedValue(vi.fn());
         TestBed.configureTestingModule({providers: [EditorService]});
+    });
+
+    it('publishes a clip catalog change for both accepted clip saves and skips ordinary snapshots and failed saves', async () => {
+        const asset = {
+            asset_id: '90000000-0000-4000-8000-000000000053', path: 'animations/bell.clip.json',
+            fingerprint: 'a'.repeat(64), revision: 1,
+        };
+        const document: ClipAssetDocument = {
+            asset, workspace_generation: 5, clip: {
+                schema_version: 2, name: 'Bell', owner: {kind: 'scene', scene_id: 'main'},
+                duration_ticks: 500, tracks: [],
+            },
+        };
+        const draft: ClipTimelineDraft = {
+            ...document, draft_id: 'draft', draft_revision: 3, dirty: false, can_undo: false, can_redo: false,
+        };
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({document, snapshot: snapshot(1)})
+            .mockResolvedValueOnce(snapshot(2))
+            .mockResolvedValueOnce({draft, snapshot: snapshot(3)})
+            .mockRejectedValueOnce(new Error('Asset changed'))
+            .mockResolvedValueOnce(snapshot(3));
+        const service = TestBed.inject(EditorService);
+        const generation = service.workspaceGeneration();
+        expect(service.authoredClipCatalogVersion()).toBe(0);
+        await service.saveAuthoredClip(asset.path, document.clip, null, generation, 0);
+        expect(service.authoredClipCatalogVersion()).toBe(1);
+        await service.refresh();
+        expect(service.authoredClipCatalogVersion()).toBe(1);
+        await service.saveClipTimelineDraft(draft.draft_id, 2, generation, 2);
+        expect(service.authoredClipCatalogVersion()).toBe(2);
+        await expect(service.saveAuthoredClip(asset.path, document.clip, null, generation, 3))
+            .rejects.toThrow('Asset changed');
+        expect(service.authoredClipCatalogVersion()).toBe(2);
     });
 
     it('serializes document commands using the revision returned by the preceding command', async () => {

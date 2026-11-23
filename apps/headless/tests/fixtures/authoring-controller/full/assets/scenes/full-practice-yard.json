@@ -1,0 +1,1946 @@
+{
+  "schema_version": 7,
+  "bindings": {
+    "player": "yard-player"
+  },
+  "entities": [
+    {
+      "key": "yard-player",
+      "name": "Player",
+      "transform": {
+        "position": [
+          0.0,
+          0.901,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "player",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "player_controller",
+            "settings": {
+              "input": {
+                "kind": "asset",
+                "asset_id": "90000000-0000-4000-8000-000000000002"
+              },
+              "space": "camera_relative",
+              "local": true,
+              "control_graph": "90000000-0000-4000-8000-000000000009"
+            }
+          }
+        },
+        {
+          "id": "character",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "character_controller",
+            "settings": {
+              "walk_speed": 4.0,
+              "ground_acceleration": 30.0,
+              "air_acceleration": 8.0,
+              "gravity": 20.0,
+              "max_fall_speed": 30.0,
+              "jump_speed": 7.0,
+              "ground_probe": 0.02,
+              "step_height": 0.25,
+              "coyote_ticks": 5,
+              "jump_buffer_ticks": 5,
+              "jump_action": "jump"
+            }
+          }
+        },
+        {
+          "id": "yard-animator",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animator",
+            "settings": {
+              "asset_id": "90000000-0000-4000-8000-000000000008",
+              "binding": {
+                "kind": "visual",
+                "targets": [
+                  {
+                    "channel": {
+                      "kind": "prop",
+                      "address": {
+                        "kind": "object",
+                        "placement_path": [],
+                        "source_entity": "training-blade"
+                      }
+                    },
+                    "entity_key": "yard-training-blade"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "body",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.35,
+                0.9,
+                0.35
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-player-visual",
+      "name": "Player body",
+      "transform": {
+        "position": [
+          0.0,
+          -0.14,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.66,
+          1.46,
+          0.56
+        ]
+      },
+      "parent": "yard-player",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19,
+                0.54,
+                0.78,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-player-head",
+      "name": "Player head",
+      "transform": {
+        "position": [
+          0.0,
+          0.71,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.48,
+          0.34,
+          0.44
+        ]
+      },
+      "parent": "yard-player",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.35,
+                0.73,
+                0.86,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-training-blade",
+      "name": "Training Blade",
+      "transform": {
+        "position": [
+          0.5,
+          0.15,
+          0.1
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.12,
+          0.6,
+          0.12
+        ]
+      },
+      "parent": "yard-player",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.19,
+                0.54,
+                0.78,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-camera",
+      "name": "Orbit Camera",
+      "transform": {
+        "position": [
+          0.0,
+          2.05,
+          5.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "camera",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "camera",
+            "settings": {
+              "lens": {
+                "vertical_fov": 1.0471976,
+                "near": 0.1,
+                "far": 100.0
+              },
+              "rig": {
+                "mode": "orbit",
+                "settings": {
+                  "target": "yard-player",
+                  "pivot_offset": [
+                    0.0,
+                    0.65,
+                    0.0
+                  ],
+                  "initial_yaw": 0.0,
+                  "initial_pitch": -0.1,
+                  "initial_distance": 5.0,
+                  "min_distance": 0.5,
+                  "max_distance": 12.0,
+                  "min_pitch": -1.3,
+                  "max_pitch": 0.9,
+                  "follow_seconds": 0.1,
+                  "recovery_seconds": 0.22,
+                  "teleport_distance": 8.0,
+                  "probe_radius": 0.25,
+                  "obstruction_mask": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-floor",
+      "name": "Floor1",
+      "transform": {
+        "position": [
+          0.0,
+          -0.1,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          16.0,
+          0.2,
+          16.0
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.32,
+                0.36,
+                0.41,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-wall",
+      "name": "Camera wall",
+      "transform": {
+        "position": [
+          0.0,
+          1.4,
+          2.3
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          2.4,
+          2.8,
+          0.35
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.57,
+                0.35,
+                0.25,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-step",
+      "name": "Jump step",
+      "transform": {
+        "position": [
+          2.95,
+          0.2,
+          -1.35
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.25,
+          0.4,
+          1.3
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.72,
+                0.57,
+                0.25,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "id": "collision",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "floor-side",
+      "name": "Floor2",
+      "transform": {
+        "position": [
+          -14.2,
+          -0.72,
+          -5.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          2.0,
+          0.19,
+          6.0
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.46,
+                0.45,
+                0.42,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "active-bell",
+      "name": "Practice Bell",
+      "transform": {
+        "position": [
+          -2.6,
+          1.85,
+          -2.1
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "bell-audio",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "audio_source",
+            "settings": {
+              "clip": {
+                "asset": "90000000-0000-4000-8000-000000000055"
+              },
+              "gain": 0.65,
+              "loop": false,
+              "playback": "on_event",
+              "bus": "effects",
+              "spatial": {
+                "mode": "spatial",
+                "near": 0.7,
+                "far": 22.0
+              },
+              "event": {
+                "kind": "animation_marker",
+                "clip": "90000000-0000-4000-8000-000000000053",
+                "marker": "bell-contact"
+              }
+            }
+          }
+        },
+        {
+          "id": "bell-animator",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animator",
+            "settings": {
+              "asset_id": "90000000-0000-4000-8000-000000000054",
+              "binding": {
+                "kind": "visual",
+                "targets": [
+                  {
+                    "channel": {
+                      "kind": "scene",
+                      "entity_key": "active-bell-visual"
+                    },
+                    "entity_key": "active-bell-visual"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "bell-collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.55,
+                0.55,
+                0.25
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "active-bell-visual",
+      "name": "Practice Bell Visual",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.45,
+          0.45,
+          0.45
+        ]
+      },
+      "parent": "active-bell",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.88,
+                0.5,
+                0.11,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "yard-sky",
+      "name": "Yard Sky",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "sky",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "sky",
+            "settings": {
+              "zenith": [
+                0.025,
+                0.09,
+                0.25
+              ],
+              "horizon": [
+                0.61,
+                0.56,
+                0.45
+              ],
+              "yaw_degrees": 25.0,
+              "background": {
+                "kind": "panorama",
+                "image": "90000000-0000-4000-8000-000000000056"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "9ef94d49-24eb-4892-bd1e-cf3338f5f869",
+      "name": "Linked prefab instance",
+      "transform": {
+        "position": [
+          -4.5,
+          0.0,
+          -2.5
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "linked_prefab": {
+        "source": {
+          "source_id": "90000000-0000-4000-8000-000000000052",
+          "path": "prefabs/bell-gate.prefab.json",
+          "fingerprint": "179c8e1bc108c0687fc717e703229626bc2b7a060ac80cf8c24df23b3dd6e30c",
+          "prefab": {
+            "schema_version": 4,
+            "entities": [
+              {
+                "key": "gate-root",
+                "name": "Bell Gate",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "components": []
+              },
+              {
+                "key": "gate-left",
+                "name": "Left Post",
+                "transform": {
+                  "position": [
+                    -0.85,
+                    1.25,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.19,
+                    1.25,
+                    0.19
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.17,
+                          0.23,
+                          0.29,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "gate-right",
+                "name": "Right Post",
+                "transform": {
+                  "position": [
+                    0.85,
+                    1.25,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.19,
+                    1.25,
+                    0.19
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.17,
+                          0.23,
+                          0.29,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "gate-beam",
+                "name": "Top Beam",
+                "transform": {
+                  "position": [
+                    0.0,
+                    2.45,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.04,
+                    0.16,
+                    0.22
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.24,
+                          0.35,
+                          0.44,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "gameplay": null,
+            "reference_slots": {},
+            "composition": {
+              "placements": [
+                {
+                  "id": "hanging-bell",
+                  "name": "Hanging Bell",
+                  "target": {
+                    "asset_id": "90000000-0000-4000-8000-000000000051",
+                    "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+                  },
+                  "parent": "gate-root",
+                  "local": {
+                    "position": [
+                      0.0,
+                      1.94,
+                      0.0
+                    ],
+                    "rotation": [
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    "scale": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ]
+                  }
+                }
+              ],
+              "pins": [
+                {
+                  "version": {
+                    "asset_id": "90000000-0000-4000-8000-000000000051",
+                    "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+                  },
+                  "path": "prefabs/bell.prefab.json",
+                  "entities": [
+                    {
+                      "key": "bell-body",
+                      "name": "Bell Body",
+                      "transform": {
+                        "position": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "rotation": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "scale": [
+                          0.4,
+                          0.32,
+                          0.4
+                        ]
+                      },
+                      "components": [
+                        {
+                          "id": "mesh",
+                          "schema_version": 1,
+                          "enabled": true,
+                          "data": {
+                            "kind": "mesh_renderer",
+                            "model_path": "models/cube.glb",
+                            "asset_id": "90000000-0000-4000-8000-000000000001",
+                            "mesh_index": 0,
+                            "material": {
+                              "base_color_factor": [
+                                0.88,
+                                0.53,
+                                0.13,
+                                1.0
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "key": "bell-skirt",
+                      "name": "Bell Skirt",
+                      "transform": {
+                        "position": [
+                          0.0,
+                          -0.34,
+                          0.0
+                        ],
+                        "rotation": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "scale": [
+                          1.23,
+                          0.3,
+                          1.23
+                        ]
+                      },
+                      "parent": "bell-body",
+                      "components": [
+                        {
+                          "id": "mesh",
+                          "schema_version": 1,
+                          "enabled": true,
+                          "data": {
+                            "kind": "mesh_renderer",
+                            "model_path": "models/cube.glb",
+                            "asset_id": "90000000-0000-4000-8000-000000000001",
+                            "mesh_index": 0,
+                            "material": {
+                              "base_color_factor": [
+                                0.72,
+                                0.29,
+                                0.08,
+                                1.0
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "entity_map": {
+          "gate-beam": "91723815-1c05-499a-98c0-a241877ba460",
+          "gate-left": "3606c468-67bc-45a6-8dd2-b1a16a9da781",
+          "gate-right": "1ce42e61-ae39-4d5c-a19a-e76a036f454d",
+          "gate-root": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+          "prop-6cb74531c81cf3ae9396b45ff05ca408208e218d287d25c3e71a7a80953c734e": "222c5e0d-8a56-4d28-953b-86da822d9176",
+          "prop-b6ac5ed64537d3974036f499652b364a4e23cc69ddf82a5064217c3958e03341": "42ece272-f060-4583-941b-62ec264cdcc8",
+          "prop-c1b895a3319906f5b4ccdbd49fd4ce5230d3a7b269a97d2bdfdf9a40da2ed48d": "b1123523-ce19-4b51-bcd0-b51335dfdebd"
+        },
+        "bindings": {},
+        "overrides": [
+          {
+            "source_entity": "prop-6cb74531c81cf3ae9396b45ff05ca408208e218d287d25c3e71a7a80953c734e",
+            "property": {
+              "kind": "name"
+            }
+          }
+        ]
+      },
+      "components": []
+    },
+    {
+      "key": "91723815-1c05-499a-98c0-a241877ba460",
+      "name": "Top Beam",
+      "transform": {
+        "position": [
+          0.0,
+          2.45,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.04,
+          0.16,
+          0.22
+        ]
+      },
+      "parent": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.24,
+                0.35,
+                0.44,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "3606c468-67bc-45a6-8dd2-b1a16a9da781",
+      "name": "Left Post",
+      "transform": {
+        "position": [
+          -0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "1ce42e61-ae39-4d5c-a19a-e76a036f454d",
+      "name": "Right Post",
+      "transform": {
+        "position": [
+          0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+      "name": "Bell Gate",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "9ef94d49-24eb-4892-bd1e-cf3338f5f869",
+      "components": []
+    },
+    {
+      "key": "222c5e0d-8a56-4d28-953b-86da822d9176",
+      "name": "Left Bell",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4,
+          0.32,
+          0.4
+        ]
+      },
+      "parent": "b1123523-ce19-4b51-bcd0-b51335dfdebd",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.88,
+                0.53,
+                0.13,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "42ece272-f060-4583-941b-62ec264cdcc8",
+      "name": "Bell Skirt",
+      "transform": {
+        "position": [
+          0.0,
+          -0.34,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.23,
+          0.3,
+          1.23
+        ]
+      },
+      "parent": "222c5e0d-8a56-4d28-953b-86da822d9176",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.72,
+                0.29,
+                0.08,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "b1123523-ce19-4b51-bcd0-b51335dfdebd",
+      "name": "Hanging Bell",
+      "transform": {
+        "position": [
+          0.0,
+          1.94,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "e3e751a9-ac91-48b8-9e7b-a9b7fdcc6b98",
+      "components": []
+    },
+    {
+      "key": "281ab2e8-b147-4426-962f-ce1ef12881f0",
+      "name": "Linked prefab instance",
+      "transform": {
+        "position": [
+          4.0,
+          0.0,
+          -4.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "linked_prefab": {
+        "source": {
+          "source_id": "90000000-0000-4000-8000-000000000052",
+          "path": "prefabs/bell-gate.prefab.json",
+          "fingerprint": "179c8e1bc108c0687fc717e703229626bc2b7a060ac80cf8c24df23b3dd6e30c",
+          "prefab": {
+            "schema_version": 4,
+            "entities": [
+              {
+                "key": "gate-root",
+                "name": "Bell Gate",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "components": []
+              },
+              {
+                "key": "gate-left",
+                "name": "Left Post",
+                "transform": {
+                  "position": [
+                    -0.85,
+                    1.25,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.19,
+                    1.25,
+                    0.19
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.17,
+                          0.23,
+                          0.29,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "gate-right",
+                "name": "Right Post",
+                "transform": {
+                  "position": [
+                    0.85,
+                    1.25,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.19,
+                    1.25,
+                    0.19
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.17,
+                          0.23,
+                          0.29,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "gate-beam",
+                "name": "Top Beam",
+                "transform": {
+                  "position": [
+                    0.0,
+                    2.45,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.04,
+                    0.16,
+                    0.22
+                  ]
+                },
+                "parent": "gate-root",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/cube.glb",
+                      "asset_id": "90000000-0000-4000-8000-000000000001",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.24,
+                          0.35,
+                          0.44,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "gameplay": null,
+            "reference_slots": {},
+            "composition": {
+              "placements": [
+                {
+                  "id": "hanging-bell",
+                  "name": "Hanging Bell",
+                  "target": {
+                    "asset_id": "90000000-0000-4000-8000-000000000051",
+                    "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+                  },
+                  "parent": "gate-root",
+                  "local": {
+                    "position": [
+                      0.0,
+                      1.94,
+                      0.0
+                    ],
+                    "rotation": [
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    "scale": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ]
+                  }
+                }
+              ],
+              "pins": [
+                {
+                  "version": {
+                    "asset_id": "90000000-0000-4000-8000-000000000051",
+                    "fingerprint": "95d88a8c76d77c0b169a9d53376752e0c9240514ffe33eaeb1509268d601ada3"
+                  },
+                  "path": "prefabs/bell.prefab.json",
+                  "entities": [
+                    {
+                      "key": "bell-body",
+                      "name": "Bell Body",
+                      "transform": {
+                        "position": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "rotation": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "scale": [
+                          0.4,
+                          0.32,
+                          0.4
+                        ]
+                      },
+                      "components": [
+                        {
+                          "id": "mesh",
+                          "schema_version": 1,
+                          "enabled": true,
+                          "data": {
+                            "kind": "mesh_renderer",
+                            "model_path": "models/cube.glb",
+                            "asset_id": "90000000-0000-4000-8000-000000000001",
+                            "mesh_index": 0,
+                            "material": {
+                              "base_color_factor": [
+                                0.88,
+                                0.53,
+                                0.13,
+                                1.0
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "key": "bell-skirt",
+                      "name": "Bell Skirt",
+                      "transform": {
+                        "position": [
+                          0.0,
+                          -0.34,
+                          0.0
+                        ],
+                        "rotation": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "scale": [
+                          1.23,
+                          0.3,
+                          1.23
+                        ]
+                      },
+                      "parent": "bell-body",
+                      "components": [
+                        {
+                          "id": "mesh",
+                          "schema_version": 1,
+                          "enabled": true,
+                          "data": {
+                            "kind": "mesh_renderer",
+                            "model_path": "models/cube.glb",
+                            "asset_id": "90000000-0000-4000-8000-000000000001",
+                            "mesh_index": 0,
+                            "material": {
+                              "base_color_factor": [
+                                0.72,
+                                0.29,
+                                0.08,
+                                1.0
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "entity_map": {
+          "gate-beam": "f54dac04-1731-4343-8374-3507d5abd7a5",
+          "gate-left": "2c6fccc1-547c-43dd-8f84-5b29fef5ef88",
+          "gate-right": "aa826b39-66f1-4ac0-b46d-88bb2e173db8",
+          "gate-root": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+          "prop-6cb74531c81cf3ae9396b45ff05ca408208e218d287d25c3e71a7a80953c734e": "afac29c9-3e18-46bb-9604-20a85471db36",
+          "prop-b6ac5ed64537d3974036f499652b364a4e23cc69ddf82a5064217c3958e03341": "f9b97e64-ffd3-40fe-8b68-2520884036ad",
+          "prop-c1b895a3319906f5b4ccdbd49fd4ce5230d3a7b269a97d2bdfdf9a40da2ed48d": "12c6e368-e2a5-4c85-acfc-42d38f3645c8"
+        },
+        "bindings": {},
+        "overrides": []
+      },
+      "components": []
+    },
+    {
+      "key": "f54dac04-1731-4343-8374-3507d5abd7a5",
+      "name": "Top Beam",
+      "transform": {
+        "position": [
+          0.0,
+          2.45,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.04,
+          0.16,
+          0.22
+        ]
+      },
+      "parent": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.24,
+                0.35,
+                0.44,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "2c6fccc1-547c-43dd-8f84-5b29fef5ef88",
+      "name": "Left Post",
+      "transform": {
+        "position": [
+          -0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "aa826b39-66f1-4ac0-b46d-88bb2e173db8",
+      "name": "Right Post",
+      "transform": {
+        "position": [
+          0.85,
+          1.25,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.19,
+          1.25,
+          0.19
+        ]
+      },
+      "parent": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.17,
+                0.23,
+                0.29,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+      "name": "Bell Gate",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "281ab2e8-b147-4426-962f-ce1ef12881f0",
+      "components": []
+    },
+    {
+      "key": "afac29c9-3e18-46bb-9604-20a85471db36",
+      "name": "Bell Body",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4,
+          0.32,
+          0.4
+        ]
+      },
+      "parent": "12c6e368-e2a5-4c85-acfc-42d38f3645c8",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.88,
+                0.53,
+                0.13,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "f9b97e64-ffd3-40fe-8b68-2520884036ad",
+      "name": "Bell Skirt",
+      "transform": {
+        "position": [
+          0.0,
+          -0.34,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.23,
+          0.3,
+          1.23
+        ]
+      },
+      "parent": "afac29c9-3e18-46bb-9604-20a85471db36",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.72,
+                0.29,
+                0.08,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "12c6e368-e2a5-4c85-acfc-42d38f3645c8",
+      "name": "Hanging Bell",
+      "transform": {
+        "position": [
+          0.0,
+          1.94,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "6d97ac97-b6e2-4c27-a16e-de2b21d0ff3e",
+      "components": []
+    }
+  ],
+  "default_game_camera": "yard-camera",
+  "lights": [
+    {
+      "key": "yard-sun",
+      "name": "Sun",
+      "kind": "directional",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 0.75,
+      "range": 10.0
+    }
+  ],
+  "organization": {
+    "folders": [
+      {
+        "id": "floor",
+        "name": "Floor"
+      }
+    ],
+    "root_membership": {
+      "floor-side": "floor",
+      "yard-floor": "floor"
+    }
+  },
+  "environment": {
+    "active_sky": "yard-sky",
+    "ambient_linear": [
+      0.24,
+      0.29,
+      0.36
+    ],
+    "sky_exposure_ev": 0.18
+  }
+}
