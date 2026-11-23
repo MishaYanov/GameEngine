@@ -135,7 +135,8 @@ try
         }
     }
 
-    $bundleArguments = @('build', '--ci', '--target', $targetTriple, '--config', $overlay)
+    # Enable the Editor feature that selects the bundled Player and sample.
+    $bundleArguments = @('build', '--ci', '--target', $targetTriple, '--config', $overlay, '--features', 'custom-protocol')
     if ($PortableOnly)
     {
         $bundleArguments += '--no-bundle'
