@@ -11,6 +11,8 @@ type PropPreviewTarget =
     | {readonly kind: 'source'; readonly draft_id: string}
     | {readonly kind: 'instance'; readonly scene_id: SceneId; readonly root_key: EntityKey};
 
+export type PropPreviewEnvironment = 'neutral' | 'scene';
+
 type PreviewState = {
     readonly token: string;
     readonly workspace_generation: number;
@@ -37,6 +39,9 @@ export class PropPreviewService {
     private readonly state = signal<PreviewState | null>(null);
     private readonly busy = signal(false);
     private readonly failure = signal<string | null>(null);
+    private readonly previewEnvironment = signal<PropPreviewEnvironment>('neutral');
+    private readonly environmentBusy = signal(false);
+    private readonly environmentFailure = signal<string | null>(null);
     private readonly retryVersion = signal(0);
     private readonly subscriptions: UnlistenFn[] = [];
     private request = 0;
@@ -46,6 +51,12 @@ export class PropPreviewService {
     readonly currentState = this.state.asReadonly();
     readonly loading = this.busy.asReadonly();
     readonly error = this.failure.asReadonly();
+    readonly environment = this.previewEnvironment.asReadonly();
+    readonly environmentPending = this.environmentBusy.asReadonly();
+    readonly environmentError = this.environmentFailure.asReadonly();
+    readonly supportsEnvironment = computed(() =>
+        this.editor.capabilities()?.commands?.some(command => command.name === 'set_scene_environment') ?? false,
+    );
     private readonly owner = computed<PreviewOwner | null>(() => {
         if (!this.editor.nativeAvailable || this.views.activeViewKind() !== 'prop-workspace' ||
             this.editor.playing()) return null;
@@ -108,6 +119,22 @@ export class PropPreviewService {
         }
     }
 
+    async setEnvironment(environment: PropPreviewEnvironment): Promise<void> {
+        const current = this.state();
+        if (!current || !this.ready() || !this.supportsEnvironment() || this.environmentPending() ||
+            this.environment() === environment) return;
+        this.environmentBusy.set(true);
+        this.environmentFailure.set(null);
+        try {
+            await invoke<void>('editor_prop_preview_environment', {token: current.token, environment});
+            if (this.matches(current)) this.previewEnvironment.set(environment);
+        } catch (error) {
+            if (this.matches(current)) this.environmentFailure.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            if (this.matches(current)) this.environmentBusy.set(false);
+        }
+    }
+
     async select(key: EntityKey): Promise<void> {
         this.props.selectObject(key);
         const current = this.state();
@@ -128,6 +155,9 @@ export class PropPreviewService {
         this.closeToken(this.state()?.token);
         this.state.set(null);
         this.failure.set(null);
+        this.previewEnvironment.set('neutral');
+        this.environmentBusy.set(false);
+        this.environmentFailure.set(null);
         const revision = this.editor.snapshot()?.revision;
         this.busy.set(owner !== null && revision !== undefined);
         if (!owner || revision === undefined) return;

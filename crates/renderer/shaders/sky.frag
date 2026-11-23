@@ -13,5 +13,5 @@ layout(push_constant) uniform Sky {
 void main() {
     vec3 ray = normalize(sky.forward.xyz + screen_ndc.x * sky.ray_x.xyz + screen_ndc.y * sky.ray_y.xyz);
     float height = smoothstep(0.0, 1.0, ray.y);
-    color = vec4(mix(sky.horizon.rgb, sky.zenith.rgb, height), 1.0);
+    color = vec4(mix(sky.horizon.rgb, sky.zenith.rgb, height) * sky.zenith.w, 1.0);
 }

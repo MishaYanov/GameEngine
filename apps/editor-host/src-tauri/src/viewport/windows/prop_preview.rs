@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
 	editor::prefab_sources::PropDraftEdit,
-	editor::prop_preview::PropPreviewFrame,
+	editor::prop_preview::{PropPreviewFrame, PropSceneEnvironment},
 	viewport_tools::{adaptive_grid_spacing, pick_nearest, EditorCamera, PickTarget},
 };
 use bridge::viewport::ViewportProjection;
@@ -135,11 +135,12 @@ impl Worker {
 	pub(super) fn try_draw_prop_preview(&mut self) -> Result<bool, String> {
 		let current = self.shared.lock().ok().and_then(|slot| {
 			let workspace = slot.as_ref()?;
-			workspace
-				.active_prop_preview()
-				.map(|frame| (frame, workspace.asset_root.clone()))
+			workspace.active_prop_preview().map(|frame| {
+				let environment = workspace.prop_scene_environment(&frame.state.token);
+				(frame, workspace.asset_root.clone(), environment)
+			})
 		});
-		let Some((frame, asset_root)) = current else {
+		let Some((frame, asset_root, environment)) = current else {
 			let returning_to_scene = self.prop_navigation.take().is_some();
 			if returning_to_scene {
 				self.release_keyboard_focus();
@@ -169,7 +170,7 @@ impl Worker {
 		}
 		self.authored_load = None;
 		self.play_load = None;
-		if let Err(message) = self.draw_prop_preview(&frame, asset_root) {
+		if let Err(message) = self.draw_prop_preview(&frame, asset_root, environment.as_deref()) {
 			let closed = self.shared.lock().ok().is_some_and(|mut slot| {
 				slot.as_mut().is_some_and(|workspace| {
 					workspace
@@ -200,6 +201,7 @@ impl Worker {
 		&mut self,
 		frame: &PropPreviewFrame,
 		asset_root: PathBuf,
+		environment: Option<&PropSceneEnvironment>,
 	) -> Result<(), String> {
 		if self
 			.gpu
@@ -284,11 +286,6 @@ impl Worker {
 				return Ok(());
 			}
 			let preview = PropGpuPreview::new(token.clone(), frame.content_revision, scene)?;
-			gpu.renderer.set_lights(&[Light::Directional {
-				direction: [0.2, -0.9, -0.4],
-				color: [1.0; 3],
-				intensity: 0.85,
-			}])?;
 			gpu.prop_preview = Some(preview);
 		}
 		let preview = gpu
@@ -378,7 +375,22 @@ impl Worker {
 			self.dirty = true;
 			return Ok(());
 		}
-		Scene::configure_sky(&mut gpu.renderer, Some(&mut gpu.assets), None)?;
+		if let Some(environment) = environment {
+			gpu.renderer.set_lights(&environment.lights)?;
+			Scene::configure_sky(
+				&mut gpu.renderer,
+				Some(&mut gpu.assets),
+				environment.sky.as_ref(),
+				&environment.environment,
+			)?;
+		} else {
+			gpu.renderer.set_lights(&[Light::Directional {
+				direction: [0.2, -0.9, -0.4],
+				color: [1.0; 3],
+				intensity: 0.85,
+			}])?;
+			Scene::configure_sky(&mut gpu.renderer, Some(&mut gpu.assets), None, &Default::default())?;
+		}
 		let status = gpu.renderer.draw(&uniform, &objects)?;
 		if status == DrawStatus::NeedsRedraw {
 			self.dirty = true;

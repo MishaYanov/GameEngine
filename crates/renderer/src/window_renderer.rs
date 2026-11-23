@@ -182,6 +182,10 @@ impl WindowRenderer {
 		Ok(())
 	}
 
+	pub fn set_ambient(&mut self, ambient: [f32; 3]) -> Result<(), String> {
+		self.lighting.set_ambient(ambient)
+	}
+
 	/// Active scene background. An absent sky uses the existing color clear.
 	pub fn set_sky(&mut self, sky: Option<SkyGradient>) {
 		self.sky = sky;

@@ -6,6 +6,9 @@
                 <dt>Active scene ID</dt>
                 <dd>{{ snapshot.active_scene_id }}</dd>
             </dl>
+            @if (informationOpen() && environmentSupported()) {
+                <editor-scene-environment-inspector [editable]="available()"/>
+            }
             <div class="scene-actions">
                 <label>Scene
                     <select #scene (change)="switchScene(scene)" [disabled]="!available()">
@@ -88,7 +91,7 @@
                             [disabled]="!available() || gameplayModules() === undefined" aria-describedby="gameplay-module-help">
                         <option [selected]="!selectedModuleId()" value="">Configured behaviors only</option>
                         @if (unavailableModule()) {
-                            <option [value]="selectedModuleId()" selected>{{ selectedModuleId() }}(unavailable)
+                            <option [value]="selectedModuleId()" selected>{{ selectedModuleId() }} (unavailable)
                             </option>
                         }
                         @for (module of gameplayModules(); track module.id) {

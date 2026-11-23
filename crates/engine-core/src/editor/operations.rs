@@ -75,6 +75,13 @@ pub(super) fn apply(
 		}
 		EditorCommandDto::CreateSky => *selection = vec![sky::create_sky(data)?],
 		EditorCommandDto::SetActiveSky { key } => data.set_active_sky(key)?,
+		EditorCommandDto::SetSceneEnvironment {
+			ambient_linear,
+			sky_exposure_ev,
+		} => {
+			data.environment.ambient_linear = ambient_linear;
+			data.environment.sky_exposure_ev = sky_exposure_ev;
+		}
 		EditorCommandDto::SetLocalPlayer { key } => player::set_local_player(data, key.as_ref())?,
 		EditorCommandDto::AlignCameraToSceneView {
 			key,

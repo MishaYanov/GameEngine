@@ -20,6 +20,15 @@
                     }
                 }
                 <button (click)="preview.frame()" [disabled]="!preview.ready()" type="button">Frame Prop</button>
+                @if (preview.supportsEnvironment()) {
+                    <label>Preview environment
+                        <select #environment [value]="preview.environment()" (change)="selectPreviewEnvironment(environment)"
+                                [disabled]="!preview.ready() || preview.environmentPending()">
+                            <option value="neutral">Neutral</option>
+                            <option value="scene">Scene</option>
+                        </select>
+                    </label>
+                }
                 <button (click)="closed.emit()" [disabled]="prop.draftPending()" type="button">Close Prop</button>
             </div>
         </header>
@@ -31,6 +40,9 @@
             }
         </div>
         @if (prop.error(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
+        @if (preview.environmentError(); as message) {
             <p role="alert">{{ message }}</p>
         }
         @if (preview.loading()) {

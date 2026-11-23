@@ -305,6 +305,15 @@ impl CommandFactory {
 					validate_key(key.as_str())?;
 				}
 			}
+			EditorCommandDto::SetSceneEnvironment {
+				ambient_linear,
+				sky_exposure_ev,
+			} => {
+				crate::components::SceneEnvironment::validate_lighting(
+					*ambient_linear,
+					*sky_exposure_ev,
+				)?;
+			}
 			EditorCommandDto::SetProject { project } => project.validate()?,
 			EditorCommandDto::OrbitCamera { yaw, pitch } => {
 				finite(&[*yaw, *pitch], "Camera orbit")?
@@ -395,6 +404,13 @@ impl CommandFactory {
 				"set_active_sky",
 				"Set as Scene Sky",
 				"component",
+				true,
+				false,
+			),
+			(
+				"set_scene_environment",
+				"Configure Scene Environment",
+				"scene",
 				true,
 				false,
 			),

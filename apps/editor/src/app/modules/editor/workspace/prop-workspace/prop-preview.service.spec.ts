@@ -36,6 +36,7 @@ function setup() {
                 nativeAvailable: true, playing: signal(false), snapshot: signal({
                     revision: 8, scene_revision: 4, active_scene_id: 'arena',
                 }),
+                capabilities: () => ({commands: [{name: 'set_scene_environment'}]}),
             }},
             {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 7})}},
             {provide: WorkspaceViewService, useValue: {activeViewKind}},
@@ -80,4 +81,44 @@ it('closes a delayed old preview without applying selection after the tab change
     expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'retired-token'});
     expect(service.ready()).toBe(false);
     expect(selectObject).not.toHaveBeenCalled();
+});
+
+it('changes only the live Prop token environment and restores Neutral when entering another preview', async () => {
+    const {service, requests, activeViewKind} = setup();
+    const [requestId, resolve] = Array.from(requests)[0];
+    resolve(reply(requestId));
+    await Promise.resolve();
+    expect(service.environment()).toBe('neutral');
+    await service.setEnvironment('scene');
+    expect(invoke).toHaveBeenCalledWith('editor_prop_preview_environment', {token: 'native-token', environment: 'scene'});
+    expect(service.environment()).toBe('scene');
+    activeViewKind.set('scene-viewport');
+    TestBed.tick();
+    expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'native-token'});
+    expect(service.environment()).toBe('neutral');
+    activeViewKind.set('prop-workspace');
+    TestBed.tick();
+    const [newRequest, resolveNext] = Array.from(requests).at(-1)!;
+    resolveNext(reply(newRequest, 'next-token'));
+    await Promise.resolve();
+    expect(service.ready()).toBe(true);
+    expect(service.environment()).toBe('neutral');
+});
+
+it('discards a pending preview environment response after leaving the Prop tab', async () => {
+    const {service, requests, activeViewKind} = setup();
+    const [requestId, resolve] = Array.from(requests)[0];
+    resolve(reply(requestId));
+    await Promise.resolve();
+    let finish: (value: never) => void = () => {};
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = service.setEnvironment('scene');
+    expect(service.environmentPending()).toBe(true);
+    activeViewKind.set('scene-viewport');
+    TestBed.tick();
+    finish(undefined as never);
+    await pending;
+    expect(service.environmentPending()).toBe(false);
+    expect(service.environment()).toBe('neutral');
+    expect(service.ready()).toBe(false);
 });

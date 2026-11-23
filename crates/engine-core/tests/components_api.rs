@@ -104,6 +104,57 @@ fn sky_assignment_validates_and_undoes_edits_without_changing_legacy_clear() {
 }
 
 #[test]
+fn scene_lighting_updates_keep_sky_identity_and_round_trip_separately() {
+	let scene = scene(vec![]);
+	let project = ProjectData::for_scene("Environment", "scenes/main.json", &scene).unwrap();
+	let mut engine = Engine::new(scene, project).unwrap();
+	run(&mut engine, Command::CreateSky);
+	let sky = engine.session().selection()[0].clone();
+	run(
+		&mut engine,
+		Command::SetActiveSky {
+			key: Some(sky.clone()),
+		},
+	);
+	let baseline = engine.session().authored_document();
+	run(
+		&mut engine,
+		Command::SetSceneEnvironment {
+			ambient_linear: [0.05, 0.10, 0.20],
+			sky_exposure_ev: 2.0,
+		},
+	);
+	let adjusted = engine.session().authored_document();
+	assert_eq!(adjusted.environment.active_sky, Some(sky));
+	assert_eq!(adjusted.environment.ambient_linear, [0.05, 0.10, 0.20]);
+	assert_eq!(adjusted.environment.sky_exposure_ev, 2.0);
+	assert_eq!(adjusted.active_sky(), baseline.active_sky());
+	assert_eq!(adjusted.lights, baseline.lights);
+	assert_eq!(
+		SceneData::from_json(&adjusted.to_json().unwrap()).unwrap(),
+		*adjusted
+	);
+	let revision = engine.session().revision();
+	assert!(
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: revision,
+				command: Command::SetSceneEnvironment {
+					ambient_linear: [f32::NAN; 3],
+					sky_exposure_ev: 0.0
+				},
+			})
+			.is_err()
+	);
+	assert_eq!(engine.session().revision(), revision);
+	run(&mut engine, Command::Undo);
+	assert_eq!(
+		engine.session().authored_document().environment,
+		baseline.environment
+	);
+}
+
+#[test]
 fn audio_source_create_update_undo_duplication_and_save_are_atomic() {
 	use engine_core::{
 		asset_catalog::AssetId, audio_clip::AudioClipRef, components::AudioSourceSettings,

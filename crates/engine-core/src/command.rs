@@ -127,6 +127,10 @@ pub enum EditorCommandDto {
 	SetActiveSky {
 		key: Option<EntityKey>,
 	},
+	SetSceneEnvironment {
+		ambient_linear: [f32; 3],
+		sky_exposure_ev: f32,
+	},
 	SetLocalPlayer {
 		key: Option<EntityKey>,
 	},

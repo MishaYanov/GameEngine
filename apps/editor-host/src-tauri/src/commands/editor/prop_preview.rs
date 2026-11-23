@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::prop_preview::PropPreviewEnvironment;
 use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto};
 use runtime::EntityKey;
 
@@ -41,6 +42,20 @@ pub async fn editor_prop_preview_frame(
 	trusted_window(&window)?;
 	workspace(state, true, None, move |workspace| {
 		workspace.frame_prop_preview(&token)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_prop_preview_environment(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	token: String,
+	environment: PropPreviewEnvironment,
+) -> Result<(), String> {
+	trusted_window(&window)?;
+	workspace(state, true, None, move |workspace| {
+		workspace.set_prop_preview_environment(&token, environment)
 	})
 	.await
 }

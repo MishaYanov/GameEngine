@@ -49,6 +49,72 @@ fn fixture() -> (Fixture, EditorWorkspace) {
 }
 
 #[test]
+fn prop_environment_is_token_scoped_and_restores_neutral_without_a_scene_edit() {
+	use crate::editor::prop_preview::PropPreviewEnvironment;
+	use bridge::viewport::PropPreviewTargetDto;
+
+	let (_fixture, mut workspace) = fixture();
+	workspace
+		.execute_receipt(EditorCommandRequest {
+			expected_revision: workspace.backend.session().revision(),
+			command: EditorCommandDto::SetSceneEnvironment {
+				ambient_linear: [0.2, 0.4, 0.6],
+				sky_exposure_ev: 1.5,
+			},
+		})
+		.unwrap();
+	let revision = workspace.backend.session().revision();
+	let original = workspace
+		.backend
+		.session()
+		.authored_document()
+		.to_json()
+		.unwrap();
+	let saved = std::fs::read(&workspace.scene_path).unwrap();
+	let source = workspace
+		.create_linked_prefab_source("prefabs/environment.json", BTreeMap::new(), revision)
+		.unwrap();
+	let target = PropPreviewTargetDto::Source {
+		draft_id: source.draft_id,
+	};
+	let token = workspace
+		.open_prop_preview(target.clone(), revision, workspace.generation, 1)
+		.unwrap()
+		.token;
+	assert!(workspace.prop_scene_environment(&token).is_none());
+	workspace
+		.set_prop_preview_environment(&token, PropPreviewEnvironment::Scene)
+		.unwrap();
+	assert_eq!(
+		workspace
+			.prop_scene_environment(&token)
+			.unwrap()
+			.environment
+			.ambient_linear,
+		[0.2, 0.4, 0.6]
+	);
+	assert!(workspace.close_prop_preview(&token));
+	let new = workspace
+		.open_prop_preview(target, revision, workspace.generation, 2)
+		.unwrap();
+	assert!(workspace
+		.set_prop_preview_environment(&token, PropPreviewEnvironment::Scene)
+		.is_err());
+	assert!(workspace.prop_scene_environment(&new.token).is_none());
+	assert_eq!(workspace.backend.session().revision(), revision);
+	assert_eq!(
+		workspace
+			.backend
+			.session()
+			.authored_document()
+			.to_json()
+			.unwrap(),
+		original
+	);
+	assert_eq!(std::fs::read(&workspace.scene_path).unwrap(), saved);
+}
+
+#[test]
 fn reviewed_prop_creation_and_placement_are_separate_and_guarded() {
 	let (_fixture, mut workspace) = fixture();
 	let revision = workspace.backend.session().revision();

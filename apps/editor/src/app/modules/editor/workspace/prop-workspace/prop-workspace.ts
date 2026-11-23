@@ -106,6 +106,12 @@ export class PropWorkspace {
     });
     private readonly heading = viewChild<ElementRef<HTMLElement>>('heading');
 
+    protected selectPreviewEnvironment(select: HTMLSelectElement): void {
+        const selected = select.value;
+        select.value = this.preview.environment();
+        if (selected === 'neutral' || selected === 'scene') void this.preview.setEnvironment(selected);
+    }
+
     constructor() {
         afterNextRender(() => this.heading()?.nativeElement.focus({preventScroll: true}));
     }

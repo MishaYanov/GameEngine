@@ -1,7 +1,7 @@
 use renderer::vulkan::{ModelPushConstants, RenderObject};
 
 use super::{EntityId, MAX_SCENE_RENDER_OBJECTS, Scene, validate_animation_placement};
-use crate::scene_data::LightKind;
+use crate::scene_data::{LightData, LightKind, SceneEnvironment};
 
 impl Scene {
 	pub fn render_objects(&self) -> Vec<RenderObject<'_>> {
@@ -139,21 +139,31 @@ impl Scene {
 		renderer: &mut renderer::WindowRenderer,
 		assets: Option<&mut crate::assets::AssetManager>,
 		settings: Option<&engine_core::components::SkySettings>,
+		environment: &SceneEnvironment,
 	) -> Result<(), String> {
 		let gradient = settings.map(|sky| renderer::vulkan::SkyGradient {
 			zenith: sky.zenith,
 			horizon: sky.horizon,
 			yaw_degrees: sky.yaw_degrees,
+			exposure_ev: environment.sky_exposure_ev,
 		});
 		let image = settings.and_then(|sky| sky.background.image());
 		let texture = assets.and_then(|assets| assets.sky_texture(renderer, image));
 		renderer.set_sky_panorama(texture)?;
 		renderer.set_sky(gradient);
-		Ok(())
+		renderer.set_ambient(environment.ambient_linear)
+	}
+
+	pub fn environment(&self) -> &SceneEnvironment {
+		&self.environment
 	}
 
 	pub fn renderer_lights(&self) -> Vec<renderer::vulkan::Light> {
-		self.lights
+		Self::project_renderer_lights(&self.lights)
+	}
+
+	pub fn project_renderer_lights(lights: &[LightData]) -> Vec<renderer::vulkan::Light> {
+		lights
 			.iter()
 			.map(|light| match light.kind {
 				LightKind::Directional => renderer::vulkan::Light::Directional {

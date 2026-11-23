@@ -297,6 +297,7 @@ export type EditorCommand =
     | { readonly type: 'create_camera' }
     | { readonly type: 'create_sky' }
     | { readonly type: 'set_active_sky'; readonly key: EntityKey | null }
+    | { readonly type: 'set_scene_environment'; readonly ambient_linear: Vec3; readonly sky_exposure_ev: number }
     | { readonly type: 'create_player' }
     | { readonly type: 'create_audio_source' }
     | { readonly type: 'set_local_player'; readonly key: EntityKey | null }

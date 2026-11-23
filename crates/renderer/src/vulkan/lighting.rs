@@ -37,6 +37,14 @@ pub struct LightingUniform {
 impl LightingUniform {
 	pub const MAX_LIGHTS: usize = 16;
 
+	pub fn set_ambient(&mut self, ambient: [f32; 3]) -> Result<(), String> {
+		if !ambient.iter().all(|value| (0.0..=1.0).contains(value)) {
+			return Err("Ambient color requires finite linear RGB values from 0 to 1".into());
+		}
+		self.ambient_count[..3].copy_from_slice(&ambient);
+		Ok(())
+	}
+
 	pub fn from_lights(lights: &[Light]) -> Result<Self, String> {
 		if lights.len() > Self::MAX_LIGHTS {
 			return Err(format!("at most {} lights are supported", Self::MAX_LIGHTS));

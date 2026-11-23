@@ -96,6 +96,7 @@ pub fn run() {
 			editor_prop_preview_close,
 			editor_prop_preview_frame,
 			editor_prop_preview_select,
+			editor_prop_preview_environment,
 			editor_open,
 			editor_open_project,
 			editor_register_scene,

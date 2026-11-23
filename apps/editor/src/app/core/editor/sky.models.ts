@@ -18,7 +18,12 @@ export interface SkyAttachment {
 
 export interface SceneEnvironment {
     readonly active_sky?: EntityKey | null;
+    readonly ambient_linear?: Vec3;
+    readonly sky_exposure_ev?: number;
 }
+
+export const DEFAULT_AMBIENT: Vec3 = [0.25, 0.25, 0.25];
+export const SKY_EXPOSURE_LIMIT = 8;
 
 export interface SkyPanoramaAsset {
     readonly id: string;
@@ -62,9 +67,13 @@ export function validSkyAttachment(value: unknown): value is SkyAttachment {
 }
 
 export function validSceneEnvironment(value: unknown): value is SceneEnvironment {
-    return record(value) && Object.keys(value).every(key => key === 'active_sky') &&
+    return record(value) && Object.keys(value).every(key =>
+        key === 'active_sky' || key === 'ambient_linear' || key === 'sky_exposure_ev') &&
         (value['active_sky'] == null ||
-            typeof value['active_sky'] === 'string' && value['active_sky'].length > 0 && !/\s/.test(value['active_sky']));
+            typeof value['active_sky'] === 'string' && value['active_sky'].length > 0 && !/\s/.test(value['active_sky'])) &&
+        (value['ambient_linear'] === undefined || validSkyColor(value['ambient_linear'])) &&
+        (value['sky_exposure_ev'] === undefined ||
+            typeof value['sky_exposure_ev'] === 'number' && Math.abs(value['sky_exposure_ev']) <= SKY_EXPOSURE_LIMIT);
 }
 
 export function validPanoramaPath(path: string): boolean {

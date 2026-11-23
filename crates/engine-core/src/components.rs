@@ -25,8 +25,9 @@ pub use player_controller::{
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 use serde::{Deserialize, Deserializer, Serialize};
 pub use sky::{
-	MAX_SKY_PANORAMA_FILE_BYTES, MAX_SKY_PANORAMA_HEIGHT, MAX_SKY_PANORAMA_WIDTH, SceneEnvironment,
-	SkyBackground, SkyComponent, SkySettings,
+	DEFAULT_AMBIENT_LINEAR, MAX_SKY_EXPOSURE_EV, MAX_SKY_PANORAMA_FILE_BYTES,
+	MAX_SKY_PANORAMA_HEIGHT, MAX_SKY_PANORAMA_WIDTH, SceneEnvironment, SkyBackground, SkyComponent,
+	SkySettings,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 

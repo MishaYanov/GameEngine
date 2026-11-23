@@ -10,6 +10,7 @@ pub struct SkyGradient {
 	pub zenith: [f32; 3],
 	pub horizon: [f32; 3],
 	pub yaw_degrees: f32,
+	pub exposure_ev: f32,
 }
 
 #[repr(C)]
@@ -181,7 +182,9 @@ impl SkyPass {
 			ray_x: ray_x.extend(0.0).to_array(),
 			ray_y: ray_y.extend(0.0).to_array(),
 			forward: forward.extend(gradient.yaw_degrees / 360.0).to_array(),
-			zenith: Vec3::from_array(gradient.zenith).extend(0.0).to_array(),
+			zenith: Vec3::from_array(gradient.zenith)
+				.extend(gradient.exposure_ev.exp2())
+				.to_array(),
 			horizon: Vec3::from_array(gradient.horizon).extend(0.0).to_array(),
 		};
 		unsafe {

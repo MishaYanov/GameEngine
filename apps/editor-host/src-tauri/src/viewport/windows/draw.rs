@@ -574,6 +574,7 @@ impl Worker {
 			&mut gpu.renderer,
 			Some(&mut gpu.assets),
 			gpu.scene.sky_settings(),
+			gpu.scene.environment(),
 		)?;
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),

@@ -220,6 +220,7 @@ impl ApplicationHandler for Smoke {
 				zenith: [0.035, 0.075, 0.18],
 				horizon: [0.30, 0.46, 0.65],
 				yaw_degrees: 0.0,
+				exposure_ev: -1.0,
 			}));
 			let camera = CameraUniform::perspective(
 				[0.0; 3],

@@ -21,5 +21,5 @@ void main() {
     vec3 linear_sample = texture(panorama, vec2(u, clamp(v, half_texel, 1.0 - half_texel))).rgb;
     vec3 tint = mix(sky.horizon.rgb / vec3(0.30, 0.46, 0.65),
         sky.zenith.rgb / vec3(0.035, 0.075, 0.18), smoothstep(0.0, 1.0, ray.y));
-    color = vec4(linear_sample * min(tint, vec3(3.0)), 1.0);
+    color = vec4(linear_sample * min(tint, vec3(3.0)) * sky.zenith.w, 1.0);
 }

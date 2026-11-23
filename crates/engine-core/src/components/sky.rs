@@ -74,16 +74,56 @@ pub struct SkyComponent {
 	pub settings: SkySettings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneEnvironment {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub active_sky: Option<EntityKey>,
+	#[serde(
+		default = "default_ambient",
+		skip_serializing_if = "is_default_ambient"
+	)]
+	pub ambient_linear: [f32; 3],
+	#[serde(default, skip_serializing_if = "is_zero")]
+	pub sky_exposure_ev: f32,
+}
+
+pub const DEFAULT_AMBIENT_LINEAR: [f32; 3] = [0.25; 3];
+pub const MAX_SKY_EXPOSURE_EV: f32 = 8.0;
+
+fn default_ambient() -> [f32; 3] {
+	DEFAULT_AMBIENT_LINEAR
+}
+fn is_default_ambient(value: &[f32; 3]) -> bool {
+	*value == DEFAULT_AMBIENT_LINEAR
+}
+fn is_zero(value: &f32) -> bool {
+	*value == 0.0
+}
+
+impl Default for SceneEnvironment {
+	fn default() -> Self {
+		Self {
+			active_sky: None,
+			ambient_linear: DEFAULT_AMBIENT_LINEAR,
+			sky_exposure_ev: 0.0,
+		}
+	}
 }
 
 impl SceneEnvironment {
 	pub fn is_empty(&self) -> bool {
-		self.active_sky.is_none()
+		self == &Self::default()
+	}
+
+	pub(crate) fn validate_lighting(ambient: [f32; 3], exposure: f32) -> Result<(), String> {
+		if !ambient.iter().all(|channel| (0.0..=1.0).contains(channel)) {
+			return Err("Ambient color requires finite linear RGB values from 0 to 1".into());
+		}
+		if !(-MAX_SKY_EXPOSURE_EV..=MAX_SKY_EXPOSURE_EV).contains(&exposure) {
+			return Err("Sky exposure requires a finite value from -8 to 8 EV".into());
+		}
+		Ok(())
 	}
 
 	pub(crate) fn retained_bytes(&self) -> usize {
@@ -111,6 +151,10 @@ impl SceneData {
 	}
 
 	pub(crate) fn validate_environment(&self) -> Result<(), String> {
+		SceneEnvironment::validate_lighting(
+			self.environment.ambient_linear,
+			self.environment.sky_exposure_ev,
+		)?;
 		if self.environment.active_sky.is_some() && self.active_sky().is_none() {
 			return Err("Scene Sky requires an enabled Sky on a scene-root object".into());
 		}

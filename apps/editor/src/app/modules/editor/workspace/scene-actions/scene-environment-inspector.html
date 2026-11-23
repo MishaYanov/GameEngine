@@ -1,0 +1,18 @@
+<fieldset [disabled]="!editable() || busy()">
+    <legend>Scene Environment</legend>
+    <div class="ambient" role="group" aria-label="Ambient light (linear RGB)">
+        @for (channel of channels; track channel.key) {
+            <label>Ambient {{ channel.label.toLowerCase() }}
+                <input inputmode="decimal" [formField]="fields.ambient[channel.key]"/>
+            </label>
+        }
+    </div>
+    <label>Sky Exposure (EV)<input inputmode="decimal" [formField]="fields.exposure"/></label>
+    <button type="button" [disabled]="!canApply()" (click)="apply()">Apply Environment</button>
+    @if (candidate().error; as message) {
+        <small role="status">{{ message }}</small>
+    }
+    @if (error(); as message) {
+        <p role="alert">{{ message }}</p>
+    }
+</fieldset>

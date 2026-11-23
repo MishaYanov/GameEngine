@@ -11,6 +11,7 @@ import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
 import {SceneVerification} from './scene-verification';
+import {SceneEnvironmentInspector} from './scene-environment-inspector';
 import {rolesForScene} from '../../../../core/editor/gameplay-modules';
 import type {EditorCommand, SceneId} from '../../../../core/editor/editor.models';
 
@@ -23,7 +24,7 @@ interface WarmingContext {
 
 @Component({
     selector: 'editor-scene-actions',
-    imports: [EditorDialog, FormField, SceneVerification],
+    imports: [EditorDialog, FormField, SceneVerification, SceneEnvironmentInspector],
     templateUrl: './scene-actions.html',
     styleUrl: './scene-actions.scss',
 })
@@ -105,6 +106,8 @@ export class SceneActions {
     });
 
     protected readonly gameplayModules = computed(() => this.editor.capabilities()?.gameplay_modules);
+    protected readonly environmentSupported = computed(() =>
+        this.editor.capabilities()?.commands?.some(command => command.name === 'set_scene_environment') ?? false);
     protected readonly selectedModuleId = computed(() => this.editor.snapshot()?.project.gameplay_module ?? '');
     protected readonly selectedModule = computed(() =>
         this.gameplayModules()?.find(module => module.id === this.selectedModuleId()),

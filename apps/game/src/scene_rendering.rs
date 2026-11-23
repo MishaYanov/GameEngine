@@ -229,6 +229,7 @@ impl GameApp {
 			renderer,
 			self.asset_manager.as_mut(),
 			self.scene.sky_settings(),
+			self.scene.environment(),
 		)?;
 		match game_rect {
 			Some(rect) => renderer.draw_in_rect(&camera_uniform, &objects, rect.pixels()),

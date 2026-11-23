@@ -1,13 +1,17 @@
 //! Verified visual snapshots for the single embedded viewport's Prop pane.
 use super::EditorWorkspace;
 use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto};
+use renderer::vulkan::Light;
 use runtime::{
 	animation::{AnimationPose, VisualPose},
+	components::SkySettings,
 	editor::PrefabData,
+	scene::Scene,
 	scene_catalog::SceneId,
-	scene_data::{CameraData, EntityData, CURRENT_SCHEMA_VERSION},
+	scene_data::{CameraData, EntityData, SceneEnvironment, CURRENT_SCHEMA_VERSION},
 	Camera, EntityKey, SceneData,
 };
+use serde::Deserialize;
 use std::{
 	collections::HashSet,
 	sync::{Arc, Weak},
@@ -28,6 +32,20 @@ enum PreviewOwner {
 pub(crate) struct PropPreview {
 	owner: PreviewOwner,
 	frame: PropPreviewFrame,
+	environment: Option<Arc<PropSceneEnvironment>>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PropPreviewEnvironment {
+	Neutral,
+	Scene,
+}
+
+pub(crate) struct PropSceneEnvironment {
+	pub sky: Option<SkySettings>,
+	pub environment: SceneEnvironment,
+	pub lights: Vec<Light>,
 }
 
 #[derive(Clone)]
@@ -143,6 +161,7 @@ impl EditorWorkspace {
 		self.camera_preview = None;
 		self.prop_preview = Some(PropPreview {
 			owner,
+			environment: None,
 			frame: PropPreviewFrame {
 				state: state.clone(),
 				document: Arc::new(document),
@@ -238,6 +257,39 @@ impl EditorWorkspace {
 		} else {
 			self.close_authored_clip_preview(token)
 		}
+	}
+
+	pub(crate) fn set_prop_preview_environment(
+		&mut self,
+		token: &str,
+		environment: PropPreviewEnvironment,
+	) -> Result<(), String> {
+		if !self.prop_preview_is_current(token) {
+			return Err("Prop preview environment belongs to a closed or replaced Prop".into());
+		}
+		let capture = match environment {
+			PropPreviewEnvironment::Neutral => None,
+			PropPreviewEnvironment::Scene => {
+				let scene = self.backend.session().authored_document();
+				Some(Arc::new(PropSceneEnvironment {
+					sky: scene.active_sky().cloned(),
+					environment: scene.environment.clone(),
+					lights: Scene::project_renderer_lights(&scene.lights),
+				}))
+			}
+		};
+		self.prop_preview
+			.as_mut()
+			.expect("current Prop preview")
+			.environment = capture;
+		Ok(())
+	}
+
+	pub(crate) fn prop_scene_environment(&self, token: &str) -> Option<Arc<PropSceneEnvironment>> {
+		self.prop_preview
+			.as_ref()
+			.filter(|preview| preview.frame.state.token == token)
+			.and_then(|preview| preview.environment.clone())
 	}
 
 	pub(crate) fn discard_stale_prop_preview(&mut self) -> bool {
