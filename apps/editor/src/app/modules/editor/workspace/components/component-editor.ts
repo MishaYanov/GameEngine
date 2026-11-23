@@ -64,6 +64,9 @@ export type ComponentEditIntent =
 })
 export class ComponentEditor {
 	readonly components = input<readonly ComponentRecord[]>([]);
+    protected readonly orderedComponents = computed(() => [...this.components()].sort(
+        (a, b) => a.data.kind.localeCompare(b.data.kind) || a.id.localeCompare(b.id),
+    ));
 	readonly types = input<readonly ComponentTypeDescriptor[]>([]);
 	readonly scriptTypes = input<readonly ScriptDescriptor[]>([]);
 	readonly scriptSlots = input<readonly string[]>([]);

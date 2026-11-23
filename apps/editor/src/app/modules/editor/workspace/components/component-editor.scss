@@ -16,7 +16,7 @@ h3 {
 	font-size: var(--font-size-sm);
 }
 h4 {
-	font-size: inherit;
+	font-size: var(--font-size-sm);
 }
 .component {
 	display: grid;
@@ -24,6 +24,38 @@ h4 {
 	padding: var(--space-2);
 	border: var(--border-width) solid var(--color-border-strong);
 	border-radius: var(--radius-sm);
+}
+.component-heading {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-1) var(--space-2);
+}
+.component-state,
+.binding,
+.reference {
+	color: var(--color-text-secondary);
+	font-size: var(--font-size-xs);
+	overflow-wrap: anywhere;
+}
+.actions.component-actions {
+	align-items: start;
+}
+.primary-action {
+	font-weight: var(--font-weight-semibold);
+}
+.component-more {
+	max-width: 100%;
+}
+.component-more > summary {
+	padding: var(--space-1) var(--space-2);
+	color: var(--color-text-secondary);
+	font-size: var(--font-size-xs);
+	cursor: var(--cursor-action);
+}
+.component-more[open] > summary {
+	margin-block-end: var(--space-1);
 }
 .actions {
 	display: flex;
@@ -81,10 +113,6 @@ fieldset {
 	flex: 1;
 	min-width: 0;
 }
-.reference {
-	overflow-wrap: anywhere;
-	color: var(--color-text-secondary);
-}
 .binding-row {
 	display: grid;
 	gap: var(--space-2);
@@ -115,12 +143,7 @@ fieldset {
     font-weight: var(--font-weight-semibold);
   }
 
-  .component > span {
-    color: var(--color-text-secondary);
-    font-size: var(--font-size-xs);
-  }
-
-  .component .actions > button:enabled {
+  .component .actions > button:enabled:not(.primary-action) {
     border-color: transparent;
     background: transparent;
   }

@@ -1,63 +1,90 @@
 <section aria-label="Components" class="components">
 	<h3>Components</h3>
-	@for (component of components(); track component.id) {
+    @for (component of orderedComponents(); track component.id) {
         <article [attr.aria-label]="label(component)" [attr.data-reference-component]="component.id" class="component"
                  tabindex="-1">
-			<h4>{{ label(component) }}</h4>
-			<span>{{ component.enabled ? 'Enabled' : 'Disabled' }}</span>
-			<small class="reference">{{ component.id }}</small>
-            @if (component.data.kind === 'interactable') {
-                <p>{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
-            } @else if (component.data.kind === 'audio_source') {
-                <editor-audio-source-inspector [componentId]="component.id" [enabled]="component.enabled"
-                    [settings]="component.data.settings" [scope]="audioScope()" [clips]="audioClips()"
-                    [assignable]="available() && !open() && !pinned(component.data.kind)"
-                    (assign)="revealReference(component.id, 'Audio Clip')"/>
-            } @else if (component.data.kind === 'camera') {
-                <p>{{ component.data.settings.rig.mode }}</p>
-            } @else if (component.data.kind === 'sky' && skyPanoramaAssetsEnabled() && !open()) {
-                @if (component.data.settings.background; as background) {
-                    @if (background.kind === 'panorama') {
-                        <editor-sky-panorama-picker [image]="background.image" [review]="true"
-                            [context]="contextKey() + ':' + component.id"/>
+            <header class="component-heading">
+                <h4>{{ label(component) }}</h4>
+                <span class="component-state">{{ component.enabled ? 'Enabled' : 'Disabled' }}</span>
+            </header>
+            @switch (component.data.kind) {
+                @case ('mesh_renderer') {
+                    <p class="binding" [title]="component.data.model_path">{{ component.data.model_path }}</p>
+                }
+                @case ('collider') {
+                    <p class="binding">{{ component.data.collider.kind === 'box' ? 'Box' : 'Sphere' }} shape</p>
+                }
+                @case ('character_controller') {
+                    <p class="binding">Jump action: {{ component.data.settings.jump_action }}</p>
+                }
+                @case ('interactable') {
+                    <p class="binding">{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
+                }
+                @case ('audio_source') {
+                    <editor-audio-source-inspector [componentId]="component.id" [enabled]="component.enabled"
+                        [settings]="component.data.settings" [scope]="audioScope()" [clips]="audioClips()"
+                        [assignable]="available() && !open() && !pinned(component.data.kind)"
+                        (assign)="revealReference(component.id, 'Audio Clip')"/>
+                }
+                @case ('camera') {
+                    <p class="binding">{{ component.data.settings.rig.mode.replaceAll('_', ' ') }}</p>
+                }
+                @case ('sky') {
+                    @if (component.data.settings.background; as background) {
+                        @if (background.kind === 'panorama') {
+                            @if (skyPanoramaAssetsEnabled() && !open()) {
+                                <editor-sky-panorama-picker [image]="background.image" [review]="true"
+                                    [context]="contextKey() + ':' + component.id"/>
+                            } @else {
+                                <p class="binding">Panorama</p>
+                            }
+                        } @else {
+                            <p class="binding">Gradient</p>
+                        }
+                    } @else {
+                        <p class="binding">Gradient</p>
                     }
                 }
-            } @else if (component.data.kind === 'player_controller') {
-                <p>Input source: {{ inputSource(component.data.settings.input) }}</p>
-                <p>{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
+                @case ('player_controller') {
+                    <p class="binding">Input source: {{ inputSource(component.data.settings.input) }}</p>
+                    <p class="binding">{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
+                    @if (playerBodyIssue(); as issue) { <p class="error" role="status">{{ issue }}</p> }
+                }
+                @case ('animation') {
+                    @let playback = component.data.settings.playback;
+                    <p class="binding">{{ playback.kind === 'single_clip' ? 'Imported clip ' + (playback.clip_index + 1) : 'Locomotion clips' }}</p>
+                }
+                @case ('particle_emitter') {
+                    <p class="binding">{{ component.data.settings.rate_per_second }} particles per second</p>
+                }
             }
             @if (pinned(component.data.kind)) {
-                <p>Edit the Prop source or unpack this instance to change its {{ label(component) }}.</p>
+                <p class="binding">Edit the Prop source or unpack this instance to change its {{ label(component) }}.</p>
             } @else {
-			<div class="actions">
-                @if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
-                    <button (click)="particleDesignerRequested.emit()" [disabled]="!available() || open()" aria-haspopup="dialog"
-                            type="button">Edit Particles…
-                    </button>
-                } @else {
-                    <button (click)="start(component)" [attr.aria-label]="'Edit ' + label(component)"
-                            [disabled]="!available() || open()" type="button">Edit
-                    </button>
-                }
-				<button
-					type="button"
-					[disabled]="!available() || open()"
-					(click)="toggle(component)"
-					[attr.aria-label]="(component.enabled ? 'Disable ' : 'Enable ') + label(component)"
-				>
-					{{ component.enabled ? 'Disable' : 'Enable' }}
-				</button>
-				<button
-					type="button"
-					[disabled]="!available() || open()"
-					(click)="remove(component)"
-					[attr.aria-label]="'Remove ' + label(component)"
-				>
-					Remove
-				</button>
-			</div>
+                <div class="actions component-actions">
+                    @if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
+                        <button class="primary-action" (click)="particleDesignerRequested.emit()"
+                                [disabled]="!available() || open()" aria-haspopup="dialog" type="button">Edit Particles…</button>
+                    } @else {
+                        <button class="primary-action" (click)="start(component)" [attr.aria-label]="'Edit ' + label(component)"
+                                [attr.aria-expanded]="open() && original()?.id === component.id"
+                                [disabled]="!available() || open()" type="button">Edit</button>
+                    }
+                    <details class="component-more">
+                        <summary [attr.aria-label]="'More actions for ' + label(component)">More actions</summary>
+                        <div class="actions">
+                            <button type="button" [disabled]="!available() || open()" (click)="toggle(component)"
+                                    [attr.aria-label]="(component.enabled ? 'Disable ' : 'Enable ') + label(component)">
+                                {{ component.enabled ? 'Disable' : 'Enable' }}
+                            </button>
+                            <button type="button" [disabled]="!available() || open()" (click)="remove(component)"
+                                    [attr.aria-label]="'Remove ' + label(component)">Remove</button>
+                        </div>
+                        <small class="reference" [title]="component.id">Component ID: {{ component.id }}</small>
+                    </details>
+                </div>
             }
-		</article>
+        </article>
 	} @empty {
 		<p>No components attached.</p>
 	}

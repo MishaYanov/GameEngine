@@ -2,6 +2,7 @@ import {TestBed} from '@angular/core/testing';
 import {ComponentEditor, type ComponentEditIntent} from './component-editor';
 import {
     validComponentRecord,
+    type ComponentRecord,
     type ComponentTypeDescriptor,
 } from '../../../../core/editor/editor-components';
 
@@ -70,6 +71,41 @@ describe('Interactable Inspector', () => {
         await panel.fixture.whenStable();
         expect(panel.host.querySelector('.component-form')).toBeNull();
         expect(panel.intents).toEqual([]);
+    });
+
+    it('keeps a focused component action stable through snapshot reorder and shows its saved status', async () => {
+        const panel = await setup();
+        const interaction: ComponentRecord = {
+            id: 'interaction', schema_version: 1, enabled: true,
+            data: {kind: 'interactable', settings: {action: 'inspect', reach: 1.25}},
+        };
+        const mesh: ComponentRecord = {
+            id: 'mesh', schema_version: 1, enabled: true,
+            data: {kind: 'mesh_renderer', model_path: 'props/lever.glb'},
+        };
+        panel.fixture.componentRef.setInput('components', [mesh, interaction]);
+        await panel.fixture.whenStable();
+
+        const card = panel.host.querySelector<HTMLElement>('[data-reference-component="interaction"]')!;
+        const edit = card.querySelector<HTMLButtonElement>('button[aria-label="Edit Interactable"]')!;
+        expect(card.querySelector('.component-state')?.textContent?.trim()).toBe('Enabled');
+        expect(card.querySelector('.binding')?.textContent?.trim()).toBe('inspect · 1.25 m');
+        expect(panel.host.querySelector('[data-reference-component="mesh"] .binding')?.textContent).toContain('props/lever.glb');
+        edit.focus();
+        panel.fixture.componentRef.setInput('components', [{...interaction, enabled: false}, mesh]);
+        await panel.fixture.whenStable();
+
+        expect(document.activeElement).toBe(edit);
+        expect(panel.host.querySelector('[data-reference-component="interaction"]')).toBe(card);
+        expect(card.querySelector('.component-state')?.textContent?.trim()).toBe('Disabled');
+        const more = card.querySelector<HTMLElement>('summary')!;
+        expect(more.getAttribute('aria-label')).toBe('More actions for Interactable');
+        more.focus();
+        expect(document.activeElement).toBe(more);
+        more.click();
+        expect(card.querySelector('details')?.open).toBe(true);
+        card.querySelector<HTMLButtonElement>('button[aria-label="Enable Interactable"]')!.click();
+        expect(panel.intents).toEqual([{kind: 'enabled', component_id: 'interaction', enabled: true}]);
     });
 
     it('shows the prefab source value and excludes native instance edit intents', async () => {

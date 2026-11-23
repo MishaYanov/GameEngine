@@ -11,33 +11,37 @@
         @for (selection of selectedEntities(); track selection.identity) {
             @let selected = selection.entity;
             <div class="inspector-content">
-                @if (!editable()) {
-                    <p class="read-only">Properties are read-only while editing is unavailable.</p>
-                }
-                <label class="name-field">
-                    <span>Name</span>
-                    <input
-                            #nameInput
-                            type="text"
-                            maxlength="1024"
-                            autocomplete="off"
-                            [value]="nameValue()"
-                            [disabled]="!editable()"
-                            [attr.aria-invalid]="invalidName() ? 'true' : null"
-                            [attr.aria-describedby]="invalidName() ? nameErrorId : null"
-                            (focus)="startName(nameInput)"
-                            (input)="changeName(nameInput)"
-                            (blur)="finishName(nameInput)"
-                            (keydown)="nameKeydown($event, nameInput)"
-                    />
-                </label>
-                @if (invalidName()) {
-                    <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
-                }
-                <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
-                    <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
-                    <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
-                </dl>
+                <section aria-label="Object identity" class="object-identity">
+                    @if (!editable()) {
+                        <p class="read-only">Properties are read-only while editing is unavailable.</p>
+                    }
+                    <label class="name-field">
+                        <span>Name</span>
+                        <input
+                                #nameInput
+                                type="text"
+                                maxlength="1024"
+                                autocomplete="off"
+                                [value]="nameValue()"
+                                [disabled]="!editable()"
+                                [attr.aria-invalid]="invalidName() ? 'true' : null"
+                                [attr.aria-describedby]="invalidName() ? nameErrorId : null"
+                                (focus)="startName(nameInput)"
+                                (input)="changeName(nameInput)"
+                                (blur)="finishName(nameInput)"
+                                (keydown)="nameKeydown($event, nameInput)"
+                        />
+                    </label>
+                    @if (invalidName()) {
+                        <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
+                    }
+                    <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
+                        <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
+                        @if (selected.component_views === undefined) {
+                            <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
+                        }
+                    </dl>
+                </section>
                 <section class="transform" aria-label="Local transform">
                     <h3>Transform <span>Local space</span></h3>
                     <editor-vector3-field

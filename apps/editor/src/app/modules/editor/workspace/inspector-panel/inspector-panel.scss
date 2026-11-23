@@ -17,6 +17,11 @@
   min-width: 0;
 }
 
+.object-identity {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .name-field {
   display: flex;
   flex-direction: column;

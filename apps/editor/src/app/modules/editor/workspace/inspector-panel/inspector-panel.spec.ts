@@ -69,6 +69,10 @@ describe('InspectorPanel', () => {
         await select();
         expect(fixture.nativeElement.textContent).toContain('props/robot.glb');
         expect(fixture.nativeElement.textContent).toContain('Local space');
+        const identity: HTMLElement = fixture.nativeElement.querySelector('[aria-label="Object identity"]');
+        const transform: HTMLElement = fixture.nativeElement.querySelector('[aria-label="Local transform"]');
+        expect(identity.querySelector('input')).not.toBeNull();
+        expect(identity.compareDocumentPosition(transform) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(input('Position X').value).toBe('1');
         expect(input('Rotation Y (degrees)').value).toBe('90');
     });
