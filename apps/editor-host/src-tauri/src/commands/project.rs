@@ -54,32 +54,18 @@ pub async fn editor_exit(
 	super::editor::trusted_window(&window)?;
 	let editor = Arc::clone(&state.editor);
 	tauri::async_runtime::spawn_blocking(move || {
-		let review = |workspace: Option<&EditorWorkspace>| -> Result<bool, String> {
-			let session = workspace.map(|workspace| workspace.backend.session());
-			if session.map(|session| session.revision()) != expected_revision {
-				return Err("Revision conflict: the open project changed. Try Exit again.".into());
-			}
-			if session.is_some_and(|session| session.has_transaction()) {
-				return Err("Finish the current edit before exiting.".into());
-			}
-			Ok(session.is_some_and(|session| session.is_dirty()))
-		};
-		let dirty = {
+		let warning = {
 			let workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
-			review(workspace.as_ref())?
+			exit_review(workspace.as_ref(), expected_revision)?
 		};
-		if dirty
-			&& !confirm_discard(
-				&window,
-				"Exiting the editor will discard all unsaved scene and project changes.",
-				"Discard and exit",
-				"Keep editing",
-			) {
-			return Ok(false);
+		if let Some(message) = warning {
+			if !confirm_discard(&window, message, "Discard and exit", "Keep editing") {
+				return Ok(false);
+			}
 		}
 
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
-		if review(workspace.as_ref())? && !dirty {
+		if exit_review(workspace.as_ref(), expected_revision)? != warning {
 			return Err(
 				"Revision conflict: the project has new unsaved changes. Try Exit again.".into(),
 			);
@@ -94,6 +80,27 @@ pub async fn editor_exit(
 	})
 	.await
 	.map_err(|error| error.to_string())?
+}
+
+fn exit_review(
+	workspace: Option<&EditorWorkspace>,
+	expected_revision: Option<u64>,
+) -> Result<Option<&'static str>, String> {
+	let session = workspace.map(|workspace| workspace.backend.session());
+	if session.map(|session| session.revision()) != expected_revision {
+		return Err("Revision conflict: the open project changed. Try Exit again.".into());
+	}
+	if session.is_some_and(|session| session.has_transaction()) {
+		return Err("Finish the current edit before exiting.".into());
+	}
+	let scene_dirty = session.is_some_and(|session| session.is_dirty());
+	let timeline_dirty = workspace.is_some_and(EditorWorkspace::has_dirty_clip_timelines);
+	Ok(match (scene_dirty, timeline_dirty) {
+		(false, false) => None,
+		(true, false) => Some("Exiting the editor will discard all unsaved scene and project changes."),
+		(false, true) => Some("Exiting the editor will discard unsaved Animation Clip Timeline changes."),
+		(true, true) => Some("Exiting the editor will discard unsaved scene, project, and Animation Clip Timeline changes."),
+	})
 }
 
 fn confirm_discard(
