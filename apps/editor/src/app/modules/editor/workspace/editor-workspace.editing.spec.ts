@@ -1656,6 +1656,66 @@ describe('Workspace live editing flow', () => {
         expect(invoke).toHaveBeenCalledWith('editor_prop_preview_close', {token: 'workspace-prop-preview'});
     });
 
+    it('keeps workspace focus and panel labels valid through keyboard navigation, Play, and project replacement', async () => {
+        assets = [propAsset];
+        await editor.assets(true);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const tabs = () => [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+        const tab = (name: string) => tabs().find(button => button.textContent?.trim() === name);
+        const expectActive = (name: string) => {
+            const selected = tab(name);
+            const panel = root.querySelector<HTMLElement>('[role="tabpanel"]')!;
+            expect(selected).toBeDefined();
+            expect(tabs().filter(button => button.getAttribute('aria-selected') === 'true')).toEqual([selected]);
+            expect(panel.getAttribute('aria-labelledby')).toBe(selected?.id);
+            expect(selected?.getAttribute('aria-controls')).toBe(panel.id);
+        };
+        const key = (target: HTMLElement, value: string) =>
+            target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
+
+        root.querySelector('[data-asset-id="arch-id"]')!.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await fixture.whenStable();
+        expectActive('Prop');
+        const prop = tab('Prop')!;
+        prop.focus();
+        key(prop, 'ArrowRight');
+        await fixture.whenStable();
+        expectActive('Prop');
+        expect(document.activeElement).toBe(tab('Animation'));
+        expect(root.querySelector('editor-animation-workspace')).toBeNull();
+
+        key(tab('Animation')!, 'Enter');
+        await fixture.whenStable();
+        expectActive('Animation');
+        const importedClips = root.querySelector<HTMLButtonElement>('editor-animation-workspace .clip-kind button')!;
+        importedClips.focus();
+        action('Play').click();
+        await vi.waitFor(() => expect(editor.playing()).toBe(true));
+        await fixture.whenStable();
+        expectActive('Game');
+        expect(tab('Animation')).toBeUndefined();
+        expect(document.activeElement).toBe(tab('Game'));
+
+        action('Stop').click();
+        await vi.waitFor(() => expect(editor.playing()).toBe(false));
+        await fixture.whenStable();
+        expectActive('Animation');
+        expect(document.activeElement).toBe(tab('Game'));
+
+        const currentProp = tab('Prop')!;
+        currentProp.focus();
+        currentProp.click();
+        await fixture.whenStable();
+        expectActive('Prop');
+        await editor.openProject('replacement/project.json');
+        await fixture.whenStable();
+        expect(tab('Prop')).toBeUndefined();
+        expectActive('Scene');
+        expect(document.activeElement).toBe(tab('Scene'));
+        expect(tabs().filter(button => button.tabIndex === 0)).toEqual([tab('Scene')]);
+    });
+
     it('opens a pinned instance with unavailable source and restores its read-only tab after Play', async () => {
         const prefab = {source: {source_id: 'missing-id', path: 'missing.json'}, bindings: {actor: 'crate'}};
         nativeState = {...nativeState, document: {...nativeState.document, entities: nativeState.document.entities.map(entity =>
