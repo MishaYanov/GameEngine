@@ -1,4 +1,4 @@
-import {Component, computed, effect, inject, input, signal} from '@angular/core';
+import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
 import {applyEach, form, FormField, maxLength} from '@angular/forms/signals';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {
@@ -81,6 +81,13 @@ export class GameInputManager {
     protected readonly changed = computed(() => this.profileSignature(this.profile()) !== this.savedProfile());
     protected readonly preview = computed(() => evaluateGameInput(this.profile(), this.heldKeys()));
     protected readonly parameters = computed(() => [...this.preview().animation]);
+    private readonly assetEditor = viewChild(InputActionsEditor);
+    protected readonly editingPending = computed(() => this.pending() || this.assetEditor()?.pending() === true);
+    protected readonly dirty = computed(() => this.showingAssets() ?
+        this.assetEditor()?.dirty() === true : this.changed());
+    protected readonly canSaveDraft = computed(() => this.showingAssets() ?
+        this.assetEditor()?.savable() === true : this.available() && this.changed() && !this.validation());
+    protected readonly closeReview = signal(false);
 
     constructor() {
         effect(() => {
@@ -106,6 +113,7 @@ export class GameInputManager {
         });
         this.message.set(null);
         this.error.set(null);
+        this.closeReview.set(false);
         this.clearPreview();
         const controller = snapshot.document?.entities.find(entity =>
             entity.key === snapshot.selection?.[0] && entity.player_controller?.enabled)?.player_controller
@@ -119,8 +127,34 @@ export class GameInputManager {
     }
 
     protected showAssetTools(active: boolean): void {
+        if (active === this.showingAssets() || this.dirty() || this.editingPending()) return;
         this.clearPreview();
         this.showingAssets.set(active);
+    }
+
+    protected reviewClose(): void {
+        if (!this.editingPending()) this.closeReview.set(true);
+    }
+
+    protected discardAndClose(): void {
+        if (this.editingPending()) return;
+        if (this.showingAssets()) {
+            this.assetEditor()?.discard();
+            if (this.dirty()) return;
+        }
+        this.open.set(false);
+    }
+
+    protected async saveAndClose(): Promise<void> {
+        if (!this.canSaveDraft()) return;
+        if (this.showingAssets()) await this.assetEditor()?.save();
+        else await this.apply();
+        if (!this.dirty()) this.open.set(false);
+    }
+
+    protected didClose(): void {
+        this.clearPreview();
+        this.closeReview.set(false);
     }
 
     protected addAction(): void {

@@ -6,5 +6,7 @@
 .action-heading { cursor: pointer; text-align: start; width: 100%; margin-block-end: var(--space-2); overflow-wrap: anywhere; }
 .action small { color: var(--color-text-secondary); }
 .binding { margin-block: var(--space-2); border-block-start: 1px solid var(--color-border); padding-block-start: var(--space-2); }
+.layout-editor { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-2); }
+.layout-editor fieldset { min-width: 0; }
 p { margin: 0; overflow-wrap: anywhere; }
 .error { color: var(--color-danger); }

@@ -46,13 +46,68 @@
                 <button type="button" (click)="moving.set(false)" [disabled]="!available()">Cancel Move</button>
             </div>
         }
+        <div class="layout-editor">
+        <fieldset [disabled]="!available()" class="fields">
+            <legend>Layouts in priority order</legend>
+            <p>The first matching conditional layout wins.</p>
+            <div class="fields" role="group" aria-label="Layout selection">
+                @for (layout of layouts(); track layout.id) {
+                    <button type="button" [attr.aria-pressed]="layout.id === pickedLayout()"
+                            (click)="selectLayout(layout.id)">{{ layout.label || 'Unnamed layout' }}</button>
+                }
+                <button type="button" [attr.aria-pressed]="!selectedLayout()" (click)="selectLayout(null)">Default</button>
+            </div>
+            <label>Layout preset
+                <select #preset>
+                    @for (option of presets; track option.id) {
+                        <option [value]="option.id">{{ option.label }}</option>
+                    }
+                </select>
+            </label>
+            <button type="button" [disabled]="layouts().length >= layoutLimit" (click)="addLayout(preset.value)">Add Layout</button>
+            @if (selectedLayout(); as layout) {
+                <div class="actions">
+                    <button type="button" [disabled]="layoutPosition() <= 0" (click)="moveLayout(-1)">Move Up</button>
+                    <button type="button" [disabled]="layoutPosition() >= layouts().length - 1" (click)="moveLayout(1)">Move Down</button>
+                    <button type="button" [disabled]="layouts().length >= layoutLimit" (click)="duplicateLayout()">Duplicate Layout</button>
+                    <button type="button" (click)="removeLayout()">Remove Layout</button>
+                </div>
+            }
+        </fieldset>
         <fieldset [disabled]="!available()" class="fields">
             <legend>Actions</legend>
-            @for (action of map.actions; track $index; let actionIndex = $index) {
+            @if (selectedLayout(); as layout) {
+                <label>Layout name
+                    <input #label [value]="layout.label" maxlength="96" (input)="renameLayout(label.value)" autocomplete="off"/>
+                </label>
+                <label>Layout condition
+                    <select #condition [value]="conditionPreset(layout.when)" (change)="changeCondition(condition.value)">
+                        <option value="land" [selected]="conditionPreset(layout.when) === 'land'">Character is grounded</option>
+                        <option value="airborne" [selected]="conditionPreset(layout.when) === 'airborne'">Character is airborne</option>
+                        <option value="world_scene" [selected]="conditionPreset(layout.when) === 'world_scene'">Scene is</option>
+                    </select>
+                </label>
+                @if (layout.when.kind === 'scene_is') {
+                    <label>Condition scene
+                        <select #scene [value]="layout.when.scene_id" (change)="chooseConditionScene(scene.value)">
+                            @if (!sceneIds().has(layout.when.scene_id)) {
+                                <option value="" selected>Choose an available scene</option>
+                            }
+                            @for (item of scenes(); track item.id) {
+                                <option [value]="item.id" [selected]="item.id === layout.when.scene_id">{{ item.id }}</option>
+                            }
+                        </select>
+                    </label>
+                }
+            }
+            @for (action of editingActions(); track $index; let actionIndex = $index) {
                 <article class="action" [attr.data-action-id]="action.id">
                     <button type="button" class="action-heading" [attr.aria-expanded]="expandedAction() === actionIndex"
-                            (click)="toggleAction(actionIndex)">{{ action.label || action.id || 'Unnamed action' }} <small>{{ action.id }}</small></button>
+                            (click)="toggleAction(actionIndex)">{{ action.label || action.id || 'Unnamed action' }} <small>{{ action.id }}</small>
+                            @if (selectedLayout()) { <small>{{ bindingOrigin(action.id) }}</small> }
+                    </button>
                     @if (expandedAction() === actionIndex) {
+                    @if (!selectedLayout()) {
                     <div class="actions">
                         <label>Action ID
                             <input #id [value]="action.id" maxlength="32" (input)="patchAction(actionIndex, {id: id.value})" autocomplete="off"/>
@@ -70,6 +125,12 @@
                         <button type="button" (click)="removeAction(actionIndex)"
                                 [attr.aria-label]="'Remove action ' + action.label">Remove Action</button>
                     </div>
+                    } @else {
+                        <div class="actions">
+                            <button type="button" [disabled]="bindingOrigin(action.id) === 'Inherited'" (click)="inheritBindings(action.id)">Inherit Default</button>
+                            <button type="button" [disabled]="bindingOrigin(action.id) === 'Unbound'" (click)="unbindAction(actionIndex)">Unbind Action</button>
+                        </div>
+                    }
                     @for (binding of action.bindings; track $index; let bindingIndex = $index) {
                         <div class="binding" role="group" [attr.aria-label]="action.label + ' binding ' + (bindingIndex + 1)">
                             <label>Binding type
@@ -105,8 +166,11 @@
                     }
                 </article>
             }
-            <button type="button" (click)="addAction()" [disabled]="map.actions.length >= maxActions">Add Input Action</button>
+            @if (!selectedLayout()) {
+                <button type="button" (click)="addAction()" [disabled]="map.actions.length >= maxActions">Add Input Action</button>
+            }
         </fieldset>
+        </div>
         <editor-input-actions-monitor [map]="map" [active]="active() && !pending()"/>
     } @else {
         <p>Open an existing asset or create one with Move, Look, Jump, and Attack.</p>

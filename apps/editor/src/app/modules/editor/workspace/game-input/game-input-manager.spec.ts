@@ -176,6 +176,27 @@ describe('Game Input Manager', () => {
         expect(document.activeElement).toBe(opener);
     });
 
+    it('offers a close review before discarding unsaved controls', async () => {
+        const {fixture, root, button, execute, opener} = await setup();
+        button('Add Action').click();
+        await fixture.whenStable();
+        const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
+        dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+        await fixture.whenStable();
+        expect(dialog.open).toBe(true);
+        expect(button('Apply and Close').disabled).toBe(true);
+        button('Keep Editing').click();
+        await fixture.whenStable();
+        expect(dialog.open).toBe(true);
+        dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+        await fixture.whenStable();
+        button('Discard and Close').click();
+        await fixture.whenStable();
+        expect(dialog.open).toBe(false);
+        expect(execute).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(opener);
+    });
+
     it('previews the physical key through its game action and animation parameter and applies it to the project', async () => {
         const {fixture, root, button, execute} = await setup();
         button('Add Action').click();

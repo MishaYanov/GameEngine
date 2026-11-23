@@ -1,12 +1,25 @@
-<editor-dialog (closed)="clearPreview()" [(open)]="open" [config]="dialogConfig"
+<editor-dialog (closed)="didClose()" (closeAttempted)="reviewClose()" [closeBlocked]="editingPending() || dirty()"
+               [(open)]="open" [config]="dialogConfig"
                [renderFields]="false" preferenceKey="game-input-manager" title="Controls">
     @if (inputActions?.supported()) {
         <div class="actions" role="group" aria-label="Game Input settings">
-            <button type="button" (click)="showAssetTools(false)" [attr.aria-pressed]="!showingAssets()" [disabled]="pending()">Project Bindings</button>
-            <button type="button" (click)="showAssetTools(true)" [attr.aria-pressed]="showingAssets()" [disabled]="pending()">Input Actions Assets</button>
+            <button type="button" (click)="showAssetTools(false)" [attr.aria-pressed]="!showingAssets()"
+                    [disabled]="editingPending() || dirty() && showingAssets()">Project Bindings</button>
+            <button type="button" (click)="showAssetTools(true)" [attr.aria-pressed]="showingAssets()"
+                    [disabled]="editingPending() || dirty() && !showingAssets()">Input Actions Assets</button>
         </div>
         <editor-input-actions-editor [active]="open() && showingAssets() && !opening()" [hidden]="!showingAssets()"
                                      [preferredAsset]="preferredAsset()"/>
+    }
+    @if (closeReview()) {
+        <fieldset class="actions">
+            <legend>Unsaved controls</legend>
+            <button type="button" (click)="saveAndClose()" [disabled]="editingPending() || !canSaveDraft()">
+                {{ showingAssets() ? 'Save and Close' : 'Apply and Close' }}
+            </button>
+            <button type="button" (click)="discardAndClose()" [disabled]="editingPending()">Discard and Close</button>
+            <button type="button" (click)="closeReview.set(false)">Keep Editing</button>
+        </fieldset>
     }
     @if (!showingAssets()) {
     <p>Map physical keys to movement and game actions. An action can drive a boolean animation parameter while its key

@@ -975,6 +975,29 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(editor.document()?.entities.find(entity => entity.key === 'player-1')
             ?.player_controller?.settings.input).toEqual({kind: 'asset', asset_id: controlsAssetId}));
         expect(commands.filter(command => command.type === 'replace_component')).toHaveLength(1);
+
+        fixture.componentInstance.openControls();
+        await fixture.whenStable();
+        const controls = root.querySelector('editor-input-actions-editor:not([hidden])')!;
+        expect(button('Open Asset', controls)).toBeDefined();
+        const preset = field('Layout preset', controls).querySelector('select')!;
+        preset.value = 'airborne';
+        button('Add Layout', controls).click();
+        await fixture.whenStable();
+        const layoutId = field('Layout name', controls).querySelector('input')!;
+        await change(layoutId, 'Air controls');
+        expect(controls.querySelector('[data-action-id="jump"]')?.textContent).toContain('Unbound');
+        expect(controls.querySelector('[data-action-id="attack"]')?.textContent).toContain('Override');
+        button('Duplicate Layout', controls).click();
+        await fixture.whenStable();
+        button('Move Up', controls).click();
+        await fixture.whenStable();
+        button('Save Input Actions', controls).click();
+        await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.map.schema_version).toBe(2));
+        const layouts = inputActions.get(controlsAssetId)?.map.layouts ?? [];
+        expect(layouts.map(layout => layout.label)).toEqual(['Air controls', 'Air controls']);
+        expect(new Set(layouts.map(layout => layout.id)).size).toBe(2);
+        expect(layouts[0].overrides).toContainEqual({action_id: 'jump', bindings: []});
     });
 
     it('reviews a registered Animator definition and binds the same graph to two independent visual actors', async () => {
