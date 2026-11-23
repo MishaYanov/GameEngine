@@ -8,7 +8,7 @@ article {
     border-top: 1px solid var(--color-border);
 }
 
-h3, p {
+h3, h4, p {
     margin: 0;
     overflow-wrap: anywhere;
 }
@@ -36,4 +36,12 @@ textarea {
 
 .answer {
     white-space: pre-wrap;
+}
+
+.sources {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-inline-start: var(--space-4);
+    overflow-wrap: anywhere;
 }

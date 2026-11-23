@@ -22,12 +22,38 @@
     </div>
 </form>
 @if (session.failure(); as message) { <p role="alert">{{ message }}</p> }
+@if (navigation.notice(); as message) {
+    <p role="status">{{ message }}</p>
+}
+@if (retry(); as action) {
+    <button type="button" (click)="open(action, true)" [disabled]="navigation.pending()">Refresh Target</button>
+}
 <section aria-label="Agent answers">
     @for (answer of session.answers(); track answer.id) {
         <article>
             <h3>{{ answer.question }}</h3>
             @if (answer.selection; as selection) { <p class="selection">{{ selection.label }}</p> }
             @if (answer.text) { <p class="answer">{{ answer.text }}</p> }
+            @if (answer.references.length) {
+                <h4>Sources</h4>
+                <ul class="sources">
+                    @for (source of answer.references; track source.citation.source_id + ':' + source.citation.ordinal) {
+                        <li><details>
+                            <summary>{{ source.citation.heading }} · {{ source.citation.relative_path }}</summary>
+                            <p>{{ source.excerpt }}</p>
+                        </details></li>
+                    }
+                </ul>
+            }
+            @if (answer.selection; as target) {
+                <div class="controls">
+                    <button type="button" [disabled]="navigation.pending()" (click)="open({kind: 'show-object', target})">Show Object</button>
+                    @if (target.componentId; as id) {
+                        <button type="button" [disabled]="navigation.pending()"
+                                (click)="open({kind: 'open-component-editor', target, componentId: id})">Open Component Editor</button>
+                    }
+                </div>
+            }
             @switch (answer.status) {
                 @case ('starting') { <p role="status">Starting local Agent…</p> }
                 @case ('streaming') { <p role="status">Finding guidance…</p> }

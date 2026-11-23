@@ -26,6 +26,7 @@ import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entiti
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {AgentDrawer} from './agent-drawer/agent-drawer';
+import {AgentAnswerActions} from './agent-drawer/agent-answer-actions';
 import {AgentDrawerService} from './agent-drawer/agent-drawer.service';
 import {AgentSelectionContextService} from './agent-drawer/agent-selection-context';
 import {AUTHORING_DRAWER_CONFIG, type RightDrawerMode} from './agent-drawer/authoring-drawer';
@@ -69,7 +70,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
-        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService, AgentDrawerService,
+        SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService, AgentDrawerService, AgentAnswerActions,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
@@ -236,6 +237,18 @@ export class EditorWorkspace {
 
     constructor() {
         inject(AgentSelectionContextService).setSceneSubject(() => this.inspector()?.subject() ?? null);
+        inject(AgentAnswerActions).setReveal((key, componentId) => {
+            const context = this.sceneContext();
+            this.rightDrawerMode.set('inspector');
+            afterNextRender(() => {
+                if (this.sceneContext() !== context || this.rightDrawerMode() !== 'inspector') return;
+                if (this.workspaceView.propView() && this.propWorkspace.selectedObject()?.key === key) {
+                    this.propPanel()?.focusInspector();
+                } else if (this.sceneEditing.entity()?.key === key) {
+                    this.inspector()?.revealReference(key, componentId);
+                }
+            }, {injector: this.injector});
+        });
         this.draftReview.setReviewers([
             () => this.gameInput()?.canLeaveProject() ?? true,
             () => this.physicsLayers()?.canLeaveProject() ?? true,
