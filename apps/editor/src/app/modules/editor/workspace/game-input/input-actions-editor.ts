@@ -21,6 +21,7 @@ const DEFAULT_PATH = 'controls.input-actions.json';
 })
 export class InputActionsEditor {
     readonly active = input(false);
+    readonly preferredAsset = input<string | null>(null);
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService, {optional: true});
     protected readonly catalog = inject(InputActionsCatalog);
@@ -36,6 +37,7 @@ export class InputActionsEditor {
     protected readonly message = signal<string | null>(null);
     private readonly saved = signal<InputActionMap | null>(null);
     private generation = '';
+    private autoOpened = false;
     protected readonly invalid = computed(() => {
         const map = this.draft();
         return map ? validateInputActions(map) : null;
@@ -65,6 +67,21 @@ export class InputActionsEditor {
                 this.reset();
                 this.selectedId.set('');
                 this.pending.set(false);
+            });
+        });
+        effect(() => {
+            if (!this.active()) {
+                this.autoOpened = false;
+                return;
+            }
+            const id = this.preferredAsset();
+            if (this.autoOpened || !id || !this.available() ||
+                !this.catalog.assets().some(asset => asset.id === id)) return;
+            this.autoOpened = true;
+            if (this.dirty() || this.source()?.id === id) return;
+            untracked(() => {
+                this.selectedId.set(id);
+                void this.openSelected();
             });
         });
     }

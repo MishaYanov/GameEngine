@@ -3,9 +3,11 @@
             (exitRequested)="exitEditor()"
             (openProjectRequested)="openProject()"
             (sceneInformationRequested)="workspace.openSceneInformation()"
+            (controlsRequested)="workspace.openControls()"
             (settingsRequested)="settings.setOpen(true)"
             [canExit]="canExit()"
             [canOpen]="canOpenProject()"
+            [canOpenControls]="workspace.canOpenControls()"
             [canOpenSettings]="!opening()"
             [opening]="opening()"
     />

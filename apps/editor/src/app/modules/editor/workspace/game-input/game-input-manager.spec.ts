@@ -157,10 +157,24 @@ describe('Game Input Manager', () => {
         const root: HTMLElement = fixture.nativeElement;
         const button = (text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
             .find(candidate => candidate.textContent?.trim() === text)!;
-        button('Game Input…').click();
+        const opener = document.createElement('button');
+        opener.textContent = 'Controls';
+        root.prepend(opener);
+        opener.focus();
+        fixture.componentInstance.show();
         await fixture.whenStable();
-        return {fixture, root, button, execute, workspaceGeneration, snapshot, withCommittedEdit, busy};
+        return {fixture, root, button, execute, workspaceGeneration, snapshot, withCommittedEdit, busy, opener};
     }
+
+    it('restores focus to the opening control when Escape cancels the modal', async () => {
+        const {fixture, root, opener} = await setup();
+        const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
+        dialog.querySelector('button')!.focus();
+        dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+        await fixture.whenStable();
+        expect(dialog.open).toBe(false);
+        expect(document.activeElement).toBe(opener);
+    });
 
     it('previews the physical key through its game action and animation parameter and applies it to the project', async () => {
         const {fixture, root, button, execute} = await setup();
@@ -310,7 +324,7 @@ describe('Game Input Manager', () => {
         snapshot.update(value => ({...value, mode: 'play'}));
         await fixture.whenStable();
         expect(root.querySelector('dialog[open]')).toBeNull();
-        expect(root.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true);
+        expect(fixture.componentInstance.available()).toBe(false);
     });
 
     it('has accessible controls for movement and a named action', async () => {

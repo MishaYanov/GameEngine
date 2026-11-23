@@ -886,8 +886,8 @@ describe('Workspace live editing flow', () => {
             .find(item => item.textContent?.trim() === label)!;
         const field = (label: string, within: ParentNode) => [...within.querySelectorAll<HTMLLabelElement>('label')]
             .find(item => item.firstChild?.textContent?.trim() === label)!;
-        await vi.waitFor(() => expect(button('Game Input…').disabled).toBe(false));
-        button('Game Input…').click();
+        await vi.waitFor(() => expect(fixture.componentInstance.canOpenControls()).toBe(true));
+        fixture.componentInstance.openControls();
         await vi.waitFor(() => expect(button('Input Actions Assets')).toBeDefined());
         button('Input Actions Assets').click();
         await fixture.whenStable();
@@ -960,7 +960,7 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_open_input_actions',
             expect.objectContaining({assetId: controlsAssetId, expectedGeneration: 1})));
         await fixture.whenStable();
-        root.querySelector<HTMLButtonElement>('button[aria-label="Close Game Input Manager"]')!.click();
+        root.querySelector<HTMLButtonElement>('button[aria-label="Close Controls"]')!.click();
         await fixture.whenStable();
 
         const edit = root.querySelector<HTMLButtonElement>('button[aria-label="Edit Player Controller"]')!;
@@ -1224,8 +1224,7 @@ describe('Workspace live editing flow', () => {
     });
 
     it('applies game bindings, saves the project and reopens with the authored profile before Play', async () => {
-        const inputManagerButton = () => fixture.nativeElement.querySelector('editor-game-input > button') as HTMLButtonElement;
-        inputManagerButton().click();
+        fixture.componentInstance.openControls();
         await fixture.whenStable();
         const forward: HTMLSelectElement = fixture.nativeElement.querySelectorAll('editor-game-input .movement-keys select')[3];
         forward.value = 'arrow_up';
@@ -1246,7 +1245,7 @@ describe('Workspace live editing flow', () => {
         await editor.openProject('fixture/project.json');
         await fixture.whenStable();
         expect(editor.snapshot()?.project.input_profile?.movement.positive_y).toBe('arrow_up');
-        inputManagerButton().click();
+        fixture.componentInstance.openControls();
         await fixture.whenStable();
         expect((fixture.nativeElement.querySelectorAll('editor-game-input .movement-keys select')[3] as HTMLSelectElement).value).toBe('arrow_up');
         (fixture.nativeElement.querySelector('editor-game-input dialog') as HTMLDialogElement).close();

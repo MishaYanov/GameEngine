@@ -70,4 +70,19 @@ describe('EditorHeader', () => {
 
         expect(openSceneInformation).toHaveBeenCalledOnce();
     });
+
+    it('puts Controls next to Game and focuses the trigger before requesting its modal', async () => {
+        const trigger = root.querySelector<HTMLButtonElement>('.controls-trigger')!;
+        const open = vi.fn(() => expect(document.activeElement).toBe(trigger));
+        component.controlsRequested.subscribe(open);
+        expect(trigger.previousElementSibling?.id).toBe('editor-game-menu');
+        expect(trigger.disabled).toBe(true);
+        fixture.componentRef.setInput('canOpenControls', true);
+        await fixture.whenStable();
+        trigger.click();
+        expect(open).toHaveBeenCalledOnce();
+        fixture.componentRef.setInput('opening', true);
+        await fixture.whenStable();
+        expect(trigger.disabled).toBe(true);
+    });
 });

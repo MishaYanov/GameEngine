@@ -139,6 +139,7 @@ export class EditorWorkspace {
     private readonly inspector = viewChild(InspectorPanel);
     private readonly cameraSettings = viewChild(CameraSettings);
     private readonly sceneActions = viewChild(SceneActions);
+    private readonly gameInput = viewChild(GameInputManager);
     private readonly projectBuild = viewChild(ProjectBuild);
     protected readonly paletteOpen = signal(false);
     protected readonly problemsOpen = signal(false);
@@ -266,6 +267,14 @@ export class EditorWorkspace {
 
     openSceneInformation(): boolean {
         return this.sceneActions()?.show() ?? false;
+    }
+
+    canOpenControls(): boolean {
+        return this.gameInput()?.available() === true;
+    }
+
+    openControls(): void {
+        if (!this.document.querySelector('dialog[open]')) this.gameInput()?.show();
     }
 
     protected showUsages(key: EntityKey): void {

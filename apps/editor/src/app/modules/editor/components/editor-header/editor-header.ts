@@ -10,11 +10,13 @@ import {EditorService} from "../../../../core/editor/editor.service";
 })
 export class EditorHeader {
     readonly canOpen = input(false);
+    readonly canOpenControls = input(false);
     readonly canOpenSettings = input(true);
     readonly canExit = input(false);
     readonly opening = input(false);
     readonly openProjectRequested = output<void>();
     readonly sceneInformationRequested = output<void>();
+    readonly controlsRequested = output<void>();
     readonly settingsRequested = output<void>();
     readonly exitRequested = output<void>();
 

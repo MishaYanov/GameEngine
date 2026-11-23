@@ -40,6 +40,7 @@ export class GameInputManager {
     readonly opening = input(false);
     protected readonly open = signal(false);
     protected readonly showingAssets = signal(false);
+    protected readonly preferredAsset = signal<string | null>(null);
     protected readonly inputActions = inject(InputActionsCatalog, {optional: true});
     protected readonly pending = signal(false);
     protected readonly message = signal<string | null>(null);
@@ -57,7 +58,7 @@ export class GameInputManager {
     });
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService, {optional: true});
-    protected readonly available = computed(() => {
+    readonly available = computed(() => {
         const snapshot = this.editor.snapshot();
         return this.editor.nativeAvailable && !this.opening() && !this.pending() && snapshot?.mode === 'edit' &&
             (this.editing?.ready() ?? (!this.editor.busy() && !snapshot.transaction));
@@ -91,9 +92,9 @@ export class GameInputManager {
         });
     }
 
-    protected show(): void {
+    show(): void {
         const snapshot = this.editor.snapshot();
-        if (!snapshot || !this.available()) return;
+        if (!snapshot || this.open() || !this.available()) return;
         const profile = snapshot.project.input_profile ?? DEFAULT_GAME_INPUT;
         this.projectGeneration = this.editor.workspaceGeneration();
         this.savedProfile.set(this.profileSignature(profile));
@@ -106,7 +107,14 @@ export class GameInputManager {
         this.message.set(null);
         this.error.set(null);
         this.clearPreview();
-        this.showingAssets.set(false);
+        const controller = snapshot.document?.entities.find(entity =>
+            entity.key === snapshot.selection?.[0] && entity.player_controller?.enabled)?.player_controller
+            ?? snapshot.document?.entities.find(entity =>
+                entity.player_controller?.enabled && entity.player_controller.settings.local)?.player_controller;
+        const input = this.inputActions?.supported() ? controller?.settings.input : undefined;
+        const preferred = input?.kind === 'asset' ? input.asset_id : null;
+        this.preferredAsset.set(preferred);
+        this.showingAssets.set(preferred !== null);
         this.open.set(true);
     }
 

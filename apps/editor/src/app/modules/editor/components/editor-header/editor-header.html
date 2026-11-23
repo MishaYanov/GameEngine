@@ -21,6 +21,9 @@
             >Scene Information…
             </button>
         </div>
+        <button #controlsTrigger class="controls-trigger" type="button" aria-haspopup="dialog"
+                [disabled]="opening() || !canOpenControls()"
+                (click)="controlsTrigger.focus(); controlsRequested.emit()">Controls</button>
     </div>
 
     <div class="breadcrumb">
