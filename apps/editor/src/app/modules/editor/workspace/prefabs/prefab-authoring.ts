@@ -17,6 +17,7 @@ import {Vector3Field, type Vector3Change} from '../../../../shared/components/ve
 import { SceneEditingService } from '../scene-editing.service';
 import {sceneReferenceOptions} from '../scene-reference-options';
 import { relativeAssetPath } from '../components/component-draft';
+import {PropAssetSelection} from './prop-asset-selection';
 import { PrefabSourceEditor } from './prefab-source-editor';
 import { readPrefabSource } from './prefab-source-values';
 import { ReferenceBindings } from './reference-bindings';
@@ -106,6 +107,20 @@ export class PrefabAuthoring {
 				this.message.set(null);
 			});
 		});
+        const navigation = inject(PropAssetSelection, {optional: true});
+        effect(() => {
+            const request = navigation?.creationRequest();
+            const snapshot = this.editor.snapshot();
+            if (!request || !snapshot) return;
+            const sameScene = request.workspaceGeneration === this.editor.workspaceGeneration() &&
+                request.sceneId === snapshot.active_scene_id && snapshot.mode === 'edit';
+            if (sameScene && !this.available()) return;
+            untracked(() => {
+                navigation?.completeCreation(request);
+                if (sameScene && request.selection.length === snapshot.selection.length &&
+                    request.selection.every((key, index) => key === snapshot.selection[index])) void this.beginCreate();
+            });
+        });
 		inject(DestroyRef).onDestroy(() => {
 			this.destroyed = true;
 			this.closeSource();

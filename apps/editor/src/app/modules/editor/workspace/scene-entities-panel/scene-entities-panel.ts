@@ -36,6 +36,9 @@ import {
     visibleHierarchyRows
 } from './hierarchy-tree';
 import {hierarchyScrollTop, renderHierarchyWindow} from './hierarchy-viewport';
+import {PropAssetSelection} from '../prefabs/prop-asset-selection';
+import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
+import {EditorService} from '../../../../core/editor/editor.service';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -195,6 +198,9 @@ export class SceneEntitiesPanel {
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
     protected readonly contextMenu = inject(ContextMenuService);
+    private readonly propAssets = inject(PropAssetSelection, {optional: true});
+    private readonly propWorkspace = inject(PropWorkspaceService, {optional: true});
+    private readonly editor = inject(EditorService, {optional: true});
     protected readonly canCreate = computed(() => this.creationActions().length > 0 && this.scene().projectOpen && !this.disabled());
     private readonly createMenuBuilder = this.creationMenu(ContextMenuBuilder.create<CreationMenuContext>());
     protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey(), folder: null});
@@ -211,6 +217,26 @@ export class SceneEntitiesPanel {
             .icon('graph')
             .enabledWhen(context => this.canUseEntityMenu(context))
             .run(context => this.usagesRequested.emit(context.key)).build())
+        .action(ContextActionBuilder.create<EntityMenuContext>('entity.create-prop', 'Create Prop from Selection…')
+            .icon('layers')
+            .when(() => !!this.propAssets && !!this.editor?.capabilities()?.component_types?.length)
+            .enabledWhen(context => this.canUseEntityMenu(context) &&
+                this.editor?.snapshot()?.selection.includes(context.key) === true)
+            .run(context => {
+                const snapshot = this.editor?.snapshot();
+                if (!this.editor || snapshot?.mode !== 'edit' || !snapshot.selection.includes(context.key)) return;
+                this.propAssets?.create({workspaceGeneration: this.editor.workspaceGeneration(),
+                    sceneId: snapshot.active_scene_id, selection: [...snapshot.selection]});
+            }).build())
+        .action(ContextActionBuilder.create<EntityMenuContext>('entity.edit-prop-source', 'Edit Prop Source…')
+            .icon('object')
+            .when(context => !!this.propWorkspace && !!this.linkedSource(context.key))
+            .enabledWhen(context => this.canUseEntityMenu(context) &&
+                this.propWorkspace?.canOpen() === true && !!this.linkedSource(context.key))
+            .run(async context => {
+                const source = this.linkedSource(context.key);
+                if (source && this.canUseEntityMenu(context)) await this.propWorkspace?.openSource(source);
+            }).build())
         .action(ContextActionBuilder.create<EntityMenuContext>('entity.expand-branch', 'Expand Branch')
             .enabledWhen(context => this.canUseEntityMenu(context) && this.canExpandBranch(entityHierarchyKey(context.key)))
             .run(context => this.expandBranch(entityHierarchyKey(context.key))).build())
@@ -240,6 +266,12 @@ export class SceneEntitiesPanel {
             .enabledWhen(context => this.canUseEntityMenu(context) && this.canOrganize(this.dragSelection(context.key)))
             .run(context => this.beginMoveObjects(this.dragSelection(context.key))).build())
         .submenu('entity.create', 'Create', items => this.creationMenu(items));
+    private linkedSource(key: EntityKey) {
+        const link = this.editor?.snapshot()?.document.entities.find(entity => entity.key === key)?.linked_prefab;
+        return link ? {asset_id: link.source.source_id, path: link.source.path,
+            name: link.source.path.split('/').at(-1) ?? link.source.path} : null;
+    }
+
     private readonly folderMenuBuilder = ContextMenuBuilder.create<FolderMenuContext>()
         .action(ContextActionBuilder.create<FolderMenuContext>('folder.expand-branch', 'Expand Branch')
             .enabledWhen(context => context.contextKey === this.contextKey() && this.canExpandBranch(folderHierarchyKey(context.id)))

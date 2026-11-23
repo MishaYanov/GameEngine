@@ -19,6 +19,9 @@
                         <button (click)="prop.saveDraft()" [disabled]="!draft.dirty || !prop.canEditDraft()" type="button">Save Prop</button>
                     }
                 }
+                @if (sourceInAssets(); as assetId) {
+                    <button (click)="showSourceInAssets(assetId)" type="button">Show in Assets</button>
+                }
                 <button (click)="preview.frame()" [disabled]="!preview.ready()" type="button">Frame Prop</button>
                 @if (preview.supportsEnvironment()) {
                     <label>Preview environment

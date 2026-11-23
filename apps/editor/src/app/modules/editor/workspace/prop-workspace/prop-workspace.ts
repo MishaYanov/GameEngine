@@ -9,6 +9,7 @@ import {PropObjectEditor} from './prop-object-editor';
 import {NestedPropEditor} from './nested-prop-editor';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
+import {PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {ComponentEditor} from '../components/component-editor';
 
 interface PlacementRefresh {
@@ -30,6 +31,11 @@ export class PropWorkspace {
     protected readonly preview = inject(PropPreviewService);
     private readonly injector = inject(Injector);
     private readonly editor = inject(EditorService);
+    private readonly propAssets = inject(PropAssetSelection, {optional: true});
+    protected readonly sourceInAssets = computed(() => {
+        const document = this.prop.document();
+        return document?.kind === 'source' ? document.draft.asset_id : null;
+    });
     protected readonly assetGeneration = this.editor.workspaceGeneration;
     protected readonly authoringTypes = computed(() => this.editor.capabilities()?.component_types?.filter(
         type => canEditPropComponent(type.kind) && (type.kind !== 'script' || this.scriptTypes().length > 0),
@@ -118,6 +124,13 @@ export class PropWorkspace {
         }));
     });
     private readonly heading = viewChild<ElementRef<HTMLElement>>('heading');
+
+    protected showSourceInAssets(sourceId: string): void {
+        const snapshot = this.editor.snapshot();
+        if (!snapshot || snapshot.mode !== 'edit') return;
+        this.propAssets?.reveal({sourceId, workspaceGeneration: this.editor.workspaceGeneration(),
+            sceneId: snapshot.active_scene_id});
+    }
 
     protected selectPreviewEnvironment(select: HTMLSelectElement): void {
         const selected = select.value;
