@@ -43,8 +43,8 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
         (audioWorkspaceRequested)="openAudio($event)"
         [animationWorkspaceAvailable]="animationWorkspaceAvailable()"
         (animationWorkspaceRequested)="openAnimation($event)"
-		[particleDesignerAvailable]="particleDesigner !== null"
-		(particleDesignerRequested)="openParticleDesigner()"
+		[particleDesignerAvailable]="particleDesignerAvailable()"
+		(particleDesignerRequested)="openParticleDesigner($event)"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[audioScope]="audioScope()"
@@ -120,7 +120,11 @@ export class SceneComponentInspector {
     private readonly controlsInspector = viewChild(ControlGraphInspector);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
-    protected readonly particleDesigner = inject(ParticleDesignerSession, {optional: true});
+    private readonly particleDesigner = inject(ParticleDesignerSession, {optional: true});
+    protected readonly particleDesignerAvailable = computed(() => {
+        const access = this.subject()?.access;
+        return !!this.particleDesigner && (access === 'scene-edit' || access === 'linked-overrides');
+    });
 	private readonly viewport = inject(ViewportEditorService, {optional: true});
 	private readonly views = inject(WorkspaceViewService, {optional: true});
 	private readonly selectedPreview = inject(SelectedCameraPreviewService, {optional: true});
@@ -372,9 +376,10 @@ export class SceneComponentInspector {
 		}
 	}
 
-    protected openParticleDesigner(): void {
+    protected openParticleDesigner(componentId: string): void {
         const key = this.entity()?.key;
-        if (key && this.available()) this.particleDesigner?.open(key);
+        const subject = this.subject();
+        if (key && subject && this.available()) void this.particleDesigner?.openScoped(subject, key, componentId);
     }
 
 	protected async setSceneSky(assign: boolean): Promise<void> {

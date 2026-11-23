@@ -39,6 +39,7 @@ import {sceneReferenceOptions} from '../scene-reference-options';
 import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {skyColorChannels} from './sky-component-draft';
 import {SkyPanoramaPicker} from './sky-panorama-picker';
+import {particlePresetLabel} from '../particle-designer/particle-designer.models';
 import {PARTICLE_NUMBER_FIELDS} from '../../../../core/editor/particle-emitter.models';
 import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
@@ -89,7 +90,8 @@ export class ComponentEditor {
     readonly animationWorkspaceAvailable = input(false);
     readonly animationWorkspaceRequested = output<string>();
     readonly particleDesignerAvailable = input(false);
-    readonly particleDesignerRequested = output<void>();
+    readonly particleDesignerRequested = output<string>();
+    protected readonly particlePresetLabel = particlePresetLabel;
 	readonly ownerKey = input('');
     readonly initialCollider = input<Collider | null>(null);
 	readonly contextKey = input('');

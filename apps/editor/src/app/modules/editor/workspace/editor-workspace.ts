@@ -546,7 +546,7 @@ export class EditorWorkspace {
             this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
         }
         if (light) this.lights()?.show(light);
-        if (emitter) this.particles.open(emitter);
+        if (emitter) await this.particles.openSelected(emitter);
     }
 
     async createPrimitive(kind: PrimitiveKind, folder: FolderId | null = null): Promise<void> {

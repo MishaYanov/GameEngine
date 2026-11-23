@@ -7,13 +7,18 @@ import type {
     ParticleEmitterComponent,
     SceneEntity
 } from '../../../../core/editor/editor.models';
+import type {LinkedPropAddress} from '../../../../core/editor/linked-prefabs.models';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
+import type {InspectorSubject} from '../inspector-panel/inspector-subject';
+import {ScopedPaneRequests} from '../scoped-pane-request';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {DEFAULT_PARTICLE_EMITTER} from '../../../../core/editor/particle-emitter.models';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {ParticleDesigner} from './particle-designer';
 import {ParticleDesignerSession} from './particle-designer-session';
-import {PARTICLE_PRESETS} from './particle-designer.models';
+import {PARTICLE_PRESETS, particlePresetLabel} from './particle-designer.models';
 import {ParticlePreview} from './particle-preview';
 
 const emitter: ParticleEmitterComponent = {id: 'fixture-emitter', enabled: true, settings: DEFAULT_PARTICLE_EMITTER};
@@ -23,7 +28,7 @@ const entity: SceneEntity = {
     particle_emitter: emitter,
 };
 
-type DraftSnapshot = Pick<EditorSnapshot, 'mode' | 'revision' | 'active_scene_id'> & {
+type DraftSnapshot = Pick<EditorSnapshot, 'mode' | 'revision' | 'active_scene_id' | 'scene_revision' | 'selection'> & {
     document: Pick<EditorSnapshot['document'], 'entities'>;
 };
 
@@ -56,12 +61,14 @@ describe('Particle Designer', () => {
 
     afterEach(() => vi.restoreAllMocks());
 
-    async function setup() {
+    async function setup(open = true) {
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
         const snapshot = signal<DraftSnapshot>({
-            mode: 'edit', revision: 8, active_scene_id: 'yard', document: {entities: [entity]},
+            mode: 'edit', revision: 8, active_scene_id: 'yard', scene_revision: 3, selection: [entity.key],
+            document: {entities: [entity]},
         });
         const workspaceGeneration = signal(2);
+        const inspectLinkedPropAddress = vi.fn(async (): Promise<LinkedPropAddress | null> => null);
         const execute = vi.fn(async (command: EditorCommand) => {
             if (command.type !== 'replace_component' || command.component.data.kind !== 'particle_emitter') {
                 throw new Error('Unexpected command');
@@ -76,7 +83,9 @@ describe('Particle Designer', () => {
         TestBed.configureTestingModule({
             providers: [
                 {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: vi.fn(async () => ({})), save: vi.fn()}},
-                {provide: EditorService, useValue: {snapshot, workspaceGeneration, execute}},
+                {provide: EditorService, useValue: {snapshot, workspaceGeneration, execute, inspectLinkedPropAddress}},
+                {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 17})}},
+                ScopedPaneRequests, WorkspaceDraftReview,
                 {
                     provide: SceneEditingService, useValue: {
                         ready: () => true, error: () => null,
@@ -96,7 +105,7 @@ describe('Particle Designer', () => {
         root.append(opener);
         opener.focus();
         await fixture.whenStable();
-        expect(session.open(entity.key)).toBe(true);
+        if (open) expect(await session.openSelected(entity.key)).toBe(true);
         await fixture.whenStable();
         const button = (name: string) => [...root.querySelectorAll('button')].find(item =>
             item.textContent?.trim() === name || item.getAttribute('aria-label') === name)!;
@@ -110,8 +119,44 @@ describe('Particle Designer', () => {
             select.dispatchEvent(new Event('change', {bubbles: true}));
             await fixture.whenStable();
         };
-        return {fixture, root, session, snapshot, workspaceGeneration, execute, button, click, changePreset, opener};
+        return {fixture, root, session, snapshot, workspaceGeneration, execute, button, click, changePreset, opener,
+            inspectLinkedPropAddress, reviews: TestBed.inject(WorkspaceDraftReview)};
     }
+
+    it('opens only the clicked emitter after review and rejects stale selection', async () => {
+        const {session, snapshot, reviews} = await setup(false);
+        const subject: InspectorSubject = {address: {kind: 'scene', scene: 'yard', object: entity.key},
+            scope: {workspaceGeneration: 2, nativeGeneration: 17, revision: 8}, contentRevision: 3, access: 'scene-edit'};
+        expect(await session.openScoped(subject, entity.key, 'unknown-component')).toBe(false);
+        reviews.setReviewers([() => {
+            snapshot.update(current => ({...current, selection: ['other']}));
+            return true;
+        }]);
+        expect(await session.openScoped(subject, entity.key, emitter.id)).toBe(false);
+        expect(session.active()).toBe(false);
+    });
+
+    it('validates exact linked member addresses and applies a supported override', async () => {
+        const {session, snapshot, inspectLinkedPropAddress, execute} = await setup(false);
+        const address = {kind: 'object', placement_path: ['child-placement'], source_entity: 'source-mist'} as const;
+        const root: SceneEntity = {...entity, key: 'linked-root', particle_emitter: null,
+            linked_prefab: {source: {source_id: 'prop', path: 'props/yard.prefab.json'}, bindings: {}}};
+        snapshot.update(current => ({...current, document: {entities: [root, {...entity, parent: root.key}]}}));
+        const subject: InspectorSubject = {address: {kind: 'linked', scene: 'yard', root: root.key, address},
+            scope: {workspaceGeneration: 2, nativeGeneration: 17, revision: 8}, contentRevision: 3, access: 'linked-overrides'};
+        const reply = {root_key: root.key, entity_key: entity.key, scene_id: 'yard', address};
+        inspectLinkedPropAddress.mockResolvedValueOnce({...reply, address: {...address, source_entity: 'wrong-source'}});
+        expect(await session.openScoped(subject, entity.key, emitter.id)).toBe(false);
+        expect(await session.openScoped({...subject, access: 'read-only'}, entity.key, emitter.id)).toBe(false);
+        inspectLinkedPropAddress.mockResolvedValue(reply);
+        expect(await session.openScoped(subject, entity.key, emitter.id)).toBe(true);
+        session.pickPreset('Sparks');
+        await session.apply();
+        expect(inspectLinkedPropAddress).toHaveBeenCalledTimes(3);
+        expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+            type: 'replace_component', key: entity.key,
+        }), 2, 8);
+    });
 
     it('applies a previewed preset as one revisioned component replacement', async () => {
         const {root, session, button, click, changePreset, execute, snapshot} = await setup();
@@ -190,6 +235,12 @@ describe('Particle Designer', () => {
 });
 
 describe('Particle preview step', () => {
+    it('identifies preset values serialized by the native f32 runtime', () => {
+        const settings = PARTICLE_PRESETS[1].settings;
+        expect(particlePresetLabel({...settings, size: Math.fround(settings.size),
+            color: [Math.fround(settings.color[0]), .75, 1]})).toBe('Fountain');
+        expect(particlePresetLabel({...settings, size: .22})).toBe('');
+    });
     it('matches fixed-step grouping, uses its seed and caps active particles', () => {
         const settings = {...PARTICLE_PRESETS[1].settings, rate_per_second: 128, lifetime_seconds: 10};
         const individual = new ParticlePreview(settings);

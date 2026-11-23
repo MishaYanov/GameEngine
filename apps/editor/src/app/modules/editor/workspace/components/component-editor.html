@@ -61,7 +61,9 @@
                     <p class="binding">{{ playback.kind === 'single_clip' ? 'Imported clip ' + (playback.clip_index + 1) : 'Locomotion clips' }}</p>
                 }
                 @case ('particle_emitter') {
-                    <p class="binding">{{ component.data.settings.rate_per_second }} particles per second</p>
+                    <p class="binding">{{ particlePresetLabel(component.data.settings) || 'Custom settings' }}</p>
+                    <p class="binding">{{ component.data.settings.rate_per_second }} particles per second
+                        · {{ component.data.settings.lifetime_seconds }} s lifetime</p>
                 }
             }
             @if (pinned(component.data.kind)) {
@@ -75,7 +77,7 @@
                         <button class="primary-action" type="button" [disabled]="!available() || open()"
                                 (click)="audioWorkspaceRequested.emit(component.id)">Edit Audio</button>
                     } @else if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
-                        <button class="primary-action" (click)="particleDesignerRequested.emit()"
+                        <button class="primary-action" (click)="particleDesignerRequested.emit(component.id)"
                                 [disabled]="!available() || open()" aria-haspopup="dialog" type="button">Edit Particles…</button>
                     } @else {
                         <button class="primary-action" (click)="start(component)" [attr.aria-label]="'Edit ' + label(component)"

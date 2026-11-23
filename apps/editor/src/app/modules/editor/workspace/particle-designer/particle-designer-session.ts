@@ -1,12 +1,16 @@
 import {computed, inject, Injectable, signal} from '@angular/core';
 import type {EditorSnapshot, ParticleEmitterComponent, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
+import {type InspectorSubject, inspectorAddressKey, linkedInspectorRoot, linkedInspectorSubject, sceneInspectorSubject} from '../inspector-panel/inspector-subject';
+import {ScopedPaneRequests} from '../scoped-pane-request';
 import {DEFAULT_PARTICLE_EMITTER} from '../../../../core/editor/particle-emitter.models';
 import {SceneEditingService} from '../scene-editing.service';
 import {
     draftFromSettings,
     type ParticleDraft,
     PARTICLE_PRESETS,
+    particlePresetLabel,
     sameParticleSettings,
     settingsFromDraft,
 } from './particle-designer.models';
@@ -17,12 +21,15 @@ interface DraftTarget {
     readonly key: string;
     readonly name: string;
     readonly original: ParticleEmitterComponent;
+    readonly subject: InspectorSubject;
 }
 
 @Injectable()
 export class ParticleDesignerSession {
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService);
+    private readonly viewport = inject(ViewportEditorService);
+    private readonly panes = inject(ScopedPaneRequests);
     private readonly target = signal<DraftTarget | null>(null);
     private readonly exactColor = signal(DEFAULT_PARTICLE_EMITTER.color);
 
@@ -48,27 +55,82 @@ export class ParticleDesignerSession {
         !this.targetError() && !this.pending() && this.editing.ready());
     readonly preset = computed(() => {
         const candidate = this.candidate();
-        return candidate ? PARTICLE_PRESETS.find(item => sameParticleSettings(candidate, item.settings))?.label ?? '' : '';
+        return candidate ? particlePresetLabel(candidate) : '';
     });
 
-    open(key: string): boolean {
+    /** Opens the exact selected emitter created by the last accepted Scene command. */
+    openSelected(key: string): Promise<boolean> {
+        const selected = this.selectedEmitter(key);
+        return selected ? this.openScoped(selected.subject, key, selected.original.id) : Promise.resolve(false);
+    }
+
+    async openScoped(subject: InspectorSubject, key: string, componentId: string): Promise<boolean> {
+        const address = subject.address;
+        if (address.kind === 'prop' || (address.kind === 'scene' &&
+            (subject.access !== 'scene-edit' || address.object !== key)) ||
+            (address.kind === 'linked' && subject.access !== 'linked-overrides')) return false;
+        return this.panes.open<DraftTarget>({pane: 'particle-designer', subject, componentId}, {
+            resolve: () => {
+                const selected = this.selectedEmitter(key, subject);
+                return selected?.original.id === componentId ? {subject: selected.subject, componentId} : null;
+            },
+            load: async target => {
+                const selected = this.selectedEmitter(key, subject);
+                if (!selected || selected.original.id !== componentId ||
+                    !await this.validLinkedAddress(key, target.subject)) return null;
+                return {value: {
+                    generation: target.subject.scope.workspaceGeneration, subject: target.subject,
+                    scene: address.scene, key, name: selected.name, original: selected.original,
+                }};
+            },
+            activate: target => {
+                if (this.active()) return false;
+                this.activate(target);
+                return true;
+            },
+        });
+    }
+
+    private selectedEmitter(key: string, expected?: InspectorSubject):
+        {subject: InspectorSubject; name: string; original: ParticleEmitterComponent} | null {
         const snapshot = this.editor.snapshot();
-        if (!snapshot || snapshot.mode !== 'edit' || this.active()) return false;
-        const entity = snapshot.document.entities.find(item => item.key === key);
-        const original = particleEmitter(entity);
-        if (!entity || !original) return false;
-        this.setDraft(original.settings);
+        const nativeGeneration = this.viewport.state()?.workspace_generation;
+        if (!snapshot || snapshot.mode !== 'edit' || nativeGeneration == null || snapshot.selection[0] !== key) return null;
+        const object = snapshot.document.entities.find(entity => entity.key === key);
+        const original = particleEmitter(object);
+        if (!object || !original) return null;
+        const scope = {workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision};
+        const root = linkedInspectorRoot(object, snapshot.document.entities);
+        const linked = expected?.address.kind === 'linked' ? expected.address : null;
+        if (root) {
+            if (linked?.root !== root || linked.scene !== snapshot.active_scene_id) return null;
+            return {original, name: object.name,
+                subject: {address: linked, scope, contentRevision: snapshot.scene_revision, access: 'linked-overrides'}};
+        }
+        return linked ? null : {original, name: object.name, subject: sceneInspectorSubject(snapshot, key, scope, true)};
+    }
+
+    private async validLinkedAddress(key: string, subject: InspectorSubject): Promise<boolean> {
+        const {address, scope} = subject;
+        if (address.kind !== 'linked') return true;
+        try {
+            const result = await this.editor.inspectLinkedPropAddress(key, scope);
+            const snapshot = this.editor.snapshot();
+            const verified = snapshot && linkedInspectorSubject(snapshot,
+                {object: key, scene: address.scene, root: address.root, scope}, result, true);
+            return !!verified && inspectorAddressKey(address, scope.workspaceGeneration, scope.nativeGeneration) ===
+                inspectorAddressKey(verified.address, scope.workspaceGeneration, scope.nativeGeneration);
+        } catch {
+            return false;
+        }
+    }
+
+    private activate(target: DraftTarget): void {
+        this.setDraft(target.original.settings);
         this.errorState.set(null);
         this.announcementState.set(null);
         this.closeReviewState.set(false);
-        this.target.set({
-            generation: this.editor.workspaceGeneration(),
-            scene: snapshot.active_scene_id,
-            key,
-            name: entity.name,
-            original,
-        });
-        return true;
+        this.target.set(target);
     }
 
     canLeaveProject(): boolean {
@@ -117,6 +179,12 @@ export class ParticleDesignerSession {
                     this.errorState.set(issue ?? 'Reopen Particle Designer for this object.');
                     return;
                 }
+                const selected = this.selectedEmitter(target.key, target.subject);
+                if (!selected || !await this.validLinkedAddress(target.key, selected.subject) ||
+                    snapshot.revision !== this.editor.snapshot()?.revision || this.targetIssue(target, this.editor.snapshot())) {
+                    this.errorState.set('The emitter address changed. Reopen Particle Designer.');
+                    return;
+                }
                 try {
                     const saved = await this.editor.execute({
                         type: 'replace_component',
@@ -159,6 +227,10 @@ export class ParticleDesignerSession {
         if (target.generation !== this.editor.workspaceGeneration() || snapshot?.mode !== 'edit' ||
             snapshot.active_scene_id !== target.scene) {
             return 'The project or scene changed. Discard this draft and reopen Particle Designer.';
+        }
+        if (this.viewport.state()?.workspace_generation !== target.subject.scope.nativeGeneration ||
+            snapshot.selection[0] !== target.key) {
+            return 'The selected object or its workspace changed. Discard this draft and reopen Particle Designer.';
         }
         const component = this.component(snapshot, target.key);
         if (!component || component.id !== target.original.id) {

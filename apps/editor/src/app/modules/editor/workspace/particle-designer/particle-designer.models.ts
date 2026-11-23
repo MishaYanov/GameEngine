@@ -29,6 +29,14 @@ export const PARTICLE_PRESETS = [
     },
 ] as const satisfies readonly { label: string; settings: ParticleEmitterSettings }[];
 
+export function particlePresetLabel(settings: ParticleEmitterSettings): string {
+    return PARTICLE_PRESETS.find(({settings: preset}) =>
+        PARTICLE_FIELDS.every(({key}) => key === 'seed' ? settings[key] === preset[key]
+            : Math.fround(settings[key]) === Math.fround(preset[key])) &&
+        settings.color.every((channel, index) => Math.fround(channel) === Math.fround(preset.color[index])),
+    )?.label ?? '';
+}
+
 function colorToHex(color: ParticleEmitterSettings['color']): string {
     return '#' + color.map(channel => Math.round(channel * 255).toString(16).padStart(2, '0')).join('');
 }
