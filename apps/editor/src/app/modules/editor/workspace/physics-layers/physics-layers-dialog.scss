@@ -1,0 +1,41 @@
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    margin-block: .5rem;
+}
+
+.matrix {
+    overflow: auto;
+    max-block-size: 24rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: .25rem;
+    text-align: center;
+    white-space: nowrap;
+}
+
+caption {
+    margin-block: .5rem;
+    text-align: start;
+}
+
+th[scope='row'] {
+    text-align: start;
+}
+
+td button {
+    min-inline-size: 4rem;
+}
+
+.mirror {
+    font-weight: normal;
+}
+
+details {
+    margin-block-start: .75rem;
+}

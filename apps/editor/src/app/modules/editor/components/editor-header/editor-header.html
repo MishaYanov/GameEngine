@@ -20,6 +20,13 @@
                     type="button"
             >Scene Information…
             </button>
+            <button
+                    (click)="gameMenu.hidePopover(); gameTrigger.focus(); physicsLayersRequested.emit()"
+                    [disabled]="opening() || editorService.snapshot()?.mode !== 'edit'"
+                    aria-haspopup="dialog"
+                    type="button"
+            >Physics Layers…
+            </button>
         </div>
         <button #controlsTrigger class="controls-trigger" type="button" aria-haspopup="dialog"
                 [disabled]="opening() || !canOpenControls()"

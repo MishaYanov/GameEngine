@@ -1,4 +1,5 @@
 import type {GameInputProfile} from '../game-input/game-input.models';
+import type {PhysicsLayers} from './physics-layers.models';
 import type {ComponentRecord, ComponentTypeDescriptor, NativeBehaviorAttachment} from './editor-components';
 import type {
     LinkedPrefabOverrideTarget,
@@ -46,6 +47,7 @@ export interface ProjectData {
     readonly behaviors: readonly { readonly scene_id: SceneId; readonly behavior: BehaviorSpec }[];
     readonly behavior_definitions: readonly { readonly id: string; readonly settings: BehaviorSettings }[];
     readonly input_profile?: GameInputProfile | null;
+    readonly physics_layers?: PhysicsLayers | null;
     readonly gameplay_module?: string | null;
     readonly gameplay_settings?: unknown;
 }

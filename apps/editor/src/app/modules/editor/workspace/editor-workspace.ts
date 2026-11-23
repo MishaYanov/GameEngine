@@ -38,6 +38,7 @@ import {ViewportToolbar} from './viewport-toolbar/viewport-toolbar';
 import {GameInputManager} from './game-input/game-input-manager';
 import {InputActionsCatalog} from './game-input/input-actions-catalog.service';
 import {CameraSettings} from './game-settings/camera-settings';
+import {PhysicsLayersDialog} from './physics-layers/physics-layers-dialog';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
 import {CommandBuilder, type EntityKey} from '../../../core/editor/editor.models';
@@ -59,7 +60,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
+        CameraSettings, PhysicsLayersDialog, RuntimeInspector, CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
     styleUrl: './editor-workspace.scss',
@@ -140,6 +141,7 @@ export class EditorWorkspace {
     private readonly cameraSettings = viewChild(CameraSettings);
     private readonly sceneActions = viewChild(SceneActions);
     private readonly gameInput = viewChild(GameInputManager);
+    private readonly physicsLayers = viewChild(PhysicsLayersDialog);
     private readonly projectBuild = viewChild(ProjectBuild);
     protected readonly paletteOpen = signal(false);
     protected readonly problemsOpen = signal(false);
@@ -275,6 +277,10 @@ export class EditorWorkspace {
 
     openControls(): void {
         if (!this.document.querySelector('dialog[open]')) this.gameInput()?.show();
+    }
+
+    openPhysicsLayers(): boolean {
+        return this.physicsLayers()?.show() ?? false;
     }
 
     protected showUsages(key: EntityKey): void {

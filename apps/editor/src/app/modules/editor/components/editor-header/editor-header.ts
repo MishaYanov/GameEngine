@@ -17,6 +17,7 @@ export class EditorHeader {
     readonly openProjectRequested = output<void>();
     readonly sceneInformationRequested = output<void>();
     readonly controlsRequested = output<void>();
+    readonly physicsLayersRequested = output<void>();
     readonly settingsRequested = output<void>();
     readonly exitRequested = output<void>();
 

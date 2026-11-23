@@ -2,7 +2,7 @@ mod support;
 use engine_core::{
 	command::{EditorCommandDto as Command, EditorCommandRequest},
 	editor::EditorSession,
-	project::{BehaviorSpace, BehaviorSpec, ProjectData},
+	project::{BehaviorSpace, BehaviorSpec, PhysicsLayers, ProjectData},
 	simulation_session::SimulationSession,
 };
 use std::sync::Arc;
@@ -26,6 +26,23 @@ fn configure(mut project: ProjectData) -> ProjectData {
 		space: BehaviorSpace::World,
 	});
 	project
+}
+
+#[test]
+fn physics_layers_apply_and_undo_preserve_the_authored_document() {
+	let data = scene(vec![entity("terrain", [0.0; 3])]);
+	let mut editor = EditorSession::new(data.clone()).unwrap();
+	let mut project = editor.project().clone();
+	project.physics_layers = Some(PhysicsLayers {
+		layers: vec![],
+		ignored_pairs: vec![[1, 31]],
+	});
+	run(&mut editor, Command::SetProject { project });
+	assert!(editor.project().physics_layers.is_some());
+	assert_eq!(editor.authored_document().as_ref(), &data);
+	run(&mut editor, Command::Undo);
+	assert!(editor.project().physics_layers.is_none());
+	assert_eq!(editor.authored_document().as_ref(), &data);
 }
 
 #[test]

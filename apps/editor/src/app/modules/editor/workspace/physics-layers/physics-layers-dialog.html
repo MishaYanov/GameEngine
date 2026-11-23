@@ -1,0 +1,80 @@
+<editor-dialog title="Physics Layers" preferenceKey="physics-layers" closeLabel="Cancel"
+               [(open)]="open" [config]="dialogConfig" [renderFields]="false" [closeBlocked]="pending()">
+    @if (open()) {
+        <p>Allow permits interaction when both collider masks agree. Sensors overlap and blocking colliders can stop movement.</p>
+        <div class="actions">
+            <button type="button" [disabled]="busy()" (click)="previewStandardWorld()">Preview Standard World</button>
+            @if (preview()) {
+                <button type="button" (click)="usePreview()">Use preset</button>
+                <button type="button" (click)="preview.set(null)">Discard preview</button>
+            }
+            <label><input type="checkbox" [checked]="showAll()" (change)="showAll.set(!showAll())"> Show all 32 bits</label>
+        </div>
+        @if (preview()) {
+            <p role="status">Standard World preview. Review the layer labels and matrix before using the preset.</p>
+        }
+        <div class="matrix">
+            <table>
+                <caption>Layer interaction matrix</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Layer</th>
+                        @for (column of displayed(); track column.bit) {
+                            <th scope="col">{{ column.label }}</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (row of displayed(); track row.bit) {
+                        <tr>
+                            <th scope="row">{{ row.label }}</th>
+                            @for (column of displayed(); track column.bit) {
+                                <td>
+                                    @let state = allowed(row.bit, column.bit) ? 'Allow' : 'Ignore';
+                                    @if (row.bit <= column.bit) {
+                                        <button type="button" [disabled]="busy()"
+                                                [attr.aria-label]="row.label + ' and ' + column.label + ', ' + state"
+                                                [attr.aria-pressed]="state === 'Allow'"
+                                                (click)="togglePair(row.bit, column.bit)">{{ state }}</button>
+                                    } @else {
+                                        <span class="mirror">{{ state }}</span>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <details>
+            <summary>Layer names and bit assignments</summary>
+            @for (layer of policy().layers; track layer.bit) {
+                <div class="actions">
+                    <label>Bit {{ layer.bit }} <input #label type="text" [value]="layer.label" maxlength="80"
+                                                       [disabled]="busy()" (change)="rename(layer, label)"></label>
+                    <button type="button" [disabled]="busy()" (click)="toggleArchive(layer)">
+                        {{ layer.archived ? 'Reactivate' : 'Archive' }} {{ layer.label }}
+                    </button>
+                </div>
+            }
+            @if (vacantBits().length) {
+                <div class="actions">
+                    <label>Unused bit
+                        <select #bit [disabled]="busy()">
+                            @for (choice of vacantBits(); track choice) {
+                                <option [value]="choice">{{ choice }}</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Layer name <input #newName type="text" maxlength="80" [disabled]="busy()"></label>
+                    <button type="button" [disabled]="busy()" (click)="addLayer(+bit.value, newName.value) && (newName.value = '')">Add layer</button>
+                </div>
+            }
+        </details>
+        @if (error(); as message) { <p role="alert">{{ message }}</p> }
+        <p>Changes take effect on the next Play. Use Save All to keep them with the project.</p>
+    }
+    <button dialog-actions type="button" [disabled]="busy() || !changed() || opening()" (click)="apply()">
+        Apply
+    </button>
+</editor-dialog>
