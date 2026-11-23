@@ -8,6 +8,14 @@
         <div class="toolbar">
             <button type="button" [disabled]="timeline.playing() || !timeline.preview()" (click)="timeline.play()">Play Clip</button>
             <button type="button" [disabled]="!timeline.playing()" (click)="timeline.stop()">Stop Clip</button>
+            <label>Playback speed
+                <select #speed [disabled]="timeline.playing()"
+                        (change)="timeline.setPlaybackRate(+speed.value)">
+                    @for (rate of timeline.playbackRates; track rate) {
+                        <option [value]="rate" [selected]="rate === timeline.playbackRate()">{{ rate }}×</option>
+                    }
+                </select>
+            </label>
             <button type="button" [disabled]="timeline.busy() || !draft.can_undo" (click)="timeline.edit({type: 'undo'})">Undo Key Edit</button>
             <button type="button" [disabled]="timeline.busy() || !draft.can_redo" (click)="timeline.edit({type: 'redo'})">Redo Key Edit</button>
             <button type="button" [disabled]="timeline.busy() || !draft.dirty" (click)="save()">Save Timeline</button>

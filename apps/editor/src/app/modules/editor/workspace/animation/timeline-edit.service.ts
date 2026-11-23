@@ -25,6 +25,8 @@ interface Seek {
     readonly drag: TimelineKeyMove | null;
 }
 
+const PLAYBACK_RATES = [0.25, 0.5, 1, 1.5, 2] as const;
+
 @Injectable()
 export class TimelineEditService {
     private readonly editor = inject(EditorService);
@@ -47,6 +49,9 @@ export class TimelineEditService {
     readonly looping = signal(false);
     readonly snap = signal(false);
     readonly zoom = signal(1);
+    readonly playbackRates = PLAYBACK_RATES;
+    private readonly rate = signal<number>(1);
+    readonly playbackRate = this.rate.asReadonly();
     readonly playing = signal(false);
     readonly busy = signal(false);
     readonly error = signal<string | null>(null);
@@ -112,17 +117,22 @@ export class TimelineEditService {
         this.enqueueSeek();
     }
 
+    setPlaybackRate(rate: number): void {
+        if (!this.playing() && PLAYBACK_RATES.some(candidate => candidate === rate)) this.rate.set(rate);
+    }
+
     play(): void {
         const end = this.looping() ? this.loopEnd() : this.duration();
         const start = this.looping() ? this.loopStart() : 0;
         if (this.playing() || !this.preview() || end <= start) return;
         const from = this.playhead() >= end || this.playhead() < start ? start : this.playhead();
+        const rate = this.playbackRate();
         let started: number | null = null;
         this.playing.set(true);
         const advance = (now: number) => {
             if (!this.playing()) return;
             started ??= now;
-            const next = from + Math.floor(now - started);
+            const next = from + Math.floor((now - started) * rate);
             const tick = this.looping() ? start + (next - start) % (end - start) : Math.min(end, next);
             this.playhead.set(tick);
             this.enqueueSeek();

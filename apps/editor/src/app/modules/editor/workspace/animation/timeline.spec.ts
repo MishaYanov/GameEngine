@@ -223,6 +223,40 @@ describe('Authored clip timeline', () => {
         }
     });
 
+    it('plays at the chosen editor speed without writing to the clip or its undo history', async () => {
+        const {fixture, timeline, edit, saveDraft} = setup();
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const speed = [...root.querySelectorAll('label')]
+            .find(label => label.firstChild?.textContent?.trim() === 'Playback speed')!.querySelector('select')!;
+        expect(speed.value).toBe('1');
+        speed.value = '0.5';
+        speed.dispatchEvent(new Event('change'));
+        await fixture.whenStable();
+        let tick: FrameRequestCallback | undefined;
+        const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => {
+            tick = callback;
+            return 1;
+        });
+        try {
+            button(root, 'Play Clip').click();
+            await fixture.whenStable();
+            expect(speed.disabled).toBe(true);
+            tick?.(100);
+            tick?.(500);
+            expect(timeline.playhead()).toBe(200);
+            timeline.setPlaybackRate(2);
+            tick?.(2100);
+            expect(timeline.playhead()).toBe(1000);
+            expect(timeline.playing()).toBe(false);
+            expect(timeline.playbackRate()).toBe(0.5);
+            expect(edit).not.toHaveBeenCalled();
+            expect(saveDraft).not.toHaveBeenCalled();
+        } finally {
+            request.mockRestore();
+        }
+    });
+
     it('loops the editor transport inside the chosen range and releases it on destruction', async () => {
         const {fixture, timeline, close} = setup();
         await fixture.whenStable();
