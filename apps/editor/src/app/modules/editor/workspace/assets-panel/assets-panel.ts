@@ -1,6 +1,6 @@
 import {
     afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, input, linkedSignal, signal,
-    untracked, viewChild,
+    untracked, viewChild, viewChildren,
 } from '@angular/core';
 import type {ModelAsset, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
@@ -61,6 +61,10 @@ function searchable(text: string): string {
     return text.trim().replaceAll('\\', '/').toLocaleLowerCase();
 }
 
+function parentFolder(path: string): string {
+    return path.slice(0, Math.max(0, path.lastIndexOf('/')));
+}
+
 @Component({
     selector: 'editor-assets-panel',
     imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, AudioClipDetails, PrefabAuthoring, EditorContextMenuTrigger],
@@ -92,9 +96,9 @@ export class AssetsPanel {
     protected readonly controlsWorkspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
     private readonly folderLocation = viewChild<ElementRef<HTMLElement>>('location');
+    private readonly assetRows = viewChildren<ElementRef<HTMLButtonElement>>('assetRow');
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
-    private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly destroy = inject(DestroyRef);
     private readonly sceneEditing = inject(SceneEditingService, {optional: true});
     private readonly sceneSwitch = inject(SceneSwitchService);
@@ -216,6 +220,14 @@ export class AssetsPanel {
                 const file = this.menuFile(context);
                 if (file) this.selectFile(file);
             }).build())
+        .action(ContextActionBuilder.create<AssetMenuContext>('asset.show-in-folder', 'Show in Folder')
+            .icon('folder')
+            .when(() => this.searching())
+            .enabledWhen(context => this.menuFile(context) !== null)
+            .run(context => {
+                const file = this.menuFile(context);
+                if (file) this.showInFolder(file);
+            }).build())
         .separator()
         .action(ContextActionBuilder.create<AssetMenuContext>('asset.open-scene', 'Open Scene')
             .icon('cube')
@@ -325,21 +337,37 @@ export class AssetsPanel {
             this.error.set('The linked Prop source is unavailable in Assets.');
             return;
         }
-        this.assetFilter.set('all');
+        if (this.assetFilter() !== 'prefab') this.assetFilter.set('all');
+        this.revealAsset(file);
+    }
+
+    protected showInFolder(file: AssetEntry): void {
+        if (!this.searching()) return;
+        const visible = this.folderContents().files.find(entry => this.sameFile(entry, file));
+        if (visible) this.revealAsset(visible);
+    }
+
+    private revealAsset(file: AssetEntry): void {
+        const generation = this.editor.workspaceGeneration();
+        const snapshot = this.editor.snapshot();
+        const folder = parentFolder(file.path);
         this.searchQuery.set('');
-        this.folder.set(file.path.slice(0, Math.max(0, file.path.lastIndexOf('/'))));
+        this.folder.set(folder);
         this.selectFile(file);
         afterNextRender(() => {
-            if (!this.ownsReveal(request) || this.selectedCatalogAsset()?.asset_id !== request.sourceId) return;
-            const row = [...this.element.querySelectorAll<HTMLButtonElement>('button[data-asset-id]')]
-                .find(button => button.dataset['assetId'] === request.sourceId);
-            row?.focus();
+            const selected = this.selected();
+            const current = this.editor.snapshot();
+            if (generation !== this.editor.workspaceGeneration() || current?.active_scene_id !== snapshot?.active_scene_id ||
+                current?.mode !== snapshot?.mode || this.searching() || this.folder() !== folder ||
+                !selected || !this.sameFile(selected, file)) return;
+            const index = this.folderContents().files.indexOf(selected);
+            this.assetRows()[index]?.nativeElement.focus();
         }, {injector: this.injector});
     }
 
     protected upOneFolder(): void {
         const path = this.folder();
-        if (path) this.openFolder(path.slice(0, Math.max(0, path.lastIndexOf('/'))));
+        if (path) this.openFolder(parentFolder(path));
     }
 
     protected filterAssets(value: string): void {
@@ -393,6 +421,11 @@ export class AssetsPanel {
     protected isSelected(file: AssetEntry): boolean {
         const selected = this.selected();
         return selected !== null && this.sameFile(file, selected);
+    }
+
+    protected assetRowKey(file: AssetEntry): string {
+        if (file.kind === 'scene') return `scene:${file.sceneId}`;
+        return file.asset_id ? `${file.kind}:id:${file.asset_id}` : `${file.kind}:path:${file.path}`;
     }
 
     protected isActiveScene(file: AssetEntry): boolean {

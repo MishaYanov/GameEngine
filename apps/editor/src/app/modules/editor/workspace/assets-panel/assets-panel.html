@@ -85,9 +85,10 @@
                             </button>
                         </li>
                     }
-                    @for (file of folderContents().files; track file.kind === 'scene' ? file.sceneId : file.path) {
+                    @for (file of folderContents().files; track assetRowKey(file)) {
                         <li [title]="file.path" class="asset-file">
                             <button
+                                    #assetRow
                                     [editorContextMenuLabel]="file.name + ' actions'"
                                     [editorContextMenu]="assetMenu(file)"
                                     (click)="selectFile(file)"
@@ -133,6 +134,9 @@
                             <strong>{{ file.name }}</strong>
                             <span class="asset-path">{{ file.path }}</span>
                         </div>
+                        @if (searching()) {
+                            <button (click)="showInFolder(file)" type="button">Show in Folder</button>
+                        }
                         @if (file.kind === 'scene') {
                             <button (click)="openScene()" [disabled]="!canOpenScene() || isActiveScene(file)"
                                     type="button">

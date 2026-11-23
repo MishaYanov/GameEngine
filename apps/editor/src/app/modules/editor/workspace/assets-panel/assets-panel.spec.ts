@@ -269,6 +269,50 @@ describe('AssetsPanel', () => {
         expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
     });
 
+    it('shows the exact search result in its folder and keeps the kind filter', async () => {
+        const matchingName: ModelAsset = {name: 'Robot', path: 'models/robot.glb', asset_id: 'duplicate-name'};
+        const excludedProp: ModelAsset = {name: 'Robot prop', path: 'props/robot.prop.json', kind: 'prefab'};
+        const panel = await createPanel({models: [robot, matchingName, excludedProp]});
+        panel.button('models').click();
+        await panel.fixture.whenStable();
+        await panel.filterBy('model');
+        await panel.search('robot');
+        expect(panel.file(matchingName.path)).toBeTruthy();
+        panel.file(robot.path).click();
+        await panel.fixture.whenStable();
+        panel.button('Show in Folder').click();
+        await panel.fixture.whenStable();
+
+        expect(panel.root.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('');
+        expect(panel.root.querySelector<HTMLSelectElement>('.asset-filter select')?.value).toBe('model');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('props');
+        expect(panel.root.querySelector('.asset-file[title="props/robot.prop.json"]')).toBeNull();
+        expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
+        expect(panel.root.ownerDocument.activeElement).toBe(panel.file(robot.path));
+        expect(panel.importModel).not.toHaveBeenCalled();
+        expect(panel.current().dirty).toBe(false);
+    });
+
+    it('reveals a scene result from its context menu and ignores a result removed by a new query', async () => {
+        const path = 'scenes/courtyard.json';
+        const panel = await createPanel({models: [robot]});
+        await panel.search('courtyard');
+        const action = panel.contextAction(path, 'asset.show-in-folder');
+        await panel.search('robot');
+        await action.execute();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('robot');
+        expect(panel.file(robot.path)).toBeTruthy();
+
+        await panel.search('courtyard');
+        await panel.contextAction(path, 'asset.show-in-folder').execute();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('scenes');
+        expect(panel.root.ownerDocument.activeElement).toBe(panel.file(path));
+        expect(panel.file(path).getAttribute('aria-pressed')).toBe('true');
+        expect(panel.request).not.toHaveBeenCalled();
+    });
+
     it('filters Audio Clips and shows native duration, format and reverse references with focus on the row', async () => {
         const panel = await createPanel({models: [robot, bell]});
         const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
