@@ -1,8 +1,9 @@
-import type {EditorCommand} from './editor.models';
+import type {EditorCommand, PrimitiveKind} from './editor.models';
 
 type CreateAction =
     | {readonly kind: 'browse'; readonly asset: 'model' | 'prefab'}
     | {readonly kind: 'scene-settings'}
+    | {readonly kind: 'primitive'; readonly primitive: PrimitiveKind}
     | {readonly kind: 'create'; readonly command: EditorCommand; readonly allowFolder: boolean};
 
 interface CreateEntry {
@@ -28,6 +29,12 @@ export const OBJECT_MENU_GROUPS = [
             action: {kind: 'create', command: {type: 'create_particle_emitter'}, allowFolder: true}},
     ],
     [
+        {id: 'create_plane', label: 'Plane', action: {kind: 'primitive', primitive: 'plane'}},
+        {id: 'create_cube', label: 'Cube', action: {kind: 'primitive', primitive: 'cube'}},
+        {id: 'create_sphere', label: 'Sphere', action: {kind: 'primitive', primitive: 'sphere'}},
+        {id: 'create_capsule', label: 'Capsule', action: {kind: 'primitive', primitive: 'capsule'}},
+    ],
+    [
         {id: 'browse_props', label: 'Props…', action: {kind: 'browse', asset: 'prefab'}},
         {id: 'browse_models', label: 'Models…', action: {kind: 'browse', asset: 'model'}},
     ],
@@ -44,8 +51,16 @@ export type ObjectMenuEntry = (typeof OBJECT_MENU_GROUPS)[number][number];
 export type ObjectMenuAction = ObjectMenuEntry['id'];
 const entries: readonly ObjectMenuEntry[] = OBJECT_MENU_GROUPS.flatMap<ObjectMenuEntry>(group => group);
 
-export function availableObjectMenuActions(commands: ReadonlySet<string>): readonly ObjectMenuAction[] {
-    return entries.filter(item => !('capability' in item) || commands.has(item.capability)).map(item => item.id);
+export function availableObjectMenuActions(
+    commands: ReadonlySet<string>, primitivesAvailable: boolean,
+): readonly ObjectMenuAction[] {
+    return entries.filter(entry => entry.action.kind === 'primitive'
+        ? primitivesAvailable
+        : !('capability' in entry) || commands.has(entry.capability)).map(entry => entry.id);
+}
+
+export function allowsFolder(entry: ObjectMenuEntry): boolean {
+    return entry.action.kind === 'primitive' || (entry.action.kind === 'create' && entry.action.allowFolder);
 }
 
 export function objectMenuEntry(id: ObjectMenuAction): ObjectMenuEntry | undefined {

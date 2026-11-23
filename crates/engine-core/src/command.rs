@@ -451,4 +451,6 @@ pub struct EditorCapabilitiesDto {
 	pub controls_graph_assets: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub sky_panorama_assets: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub primitive_assets: bool,
 }

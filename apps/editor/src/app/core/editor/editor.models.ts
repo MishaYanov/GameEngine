@@ -423,6 +423,7 @@ export interface CommandDescriptor {
 export interface EditorCapabilities {
     readonly input_action_assets?: boolean;
     readonly sky_panorama_assets?: boolean;
+    readonly primitive_assets?: boolean;
     readonly animator_assets?: boolean;
     readonly controls_graph_assets?: boolean;
     readonly state_machines?: MachineDescriptor;

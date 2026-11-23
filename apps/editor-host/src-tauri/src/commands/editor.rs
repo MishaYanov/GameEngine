@@ -152,6 +152,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		controls_graph_assets: true,
 		input_action_assets: true,
 		sky_panorama_assets: true,
+		primitive_assets: cfg!(target_os = "windows"),
 	}
 }
 

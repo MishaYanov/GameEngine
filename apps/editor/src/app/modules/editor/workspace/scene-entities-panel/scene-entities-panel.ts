@@ -15,7 +15,7 @@ import {
     viewChild
 } from '@angular/core';
 import type {EntityKey, FolderId, FolderRecord} from '../../../../core/editor/editor.models';
-import {OBJECT_MENU_GROUPS, type ObjectMenuAction, type ObjectMenuEntry} from '../../../../core/editor/editor-object-menu';
+import {allowsFolder, OBJECT_MENU_GROUPS, type ObjectMenuAction, type ObjectMenuEntry} from '../../../../core/editor/editor-object-menu';
 import {EditorPane} from '../../../../shared/components/pane/pane';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
@@ -286,7 +286,7 @@ export class SceneEntitiesPanel {
 
     private creationAction(entry: ObjectMenuEntry) {
         const visible = (context: CreationMenuContext) => this.creationActions().includes(entry.id) &&
-            (context.folder === null || (entry.action.kind === 'create' && entry.action.allowFolder));
+            (context.folder === null || allowsFolder(entry));
         const allowed = (context: CreationMenuContext) => visible(context) && this.canCreate() &&
             context.contextKey === this.contextKey() &&
             (context.folder === null || this.canEditFolders() && this.forest().folders.has(context.folder));

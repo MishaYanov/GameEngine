@@ -1,6 +1,6 @@
 import {afterNextRender, Component, computed, DOCUMENT, effect, inject, Injector, input, output, signal, viewChild} from '@angular/core';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
-import {availableObjectMenuActions, objectMenuEntry, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
+import {allowsFolder, availableObjectMenuActions, objectMenuEntry, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {EditorPane} from '../../../shared/components/pane/pane';
@@ -106,7 +106,9 @@ export class EditorWorkspace {
     readonly availableObjectActions = computed<readonly ObjectMenuAction[]>(() => {
         if (!this.editorService.nativeAvailable || this.workspaceActionBlocked() || !this.sceneEditing.ready() ||
             this.editorService.snapshot()?.mode !== 'edit') return [];
-        return availableObjectMenuActions(new Set(this.editorService.capabilities()?.commands?.map(command => command.name)));
+        const capabilities = this.editorService.capabilities();
+        const primitives = capabilities?.primitive_assets === true && this.viewportEditor.state()?.workspace_generation != null;
+        return availableObjectMenuActions(new Set(capabilities?.commands?.map(command => command.name)), primitives);
     });
     protected readonly batchParentingEnabled = computed(() =>
         this.editorService.capabilities()?.commands?.some(command => command.name === 'reparent_objects') ?? false,
@@ -315,7 +317,7 @@ export class EditorWorkspace {
     async runObjectAction(id: ObjectMenuAction, folder: FolderId | null = null): Promise<void> {
         const entry = objectMenuEntry(id);
         if (!entry || !this.availableObjectActions().includes(id) || this.document.querySelector('dialog[open]')) return;
-        if (folder && (entry.action.kind !== 'create' || !entry.action.allowFolder || !this.hierarchyFoldersEnabled())) return;
+        if (folder && (!allowsFolder(entry) || !this.hierarchyFoldersEnabled())) return;
         const target = this.draftReview.capture();
         await this.draftReview.run(target, async () => {
             if (!this.availableObjectActions().includes(id)) return;
@@ -323,6 +325,7 @@ export class EditorWorkspace {
             const action = entry.action;
             if (action.kind === 'browse') this.assets()?.browse(action.asset);
             else if (action.kind === 'scene-settings') this.lights()?.show();
+            else if (action.kind === 'primitive') await this.createPrimitive(action.primitive, folder);
             else await this.createSceneObject(action.command, folder);
         });
     }
