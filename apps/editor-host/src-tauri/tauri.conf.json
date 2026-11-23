@@ -36,7 +36,29 @@
     ],
 
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self'",
+        "style-src-attr": "'unsafe-inline'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' data:",
+        "base-uri": "'self'",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "form-action": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "connect-src": "'self' ws://localhost:4200 ipc: http://ipc.localhost",
+        "img-src": "'self' data:",
+        "base-uri": "'self'",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "form-action": "'none'"
+      }
     }
   },
 

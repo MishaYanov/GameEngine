@@ -33,6 +33,7 @@ function adjacentMoments<T extends {readonly at: number}>(
 export class ClipTimeline {
     readonly asset = input.required<ClipAssetDocument>();
     readonly scope = input<AnimationPreviewDocument | null>(null);
+    readonly initialMarker = input('');
     readonly closed = output<void>();
     readonly saved = output<ClipTimelineDraft>();
     protected readonly timeline = inject(TimelineEditService);
@@ -42,6 +43,7 @@ export class ClipTimeline {
     protected readonly track = signal(0);
     private readonly key = signal('');
     private readonly marker = signal('');
+    private revealedMarker = '';
     protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
     protected readonly tracks = computed(() => this.timeline.draft()?.clip.tracks ?? []);
     protected readonly keys = computed<readonly ClipKey<Vec3 | Quaternion>[]>(() => this.tracks()[this.track()]?.track.keys ?? []);
@@ -76,6 +78,16 @@ export class ClipTimeline {
         effect(() => {
             const asset = this.asset(), scope = this.scope();
             untracked(() => this.timeline.connect(asset, scope));
+        });
+        effect(() => {
+            const id = this.initialMarker();
+            const draft = this.timeline.draft();
+            if (!id || !draft || (draft.asset.asset_id !== this.asset().asset.asset_id)) return;
+            const marker = draft.clip.markers?.find(entry => entry.id === id);
+            const reveal = `${draft.draft_id}:${id}`;
+            if (!marker || reveal === this.revealedMarker) return;
+            this.revealedMarker = reveal;
+            untracked(() => this.selectMarker(marker.id, marker.at));
         });
     }
 

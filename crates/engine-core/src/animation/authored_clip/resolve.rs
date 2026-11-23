@@ -228,10 +228,10 @@ fn blocked_subtrees(
 	}
 	let mut queue: Vec<_> = blocked.iter().cloned().collect();
 	while let Some(key) = queue.pop() {
-		if let Some(parent) = by_key.get(&key).and_then(|entity| entity.parent.as_ref()) {
-			if blocked.insert(parent.clone()) {
-				queue.push(parent.clone());
-			}
+		if let Some(parent) = by_key.get(&key).and_then(|entity| entity.parent.as_ref())
+			&& blocked.insert(parent.clone())
+		{
+			queue.push(parent.clone());
 		}
 	}
 	blocked

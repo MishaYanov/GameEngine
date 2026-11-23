@@ -14,23 +14,26 @@ use crate::{
 	asset_catalog::AssetId,
 	scene_data::{ColliderData, EntityData, MaterialOverrideData, SceneData, validate_model_path},
 };
-pub use audio_source::{AudioEventBinding, LegacyCombatCue,
-	AudioSourceBus, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings, AudioSourceSpatial,
+pub use audio_source::{
+	AudioEventBinding, AudioSourceBus, AudioSourceComponent, AudioSourcePlayback,
+	AudioSourceSettings, AudioSourceSpatial, LegacyCombatCue,
 };
 pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
-pub use particle_emitter::{MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterComponent, ParticleEmitterSettings};
+pub use particle_emitter::{
+	MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterComponent, ParticleEmitterSettings,
+};
 pub use player_controller::{
 	InputActionsRef, PlayerControllerComponent, PlayerControllerSettings, PlayerMovementSpace,
 };
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
-use serde::{Deserialize, Deserializer, Serialize};
 pub use script::{
-	MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField, ScriptIssue, ScriptProperty,
-	ScriptReference, ScriptReferenceField, ScriptReferenceKind, ScriptSettings,
+	MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField, ScriptIssue,
+	ScriptProperty, ScriptReference, ScriptReferenceField, ScriptReferenceKind, ScriptSettings,
 };
+use serde::{Deserialize, Deserializer, Serialize};
 pub use sky::{
 	DEFAULT_AMBIENT_LINEAR, MAX_SKY_EXPOSURE_EV, MAX_SKY_PANORAMA_FILE_BYTES,
 	MAX_SKY_PANORAMA_HEIGHT, MAX_SKY_PANORAMA_WIDTH, SceneEnvironment, SkyBackground, SkyComponent,

@@ -5,10 +5,19 @@ import {
     matchesAnimationTarget, reserveAnimationPreviewRequest, type ScopedAnimationPreview,
 } from '../../../../core/editor/animation-workspace.models';
 import {EditorService} from '../../../../core/editor/editor.service';
-import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
+import {type PropWorkspaceDocument, PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import {type AnimationTargetOption, propAnimationTargets, sceneAnimationTarget} from './animation-workspace-target';
+
+interface AuthoredClipReveal {
+    readonly assetId: string;
+    readonly markerId: string;
+    readonly generation: number;
+    readonly scene: string;
+    readonly prop: PropWorkspaceDocument | null;
+    readonly subject: string | null;
+}
 
 interface PreviewOwner {
     readonly key: string;
@@ -56,6 +65,8 @@ export class AnimationWorkspaceService {
     private request = 0;
     private reviewTimeline: (() => Promise<boolean>) | null = null;
 
+    private readonly authoredReveal = signal<AuthoredClipReveal | null>(null);
+    readonly authoredClipReveal = this.authoredReveal.asReadonly();
     readonly scope = signal<'scene' | 'prop'>('scene');
     readonly library = signal<'imported' | 'authored'>('imported');
     readonly authoredReady = signal(false);
@@ -109,6 +120,9 @@ export class AnimationWorkspaceService {
             if (active) untracked(() => this.chooseScope(origin));
         });
         effect(() => {
+            if (!this.views.animationView() || this.library() !== 'authored') this.authoredReveal.set(null);
+        });
+        effect(() => {
             const owner = this.owner();
             untracked(() => this.synchronize(owner));
         });
@@ -146,6 +160,44 @@ export class AnimationWorkspaceService {
         if (this.editor.playing()) return;
         this.library.set('authored');
         this.views.selectView('animation-workspace');
+    }
+
+    async revealAuthoredClip(assetId: string, markerId: string): Promise<void> {
+        const snapshot = this.editor.snapshot();
+        if (!assetId || snapshot?.mode !== 'edit' || this.editor.playing()) return;
+        const origin = this.views.activeViewKind();
+        const prop = this.views.propView() ? this.props.document() : null;
+        const request: AuthoredClipReveal = {
+            assetId, markerId, generation: this.editor.workspaceGeneration(), scene: snapshot.active_scene_id,
+            prop, subject: this.clipRevealSubject(prop),
+        };
+        if (!await this.reviewNavigation() || !this.matchesClipRevealOrigin(request) ||
+            this.views.activeViewKind() !== origin) return;
+        this.authoredReveal.set(request);
+        this.openAuthored();
+    }
+
+    isCurrentClipReveal(request: AuthoredClipReveal): boolean {
+        return this.authoredReveal() === request && this.library() === 'authored' &&
+            this.views.animationView() && this.matchesClipRevealOrigin(request);
+    }
+
+    finishClipReveal(request: AuthoredClipReveal): void {
+        if (this.authoredReveal() === request) this.authoredReveal.set(null);
+    }
+
+    private matchesClipRevealOrigin(request: AuthoredClipReveal): boolean {
+        const snapshot = this.editor.snapshot();
+        return !this.destroyed && snapshot?.mode === 'edit' && !this.editor.playing() &&
+            snapshot.active_scene_id === request.scene && this.editor.workspaceGeneration() === request.generation &&
+            (!request.prop || this.props.document() === request.prop) && this.clipRevealSubject(request.prop) === request.subject;
+    }
+
+    private clipRevealSubject(prop: PropWorkspaceDocument | null): string | null {
+        if (!prop) return this.editing.entity()?.key ?? null;
+        const object = this.props.selectedObject();
+        const placement = this.props.selectedPlacement();
+        return object ? `object:${object.key}` : placement ? `placement:${placement.id}` : null;
     }
 
     registerTimelineReview(review: () => Promise<boolean>): () => void {

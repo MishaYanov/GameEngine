@@ -111,10 +111,10 @@ impl GameApp {
 	pub(crate) fn supports_checkpoint_transfer(&self) -> bool {
 		self.installed_project
 			&& self
-			.project
-			.as_ref()
-			.and_then(|project| project.gameplay_module.as_deref())
-			== Some(CINDER_OATH_ID)
+				.project
+				.as_ref()
+				.and_then(|project| project.gameplay_module.as_deref())
+				== Some(CINDER_OATH_ID)
 	}
 
 	pub(crate) fn checkpoint_arena_scene(&self) -> Option<SceneId> {
@@ -148,7 +148,7 @@ impl GameApp {
 			let bytes = read_bounded(&path, MAX_SCENE_BYTES)?.ok_or("Missing arena scene")?;
 			Ok::<_, String>((path, bytes))
 		})()
-			.map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
+		.map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
 		let source =
 			std::str::from_utf8(&scene_bytes).map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
 		let document = Arc::new(
@@ -214,15 +214,15 @@ fn valid_identifier(value: &str) -> bool {
 	!value.is_empty()
 		&& value.len() <= 64
 		&& value.bytes().all(|byte| {
-		byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
-	})
+			byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+		})
 }
 
 fn valid_digest(value: &str) -> bool {
 	value.len() == 64
 		&& value
-		.bytes()
-		.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+			.bytes()
+			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[cfg(test)]

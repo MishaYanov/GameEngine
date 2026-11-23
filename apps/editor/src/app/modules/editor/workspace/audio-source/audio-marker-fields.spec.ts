@@ -23,12 +23,12 @@ function setup(openAuthoredClip = vi.fn(async () => clip([contact]))) {
     const authoredClipCatalogVersion = signal(0);
     const snapshot = signal({revision: 1, mode: 'edit'});
     const listAuthoredClips = vi.fn(async () => [clip([]).asset]);
-    const openAuthored = vi.fn();
+    const revealAuthoredClip = vi.fn();
     TestBed.configureTestingModule({imports: [AudioMarkerFields], providers: [
         {provide: EditorService, useValue: {
             workspaceGeneration, authoredClipCatalogVersion, snapshot, openAuthoredClip, listAuthoredClips,
         }},
-        {provide: AnimationWorkspaceService, useValue: {openAuthored}},
+        {provide: AnimationWorkspaceService, useValue: {revealAuthoredClip}},
     ]});
     const fixture = TestBed.createComponent(AudioMarkerFields);
     fixture.componentRef.setInput('clipId', assetId);
@@ -36,11 +36,11 @@ function setup(openAuthoredClip = vi.fn(async () => clip([contact]))) {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     const marker = () => root.querySelector<HTMLInputElement>('editor-search-picker:nth-of-type(2) input');
-    return {fixture, root, marker, authoredClipCatalogVersion, snapshot, listAuthoredClips, openAuthoredClip, openAuthored};
+    return {fixture, root, marker, authoredClipCatalogVersion, snapshot, listAuthoredClips, openAuthoredClip, revealAuthoredClip};
 }
 
 it('refreshes a selected clip after publication and keeps its missing marker visible for repair', async () => {
-    const {fixture, root, marker, authoredClipCatalogVersion, snapshot, listAuthoredClips, openAuthoredClip, openAuthored} = setup();
+    const {fixture, root, marker, authoredClipCatalogVersion, snapshot, listAuthoredClips, openAuthoredClip, revealAuthoredClip} = setup();
     await vi.waitFor(() => {
         fixture.detectChanges();
         expect(marker()?.value).toBe(contact.label);
@@ -60,7 +60,7 @@ it('refreshes a selected clip after publication and keeps its missing marker vis
     expect(marker()?.value).toBe(contact.id);
     expect(openAuthoredClip).toHaveBeenLastCalledWith(assetId, 1);
     root.querySelector<HTMLButtonElement>('button:not([aria-label])')?.click();
-    expect(openAuthored).toHaveBeenCalledOnce();
+    expect(revealAuthoredClip).toHaveBeenCalledWith(assetId, contact.id);
 });
 
 it('discards the delayed reply for a previously published version of the same clip', async () => {

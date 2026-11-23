@@ -155,8 +155,7 @@ fn legacy_names_starting_with_a_hyphen_reach_project_validation() {
 
 #[test]
 fn audio_stage_preserves_only_referenced_bytes_and_rejects_malformed_clips() {
-	const KEY_CLIP: &[u8] =
-		include_bytes!("../../projects/cinder-oath/assets/audio/blade-hit.wav");
+	const KEY_CLIP: &[u8] = include_bytes!("../../projects/cinder-oath/assets/audio/blade-hit.wav");
 	let fixture = Fixture::new();
 	let authoring = fixture.0.join("audio-authoring");
 	let assets = authoring.join("assets");

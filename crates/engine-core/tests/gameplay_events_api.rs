@@ -31,8 +31,7 @@ fn fixture() -> (ProjectData, Arc<SceneData>) {
 		"../../../apps/game/assets/scenes/event-lab.json"
 	))
 	.unwrap();
-	let project =
-		ProjectData::from_json(&test_project::manifest("event-lab")).unwrap();
+	let project = ProjectData::from_json(&test_project::manifest("event-lab")).unwrap();
 	(project, Arc::new(data))
 }
 fn step(session: &mut SimulationSession) {
@@ -233,8 +232,7 @@ fn character_fixture() -> (ProjectData, Arc<SceneData>) {
 		"../../../apps/game/assets/scenes/controller-room.json"
 	))
 	.unwrap();
-	let project =
-		ProjectData::from_json(&test_project::manifest("controller-room")).unwrap();
+	let project = ProjectData::from_json(&test_project::manifest("controller-room")).unwrap();
 	let owner = data
 		.entities
 		.iter_mut()

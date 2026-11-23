@@ -61,7 +61,7 @@ fn particle_motion_is_identical_under_different_frame_groupings() {
 			..Default::default()
 		},
 	)
-		.with_parent(Some(parent.key.clone()));
+	.with_parent(Some(parent.key.clone()));
 	let entities = vec![parent, local];
 	let mut single = simulator(entities.clone());
 	let mut grouped = simulator(entities);
@@ -100,12 +100,12 @@ fn particle_cone_uses_parent_and_local_rotation_without_scale() {
 				..Default::default()
 			},
 		)
-			.with_parent(Some(parent.key.clone()))
-			.with_transform(TransformData {
-				rotation: [std::f32::consts::FRAC_PI_4, 0., 0.],
-				scale: local_scale,
-				..Default::default()
-			});
+		.with_parent(Some(parent.key.clone()))
+		.with_transform(TransformData {
+			rotation: [std::f32::consts::FRAC_PI_4, 0., 0.],
+			scale: local_scale,
+			..Default::default()
+		});
 		let mut run = simulator(vec![parent, local]);
 		for _ in 0..16 {
 			run.tick(STEP).unwrap();
@@ -293,5 +293,8 @@ fn rejected_catch_up_does_not_commit_particle_births() {
 	assert_eq!(run.particles().count(), 0);
 	run.set_paused(false);
 	assert!(run.tick(STEP).unwrap().particles_changed);
-	assert_eq!(run.particles().next().unwrap().position, [1., 0., 0.]);
+	let samples = run.particles().collect::<Vec<_>>();
+	assert_eq!(samples[0].position, [1., 0., 0.]);
+	assert!(run.tick(STEP).is_err());
+	assert_eq!(run.particles().collect::<Vec<_>>(), samples);
 }

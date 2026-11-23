@@ -76,7 +76,7 @@ The export tests that the authored game does not depend on editor-only geometry.
 The following records current source capabilities. Record native acceptance separately.
 The main wire definitions are in `apps/editor/src/app/core/editor/editor.models.ts`.
 The configured starter is in `apps/game/project.json`.
-Native application-specific progress is demonstrated in `crates/courtyard-gameplay/src/lib.rs`.
+Native application-specific progress is demonstrated in `crates/cinder-oath-gameplay/src/lib.rs`.
 
 | Capability                           | Inspected state                                                              | Consequence for the next work                                |
 |--------------------------------------|------------------------------------------------------------------------------|--------------------------------------------------------------|

@@ -1,12 +1,12 @@
 //! One isolated, pinned native pose. It never advances a game session or edits a document.
 #[path = "animation_preview/authored.rs"]
 pub(crate) mod authored;
-#[path = "animation_preview/timeline.rs"]
-pub(crate) mod timeline;
 #[path = "animation_preview/imported_keys.rs"]
 pub(crate) mod imported_keys;
 #[path = "animation_preview/scoped.rs"]
 mod scoped;
+#[path = "animation_preview/timeline.rs"]
+pub(crate) mod timeline;
 
 use crate::editor::EditorWorkspace;
 use runtime::{
@@ -14,8 +14,8 @@ use runtime::{
 	asset_catalog::AssetId,
 	EntityKey,
 };
-pub use scoped::{AnimationPreviewDocument, AnimationWorkspaceTarget};
 use scoped::ScopedAnimationPreview;
+pub use scoped::{AnimationPreviewDocument, AnimationWorkspaceTarget};
 use serde::Serialize;
 use std::sync::Arc;
 

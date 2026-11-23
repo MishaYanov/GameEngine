@@ -192,6 +192,8 @@ fn reimport_is_compatible_and_rolls_back_asset_and_catalog_on_publication_failur
 		.unwrap();
 	let before = fs::read(root.join("model.glb")).unwrap();
 	let catalog_before = fs::read(root.join(CATALOG_FILE)).unwrap();
+	assert_eq!(old.source_path.as_deref(), source.to_str());
+	assert!(prepare_reimport(&root, &old.id, None, &old.fingerprint, &HashSet::new()).is_err());
 	let incompatible = f.source("incompatible.glb", "Renamed", 2.);
 	let used = HashSet::from([0]);
 	assert!(

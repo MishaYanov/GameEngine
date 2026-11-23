@@ -559,9 +559,7 @@ pub fn prepare_reimport(
 	if old.kind != AssetKind::Model || old.fingerprint != expected_fingerprint {
 		return Err("Asset fingerprint changed; refresh before reimporting".into());
 	}
-	let source = source
-		.or_else(|| old.source_path.as_deref().map(Path::new))
-		.ok_or("Choose a reimport source")?;
+	let source = source.ok_or("Choose a reimport source")?;
 	prepare(asset_root, source, &old.path, Some(old), false, used_meshes)
 }
 pub fn prepare_move(

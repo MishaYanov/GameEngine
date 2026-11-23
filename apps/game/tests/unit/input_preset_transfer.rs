@@ -24,7 +24,7 @@ impl Fixture {
 		let mut project = ProjectData::from_json(include_str!(
 			"../../../../projects/cinder-oath/project.json"
 		))
-			.unwrap();
+		.unwrap();
 		project.input_profile.as_mut().unwrap().actions = vec![
 			GameInputBinding {
 				id: "interact".into(),

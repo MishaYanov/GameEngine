@@ -270,7 +270,10 @@ impl ScriptDescriptor {
 		self.validate_config(settings)
 			.map_err(ScriptIssue::InvalidConfiguration)?;
 		if self.write_owner_transform
-			&& owner.character_controller.as_ref().is_some_and(|component| component.enabled)
+			&& owner
+				.character_controller
+				.as_ref()
+				.is_some_and(|component| component.enabled)
 		{
 			return Err(ScriptIssue::InvalidConfiguration(format!(
 				"{} writes its owner's transform, which is owned by the enabled Character Controller",

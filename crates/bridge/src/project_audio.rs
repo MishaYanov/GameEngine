@@ -38,7 +38,7 @@ impl ProjectAudio {
 		self.waves.get(path)
 	}
 
-	pub fn files(&self) -> impl Iterator<Item=(&str, &[u8])> {
+	pub fn files(&self) -> impl Iterator<Item = (&str, &[u8])> {
 		std::iter::once((MANIFEST, self.manifest.as_slice())).chain(
 			self.waves
 				.iter()
@@ -95,8 +95,8 @@ pub fn load(asset_root: &Path) -> Result<Option<ProjectAudio>, String> {
 fn valid_name(name: &str) -> bool {
 	(1..=48).contains(&name.len())
 		&& name
-		.bytes()
-		.all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == b'-')
+			.bytes()
+			.all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == b'-')
 }
 
 fn read_wave(root: &Path, path: &str, max_pcm_bytes: usize) -> Result<WaveClip, String> {

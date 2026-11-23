@@ -119,7 +119,9 @@ fn repeated_nested_scripts_keep_their_local_sensor_and_bind_named_external_slots
 	let base = vec![entity("floor", [0.0; 3])];
 	let mut child = pin(version(), "door");
 	child.entities.push(entity("sensor", [0.0; 3]));
-	child.reference_slots.insert("External".into(), key("placeholder"));
+	child
+		.reference_slots
+		.insert("External".into(), key("placeholder"));
 	child.entities[0].scripts.push(ScriptComponent {
 		id: ComponentId::new("door-script").unwrap(),
 		enabled: true,
@@ -128,15 +130,30 @@ fn repeated_nested_scripts_keep_their_local_sensor_and_bind_named_external_slots
 			config_version: 1,
 			properties: BTreeMap::new(),
 			references: BTreeMap::from([
-				("sensor".into(), ScriptReference::Entity { entity: key("sensor") }),
-				("out".into(), ScriptReference::Slot { slot: "External".into() }),
+				(
+					"sensor".into(),
+					ScriptReference::Entity {
+						entity: key("sensor"),
+					},
+				),
+				(
+					"out".into(),
+					ScriptReference::Slot {
+						slot: "External".into(),
+					},
+				),
 			]),
 		},
 	});
 	let slots = BTreeMap::from([("Outside".into(), key("outside"))]);
 	let placements = ["left", "right"].map(|side| {
 		let mut place = placement(side, &child.version, "floor", 0.0);
-		place.bindings.insert("External".into(), NestedBinding::Slot { name: "Outside".into() });
+		place.bindings.insert(
+			"External".into(),
+			NestedBinding::Slot {
+				name: "Outside".into(),
+			},
+		);
 		place
 	});
 	let prefab = PrefabData {
@@ -144,26 +161,58 @@ fn repeated_nested_scripts_keep_their_local_sensor_and_bind_named_external_slots
 		entities: base,
 		reference_slots: slots,
 		gameplay: None,
-		composition: PropComposition { pins: vec![child], placements: placements.into() },
+		composition: PropComposition {
+			pins: vec![child],
+			placements: placements.into(),
+		},
 	};
 	let reopened = PrefabData::from_json(&prefab.to_json().unwrap()).unwrap();
-	assert_eq!(reopened.composition.pins[0].entities[0].scripts[0].settings.references["out"],
-		ScriptReference::Slot { slot: "External".into() });
+	assert_eq!(
+		reopened.composition.pins[0].entities[0].scripts[0]
+			.settings
+			.references["out"],
+		ScriptReference::Slot {
+			slot: "External".into()
+		}
+	);
 	let expanded = reopened.expanded_entities().unwrap();
-	let mapping = expanded.iter().map(|entity| {
-		(entity.key.clone(), key(&format!("copy-{}", entity.key.as_str())))
-	}).collect();
-	let copied = reopened.remap_entities(
-		&mapping, &BTreeMap::from([("Outside".into(), key("scene-outside"))]),
-	).unwrap();
-	for (original, clone) in expanded.iter().zip(copied).filter(|(entity, _)| !entity.scripts.is_empty()) {
+	let mapping = expanded
+		.iter()
+		.map(|entity| {
+			(
+				entity.key.clone(),
+				key(&format!("copy-{}", entity.key.as_str())),
+			)
+		})
+		.collect();
+	let copied = reopened
+		.remap_entities(
+			&mapping,
+			&BTreeMap::from([("Outside".into(), key("scene-outside"))]),
+		)
+		.unwrap();
+	for (original, clone) in expanded
+		.iter()
+		.zip(copied)
+		.filter(|(entity, _)| !entity.scripts.is_empty())
+	{
 		let old = &original.scripts[0].settings.references;
 		let ScriptReference::Entity { entity: sensor } = &old["sensor"] else {
 			panic!("nested sensor must be scoped");
 		};
 		let refs = &clone.scripts[0].settings.references;
-		assert_eq!(refs["sensor"], ScriptReference::Entity { entity: mapping[sensor].clone() });
-		assert_eq!(refs["out"], ScriptReference::Entity { entity: key("scene-outside") });
+		assert_eq!(
+			refs["sensor"],
+			ScriptReference::Entity {
+				entity: mapping[sensor].clone()
+			}
+		);
+		assert_eq!(
+			refs["out"],
+			ScriptReference::Entity {
+				entity: key("scene-outside")
+			}
+		);
 	}
 }
 

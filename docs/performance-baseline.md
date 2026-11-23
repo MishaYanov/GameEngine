@@ -11,6 +11,7 @@ are local regression limits, not hardware-independent frame-rate guarantees.
 608 entities: 576 repeated props, 16 controlled actors and 16 invisible sensors.
 It uses three bundled GLB models, 592 visible instances, 68 colliders and a fixed
 camera. Sixteen actors move through sensors while the props remain static.
+Use a separate emitter fixture to measure particle work.
 
 From the repository root on Windows:
 
@@ -18,15 +19,19 @@ From the repository root on Windows:
 ./scripts/measure-core-performance.ps1 -EnforceBudget
 ```
 
-The script builds the release example and runs five fresh processes. Each process
+The script builds the release example with the locked dependencies and runs five
+fresh processes. Pass `-Offline` when the dependencies are already cached. The
+script uses the executable reported by Cargo, including when a different target
+directory is configured. Each process
 measures 20 scene preparations, warms 60 simulation ticks and measures 600 fixed
 ticks. It records process peak working set through the child process handle.
-Reports and the generated scene are written below `target/performance`.
+Reports and the generated scene go to `target/performance` by default. Use
+`-OutputDirectory` to keep a separate run.
 
 The CPU executable can also run directly, including on other supported platforms:
 
 ```text
-cargo run --release -p engine-core --example performance_baseline
+cargo run --release --locked -p engine-core --example performance_baseline
 ```
 
 CPU preparation includes JSON parsing, scene validation, module construction and
@@ -108,5 +113,5 @@ native rendering and GPU ownership measurements separate from CPU simulation.
 - `crates/engine-core/src/simulation_session.rs`
 - `crates/engine-core/src/collision.rs`
 - `target/performance/core-series.json`
-- `apps/game/src/tests_performance.rs`
+- `apps/game/tests/unit/tests_performance.rs`
 - `docs/verification/milestones-performance-2026-11-20.json`

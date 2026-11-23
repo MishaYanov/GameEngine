@@ -7,6 +7,7 @@ import type {
 } from '../../../../core/editor/authored-clip.models';
 import type {SceneEntity, Transform, Vec3} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ClipTimeline} from './timeline';
@@ -42,6 +43,7 @@ type KeyField = 'fromPosition' | 'toPosition' | 'fromRotation' | 'toRotation';
 })
 export class AuthoredClipEditor {
     private readonly editor = inject(EditorService);
+    private readonly viewport = inject(ViewportEditorService);
     private readonly scene = inject(SceneEditingService);
     private readonly props = inject(PropWorkspaceService);
     private readonly animation = inject(AnimationWorkspaceService);
@@ -51,6 +53,7 @@ export class AuthoredClipEditor {
     protected readonly preview = signal<VisualClipPreview | null>(null);
     protected readonly busy = signal(false);
     protected readonly timelineOpen = signal(false);
+    protected readonly timelineMarker = signal('');
     private readonly timelineTrigger = viewChild<ElementRef<HTMLButtonElement>>('timelineTrigger');
     private readonly injector = inject(Injector);
     protected readonly error = signal<string | null>(null);
@@ -90,7 +93,7 @@ export class AuthoredClipEditor {
     protected readonly canCreate = computed(() => this.available() && this.target() !== null);
     protected readonly canSave = computed(() => {
         const draft = this.draft();
-        return this.available() && draft !== null && draft.name.trim() !== '' && draft.path.trim() !== '';
+        return this.available() && this.viewport.state()?.workspace_generation != null && draft !== null && draft.name.trim() !== '' && draft.path.trim() !== '';
     });
 
     private readonly apertureContext = computed(() => {
@@ -117,6 +120,29 @@ export class AuthoredClipEditor {
         effect(() => {
             this.apertureContext();
             untracked(() => this.closePreview());
+        });
+        effect(() => {
+            const request = this.animation.authoredClipReveal();
+            if (!request || !this.available()) return;
+            untracked(() => {
+                if (!this.animation.isCurrentClipReveal(request)) {
+                    this.animation.finishClipReveal(request);
+                    return;
+                }
+                void this.run(async () => {
+                    const clip = await this.editor.openAuthoredClip(request.assetId, request.generation);
+                    if (!this.current(request.generation) || !this.animation.isCurrentClipReveal(request)) return;
+                    if (clip.asset.asset_id !== request.assetId) throw new Error('The editor opened a different Animation Clip.');
+                    this.accept(clip);
+                    if (!request.markerId) return;
+                    if (!clip.clip.markers?.some(marker => marker.id === request.markerId)) {
+                        this.error.set('The saved marker is unavailable in this Animation Clip.');
+                        return;
+                    }
+                    this.timelineMarker.set(request.markerId);
+                    this.timelineOpen.set(true);
+                }).finally(() => this.animation.finishClipReveal(request));
+            });
         });
         let unsubscribe: (() => void) | undefined;
         if (this.editor.nativeAvailable) {
@@ -149,6 +175,7 @@ export class AuthoredClipEditor {
 
     protected closeTimeline(): void {
         this.timelineOpen.set(false);
+        this.timelineMarker.set('');
         afterNextRender(() => this.timelineTrigger()?.nativeElement.focus({preventScroll: true}), {injector: this.injector});
     }
 
@@ -200,12 +227,19 @@ export class AuthoredClipEditor {
 
     protected async save(): Promise<void> {
         const form = this.draft(), snapshot = this.editor.snapshot(), selected = this.selected();
-        if (!form || !snapshot || !this.canSave()) return;
+        const nativeGeneration = this.viewport.state()?.workspace_generation;
+        if (!form || !snapshot || nativeGeneration == null || !this.canSave()) return;
+        if (selected && selected.workspace_generation !== nativeGeneration) {
+            this.error.set('The workspace changed. Reopen the authored clip before saving.');
+            return;
+        }
         const generation = this.editor.workspaceGeneration();
         await this.run(async () => {
             const clip = buildClip(form);
             const replacement = selected && {asset_id: selected.asset.asset_id, fingerprint: selected.asset.fingerprint};
-            const saved = await this.editor.saveAuthoredClip(form.path.trim(), clip, replacement, generation, snapshot.revision);
+            const saved = await this.editor.saveAuthoredClip(form.path.trim(), clip, replacement, {
+                workspaceGeneration: generation, nativeGeneration, revision: snapshot.revision,
+            });
             if (!this.current(generation)) return;
             this.accept(saved);
             this.message.set(`Saved ${saved.clip.name}.`);

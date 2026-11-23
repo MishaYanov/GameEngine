@@ -1,9 +1,9 @@
 use super::*;
-use runtime::particle_draw::ParticleDraw;
 use bridge::viewport::{
 	SceneWarmingMode, SceneWarmingResultDto, WarmingCacheDto, WarmingCacheState,
 	WarmingLoadIdentityDto, WarmingSessionRowDto, WarmingViewportDto,
 };
+use runtime::particle_draw::ParticleDraw;
 
 impl Worker {
 	pub(super) fn draw(&mut self) -> Result<(), String> {
@@ -140,12 +140,13 @@ impl Worker {
 						}
 						_ => crate::editor::scene_warming::WarmClaim::Unrequested,
 					};
+					self.particle_samples.clear();
+					self.particle_samples.extend(session.particles());
 					Some(RenderPacket {
 						warm_requested,
 						warming: workspace.scene_warming.context(),
 						warmed,
 						animations: session.animations().cloned(),
-						particles: session.particles().collect(),
 						animation_preview: workspace.active_animation_preview(),
 						document,
 						game_camera,
@@ -173,7 +174,6 @@ impl Worker {
 			warm_requested,
 			warming,
 			animations,
-			particles,
 			animation_preview,
 			mut document,
 			game_camera,
@@ -583,7 +583,12 @@ impl Worker {
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
 		)?;
-		ParticleDraw::prepare(&mut gpu.particle_draw, &gpu.renderer, &uniform, &particles)?;
+		ParticleDraw::prepare(
+			&mut gpu.particle_draw,
+			&gpu.renderer,
+			&uniform,
+			&self.particle_samples,
+		)?;
 		let (mut objects, _) = gpu.scene.try_render_visible(Some(&frustum))?;
 		if let Some(object) = gpu.particle_draw.as_ref().and_then(ParticleDraw::object) {
 			objects.push(object);

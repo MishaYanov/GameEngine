@@ -74,9 +74,7 @@ fn game_status_projects_only_on_changes_during_steady_ticks() {
 			Some(GameplayStatus {
 				objective: "Test objective".into(),
 				detail: None,
-				score: progress
-					.get::<TestProgress>()
-					.map(|progress| progress.0),
+				score: progress.get::<TestProgress>().map(|progress| progress.0),
 				completed: false,
 			})
 		}
@@ -105,8 +103,7 @@ fn game_status_projects_only_on_changes_during_steady_ticks() {
 	}
 	assert_eq!(calls.load(Ordering::Relaxed), 1);
 
-	let award =
-		ProgressAction::new::<TestProgress>(2).unwrap();
+	let award = ProgressAction::new::<TestProgress>(2).unwrap();
 	workspace.backend.apply_play_progress(&[award]).unwrap();
 	controller.sync(&mut workspace).unwrap();
 	let status = controller.state().game_status.unwrap();

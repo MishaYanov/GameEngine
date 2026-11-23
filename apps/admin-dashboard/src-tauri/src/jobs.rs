@@ -49,6 +49,8 @@ pub struct Run {
 	pub artifacts: Vec<String>,
 	#[serde(default)]
 	pub offline: bool,
+	#[serde(default)]
+	local_artifacts: bool,
 	pub detail: Option<String>,
 }
 
@@ -88,6 +90,12 @@ pub const PACKAGES: &[&str] = &[
 	"engine-core",
 	"engine-headless",
 ];
+#[derive(Default)]
+struct QueueOptions {
+	offline: bool,
+	local_artifacts: bool,
+}
+
 pub struct Jobs {
 	pub runs: Vec<Run>,
 	path: PathBuf,
@@ -135,6 +143,35 @@ impl Jobs {
 		package: String,
 		profile: String,
 	) -> io::Result<Run> {
+		self.queue_with(workspace, kind, package, profile, QueueOptions::default())
+	}
+
+	pub(crate) fn queue_generated_validation(
+		&mut self,
+		workspace: &Path,
+		profile: String,
+		offline: bool,
+	) -> io::Result<Run> {
+		self.queue_with(
+			workspace,
+			Kind::Build,
+			"game".into(),
+			profile,
+			QueueOptions {
+				offline,
+				local_artifacts: true,
+			},
+		)
+	}
+
+	fn queue_with(
+		&mut self,
+		workspace: &Path,
+		kind: Kind,
+		package: String,
+		profile: String,
+		options: QueueOptions,
+	) -> io::Result<Run> {
 		if !PACKAGES.contains(&package.as_str()) || !["dev", "release"].contains(&profile.as_str())
 		{
 			return Err(io::Error::other("Unsupported Cargo package or profile"));
@@ -162,7 +199,8 @@ impl Jobs {
 			exit_code: None,
 			toolchain: None,
 			artifacts: vec![],
-			offline: false,
+			offline: options.offline,
+			local_artifacts: options.local_artifacts,
 			detail: None,
 		};
 		self.runs.insert(0, run.clone());
@@ -170,6 +208,7 @@ impl Jobs {
 		self.persist();
 		Ok(run)
 	}
+	#[cfg(test)]
 	pub fn set_offline(&mut self, id: &str, offline: bool) {
 		if let Some(run) = self.runs.iter_mut().find(|r| r.id == id) {
 			run.offline = offline;
@@ -248,6 +287,12 @@ impl Jobs {
 				&run.profile,
 				"--message-format=json",
 			]);
+			if run.local_artifacts {
+				// The generation manifest and publication both require portable paths inside staging.
+				command
+					.arg("--target-dir")
+					.arg(run.workspace.join("target"));
+			}
 			if run.offline {
 				command.arg("--offline");
 			}

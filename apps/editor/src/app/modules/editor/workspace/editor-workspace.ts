@@ -27,7 +27,7 @@ import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
 import {AssetsPanel} from './assets-panel/assets-panel';
 import {PropAssetSelection} from './prefabs/prop-asset-selection';
-import type {SceneEntitiesModel} from './scene-entities-panel/scene-entities.model';
+import {sameHierarchyScene, type SceneEntitiesModel} from './scene-entities-panel/scene-entities.model';
 import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
 import {WorkspaceDraftReview} from './workspace-draft-review';
@@ -204,8 +204,7 @@ export class EditorWorkspace {
             organization: snapshot?.document.organization,
         };
     }, {
-        equal: (previous, next) => previous.projectOpen === next.projectOpen &&
-            previous.entities === next.entities && previous.organization === next.organization,
+        equal: sameHierarchyScene,
     });
 
     constructor() {
@@ -477,11 +476,22 @@ export class EditorWorkspace {
                 this.sceneActions()?.revealBinding(location.name);
                 return;
             case 'entity': {
-                const context = this.sceneContext();
+                const target = this.draftReview.capture();
+                const from = this.workspaceView.activeViewKind();
+                const current = () => this.draftReview.current(target) && this.canRevealReference();
+                if (from !== 'scene-viewport' && !await this.draftReview.run(target)) return;
+                if (!current() || this.workspaceView.activeViewKind() !== from) return;
+
                 await this.sceneEditing.select(location.key);
-                if (context !== this.sceneContext() || this.sceneEditing.entity()?.key !== location.key) return;
-                if (location.section === 'hierarchy') this.hierarchy()?.revealEntity(location.key);
-                else this.inspector()?.revealReference(location.key, location.componentId, location.section, location.slot, field);
+                if (!current() || this.sceneEditing.entity()?.key !== location.key ||
+                    this.workspaceView.activeViewKind() !== from) return;
+                this.workspaceView.selectView('scene-viewport');
+                afterNextRender(() => {
+                    if (!current() || this.workspaceView.activeViewKind() !== 'scene-viewport' ||
+                        this.sceneEditing.entity()?.key !== location.key) return;
+                    if (location.section === 'hierarchy') this.hierarchy()?.revealEntity(location.key);
+                    else this.inspector()?.revealReference(location.key, location.componentId, location.section, location.slot, field);
+                }, {injector: this.injector});
             }
         }
     }

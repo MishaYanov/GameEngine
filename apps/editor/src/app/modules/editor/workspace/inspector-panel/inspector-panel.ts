@@ -112,9 +112,9 @@ export class InspectorPanel {
     }
 
     revealReference(key: string, componentId?: string, section?: 'prefab', slot?: string, field?: string): void {
-        this.drawer()?.config.update(config => ({...config, collapsed: false, expanded: true}));
-        afterNextRender(() => {
-            if (this.entity()?.key !== key) return;
+        const identity = `${this.contextKey()}:${key}`;
+        const focus = () => {
+            if (this.selectionIdentity() !== identity) return;
             const components = this.components();
             if (components && componentId !== undefined && field !== undefined &&
                 components.revealReference(componentId, field)) return;
@@ -128,6 +128,14 @@ export class InspectorPanel {
                 this.element.querySelector<HTMLElement>('[data-reference-entity]');
             control?.scrollIntoView?.({block: 'nearest'});
             control?.focus({preventScroll: true});
+        };
+        afterNextRender(() => {
+            if (this.selectionIdentity() !== identity) return;
+            const drawer = this.drawer();
+            if (drawer && (drawer.collapsed() || !drawer.isExpanded())) {
+                drawer.config.update(config => ({...config, collapsed: false, expanded: true}));
+                afterNextRender(focus, {injector: this.injector});
+            } else focus();
         }, {injector: this.injector});
     }
 

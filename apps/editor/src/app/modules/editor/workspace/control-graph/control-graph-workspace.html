@@ -6,7 +6,7 @@
                 <strong [title]="asset.path">{{ asset.path }}</strong>
             } @else {
                 <label>Asset path <input #path [value]="workspace.destination()" maxlength="4096"
-                    (input)="workspace.destination.set(path.value)" [disabled]="workspace.pending()"></label>
+                    (input)="workspace.setDestination(path.value)" [disabled]="workspace.pending()"></label>
             }
             @if (workspace.dirty()) { <span role="status">Unsaved changes</span> }
             <button type="button" (click)="workspace.undo()" [disabled]="!workspace.canUndo()">Undo</button>
@@ -18,7 +18,7 @@
             @if (graphCanvas(); as canvas) {
                 <editor-graph [graph]="canvas" [managed]="true" [managedRevision]="workspace.revision()"
                     [managedSelection]="workspace.selection()" [activeNodes]="activeNodes()" label="Controls Graph"
-                    (selectedItem)="workspace.selection.set($event)" (canvasEdited)="canvasEdit($event)"/>
+                    (selectedItem)="workspace.select($event)" (canvasEdited)="canvasEdit($event)"/>
             }
             <div class="outline">
                 <fieldset [disabled]="workspace.pending()">
@@ -37,7 +37,7 @@
                             <li>
                                 <button type="button" [attr.data-control-node]="node.id"
                                     [attr.aria-pressed]="selectedNode()?.id === node.id"
-                                    (click)="workspace.selection.set({kind: 'node', id: node.id})">{{ label(node.data) }}</button>
+                                    (click)="workspace.select({kind: 'node', id: node.id})">{{ label(node.data) }}</button>
                                 @for (issue of issues().get(node.id); track $index) {
                                     <div class="failure" role="status">{{ issue }}</div>
                                 }

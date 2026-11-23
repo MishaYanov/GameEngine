@@ -14,7 +14,7 @@ pub use settings::*;
 
 pub use animator_graph::*;
 
-pub(crate) use animator_runtime::AnimatorBank;
+pub(crate) use animator_runtime::{AnimatorBank, AnimatorTick};
 pub use animator_runtime::{
 	AnimatorInspection, AnimatorResolver, AnimatorStepInputs, PreparedAnimator,
 	PreparedAnimatorBindings, PreparedAnimatorClips,

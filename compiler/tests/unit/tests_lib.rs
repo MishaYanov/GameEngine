@@ -185,7 +185,7 @@ mod authoring {
 			fixture.0.to_str().unwrap(),
 			&manifest,
 		)
-			.unwrap();
+		.unwrap();
 		let editable = ProjectData::load(copy.join("project.json")).unwrap();
 		assert_eq!(editable.name, "Editable sample");
 		assert_eq!(editable.startup_scene_id, project.startup_scene_id);

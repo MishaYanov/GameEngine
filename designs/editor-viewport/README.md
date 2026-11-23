@@ -27,6 +27,7 @@ Authored entities, gameplay cameras, and project settings belong to game data.
 | [Scene view interactions](scene-view-interactions.md) | Navigation, grid, selection, transform tools, asset placement, and input behavior. |
 | [Runtime and rendering](runtime-and-rendering.md) | State ownership, native rendering, bridge contracts, grid/gizmo implementation, and responsiveness. |
 | [Game creation workflows](game-creation-workflows.md) | Concrete game-building tasks, feature dependencies, and support-agent responsibilities. |
+| [Object authoring roadmap, Milestones 163–202](object-authoring-roadmap-163-202.md) | Create, Inspector and specialist panes, Prop authoring, and the future contextual Agent. |
 
 The interactive preview supplied with this design demonstrates the proposed
 layout and gestures. It is a local concept simulation, not a Vulkan renderer

@@ -108,7 +108,7 @@ fn changing_mode_cancels_an_inflight_job_and_retires_its_result_context() {
 			models: None,
 		})
 	})
-		.unwrap();
+	.unwrap();
 	let source = Arc::new(document());
 	let mut key = key("garden", 1);
 	worker.request(key.clone(), Arc::clone(&source), PathBuf::new());
@@ -216,7 +216,7 @@ fn completed_row(generation: u64, result: SceneWarmingResultDto) -> WarmingSessi
 		} else {
 			"unrequested"
 		}
-			.into(),
+		.into(),
 		result,
 	}
 }

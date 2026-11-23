@@ -161,7 +161,7 @@ impl EditorWorkspace {
 				let session = self.backend.session();
 				let project = session.project();
 				clip.resolve_scene(
-					&project,
+					project,
 					scene_id,
 					session.scene_document(scene_id)?.as_ref(),
 				)?;
@@ -171,7 +171,7 @@ impl EditorWorkspace {
 				let saved = SceneData::from_json(
 					std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,
 				)?;
-				clip.resolve_scene(&project, scene_id, &saved)
+				clip.resolve_scene(project, scene_id, &saved)
 					.map_err(|error| {
 						format!("Save the target Scene before saving the Animation Clip: {error}")
 					})?;
@@ -452,21 +452,20 @@ impl EditorWorkspace {
 			}
 			Some(Instance { scene_id, root_key }) if &scene_id == active => {
 				let scene = session.scene_document(&scene_id)?;
-				let resolved =
-					clip.resolve_prop_instance(&project, &scene_id, &scene, &root_key)?;
+				let resolved = clip.resolve_prop_instance(project, &scene_id, &scene, &root_key)?;
 				let document = clip_document(&scene.entities, &resolved.sample(0)?)?;
 				Ok((resolved, document, None))
 			}
 			Some(Scene { scene_id }) if &scene_id == active => {
 				let scene = session.scene_document(&scene_id)?;
-				let resolved = clip.resolve_scene(&project, &scene_id, &scene)?;
+				let resolved = clip.resolve_scene(project, &scene_id, &scene)?;
 				let document = clip_document(&scene.entities, &resolved.sample(0)?)?;
 				Ok((resolved, document, None))
 			}
 			None => match &clip.owner {
 				AuthoredClipOwner::Scene { scene_id } if scene_id == active => {
 					let scene = session.scene_document(scene_id)?;
-					let resolved = clip.resolve_scene(&project, scene_id, &scene)?;
+					let resolved = clip.resolve_scene(project, scene_id, &scene)?;
 					let document = clip_document(&scene.entities, &resolved.sample(0)?)?;
 					Ok((resolved, document, None))
 				}

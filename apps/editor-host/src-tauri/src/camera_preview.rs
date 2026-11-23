@@ -22,7 +22,7 @@ pub(crate) struct CameraPreview {
 enum CameraPreviewState {
 	Fixed(Camera),
 	Follow(Camera),
-	Orbit(FrozenOrbitPreview),
+	Orbit(Box<FrozenOrbitPreview>),
 }
 
 #[derive(Debug, Serialize)]
@@ -184,12 +184,12 @@ impl EditorWorkspace {
 		}) {
 			previous.state.clone()
 		} else if let Some(settings) = camera.orbit.clone() {
-			CameraPreviewState::Orbit(FrozenOrbitPreview::from_document(
+			CameraPreviewState::Orbit(Box::new(FrozenOrbitPreview::from_document(
 				session.authored_document(),
 				settings,
 				camera.to_camera(),
 				1.0 / session.project().fixed_hz as f32,
-			)?)
+			)?))
 		} else if camera.follow.is_some() {
 			let mut document = session.authored_document();
 			if document.default_game_camera != camera_key {
@@ -238,7 +238,7 @@ impl EditorWorkspace {
 		if Some(next_sample) != orbit.orbit_state().tick.checked_add(1) {
 			return Err("Camera preview token or sample order is stale".into());
 		}
-		*orbit = orbit.advance(intent)?;
+		**orbit = orbit.advance(intent)?;
 		Ok(preview.dto())
 	}
 

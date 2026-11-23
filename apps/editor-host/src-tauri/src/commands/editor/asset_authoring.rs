@@ -1,12 +1,10 @@
 //! External file work is prepared away from the workspace lock. Only a native
 //! resource owner may publish an active asset after candidate GPU preparation.
 use super::*;
+use crate::editor::asset_sources::AssetSourceKind;
 use runtime::asset_catalog::AssetId;
 use runtime::assets::project_assets::{self, PreparedAssetChange};
-use std::{
-	collections::HashSet,
-	path::{Path, PathBuf},
-};
+use std::{collections::HashSet, fs, path::PathBuf};
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
@@ -56,47 +54,100 @@ fn progress(
 }
 
 #[tauri::command]
-pub async fn editor_choose_external_glb(window: WebviewWindow) -> Result<Option<String>, String> {
-	choose_external_file(window, "Import binary glTF model", "Binary glTF", "glb").await
+pub async fn editor_choose_external_glb(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+) -> Result<Option<String>, String> {
+	choose_external_file(window, state, expected_generation, AssetSourceKind::Glb).await
 }
 
 #[tauri::command]
-pub async fn editor_choose_external_wav(window: WebviewWindow) -> Result<Option<String>, String> {
-	choose_external_file(window, "Import Audio Clip", "PCM WAV", "wav").await
+pub async fn editor_choose_external_wav(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+) -> Result<Option<String>, String> {
+	choose_external_file(window, state, expected_generation, AssetSourceKind::Wav).await
 }
 
 #[tauri::command]
 pub async fn editor_choose_external_sky_png(
 	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
 ) -> Result<Option<String>, String> {
-	choose_external_file(window, "Import Sky Panorama", "PNG image", "png").await
+	choose_external_file(window, state, expected_generation, AssetSourceKind::SkyPng).await
 }
 
 async fn choose_external_file(
 	window: WebviewWindow,
-	title: &'static str,
-	label: &'static str,
-	extension: &'static str,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+	kind: AssetSourceKind,
 ) -> Result<Option<String>, String> {
 	trusted_window(&window)?;
+	let shared = Arc::clone(&state.editor);
 	tauri::async_runtime::spawn_blocking(move || {
-		window
+		let check_scope = |slot: &Option<EditorWorkspace>| {
+			let workspace = slot
+				.as_ref()
+				.ok_or("Open a project before choosing an asset source")?;
+			check_asset_generation(workspace, expected_generation)
+		};
+		{
+			let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+			check_scope(&slot)?;
+		}
+		let (title, label, extension) = match kind {
+			AssetSourceKind::Glb => ("Import binary glTF model", "Binary glTF", "glb"),
+			AssetSourceKind::Wav => ("Import Audio Clip", "PCM WAV", "wav"),
+			AssetSourceKind::SkyPng => ("Import Sky Panorama", "PNG image", "png"),
+		};
+		let Some(file) = window
 			.dialog()
 			.file()
 			.set_parent(&window)
 			.set_title(title)
 			.add_filter(label, &[extension])
 			.blocking_pick_file()
-			.map(|file| {
-				file.into_path()
-					.map(|path| path.to_string_lossy().into_owned())
-					.map_err(|e| e.to_string())
-			})
-			.transpose()
+		else {
+			return Ok(None);
+		};
+		let selected = file.into_path().map_err(|error| error.to_string())?;
+		let metadata = fs::symlink_metadata(&selected).map_err(|error| error.to_string())?;
+		if !metadata.is_file() || metadata.file_type().is_symlink() {
+			return Err("Choose a regular asset source file".into());
+		}
+		let source = fs::canonicalize(&selected)
+			.map_err(|error| format!("Could not open the selected asset source: {error}"))?;
+		let display = source
+			.to_str()
+			.ok_or("The source file path is not valid Unicode")?
+			.to_owned();
+		trusted_window(&window)?;
+		let mut slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+		let workspace = slot
+			.as_mut()
+			.ok_or("Open a project before choosing an asset source")?;
+		check_asset_generation(workspace, expected_generation)?;
+		workspace.asset_sources.select(kind, source);
+		Ok(Some(display))
 	})
 	.await
-	.map_err(|e| e.to_string())?
+	.map_err(|error| error.to_string())?
 }
+
+fn check_asset_generation(
+	workspace: &EditorWorkspace,
+	expected_generation: u64,
+) -> Result<(), String> {
+	if workspace.generation != expected_generation {
+		return Err("The asset operation belongs to another workspace".into());
+	}
+	Ok(())
+}
+
 enum Change {
 	Import {
 		source: PathBuf,
@@ -109,11 +160,10 @@ enum Change {
 	ImportSkyPanorama {
 		source: PathBuf,
 		destination: String,
-		expected_generation: u64,
 	},
 	Reimport {
 		id: AssetId,
-		source: Option<PathBuf>,
+		source: PathBuf,
 		fingerprint: String,
 	},
 	Move {
@@ -144,6 +194,7 @@ async fn operate(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	expected_revision: u64,
+	expected_generation: u64,
 	change: Change,
 ) -> Result<AssetOperationDto, String> {
 	trusted_window(&window)?;
@@ -160,15 +211,20 @@ async fn operate(
 				let w = slot
 					.as_ref()
 					.ok_or("Open a project before importing assets")?;
+				check_asset_generation(w, expected_generation)?;
 				w.check_revision(expected_revision)?;
-				if let Change::ImportSkyPanorama {
-					expected_generation,
-					..
-				} = &change
-				{
-					if w.generation != *expected_generation {
-						return Err("Sky Panorama import belongs to another workspace".into());
+				let selected = match &change {
+					Change::Import { source, .. } | Change::Reimport { source, .. } => {
+						Some((AssetSourceKind::Glb, source))
 					}
+					Change::ImportAudioClip { source, .. } => Some((AssetSourceKind::Wav, source)),
+					Change::ImportSkyPanorama { source, .. } => {
+						Some((AssetSourceKind::SkyPng, source))
+					}
+					Change::Move { .. } => None,
+				};
+				if let Some((kind, source)) = selected {
+					w.asset_sources.require(kind, source)?;
 				}
 				w.backend
 					.validate_asset_invalidation()
@@ -190,12 +246,7 @@ async fn operate(
 				Change::Import {
 					source,
 					destination,
-				} => {
-					if !source.is_absolute() {
-						return Err("Choose an absolute GLB source file".into());
-					}
-					project_assets::prepare_import(&root, &source, &destination)?
-				}
+				} => project_assets::prepare_import(&root, &source, &destination)?,
 				Change::ImportAudioClip {
 					source,
 					destination,
@@ -203,24 +254,18 @@ async fn operate(
 				Change::ImportSkyPanorama {
 					source,
 					destination,
-					..
 				} => project_assets::prepare_sky_panorama_import(&root, &source, &destination)?,
 				Change::Reimport {
 					id,
 					source,
 					fingerprint,
-				} => {
-					if source.as_ref().is_some_and(|path| !path.is_absolute()) {
-						return Err("Choose an absolute GLB source file".into());
-					}
-					project_assets::prepare_reimport(
-						&root,
-						&id,
-						source.as_deref(),
-						&fingerprint,
-						&used,
-					)?
-				}
+				} => project_assets::prepare_reimport(
+					&root,
+					&id,
+					Some(&source),
+					&fingerprint,
+					&used,
+				)?,
 				Change::Move { id, destination } => {
 					project_assets::prepare_move(&root, &id, &destination)?
 				}
@@ -254,13 +299,15 @@ pub async fn editor_import_external_glb(
 	source_path: String,
 	destination_path: String,
 	expected_revision: u64,
+	expected_generation: u64,
 ) -> Result<AssetOperationDto, String> {
 	operate(
 		window,
 		state,
 		expected_revision,
+		expected_generation,
 		Change::Import {
-			source: Path::new(&source_path).into(),
+			source: PathBuf::from(source_path),
 			destination: destination_path,
 		},
 	)
@@ -274,11 +321,13 @@ pub async fn editor_import_external_wav(
 	source_path: String,
 	destination_path: String,
 	expected_revision: u64,
+	expected_generation: u64,
 ) -> Result<AssetOperationDto, String> {
 	operate(
 		window,
 		state,
 		expected_revision,
+		expected_generation,
 		Change::ImportAudioClip {
 			source: PathBuf::from(source_path),
 			destination: destination_path,
@@ -300,10 +349,10 @@ pub async fn editor_import_sky_panorama(
 		window,
 		state,
 		expected_revision,
+		expected_generation,
 		Change::ImportSkyPanorama {
 			source: PathBuf::from(source_path),
 			destination: destination_path,
-			expected_generation,
 		},
 	)
 	.await
@@ -418,17 +467,19 @@ pub async fn editor_reimport_asset(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
 	asset_id: String,
-	source_path: Option<String>,
+	source_path: String,
 	expected_fingerprint: String,
 	expected_revision: u64,
+	expected_generation: u64,
 ) -> Result<AssetOperationDto, String> {
 	operate(
 		window,
 		state,
 		expected_revision,
+		expected_generation,
 		Change::Reimport {
 			id: AssetId::new(asset_id)?,
-			source: source_path.map(PathBuf::from),
+			source: PathBuf::from(source_path),
 			fingerprint: expected_fingerprint,
 		},
 	)
@@ -441,11 +492,13 @@ pub async fn editor_move_asset(
 	asset_id: String,
 	destination_path: String,
 	expected_revision: u64,
+	expected_generation: u64,
 ) -> Result<AssetOperationDto, String> {
 	operate(
 		window,
 		state,
 		expected_revision,
+		expected_generation,
 		Change::Move {
 			id: AssetId::new(asset_id)?,
 			destination: destination_path,

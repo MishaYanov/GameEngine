@@ -9,7 +9,7 @@
                 <h3 id="particle-preview-heading">Preview</h3>
                 <editor-particle-preview [restart]="restart()" [running]="running()" [settings]="session.candidate()"/>
                 <div class="actions">
-                    <button (click)="running.set(!running())" type="button">{{ running() ? 'Pause' : 'Play' }}</button>
+                    <button (click)="togglePreview()" type="button">{{ running() ? 'Pause' : 'Play' }}</button>
                     <button (click)="restartPreview()" type="button">Restart</button>
                 </div>
                 @if (!session.candidate()) {
@@ -56,7 +56,7 @@
                         Apply and Close
                     </button>
                     <button (click)="session.discardAndClose()" type="button">Discard and Close</button>
-                    <button (click)="session.closeReview.set(false)" type="button">Keep Editing</button>
+                    <button (click)="session.keepEditing()" type="button">Keep Editing</button>
                 </div>
                 @if (session.pending()) {
                     <p role="status">Applying particle settings…</p>

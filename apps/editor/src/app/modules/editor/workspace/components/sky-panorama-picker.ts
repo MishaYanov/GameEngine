@@ -88,11 +88,12 @@ export class SkyPanoramaPicker {
 
     protected async chooseSource(): Promise<void> {
         const owner = this.owner();
-        if (!owner || !this.available()) return;
+        const scope = this.scope();
+        if (!owner || !scope || !this.available()) return;
         this.pending.set(true);
         this.failure.set(null);
         try {
-            const path = await this.editor.chooseExternalSkyPng();
+            const path = await this.editor.chooseExternalSkyPng(scope);
             if (path && this.current(owner) && this.editor.snapshot()?.mode === 'edit') {
                 this.source.set(path);
                 this.path.set({destination: path.split(/[\\/]/).at(-1) ?? 'panorama.png'});

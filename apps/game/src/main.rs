@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "../../../tests/support/project_fixture.rs"]
+mod test_project;
+
 mod cinder_checkpoint;
 mod editor_panel;
 mod editor_tools;
@@ -85,6 +89,7 @@ struct GameApp {
 	tools: EditorTools,
 	selection_overlay: Option<SelectionOverlay>,
 	particle_draw: Option<runtime::particle_draw::ParticleDraw>,
+	particle_samples: Vec<runtime::particle_draw::ParticleSample>,
 	game_hud: Option<renderer::ui::ScreenOverlay>,
 	asset_manager: Option<AssetManager>,
 	renderer: Option<WindowRenderer>,

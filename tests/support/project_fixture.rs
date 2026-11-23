@@ -2,7 +2,7 @@
 
 #![allow(dead_code)] // Each integration-test binary uses a subset of this module.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
 	fs,
 	path::{Path, PathBuf},
@@ -19,25 +19,29 @@ pub fn manifest(scene: &str) -> String {
 		"event-lab" => ("Event Interaction Lab", Some("event-player")),
 		_ => panic!("unknown test scene: {scene}"),
 	};
-	let mut scenes: Vec<Value> = vec![json!({
+	let mut scenes: Vec<Value> = vec![serde_json::json!({
 		"id": scene, "asset_path": format!("scenes/{scene}.json"),
 	})];
 	if scene == "component-lab" {
-		scenes.push(json!({"id": "component-rest", "asset_path": "scenes/component-rest.json"}));
+		scenes.push(
+			serde_json::json!({"id": "component-rest", "asset_path": "scenes/component-rest.json"}),
+		);
 	}
 	let behaviors: Vec<_> = behavior
-		.map(|entity| json!({
-			"scene_id": scene,
-			"behavior": {"kind": "controlled_move", "entity": entity, "speed": 2, "space": "world"},
-		}))
+		.map(|entity| {
+			serde_json::json!({
+				"scene_id": scene,
+				"behavior": {"kind": "controlled_move", "entity": entity, "speed": 2, "space": "world"},
+			})
+		})
 		.into_iter()
 		.collect();
-	let mut project = json!({
+	let mut project = serde_json::json!({
 		"schema_version": 3, "name": name, "fixed_hz": 60, "max_catchup_steps": 8,
 		"behaviors": behaviors, "scenes": scenes, "startup_scene_id": scene,
 	});
 	if behavior.is_none() {
-		project["input_profile"] = json!({
+		project["input_profile"] = serde_json::json!({
 			"schema_version": 1,
 			"movement": {"negative_x": "a", "positive_x": "d", "negative_y": "s", "positive_y": "w"},
 			"actions": [{"id": "jump", "key": "space"}],
@@ -74,14 +78,18 @@ impl ProjectFixture {
 			for entry in fs::read_dir(source.join(directory)).unwrap() {
 				let entry = entry.unwrap();
 				assert!(entry.file_type().unwrap().is_file());
-				fs::copy(entry.path(), destination.join(directory).join(entry.file_name())).unwrap();
+				fs::copy(
+					entry.path(),
+					destination.join(directory).join(entry.file_name()),
+				)
+				.unwrap();
 			}
 		}
 		fs::copy(
 			source.join("asset-catalog.json"),
 			destination.join("asset-catalog.json"),
 		)
-			.unwrap();
+		.unwrap();
 		fs::write(fixture.manifest_path(), manifest(scene)).unwrap();
 		fixture
 	}

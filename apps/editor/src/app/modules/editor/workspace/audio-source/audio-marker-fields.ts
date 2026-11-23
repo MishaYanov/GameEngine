@@ -16,7 +16,9 @@ import {EditorSearchPicker} from '../../../../shared/components/search-picker/se
         @if (clipId() && !loading() && markerId() && !markers().some(hasSelectedMarker)) {
             <p role="status">The saved marker is unavailable.</p>
         }
-        @if (animation) { <button type="button" (click)="animation.openAuthored()">Open Animation</button> }
+        @if (animation) {
+            <button type="button" [disabled]="!clipId()" (click)="openAnimation()">Open Animation</button>
+        }
     `,
 })
 export class AudioMarkerFields {
@@ -35,6 +37,10 @@ export class AudioMarkerFields {
     protected readonly markerOptions = computed(() => this.markers().map(marker => ({
         id: marker.id, label: marker.label, description: `${marker.at} ms`,
     })));
+
+    protected openAnimation(): void {
+        void this.animation?.revealAuthoredClip(this.clipId(), this.markerId());
+    }
 
     constructor() {
         effect(onCleanup => {

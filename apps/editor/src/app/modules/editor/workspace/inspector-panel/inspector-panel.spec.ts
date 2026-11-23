@@ -43,6 +43,16 @@ describe('InspectorPanel', () => {
         expect(input('Rotation Y (degrees)').value).toBe('90');
     });
 
+    it('rejects a deferred reveal when another scene reuses the same entity key', async () => {
+        await select();
+        fixture.componentRef.setInput('contextKey', '1:scene-a');
+        fixture.detectChanges();
+        fixture.componentInstance.revealReference(entity.key);
+        fixture.componentRef.setInput('contextKey', '1:scene-b');
+        await fixture.whenStable();
+        expect(document.activeElement).not.toBe(fixture.nativeElement.querySelector('[data-reference-entity]'));
+    });
+
     it('emits rotation edits in radians and starts the correct transaction', async () => {
         await select();
         const started: InspectorField[] = [];

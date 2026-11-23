@@ -258,7 +258,7 @@ fn cinder_audio_check_uses_authored_cues_and_applied_mix_without_touching_gamepl
 		runtime::project::ProjectData::from_json(include_str!(
 			"../../../../projects/cinder-oath/project.json"
 		))
-			.unwrap(),
+		.unwrap(),
 	);
 	app.project_sound = ProjectSound::new(Some(audio), false);
 	assert_eq!(app.project_sound.configured_cues(), CombatCue::ALL);

@@ -109,7 +109,7 @@ fn nested_prop_roundtrips_from_editor_play_through_export() {
 	assert!(spawnable.composition.is_empty());
 	assert_eq!(spawnable.entities.len(), 5);
 	assert_eq!(spawnable.reference_slots.get("Player"), Some(&key("actor")));
-	let project = runtime::project::ProjectData::load(&package.join("project.json")).unwrap();
+	let project = runtime::project::ProjectData::load(package.join("project.json")).unwrap();
 	let exported = runtime::scene_io::load_data(
 		&asset_root.join(project.scene_path(&project.startup_scene_id).unwrap()),
 	)

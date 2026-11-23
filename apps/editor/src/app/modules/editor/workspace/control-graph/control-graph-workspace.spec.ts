@@ -33,15 +33,16 @@ async function setup() {
     const workspaceGeneration = signal(1);
     const probe = vi.fn(async (): Promise<ControlGraphProbe> => result);
     const save = vi.fn(async (_: string, saved: ControlGraph) => ({asset, graph: saved}));
+    const open = vi.fn(async (id: string) => ({asset: {...asset, id}, graph}));
     TestBed.configureTestingModule({imports: [ControlGraphWorkspace], providers: [
         ControlGraphWorkspaceService,
         {provide: EditorService, useValue: {
             capabilities: signal({controls_graph_assets: true}), workspaceGeneration, snapshot, playing,
-            listControlGraphs: vi.fn(async () => [asset]), openControlGraph: vi.fn(async () => ({asset, graph})),
+            listControlGraphs: vi.fn(async () => [asset]), openControlGraph: open,
             probeControlsGraph: probe, saveControlGraph: save,
         }},
         {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 2})}},
-        {provide: WorkspaceViewService, useValue: {controlsGraphView: () => view() === 'controls-graph',
+        {provide: WorkspaceViewService, useValue: {activeViewKind: view, controlsGraphView: () => view() === 'controls-graph',
             selectView: (kind: string) => view.set(kind)}},
     ]});
     const fixture = TestBed.createComponent(ControlGraphWorkspace);
@@ -53,10 +54,34 @@ async function setup() {
         .find(button => button.textContent?.trim() === label)!;
     const field = (label: string) => [...element.querySelectorAll<HTMLLabelElement>('label')]
         .find(candidate => candidate.textContent?.trim().startsWith(label))!;
-    return {fixture, workspace, element, button, field, playing, snapshot, workspaceGeneration, probe, save, view};
+    return {fixture, workspace, element, button, field, playing, snapshot, workspaceGeneration, probe, save, open, view};
 }
 
 describe('Controls Graph workspace', () => {
+    it('keeps the current workspace view until review and the requested graph load succeed', async () => {
+        const {workspace, view, open} = await setup();
+        await workspace.open(asset.id);
+        workspace.edit({kind: 'add', node: {id: 'movement', data: {kind: 'action', action: 'move', value: 'vector2'}}});
+        view.set('scene-viewport');
+        const canceled = workspace.open('alternate');
+        await workspace.settleNavigation('cancel');
+        expect(await canceled).toBe(false);
+        expect(view()).toBe('scene-viewport');
+        expect(open).toHaveBeenCalledTimes(1);
+
+        let respond!: (value: Awaited<ReturnType<typeof open>>) => void;
+        open.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+        const loading = workspace.open('alternate');
+        await workspace.settleNavigation('discard');
+        await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+        expect(view()).toBe('scene-viewport');
+        view.set('game-preview');
+        respond({asset: {...asset, id: 'alternate'}, graph});
+        expect(await loading).toBe(false);
+        expect(view()).toBe('game-preview');
+        expect(workspace.asset()?.id).toBe(asset.id);
+    });
+
     it('authors a Jump through keyboard-accessible typed ports, simulates a semantic press and saves only explicitly', async () => {
         const {fixture, workspace, element, button, field, probe, save} = await setup();
         button('New Controls Graph').click();

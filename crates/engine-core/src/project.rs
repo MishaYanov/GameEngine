@@ -9,9 +9,9 @@ pub use behavior::{
 };
 use std::collections::{HashMap, HashSet};
 
+pub(crate) use physics_layers::validate_required_physics_contacts;
 pub use physics_layers::{COLLISION_LAYER_COUNT, PhysicsLayer, PhysicsLayers};
 pub use physics_layers::{PhysicsContactIssue, inspect_physics_contacts};
-pub(crate) use physics_layers::validate_required_physics_contacts;
 use serde::{Deserialize, Serialize};
 
 use crate::{

@@ -94,6 +94,7 @@ export interface DashboardSnapshot {
     jobs?: JobRun[];
     job_storage_error?: string | null;
     workspace: string;
+    workspace_trusted: boolean;
     log_directory: string;
     data_directory: string;
     collector: {

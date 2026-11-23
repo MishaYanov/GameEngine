@@ -142,7 +142,7 @@ fn timing_summary(samples: &mut [f64]) -> Value {
 #[test]
 #[ignore = "requires native Vulkan, the camera acceptance room and same-profile engine-headless"]
 fn player_camera_route_matches_headless_at_two_extents() {
-	let fixture = test_project::ProjectFixture::new("camera-room");
+	let fixture = crate::test_project::ProjectFixture::new("camera-room");
 	let project = std::env::var_os("GAME_ENGINE_QA_CAMERA_PROJECT")
 		.map(PathBuf::from)
 		.unwrap_or_else(|| fixture.manifest_path());
@@ -849,6 +849,3 @@ fn particle_batch_is_submitted_as_one_world_draw_and_can_be_cleared() {
 		renderer.retire_resources(draw).unwrap();
 	});
 }
-
-#[path = "../../../../tests/support/project_fixture.rs"]
-mod test_project;

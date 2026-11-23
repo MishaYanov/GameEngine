@@ -51,7 +51,7 @@ impl Fixture {
 		let Preflight::Ready(review) = self.preflight() else {
 			panic!("expected a Ready review");
 		};
-		review
+		*review
 	}
 
 	fn slot_path(&self) -> PathBuf {
@@ -131,7 +131,7 @@ fn stale_archive_and_destination_leave_existing_slot_bytes_untouched_until_fresh
 		&fixture.source,
 		serde_json::to_vec_pretty(&fixture.arena).unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let apply = |review| {
 		fixture
 			.destination
@@ -230,7 +230,7 @@ fn scoped_and_legacy_audits_validate_in_place_and_keep_saved_order() {
 		&path,
 		fixture.destination.audit(Some(Direction::Export)).unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	let empty = AuditReview::read(&path).unwrap();
 	assert!(empty.entries.is_empty());
 	assert!(empty.first_completed.is_none());

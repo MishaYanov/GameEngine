@@ -236,7 +236,13 @@ fn uses_particle_emitter_schema(entities: &[EntityData]) -> bool {
 				}
 				let prefab = &link.source.prefab;
 				pending.push(&prefab.entities);
-				pending.extend(prefab.composition.pins.iter().map(|pin| pin.entities.as_slice()));
+				pending.extend(
+					prefab
+						.composition
+						.pins
+						.iter()
+						.map(|pin| pin.entities.as_slice()),
+				);
 			}
 		}
 	}

@@ -79,8 +79,8 @@
             </section>
             <section class="panel">
                 <h2>Managed applications</h2>
-                @if (state() && !state()?.workspace) {
-                    <p class="muted">Set a source checkout in Workspace settings to manage development applications.</p>
+                @if (state() && !state()?.workspace_trusted) {
+                    <p class="muted">Review and trust a source checkout in Workspace settings to manage development applications.</p>
                 }
                 @for (target of state()?.targets ?? []; track target.id) {
                     <div class="process-target">
@@ -165,6 +165,11 @@
                         Save settings
                     </button>
                 </form>
+                @if (state()?.workspace_trusted) {
+                    <p class="muted">Trusted checkout: {{ state()?.workspace }}</p>
+                } @else {
+                    <p class="muted">Saving a new checkout opens a confirmation with its resolved location. Build, test, and launch commands run code from the trusted checkout.</p>
+                }
                 <p>
                     Malformed lines: {{ state()?.collector?.malformed_lines }} ·
                     History gaps: {{ state()?.collector?.history_gaps }} · Oversized
@@ -190,8 +195,8 @@
                     raw output. Test command outcomes do not imply structured test
                     counts.
                 </p>
-                @if (state() && !state()?.workspace) {
-                    <p class="muted">Set a source checkout under Overview → Workspace settings to run Cargo jobs.</p>
+                @if (state() && !state()?.workspace_trusted) {
+                    <p class="muted">Review and trust a source checkout under Overview → Workspace settings to run Cargo jobs.</p>
                 }
                 <form (ngSubmit)="queueJob()">
                     <label
@@ -206,7 +211,7 @@
                     <option value="release">Release</option>
                 </select></label
                 >
-                    <button [disabled]="!api.desktop || !state()?.workspace || !!busy()" class="primary">
+                    <button [disabled]="!api.desktop || !state()?.workspace_trusted || !!busy()" class="primary">
                         Queue {{ section() === 'Builds' ? 'build' : 'tests' }}
                     </button>
                 </form>

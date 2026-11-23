@@ -131,7 +131,11 @@ fn helpers_report_missing_configuration_without_mutating_live_state() {
 	assert!(app.reload_scene().unwrap_err().contains("Asset root"));
 	app.asset_root = Some(directory.0.clone());
 	let project = app.project.take().unwrap();
-	assert!(app.reload_scene().unwrap_err().contains("Project configuration"));
+	assert!(
+		app.reload_scene()
+			.unwrap_err()
+			.contains("Project configuration")
+	);
 	let scene_path = directory.0.join(project.startup_scene_path().unwrap());
 	fs::create_dir_all(scene_path.parent().unwrap()).unwrap();
 	fs::write(&scene_path, &before).unwrap();

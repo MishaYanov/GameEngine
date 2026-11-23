@@ -1,8 +1,7 @@
 use super::*;
 use std::{sync::mpsc, time::Duration};
 
-const SCENE: &[u8] =
-	include_bytes!("../../../../apps/game/assets/scenes/camera-room.json");
+const SCENE: &[u8] = include_bytes!("../../../../apps/game/assets/scenes/camera-room.json");
 const WAIT: Duration = Duration::from_secs(4);
 
 fn fixture(bytes: &[u8]) -> PrefetchedScene {
@@ -57,7 +56,7 @@ fn newer_generation_cancels_an_in_flight_document_and_claims_once() {
 		}
 		Some(fixture(SCENE))
 	})
-		.unwrap();
+	.unwrap();
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"));
 	let first = key(root, "camera-room", 1);
 	let second = key(root, "camera-room", 2);

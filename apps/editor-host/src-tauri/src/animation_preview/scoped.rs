@@ -61,6 +61,8 @@ impl ScopedAnimationPreview {
 	}
 }
 
+type ResolvedAnimationScope = (Vec<EntityData>, Option<PropAddress>, Option<String>);
+
 impl EditorWorkspace {
 	pub fn open_animation_workspace_preview(
 		&mut self,
@@ -148,7 +150,7 @@ impl EditorWorkspace {
 	fn resolve_animation_scope(
 		&self,
 		target: &AnimationWorkspaceTarget,
-	) -> Result<(Vec<EntityData>, Option<PropAddress>, Option<String>), String> {
+	) -> Result<ResolvedAnimationScope, String> {
 		use AnimationPreviewDocument::*;
 		let session = self.backend.session();
 		match &target.document {

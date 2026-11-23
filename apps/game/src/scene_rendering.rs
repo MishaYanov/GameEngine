@@ -145,8 +145,14 @@ impl GameApp {
 		} else {
 			None
 		};
-		let particles: Vec<_> = self.editor.play_particles().collect();
-		ParticleDraw::prepare(&mut self.particle_draw, renderer, &camera_uniform, &particles)?;
+		self.particle_samples.clear();
+		self.particle_samples.extend(self.editor.play_particles());
+		ParticleDraw::prepare(
+			&mut self.particle_draw,
+			renderer,
+			&camera_uniform,
+			&self.particle_samples,
+		)?;
 		let (mut objects, mut stats) = self.scene.try_render_visible(frustum.as_ref())?;
 		if let Some(object) = self.particle_draw.as_ref().and_then(ParticleDraw::object) {
 			stats.draw_calls += 1;

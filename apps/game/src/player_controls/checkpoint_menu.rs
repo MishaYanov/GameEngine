@@ -152,7 +152,7 @@ impl CheckpointMenu {
 					} else {
 						"Import to Practice Slot"
 					}
-						.into(),
+					.into(),
 					transfer_label("File", picker.focus, review.filename(), CHECKPOINT_SUFFIX),
 					format!("Entry: {}", review.archive.id()),
 					format!("File SHA-256: {}", digest_prefix(&review.source_sha256)),
@@ -353,7 +353,7 @@ impl CheckpointMenu {
 					app.player_controls.message = Some("Arena entry matches installed game".into());
 					Screen::Review {
 						picker,
-						review,
+						review: *review,
 						focus: 0,
 					}
 				}

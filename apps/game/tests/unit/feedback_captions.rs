@@ -47,14 +47,14 @@ fn zero_audio_gain_still_allows_gameplay_captions() {
 		"muted": false,
 		"bus_percent": {"collection": 100, "mechanisms": 100, "completion": 100}
 	}))
-		.unwrap();
+	.unwrap();
 	let audio = crate::feedback_audio::FeedbackAudio::new(
 		None,
 		false,
 		mix,
 		&SceneId::new("intro").unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(
 		audio.cue_details(FeedbackBus::Mechanisms).resolved_percent,
 		0
@@ -78,7 +78,7 @@ fn disabled_categories_filter_projection_and_remaining_cues_keep_expiry_order() 
 		"cue_captions": true,
 		"caption_categories": {"sword": true, "damage": false, "outcome": true}
 	}))
-		.unwrap();
+	.unwrap();
 	let mut captions = FeedbackCaptions::default();
 	let now = Instant::now();
 	captions.push(CombatCue::Swing, now);
@@ -110,7 +110,7 @@ fn a_hidden_cue_cannot_displace_three_live_visible_captions() {
 		"cue_captions": true,
 		"caption_categories": {"sword": true, "damage": true, "outcome": false}
 	}))
-		.unwrap();
+	.unwrap();
 	let mut captions = FeedbackCaptions::default();
 	let now = Instant::now();
 	for cue in [

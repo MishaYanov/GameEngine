@@ -506,25 +506,27 @@ export class EditorService {
         return this.snapshotOperation('editor_import_model', {path, position}, false, {expectedGeneration, expectedRevision});
     }
 
-    chooseExternalGlb(): Promise<string | null> {
-        return this.chooseExternalAssetSource('editor_choose_external_glb');
+    chooseExternalGlb(scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_glb', scope);
     }
 
-    chooseExternalWav(): Promise<string | null> {
-        return this.chooseExternalAssetSource('editor_choose_external_wav');
+    chooseExternalWav(scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_wav', scope);
     }
 
-    chooseExternalSkyPng(): Promise<string | null> {
-        return this.chooseExternalAssetSource('editor_choose_external_sky_png');
+    chooseExternalSkyPng(scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_sky_png', scope);
     }
 
     private async chooseExternalAssetSource(
         operation: 'editor_choose_external_glb' | 'editor_choose_external_wav' | 'editor_choose_external_sky_png',
+        scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>,
     ): Promise<string | null> {
-        const generation = this.workspaceGeneration();
+        const generation = scope.workspaceGeneration;
+        this.requireGeneration(generation);
         const current = () => !this.destroyed && generation === this.workspaceGeneration();
         try {
-            const source = await this.native<string | null>(operation);
+            const source = await this.native<string | null>(operation, {expectedGeneration: scope.nativeGeneration});
             return current() ? source : null;
         } catch (cause) {
             if (!current()) throw this.clientError(operation, cause);
@@ -553,9 +555,7 @@ export class EditorService {
     }
 
     importSkyPanorama(sourcePath: string, destinationPath: string, scope: SkyPanoramaScope): Promise<AssetOperation> {
-        return this.mutateAsset('editor_import_sky_panorama', {
-            sourcePath, destinationPath, expectedGeneration: scope.nativeGeneration,
-        }, scope.workspaceGeneration, scope.revision);
+        return this.mutateAsset('editor_import_sky_panorama', {sourcePath, destinationPath}, scope);
     }
 
     feedbackCues(expectedGeneration: number): Promise<FeedbackCueDraft> {
@@ -614,37 +614,37 @@ export class EditorService {
         this.requireGeneration(expectedGeneration);
         return bytes;
     }
-    importExternalGlb(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
-        return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
+    importExternalGlb(sourcePath: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, scope);
     }
 
-    importExternalWav(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
-        return this.mutateAsset('editor_import_external_wav', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
+    importExternalWav(sourcePath: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_external_wav', {sourcePath, destinationPath}, scope);
     }
 
     reimportAsset(
-        assetId: string, expectedFingerprint: string, sourcePath?: string | null,
-        expectedGeneration?: number, expectedRevision?: number,
+        assetId: string, expectedFingerprint: string, sourcePath: string, scope: WorkspaceAssetScope,
     ): Promise<AssetOperation> {
-        return this.mutateAsset('editor_reimport_asset', {assetId, expectedFingerprint, sourcePath: sourcePath ?? null},
-            expectedGeneration, expectedRevision);
+        return this.mutateAsset('editor_reimport_asset', {assetId, expectedFingerprint, sourcePath}, scope);
     }
 
-    moveAsset(assetId: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
-        return this.mutateAsset('editor_move_asset', {assetId, destinationPath}, expectedGeneration, expectedRevision);
+    moveAsset(assetId: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_move_asset', {assetId, destinationPath}, scope);
     }
 
     private mutateAsset(
-        operation: string, args: Record<string, unknown>, expectedGeneration?: number, expectedRevision?: number,
+        operation: string, args: Record<string, unknown>, scope: WorkspaceAssetScope,
     ): Promise<AssetOperation> {
         return this.enqueue(operation, async () => {
-            this.requireGeneration(expectedGeneration);
-            const result = await this.native<AssetOperation>(operation, {...args, expectedRevision: expectedRevision ?? this.revision()});
-            this.requireGeneration(expectedGeneration);
+            this.requireGeneration(scope.workspaceGeneration);
+            const result = await this.native<AssetOperation>(operation, {
+                ...args, expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+            });
+            this.requireGeneration(scope.workspaceGeneration);
             this.accept(result.snapshot);
             this.invalidateAssetCatalog();
             return result;
-        }, true, expectedGeneration);
+        }, true, scope.workspaceGeneration);
     }
 
     exportPrefab(): Promise<Prefab> {
@@ -896,19 +896,19 @@ export class EditorService {
 
     saveAuthoredClip(
         path: string, clip: AuthoredClip, replacement: ClipAssetVersion | null,
-        generation: number, expectedRevision: number,
+        scope: WorkspaceAssetScope,
     ): Promise<ClipAssetDocument> {
         return this.enqueue('editor_save_authored_clip', async () => {
-            this.requireGeneration(generation);
+            this.requireGeneration(scope.workspaceGeneration);
             const result = await this.native<ClipAssetSave>('editor_save_authored_clip', {
-                path, clip, replacement, expectedRevision,
+                path, clip, replacement, expectedRevision: scope.revision, expectedGeneration: scope.nativeGeneration,
             });
-            this.requireGeneration(generation);
+            this.requireGeneration(scope.workspaceGeneration);
             this.accept(result.snapshot);
             this.invalidateAssetCatalog();
             this.authoredClipCatalogVersionState.update(version => version + 1);
             return result.document;
-        }, true, generation);
+        }, true, scope.workspaceGeneration);
     }
 
     openAuthoredClipPreview(request: AuthoredClipPreviewRequest, generation: number): Promise<VisualClipPreview> {

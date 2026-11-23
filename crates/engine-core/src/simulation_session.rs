@@ -198,7 +198,8 @@ impl SimulationSession {
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
-		let object_scripts = object_scripts::ObjectScripts::prepare(&world, &lifecycle, factory.object_scripts())?;
+		let object_scripts =
+			object_scripts::ObjectScripts::prepare(&world, &lifecycle, factory.object_scripts())?;
 		let mut camera_exclusions = None;
 		let mut preparation_budget = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let camera = GameCameraController::new_with_lifecycle(
@@ -264,7 +265,7 @@ impl SimulationSession {
 		&self.world
 	}
 	/// Samples only particles from the committed runtime step.
-	pub fn particles(&self) -> impl Iterator<Item=ParticleSample> + '_ {
+	pub fn particles(&self) -> impl Iterator<Item = ParticleSample> + '_ {
 		self.particles.samples(self.project.fixed_hz)
 	}
 
@@ -327,7 +328,7 @@ impl SimulationSession {
 	pub fn needs_tick(&self) -> bool {
 		!self.paused
 			&& (self.particles.needs_tick()
-			|| self.animations.needs_tick()
+				|| self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
 				|| self.object_scripts.needs_tick(&self.inputs)
@@ -354,7 +355,7 @@ impl SimulationSession {
 	pub(crate) fn needs_tick_with_progress(&self, progress: ProgressView<'_>) -> bool {
 		!self.paused
 			&& (self.particles.needs_tick()
-			|| self.animations.needs_tick()
+				|| self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
 				|| self.object_scripts.needs_tick(&self.inputs)
@@ -660,7 +661,9 @@ impl SimulationSession {
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
 		let mut object_scripts = self.object_scripts.clone();
-		let mut particles = self.particles.clone();
+		// One step can update committed particles after validation. A catch-up
+		// batch still stages each intermediate world pose for atomic rollback.
+		let mut staged_particles = (report.steps > 1).then(|| self.particles.clone());
 		let mut particles_changed = false;
 		let mut retired_scripts = object_scripts::ObjectScripts::default();
 		let input_layout = self
@@ -744,11 +747,15 @@ impl SimulationSession {
 				object_scripts.plan_tick(
 					&self.world,
 					&lifecycle,
-					self.tick + u64::from(steps) + 1,
-					report.step_seconds,
-					step_input,
-					characters.local_input_owner(&self.world),
-					&mut ActionWriter { actions: &mut self.actions },
+					object_scripts::ObjectScriptTick {
+						tick: self.tick + u64::from(steps) + 1,
+						step_seconds: report.step_seconds,
+						input: step_input,
+						local_owner: characters.local_input_owner(&self.world),
+					},
+					&mut ActionWriter {
+						actions: &mut self.actions,
+					},
 				)?;
 				object_scripts.stage_triggers(&lifecycle, &trigger_events[event_start..])?;
 				let look_rate = step_input.controller_look;
@@ -1078,9 +1085,11 @@ impl SimulationSession {
 					&lifecycle,
 					&mut camera,
 					camera_tick,
-					&mut camera_exclusions,
-					&self.collisions,
-					&mut collision_candidates_remaining,
+					camera_objects::CameraObstructionStep {
+						exclusions: &mut camera_exclusions,
+						collisions: &self.collisions,
+						budget: &mut collision_candidates_remaining,
+					},
 				)?;
 				let clear_camera_input = if switched {
 					true
@@ -1199,13 +1208,15 @@ impl SimulationSession {
 						.map_or(&no_cosmetics, |(graph, _)| &graph.presentation);
 					let animated = animations.step_animators(
 						&self.world,
-						&motions,
-						&jumped,
-						local_player,
-						&step_actions,
-						cosmetics,
-						self.project.fixed_hz,
-						tick,
+						crate::animation::AnimatorTick {
+							motions: &motions,
+							jumped: &jumped,
+							local_player,
+							accepted_actions: &step_actions,
+							cosmetic: cosmetics,
+							fixed_hz: self.project.fixed_hz,
+							tick,
+						},
 						&mut audio_onsets,
 					)?;
 					changes.merge(WorldChange {
@@ -1227,7 +1238,9 @@ impl SimulationSession {
 						previous,
 					)
 				});
-				particles_changed |= particles.step(&self.world, self.project.fixed_hz);
+				if let Some(particles) = &mut staged_particles {
+					particles_changed |= particles.step(&self.world, self.project.fixed_hz);
+				}
 				steps += 1;
 				if requested_scene.is_some() {
 					// A new scene starts at the next step, after the host commits it.
@@ -1275,8 +1288,12 @@ impl SimulationSession {
 		outcome.tick = self.tick;
 		outcome.steps = steps;
 		outcome.pending_steps = pending_steps;
-		outcome.particles_changed = particles_changed;
-		self.particles = particles;
+		outcome.particles_changed = if let Some(particles) = staged_particles {
+			self.particles = particles;
+			particles_changed
+		} else {
+			steps > 0 && self.particles.step(&self.world, self.project.fixed_hz)
+		};
 		outcome.dropped_seconds = report.dropped_seconds
 			+ f64::from(report.steps - steps - pending_steps) / f64::from(self.project.fixed_hz);
 		outcome.changes = changes.finish();

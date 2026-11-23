@@ -281,7 +281,7 @@ fn composed_keyboard_remap_checks_final_collisions_and_preserves_metadata() {
 			MovementBindings::ARROWS,
 			&[override_key("interact", Key::F)],
 		)
-			.is_ok()
+		.is_ok()
 	);
 }
 
@@ -322,7 +322,7 @@ fn capture_cancel_conflict_and_short_rows_do_not_change_the_live_binding() {
 	let project = runtime::project::ProjectData::from_json(include_str!(
 		"../../../../projects/cinder-oath/project.json"
 	))
-		.unwrap();
+	.unwrap();
 	let mut app = GameApp::default();
 	app.project = Some(project);
 	app.project.as_mut().unwrap().input_profile = Some(authored.clone());
@@ -392,7 +392,7 @@ fn controller_starts_and_cancels_keyboard_capture_without_assigning_a_face_butto
 	let mut project = runtime::project::ProjectData::from_json(include_str!(
 		"../../../../projects/cinder-oath/project.json"
 	))
-		.unwrap();
+	.unwrap();
 	project.input_profile = Some(authored_keyboard_fixture());
 	app.project = Some(project);
 	app.player_controls_key(Key::Escape);

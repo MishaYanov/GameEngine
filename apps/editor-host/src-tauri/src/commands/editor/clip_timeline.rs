@@ -65,6 +65,10 @@ pub async fn editor_clip_timeline_draft_close(
 }
 
 #[tauri::command]
+#[expect(
+	clippy::too_many_arguments,
+	reason = "Keep the existing Tauri IPC fields at the top level of the request"
+)]
 pub async fn editor_clip_timeline_preview_open(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,

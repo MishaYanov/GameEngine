@@ -45,7 +45,7 @@ fn local_mix(master: u8, [collection, mechanisms, completion]: [u8; 3]) -> Feedb
 		"muted": false,
 		"bus_percent": { "collection": collection, "mechanisms": mechanisms, "completion": completion }
 	}))
-		.unwrap()
+	.unwrap()
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn a_project_without_an_authored_catalog_has_no_fallback() {
 		FeedbackMix::default(),
 		&SceneId::new("intro").unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	for cue in FeedbackCue::ALL {
 		assert!(player.clip(cue).is_none());
 		assert_eq!(player.cue_details(cue.bus()).clip, CueClipSource::Missing);
@@ -111,7 +111,7 @@ fn auditions_report_missing_silent_and_unavailable_output() {
 		FeedbackMix::default(),
 		&SceneId::new("intro").unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(
 		player.cue_details(FeedbackBus::Mechanisms).clip,
 		CueClipSource::Authored
@@ -157,7 +157,7 @@ fn menu_audition_uses_prepared_gain_and_drops_its_own_pending_request() {
 		local_mix(80, [100, 50, 100]),
 		&SceneId::new("intro").unwrap(),
 	)
-		.unwrap();
+	.unwrap();
 	audio.worker = Some(worker);
 	let mut app = crate::GameApp::default();
 	app.feedback_audio = audio;

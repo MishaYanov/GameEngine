@@ -102,7 +102,8 @@ impl EditorSession {
 				use crate::components::ScriptReference;
 				for reference in component.settings.references.values_mut() {
 					if let ScriptReference::Entity { entity } = reference
-						&& let Some((slot, _)) = reference_slots.iter().find(|(_, key)| *key == entity)
+						&& let Some((slot, _)) =
+							reference_slots.iter().find(|(_, key)| *key == entity)
 					{
 						*reference = ScriptReference::Slot { slot: slot.clone() };
 					}

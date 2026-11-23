@@ -79,8 +79,8 @@ impl ControllerMenuInput {
 				MenuIntent::Right,
 			),
 		]
-			.into_iter()
-			.find_map(|(active, intent)| active.then_some(intent))
+		.into_iter()
+		.find_map(|(active, intent)| active.then_some(intent))
 	}
 }
 

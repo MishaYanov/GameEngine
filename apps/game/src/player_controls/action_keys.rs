@@ -67,10 +67,10 @@ pub(super) fn resolve(
 			&& (changed || !authored.movement.contains_key(action.key));
 		let action_conflict = changed
 			&& profile
-			.actions
-			.iter()
-			.enumerate()
-			.any(|(other, binding)| other != index && binding.key == action.key);
+				.actions
+				.iter()
+				.enumerate()
+				.any(|(other, binding)| other != index && binding.key == action.key);
 		if movement_conflict || action_conflict {
 			return Err(format!("{}: Key already assigned", action.id));
 		}

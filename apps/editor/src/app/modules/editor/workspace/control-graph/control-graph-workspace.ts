@@ -76,7 +76,7 @@ export class ControlGraphWorkspace {
         if (!Object.hasOwn(CONTROL_NODE_LABELS, kind)) return;
         const id = 'node_' + crypto.randomUUID().replaceAll('-', '').slice(0, 22);
         if (!this.workspace.edit({kind: 'add', node: {id, data: newControlData(kind as ControlNodeKind)}})) return;
-        this.workspace.selection.set({kind: 'node', id});
+        this.workspace.select({kind: 'node', id});
         this.focusNode(id);
     }
 
@@ -91,7 +91,7 @@ export class ControlGraphWorkspace {
 
     protected wire(from: string, to: string, port: string, revision = this.workspace.revision()): void {
         if (this.workspace.edit({kind: 'wire', from, to, port, revision})) {
-            this.workspace.selection.set({kind: 'node', id: to});
+            this.workspace.select({kind: 'node', id: to});
         }
     }
 

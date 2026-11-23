@@ -286,7 +286,7 @@ fn keyboard_actions_animator_transitions_poses_and_camera_match_staged_play() {
 fn a_missing_or_wrong_clip_stops_preflight_before_the_destination_exists() {
 	let fixture = Fixture::new();
 	let project_path = fixture.copy_project(&fixture_source());
-	let project = ProjectData::load(&project_path.join("project.json")).unwrap();
+	let project = ProjectData::load(project_path.join("project.json")).unwrap();
 	let assets = project_path.join("assets");
 	let export = fixture.0.join("export");
 	fs::create_dir(&export).unwrap();

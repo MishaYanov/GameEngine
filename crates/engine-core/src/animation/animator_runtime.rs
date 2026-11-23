@@ -37,6 +37,16 @@ pub struct AnimatorStepInputs<'a> {
 	pub cosmetic: Option<&'a BTreeMap<String, bool>>,
 }
 
+pub(crate) struct AnimatorTick<'a> {
+	pub motions: &'a BTreeMap<EntityKey, AnimationMotion>,
+	pub jumped: &'a HashSet<EntityKey>,
+	pub local_player: Option<&'a EntityKey>,
+	pub accepted_actions: &'a HashSet<String>,
+	pub cosmetic: &'a BTreeMap<String, bool>,
+	pub fixed_hz: u32,
+	pub tick: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AnimatorInspection {
 	pub entity: RuntimeEntityHandle,
@@ -352,16 +362,19 @@ impl AnimatorBank {
 	pub(crate) fn step(
 		&mut self,
 		world: &RuntimeWorld,
-		motions: &BTreeMap<EntityKey, AnimationMotion>,
-		jumped: &HashSet<EntityKey>,
-		local_player: Option<&EntityKey>,
-		accepted_actions: &HashSet<String>,
-		cosmetic: &BTreeMap<String, bool>,
-		fixed_hz: u32,
+		input: AnimatorTick<'_>,
 		revision: u64,
-		tick: u64,
 		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	) -> Result<Vec<EntityKey>, String> {
+		let AnimatorTick {
+			motions,
+			jumped,
+			local_player,
+			accepted_actions,
+			cosmetic,
+			fixed_hz,
+			tick,
+		} = input;
 		let no_actions = HashSet::new();
 		let mut changed = BTreeSet::new();
 		for (key, instance) in &mut self.instances {

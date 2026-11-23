@@ -34,45 +34,42 @@ pub struct PickTarget {
 	pub key: String,
 	pub bounds: Bounds3,
 }
-#[derive(Debug, Clone)]
-pub struct PickHit {
-	pub key: String,
-	pub distance: f32,
-	pub position: Vec3,
-	pub normal: Vec3,
+pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<&str> {
+	closest_target(ray, targets).map(|(target, _)| target.key.as_str())
 }
-pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<PickHit> {
-	let mut hit: Option<PickHit> = None;
+
+fn closest_target(ray: Ray, targets: &[PickTarget]) -> Option<(&PickTarget, f32)> {
+	let mut nearest = None;
+	let mut limit = ray.max_distance;
 	for target in targets {
-		let limit = hit.as_ref().map_or(ray.max_distance, |hit| hit.distance);
 		if let Some(distance) = target.bounds.ray_distance(ray.origin, ray.direction, limit) {
-			if hit.as_ref().is_some_and(|hit| distance >= hit.distance) {
+			if nearest.is_some() && distance >= limit {
 				continue;
 			}
-			let position = ray.origin + ray.direction * distance;
-			let min = Vec3::from_array(target.bounds.min());
-			let max = Vec3::from_array(target.bounds.max());
-			let mut normal = -ray.direction;
-			let mut closest = f32::INFINITY;
-			for axis in 0..3 {
-				for (edge, sign) in [(min[axis], -1.0), (max[axis], 1.0)] {
-					let separation = (position[axis] - edge).abs();
-					if separation < closest {
-						closest = separation;
-						normal = Vec3::ZERO;
-						normal[axis] = sign;
-					}
-				}
-			}
-			hit = Some(PickHit {
-				key: target.key.clone(),
-				distance,
-				position,
-				normal,
-			});
+			nearest = Some((target, distance));
+			limit = distance;
 		}
 	}
-	hit
+	nearest
+}
+
+fn hit_surface(ray: Ray, bounds: Bounds3, distance: f32) -> (Vec3, Vec3) {
+	let position = ray.origin + ray.direction * distance;
+	let min = Vec3::from_array(bounds.min());
+	let max = Vec3::from_array(bounds.max());
+	let mut normal = -ray.direction;
+	let mut closest = f32::INFINITY;
+	for axis in 0..3 {
+		for (edge, sign) in [(min[axis], -1.0), (max[axis], 1.0)] {
+			let separation = (position[axis] - edge).abs();
+			if separation < closest {
+				closest = separation;
+				normal = Vec3::ZERO;
+				normal[axis] = sign;
+			}
+		}
+	}
+	(position, normal)
 }
 
 pub fn plane_basis(plane: ViewportPlane) -> (Vec3, Vec3, Vec3) {
@@ -90,8 +87,8 @@ pub fn placement_point(
 	plane: ViewportPlane,
 	snap: Option<f32>,
 ) -> Option<Vec3> {
-	let (mut point, normal) = if let Some(hit) = pick_nearest(ray, targets) {
-		(hit.position, hit.normal)
+	let (mut point, normal) = if let Some((target, distance)) = closest_target(ray, targets) {
+		hit_surface(ray, target.bounds, distance)
 	} else {
 		let normal = plane_basis(plane).0;
 		(ray.plane(Vec3::ZERO, normal)?, normal)

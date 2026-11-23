@@ -126,8 +126,7 @@ impl GameApp {
 		loop {
 			if outcome.steps > 0
 				&& let (Some(prior), Some(after)) = (prior_combat, self.combat_sound_facts())
-			{
-				if let Some(cue) = self.project_sound.emit_combat_change(
+				&& let Some(cue) = self.project_sound.emit_combat_change(
 					prior,
 					after,
 					self.player_controls.feedback_mix(),
@@ -139,10 +138,9 @@ impl GameApp {
 						})
 					},
 				) && self.standalone_runtime
-					&& self.player_controls.display().cue_captions
-				{
-					self.feedback_captions.push(cue, Instant::now());
-				}
+				&& self.player_controls.display().cue_captions
+			{
+				self.feedback_captions.push(cue, Instant::now());
 			}
 			if !outcome.audio_onsets.is_empty()
 				&& let Some(status) = self.editor.play_status()

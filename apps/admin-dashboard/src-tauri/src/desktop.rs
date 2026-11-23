@@ -1,39 +1,110 @@
 use crate::{
-	AdminService, DashboardSnapshot, processes::ProcessRun, workspace_config::resolve_workspace,
+	AdminService, DashboardSnapshot,
+	processes::ProcessRun,
+	workspace_config::{WorkspaceSettings, resolve_workspace},
 };
 use std::{
-	path::PathBuf,
+	path::{Path, PathBuf},
 	sync::{Arc, Mutex},
 };
-use tauri::State;
+use tauri::{State, Url, WebviewWindow};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 type Service = Arc<Mutex<AdminService>>;
+static WORKSPACE_REVIEW: Mutex<()> = Mutex::new(());
 
 mod logs;
 mod projects;
 
+fn is_trusted_origin(url: &Url) -> bool {
+	let packaged = url.port().is_none()
+		&& matches!(
+			(url.scheme(), url.host_str()),
+			("tauri", Some("localhost")) | ("http", Some("tauri.localhost"))
+		);
+	let development = cfg!(debug_assertions)
+		&& url.scheme() == "http"
+		&& url.host_str() == Some("127.0.0.1")
+		&& url.port() == Some(4301);
+	packaged || development
+}
+
+fn trusted_window(window: &WebviewWindow) -> Result<(), String> {
+	if window.label() != "main" || !is_trusted_origin(&window.url().map_err(error)?) {
+		return Err("Dashboard commands require the trusted main application window".into());
+	}
+	Ok(())
+}
+
 fn error(error: impl ToString) -> String {
 	error.to_string()
 }
+
 #[tauri::command]
-fn dashboard_snapshot(service: State<Service>) -> DashboardSnapshot {
-	service.lock().unwrap_or_else(|e| e.into_inner()).snapshot()
-}
-#[tauri::command]
-fn configure_workspace(
+fn dashboard_snapshot(
+	window: WebviewWindow,
 	service: State<Service>,
+) -> Result<DashboardSnapshot, String> {
+	trusted_window(&window)?;
+	Ok(service.lock().unwrap_or_else(|e| e.into_inner()).snapshot())
+}
+
+#[tauri::command]
+async fn configure_workspace(
+	window: WebviewWindow,
+	service: State<'_, Service>,
 	workspace: String,
 	logs: String,
 ) -> Result<(), String> {
-	service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.configure(&workspace, &logs)
-		.map_err(error)
+	trusted_window(&window)?;
+	let service = Arc::clone(service.inner());
+	tauri::async_runtime::spawn_blocking(move || {
+		let _review = WORKSPACE_REVIEW
+			.try_lock()
+			.map_err(|_| "A workspace settings review is already in progress".to_owned())?;
+		let workspace = workspace.trim();
+		let reviewed = (!workspace.is_empty())
+			.then(|| resolve_workspace(Path::new(workspace)))
+			.transpose()
+			.map_err(error)?;
+		if let Some(path) = reviewed.as_deref() {
+			let already_trusted = {
+				let service = service.lock().unwrap_or_else(|e| e.into_inner());
+				service.workspace_trusted && service.workspace.as_deref() == Some(path)
+			};
+			if !already_trusted && !confirm_workspace_trust(&window, path) {
+				return Err("Workspace trust review canceled".into());
+			}
+		}
+		trusted_window(&window)?;
+		let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+		service.configure(reviewed, &logs).map_err(error)
+	})
+	.await
+	.map_err(|_| "Workspace settings review worker failed".to_owned())?
+}
+
+fn confirm_workspace_trust(window: &WebviewWindow, path: &Path) -> bool {
+	window
+		.dialog()
+		.message(format!(
+			"Trust this source checkout? Builds, tests, and application launches can execute its code.\n\n{}",
+			crate::comparable_path(path).display()
+		))
+		.title("Review workspace trust")
+		.parent(window)
+		.kind(MessageDialogKind::Warning)
+		.buttons(MessageDialogButtons::OkCancelCustom("Trust checkout".into(), "Cancel".into()))
+		.blocking_show()
 }
 #[tauri::command]
-fn start_application(service: State<Service>, id: String) -> Result<ProcessRun, String> {
+fn start_application(
+	window: WebviewWindow,
+	service: State<Service>,
+	id: String,
+) -> Result<ProcessRun, String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let workspace = developer_workspace(&service)?;
+	let workspace = service.trusted_workspace().map_err(error)?;
 	let logs = service.collector.directory.clone();
 	service
 		.processes
@@ -41,7 +112,12 @@ fn start_application(service: State<Service>, id: String) -> Result<ProcessRun, 
 		.map_err(error)
 }
 #[tauri::command]
-fn stop_application(service: State<Service>, id: String) -> Result<(), String> {
+fn stop_application(
+	window: WebviewWindow,
+	service: State<Service>,
+	id: String,
+) -> Result<(), String> {
+	trusted_window(&window)?;
 	service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -50,9 +126,14 @@ fn stop_application(service: State<Service>, id: String) -> Result<(), String> {
 		.map_err(error)
 }
 #[tauri::command]
-fn restart_application(service: State<Service>, id: String) -> Result<ProcessRun, String> {
+fn restart_application(
+	window: WebviewWindow,
+	service: State<Service>,
+	id: String,
+) -> Result<ProcessRun, String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let workspace = developer_workspace(&service)?;
+	let workspace = service.trusted_workspace().map_err(error)?;
 	service.processes.stop(&id).map_err(error)?;
 	let logs = service.collector.directory.clone();
 	service
@@ -62,20 +143,23 @@ fn restart_application(service: State<Service>, id: String) -> Result<ProcessRun
 }
 #[tauri::command]
 fn queue_job(
+	window: WebviewWindow,
 	service: State<Service>,
 	kind: crate::jobs::Kind,
 	package: String,
 	profile: String,
 ) -> Result<crate::jobs::Run, String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
-	let workspace = developer_workspace(&service)?;
+	let workspace = service.trusted_workspace().map_err(error)?;
 	service
 		.jobs
 		.queue(&workspace, kind, package, profile)
 		.map_err(error)
 }
 #[tauri::command]
-fn cancel_job(service: State<Service>, id: String) -> Result<(), String> {
+fn cancel_job(window: WebviewWindow, service: State<Service>, id: String) -> Result<(), String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
 	let AdminService {
 		jobs, processes, ..
@@ -85,10 +169,12 @@ fn cancel_job(service: State<Service>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn save_card(
+	window: WebviewWindow,
 	service: State<Service>,
 	id: Option<String>,
 	draft: crate::board::Draft,
 ) -> Result<crate::board::Card, String> {
+	trusted_window(&window)?;
 	service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -97,7 +183,8 @@ fn save_card(
 		.map_err(error)
 }
 #[tauri::command]
-fn delete_card(service: State<Service>, id: String) -> Result<(), String> {
+fn delete_card(window: WebviewWindow, service: State<Service>, id: String) -> Result<(), String> {
+	trusted_window(&window)?;
 	service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -107,11 +194,13 @@ fn delete_card(service: State<Service>, id: String) -> Result<(), String> {
 }
 #[tauri::command]
 fn move_card(
+	window: WebviewWindow,
 	service: State<Service>,
 	id: String,
 	column: crate::board::Column,
 	before: Option<String>,
 ) -> Result<(), String> {
+	trusted_window(&window)?;
 	service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -120,7 +209,13 @@ fn move_card(
 		.map_err(error)
 }
 #[tauri::command]
-fn link_card_job(service: State<Service>, id: String, job: String) -> Result<(), String> {
+fn link_card_job(
+	window: WebviewWindow,
+	service: State<Service>,
+	id: String,
+	job: String,
+) -> Result<(), String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
 	if !service.jobs.runs.iter().any(|r| r.id == job) {
 		return Err("Job no longer exists".into());
@@ -129,12 +224,14 @@ fn link_card_job(service: State<Service>, id: String, job: String) -> Result<(),
 }
 #[tauri::command]
 fn queue_card_job(
+	window: WebviewWindow,
 	service: State<Service>,
 	id: String,
 	kind: crate::jobs::Kind,
 	package: String,
 	profile: String,
 ) -> Result<crate::jobs::Run, String> {
+	trusted_window(&window)?;
 	let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
 	if !service
 		.board
@@ -145,7 +242,7 @@ fn queue_card_job(
 	{
 		return Err("Card unavailable or link limit reached".into());
 	}
-	let workspace = developer_workspace(&service)?;
+	let workspace = service.trusted_workspace().map_err(error)?;
 	let job = service
 		.jobs
 		.queue(&workspace, kind, package, profile)
@@ -168,31 +265,35 @@ pub fn run() {
 		.unwrap_or_else(|| logs.parent().unwrap_or(&logs).join("admin"));
 	let settings = std::fs::read(data.join("settings.json"))
 		.ok()
-		.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+		.and_then(|bytes| serde_json::from_slice::<WorkspaceSettings>(&bytes).ok())
+		.unwrap_or_default();
 	let workspace = std::env::var_os("ENGINE_WORKSPACE_DIR")
 		.map(PathBuf::from)
 		.and_then(|path| resolve_workspace(&path).ok())
 		.or_else(|| {
 			settings
-				.as_ref()
-				.and_then(|s| s["workspace"].as_str().map(PathBuf::from))
-				.and_then(|path| resolve_workspace(&path).ok())
+				.workspace
+				.as_deref()
+				.and_then(|path| resolve_workspace(path).ok())
 		});
 	#[cfg(not(feature = "custom-protocol"))]
-	let workspace =
-		workspace.or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")));
+	let workspace = workspace.or_else(|| {
+		resolve_workspace(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")).ok()
+	});
+	let workspace_trusted = workspace
+		.as_deref()
+		.is_some_and(|path| settings.trusts(path));
 	let logs = std::env::var_os("ENGINE_LOG_DIR")
 		.map(PathBuf::from)
-		.or_else(|| {
-			settings
-				.as_ref()
-				.and_then(|s| s["logs"].as_str().map(PathBuf::from))
-		})
+		.or(settings.logs)
 		.unwrap_or(logs);
-	let service = Arc::new(Mutex::new(AdminService::new(workspace, logs, data)));
+	let mut admin = AdminService::new(workspace, logs, data);
+	admin.workspace_trusted = workspace_trusted;
+	let service = Arc::new(Mutex::new(admin));
 	crate::start_worker(&service);
 	let owned = service.clone();
 	let app = tauri::Builder::default()
+		.plugin(tauri_plugin_dialog::init())
 		.manage(service)
 		.invoke_handler(tauri::generate_handler![
 			logs::resource_metrics,
@@ -229,9 +330,19 @@ pub fn run() {
 	engine_logger::info!(target: "admin", "Admin dashboard stopped");
 }
 
-fn developer_workspace(service: &AdminService) -> Result<PathBuf, String> {
-	service
-		.workspace
-		.clone()
-		.ok_or_else(|| "Select a source checkout under Overview → Workspace settings.".into())
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn dashboard_uses_exact_application_origins() {
+		for value in ["tauri://localhost/", "http://tauri.localhost/"] {
+			assert!(is_trusted_origin(&Url::parse(value).unwrap()));
+		}
+		for value in ["https://web.example/", "http://tauri.localhost:4301/"] {
+			assert!(!is_trusted_origin(&Url::parse(value).unwrap()));
+		}
+		let dev = Url::parse("http://127.0.0.1:4301/").unwrap();
+		assert_eq!(is_trusted_origin(&dev), cfg!(debug_assertions));
+	}
 }

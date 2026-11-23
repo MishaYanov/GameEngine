@@ -22,6 +22,13 @@ use super::{ActionWriter, InputFrame, SimulationAction};
 const MAX_ACTIVE_SCRIPTS: usize = 4096;
 const MAX_TRIGGER_DELIVERIES_PER_STEP: usize = 4096;
 
+pub(super) struct ObjectScriptTick<'a> {
+	pub(super) tick: u64,
+	pub(super) step_seconds: f32,
+	pub(super) input: &'a InputFrame,
+	pub(super) local_owner: Option<&'a EntityKey>,
+}
+
 #[derive(Clone, Debug)]
 pub struct ObjectScriptTrigger {
 	pub sensor: RuntimeEntityHandle,
@@ -345,16 +352,19 @@ impl ObjectScripts {
 		Ok(())
 	}
 
-	pub fn plan_tick(
+	pub(super) fn plan_tick(
 		&mut self,
 		world: &RuntimeWorld,
 		lifecycle: &RuntimeLifecycle,
-		tick: u64,
-		step_seconds: f32,
-		input: &InputFrame,
-		local_owner: Option<&EntityKey>,
+		step: ObjectScriptTick<'_>,
 		actions: &mut ActionWriter<'_>,
 	) -> Result<(), String> {
+		let ObjectScriptTick {
+			tick,
+			step_seconds,
+			input,
+			local_owner,
+		} = step;
 		let local_owner = local_owner
 			.and_then(|key| lifecycle.handle(key))
 			.filter(|owner| {
@@ -455,12 +465,8 @@ impl ObjectScripts {
 		let removed = self
 			.active
 			.iter()
-			.filter_map(|(address, state)| {
-				lifecycle
-					.validate_handle(&state.owner)
-					.is_err()
-					.then(|| address.clone())
-			})
+			.filter(|(_, state)| lifecycle.validate_handle(&state.owner).is_err())
+			.map(|(address, _)| address.clone())
 			.collect::<Vec<_>>();
 		for address in removed {
 			if let Some(instance) = self.active.remove(&address) {

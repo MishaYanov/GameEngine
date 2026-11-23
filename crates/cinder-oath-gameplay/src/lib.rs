@@ -172,7 +172,8 @@ pub fn intro_route(project: &ProjectData) -> Result<Option<(SceneId, SceneId)>, 
 	Ok(Some((settings.intro_scene, settings.arena_scene)))
 }
 
-pub const fn object_script_registration() -> engine_core::simulation_session::ObjectScriptRegistration {
+pub const fn object_script_registration()
+-> engine_core::simulation_session::ObjectScriptRegistration {
 	engine_core::simulation_session::ObjectScriptRegistration {
 		descriptor: scripts::open_door_on_trigger::descriptor,
 		instantiate: scripts::open_door_on_trigger::instantiate,

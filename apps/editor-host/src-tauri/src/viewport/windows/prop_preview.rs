@@ -390,7 +390,12 @@ impl Worker {
 				color: [1.0; 3],
 				intensity: 0.85,
 			}])?;
-			Scene::configure_sky(&mut gpu.renderer, Some(&mut gpu.assets), None, &Default::default())?;
+			Scene::configure_sky(
+				&mut gpu.renderer,
+				Some(&mut gpu.assets),
+				None,
+				&Default::default(),
+			)?;
 		}
 		let status = gpu.renderer.draw(&uniform, &objects)?;
 		if status == DrawStatus::NeedsRedraw {
@@ -477,17 +482,16 @@ impl Worker {
 						)
 					});
 				}
-				if let Some((preview, ray)) = ready
-					.filter(|_| navigation.translation.is_none())
-					.and_then(|preview| {
-						navigation
-							.camera
-							.ray(point, extent, ViewportProjection::Perspective)
-							.ok()
-							.map(|ray| (preview, ray))
-					}) {
+				let ready = ready.filter(|_| navigation.translation.is_none());
+				let ray = ready.as_ref().and_then(|_| {
+					navigation
+						.camera
+						.ray(point, extent, ViewportProjection::Perspective)
+						.ok()
+				});
+				if let Some((preview, ray)) = ready.zip(ray) {
 					let key = pick_nearest(ray, &preview.targets)
-						.and_then(|hit| EntityKey::new(hit.key).ok());
+						.and_then(|key| EntityKey::new(key).ok());
 					let accepted = self.shared.lock().ok().and_then(|mut slot| {
 						let workspace = slot.as_mut()?;
 						if workspace.prop_preview_content_is_current(token, frame.content_revision)

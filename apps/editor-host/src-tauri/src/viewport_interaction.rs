@@ -809,7 +809,7 @@ impl ViewportInteraction {
 							self.camera.ray(point, extent, self.settings.projection)?,
 							&self.targets,
 						)
-						.map(|hit| hit.key)
+						.map(str::to_owned)
 					} else {
 						None
 					};

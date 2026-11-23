@@ -82,3 +82,4 @@ mod health_registry;
 mod log_collection;
 mod managed_processes;
 mod source_navigation;
+mod workspace_trust;

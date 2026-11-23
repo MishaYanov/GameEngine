@@ -20,11 +20,10 @@
                 name="name"
                 required/></label
         ><label
-    >Source workspace<input
-            (ngModelChange)="invalidate()"
-            [(ngModel)]="draft.source"
-            [placeholder]="state()?.workspace || 'Absolute source workspace'"
-            name="source"/></label
+    >Trusted source checkout<input
+            [value]="state()?.workspace_trusted ? state()?.workspace : ''"
+            placeholder="Review and trust a checkout under Overview"
+            readonly/></label
     ><label
     >New destination folder<input
             (ngModelChange)="invalidate()"
@@ -57,7 +56,7 @@
             type="checkbox"
     />Use cached Cargo dependencies (offline)</label
     >
-        <button [disabled]="!api.desktop || busy() || !(draft.source.trim() || state()?.workspace)" class="primary">
+        <button [disabled]="!api.desktop || busy() || !state()?.workspace_trusted" class="primary">
             Preview files
         </button>
     </form>
@@ -92,7 +91,7 @@
         </details>
         <button
                 (click)="generate()"
-                [disabled]="!api.desktop || busy()"
+                [disabled]="!api.desktop || busy() || !state()?.workspace_trusted"
                 class="primary"
         >
             Generate and validate

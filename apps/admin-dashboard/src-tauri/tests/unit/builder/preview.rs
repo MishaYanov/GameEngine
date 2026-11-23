@@ -191,7 +191,7 @@ fn preparation_leaves_service_available_and_blocks_workspace_reconfiguration() {
 		assert!(
 			state
 				.configure(
-					source.to_str().unwrap(),
+					Some(source.canonicalize().unwrap()),
 					root.join("other-logs").to_str().unwrap()
 				)
 				.is_err()
@@ -239,7 +239,11 @@ fn template_preview_includes_game_assets_and_excludes_historical_demos() {
 	assert!(paths.contains(&"projects/cinder-oath/assets/prefabs/robot.json"));
 	assert!(paths.contains(&"projects/cinder-oath/assets/soundtrack.wav"));
 	assert!(paths.contains(&"crates/cinder-oath-gameplay/Cargo.toml"));
-	assert!(!paths.iter().any(|path| path.starts_with("crates/courtyard-gameplay/")));
+	assert!(
+		!paths
+			.iter()
+			.any(|path| path.starts_with("crates/courtyard-gameplay/"))
+	);
 	assert!(!paths.iter().any(|p| p.ends_with("legacy.json")));
 	assert!(!paths.iter().any(|p| p.ends_with("private.json")));
 	assert!(!root.join("output").exists());

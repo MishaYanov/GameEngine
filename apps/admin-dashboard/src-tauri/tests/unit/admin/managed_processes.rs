@@ -8,7 +8,7 @@ fn dashboard_without_checkout_collects_logs_and_can_save_log_settings() {
 	assert!(service.snapshot().workspace.is_empty());
 	assert!(service.snapshot().targets.is_empty());
 
-	service.configure("", log_dir.to_str().unwrap()).unwrap();
+	service.configure(None, log_dir.to_str().unwrap()).unwrap();
 	let entry = record("game-123-1", 1);
 	fixture.write(&entry);
 	service.tick();

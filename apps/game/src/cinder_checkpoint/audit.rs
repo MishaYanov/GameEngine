@@ -79,8 +79,8 @@ impl AuditScope {
 		receipt.is_cinder()
 			&& self.slot.is_none_or(|slot| receipt.slot == slot)
 			&& self
-			.direction
-			.is_none_or(|direction| receipt.direction == direction)
+				.direction
+				.is_none_or(|direction| receipt.direction == direction)
 	}
 }
 
@@ -126,13 +126,13 @@ impl AuditReview {
 			match serde_json::from_slice(bytes).map_err(|_| "Invalid checkpoint audit")? {
 				WireAudit::Legacy(audit) if audit.schema_version == 1 => (None, audit.entries),
 				WireAudit::Scoped(audit)
-				if audit.schema_version == 2
-					&& audit.scope.project_id == PROJECT_ID
-					&& audit.scope.slot.is_none_or(|slot| slot == SLOT_NUMBER)
-					&& audit.entries.iter().all(|row| audit.scope.covers(row)) =>
-					{
-						(Some(audit.scope), audit.entries)
-					}
+					if audit.schema_version == 2
+						&& audit.scope.project_id == PROJECT_ID
+						&& audit.scope.slot.is_none_or(|slot| slot == SLOT_NUMBER)
+						&& audit.entries.iter().all(|row| audit.scope.covers(row)) =>
+				{
+					(Some(audit.scope), audit.entries)
+				}
 				_ => return Err("Unsupported checkpoint audit or inconsistent scope".into()),
 			};
 		if entries.len() > MAX_ROWS || !entries.iter().all(Receipt::is_valid) {
@@ -166,5 +166,5 @@ pub(super) fn export_bytes(
 		scope,
 		entries,
 	})
-		.map_err(|error| error.to_string())
+	.map_err(|error| error.to_string())
 }

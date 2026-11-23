@@ -379,7 +379,7 @@ fn public_resolver_freezes_on_loss_or_reused_key_without_rebinding() {
 			},
 			|_, _, _| panic!("a lost target must not query obstruction"),
 		)
-			.unwrap();
+		.unwrap();
 		assert!(rejected_target.state.target_lost && rejected_target.clear_input);
 		assert!(rejected_target.state.pivot_settled && rejected_target.state.arm_settled);
 		assert_eq!(rejected_target.state.target, previous.target);
@@ -406,7 +406,7 @@ fn public_resolver_freezes_on_loss_or_reused_key_without_rebinding() {
 			},
 			|_, _, _| panic!("target loss is sticky until a fresh binding"),
 		)
-			.unwrap();
+		.unwrap();
 		assert!(still_lost.state.target_lost && still_lost.clear_input);
 		assert_eq!(camera_pose(&still_lost.pose), camera_pose(template));
 	}
@@ -521,6 +521,6 @@ fn restart_rebinds_and_restores_authored_rig_instead_of_saving_live_orbit() {
 				..Default::default()
 			}
 		)
-			.is_err()
+		.is_err()
 	);
 }

@@ -120,7 +120,7 @@ fn authored_clip_roundtrips_and_resolves_to_distinct_placed_instances() {
 		.iter()
 		.map(|root| {
 			authored
-				.resolve_prop_instance(&project, &scene_id, &document, &root.key)
+				.resolve_prop_instance(project, &scene_id, &document, &root.key)
 				.unwrap()
 				.sample(500)
 				.unwrap()

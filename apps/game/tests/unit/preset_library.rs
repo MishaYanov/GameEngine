@@ -26,7 +26,7 @@ impl Fixture {
 			&manifest,
 			include_str!("../../../../projects/cinder-oath/project.json"),
 		)
-			.unwrap();
+		.unwrap();
 		let owner = test_owner(&root);
 		Self { root, owner }
 	}

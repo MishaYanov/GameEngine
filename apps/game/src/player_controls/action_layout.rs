@@ -82,13 +82,13 @@ pub(super) fn keyboard_menu(
 			match map.with_layout(&asset, &layout) {
 				Ok(effective) => {
 					for (base, effective) in map.actions.iter().zip(&effective.actions) {
-						if let (Some(old), Some(new)) = (first_key(base), first_key(effective)) {
-							if old != new {
-								draft.push(ActionKeyOverride {
-									action_id: base.id.clone(),
-									key: new,
-								});
-							}
+						if let (Some(old), Some(new)) = (first_key(base), first_key(effective))
+							&& old != new
+						{
+							draft.push(ActionKeyOverride {
+								action_id: base.id.clone(),
+								key: new,
+							});
 						}
 					}
 				}

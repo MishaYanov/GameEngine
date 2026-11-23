@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod processes;
 mod service;
 mod source_location;
+#[cfg(any(feature = "desktop", test))]
 mod workspace_config;
 
 pub use service::{AdminService, DashboardSnapshot, start_worker};

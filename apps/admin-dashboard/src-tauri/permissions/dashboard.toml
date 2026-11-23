@@ -1,0 +1,23 @@
+[[permission]]
+identifier = "allow-dashboard-commands"
+description = "Dashboard operations for the trusted main window."
+commands.allow = [
+  "cancel_job",
+  "configure_workspace",
+  "dashboard_snapshot",
+  "delete_card",
+  "export_logs",
+  "generate_project",
+  "link_card_job",
+  "log_page",
+  "move_card",
+  "open_source",
+  "preview_project",
+  "queue_card_job",
+  "queue_job",
+  "resource_metrics",
+  "restart_application",
+  "save_card",
+  "start_application",
+  "stop_application",
+]

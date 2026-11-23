@@ -1,6 +1,6 @@
 <div class="asset-controls" aria-label="Asset authoring">
-    <button type="button" [disabled]="!available()" (click)="chooseImport()">Import GLB…</button>
-    <button #wavImport type="button" [disabled]="!available()" (click)="chooseImport('wav', wavImport)">Import Audio Clip…</button>
+    <button type="button" [disabled]="!availableAssetScope()" (click)="chooseImport()">Import GLB…</button>
+    <button #wavImport type="button" [disabled]="!availableAssetScope()" (click)="chooseImport('wav', wavImport)">Import Audio Clip…</button>
     <button type="button" [disabled]="!canReimport()" (click)="reimport()">Reimport GLB…</button>
     <button type="button" [disabled]="!canMove()" (click)="show('move')">Move Asset…</button>
     <button type="button" [disabled]="!available() || !editor.snapshot()?.selection?.length" (click)="show('prefab')">Save Gameplay Prefab…</button>

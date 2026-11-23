@@ -87,7 +87,9 @@ impl SceneEditor {
 			.prepare_restored_game(scene_id, document, progress)
 	}
 
-	pub fn play_particles(&self) -> impl Iterator<Item=engine_core::particles::ParticleSample> + '_ {
+	pub fn play_particles(
+		&self,
+	) -> impl Iterator<Item = engine_core::particles::ParticleSample> + '_ {
 		self.session.iter().flat_map(EditorSession::particles)
 	}
 

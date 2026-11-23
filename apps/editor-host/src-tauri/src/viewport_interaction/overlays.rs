@@ -32,10 +32,9 @@ impl ViewportInteraction {
 		let selection = workspace.backend.session().selection();
 		if selection.len() == 1 {
 			let cache = self.transform_targets(workspace)?;
-			let segments = runtime::GameContentRect::fit(extent[0], extent[1])
-				.and_then(|rect| {
-					tools::camera_frustum(cache.active_camera.as_ref()?, rect.aspect())
-				});
+			let segments = runtime::GameContentRect::fit(extent[0], extent[1]).and_then(|rect| {
+				tools::camera_frustum(cache.active_camera.as_ref()?, rect.aspect())
+			});
 			if let Some(segments) = segments {
 				visuals
 					.lines

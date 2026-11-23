@@ -313,7 +313,7 @@ impl ViewportInteraction {
 					.ray(click.current, extent, self.settings.projection)?,
 				&self.targets,
 			)
-			.map(|hit| vec![hit.key])
+			.map(|key| vec![key.to_owned()])
 			.unwrap_or_default()
 		};
 		let mut keys = if click.additive || click.toggle {

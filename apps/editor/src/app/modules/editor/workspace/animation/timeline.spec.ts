@@ -135,6 +135,14 @@ function field(root: HTMLElement, label: string): HTMLInputElement {
 }
 
 describe('Authored clip timeline', () => {
+    it('selects a requested bookmark after its clip draft loads', async () => {
+        const {fixture, timeline} = setup(timedDraft);
+        fixture.componentRef.setInput('initialMarker', 'locked');
+        await fixture.whenStable();
+        expect(timeline.playhead()).toBe(876);
+        expect(button(fixture.nativeElement, 'Locked · 876 ms').getAttribute('aria-pressed')).toBe('true');
+    });
+
     it('previews and cancels a drag without history, then commits exactly one move with undo and redo', async () => {
         const {fixture, timeline, edit, sample, open, showPreview} = setup();
         await fixture.whenStable();

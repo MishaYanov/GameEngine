@@ -87,16 +87,16 @@ fn installed_game_launches_outside_its_package() {
 	let executable = PathBuf::from(
 		env::var_os("GAME_ENGINE_QA_EXPORTED_GAME").expect("provide copied game.exe"),
 	)
-		.canonicalize()
-		.expect("resolve copied game.exe");
+	.canonicalize()
+	.expect("resolve copied game.exe");
 	let package = executable.parent().expect("installed package directory");
 	assert!(package.join("project.json").is_file());
 	assert!(package.join("assets").is_dir());
 	let work_dir = PathBuf::from(
 		env::var_os("GAME_ENGINE_QA_WORK_DIR").expect("provide an independent working directory"),
 	)
-		.canonicalize()
-		.expect("resolve independent working directory");
+	.canonicalize()
+	.expect("resolve independent working directory");
 	assert!(work_dir.is_dir());
 	assert!(!work_dir.starts_with(package));
 	assert!(!work_dir.join("project.json").exists());

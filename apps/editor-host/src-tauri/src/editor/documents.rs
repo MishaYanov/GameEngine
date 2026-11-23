@@ -52,7 +52,9 @@ impl EditorWorkspace {
 	) -> Result<EditorSnapshotDto, String> {
 		self.check_revision(revision)?;
 		if self.has_dirty_clip_timelines() {
-			return Err("Save or discard open Animation Clip changes before reloading the project".into());
+			return Err(
+				"Save or discard open Animation Clip changes before reloading the project".into(),
+			);
 		}
 		if self.has_dirty_prop_sources() {
 			return Err("Save or discard open Prop changes before reloading the project".into());

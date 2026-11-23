@@ -204,8 +204,12 @@ impl EditorCamera {
 		let horizontal = vertical * aspect.max(0.01);
 		self.distance =
 			(radius / vertical.min(horizontal) * 1.35).clamp(MIN_DISTANCE, MAX_DISTANCE);
-		self.ortho_height =
-			(2.0 * radius * 1.35 / aspect.min(1.0).max(0.01)).clamp(MIN_DISTANCE, MAX_DISTANCE);
+		let ortho_aspect = if aspect.is_nan() {
+			1.0
+		} else {
+			aspect.clamp(0.01, 1.0)
+		};
+		self.ortho_height = (2.0 * radius * 1.35 / ortho_aspect).clamp(MIN_DISTANCE, MAX_DISTANCE);
 	}
 
 	pub fn orient(&mut self, orientation: ViewportOrientation) {

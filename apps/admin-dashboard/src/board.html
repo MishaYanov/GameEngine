@@ -155,14 +155,14 @@
                         <div class="card-actions">
                             <button
                                     (click)="queue(card,'BUILD')"
-                                    [disabled]="!api.desktop || busy()"
+                                    [disabled]="!api.desktop || busy() || !state()?.workspace_trusted"
                             >
                                 Build
                             </button
                             >
                             <button
                                     (click)="queue(card,'TEST')"
-                                    [disabled]="!api.desktop || busy()"
+                                    [disabled]="!api.desktop || busy() || !state()?.workspace_trusted"
                             >
                                 Test
                             </button

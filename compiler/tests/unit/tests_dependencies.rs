@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_project;
 
 use engine_core::{
 	EntityKey,
@@ -592,6 +593,3 @@ mod prefab_dependencies {
 		validate_export_snapshot(&staged, None).unwrap();
 	}
 }
-
-#[path = "../../../tests/support/project_fixture.rs"]
-mod test_project;

@@ -285,10 +285,10 @@ fn walk_bounded(
 			|| relative.ends_with(".frag")
 			|| project_json
 			|| (project_asset
-			&& [
-			"png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json", "wav",
-		]
-			.contains(&extension.as_str()));
+				&& [
+					"png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json", "wav",
+				]
+				.contains(&extension.as_str()));
 		if allowed {
 			if relative.len() > 1024 {
 				return Err(io::Error::other("Template path is too long"));

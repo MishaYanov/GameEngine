@@ -16,6 +16,7 @@ use std::{
 #[derive(Serialize)]
 pub struct DashboardSnapshot {
 	pub workspace: String,
+	pub workspace_trusted: bool,
 	pub log_directory: String,
 	pub data_directory: String,
 	pub collector: collector::CollectorHealth,
@@ -39,6 +40,7 @@ pub struct AdminService {
 	pub board: board::Board,
 	pub builder: builder::Builder,
 	pub workspace: Option<PathBuf>,
+	pub(crate) workspace_trusted: bool,
 	pub data: PathBuf,
 }
 impl AdminService {
@@ -55,6 +57,7 @@ impl AdminService {
 			board: board::Board::new(&data),
 			builder: builder::Builder::new(&data),
 			workspace: workspace.into(),
+			workspace_trusted: false,
 			data,
 		};
 		for run in service.processes.history_ref() {
@@ -112,6 +115,7 @@ impl AdminService {
 				.as_ref()
 				.map(|path| path.to_string_lossy().into_owned())
 				.unwrap_or_default(),
+			workspace_trusted: self.workspace_trusted,
 			log_directory: self.collector.directory.to_string_lossy().into_owned(),
 			data_directory: self.data.to_string_lossy().into_owned(),
 			collector,
@@ -132,6 +136,7 @@ impl AdminService {
 			targets: self
 				.workspace
 				.as_deref()
+				.filter(|_| self.workspace_trusted)
 				.map(Processes::targets)
 				.unwrap_or_default(),
 			process_storage_error: self.processes.persistence_error.clone(),

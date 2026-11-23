@@ -115,7 +115,7 @@ function setup(useRealViews = false) {
             {provide: SceneEditingService, useValue: {entity: selected}},
             useRealViews ? WorkspaceViewService
                 : {provide: WorkspaceViewService, useValue: {animationView: active, animationOrigin: origin}},
-            {provide: ViewportEditorService, useValue: {state: signal(null), gameStatus: signal(null)}},
+            {provide: ViewportEditorService, useValue: {state: () => ({workspace_generation: 11, settings: {view: playing() ? 'game' : 'scene'}}), gameStatus: signal(null)}},
             {provide: PropWorkspaceService, useValue: {document: propSource, selectedObject: () => null, selectedPlacement: placement}},
         ],
     });
@@ -279,6 +279,19 @@ describe('Animation workspace', () => {
         expect(workspace.preview()?.target.document).toMatchObject({draft_revision: 4});
         expect(close).toHaveBeenCalledWith(previous.token);
     });
+    it('does not open an audio-linked clip after its selected object changes during review', async () => {
+        const {fixture, workspace, views, selected, openAuthoredClip} = setup(true);
+        await fixture.whenStable();
+        let resolveReview!: (allowed: boolean) => void;
+        workspace.registerTimelineReview(() => new Promise(resolve => { resolveReview = resolve; }));
+        const opening = workspace.revealAuthoredClip('audio-event-clip', 'marker');
+        selected.set({...actor, key: 'other'});
+        resolveReview(true);
+        await opening;
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        expect(openAuthoredClip).not.toHaveBeenCalled();
+    });
+
     it('creates a visual clip, reopens its authored keys and samples halfway without a Scene edit', async () => {
         const {fixture, selected, entities, workspace, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview} = setup();
         const lever: SceneEntity = {...actor, name: 'Lever', key: 'lever', animation: null, parent: 'pivot'};
@@ -305,7 +318,7 @@ describe('Animation workspace', () => {
         expect(saveAuthoredClip).toHaveBeenCalledWith('lever-turn.clip.json', expect.objectContaining({
             name: 'Lever Turn', duration_ticks: 1000,
             owner: {kind: 'scene', scene_id: 'arena'},
-        }), null, 1, 4);
+        }), null, {workspaceGeneration: 1, nativeGeneration: 11, revision: 4});
         expect(saveAuthoredClip.mock.calls[0][1].tracks[0]).toEqual({
             target: {kind: 'scene', entity_key: 'lever'},
             track: {kind: 'local_position', interpolation: 'linear', keys: [

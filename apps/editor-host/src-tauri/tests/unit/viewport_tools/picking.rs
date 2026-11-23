@@ -21,11 +21,11 @@ fn world_bounds_picking_chooses_the_nearest_and_has_stable_ties() {
 			bounds: bounds([-1.0, -1.0, 1.0], [1.0, 1.0, 2.0]),
 		},
 	];
-	let hit = pick_nearest(ray, &targets).unwrap();
-	assert_eq!(hit.key, "near");
-	assert_eq!(hit.distance, 6.0);
-	approx(hit.position, Vec3::new(0.0, 0.0, 2.0));
-	approx(hit.normal, Vec3::Z);
+	assert_eq!(pick_nearest(ray, &targets), Some("near"));
+	approx(
+		placement_point(ray, &targets, ViewportPlane::Xz, None).unwrap(),
+		Vec3::new(0.0, 0.0, 2.0),
+	);
 }
 
 #[test]

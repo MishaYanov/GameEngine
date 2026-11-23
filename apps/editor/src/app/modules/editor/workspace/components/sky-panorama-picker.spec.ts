@@ -62,7 +62,7 @@ describe('Sky panorama picker', () => {
         });
         button('Import and Assign')?.click();
         await vi.waitFor(() => expect(selected).toHaveBeenCalledWith(sunset.id));
-        expect(choose).toHaveBeenCalledTimes(1);
+        expect(choose).toHaveBeenCalledExactlyOnceWith({workspaceGeneration: 1, nativeGeneration: 7, revision: 4});
         expect(publish).toHaveBeenCalledWith('C:\\Pictures\\sunset.png', 'sunset.png', {
             workspaceGeneration: 1, nativeGeneration: 7, revision: 4,
         });

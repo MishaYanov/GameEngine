@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;
+
 mod animation_preview;
 mod asset_reimport_gpu;
 mod camera_preview;

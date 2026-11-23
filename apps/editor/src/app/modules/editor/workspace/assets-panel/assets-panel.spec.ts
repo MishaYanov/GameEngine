@@ -479,7 +479,7 @@ describe('AssetsPanel', () => {
         const file = (path: string) => root.querySelector<HTMLButtonElement>(`.asset-file[title="${path}"] button`);
         file(original.path)!.click();
         await fixture.whenStable();
-        await editor.moveAsset('robot-id', moved.path, editor.workspaceGeneration(), 1);
+        await editor.moveAsset('robot-id', moved.path, {workspaceGeneration: editor.workspaceGeneration(), nativeGeneration: 17, revision: 1});
         await fixture.whenStable();
         expect(file(original.path)?.getAttribute('aria-pressed')).toBe('true');
         const refresh = editor.assets();

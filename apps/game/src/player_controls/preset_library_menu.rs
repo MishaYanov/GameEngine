@@ -262,8 +262,8 @@ impl LibraryMenu {
 									self.focus = index;
 									if let Some(action) = retain
 										&& let Some(focus) = layout_actions(&self.layouts, index)
-										.iter()
-										.position(|item| *item == action)
+											.iter()
+											.position(|item| *item == action)
 									{
 										self.page = Page::Actions(focus);
 									}

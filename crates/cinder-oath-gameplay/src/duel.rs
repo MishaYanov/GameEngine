@@ -304,10 +304,10 @@ impl Duel {
 		if gap <= PLAYER_REACH * PLAYER_REACH
 			&& forward.dot(aim) >= PLAYER_FRONT_DOT
 			&& context.collisions.interaction_segment_clear(
-			context.world,
-			&self.player,
-			&self.enemy,
-		) {
+				context.world,
+				&self.player,
+				&self.enemy,
+			) {
 			state.warden_health -= 1;
 			state.enemy_hits += 1;
 			if state.warden_health == 0 {
@@ -347,10 +347,10 @@ impl Duel {
 				}
 				if gap <= WARDEN_REACH
 					&& context.collisions.interaction_segment_clear(
-					context.world,
-					&self.enemy,
-					&self.player,
-				) {
+						context.world,
+						&self.enemy,
+						&self.player,
+					) {
 					state.warden_motion = WardenMotion::Swing {
 						ticks_left: self.timing.warden_swing_ticks,
 					};
@@ -361,7 +361,7 @@ impl Duel {
 						entity: self.enemy.clone(),
 						world_delta: (direction
 							* (WARDEN_APPROACH_SPEED * context.step_seconds).min(gap))
-							.to_array(),
+						.to_array(),
 					})?;
 				}
 			}
@@ -372,14 +372,14 @@ impl Duel {
 					let forward = horizontal(
 						context.world.world_matrices()[warden].transform_vector3(-Vec3::Z),
 					)
-						.normalize_or_zero();
+					.normalize_or_zero();
 					if gap <= WARDEN_REACH
 						&& forward.dot(warden_to_player.normalize_or_zero()) >= PLAYER_FRONT_DOT
 						&& context.collisions.interaction_segment_clear(
-						context.world,
-						&self.enemy,
-						&self.player,
-					) {
+							context.world,
+							&self.enemy,
+							&self.player,
+						) {
 						state.player_health -= 1;
 						state.player_hits += 1;
 						if state.player_health == 0 {
@@ -558,17 +558,17 @@ fn write_clip(
 ) -> Result<(), String> {
 	if next != previous
 		&& world.entity_index(key).is_some_and(|index| {
-		world.data().entities[index]
-			.animation
-			.as_ref()
-			.is_some_and(|component| {
-				component.enabled
-					&& matches!(
+			world.data().entities[index]
+				.animation
+				.as_ref()
+				.is_some_and(|component| {
+					component.enabled
+						&& matches!(
 							component.settings.playback,
 							AnimationPlayback::SingleClip { .. }
 						)
-			})
-	}) {
+				})
+		}) {
 		output.push(SimulationAction::PlayAnimation {
 			entity: key.clone(),
 			clip_index: next as u32,

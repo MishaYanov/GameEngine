@@ -75,10 +75,10 @@ impl DisplaySettings {
 	pub(crate) fn captions_enabled_for(self, cue: CombatCue) -> bool {
 		self.cue_captions
 			&& match cue {
-			CombatCue::Swing | CombatCue::Hit => self.caption_categories.sword,
-			CombatCue::Hurt => self.caption_categories.damage,
-			CombatCue::Victory | CombatCue::Defeat => self.caption_categories.outcome,
-		}
+				CombatCue::Swing | CombatCue::Hit => self.caption_categories.sword,
+				CombatCue::Hurt => self.caption_categories.damage,
+				CombatCue::Victory | CombatCue::Defeat => self.caption_categories.outcome,
+			}
 	}
 }
 
@@ -204,24 +204,24 @@ impl DisplayMenu {
 			Page::Settings => return self.settings_key(key),
 			Page::Categories(focus) => match key {
 				Key::Escape | Key::Enter
-				if key == Key::Escape || *focus == Self::CATEGORY_ROWS.len() =>
-					{
-						self.page = Page::Settings;
-					}
+					if key == Key::Escape || *focus == Self::CATEGORY_ROWS.len() =>
+				{
+					self.page = Page::Settings;
+				}
 				Key::ArrowUp | Key::ArrowDown => {
 					*focus = super::advance_row(*focus, Self::CATEGORY_ROWS.len() + 1, key);
 				}
 				Key::Enter | Key::ArrowLeft | Key::ArrowRight
-				if *focus < Self::CATEGORY_ROWS.len() =>
-					{
-						let categories = &mut self.draft.caption_categories;
-						let category = [
-							&mut categories.sword,
-							&mut categories.damage,
-							&mut categories.outcome,
-						];
-						*category[*focus] = !*category[*focus];
-					}
+					if *focus < Self::CATEGORY_ROWS.len() =>
+				{
+					let categories = &mut self.draft.caption_categories;
+					let category = [
+						&mut categories.sword,
+						&mut categories.damage,
+						&mut categories.outcome,
+					];
+					*category[*focus] = !*category[*focus];
+				}
 				_ => {}
 			},
 			Page::Preview { cue, focus } => match key {

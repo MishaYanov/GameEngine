@@ -93,7 +93,8 @@ impl EntityData {
 			}
 		}
 		for script in &self.scripts {
-			bytes = bytes.saturating_add(size_of::<ScriptComponent>())
+			bytes = bytes
+				.saturating_add(size_of::<ScriptComponent>())
 				.saturating_add(script.id.as_str().len())
 				.saturating_add(script.settings.retained_bytes());
 		}
@@ -119,7 +120,9 @@ impl EntityData {
 				id: emitter.id.clone(),
 				schema_version: 1,
 				enabled: emitter.enabled,
-				data: ComponentData::ParticleEmitter { settings: emitter.settings },
+				data: ComponentData::ParticleEmitter {
+					settings: emitter.settings,
+				},
 			});
 		}
 		if let Some(sky) = &self.sky {
@@ -241,7 +244,9 @@ impl EntityData {
 			id: script.id.clone(),
 			schema_version: 1,
 			enabled: script.enabled,
-			data: ComponentData::Script { settings: script.settings.clone() },
+			data: ComponentData::Script {
+				settings: script.settings.clone(),
+			},
 		}));
 		records
 	}
@@ -388,7 +393,11 @@ impl EntityData {
 					.insert(COLLIDER_TYPE.into(), component.id);
 			}
 			ComponentData::Script { settings } => {
-				let attachment = ScriptComponent { id: component.id, enabled: component.enabled, settings };
+				let attachment = ScriptComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				};
 				if let Some(old) = self.scripts.iter_mut().find(|old| old.id == attachment.id) {
 					*old = attachment;
 				} else {

@@ -11,16 +11,15 @@ import type {DashboardSnapshot, ProjectInput, ProjectPreview} from "./models";
 })
 export class Builder {
     readonly api = inject(AdminApi);
-    readonly state = input<DashboardSnapshot | null>(null);
+    readonly state = input<Pick<DashboardSnapshot, "workspace" | "workspace_trusted" | "projects" | "project_storage_error"> | null>(null);
     readonly changed = output<void>();
     readonly viewLogs = output<{ operation_id: string }>();
     readonly plan = signal<ProjectPreview | null>(null);
     readonly busy = signal(false);
     readonly error = signal("");
     private draftGeneration = 0;
-    draft: ProjectInput = {
+    draft: Omit<ProjectInput, "source"> = {
         name: "my-game",
-        source: "",
         destination: "",
         profile: "dev",
         target: "local",
@@ -33,7 +32,8 @@ export class Builder {
     }
 
     async preview(): Promise<void> {
-        if (this.busy()) return;
+        const workspace = this.state();
+        if (this.busy() || !workspace?.workspace_trusted) return;
         this.busy.set(true);
         this.error.set("");
         this.plan.set(null);
@@ -42,7 +42,7 @@ export class Builder {
             const plan = await this.api.call<ProjectPreview>("preview_project", {
                 input: {
                     ...this.draft,
-                    source: this.draft.source || this.state()?.workspace || "",
+                    source: workspace.workspace,
                 },
             });
             if (generation === this.draftGeneration) this.plan.set(plan);
@@ -55,7 +55,7 @@ export class Builder {
 
     async generate(): Promise<void> {
         const plan = this.plan();
-        if (!plan || this.busy()) return;
+        if (!plan || this.busy() || !this.state()?.workspace_trusted) return;
         this.busy.set(true);
         this.error.set("");
         try {

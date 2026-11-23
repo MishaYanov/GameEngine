@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const stats = JSON.parse(
-    await readFile(new URL('../dist/editor/stats.json', import.meta.url), 'utf8'),
+    await readFile(new URL('../dist/editor/browser-stats.json', import.meta.url), 'utf8'),
 );
 const inputs = Object.keys(stats.inputs).map((path) => path.replaceAll('\\', '/'));
 const forbidden = inputs.filter((path) =>

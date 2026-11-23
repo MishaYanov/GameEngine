@@ -264,13 +264,7 @@ impl AnimationBank {
 	pub(crate) fn step_animators(
 		&mut self,
 		world: &RuntimeWorld,
-		motions: &BTreeMap<EntityKey, AnimationMotion>,
-		jumped: &std::collections::HashSet<EntityKey>,
-		local_player: Option<&EntityKey>,
-		accepted_actions: &std::collections::HashSet<String>,
-		cosmetic: &BTreeMap<String, bool>,
-		fixed_hz: u32,
-		tick: u64,
+		input: AnimatorTick<'_>,
 		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	) -> Result<Vec<EntityKey>, String> {
 		if self.animators.is_empty() {
@@ -280,18 +274,7 @@ impl AnimationBank {
 			.revision
 			.checked_add(1)
 			.ok_or("Animation revision overflow")?;
-		let changes = self.animators.step(
-			world,
-			motions,
-			jumped,
-			local_player,
-			accepted_actions,
-			cosmetic,
-			fixed_hz,
-			revision,
-			tick,
-			onsets,
-		)?;
+		let changes = self.animators.step(world, input, revision, onsets)?;
 		let matrices = self.animators.visual_matrices(world)?;
 		if matrices != *self.visual_matrices {
 			self.visual_matrices = Arc::new(matrices);

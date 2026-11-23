@@ -21,7 +21,7 @@ pub async fn editor_collisions(
 			shapes: runtime::collision::debug_shapes(&document)?,
 		})
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -62,7 +62,7 @@ pub async fn editor_set_scene_warming_mode(
 	workspace(state, true, None, move |editor| {
 		editor.set_scene_warming_mode(expected_generation, mode)
 	})
-		.await
+	.await
 }
 
 #[tauri::command]
@@ -98,8 +98,8 @@ pub async fn editor_export_warming_report(
 		let destination = file.into_path().map_err(|error| error.to_string())?;
 		if !destination.is_absolute()
 			|| !destination
-			.extension()
-			.is_some_and(|suffix| suffix.eq_ignore_ascii_case("json"))
+				.extension()
+				.is_some_and(|suffix| suffix.eq_ignore_ascii_case("json"))
 		{
 			return Err("Choose an absolute .json filename for the warming report".into());
 		}
@@ -107,8 +107,8 @@ pub async fn editor_export_warming_report(
 			limit: 0,
 			..Default::default()
 		})
-			.session_id
-			.ok_or("The native log session is unavailable")?;
+		.session_id
+		.ok_or("The native log session is unavailable")?;
 		let report = {
 			let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
 			slot.as_ref()
@@ -117,8 +117,8 @@ pub async fn editor_export_warming_report(
 		};
 		publish_warming_report(&report, &destination).map(Some)
 	})
-		.await
-		.map_err(|error| error.to_string())?
+	.await
+	.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

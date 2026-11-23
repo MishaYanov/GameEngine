@@ -390,5 +390,9 @@ fn collect_assets(
 }
 
 #[cfg(test)]
+#[path = "../../tests/support/project_fixture.rs"]
+mod test_project;
+
+#[cfg(test)]
 #[path = "../tests/unit/tests_lib.rs"]
 mod tests;

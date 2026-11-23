@@ -16,7 +16,11 @@ use support::*;
 fn script_component_round_trips_undoes_and_keeps_unknown_ids_for_repair() {
 	let original = scene(vec![entity("door", [0., 0., 0.])]);
 	let legacy = original.to_json().unwrap();
-	assert!(SceneData::from_json(&legacy).unwrap().entities[0].scripts.is_empty());
+	assert!(
+		SceneData::from_json(&legacy).unwrap().entities[0]
+			.scripts
+			.is_empty()
+	);
 	let project = ProjectData::for_scene("Scripts", "scenes/main.json", &original).unwrap();
 	let mut engine = Engine::new(original, project).unwrap();
 	let script: ComponentRecord = serde_json::from_value(serde_json::json!({
@@ -32,15 +36,31 @@ fn script_component_round_trips_undoes_and_keeps_unknown_ids_for_repair() {
 				"references": {"sensor": {"slot": "door_sensor"}}
 			}
 		}
-	})).unwrap();
-	run(&mut engine, Command::AddComponent { key: "door".into(), component: script.clone() });
+	}))
+	.unwrap();
+	run(
+		&mut engine,
+		Command::AddComponent {
+			key: "door".into(),
+			component: script.clone(),
+		},
+	);
 	let saved = engine.session().authored_document().to_json().unwrap();
 	let reopened = SceneData::from_json(&saved).unwrap();
 	assert!(reopened.entities[0].component_records().contains(&script));
 	run(&mut engine, Command::Undo);
-	assert!(engine.session().authored_document().entities[0].scripts.is_empty());
+	assert!(
+		engine.session().authored_document().entities[0]
+			.scripts
+			.is_empty()
+	);
 	run(&mut engine, Command::Redo);
-	assert_eq!(engine.session().authored_document().entities[0].scripts[0].settings.script_id, "project.unregistered");
+	assert_eq!(
+		engine.session().authored_document().entities[0].scripts[0]
+			.settings
+			.script_id,
+		"project.unregistered"
+	);
 }
 fn run(engine: &mut Engine, command: Command) {
 	engine
@@ -312,7 +332,12 @@ fn version_three_migration_preserves_ids_assets_flags_and_optional_values() {
 	assert_eq!(migrated.entities.len(), 2);
 	let camera = &migrated.entities[1];
 	assert_eq!(migrated.default_game_camera.as_ref(), Some(&camera.key));
-	assert!(camera.camera.as_ref().is_some_and(|component| component.enabled));
+	assert!(
+		camera
+			.camera
+			.as_ref()
+			.is_some_and(|component| component.enabled)
+	);
 	assert_eq!(migrated.camera, data.camera);
 	let saved = migrated.to_json().unwrap();
 	assert_eq!(SceneData::from_json(&saved).unwrap(), migrated);

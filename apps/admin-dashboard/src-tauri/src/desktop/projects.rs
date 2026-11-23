@@ -1,21 +1,31 @@
-use super::{Service, error};
+use super::{Service, error, trusted_window};
 use crate::{AdminService, builder};
-use tauri::State;
+use std::path::Path;
+use tauri::{State, WebviewWindow};
 
 #[tauri::command]
 pub(super) async fn preview_project(
+	window: WebviewWindow,
 	service: State<'_, Service>,
-	input: builder::Input,
+	mut input: builder::Input,
 ) -> Result<builder::Preview, String> {
 	if input.source.trim().is_empty() {
 		return Err("Choose a source checkout to preview project files.".into());
 	}
-	let request = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.builder
-		.begin_preview(input)
-		.map_err(error)?;
+	trusted_window(&window)?;
+	let request = {
+		let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+		let approved = service.trusted_workspace().map_err(error)?;
+		let source =
+			crate::workspace_config::resolve_workspace(Path::new(&input.source)).map_err(error)?;
+		if source != approved {
+			return Err(
+				"Choose the trusted source checkout under Overview > Workspace settings.".into(),
+			);
+		}
+		input.source = approved.to_string_lossy().into_owned();
+		service.builder.begin_preview(input).map_err(error)?
+	};
 	let prepared =
 		tauri::async_runtime::spawn_blocking(move || builder::Builder::prepare_preview(request))
 			.await
@@ -30,15 +40,16 @@ pub(super) async fn preview_project(
 }
 #[tauri::command]
 pub(super) async fn generate_project(
+	window: WebviewWindow,
 	service: State<'_, Service>,
 	id: String,
 ) -> Result<builder::Generation, String> {
-	let request = service
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.builder
-		.begin_generation(&id)
-		.map_err(error)?;
+	trusted_window(&window)?;
+	let request = {
+		let mut service = service.lock().unwrap_or_else(|e| e.into_inner());
+		service.trusted_workspace().map_err(error)?;
+		service.builder.begin_generation(&id).map_err(error)?
+	};
 	let prepared =
 		tauri::async_runtime::spawn_blocking(move || builder::Builder::prepare_generation(request))
 			.await

@@ -41,6 +41,7 @@ import {
 } from '../../../core/editor/viewport-editor.models';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 import {AnimationWorkspaceService} from './animation/animation-workspace.service';
+import {WorkspaceViewService} from './scene-viewport/workspace-view.service';
 
 vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
@@ -1098,6 +1099,30 @@ describe('Workspace live editing flow', () => {
             expect.objectContaining({entityKey: 'actor-b', expectedGeneration: 1}));
     });
 
+    it('reuses the Hierarchy scene input after a transform-only snapshot update', async () => {
+        const hierarchy = fixture.debugElement.query(By.directive(SceneEntitiesPanel)).injector.get(SceneEntitiesPanel);
+        const original = hierarchy.scene();
+        const updateCrate = async (update: Partial<EditorSnapshot['document']['entities'][number]>) => {
+            nativeState = {
+                ...nativeState,
+                revision: nativeState.revision + 1,
+                scene_revision: nativeState.scene_revision + 1,
+                document: {
+                    ...nativeState.document,
+                    entities: nativeState.document.entities.map(entity =>
+                        entity.key === 'crate' ? {...entity, ...update} : entity),
+                },
+            };
+            await editor.refresh();
+            await fixture.whenStable();
+        };
+        await updateCrate({transform: {position: [6, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]}});
+        expect(hierarchy.scene()).toBe(original);
+        await updateCrate({name: 'Renamed crate'});
+        expect(hierarchy.scene()).not.toBe(original);
+        expect(hierarchy.scene().entities.find(entity => entity.key === 'crate')?.name).toBe('Renamed crate');
+    });
+
     it('reveals the source of a clicked entity usage and reports a broken reference after the scene changes', async () => {
         const setParent = async (parent: string) => {
             nativeState = {
@@ -1125,7 +1150,18 @@ describe('Workspace live editing flow', () => {
         expect(root.querySelector('editor-find-usages dialog[open]')).toBeNull();
 
         await setParent('removed');
+        const views = fixture.debugElement.injector.get(WorkspaceViewService);
+        views.selectView('animation-workspace');
+        const review = vi.fn(async () => false);
+        const release = fixture.debugElement.injector.get(AnimationWorkspaceService).registerTimelineReview(review);
         const button = root.querySelector<HTMLButtonElement>('.problems-button')!;
+        button.click();
+        await fixture.whenStable();
+        root.querySelector<HTMLButtonElement>('editor-problems-panel dialog[open] li button')!.click();
+        await fixture.whenStable();
+        expect(review).toHaveBeenCalledOnce();
+        expect(views.activeViewKind()).toBe('animation-workspace');
+        release();
         button.click();
         await fixture.whenStable();
         const problem = root.querySelector<HTMLButtonElement>('editor-problems-panel dialog[open] li button')!;
@@ -1133,7 +1169,10 @@ describe('Workspace live editing flow', () => {
         problem.click();
         await fixture.whenStable();
         expect(root.querySelector('editor-problems-panel dialog[open]')).toBeNull();
-        expect(document.activeElement).toBe(root.querySelector('.entity-list'));
+        await vi.waitFor(() => {
+            expect(views.activeViewKind()).toBe('scene-viewport');
+            expect(document.activeElement).toBe(root.querySelector('.entity-list'));
+        });
         await setParent('robot');
         button.click();
         await fixture.whenStable();

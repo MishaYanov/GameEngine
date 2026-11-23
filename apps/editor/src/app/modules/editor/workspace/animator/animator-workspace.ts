@@ -63,7 +63,7 @@ export class AnimatorWorkspace {
         const id = this.newId('state');
         const clip = this.selectedState()?.clip ?? graph.states[0].clip;
         if (this.workspace.edit({kind: 'add_state', state: {id, name: name.trim() || 'New State', clip, looping: true}})) {
-            this.workspace.selection.set({kind: 'node', id});
+            this.workspace.select({kind: 'node', id});
             this.focusItem(id, 'state');
         }
     }
@@ -89,7 +89,7 @@ export class AnimatorWorkspace {
         if (!scope || !document || this.reviewingClips()) return;
         const current = () => this.assets.current(scope) && this.workspace.document() === document;
         this.reviewingClips.set(true);
-        this.workspace.error.set(null);
+        this.workspace.clearError();
         try {
             let clips: readonly ClipChoice[];
             if (state.clip.kind === 'imported') {
@@ -118,7 +118,7 @@ export class AnimatorWorkspace {
     protected connect(from: string, to: string, expectedRevision = this.workspace.revision(), focus = true): void {
         const id = this.newId('transition');
         if (this.workspace.edit({kind: 'connect_states', from, to, id, expectedRevision})) {
-            this.workspace.selection.set({kind: 'connection', id});
+            this.workspace.select({kind: 'connection', id});
             if (focus) this.focusItem(id, 'transition');
         }
     }

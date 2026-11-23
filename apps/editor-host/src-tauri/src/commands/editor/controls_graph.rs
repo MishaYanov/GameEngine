@@ -143,6 +143,10 @@ pub async fn editor_save_control_graph(
 }
 
 #[tauri::command]
+#[expect(
+	clippy::too_many_arguments,
+	reason = "Keep the existing Tauri IPC fields at the top level of the request"
+)]
 pub async fn editor_probe_controls_graph(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,

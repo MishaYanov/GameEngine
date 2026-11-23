@@ -164,10 +164,10 @@ impl PreparedOverlay {
 		self.key == key
 			&& self.rows.len() == rows.len()
 			&& self
-			.rows
-			.iter()
-			.zip(rows)
-			.all(|(before, now)| before == now || before.chars().eq(now.chars().take(columns)))
+				.rows
+				.iter()
+				.zip(rows)
+				.all(|(before, now)| before == now || before.chars().eq(now.chars().take(columns)))
 	}
 }
 

@@ -1,9 +1,9 @@
 {
-  "last_checked_commit": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+  "last_checked_commit": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
   "last_checked_date": "2026-11-23",
-  "last_documentation_update_commit": "f1ecb3680030c3d2f247d0bf9038696ae724c09b",
+  "last_documentation_update_commit": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "The inspection compares the conditional Controls and object script proposal with the current editor and engine. Older entries retain their original verification evidence.",
+  "baseline_note": "The object authoring roadmap uses the inspected editor and engine working tree. Older entries retain their original verification evidence.",
   "conditional_controls_and_object_scripts_proposal": {
     "inspected_head": "932b5376eb8f81587e5c45b3fcdb9bcd149dcaaf",
     "path": "designs/editor-viewport/conditional-controls-and-object-scripts.md",
@@ -5978,6 +5978,29 @@
     ],
     "pending_documentation_changes": [
       "Record implemented authoring contracts and actual verification evidence as future milestones land."
+    ]
+  },
+  "object_authoring_roadmap_163_202": {
+    "inspected_head": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
+    "path": "designs/editor-viewport/object-authoring-roadmap-163-202.md",
+    "scope": "Milestones 163 through 202 for primitives, object components, specialist panes, reusable Props, and the future contextual Game Development Agent.",
+    "status": "design proposal",
+    "verification": [
+      "Verified 40 consecutive milestone headings, each with a problem, implementation files, code example, acceptance checks, and resources.",
+      "After the audit corrections, the documentation site generated and link-checked 73 pages. All eight tests passed and the complete roadmap rendered.",
+      "The fixed Windows PowerShell CPU benchmark completed five runs in the workspace target and five runs in a redirected D: target. All measured budgets passed."
+    ],
+    "audit_scope": [
+      "Updated the glTF test locations, inspector and agent workspace scopes, release qualification, and Agent worker and help packaging requirements.",
+      "Updated the performance guide, benchmark launcher, and current Cinder Oath source references.",
+      "Documented the Dashboard source checkout trust review."
+    ],
+    "verification_limits": [
+      "Milestone implementation and packaged native acceptance remain future work.",
+      "The existing CPU fixture does not cover particle workloads."
+    ],
+    "pending_documentation_changes": [
+      "Record implemented contracts, packaged acceptance, and the planned large-scene and particle performance evidence as the corresponding milestones land."
     ]
   }
 }

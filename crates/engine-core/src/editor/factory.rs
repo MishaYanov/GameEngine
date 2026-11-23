@@ -405,7 +405,13 @@ impl CommandFactory {
 			("create_sky", "Create Sky", "component", true, false),
 			("create_empty", "Create Empty Object", "scene", true, false),
 			("create_light", "Create Light", "scene", true, false),
-			("create_particle_emitter", "Create Particle Emitter", "component", true, false),
+			(
+				"create_particle_emitter",
+				"Create Particle Emitter",
+				"component",
+				true,
+				false,
+			),
 			(
 				"set_active_sky",
 				"Set as Scene Sky",

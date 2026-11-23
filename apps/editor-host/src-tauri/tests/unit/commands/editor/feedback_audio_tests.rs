@@ -108,8 +108,7 @@ fn feedback_catalog_lock_serializes_processes_and_preserves_current_catalog() {
 #[test]
 fn feedback_bus_mix_requires_registered_scenes_before_publication() {
 	let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
-	let workspace =
-		EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
+	let workspace = EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
 	let project = workspace.backend.session().project();
 	let root = Scratch::new();
 	let mix = |scene: &str| {

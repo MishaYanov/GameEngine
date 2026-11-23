@@ -10,13 +10,15 @@
   overflow: hidden;
 }
 
-.scene-root,
-.hierarchy-actions button {
-  padding: var(--space-1) var(--space-2);
+:is(.scene-root, .hierarchy-search input, .hierarchy-actions button) {
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-xs);
+}
+
+:is(.scene-root, .hierarchy-actions button) {
+  padding: var(--space-1) var(--space-2);
 }
 
 .scene-root {
@@ -70,10 +72,6 @@
   padding: var(--space-1);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: var(--font-size-xs);
 }
 
 .virtual-space {
@@ -102,7 +100,7 @@
   cursor: var(--cursor-action);
 }
 
-:is(.entity-button, .scene-root):where(:enabled:hover) {
+:is(.entity-button, .scene-root, .hierarchy-actions button):where(:enabled:hover) {
   background: var(--color-control-hover);
 }
 
@@ -115,7 +113,7 @@
   background: var(--color-selected-hover);
 }
 
-:is(.entity-button, .entity-button.selected, .scene-root):where(:enabled:active) {
+:is(.entity-button, .entity-button.selected, .scene-root, .hierarchy-actions button):where(:enabled:active) {
   background: var(--color-control-pressed);
 }
 
@@ -184,14 +182,6 @@ editor-icon {
   border-radius: var(--radius-sm);
 }
 
-.hierarchy-actions button:hover:enabled {
-  background: var(--color-control-hover);
-}
-
-.hierarchy-actions button:active:enabled {
-  background: var(--color-control-pressed);
-}
-
 .entity-details, .placeholder, .hierarchy-status, .hierarchy-error {
   flex: none;
   margin: 0;
@@ -214,7 +204,7 @@ editor-icon {
   color: var(--color-danger);
 }
 
-.hierarchy-status.drag-status {
+.drag-status {
   // Keep the drag announcement out of the tree layout.
   position: absolute;
   width: 1px;

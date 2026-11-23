@@ -32,6 +32,6 @@ pub async fn editor_check_scenes(
 		)?;
 		Ok(report)
 	})
-		.await
-		.map_err(|error| format!("Scene check worker failed: {error}"))?
+	.await
+	.map_err(|error| format!("Scene check worker failed: {error}"))?
 }

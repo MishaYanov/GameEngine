@@ -7,6 +7,8 @@ mod camera_preview;
 mod editor;
 #[path = "../src/project_location.rs"]
 mod project_location;
+#[path = "../../../../tests/support/project_fixture.rs"]
+mod test_project;
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest};
 use bridge::editor::{EditorCommandUpdateDto, EditorSnapshotDto};
 use editor::{EditorWorkspace, ReloadPolicy};
@@ -265,8 +267,7 @@ fn selected_camera_preview_is_scoped_and_can_see_an_unassigned_follow_camera() {
 	let output = fixture.0.parent().unwrap().join("camera-package");
 	fs::create_dir(&output).unwrap();
 	let staged = compiler::stage_prepared_project(&prepared, output.to_str().unwrap()).unwrap();
-	let manifest =
-		runtime::project::ProjectData::load(&staged.path().join("project.json")).unwrap();
+	let manifest = runtime::project::ProjectData::load(staged.path().join("project.json")).unwrap();
 	let path = manifest.scene_path(&manifest.startup_scene_id).unwrap();
 	let installed = runtime::scene_io::load_data(&staged.path().join("assets").join(path))
 		.unwrap()
@@ -815,7 +816,35 @@ mod scene_verification;
 #[path = "editor_workspace/prop_roundtrip.rs"]
 mod prop_roundtrip;
 
-#[path = "editor_workspace/input_actions.rs"]
-mod input_actions;
 #[path = "editor_workspace/animator_graph.rs"]
 mod animator_graph;
+#[path = "editor_workspace/input_actions.rs"]
+mod input_actions;
+
+#[test]
+fn a_new_asset_source_replaces_only_its_own_format_grant() {
+	use editor::asset_sources::AssetSourceKind;
+
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let glb = fixture.0.join("selected.glb");
+	let wav = fixture.0.join("selected.wav");
+	let png = fixture.0.join("selected.png");
+	for (kind, path) in [
+		(AssetSourceKind::Glb, &glb),
+		(AssetSourceKind::Wav, &wav),
+		(AssetSourceKind::SkyPng, &png),
+	] {
+		workspace.asset_sources.require(kind, path).unwrap_err();
+		workspace.asset_sources.select(kind, path.clone());
+	}
+	let replacement = fixture.0.join("different.glb");
+	let sources = &mut workspace.asset_sources;
+	sources.require(AssetSourceKind::Wav, &glb).unwrap_err();
+	sources.select(AssetSourceKind::Glb, replacement.clone());
+
+	sources.require(AssetSourceKind::Glb, &glb).unwrap_err();
+	sources.require(AssetSourceKind::Glb, &replacement).unwrap();
+	sources.require(AssetSourceKind::Wav, &wav).unwrap();
+	sources.require(AssetSourceKind::SkyPng, &png).unwrap();
+}

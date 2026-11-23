@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_project;
 use crate::{PreparedProject, stage_prepared_project};
 
 #[test]
@@ -72,6 +73,3 @@ fn uri_work_budget_rejects_before_reading_another_dependency() {
 	assert_eq!(closure.file_reads, 0);
 	assert!(closure.files.is_empty());
 }
-
-#[path = "../../../tests/support/project_fixture.rs"]
-mod test_project;

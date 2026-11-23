@@ -39,18 +39,26 @@ export class ControlGraphWorkspaceService {
     readonly assets = this.catalog.asReadonly();
     readonly asset = computed(() => this.draft()?.asset ?? null);
     readonly graph = computed(() => this.draft()?.graph ?? null);
-    readonly pending = signal(false);
-    readonly loadingCatalog = signal(false);
-    readonly probing = signal(false);
-    readonly confirming = signal(false);
-    readonly error = signal<string | null>(null);
+    private readonly pendingState = signal(false);
+    readonly pending = this.pendingState.asReadonly();
+    private readonly loadingCatalogState = signal(false);
+    readonly loadingCatalog = this.loadingCatalogState.asReadonly();
+    private readonly probingState = signal(false);
+    readonly probing = this.probingState.asReadonly();
+    private readonly confirmingState = signal(false);
+    readonly confirming = this.confirmingState.asReadonly();
+    private readonly errorState = signal<string | null>(null);
+    readonly error = this.errorState.asReadonly();
     readonly route = computed(() => {
         const sample = this.sample();
         return sample && sample.context === this.sampleContext() ? sample.result : null;
     });
-    readonly selection = signal<GraphCanvasSelection | null>(null);
-    readonly revision = signal(0);
-    readonly destination = signal('');
+    private readonly selectionState = signal<GraphCanvasSelection | null>(null);
+    readonly selection = this.selectionState.asReadonly();
+    private readonly revisionState = signal(0);
+    readonly revision = this.revisionState.asReadonly();
+    private readonly destinationState = signal('');
+    readonly destination = this.destinationState.asReadonly();
     readonly issues = computed(() => this.graph() ? controlIssues(this.graph()!) : []);
     readonly dirty = computed(() => {
         const draft = this.draft();
@@ -76,7 +84,7 @@ export class ControlGraphWorkspaceService {
             untracked(() => {
                 this.catalogSerial++;
                 this.catalog.set([]);
-                this.loadingCatalog.set(false);
+                this.loadingCatalogState.set(false);
                 if (context) void this.refresh();
             });
         });
@@ -91,47 +99,56 @@ export class ControlGraphWorkspaceService {
         if (!scope || this.loadingCatalog()) return;
         const request = ++this.catalogSerial;
         const current = () => this.catalogSerial === request && this.current(scope);
-        this.loadingCatalog.set(true);
+        this.loadingCatalogState.set(true);
         try {
             const assets = await this.editor.listControlGraphs(scope);
             if (current()) this.catalog.set(assets);
         } catch (error) {
             if (current()) this.showError(error);
         } finally {
-            if (current()) this.loadingCatalog.set(false);
+            if (current()) this.loadingCatalogState.set(false);
         }
     }
 
     async open(id: string): Promise<boolean> {
+        const origin = this.scope();
+        if (!origin || this.pending() || this.editor.playing()) return false;
+        const scene = this.editor.snapshot()?.active_scene_id;
+        const view = this.views.activeViewKind();
+        const current = () => this.current(origin) && !this.editor.playing() &&
+            this.editor.snapshot()?.active_scene_id === scene && this.views.activeViewKind() === view;
+        if (this.asset()?.id === id) {
+            this.views.selectView('controls-graph');
+            return true;
+        }
+        if (!await this.reviewNavigation() || this.pending() || !current()) return false;
         const scope = this.scope();
-        if (!scope || this.pending() || this.editor.playing()) return false;
-        this.views.selectView('controls-graph');
-        if (this.asset()?.id === id) return true;
-        if (!await this.reviewNavigation() || this.pending() || !this.current(scope)) return false;
+        if (!scope) return false;
         const request = ++this.serial;
-        this.pending.set(true);
-        this.error.set(null);
+        this.pendingState.set(true);
+        this.errorState.set(null);
         try {
             const document = await this.editor.openControlGraph(id, scope);
-            if (request !== this.serial || !this.current(scope)) return false;
+            if (request !== this.serial || !current() || this.scope()?.revision !== scope.revision) return false;
             if (document.asset.id !== id) throw new Error('The editor opened a different Controls Graph asset.');
-            this.destination.set(document.asset.path);
+            this.destinationState.set(document.asset.path);
             this.accept({asset: document.asset, graph: document.graph, baseline: document.graph, back: [], forward: []});
+            this.views.selectView('controls-graph');
             return true;
         } catch (error) {
-            if (request === this.serial && this.current(scope)) this.showError(error);
+            if (request === this.serial && current()) this.showError(error);
             return false;
         } finally {
-            if (request === this.serial) this.pending.set(false);
+            if (request === this.serial) this.pendingState.set(false);
         }
     }
 
     async create(): Promise<void> {
         if (!await this.reviewNavigation() || this.editor.playing()) return;
         const graph = emptyControlGraph();
-        this.destination.set('controls/player.controls.json');
+        this.destinationState.set('controls/player.controls.json');
         this.accept({asset: null, baseline: graph, graph, back: [], forward: []});
-        this.error.set(null);
+        this.errorState.set(null);
         this.views.selectView('controls-graph');
     }
 
@@ -140,16 +157,16 @@ export class ControlGraphWorkspaceService {
         const scope = this.scope();
         if (!draft || !scope || !this.canSave()) return false;
         const request = ++this.serial;
-        this.pending.set(true);
-        this.error.set(null);
+        this.pendingState.set(true);
+        this.errorState.set(null);
         try {
             const saved = await this.editor.saveControlGraph(draft.asset?.path ?? this.destination(),
                 readControlGraph(draft.graph), pin(draft.asset), scope);
             if (request !== this.serial || !this.current(scope)) return false;
-            this.destination.set(saved.asset.path);
+            this.destinationState.set(saved.asset.path);
             this.accept({...draft, asset: saved.asset, baseline: saved.graph, graph: saved.graph});
             this.catalogSerial++;
-            this.loadingCatalog.set(false);
+            this.loadingCatalogState.set(false);
             this.catalog.update(items => [...items.filter(item => item.id !== saved.asset.id), saved.asset]
                 .sort((a, b) => a.path.localeCompare(b.path)));
             return true;
@@ -157,7 +174,7 @@ export class ControlGraphWorkspaceService {
             if (request === this.serial && this.current(scope)) this.showError(error);
             return false;
         } finally {
-            if (request === this.serial) this.pending.set(false);
+            if (request === this.serial) this.pendingState.set(false);
         }
     }
 
@@ -169,28 +186,28 @@ export class ControlGraphWorkspaceService {
         const request = ++this.sampleSerial;
         const current = () => request === this.sampleSerial && context === this.sampleContext();
         this.sample.set(null);
-        this.error.set(null);
-        this.probing.set(true);
+        this.errorState.set(null);
+        this.probingState.set(true);
         try {
             const result = await this.editor.probeControlsGraph(readControlGraph(draft.graph), actions, pin(draft.asset), this.actorKey(), scope);
             if (current()) this.sample.set({context, result});
         } catch (error) {
             if (current()) this.showError(error);
         } finally {
-            if (request === this.sampleSerial) this.probing.set(false);
+            if (request === this.sampleSerial) this.probingState.set(false);
         }
     }
 
     invalidateSample(): void {
         this.sampleSerial++;
         this.sample.set(null);
-        this.probing.set(false);
+        this.probingState.set(false);
     }
 
     edit(edit: ControlEdit): boolean {
         const draft = this.draft();
         if (!draft || this.pending() || this.confirming() || this.editor.playing()) return false;
-        this.error.set(null);
+        this.errorState.set(null);
         try {
             const graph = editControlGraph(draft.graph, edit, this.revision());
             if (graph === draft.graph || JSON.stringify(graph) === JSON.stringify(draft.graph)) return false;
@@ -227,7 +244,7 @@ export class ControlGraphWorkspaceService {
     reviewNavigation(): Promise<boolean> {
         if (this.pending() || this.confirming()) return Promise.resolve(false);
         if (!this.dirty()) return Promise.resolve(true);
-        this.confirming.set(true);
+        this.confirmingState.set(true);
         return new Promise(resolve => this.settle = resolve);
     }
 
@@ -238,8 +255,16 @@ export class ControlGraphWorkspaceService {
         this.finish(choice !== 'cancel');
     }
 
+    select(selection: GraphCanvasSelection | null): void {
+        this.selectionState.set(selection);
+    }
+
+    setDestination(path: string): void {
+        if (!this.pending()) this.destinationState.set(path);
+    }
+
     showError(error: unknown): void {
-        this.error.set(error instanceof Error ? error.message : String(error));
+        this.errorState.set(error instanceof Error ? error.message : String(error));
     }
 
     scope(): WorkspaceAssetScope | null {
@@ -266,27 +291,27 @@ export class ControlGraphWorkspaceService {
 
     private accept(draft: Draft): void {
         this.draft.set(draft);
-        this.revision.update(value => value + 1);
+        this.revisionState.update(value => value + 1);
         const selected = this.selection();
         if (!selected || !(selected.kind === 'node'
             ? draft.graph.nodes.some(node => node.id === selected.id)
             : controlCanvas(draft.graph).connections.some(edge => edge.id === selected.id))) {
-            this.selection.set(draft.graph.nodes[0] ? {kind: 'node', id: draft.graph.nodes[0].id} : null);
+            this.selectionState.set(draft.graph.nodes[0] ? {kind: 'node', id: draft.graph.nodes[0].id} : null);
         }
     }
 
     private clear(): void {
         this.serial++;
-        this.pending.set(false);
+        this.pendingState.set(false);
         this.draft.set(null);
-        this.selection.set(null);
-        this.error.set(null);
+        this.selectionState.set(null);
+        this.errorState.set(null);
         this.invalidateSample();
         this.finish(false);
     }
 
     private finish(accepted: boolean): void {
-        this.confirming.set(false);
+        this.confirmingState.set(false);
         this.settle?.(accepted);
         this.settle = undefined;
     }

@@ -219,7 +219,7 @@ fn real_native_template_validation() {
 	let project = engine_core::project::ProjectData::load(
 		root.join("client/projects/cinder-oath/project.json"),
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(project.gameplay_module.as_deref(), Some("cinder_oath"));
 	eprintln!(
 		"Validated native client at {}",
@@ -259,7 +259,12 @@ fn error_to_card_failed_job_rerun_and_generated_client() {
 		fs::write(source.join("apps/game/src/main.rs"), source_text).unwrap();
 		let job = service
 			.jobs
-			.queue(&source, Kind::Build, "game".into(), "dev".into())
+			.queue(
+				&source,
+				crate::jobs::Kind::Build,
+				"game".into(),
+				"dev".into(),
+			)
 			.unwrap();
 		service.jobs.set_offline(&job.id, true);
 		service.board.link(&card.id, &job.id).unwrap();

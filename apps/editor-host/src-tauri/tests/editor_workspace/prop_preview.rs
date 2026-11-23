@@ -1,7 +1,7 @@
 use super::*;
 use bridge::viewport::PropPreviewTargetDto;
-use editor::prop_preview::PropPreviewEnvironment;
 use editor::prefab_sources::{PrefabSourceDraftDto, PropDraftEdit};
+use editor::prop_preview::PropPreviewEnvironment;
 
 const PROP_PATH: &str = "prefabs/table.json";
 

@@ -225,7 +225,6 @@ struct RenderPacket {
 	warm_requested: bool,
 	warming: crate::editor::scene_warming::WarmingContext,
 	animations: Option<runtime::animation::AnimationBank>,
-	particles: Vec<runtime::particle_draw::ParticleSample>,
 	animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 	document: Option<Arc<runtime::SceneData>>,
 	game_camera: Option<Camera>,
@@ -324,6 +323,7 @@ struct AuthoredLoad {
 }
 
 struct Worker {
+	particle_samples: Vec<runtime::particle_draw::ParticleSample>,
 	scene_audio: runtime::scene_audio::NativeSceneAudio,
 	warm_measurement: bool,
 	authored_load: Option<AuthoredLoad>,
@@ -377,6 +377,7 @@ impl Worker {
 	) -> Self {
 		let now = Instant::now();
 		Self {
+			particle_samples: Vec::new(),
 			scene_audio: Default::default(),
 			warm_measurement: std::env::var_os("ENGINE_EDITOR_WARM_MEASURE").as_deref()
 				== Some(std::ffi::OsStr::new("1")),

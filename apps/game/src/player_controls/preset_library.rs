@@ -113,8 +113,8 @@ impl Record {
 				|| layout.revision == 0
 				|| normalize_label(&layout.label)? != layout.label
 				|| record.entries[..index]
-				.iter()
-				.any(|prior| prior.layout.id == layout.id || prior.layout.label == layout.label)
+					.iter()
+					.any(|prior| prior.layout.id == layout.id || prior.layout.label == layout.label)
 			{
 				return Err("Saved layouts contain an invalid or repeated identity".into());
 			}
@@ -296,10 +296,10 @@ impl LibraryBackupReview {
 	fn label_available(&self, index: usize, label: &str) -> bool {
 		self.local_labels.iter().all(|existing| existing != label)
 			&& self
-			.rows
-			.iter()
-			.enumerate()
-			.all(|(other, row)| other == index || row.label() != Some(label))
+				.rows
+				.iter()
+				.enumerate()
+				.all(|(other, row)| other == index || row.label() != Some(label))
 	}
 }
 
@@ -484,8 +484,8 @@ impl<'a> PresetLibrary<'a> {
 					if index == other
 						|| reviewed.favorite != neighbor.favorite
 						|| record.entries[index.min(other) + 1..index.max(other)]
-						.iter()
-						.any(|entry| entry.layout.favorite == reviewed.favorite)
+							.iter()
+							.any(|entry| entry.layout.favorite == reviewed.favorite)
 					{
 						return Err("Layout order changed. Review the list again.".into());
 					}
@@ -583,8 +583,8 @@ fn normalize_label(label: &str) -> Result<String, String> {
 	if label.is_empty()
 		|| label.len() > MAX_LABEL_BYTES
 		|| !label
-		.bytes()
-		.all(|byte| byte.is_ascii_alphanumeric() || b" -".contains(&byte))
+			.bytes()
+			.all(|byte| byte.is_ascii_alphanumeric() || b" -".contains(&byte))
 	{
 		return Err("Use 1-32 letters, digits, spaces or hyphens for the layout name".into());
 	}

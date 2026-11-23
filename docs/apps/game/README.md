@@ -45,7 +45,7 @@ existing controls, but native SceneEditor delegates edits/history to core Editor
 
 Project schema 3 identifies `startup_scene_id` in its scene catalog. The player loads that document and applies its
 scene-scoped ControlledMove/Spin behaviors, including shared settings, through the same SimulationSession used by
-editor Play. Both paths resolve the manifest's optional `gameplay_module` through `courtyard-gameplay` when Play
+editor Play. Both paths resolve the manifest's optional `gameplay_module` through `gameplay-catalog` when Play
 starts. An omitted selector uses configured behaviors. GameSession owns the current simulation and explicit
 replacement boundary. RobotGame and older
 CommandHistory APIs remain compatibility helpers, not the normal GameApp behavior pipeline.

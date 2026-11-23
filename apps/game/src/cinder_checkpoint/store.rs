@@ -61,7 +61,7 @@ impl TransferFile {
 }
 
 pub(crate) enum Preflight {
-	Ready(Review),
+	Ready(Box<Review>),
 	Blocked(PreflightBlock),
 }
 
@@ -132,9 +132,9 @@ impl SlotRecord {
 		if record.schema_version != SLOT_SCHEMA
 			|| record.generation == 0
 			|| !record
-			.checkpoint
-			.as_ref()
-			.is_none_or(Checkpoint::is_cinder_entry)
+				.checkpoint
+				.as_ref()
+				.is_none_or(Checkpoint::is_cinder_entry)
 			|| record.entries.len() > MAX_ROWS
 			|| !record.entries.iter().all(Receipt::is_cinder)
 		{
@@ -213,7 +213,7 @@ impl PracticeStore {
 		arena: impl FnOnce() -> Result<Checkpoint, PreflightBlock>,
 	) -> Preflight {
 		match self.preview(file, arena) {
-			Ok(review) => Preflight::Ready(review),
+			Ok(review) => Preflight::Ready(Box::new(review)),
 			Err(problem) => Preflight::Blocked(problem),
 		}
 	}

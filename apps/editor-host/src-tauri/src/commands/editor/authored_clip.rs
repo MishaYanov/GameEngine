@@ -40,15 +40,23 @@ pub async fn editor_save_authored_clip(
 	clip: AuthoredClip,
 	replacement: Option<ClipReplacement>,
 	expected_revision: u64,
+	expected_generation: u64,
 ) -> Result<ClipAssetSave, String> {
 	trusted_window(&window)?;
 	workspace(state, true, Some("save_authored_clip"), move |workspace| {
+		if workspace.generation != expected_generation {
+			return Err("The authored clip belongs to another workspace".into());
+		}
 		workspace.save_authored_clip_asset(&path, clip, replacement, expected_revision)
 	})
 	.await
 }
 
 #[tauri::command]
+#[expect(
+	clippy::too_many_arguments,
+	reason = "Keep the existing Tauri IPC fields at the top level of the request"
+)]
 pub async fn editor_authored_clip_preview_open(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,

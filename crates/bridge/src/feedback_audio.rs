@@ -428,9 +428,9 @@ fn prepare(
 		if events.insert(event, path.clone()).is_some() {
 			return Err("Feedback cue catalog repeats an event".into());
 		}
-		if !clips.contains_key(&path) {
-			let clip = prepare_clip(root, &path)?;
-			clips.insert(path, clip);
+		if let std::collections::btree_map::Entry::Vacant(entry) = clips.entry(path) {
+			let clip = prepare_clip(root, entry.key())?;
+			entry.insert(clip);
 		}
 	}
 	Ok(PreparedCueCatalog {

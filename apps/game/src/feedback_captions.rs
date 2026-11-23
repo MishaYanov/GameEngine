@@ -34,7 +34,7 @@ impl FeedbackCaptions {
 		&self,
 		now: Instant,
 		display: DisplaySettings,
-	) -> impl Iterator<Item=&'static str> + '_ {
+	) -> impl Iterator<Item = &'static str> + '_ {
 		self.entries
 			.iter()
 			.rev()

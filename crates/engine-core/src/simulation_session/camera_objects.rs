@@ -4,6 +4,12 @@ use crate::{
 	scene_data::CameraData,
 };
 
+pub(super) struct CameraObstructionStep<'a> {
+	pub(super) exclusions: &'a mut Option<CameraExclusions>,
+	pub(super) collisions: &'a CollisionWorld,
+	pub(super) budget: &'a mut usize,
+}
+
 #[derive(Clone)]
 pub(super) struct CameraObjects {
 	default: Option<RuntimeEntityHandle>,
@@ -67,9 +73,7 @@ impl CameraObjects {
 		lifecycle: &RuntimeLifecycle,
 		camera: &mut GameCameraController,
 		tick: u64,
-		exclusions: &mut Option<CameraExclusions>,
-		collisions: &CollisionWorld,
-		budget: &mut usize,
+		obstructions: CameraObstructionStep<'_>,
 	) -> Result<bool, String> {
 		let mut override_projection = self.override_camera.as_ref().and_then(|handle| {
 			Self::projection(handle, world, lifecycle).map(|scene| (handle.clone(), scene))
@@ -92,13 +96,19 @@ impl CameraObjects {
 					.as_ref()
 					.map(|(_, scene)| scene)
 					.unwrap_or(&world.data().camera);
-				*exclusions = None;
+				*obstructions.exclusions = None;
 				GameCameraController::from_authored(
 					world,
 					lifecycle,
 					authored,
 					tick,
-					obstruction_query(world, lifecycle, collisions, exclusions, budget),
+					obstruction_query(
+						world,
+						lifecycle,
+						obstructions.collisions,
+						obstructions.exclusions,
+						obstructions.budget,
+					),
 				)?
 			};
 			*camera = replacement;
@@ -150,9 +160,11 @@ impl SimulationSession {
 			&self.lifecycle,
 			&mut camera,
 			self.tick,
-			&mut exclusions,
-			&self.collisions,
-			&mut budget,
+			CameraObstructionStep {
+				exclusions: &mut exclusions,
+				collisions: &self.collisions,
+				budget: &mut budget,
+			},
 		)?;
 		if changed || owner_changed {
 			self.camera_input.clear();

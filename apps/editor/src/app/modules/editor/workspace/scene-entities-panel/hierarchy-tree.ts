@@ -1,16 +1,17 @@
 import type {
-    EntityKey, FolderId, FolderRecord, SceneEntity, SceneOrganization,
+    EntityKey, FolderId, FolderRecord, SceneOrganization,
 } from '../../../../core/editor/editor.models';
+import type {HierarchyEntity} from './scene-entities.model';
 
 export type HierarchyKey = `entity:${EntityKey}` | `folder:${FolderId}`;
 
 export type HierarchyItem =
-    | {readonly kind: 'entity'; readonly key: HierarchyKey; readonly name: string; readonly entity: SceneEntity}
+    | {readonly kind: 'entity'; readonly key: HierarchyKey; readonly name: string; readonly entity: HierarchyEntity}
     | {readonly kind: 'folder'; readonly key: HierarchyKey; readonly name: string; readonly folder: FolderRecord};
 
 interface HierarchyForest {
-    readonly byKey: ReadonlyMap<EntityKey, SceneEntity>;
-    readonly children: ReadonlyMap<EntityKey | null, readonly SceneEntity[]>;
+    readonly byKey: ReadonlyMap<EntityKey, HierarchyEntity>;
+    readonly children: ReadonlyMap<EntityKey | null, readonly HierarchyEntity[]>;
     readonly parents: ReadonlyMap<EntityKey, EntityKey | null>;
     readonly items: ReadonlyMap<HierarchyKey, HierarchyItem>;
     readonly folders: ReadonlyMap<FolderId, FolderRecord>;
@@ -41,11 +42,11 @@ export function folderHierarchyKey(id: FolderId): HierarchyKey {
 }
 
 export function buildHierarchy(
-    entities: readonly SceneEntity[],
+    entities: readonly HierarchyEntity[],
     organization?: SceneOrganization,
 ): HierarchyForest {
     const byKey = new Map(entities.map(entity => [entity.key, entity]));
-    const children = new Map<EntityKey | null, SceneEntity[]>();
+    const children = new Map<EntityKey | null, HierarchyEntity[]>();
     const parents = new Map<EntityKey, EntityKey | null>();
     const folders = new Map(organization?.folders.map(folder => [folder.id, folder]));
     const membership = new Map(Object.entries(organization?.root_membership ?? {}));

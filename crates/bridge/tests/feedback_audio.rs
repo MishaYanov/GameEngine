@@ -8,8 +8,7 @@ use bridge::feedback_audio::{CueClip, FeedbackBus, FeedbackCue, combined_percent
 use engine_core::scene_catalog::{SceneCatalog, SceneDescriptor, SceneId};
 use serde_json::{Value, json};
 
-const TONE: &[u8] =
-	include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
+const TONE: &[u8] = include_bytes!("../../../projects/cinder-oath/assets/audio/blade-hit.wav");
 
 struct Folder(PathBuf);
 

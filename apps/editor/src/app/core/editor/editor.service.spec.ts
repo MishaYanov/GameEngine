@@ -290,13 +290,16 @@ describe('EditorService native command and viewport queues', () => {
         const service = TestBed.inject(EditorService);
         const generation = service.workspaceGeneration();
         expect(service.authoredClipCatalogVersion()).toBe(0);
-        await service.saveAuthoredClip(asset.path, document.clip, null, generation, 0);
+        await service.saveAuthoredClip(asset.path, document.clip, null, {workspaceGeneration: generation, nativeGeneration: 17, revision: 0});
+        expect(invoke).toHaveBeenLastCalledWith('editor_save_authored_clip', {
+            path: asset.path, clip: document.clip, replacement: null, expectedRevision: 0, expectedGeneration: 17,
+        });
         expect(service.authoredClipCatalogVersion()).toBe(1);
         await service.refresh();
         expect(service.authoredClipCatalogVersion()).toBe(1);
         await service.saveClipTimelineDraft(draft.draft_id, 2, generation, 2);
         expect(service.authoredClipCatalogVersion()).toBe(2);
-        await expect(service.saveAuthoredClip(asset.path, document.clip, null, generation, 3))
+        await expect(service.saveAuthoredClip(asset.path, document.clip, null, {workspaceGeneration: generation, nativeGeneration: 17, revision: 3}))
             .rejects.toThrow('Asset changed');
         expect(service.authoredClipCatalogVersion()).toBe(2);
     });
@@ -1103,12 +1106,12 @@ describe('EditorService native command and viewport queues', () => {
         const service = TestBed.inject(EditorService);
         await service.openProject('project.json');
         await service.assets();
-        const result = await service.importExternalGlb('C:/Models/source.glb', 'models/imported.glb', service.workspaceGeneration(), 1);
+        const result = await service.importExternalGlb('C:/Models/source.glb', 'models/imported.glb', {workspaceGeneration: service.workspaceGeneration(), nativeGeneration: 19, revision: 1});
         expect(result.asset).toEqual(asset);
         expect(service.snapshot()).toBe(next);
         expect(service.modelAssets()).toEqual(previous);
         expect(invoke).toHaveBeenLastCalledWith('editor_import_external_glb', {
-            sourcePath: 'C:/Models/source.glb', destinationPath: 'models/imported.glb', expectedRevision: 1,
+            sourcePath: 'C:/Models/source.glb', destinationPath: 'models/imported.glb', expectedGeneration: 19, expectedRevision: 1,
         });
         vi.mocked(invoke).mockResolvedValueOnce([asset]);
         expect(await service.assets()).toEqual([asset]);
@@ -1130,7 +1133,7 @@ describe('EditorService native command and viewport queues', () => {
         await service.openProject('project.json');
         await service.assets();
         const oldRequest = service.assets(true);
-        await service.moveAsset('actor-id', 'moved.glb', service.workspaceGeneration(), 1);
+        await service.moveAsset('actor-id', 'moved.glb', {workspaceGeneration: service.workspaceGeneration(), nativeGeneration: 19, revision: 1});
         const newRequest = service.assets();
         expect(newRequest).not.toBe(oldRequest);
         expect(service.modelAssets()).toEqual([original]);
@@ -1148,9 +1151,9 @@ describe('EditorService native command and viewport queues', () => {
             .mockResolvedValueOnce({operation_id: 'reimport', asset: {name: 'Actor', path: 'actor.glb'}, snapshot: snapshot(6)});
         const service = TestBed.inject(EditorService);
         await service.openProject('project.json');
-        await service.reimportAsset('actor-id', 'captured-fingerprint', 'C:/Models/new.glb', service.workspaceGeneration(), 4);
+        await service.reimportAsset('actor-id', 'captured-fingerprint', 'C:/Models/new.glb', {workspaceGeneration: service.workspaceGeneration(), nativeGeneration: 19, revision: 4});
         expect(invoke).toHaveBeenLastCalledWith('editor_reimport_asset', {
-            assetId: 'actor-id', expectedFingerprint: 'captured-fingerprint', sourcePath: 'C:/Models/new.glb', expectedRevision: 4,
+            assetId: 'actor-id', expectedFingerprint: 'captured-fingerprint', sourcePath: 'C:/Models/new.glb', expectedGeneration: 19, expectedRevision: 4,
         });
     });
 
@@ -1255,7 +1258,7 @@ describe('EditorService native command and viewport queues', () => {
         await service.openProject('first/project.json');
         const generation = service.workspaceGeneration();
         const reopen = service.openProject('second/project.json');
-        const stale = service.importExternalGlb('C:/Models/old.glb', 'old.glb', generation, 1);
+        const stale = service.importExternalGlb('C:/Models/old.glb', 'old.glb', {workspaceGeneration: generation, nativeGeneration: 19, revision: 1});
         const rejected = expect(stale).rejects.toThrow('workspace changed');
         replacement.resolve(snapshot(10));
         await reopen;
@@ -1275,10 +1278,11 @@ describe('EditorService native command and viewport queues', () => {
             .mockRejectedValueOnce('Current workspace picker failure');
         const service = TestBed.inject(EditorService);
         await service.openProject('first/project.json');
-        const stale = service.chooseExternalGlb();
+        const stale = service.chooseExternalGlb({workspaceGeneration: service.workspaceGeneration(), nativeGeneration: 19});
+        expect(invoke).toHaveBeenLastCalledWith('editor_choose_external_glb', {expectedGeneration: 19});
         const rejected = expect(stale).rejects.toThrow('Old workspace picker failure');
         await service.openProject('second/project.json');
-        await expect(service.chooseExternalGlb()).rejects.toThrow('Current workspace picker failure');
+        await expect(service.chooseExternalGlb({workspaceGeneration: service.workspaceGeneration(), nativeGeneration: 20})).rejects.toThrow('Current workspace picker failure');
         const currentError = service.error();
         picker.reject('Old workspace picker failure');
         await rejected;

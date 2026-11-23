@@ -134,7 +134,7 @@ impl ParticleBank {
 			.any(|emitter| emitter.settings.rate_per_second > 0.0 || !emitter.particles.is_empty())
 	}
 
-	pub(crate) fn samples(&self, fixed_hz: u32) -> impl Iterator<Item=ParticleSample> + '_ {
+	pub(crate) fn samples(&self, fixed_hz: u32) -> impl Iterator<Item = ParticleSample> + '_ {
 		self.emitters.values().flat_map(move |emitter| {
 			emitter
 				.particles

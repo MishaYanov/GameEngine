@@ -59,3 +59,35 @@ fn operation_result_and_progress_use_the_frontend_wire_field_names() {
 		serde_json::json!({"operation_id":"operation-1","stage":"validating","completed":0,"total":3,"error":null})
 	);
 }
+
+#[test]
+fn source_selections_are_confined_to_the_workspace_and_kind() {
+	let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../game/assets");
+	let mut first = EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
+	let second = EditorWorkspace::open(assets.to_str().unwrap(), "scenes/robots.json").unwrap();
+	assert_eq!(
+		first.backend.session().revision(),
+		second.backend.session().revision()
+	);
+	assert!(check_asset_generation(&second, first.generation).is_err());
+	let source = assets.join("sample.glb");
+	assert!(first
+		.asset_sources
+		.require(AssetSourceKind::Glb, &source)
+		.is_err());
+	first
+		.asset_sources
+		.select(AssetSourceKind::Glb, source.clone());
+	assert!(first
+		.asset_sources
+		.require(AssetSourceKind::Glb, &source)
+		.is_ok());
+	assert!(first
+		.asset_sources
+		.require(AssetSourceKind::Wav, &source)
+		.is_err());
+	assert!(second
+		.asset_sources
+		.require(AssetSourceKind::Glb, &source)
+		.is_err());
+}

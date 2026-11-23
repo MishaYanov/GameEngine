@@ -71,7 +71,7 @@ fn cinder_scene_verification_follows_retained_repairs_undo_and_stage() {
 	let staged =
 		compiler::stage_prepared_project(&prepared, destination.to_str().unwrap()).unwrap();
 	let staged_project =
-		runtime::project::ProjectData::load(&staged.path().join("project.json")).unwrap();
+		runtime::project::ProjectData::load(staged.path().join("project.json")).unwrap();
 	for (scene, role, expected) in [(intro, "camera_track", track), (target, "player", player)] {
 		let path = staged
 			.path()
@@ -113,7 +113,7 @@ fn open(manifest: &Path) -> EditorWorkspace {
 		ProjectLocation::from_manifest(manifest).unwrap(),
 		|| {},
 	)
-		.unwrap()
+	.unwrap()
 }
 
 fn check(workspace: &EditorWorkspace) -> SceneVerificationReport {

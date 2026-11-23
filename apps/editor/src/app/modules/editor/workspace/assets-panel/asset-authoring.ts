@@ -1,7 +1,8 @@
 import {afterNextRender, Component, computed, DestroyRef, effect, inject, Injector, input, signal} from '@angular/core';
 import {form, FormField} from '@angular/forms/signals';
 import type {ModelAsset} from '../../../../core/editor/editor.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 
@@ -17,6 +18,7 @@ export class AssetAuthoring {
     readonly opening = input(false);
     readonly selected = input<ModelAsset | null>(null);
     protected readonly editor = inject(EditorService);
+    private readonly viewport = inject(ViewportEditorService, {optional: true});
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly injector = inject(Injector);
     private readonly destroy = inject(DestroyRef);
@@ -30,11 +32,12 @@ export class AssetAuthoring {
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         this.editor.snapshot()?.mode === 'edit' && !this.opening() && !this.pending() &&
         (this.editing?.ready() ?? (!this.editor.busy() && !this.editor.snapshot()?.transaction)));
+    protected readonly availableAssetScope = computed(() => this.available() && this.scope() !== null);
     protected readonly selectedGlb = computed(() => (this.selected()?.kind ?? 'model') === 'model' &&
         /\.glb$/i.test(this.selected()?.path ?? ''));
-    protected readonly canReimport = computed(() => this.available() && this.selectedGlb() &&
+    protected readonly canReimport = computed(() => this.availableAssetScope() && this.selectedGlb() &&
         !!this.selected()?.asset_id && !!this.selected()?.fingerprint);
-    protected readonly canMove = computed(() => this.available() && !!this.selected()?.asset_id &&
+    protected readonly canMove = computed(() => this.availableAssetScope() && !!this.selected()?.asset_id &&
         (this.selectedGlb() || this.selected()?.kind === 'prefab' || this.selected()?.kind === 'audio_clip'));
     protected readonly unsupportedLegacyModel = computed(() => !!this.selected() &&
         (this.selected()?.kind ?? 'model') === 'model' && !this.selectedGlb());
@@ -59,7 +62,7 @@ export class AssetAuthoring {
             (this.destinationExtension() === '.json' ? value : value.toLowerCase()).endsWith(this.destinationExtension());
     });
     private source = '';
-    private context: {generation: number; sceneId: string; asset: ModelAsset | null; selection: string} | null = null;
+    private context: {generation: number; nativeGeneration: number | null; sceneId: string; asset: ModelAsset | null; selection: string} | null = null;
 
     constructor() {
         effect(() => {
@@ -74,13 +77,14 @@ export class AssetAuthoring {
     }
 
     protected async chooseImport(format: 'glb' | 'wav' = 'glb', opener?: HTMLButtonElement): Promise<void> {
-        if (!this.available()) return;
-        const generation = this.editor.workspaceGeneration();
+        const scope = this.scope();
+        if (!this.available() || !scope) return;
+        const generation = scope.workspaceGeneration;
         this.pending.set(format === 'wav' ? 'Choosing a PCM WAV source…' : 'Choosing a GLB source…');
         this.error.set(null);
         try {
-            const source = await (format === 'wav' ? this.editor.chooseExternalWav() : this.editor.chooseExternalGlb());
-            if (!source || generation !== this.editor.workspaceGeneration() || this.editor.playing()) return;
+            const source = await (format === 'wav' ? this.editor.chooseExternalWav(scope) : this.editor.chooseExternalGlb(scope));
+            if (!source || !this.currentScope(scope) || this.editor.playing()) return;
             this.source = source;
             this.show(format === 'wav' ? 'import-audio' : 'import', source.split(/[\\/]/).at(-1) ?? `asset.${format}`, true);
         } catch (error) {
@@ -101,7 +105,8 @@ export class AssetAuthoring {
         if (mode === 'move' && !this.canMove()) return;
         this.mode.set(mode);
         this.draft.set({path: path || (mode === 'prefab' ? 'gameplay.json' : this.selected()?.path ?? '')});
-        this.context = {generation: this.editor.workspaceGeneration(), sceneId: snapshot.active_scene_id,
+        this.context = {generation: this.editor.workspaceGeneration(), nativeGeneration: this.scope()?.nativeGeneration ?? null,
+            sceneId: snapshot.active_scene_id,
             asset: this.selected(), selection: JSON.stringify(snapshot.selection)};
         this.error.set(null);
         this.status.set(null);
@@ -116,14 +121,18 @@ export class AssetAuthoring {
         await this.run(this.title(), context.generation, async () => {
             const snapshot = this.editor.snapshot()!;
             if (snapshot.active_scene_id !== context.sceneId) throw new Error('The scene changed. Choose the asset operation again.');
-            if (mode === 'import') await this.editor.importExternalGlb(this.source, path, context.generation, snapshot.revision);
-            else if (mode === 'import-audio') await this.editor.importExternalWav(this.source, path, context.generation, snapshot.revision);
-            else if (mode === 'move') {
-                if (!context.asset?.asset_id) return;
-                await this.editor.moveAsset(context.asset.asset_id, path, context.generation, snapshot.revision);
-            } else {
+            if (mode === 'prefab') {
                 if (JSON.stringify(snapshot.selection) !== context.selection) throw new Error('The selection changed. Review it before saving a prefab.');
                 await this.editor.savePrefab(path, context.generation, snapshot.revision);
+            } else {
+                const scope = this.scope();
+                if (!scope || scope.nativeGeneration !== context.nativeGeneration || scope.workspaceGeneration !== context.generation) {
+                    throw new Error('The workspace changed. Choose the asset operation again.');
+                }
+                if (mode === 'import') await this.editor.importExternalGlb(this.source, path, scope);
+                else if (mode === 'import-audio') await this.editor.importExternalWav(this.source, path, scope);
+                else if (context.asset?.asset_id) await this.editor.moveAsset(context.asset.asset_id, path, scope);
+                else return;
             }
             if (context.generation !== this.editor.workspaceGeneration()) return;
             await this.editor.assets(true);
@@ -136,27 +145,45 @@ export class AssetAuthoring {
 
     protected async reimport(): Promise<void> {
         const asset = this.selected();
-        if (!asset?.asset_id || !asset.fingerprint || !this.canReimport()) return;
-        const generation = this.editor.workspaceGeneration();
+        const scope = this.scope();
+        if (!asset?.asset_id || !asset.fingerprint || !scope || !this.canReimport()) return;
+        const {asset_id, fingerprint} = asset;
+        const generation = scope.workspaceGeneration;
         this.pending.set('Choosing a replacement GLB…');
         this.error.set(null);
         let source: string | null;
         try {
-            source = await this.editor.chooseExternalGlb();
+            source = await this.editor.chooseExternalGlb(scope);
         } catch (error) {
             if (generation === this.editor.workspaceGeneration()) this.error.set(error instanceof Error ? error.message : String(error));
             return;
         } finally {
             this.pending.set(null);
         }
-        if (!source || generation !== this.editor.workspaceGeneration()) return;
+        if (!source || !this.currentScope(scope)) return;
+        const sourcePath = source;
         await this.run('Reimporting GLB…', generation, async () => {
-            await this.editor.reimportAsset(asset.asset_id!, asset.fingerprint!, source, generation, this.editor.snapshot()!.revision);
+            const current = this.scope();
+            if (!current || !this.currentScope(scope)) return;
+            await this.editor.reimportAsset(asset_id, fingerprint, sourcePath, current);
             if (generation !== this.editor.workspaceGeneration()) return;
             await this.editor.assets(true);
             if (generation !== this.editor.workspaceGeneration()) return;
             this.status.set('Asset reimported with its existing identity.');
         });
+    }
+
+    private scope(): WorkspaceAssetScope | null {
+        const nativeGeneration = this.viewport?.state()?.workspace_generation;
+        const snapshot = this.editor.snapshot();
+        return nativeGeneration == null || !snapshot ? null : {
+            workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision,
+        };
+    }
+
+    private currentScope(scope: WorkspaceAssetScope): boolean {
+        const current = this.scope();
+        return current?.workspaceGeneration === scope.workspaceGeneration && current.nativeGeneration === scope.nativeGeneration;
     }
 
     private async run(label: string, generation: number, action: () => Promise<void>): Promise<void> {

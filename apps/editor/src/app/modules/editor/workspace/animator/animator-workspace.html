@@ -17,7 +17,7 @@
                     <editor-graph
                         [managed]="true" [managedSelection]="selection()" [managedRevision]="workspace.revision()"
                         [graph]="graphCanvas" label="Animator state graph"
-                        (selectedItem)="selection.set($event)" (canvasEdited)="canvasEdit($event)"/>
+                        (selectedItem)="workspace.select($event)" (canvasEdited)="canvasEdit($event)"/>
                 }
                 <div class="outline">
                     <fieldset [disabled]="workspace.pending()" class="outline-group">
@@ -31,7 +31,7 @@
                                 <li>
                                     <button type="button" [attr.data-state-id]="state.id"
                                         [attr.aria-pressed]="selectedState()?.id === state.id"
-                                        (click)="selection.set({kind: 'node', id: state.id})">
+                                        (click)="workspace.select({kind: 'node', id: state.id})">
                                         {{ state.name }}{{ state.id === graph.entry ? ' · Entry' : '' }}
                                     </button>
                                     @if (issueByState().get(state.id); as issue) {
@@ -82,7 +82,7 @@
                                 <li>
                                     <button type="button" [attr.data-transition-id]="edge.id"
                                         [attr.aria-pressed]="selectedEdge()?.id === edge.id"
-                                        (click)="selection.set({kind: 'connection', id: edge.id})">
+                                        (click)="workspace.select({kind: 'connection', id: edge.id})">
                                         {{ stateName(graph, edge.from) }} → {{ stateName(graph, edge.to) }}
                                     </button>
                                 </li>

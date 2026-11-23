@@ -29,6 +29,10 @@ export class ParticleDesigner {
         this.restart.set(0);
     }
 
+    protected togglePreview(): void {
+        this.running.update(running => !running);
+    }
+
     protected restartPreview(): void {
         this.restart.update(token => token + 1);
     }

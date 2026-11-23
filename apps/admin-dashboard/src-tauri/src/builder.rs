@@ -1,5 +1,5 @@
 use crate::{
-	jobs::{Jobs, Kind, Status},
+	jobs::{Jobs, Status},
 	now_ms, save_json,
 };
 use serde::{Deserialize, Serialize};
@@ -285,13 +285,8 @@ impl Builder {
 			if run.destination.exists() {
 				return Err(io::Error::other("Destination is occupied"));
 			}
-			let job = jobs.queue(
-				&run.staging,
-				Kind::Build,
-				"game".into(),
-				run.profile.clone(),
-			)?;
-			jobs.set_offline(&job.id, offline);
+			let job =
+				jobs.queue_generated_validation(&run.staging, run.profile.clone(), offline)?;
 			run.job_id = job.id;
 			self.runs.insert(0, run.clone());
 			self.runs.truncate(50);

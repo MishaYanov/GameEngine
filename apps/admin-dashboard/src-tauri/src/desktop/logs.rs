@@ -1,13 +1,15 @@
-use super::{Service, error};
+use super::{Service, error, trusted_window};
 use crate::collector::{LogFilter, LogPage};
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 
 #[tauri::command]
 pub(super) async fn resource_metrics(
+	window: WebviewWindow,
 	service: State<'_, Service>,
 	selected_id: Option<String>,
 ) -> Result<crate::metrics::MetricsPage, String> {
+	trusted_window(&window)?;
 	let directory = service
 		.lock()
 		.map_err(|_| "Admin state lock is unavailable")?
@@ -22,16 +24,18 @@ pub(super) async fn resource_metrics(
 }
 #[tauri::command]
 pub(super) fn log_page(
+	window: WebviewWindow,
 	service: State<Service>,
 	after: u64,
 	limit: usize,
 	filter: LogFilter,
-) -> LogPage {
-	service
+) -> Result<LogPage, String> {
+	trusted_window(&window)?;
+	Ok(service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
 		.collector
-		.page(after, limit, &filter)
+		.page(after, limit, &filter))
 }
 #[derive(serde::Serialize)]
 pub(super) struct ExportResult {
@@ -40,9 +44,11 @@ pub(super) struct ExportResult {
 }
 #[tauri::command]
 pub(super) fn export_logs(
+	window: WebviewWindow,
 	service: State<Service>,
 	filter: LogFilter,
 ) -> Result<ExportResult, String> {
+	trusted_window(&window)?;
 	let (path, count) = service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -54,7 +60,12 @@ pub(super) fn export_logs(
 	})
 }
 #[tauri::command]
-pub(super) fn open_source(service: State<Service>, cursor: u64) -> Result<(), String> {
+pub(super) fn open_source(
+	window: WebviewWindow,
+	service: State<Service>,
+	cursor: u64,
+) -> Result<(), String> {
+	trusted_window(&window)?;
 	let (source, line) = service
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())

@@ -1,4 +1,6 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
+#[path = "editor/asset_sources.rs"]
+pub(crate) mod asset_sources;
 #[path = "editor/assets.rs"]
 mod assets;
 #[path = "editor/audio_audition.rs"]
@@ -57,13 +59,15 @@ pub struct EditorWorkspace {
 	pub(crate) animation_preview: Option<crate::animation_preview::AnimationPreview>,
 	pub(crate) animation_preview_request: u64,
 	pub(crate) clip_timeline_drafts: crate::animation_preview::timeline::ClipTimelineDrafts,
-	pub(crate) authored_clip_preview: Option<crate::animation_preview::authored::AuthoredClipPreview>,
+	pub(crate) authored_clip_preview:
+		Option<crate::animation_preview::authored::AuthoredClipPreview>,
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	pub(crate) prop_preview: Option<prop_preview::PropPreview>,
 	pub(crate) prop_preview_request: u64,
 	pub(crate) audio_audition: audio_audition::AudioAuditionLane,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
+	pub(crate) asset_sources: asset_sources::AssetSources,
 	scene_verification_gate: Arc<std::sync::Mutex<()>>,
 	pub(crate) scene_warming: scene_warming::SceneWarming,
 	pub(crate) scene_switch: Option<(u64, std::time::Instant, std::time::Instant)>,
@@ -285,7 +289,10 @@ impl EditorWorkspace {
 		if current.active_scene_id() != &scene {
 			self.scene_switch = Some((current.scene_revision(), requested, Instant::now()));
 		}
-		(result, camera_closed || prop_closed || animation_closed || clip_closed)
+		(
+			result,
+			camera_closed || prop_closed || animation_closed || clip_closed,
+		)
 	}
 
 	pub fn execute_receipt(
@@ -464,6 +471,7 @@ impl EditorWorkspace {
 			prop_preview_request: 0,
 			audio_audition: Default::default(),
 			prefab_source_drafts: Default::default(),
+			asset_sources: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			scene_verification_gate: Default::default(),
 			camera_capture_epoch: 0,
@@ -496,7 +504,9 @@ fn file_operation<T>(operation: &'static str, result: Result<T, String>) -> Resu
 
 fn animator_resolver(root: &Path) -> runtime::animation::AnimatorResolver {
 	let root = root.to_path_buf();
-	Arc::new(move |project, scene_id, scene| bridge::animator_graph::prepare_scene(&root, project, scene_id, scene))
+	Arc::new(move |project, scene_id, scene| {
+		bridge::animator_graph::prepare_scene(&root, project, scene_id, scene)
+	})
 }
 
 fn input_actions_resolver(root: &Path) -> runtime::simulation_session::InputActionsResolver {

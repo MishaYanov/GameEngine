@@ -187,7 +187,7 @@ impl EditorSession {
 		self.control_graph_resolver = Some(resolver);
 		Ok(())
 	}
-	pub fn particles(&self) -> impl Iterator<Item=crate::particles::ParticleSample> + '_ {
+	pub fn particles(&self) -> impl Iterator<Item = crate::particles::ParticleSample> + '_ {
 		self.play.iter().flat_map(|run| run.active().particles())
 	}
 

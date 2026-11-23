@@ -6,7 +6,8 @@ use engine_core::{
 	command::{EditorCommandDto, EditorCommandRequest},
 	components::{
 		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, NativeBehaviorComponent,
-		NativeBehaviorSpec, ScriptComponent, ScriptReference, ScriptSettings, SkyBackground, SkySettings,
+		NativeBehaviorSpec, ScriptComponent, ScriptReference, ScriptSettings, SkyBackground,
+		SkySettings,
 	},
 	editor::{EditorSession, PrefabData},
 	input::{GameInputBinding, InputProfile},
@@ -78,7 +79,8 @@ fn script_diagnostics_match_play_and_package_preflight_until_repaired() {
 		default_game_camera: None,
 		environment: Default::default(),
 	};
-	let mut project = ProjectData::for_scene("Door diagnostics", "scenes/main.json", &scene).unwrap();
+	let mut project =
+		ProjectData::for_scene("Door diagnostics", "scenes/main.json", &scene).unwrap();
 	project.input_profile = Some(InputProfile {
 		actions: vec![GameInputBinding {
 			id: "jump".into(),
@@ -125,18 +127,24 @@ fn script_diagnostics_match_play_and_package_preflight_until_repaired() {
 		},
 	}));
 	scene.entities[1] = sensor;
-	scene.entities[0] = scene.entities[0].clone().with_collider(Some(ColliderData::Box {
-		half_extents: [0.3, 0.9, 0.3],
-		offset: [0.; 3],
-		interaction: Default::default(),
-	}));
+	scene.entities[0] = scene.entities[0]
+		.clone()
+		.with_collider(Some(ColliderData::Box {
+			half_extents: [0.3, 0.9, 0.3],
+			offset: [0.; 3],
+			interaction: Default::default(),
+		}));
 	scene.entities[0].character_controller = Some(CharacterControllerComponent {
 		id: ComponentId::new("door-character").unwrap(),
 		enabled: true,
 		settings: CharacterControllerSettings::default(),
 	});
 	diagnose(&scene, "script_configuration_invalid");
-	scene.entities[0].character_controller.as_mut().unwrap().enabled = false;
+	scene.entities[0]
+		.character_controller
+		.as_mut()
+		.unwrap()
+		.enabled = false;
 	fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	assert!(
 		inspect_scene_dependencies(&project, &project.startup_scene_id, &scene, &root)

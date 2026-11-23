@@ -30,10 +30,14 @@ export class ParticleDesignerSession {
     readonly candidate = computed(() => settingsFromDraft(this.draft(), this.exactColor()));
     readonly active = computed(() => this.target() !== null);
     readonly objectName = computed(() => this.target()?.name ?? '');
-    readonly pending = signal(false);
-    readonly closeReview = signal(false);
-    readonly error = signal<string | null>(null);
-    readonly announcement = signal<string | null>(null);
+    private readonly pendingState = signal(false);
+    readonly pending = this.pendingState.asReadonly();
+    private readonly closeReviewState = signal(false);
+    readonly closeReview = this.closeReviewState.asReadonly();
+    private readonly errorState = signal<string | null>(null);
+    readonly error = this.errorState.asReadonly();
+    private readonly announcementState = signal<string | null>(null);
+    readonly announcement = this.announcementState.asReadonly();
     readonly targetError = computed(() => this.targetIssue(this.target(), this.editor.snapshot()));
     readonly dirty = computed(() => {
         const target = this.target();
@@ -54,9 +58,9 @@ export class ParticleDesignerSession {
         const original = particleEmitter(entity);
         if (!entity || !original) return false;
         this.setDraft(original.settings);
-        this.error.set(null);
-        this.announcement.set(null);
-        this.closeReview.set(false);
+        this.errorState.set(null);
+        this.announcementState.set(null);
+        this.closeReviewState.set(false);
         this.target.set({
             generation: this.editor.workspaceGeneration(),
             scene: snapshot.active_scene_id,
@@ -84,29 +88,33 @@ export class ParticleDesignerSession {
     }
 
     requestCloseReview(): void {
-        if (this.active()) this.closeReview.set(true);
+        if (this.active()) this.closeReviewState.set(true);
+    }
+
+    keepEditing(): void {
+        if (!this.pending()) this.closeReviewState.set(false);
     }
 
     discardAndClose(): void {
         if (this.pending()) return;
         this.target.set(null);
-        this.closeReview.set(false);
+        this.closeReviewState.set(false);
     }
 
     async apply(close = false): Promise<void> {
         const target = this.target();
         const candidate = this.candidate();
         if (!this.canApply() || !target || !candidate) return;
-        this.pending.set(true);
-        this.error.set(null);
-        this.announcement.set(null);
+        this.pendingState.set(true);
+        this.errorState.set(null);
+        this.announcementState.set(null);
         let applied = false;
         try {
             const accepted = await this.editing.withCommittedEdit(async () => {
                 const snapshot = this.editor.snapshot();
                 const issue = this.targetIssue(target, snapshot);
                 if (issue || !snapshot || this.target() !== target) {
-                    this.error.set(issue ?? 'Reopen Particle Designer for this object.');
+                    this.errorState.set(issue ?? 'Reopen Particle Designer for this object.');
                     return;
                 }
                 try {
@@ -122,21 +130,21 @@ export class ParticleDesignerSession {
                     }, target.generation, snapshot.revision);
                     const updated = this.component(saved, target.key);
                     if (!updated || updated.id !== target.original.id) {
-                        this.error.set('The emitter is no longer available. Reopen it to continue.');
+                        this.errorState.set('The emitter is no longer available. Reopen it to continue.');
                         return;
                     }
                     this.setDraft(updated.settings);
                     this.target.set({...target, original: updated});
-                    this.announcement.set('Particle settings applied. Use Save All to save the scene.');
-                    this.closeReview.set(false);
+                    this.announcementState.set('Particle settings applied. Use Save All to save the scene.');
+                    this.closeReviewState.set(false);
                     applied = true;
                 } catch (error: unknown) {
-                    this.error.set(error instanceof Error ? error.message : String(error));
+                    this.errorState.set(error instanceof Error ? error.message : String(error));
                 }
             });
-            if (!accepted) this.error.set(this.editing.error() ?? 'Finish the current edit and try again.');
+            if (!accepted) this.errorState.set(this.editing.error() ?? 'Finish the current edit and try again.');
         } finally {
-            this.pending.set(false);
+            this.pendingState.set(false);
         }
         if (applied && close) this.discardAndClose();
     }

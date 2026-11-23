@@ -148,12 +148,16 @@ fn one_animator_asset_validates_each_actors_visual_children() {
 			1,
 		)
 		.unwrap();
-	let sample = workspace.sample_authored_clip_preview(&preview.token, 500).unwrap();
+	let sample = workspace
+		.sample_authored_clip_preview(&preview.token, 500)
+		.unwrap();
 	let frame = workspace.active_authored_clip_aperture().unwrap();
-	assert_eq!(frame.visual_pose.unwrap().poses.as_ref(), sample.poses.as_slice());
-	let (saved, preview_closed) = workspace.with_viewport_update(|workspace| {
-		workspace.save_all(revision)
-	});
+	assert_eq!(
+		frame.visual_pose.unwrap().poses.as_ref(),
+		sample.poses.as_slice()
+	);
+	let (saved, preview_closed) =
+		workspace.with_viewport_update(|workspace| workspace.save_all(revision));
 	saved.unwrap();
 	assert!(preview_closed);
 	assert!(workspace.active_authored_clip_aperture().is_none());
@@ -164,7 +168,7 @@ fn one_animator_asset_validates_each_actors_visual_children() {
 	let output = fixture.0.parent().unwrap().join("animator-package");
 	fs::create_dir(&output).unwrap();
 	let staged = compiler::stage_prepared_project(&prepared, output.to_str().unwrap()).unwrap();
-	let project = runtime::project::ProjectData::load(&staged.path().join("project.json")).unwrap();
+	let project = runtime::project::ProjectData::load(staged.path().join("project.json")).unwrap();
 	let root = staged.path().join("assets");
 	let packaged_scene = runtime::scene_io::load_data(&root.join("scenes/main.json"))
 		.unwrap()

@@ -181,14 +181,15 @@ impl AssetManager {
 				}
 			}
 		}
-		if slot.needs_decode && self.sky_decode.is_none() {
-			if let Some((asset, stamp)) = slot.asset.as_ref().zip(slot.file_stamp.as_ref()) {
-				match SkyDecode::start(&self.root, asset, stamp) {
-					Ok(job) => self.sky_decode = job,
-					Err(error) => {
-						slot.needs_decode = false;
-						engine_logger::warn!(target: "sky", "Sky Panorama {}: {error}", asset.path);
-					}
+		if slot.needs_decode
+			&& self.sky_decode.is_none()
+			&& let Some((asset, stamp)) = slot.asset.as_ref().zip(slot.file_stamp.as_ref())
+		{
+			match SkyDecode::start(&self.root, asset, stamp) {
+				Ok(job) => self.sky_decode = job,
+				Err(error) => {
+					slot.needs_decode = false;
+					engine_logger::warn!(target: "sky", "Sky Panorama {}: {error}", asset.path);
 				}
 			}
 		}

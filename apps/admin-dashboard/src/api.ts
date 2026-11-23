@@ -125,6 +125,7 @@ const samples: LogEntry[] = [
 }));
 const sampleSnapshot: DashboardSnapshot = {
     workspace: "D:/Coding/Game Engine (sample)",
+    workspace_trusted: true,
     log_directory: "Local session storage (sample)",
     data_directory: "Local admin storage (sample)",
     collector: {

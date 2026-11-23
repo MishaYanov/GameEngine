@@ -305,13 +305,17 @@ fn local_yaw_action_preserves_other_transform_edits_in_the_same_step() {
 					scale: [2.; 3],
 				},
 			})?;
-			out.push(SimulationAction::SetLocalYaw { entity, radians: 1. })
+			out.push(SimulationAction::SetLocalYaw {
+				entity,
+				radians: 1.,
+			})
 		}
 	}
 
 	let data = scene(vec![entity("door", [0.; 3])]);
 	let project = ProjectData::for_scene("Yaw", "scenes/main.json", &data).unwrap();
-	let mut game = SimulationSession::with_factory(project, Arc::new(data), &YawAfterTransform).unwrap();
+	let mut game =
+		SimulationSession::with_factory(project, Arc::new(data), &YawAfterTransform).unwrap();
 	game.tick(0.018).unwrap();
 	let transform = &game.world().data().entities[0].transform;
 	assert_eq!(transform.position, [3., 4., 5.]);

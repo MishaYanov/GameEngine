@@ -59,7 +59,11 @@ pub fn inspect_scene_dependencies(
 			.flat_map(|(root, link)| link.entity_map.values().map(move |key| (key, root)))
 			.collect(),
 		keys: scene.entities.iter().map(|entity| &entity.key).collect(),
-		entities: scene.entities.iter().map(|entity| (&entity.key, entity)).collect(),
+		entities: scene
+			.entities
+			.iter()
+			.map(|entity| (&entity.key, entity))
+			.collect(),
 		script_descriptors: gameplay_catalog::script_descriptors(),
 		problems: Vec::new(),
 	};
@@ -126,7 +130,9 @@ impl Verification<'_> {
 	fn entity(&mut self, scene_id: &SceneId, scene: &SceneData, entity: &EntityData) {
 		let initial = self.problems.len();
 		for script in entity.scripts.iter().filter(|script| script.enabled) {
-			let descriptor = self.script_descriptors.iter()
+			let descriptor = self
+				.script_descriptors
+				.iter()
 				.find(|descriptor| descriptor.id == script.settings.script_id);
 			let result = match descriptor {
 				Some(descriptor) => descriptor.validate_attachment(
@@ -135,7 +141,9 @@ impl Verification<'_> {
 					|key| self.entities.get(key).copied(),
 					|_| false,
 				),
-				None => Err(ScriptIssue::MissingRegistration(script.settings.script_id.clone())),
+				None => Err(ScriptIssue::MissingRegistration(
+					script.settings.script_id.clone(),
+				)),
 			};
 			if let Err(issue) = result {
 				self.push(DependencyProblem::for_script(entity, script, issue));

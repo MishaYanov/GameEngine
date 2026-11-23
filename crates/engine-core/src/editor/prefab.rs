@@ -215,7 +215,8 @@ impl PrefabData {
 					if !valid {
 						return Err(format!(
 							"Script {} on {} requires a local object or a declared Prop reference slot",
-							component.id.as_str(), entity.key.as_str()
+							component.id.as_str(),
+							entity.key.as_str()
 						));
 					}
 				}

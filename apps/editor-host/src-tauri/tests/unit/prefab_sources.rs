@@ -277,15 +277,13 @@ fn reviewed_update_rejects_replaced_bytes_and_accepts_a_fresh_review() {
 			revision,
 		)
 		.unwrap();
-	assert!(
-		workspace
-			.backend
-			.session()
-			.authored_document()
-			.entities
-			.iter()
-			.any(|entity| entity.name == "Changed after review")
-	);
+	assert!(workspace
+		.backend
+		.session()
+		.authored_document()
+		.entities
+		.iter()
+		.any(|entity| entity.name == "Changed after review"));
 	workspace
 		.backend
 		.execute(EditorCommandRequest {
@@ -306,33 +304,29 @@ fn reviewed_link_rejects_foreign_expired_and_replaced_identity_captures() {
 		.create_linked_prefab_source("prefabs/other.json", BTreeMap::new(), revision)
 		.unwrap();
 	let before = workspace.backend.session().authored_document().clone();
-	assert!(
-		workspace
-			.instantiate_linked_source(
-				"prefabs/prop.json",
-				&foreign.draft_id,
-				[0.0; 3],
-				BTreeMap::new(),
-				revision
-			)
-			.err()
-			.unwrap()
-			.contains("differs")
-	);
+	assert!(workspace
+		.instantiate_linked_source(
+			"prefabs/prop.json",
+			&foreign.draft_id,
+			[0.0; 3],
+			BTreeMap::new(),
+			revision
+		)
+		.err()
+		.unwrap()
+		.contains("differs"));
 	workspace.close_prefab_source(&foreign.draft_id).unwrap();
-	assert!(
-		workspace
-			.instantiate_linked_source(
-				"prefabs/other.json",
-				&foreign.draft_id,
-				[0.0; 3],
-				BTreeMap::new(),
-				revision
-			)
-			.err()
-			.unwrap()
-			.contains("expired")
-	);
+	assert!(workspace
+		.instantiate_linked_source(
+			"prefabs/other.json",
+			&foreign.draft_id,
+			[0.0; 3],
+			BTreeMap::new(),
+			revision
+		)
+		.err()
+		.unwrap()
+		.contains("expired"));
 	let catalog_path = workspace
 		.asset_root
 		.join(runtime::asset_catalog::CATALOG_FILE);
@@ -344,19 +338,17 @@ fn reviewed_link_rejects_foreign_expired_and_replaced_identity_captures() {
 		.unwrap()
 		.id = AssetId::generate();
 	std::fs::write(catalog_path, catalog.to_json().unwrap()).unwrap();
-	assert!(
-		workspace
-			.instantiate_linked_source(
-				"prefabs/prop.json",
-				&draft.draft_id,
-				[0.0; 3],
-				BTreeMap::new(),
-				revision
-			)
-			.err()
-			.unwrap()
-			.contains("differs")
-	);
+	assert!(workspace
+		.instantiate_linked_source(
+			"prefabs/prop.json",
+			&draft.draft_id,
+			[0.0; 3],
+			BTreeMap::new(),
+			revision
+		)
+		.err()
+		.unwrap()
+		.contains("differs"));
 	assert_eq!(workspace.backend.session().revision(), revision);
 	assert_eq!(workspace.backend.session().authored_document(), before);
 }
@@ -445,13 +437,11 @@ fn source_draft_saves_canonical_components_and_conflicts_with_external_disk_edit
 	value["entities"][0]["name"] = "Extern".into();
 	let external = serde_json::to_vec(&value).unwrap();
 	std::fs::write(&path, &external).unwrap();
-	assert!(
-		workspace
-			.save_prefab_source(&draft.draft_id, saved.draft.prefab.clone(), revision)
-			.err()
-			.unwrap()
-			.contains("changed on disk")
-	);
+	assert!(workspace
+		.save_prefab_source(&draft.draft_id, saved.draft.prefab.clone(), revision)
+		.err()
+		.unwrap()
+		.contains("changed on disk"));
 	assert_eq!(std::fs::read(path).unwrap(), external);
 	assert_eq!(
 		std::fs::read(
@@ -463,11 +453,9 @@ fn source_draft_saves_canonical_components_and_conflicts_with_external_disk_edit
 		catalog
 	);
 	workspace.close_prefab_source(&draft.draft_id).unwrap();
-	assert!(
-		workspace
-			.validate_prefab_source(&draft.draft_id, value, revision)
-			.is_err()
-	);
+	assert!(workspace
+		.validate_prefab_source(&draft.draft_id, value, revision)
+		.is_err());
 }
 #[test]
 fn source_updates_are_explicit_undoable_and_missing_sources_do_not_break_pinned_play() {
@@ -572,26 +560,22 @@ fn source_updates_are_explicit_undoable_and_missing_sources_do_not_break_pinned_
 	);
 	std::fs::remove_file(workspace.asset_root.join("prefabs/prop.json")).unwrap();
 	let revision = workspace.backend.session().revision();
-	assert!(
-		workspace
-			.linked_prefab_status(root.as_str(), revision)
-			.unwrap()
-			.unwrap()
-			.source_error
-			.is_some()
-	);
+	assert!(workspace
+		.linked_prefab_status(root.as_str(), revision)
+		.unwrap()
+		.unwrap()
+		.source_error
+		.is_some());
 	let before = workspace.backend.snapshot().unwrap();
-	assert!(
-		workspace
-			.update_linked_source(
-				root.as_str(),
-				&opened.draft_id,
-				PrefabConflictResolution::Reject,
-				None,
-				revision
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.update_linked_source(
+			root.as_str(),
+			&opened.draft_id,
+			PrefabConflictResolution::Reject,
+			None,
+			revision
+		)
+		.is_err());
 	assert_eq!(workspace.backend.session().revision(), before.revision);
 	workspace
 		.backend
@@ -607,45 +591,37 @@ fn source_updates_are_explicit_undoable_and_missing_sources_do_not_break_pinned_
 			command: EditorCommandDto::StopPlay,
 		})
 		.unwrap();
-	assert!(
-		workspace
-			.backend
-			.session()
-			.authored_document()
-			.entities
-			.iter()
-			.any(|entity| entity.linked_prefab.is_some())
-	);
-	assert!(
-		workspace
-			.validate_prefab_source(
-				&draft.draft_id,
-				draft.prefab,
-				workspace.backend.session().revision()
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.backend
+		.session()
+		.authored_document()
+		.entities
+		.iter()
+		.any(|entity| entity.linked_prefab.is_some()));
+	assert!(workspace
+		.validate_prefab_source(
+			&draft.draft_id,
+			draft.prefab,
+			workspace.backend.session().revision()
+		)
+		.is_err());
 }
 #[test]
 fn drafts_reject_other_generation_and_component_sources_cannot_overwrite_scenes() {
 	let (_fixture, mut workspace) = fixture();
 	let revision = workspace.backend.session().revision();
-	assert!(
-		workspace
-			.create_linked_prefab_source("scenes/main.json", BTreeMap::new(), revision)
-			.is_err()
-	);
+	assert!(workspace
+		.create_linked_prefab_source("scenes/main.json", BTreeMap::new(), revision)
+		.is_err());
 	let draft = workspace
 		.create_linked_prefab_source("prefabs/prop.json", BTreeMap::new(), revision)
 		.unwrap();
 	workspace.generation += 1;
-	assert!(
-		workspace
-			.save_prefab_source(&draft.draft_id, draft.prefab, revision)
-			.err()
-			.unwrap()
-			.contains("generation")
-	);
+	assert!(workspace
+		.save_prefab_source(&draft.draft_id, draft.prefab, revision)
+		.err()
+		.unwrap()
+		.contains("generation"));
 }
 #[test]
 fn component_source_creation_declares_external_actor_slot_and_link_binds_it_explicitly() {
@@ -704,11 +680,9 @@ fn component_source_creation_declares_external_actor_slot_and_link_binds_it_expl
 		})
 		.unwrap();
 	let revision = workspace.backend.session().revision();
-	assert!(
-		workspace
-			.create_linked_prefab_source("prefabs/unbound.json", BTreeMap::new(), revision)
-			.is_err()
-	);
+	assert!(workspace
+		.create_linked_prefab_source("prefabs/unbound.json", BTreeMap::new(), revision)
+		.is_err());
 	let draft = workspace
 		.create_linked_prefab_source(
 			"prefabs/door.json",
@@ -717,17 +691,15 @@ fn component_source_creation_declares_external_actor_slot_and_link_binds_it_expl
 		)
 		.unwrap();
 	assert_eq!(draft.prefab["reference_slots"]["actor"], actor.as_str());
-	assert!(
-		workspace
-			.instantiate_linked_source(
-				"prefabs/door.json",
-				&draft.draft_id,
-				[1.0, 0.0, 0.0],
-				BTreeMap::new(),
-				revision
-			)
-			.is_err()
-	);
+	assert!(workspace
+		.instantiate_linked_source(
+			"prefabs/door.json",
+			&draft.draft_id,
+			[1.0, 0.0, 0.0],
+			BTreeMap::new(),
+			revision
+		)
+		.is_err());
 	workspace
 		.instantiate_linked_source(
 			"prefabs/door.json",

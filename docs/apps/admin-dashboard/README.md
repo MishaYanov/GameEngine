@@ -21,7 +21,14 @@ cargo test -p engine-admin --offline
 cargo check -p engine-admin --features desktop --offline
 ```
 
-Select a workspace and logger directory in Overview. Defaults use the current engine checkout and the shared logger directory. `ENGINE_WORKSPACE_DIR`, `ENGINE_LOG_DIR`, and `ENGINE_ADMIN_DATA_DIR` override defaults. Administration history lives separately from client logs.
+In **Overview**, open **Workspace settings** and choose the logger directory. To use builds, tests, application
+launches, and project generation, enter the source checkout, choose **Save settings**, and approve the exact
+checkout shown in the native **Review workspace trust** dialog. Read the resolved path before selecting
+**Trust checkout**. Logs and metrics can be collected with only the logger directory configured.
+
+`ENGINE_WORKSPACE_DIR` can suggest a source checkout. `ENGINE_LOG_DIR` and `ENGINE_ADMIN_DATA_DIR` override
+the logger and Dashboard history directories. Previously selected workspaces require approval when trust has
+not been recorded.
 
 Logs are incrementally collected from per-session JSONL. Retention is bounded to 5,000 records / 16 MiB; browser display retains 1,000. Pagination indicates lost history. Collection scans the newest 256 session directories and limits scan work. Incomplete trailing lines wait for completion. Malformed and oversized records have explicit counters. Pause freezes display while collection continues. Export writes retained matching JSONL into the admin data directory. Source navigation requires a file inside the configured workspace and a local VS Code installation.
 

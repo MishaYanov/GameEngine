@@ -3,7 +3,8 @@ import {TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneEditingService} from '../scene-editing.service';
 import {AssetAuthoring} from './asset-authoring';
@@ -34,14 +35,15 @@ describe('AssetAuthoring', () => {
             revision: 7, active_scene_id: 'main', mode: 'edit', selection: ['actor'], transaction: null,
         });
         const generation = signal(1);
+        const nativeGeneration = signal(17);
         const chooseExternalGlb = vi.fn(async (): Promise<string | null> => 'C:/Models/new.glb');
         const chooseExternalWav = vi.fn(async (): Promise<string | null> => 'C:/Audio/bell.wav');
         const assets = vi.fn(async () => [model]);
         const operation = () => ({operation_id: 'operation', asset: model, snapshot: current()});
-        const importExternalGlb = vi.fn(async (_source: string, _path: string, _generation?: number, _revision?: number) => operation());
-        const importExternalWav = vi.fn(async (_source: string, _path: string, _generation?: number, _revision?: number) => ({...operation(), asset: bell}));
-        const reimportAsset = vi.fn(async (_id: string, _fingerprint: string, _source?: string | null, _generation?: number, _revision?: number) => operation());
-        const moveAsset = vi.fn(async (_id: string, _path: string, _generation?: number, _revision?: number) => operation());
+        const importExternalGlb = vi.fn(async (_source: string, _path: string, _scope: WorkspaceAssetScope) => operation());
+        const importExternalWav = vi.fn(async (_source: string, _path: string, _scope: WorkspaceAssetScope) => ({...operation(), asset: bell}));
+        const reimportAsset = vi.fn(async (_id: string, _fingerprint: string, _source: string, _scope: WorkspaceAssetScope) => operation());
+        const moveAsset = vi.fn(async (_id: string, _path: string, _scope: WorkspaceAssetScope) => operation());
         const savePrefab = vi.fn(async (_path: string, _generation?: number, _revision?: number) => ({path: 'gameplay.json'}));
         const committed = vi.fn(async (action: () => Promise<void>) => { await action(); return true; });
         TestBed.configureTestingModule({providers: [
@@ -51,6 +53,7 @@ describe('AssetAuthoring', () => {
                 playing: computed(() => current().mode === 'play'),
                 chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets,
             }},
+            {provide: ViewportEditorService, useValue: {state: () => ({workspace_generation: nativeGeneration()})}},
             {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
         ]});
         const fixture = TestBed.createComponent(AssetAuthoring);
@@ -63,7 +66,7 @@ describe('AssetAuthoring', () => {
             field.value = value; field.dispatchEvent(new Event('input'));
             await fixture.whenStable();
         };
-        return {fixture, root, button, path, current, generation, chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets, committed};
+        return {fixture, root, button, path, current, generation, nativeGeneration, chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets, committed};
     }
 
     it('imports a PCM WAV, surfaces invalid content and moves the imported clip by ID', async () => {
@@ -81,7 +84,7 @@ describe('AssetAuthoring', () => {
         expect(panel.assets).not.toHaveBeenCalled();
         panel.button('Apply Asset Operation').click();
         await panel.fixture.whenStable();
-        expect(panel.importExternalWav).toHaveBeenLastCalledWith('C:/Audio/bell.wav', 'audio/bell.wav', 1, 7);
+        expect(panel.importExternalWav).toHaveBeenLastCalledWith('C:/Audio/bell.wav', 'audio/bell.wav', {workspaceGeneration: 1, nativeGeneration: 17, revision: 7});
         expect(panel.assets).toHaveBeenCalledExactlyOnceWith(true);
 
         panel.fixture.componentRef.setInput('selected', bell);
@@ -92,7 +95,7 @@ describe('AssetAuthoring', () => {
         await panel.path('audio/cues/bell.wav');
         panel.button('Apply Asset Operation').click();
         await panel.fixture.whenStable();
-        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('bell-id', 'audio/cues/bell.wav', 1, 7);
+        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('bell-id', 'audio/cues/bell.wav', {workspaceGeneration: 1, nativeGeneration: 17, revision: 7});
     });
 
     it('returns focus to the Audio Clip import button after the picker is cancelled', async () => {
@@ -120,7 +123,7 @@ describe('AssetAuthoring', () => {
         });
         panel.button('Apply Asset Operation').click();
         await panel.fixture.whenStable();
-        expect(panel.importExternalGlb).toHaveBeenCalledExactlyOnceWith('C:/Models/new.glb', 'props/new.glb', 1, 12);
+        expect(panel.importExternalGlb).toHaveBeenCalledExactlyOnceWith('C:/Models/new.glb', 'props/new.glb', {workspaceGeneration: 1, nativeGeneration: 17, revision: 12});
         expect(panel.assets).toHaveBeenCalledExactlyOnceWith(true);
         expect(panel.root.textContent).toContain('External GLB imported.');
     });
@@ -136,9 +139,20 @@ describe('AssetAuthoring', () => {
         panel.reimportAsset.mockRejectedValueOnce(new Error('The asset fingerprint changed.'));
         panel.button('Reimport GLB…').click();
         await panel.fixture.whenStable();
-        expect(panel.reimportAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'original', 'C:/Models/new.glb', 1, 7);
+        expect(panel.reimportAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'original', 'C:/Models/new.glb', {workspaceGeneration: 1, nativeGeneration: 17, revision: 7});
         expect(panel.root.querySelector('[role="alert"]')?.textContent).toContain('fingerprint changed');
         expect(panel.assets).not.toHaveBeenCalled();
+    });
+
+    it('drops an open import after native workspace replacement at the same revision', async () => {
+        const panel = await setup();
+        panel.button('Import GLB…').click();
+        await panel.fixture.whenStable();
+        panel.nativeGeneration.set(18);
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.importExternalGlb).not.toHaveBeenCalled();
+        expect(panel.root.querySelector('[role="alert"]')?.textContent).toContain('workspace changed');
     });
 
     it('drops a source picker response after workspace replacement', async () => {
@@ -161,7 +175,7 @@ describe('AssetAuthoring', () => {
         await panel.path('models/moved.glb');
         panel.button('Apply Asset Operation').click();
         await panel.fixture.whenStable();
-        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'models/moved.glb', 1, 7);
+        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'models/moved.glb', {workspaceGeneration: 1, nativeGeneration: 17, revision: 7});
         panel.button('Save Gameplay Prefab…').click();
         await panel.fixture.whenStable();
         panel.committed.mockImplementationOnce(async action => {
@@ -191,7 +205,7 @@ describe('AssetAuthoring', () => {
         await panel.path('prefabs/moved.json');
         panel.button('Apply Asset Operation').click();
         await panel.fixture.whenStable();
-        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'prefabs/moved.json', 1, 7);
+        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('actor-id', 'prefabs/moved.json', {workspaceGeneration: 1, nativeGeneration: 17, revision: 7});
     });
 
     it('saves a gameplay prefab through the existing guarded endpoint and has accessible controls', async () => {

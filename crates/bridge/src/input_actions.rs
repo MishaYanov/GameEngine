@@ -59,6 +59,6 @@ pub fn scene_asset_id(scene: &SceneData) -> Option<&AssetId> {
 }
 
 pub(crate) fn read_catalog(root: &Path) -> Result<AssetCatalog, String> {
-	let bytes = read_bounded(&contained_file(&root, CATALOG_FILE)?, MAX_CATALOG_BYTES)?;
+	let bytes = read_bounded(&contained_file(root, CATALOG_FILE)?, MAX_CATALOG_BYTES)?;
 	AssetCatalog::from_json(std::str::from_utf8(&bytes).map_err(|error| error.to_string())?)
 }

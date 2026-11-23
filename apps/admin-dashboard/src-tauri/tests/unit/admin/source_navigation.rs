@@ -18,5 +18,9 @@ fn source_navigation_rejects_files_outside_workspace() {
 	entry.file = Some("../outside.rs".into());
 	service.collector.ingest(entry);
 	assert!(service.source(2).is_err());
-	assert!(service.configure("missing", "logs").is_err());
+	assert!(
+		service
+			.configure(Some(PathBuf::from("missing")), "logs")
+			.is_err()
+	);
 }

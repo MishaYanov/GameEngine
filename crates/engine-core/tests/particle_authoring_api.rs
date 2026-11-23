@@ -46,7 +46,7 @@ fn object_menu_commands_create_real_undoable_scene_objects() {
 			light_kind: LightKind::Point,
 		},
 	)
-		.unwrap();
+	.unwrap();
 	let with_light = session.authored_document();
 	assert_eq!(with_light.lights[0].kind, LightKind::Point);
 	assert_eq!(session.selection(), [empty]);
@@ -63,7 +63,7 @@ fn object_menu_commands_create_real_undoable_scene_objects() {
 				light_kind: LightKind::Directional,
 			},
 		)
-			.unwrap();
+		.unwrap();
 	}
 	let before = session.revision();
 	assert!(
@@ -73,7 +73,7 @@ fn object_menu_commands_create_real_undoable_scene_objects() {
 				light_kind: LightKind::Point
 			}
 		)
-			.is_err()
+		.is_err()
 	);
 	assert_eq!(session.revision(), before);
 	assert_eq!(session.authored_document().lights.len(), MAX_SCENE_LIGHTS);
@@ -114,7 +114,7 @@ fn particle_emitter_round_trips_in_v8_and_rejects_invalid_or_legacy_payloads() {
 				component: invalid
 			}
 		)
-			.is_err()
+		.is_err()
 	);
 	assert_eq!(session.revision(), revision);
 
@@ -138,7 +138,7 @@ fn particle_emitter_round_trips_in_v8_and_rejects_invalid_or_legacy_payloads() {
 			component: changed.clone(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	assert_eq!(
 		session.authored_document().entities[0].component_records(),
 		[changed]
@@ -197,7 +197,7 @@ fn linked_particle_edits_persist_as_instance_overrides() {
 			component: changed.clone(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	let document = session.authored_document();
 	let serialized = document.to_json().unwrap();
 	let reopened = SceneData::from_json(&serialized).unwrap();
@@ -229,7 +229,7 @@ fn linked_particle_edits_persist_as_instance_overrides() {
 			property: Some(target),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	assert!(
 		session
 			.authored_document()
@@ -249,7 +249,7 @@ fn linked_particle_edits_persist_as_instance_overrides() {
 			component_id: original.id.clone(),
 		},
 	)
-		.unwrap();
+	.unwrap();
 	let without_live_emitters = session.authored_document();
 	assert!(
 		without_live_emitters

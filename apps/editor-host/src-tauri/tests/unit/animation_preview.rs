@@ -14,7 +14,7 @@ impl Fixture {
 		}
 		fs::write(
 			root.join("project.json"),
-			test_project::manifest("animation-room"),
+			crate::test_project::manifest("animation-room"),
 		)
 		.unwrap();
 		for file in [
@@ -612,9 +612,6 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 	assert_eq!(workspace.authored_clip_assets().unwrap().len(), 1);
 }
 
-#[path = "../../../../../tests/support/project_fixture.rs"]
-mod test_project;
-
 #[test]
 fn practice_yard_graphs_reopen_and_discarding_a_prop_clip_edit_preserves_play() {
 	use crate::animation_preview::timeline::ClipDraftOperation;
@@ -743,8 +740,8 @@ fn practice_yard_graphs_reopen_and_discarding_a_prop_clip_edit_preserves_play() 
 #[test]
 fn full_authoring_yard_edits_nested_prop_and_only_sounds_in_live_play() {
 	use crate::editor::prefab_sources::PropDraftEdit;
-	use bridge::viewport::PropPreviewTargetDto;
 	use bridge::editor::{EditorCommandDto, EditorCommandRequest};
+	use bridge::viewport::PropPreviewTargetDto;
 
 	const GATE: &str = "prefabs/bell-gate.prefab.json";
 	const SCENE: &str = "scenes/full-practice-yard.json";
@@ -771,11 +768,7 @@ fn full_authoring_yard_edits_nested_prop_and_only_sounds_in_live_play() {
 			fs::copy(entry.path(), assets.join(folder).join(entry.file_name())).unwrap();
 		}
 	}
-	fs::copy(
-		source.join("project.json"),
-		fixture.0.join("project.json"),
-	)
-	.unwrap();
+	fs::copy(source.join("project.json"), fixture.0.join("project.json")).unwrap();
 	fs::copy(
 		source.join("assets/asset-catalog.json"),
 		assets.join("asset-catalog.json"),

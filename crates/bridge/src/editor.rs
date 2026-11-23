@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 /// Structural changes use snapshots so entity order and scene identity stay exact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[expect(
+	clippy::large_enum_variant,
+	reason = "Preserve the public field types without another allocation for each command update"
+)]
 pub enum EditorCommandUpdateDto {
 	Snapshot {
 		receipt: CommandReceipt,

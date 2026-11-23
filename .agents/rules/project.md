@@ -31,7 +31,7 @@ sending messages, or unrelated maintenance.
 | Native editor host                   | `apps/editor-host/src-tauri/src/`                                                                             | Host commands, workspace ownership, native viewport and interaction                            |
 | Engine data and simulation           | `crates/engine-core/src/`                                                                                     | Authored data, command execution, simulation, runtime sessions, and typed progress foundations |
 | Runtime, bridge, and renderer        | `crates/runtime/src/`, `crates/bridge/src/`, `crates/renderer/src/`                                           | Runtime behavior, integration contracts/assets, and native rendering                           |
-| Shared game module and progress      | `crates/courtyard-gameplay/src/lib.rs`                                                                        | Courtyard-specific gameplay factory, rules, and progress                                       |
+| Shared game module and progress      | `crates/cinder-oath-gameplay/src/lib.rs`                                                                       | Cinder Oath gameplay factory, rules, and progress                                               |
 | Native game and sample configuration | `apps/game/src/main.rs`, `apps/game/project.json`                                                             | Application integration, project module selection, player behavior, and restart                |
 | Compiler/export                      | `compiler/src/lib.rs`                                                                                         | Validated creation, asset staging, and player export                                           |
 | Shared logging                       | `crates/logger/src/lib.rs`, `crates/logger/src/storage.rs`                                                    | Logger configuration, context, background JSONL persistence, rotation, and error sink          |
@@ -72,7 +72,7 @@ Run launcher and Rust commands at the repository root:
 | `python test_all.py --native`                    | Also run opt-in native/Vulkan checks; requires the native toolchain and Vulkan environment |
 
 Choose other affected Rust packages from current `Cargo.toml` files, including `runtime`, `renderer`, `bridge`,
-`compiler`, `courtyard-gameplay`, and `game`.
+`compiler`, `cinder-oath-gameplay`, and `game`.
 
 Run editor npm commands in `apps/editor/`:
 

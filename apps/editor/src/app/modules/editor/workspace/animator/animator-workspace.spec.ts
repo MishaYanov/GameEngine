@@ -33,7 +33,8 @@ async function setup() {
     }));
     const workspaceGeneration = signal(scope.workspaceGeneration);
     const current = vi.fn(() => workspaceGeneration() === scope.workspaceGeneration);
-    const selectView = vi.fn();
+    const activeViewKind = signal('scene-viewport');
+    const selectView = vi.fn((view: string) => activeViewKind.set(view));
     const accept = vi.fn();
     TestBed.configureTestingModule({
         imports: [AnimatorWorkspace],
@@ -41,11 +42,12 @@ async function setup() {
             AnimatorWorkspaceService,
             {provide: EditorService, useValue: {
                 openAnimator: open, saveAnimator: save, workspaceGeneration, playing: signal(false),
+                snapshot: signal({active_scene_id: 'main'}),
             }},
             {provide: AnimatorAssets, useValue: {
                 scope: () => scope, current, accept, assets: signal([asset, alternate]), pending: signal(false), error: signal(null),
             }},
-            {provide: WorkspaceViewService, useValue: {selectView}},
+            {provide: WorkspaceViewService, useValue: {selectView, activeViewKind}},
         ],
     });
     const fixture = TestBed.createComponent(AnimatorWorkspace);
@@ -147,23 +149,27 @@ describe('Animator workspace', () => {
     });
 
     it('retains a failed save and asks before replacing a dirty Animator', async () => {
-        const {workspace, open, save} = await setup();
+        const {workspace, open, save, selectView} = await setup();
         workspace.edit({kind: 'update_state', state: {...graph.states[0], name: 'Breathe'}});
         save.mockRejectedValueOnce(new Error('Animator bytes changed on disk.'));
         expect(await workspace.save()).toBe(false);
         expect(workspace.graph()?.states[0].name).toBe('Breathe');
 
+        selectView('scene-viewport');
+        selectView.mockClear();
         const canceled = workspace.open(alternate.id);
         expect(workspace.confirming()).toBe(true);
         expect(open).toHaveBeenCalledTimes(1);
         await workspace.settleNavigation('cancel');
         expect(await canceled).toBe(false);
+        expect(selectView).not.toHaveBeenCalled();
         expect(workspace.dirty()).toBe(true);
 
         const approved = workspace.open(alternate.id);
         await workspace.settleNavigation('discard');
         expect(await approved).toBe(true);
         expect(workspace.document()?.asset.id).toBe(alternate.id);
+        expect(selectView).toHaveBeenCalledExactlyOnceWith('animation-controller');
         expect(workspace.dirty()).toBe(false);
     });
 });

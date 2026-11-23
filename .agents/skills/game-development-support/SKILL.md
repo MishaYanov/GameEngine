@@ -25,7 +25,7 @@ Useful source entry points:
 - `apps/editor/src/app/modules/editor/workspace/`: authoring UI and edit lifetimes.
 - `apps/editor-host/src-tauri/src/`: workspace, native viewport, and host commands.
 - `crates/engine-core/src/`: authored data, commands, simulation, sessions, and progress foundations.
-- `apps/game/project.json` and `crates/courtyard-gameplay/src/lib.rs`: sample configuration, shared gameplay module, and
+- `apps/game/project.json` and `crates/cinder-oath-gameplay/src/lib.rs`: sample configuration, shared gameplay module, and
   game-specific progress.
 - `compiler/src/lib.rs`: validated creation, staging, and player export.
 

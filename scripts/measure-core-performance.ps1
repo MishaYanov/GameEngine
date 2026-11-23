@@ -1,31 +1,71 @@
 param(
     [string]$OutputDirectory = 'target/performance',
-    [switch]$EnforceBudget
+    [switch]$EnforceBudget,
+    [switch]$Offline
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$outputRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+$outputRoot = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+    [System.IO.Path]::GetFullPath($OutputDirectory)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
+}
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 Push-Location $repoRoot
 try {
-    & cargo build --release -p engine-core --example performance_baseline
+    $buildArgs = @('build', '--release', '--locked', '-p', 'engine-core', '--example', 'performance_baseline', '--message-format=json-render-diagnostics')
+    if ($Offline) { $buildArgs += '--offline' }
+    $messages = & cargo @buildArgs
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build the CPU benchmark.' }
-    $executable = Join-Path $repoRoot 'target/release/examples/performance_baseline.exe'
+
+    $executables = @(
+        foreach ($line in $messages) {
+            $message = ConvertFrom-Json -InputObject $line
+            if ($message.reason -eq 'compiler-artifact' -and $message.target.name -eq 'performance_baseline' -and
+                $message.target.kind -contains 'example' -and $message.executable) {
+                $message.executable
+            }
+        }
+    )
+    if ($executables.Count -ne 1 -or -not (Test-Path -LiteralPath $executables[0] -PathType Leaf)) {
+        throw 'Cargo did not report the CPU benchmark executable.'
+    }
+    $executable = $executables[0]
     $results = @()
     for ($run = 1; $run -le 5; $run++) {
         $jsonPath = Join-Path $outputRoot "core-run-$run.json"
         $scenePath = Join-Path $outputRoot 'representative-scene.json'
-        # Explicit literal quoting handles the workspace's spaces; no shell executes these paths.
-        $argumentList = @('--output', ('"' + $jsonPath + '"'), '--scene-output', ('"' + $scenePath + '"'))
-        $benchmark = Start-Process -FilePath $executable -ArgumentList $argumentList -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $outputRoot "core-run-$run.stdout.log") -RedirectStandardError (Join-Path $outputRoot "core-run-$run.stderr.log")
-        $peakWorkingSet = 0L
-        while (-not $benchmark.HasExited) {
-            $benchmark.Refresh()
-            $peakWorkingSet = [Math]::Max($peakWorkingSet, $benchmark.PeakWorkingSet64)
-            Start-Sleep -Milliseconds 5
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $executable
+        $startInfo.WorkingDirectory = $repoRoot
+        $startInfo.Arguments = '--output "{0}" --scene-output "{1}"' -f $jsonPath, $scenePath
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+
+        # Keep the launch handle open so a short-lived child still has a readable exit code.
+        $benchmark = [System.Diagnostics.Process]::Start($startInfo)
+        try {
+            $stdout = $benchmark.StandardOutput.ReadToEndAsync()
+            $stderr = $benchmark.StandardError.ReadToEndAsync()
+            $peakWorkingSet = 0L
+            while (-not $benchmark.HasExited) {
+                $benchmark.Refresh()
+                try {
+                    $peakWorkingSet = [Math]::Max($peakWorkingSet, $benchmark.PeakWorkingSet64)
+                } catch [System.InvalidOperationException] {
+                    if (-not $benchmark.HasExited) { throw }
+                }
+                Start-Sleep -Milliseconds 5
+            }
+            $benchmark.WaitForExit()
+            [System.IO.File]::WriteAllText((Join-Path $outputRoot "core-run-$run.stdout.log"), $stdout.GetAwaiter().GetResult())
+            [System.IO.File]::WriteAllText((Join-Path $outputRoot "core-run-$run.stderr.log"), $stderr.GetAwaiter().GetResult())
+            if ($benchmark.ExitCode -ne 0) { throw "CPU benchmark run $run failed with exit code $($benchmark.ExitCode)." }
+        } finally {
+            $benchmark.Dispose()
         }
-        $benchmark.WaitForExit()
-        if ($benchmark.ExitCode -ne 0) { throw "CPU benchmark run $run failed with exit code $($benchmark.ExitCode)." }
         $metrics = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
         $results += [pscustomobject]@{ run = $run; peak_working_set_bytes = $peakWorkingSet; metrics = $metrics }
     }
