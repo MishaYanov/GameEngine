@@ -2,9 +2,9 @@ import {Component, computed, effect, inject, input, signal, untracked} from '@an
 import {EditorService, type InputActionsScope} from '../../../../core/editor/editor.service';
 import {DEFAULT_GAME_INPUT, MOVEMENT_AXES, type MovementAxis} from '../../../../core/game-input/game-input.models';
 import {
-    ACTION_BINDINGS, ACTION_VALUES, type ConditionalInputLayout, effectiveLayoutActions, FACE_BUTTONS, INPUT_ACTIONS_SUFFIX,
+    ACTION_BINDINGS, ACTION_VALUES, type ConditionalInputLayout, effectiveLayoutActions, FACE_BUTTONS, firstMatchingLayout, INPUT_ACTIONS_SUFFIX,
     type InputActionBinding, type InputActionMap, type InputActionsAsset, type InputActionValue, type InputLayoutCondition,
-    MAX_ACTION_BINDINGS, MAX_CONDITIONAL_INPUT_LAYOUTS, MAX_INPUT_ACTIONS, type NamedInputAction, starterInputActions,
+    layoutMatches, MAX_ACTION_BINDINGS, MAX_CONDITIONAL_INPUT_LAYOUTS, MAX_INPUT_ACTIONS, type NamedInputAction, starterInputActions,
     validInputActionsPath, validateInputActions,
 } from '../../../../core/game-input/input-actions.models';
 import {SceneEditingService} from '../scene-editing.service';
@@ -45,6 +45,18 @@ export class InputActionsEditor {
     protected readonly layouts = computed(() => this.draft()?.layouts ?? []);
     protected readonly selectedLayout = computed(() => this.layouts().find(layout => layout.id === this.pickedLayout()) ?? null);
     protected readonly layoutPosition = computed(() => this.layouts().findIndex(layout => layout.id === this.pickedLayout()));
+    protected readonly testScene = signal('');
+    protected readonly testMotion = signal<'grounded' | 'airborne' | 'unavailable'>('unavailable');
+    private readonly testFacts = computed(() => {
+        const motion = this.testMotion();
+        return {scene: this.sceneIds().has(this.testScene()) ? this.testScene() : null,
+            grounded: motion === 'unavailable' ? null : motion === 'grounded'};
+    });
+    protected readonly testWinner = computed(() => firstMatchingLayout(this.layouts(), this.testFacts()));
+    protected readonly testMap = computed<InputActionMap | null>(() => {
+        const map = this.draft();
+        return map && {...map, actions: effectiveLayoutActions(map, this.testWinner())};
+    });
     protected readonly editingActions = computed(() => {
         const map = this.draft();
         return map ? effectiveLayoutActions(map, this.selectedLayout()) : [];
@@ -291,6 +303,16 @@ export class InputActionsEditor {
         return !override ? 'Inherited' : override.bindings.length ? 'Override' : 'Unbound';
     }
 
+    protected setTestMotion(value: string): void {
+        if (value === 'grounded' || value === 'airborne' || value === 'unavailable') this.testMotion.set(value);
+    }
+
+    protected testStatus(layout: ConditionalInputLayout): string {
+        const match = layoutMatches(layout.when, this.testFacts());
+        return match === null ? 'Unavailable' : !match ? 'Does not match'
+            : this.testWinner()?.id === layout.id ? 'Matched' : 'Shadowed';
+    }
+
     protected inheritBindings(actionId: string): void {
         this.updateLayout(layout => ({...layout, overrides: layout.overrides.filter(item => item.action_id !== actionId)}));
     }
@@ -395,6 +417,8 @@ export class InputActionsEditor {
         this.moving.set(false);
         this.expandedAction.set(null);
         this.pickedLayout.set(null);
+        this.testScene.set('');
+        this.testMotion.set('unavailable');
         this.failure.set(null);
         this.message.set(null);
     }

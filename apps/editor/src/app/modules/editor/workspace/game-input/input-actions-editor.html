@@ -171,7 +171,35 @@
             }
         </fieldset>
         </div>
-        <editor-input-actions-monitor [map]="map" [active]="active() && !pending()"/>
+        @if (layouts().length) {
+            <fieldset [disabled]="!available()" class="fields">
+                <legend>Test condition</legend>
+                <div class="actions">
+                    <label>Preview scene
+                        <select #previewScene [value]="testScene()" (change)="testScene.set(previewScene.value)">
+                            <option value="" [selected]="!testScene()">Unavailable</option>
+                            @for (item of scenes(); track item.id) {
+                                <option [value]="item.id" [selected]="item.id === testScene()">{{ item.id }}</option>
+                            }
+                        </select>
+                    </label>
+                    <label>Preview motion
+                        <select #motion [value]="testMotion()" (change)="setTestMotion(motion.value)">
+                            <option value="unavailable">Unavailable</option>
+                            <option value="grounded">Grounded</option>
+                            <option value="airborne">Airborne</option>
+                        </select>
+                    </label>
+                </div>
+                <p role="status">Active layout <strong>{{ testWinner()?.label ?? 'Default' }}</strong></p>
+                <ul class="layout-results">
+                    @for (layout of layouts(); track layout.id) {
+                        <li>{{ layout.label || 'Unnamed layout' }} <small>{{ testStatus(layout) }}</small></li>
+                    }
+                </ul>
+            </fieldset>
+        }
+        <editor-input-actions-monitor [map]="testMap() ?? map" [active]="active() && !pending()"/>
     } @else {
         <p>Open an existing asset or create one with Move, Look, Jump, and Attack.</p>
     }

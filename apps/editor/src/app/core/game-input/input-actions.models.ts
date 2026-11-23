@@ -34,6 +34,22 @@ export interface ConditionalInputLayout {
     readonly overrides: readonly InputBindingOverride[];
 }
 
+export interface InputLayoutFacts {
+    readonly scene: string | null;
+    readonly grounded: boolean | null;
+}
+
+export function layoutMatches(condition: InputLayoutCondition, facts: InputLayoutFacts): boolean | null {
+    if (condition.kind === 'scene_is') return facts.scene === null ? null : facts.scene === condition.scene_id;
+    return facts.grounded === null ? null : facts.grounded === condition.value;
+}
+
+export function firstMatchingLayout(
+    layouts: readonly ConditionalInputLayout[], facts: InputLayoutFacts,
+): ConditionalInputLayout | null {
+    return layouts.find(layout => layoutMatches(layout.when, facts) === true) ?? null;
+}
+
 export interface InputActionMap {
     readonly schema_version: 1 | 2;
     readonly actions: readonly NamedInputAction[];

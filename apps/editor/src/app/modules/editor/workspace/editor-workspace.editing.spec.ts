@@ -992,6 +992,21 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         button('Move Up', controls).click();
         await fixture.whenStable();
+        expect(controls.textContent).toContain('Active layout Default');
+        expect(controls.textContent).toContain('Unavailable');
+        const motion = field('Preview motion', controls).querySelector('select')!;
+        motion.value = 'airborne';
+        motion.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+        expect(controls.textContent).toContain('Active layout Air controls');
+        expect(controls.textContent).toContain('Shadowed');
+        const preview = controls.querySelector<HTMLElement>('[aria-label="Monitor Input Actions"]')!;
+        preview.focus();
+        preview.dispatchEvent(key('KeyQ'));
+        await fixture.whenStable();
+        expect([...preview.querySelectorAll('dt')].find(item => item.textContent === 'Attack')?.nextElementSibling?.textContent)
+            .toBe('Pressed');
+        motion.focus();
         button('Save Input Actions', controls).click();
         await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.map.schema_version).toBe(2));
         const layouts = inputActions.get(controlsAssetId)?.map.layouts ?? [];
