@@ -5,8 +5,10 @@ use crate::{
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+const WINDOW_CLOSE_REQUESTED: &str = "editor://window-close-requested";
 
 enum ExitRequest {
 	FileMenu { expected_revision: Option<u64> },
@@ -141,9 +143,22 @@ pub async fn editor_exit(
 	request_editor_exit(window, ExitRequest::FileMenu { expected_revision }).await
 }
 
+#[tauri::command]
+pub fn editor_set_window_close_review(
+	window: WebviewWindow,
+	owner: String,
+	enabled: bool,
+) -> Result<(), String> {
+	super::editor::trusted_window(&window)?;
+	window
+		.state::<EditorState>()
+		.exit
+		.set_window_close_owner(owner, enabled)
+}
+
 pub(crate) fn request_window_close(window: WebviewWindow) {
 	tauri::async_runtime::spawn(async move {
-		if let Err(message) = request_editor_exit(window.clone(), ExitRequest::WindowClose).await {
+		if let Err(message) = dispatch_window_close(&window).await {
 			engine_logger::warn!(target: "editor", "Window close kept the editor open: {message}");
 			window
 				.dialog()
@@ -154,6 +169,25 @@ pub(crate) fn request_window_close(window: WebviewWindow) {
 				.show(|_| {});
 		}
 	});
+}
+
+async fn dispatch_window_close(window: &WebviewWindow) -> Result<(), String> {
+	let exit = &window.state::<EditorState>().exit;
+	if exit.is_committed() {
+		return Ok(());
+	}
+	let owner = exit.window_close_owner()?.clone();
+	if let Some(owner) = owner {
+		return window
+			.emit_to(
+				EventTarget::webview_window(window.label()),
+				WINDOW_CLOSE_REQUESTED,
+				owner,
+			)
+			.map_err(|error| format!("The editor could not request a close review: {error}"));
+	}
+	request_editor_exit(window.clone(), ExitRequest::WindowClose).await?;
+	Ok(())
 }
 
 async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Result<bool, String> {
@@ -170,6 +204,7 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 			if exit.is_committed() {
 				return Ok(false);
 			}
+			let _unclaimed = hold_unclaimed_window_close(&exit, &request)?;
 			let expected_revision = request.reviewed_revision(workspace.as_ref());
 			ExitReview::capture(workspace.as_ref(), expected_revision)?
 		};
@@ -183,7 +218,10 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 		let mut host = viewport.lock().map_err(|_| "Viewport state lock failed")?;
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
 		// Close the slot to late edits and prepared project opens at the same time.
-		let retired = review.retire(&mut workspace, &exit)?;
+		let retired = {
+			let _unclaimed = hold_unclaimed_window_close(&exit, &request)?;
+			review.retire(&mut workspace, &exit)?
+		};
 		drop(workspace);
 		host.close_parent_when_ready(window);
 		drop(host);
@@ -192,6 +230,20 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 	})
 	.await
 	.map_err(|error| error.to_string())?
+}
+
+fn hold_unclaimed_window_close<'a>(
+	exit: &'a EditorExitState,
+	request: &ExitRequest,
+) -> Result<Option<MutexGuard<'a, Option<String>>>, String> {
+	if !matches!(request, ExitRequest::WindowClose) {
+		return Ok(None);
+	}
+	let owner = exit.window_close_owner()?;
+	if owner.is_some() {
+		return Err("The editor is ready to review changes. Request Close again.".into());
+	}
+	Ok(Some(owner))
 }
 
 fn exit_review_permit(gate: &Mutex<()>) -> Result<Option<MutexGuard<'_, ()>>, String> {

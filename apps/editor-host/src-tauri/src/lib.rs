@@ -17,7 +17,7 @@ use crate::commands::preferences::{
 };
 use crate::commands::project::{
 	choose_project_destination, choose_project_manifest, confirm_project_discard, create_project,
-	editor_exit,
+	editor_exit, editor_set_window_close_review,
 };
 use crate::commands::runtime_inspection::editor_runtime_inspect;
 use state::EditorState;
@@ -64,6 +64,7 @@ pub fn run() {
 			choose_project_manifest,
 			confirm_project_discard,
 			editor_exit,
+			editor_set_window_close_review,
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
 			editor_capabilities,

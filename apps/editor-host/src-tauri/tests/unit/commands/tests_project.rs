@@ -224,6 +224,43 @@ fn window_close_reviews_current_revision_and_file_exit_checks_the_caller_revisio
 }
 
 #[test]
+fn close_review_owner_is_bounded_and_late_cleanup_keeps_the_replacement() {
+	let exit = EditorExitState::default();
+	assert!(exit.set_window_close_owner(String::new(), true).is_err());
+	assert!(exit.set_window_close_owner("a".repeat(65), true).is_err());
+	assert!(exit
+		.set_window_close_owner("bad/owner".into(), true)
+		.is_err());
+	exit.set_window_close_owner("older".into(), true).unwrap();
+	exit.set_window_close_owner("newer".into(), true).unwrap();
+	exit.set_window_close_owner("older".into(), false).unwrap();
+	assert_eq!(exit.window_close_owner().unwrap().as_deref(), Some("newer"));
+	exit.set_window_close_owner("newer".into(), false).unwrap();
+	assert!(exit.window_close_owner().unwrap().is_none());
+	exit.commit();
+	assert!(exit
+		.set_window_close_owner("after-exit".into(), true)
+		.is_err());
+}
+
+#[test]
+fn a_listener_claims_an_unfinished_native_window_close_but_not_the_reviewed_file_exit() {
+	let exit = EditorExitState::default();
+	let close = ExitRequest::WindowClose;
+	assert!(hold_unclaimed_window_close(&exit, &close)
+		.unwrap()
+		.is_some());
+	exit.set_window_close_owner("editor".into(), true).unwrap();
+	assert!(hold_unclaimed_window_close(&exit, &close).is_err());
+	let reviewed = ExitRequest::FileMenu {
+		expected_revision: None,
+	};
+	assert!(hold_unclaimed_window_close(&exit, &reviewed)
+		.unwrap()
+		.is_none());
+}
+
+#[test]
 fn invalid_project_request_returns_an_error_without_building() {
 	let result = compiler::create_authoring_project("../escape", "relative");
 	assert!(matches!(result, Err(message) if message.contains("project name")));
