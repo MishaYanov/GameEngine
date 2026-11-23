@@ -4,11 +4,13 @@
 //! it is not a rigid-body solver or triangle-accurate collision system.
 
 mod geometry;
+mod matrix;
 mod movement;
 
 use geometry::{
 	Shape, WorldCollider, bounds_overlap, collider_geometry, contact_geometry, world_colliders,
 };
+pub use matrix::InteractionMatrix;
 pub(crate) use movement::BodyCast;
 pub use movement::{MovementContact, MovementResult, move_entity};
 
@@ -34,6 +36,7 @@ const CAMERA_CLEARANCE: f64 = 0.001;
 /// Persistent broad-phase ordering and cached world geometry. The stateless
 /// helpers below remain available for authored-data queries.
 pub struct CollisionWorld {
+	matrix: InteractionMatrix,
 	records: Vec<CachedCollider>,
 	indices: HashMap<EntityKey, usize>,
 	ordered: std::collections::BTreeSet<SortEntry>,
@@ -162,6 +165,10 @@ pub struct CollisionStats {
 }
 impl CollisionWorld {
 	pub fn new(world: &crate::world::RuntimeWorld) -> Result<Self, String> {
+		Self::with_matrix(world, InteractionMatrix::ALLOW_ALL)
+	}
+
+	pub fn with_matrix(world: &RuntimeWorld, matrix: InteractionMatrix) -> Result<Self, String> {
 		let records = world_colliders(world.data(), world.world_matrices())?
 			.into_iter()
 			.map(|c| CachedCollider {
@@ -188,6 +195,7 @@ impl CollisionWorld {
 			.collect();
 		let updated_colliders = records.len() as u64;
 		Ok(Self {
+			matrix,
 			records,
 			indices,
 			ordered,
@@ -197,6 +205,9 @@ impl CollisionWorld {
 				queries: 0,
 			},
 		})
+	}
+	pub(crate) fn matrix(&self) -> InteractionMatrix {
+		self.matrix
 	}
 	pub fn stats(&self) -> CollisionStats {
 		self.stats
@@ -244,7 +255,9 @@ impl CollisionWorld {
 			if &obstacle.key != actor
 				&& &obstacle.key != target
 				&& !interaction.sensor
-				&& interaction.detects(actor_collider.interaction)
+				&& self
+					.matrix
+					.allows_pair(interaction, actor_collider.interaction)
 				&& obstacle.bounds.ray_distance(from, delta, 1.0).is_some()
 			{
 				return false;
@@ -269,7 +282,7 @@ impl CollisionWorld {
 				self.indices.contains_key(key) != present
 			});
 		if changes.topology_changed || changes.full_resync || membership_changed {
-			let mut candidate = Self::new(world)?;
+			let mut candidate = Self::with_matrix(world, self.matrix)?;
 			candidate.stats.rebuilds = self.stats.rebuilds.saturating_add(1);
 			candidate.stats.updated_colliders = self
 				.stats
@@ -353,6 +366,9 @@ impl CollisionWorld {
 					format!("Collision query exceeds {MAX_CANDIDATES} broadphase candidates")
 				})?;
 				if sensors_only && !a.interaction.sensor && !b.interaction.sensor {
+					continue;
+				}
+				if !self.matrix.allows_pair(a.interaction, b.interaction) {
 					continue;
 				}
 				if let Some((normal, penetration)) = contact_geometry(&a.borrowed(), &b.borrowed())
@@ -569,7 +585,7 @@ pub fn query_overlaps(data: &SceneData) -> Result<Vec<Contact>, String> {
 				break;
 			}
 			charge_candidate(&mut candidates)?;
-			if !bounds_overlap(a.bounds, b.bounds) {
+			if !bounds_overlap(a.bounds, b.bounds) || !a.interaction.detects(b.interaction) {
 				continue;
 			}
 			if let Some((normal, penetration)) = contact_geometry(a, b) {

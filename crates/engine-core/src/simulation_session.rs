@@ -4,7 +4,7 @@ use crate::game_progress::{ProgressState, ProgressView};
 use crate::scene_catalog::SceneId;
 use crate::{
 	EntityKey,
-	collision::{CameraExclusions, CollisionStats, CollisionWorld},
+	collision::{CameraExclusions, CollisionStats, CollisionWorld, InteractionMatrix},
 	game_camera::{GameCameraController, OrbitRuntimeState, obstruction_query},
 	project::{BehaviorSettings, ProjectData},
 	scene_data::{EntityData, SceneData},
@@ -185,7 +185,8 @@ impl SimulationSession {
 			document: world.data(),
 			behaviors,
 		})?;
-		let collisions = CollisionWorld::new(&world)?;
+		let matrix = InteractionMatrix::compile(project.physics_layers.as_ref())?;
+		let collisions = CollisionWorld::with_matrix(&world, matrix)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
@@ -472,7 +473,7 @@ impl SimulationSession {
 			return Err("Prepare native render resources before admitting runtime entities".into());
 		}
 		let world = RuntimeWorld::new(Arc::new(data))?;
-		let collisions = CollisionWorld::new(&world)?;
+		let collisions = CollisionWorld::with_matrix(&world, self.collisions.matrix())?;
 		let mut characters = self.characters.clone();
 		characters.reconcile(&world, &self.project)?;
 		let mut lifecycle = self.lifecycle.clone();
@@ -854,7 +855,8 @@ impl SimulationSession {
 							}
 							structural_before.get_or_insert_with(|| self.world.document());
 							let change = self.world.remove_runtime_entities(&keys)?;
-							self.collisions = CollisionWorld::new(&self.world)?;
+							self.collisions =
+								CollisionWorld::with_matrix(&self.world, self.collisions.matrix())?;
 							lifecycle.removed(&keys)?;
 							object_scripts.prune(&lifecycle, &mut retired_scripts);
 							characters.prune(&self.world);
@@ -1213,7 +1215,7 @@ impl SimulationSession {
 				}
 			}
 			self.world = RuntimeWorld::new(Arc::new(restored))?;
-			self.collisions = CollisionWorld::new(&self.world)?;
+			self.collisions = CollisionWorld::with_matrix(&self.world, self.collisions.matrix())?;
 			self.paused = true;
 			self.clear_input();
 			self.actions.clear();

@@ -108,9 +108,6 @@ pub(super) fn contact_geometry(
 	a: &WorldCollider<'_>,
 	b: &WorldCollider<'_>,
 ) -> Option<(Vec3, f32)> {
-	if !a.interaction.detects(b.interaction) {
-		return None;
-	}
 	match (a.shape, b.shape) {
 		(Shape::Box, Shape::Box) => box_box(a.bounds, b.bounds),
 		(
@@ -226,12 +223,6 @@ pub(super) fn sweep_hit(
 	obstacle: &WorldCollider<'_>,
 	delta: Vec3,
 ) -> Result<Option<(f64, Vec3)>, String> {
-	if start.interaction.sensor
-		|| obstacle.interaction.sensor
-		|| !start.interaction.detects(obstacle.interaction)
-	{
-		return Ok(None);
-	}
 	if let Some((normal, penetration)) = contact_geometry(start, obstacle) {
 		if !normal.is_finite() || !penetration.is_finite() {
 			return Err("Collision contact exceeds finite limits".into());

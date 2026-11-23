@@ -69,8 +69,9 @@ impl CollisionWorld {
 			}
 			consume_candidates(remaining, 1)?;
 			if entry.index == index
-				|| obstacle.interaction.sensor
-				|| !start.interaction.detects(obstacle.interaction)
+				|| !self
+					.matrix
+					.allows_blocking(start.interaction, obstacle.interaction)
 				|| !bounds_overlap(swept, obstacle.bounds)
 			{
 				continue;
@@ -267,6 +268,9 @@ impl CollisionWorld {
 					consume_candidates(budget, 1)?;
 					if moving.contains(&obstacle.entity_index)
 						|| !bounds_overlap(swept, obstacle.bounds)
+						|| !self
+							.matrix
+							.allows_blocking(start.interaction, obstacle.interaction)
 					{
 						continue;
 					}

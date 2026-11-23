@@ -1,6 +1,8 @@
 mod support;
 use engine_core::{
-	collision::{self, CollisionWorld},
+	collider::ColliderInteraction,
+	collision::{self, CollisionWorld, InteractionMatrix},
+	project::PhysicsLayers,
 	scene_data::{ColliderData, TransformData},
 	world::{RuntimeWorld, WorldChange},
 };
@@ -12,6 +14,90 @@ fn cube(name: &str, position: [f32; 3]) -> engine_core::scene_data::EntityData {
 		half_extents: [0.5; 3],
 		offset: [0.0; 3],
 	}))
+}
+
+#[test]
+fn matrix_checks_the_same_raw_accepted_bits_in_both_directions() {
+	let left = ColliderInteraction {
+		sensor: false,
+		layers: (1 << 1) | (1 << 2),
+		mask: 1 << 3,
+	};
+	let right = ColliderInteraction {
+		sensor: false,
+		layers: (1 << 3) | (1 << 4),
+		mask: 1 << 1,
+	};
+	let matrix = InteractionMatrix::compile(Some(&PhysicsLayers {
+		layers: vec![],
+		ignored_pairs: vec![[1, 3], [31, 31]],
+	}))
+	.unwrap();
+	assert!(InteractionMatrix::ALLOW_ALL.allows_pair(left, right));
+	assert!(!matrix.allows_pair(left, right));
+	assert!(!matrix.allows_pair(right, left));
+	assert!(matrix.allows_pair(
+		left,
+		ColliderInteraction {
+			mask: 1 << 2,
+			..right
+		}
+	));
+	let edge = ColliderInteraction {
+		layers: 1u32 << 31,
+		..Default::default()
+	};
+	assert!(InteractionMatrix::ALLOW_ALL.allows_pair(edge, edge));
+	assert!(!matrix.allows_pair(edge, edge));
+}
+
+#[test]
+fn project_policy_persists_across_rebuilds_for_overlaps_movement_and_visibility() {
+	let matrix = InteractionMatrix::compile(Some(&PhysicsLayers {
+		layers: vec![],
+		ignored_pairs: vec![[0, 1]],
+	}))
+	.unwrap();
+	let layer_cube = |name, position, sensor| {
+		entity(name, position).with_collider(Some(ColliderData::Box {
+			interaction: ColliderInteraction {
+				layers: 1 << 1,
+				sensor,
+				..Default::default()
+			},
+			half_extents: [0.5; 3],
+			offset: [0.0; 3],
+		}))
+	};
+	let mut world = RuntimeWorld::new(Arc::new(scene(vec![
+		cube("actor", [-2.0, 0.0, 0.0]),
+		layer_cube("wall", [0.0; 3], false),
+		layer_cube("sensor", [-1.5, 0.0, 0.0], true),
+		entity("target", [2.0, 0.0, 0.0]),
+	])))
+	.unwrap();
+	let mut legacy = CollisionWorld::new(&world).unwrap();
+	assert_eq!(legacy.query_overlaps().unwrap().len(), 1);
+	assert!(!legacy.interaction_segment_clear(&world, &key("actor"), &key("target")));
+
+	let mut collisions = CollisionWorld::with_matrix(&world, matrix).unwrap();
+	collisions
+		.synchronize(
+			&world,
+			&WorldChange {
+				full_resync: true,
+				..Default::default()
+			},
+		)
+		.unwrap();
+	assert_eq!(collisions.stats().rebuilds, 2);
+	assert!(collisions.query_overlaps().unwrap().is_empty());
+	assert!(collisions.interaction_segment_clear(&world, &key("actor"), &key("target")));
+	let moved = collisions
+		.move_entity(&mut world, &key("actor"), [4.0, 0.0, 0.0])
+		.unwrap();
+	assert_eq!(moved.applied_delta, [4.0, 0.0, 0.0]);
+	assert!(moved.contacts.is_empty());
 }
 
 #[test]
