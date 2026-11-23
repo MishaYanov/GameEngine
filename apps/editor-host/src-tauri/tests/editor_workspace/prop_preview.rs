@@ -174,6 +174,121 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 }
 
 #[test]
+fn a_published_primitive_keeps_its_model_and_bounds_in_prop_preview_and_play() {
+	use runtime::{
+		asset_registry::AssetRef,
+		assets::{
+			project_assets::{prepare_primitive, resolve_asset, PreparedPrimitive},
+			AssetManager,
+		},
+		world::RuntimeWorld,
+		Bounds3, PrimitiveKind,
+	};
+
+	let fixture = Fixture::new();
+	fixture.write_project("scenes/main.json");
+	let mut workspace = fixture.open();
+	let previous_generation = workspace.generation;
+	let bytes = include_bytes!("../../assets/primitives/cube.glb");
+	let PreparedPrimitive::New(change) =
+		prepare_primitive(&workspace.asset_root, PrimitiveKind::Cube, bytes).unwrap()
+	else {
+		panic!("this project has no primitive asset yet");
+	};
+	let asset = change.publish().unwrap();
+	workspace.asset_published().unwrap();
+	workspace
+		.import_model(&asset.path, [0.0; 3], revision(&workspace))
+		.unwrap();
+	let draft = workspace
+		.create_linked_prefab_source(PROP_PATH, Default::default(), revision(&workspace))
+		.unwrap();
+	let placement = workspace
+		.instantiate_linked_source(
+			PROP_PATH,
+			&draft.draft_id,
+			[8.0, 2.0, -4.0],
+			Default::default(),
+			revision(&workspace),
+		)
+		.unwrap();
+	let root = EntityKey::new(&placement.selection[0]).unwrap();
+	workspace.save_all(revision(&workspace)).unwrap();
+	drop(workspace);
+
+	let mut reopened = fixture.open();
+	let authored = reopened.backend.session().authored_document();
+	let reopened_source = reopened
+		.open_prefab_source(PROP_PATH, revision(&reopened))
+		.unwrap();
+	assert_eq!(reopened_source.asset_id, draft.asset_id);
+	assert_eq!(reopened_source.prefab, draft.prefab);
+
+	let target = PropPreviewTargetDto::Instance {
+		scene_id: placement.active_scene_id,
+		root_key: root.clone(),
+	};
+	assert!(reopened
+		.open_prop_preview(target.clone(), revision(&reopened), previous_generation, 1)
+		.is_err());
+	let preview = reopened
+		.open_prop_preview(target, revision(&reopened), reopened.generation, 2)
+		.unwrap();
+	let frame = reopened.active_prop_preview().unwrap();
+	assert!(!frame.editable_source);
+	let preview_world = RuntimeWorld::new(frame.document).unwrap();
+	let root_index = preview_world.entity_index(&root).unwrap();
+	assert_eq!(
+		preview_world.data().entities[root_index].transform.position,
+		[0.0; 3]
+	);
+	let member = preview_world
+		.data()
+		.entities
+		.iter()
+		.find(|entity| entity.parent.as_ref() == Some(&root) && entity.renderable)
+		.unwrap()
+		.key
+		.clone();
+	reopened
+		.select_prop_preview(&preview.token, Some(member.clone()))
+		.unwrap();
+	reopened.frame_prop_preview(&preview.token).unwrap();
+	assert_eq!(reopened.active_prop_preview().unwrap().frame_request, 1);
+
+	let mut assets = AssetManager::new(&reopened.asset_root).unwrap();
+	let model_bounds = |world: &RuntimeWorld, assets: &mut AssetManager| {
+		let index = world.entity_index(&member).unwrap();
+		let entity = &world.data().entities[index];
+		assert_eq!(entity.asset_id.as_ref(), Some(&asset.id));
+		assert_eq!(entity.model_path, asset.path);
+		let reference = AssetRef::new(&entity.model_path, entity.mesh_index)
+			.unwrap()
+			.with_asset_id(entity.asset_id.clone());
+		let resolved = resolve_asset(&fixture.0, &reference).unwrap();
+		let imported = assets.load_scene(&resolved.path).unwrap();
+		imported.mesh_bounds[resolved.mesh_index.unwrap_or(0)]
+			.unwrap()
+			.transformed(world.world_matrices()[index])
+			.unwrap()
+	};
+	assert_eq!(
+		model_bounds(&preview_world, &mut assets),
+		Bounds3::new([-0.5; 3], [0.5; 3]).unwrap()
+	);
+
+	run(&mut reopened, Command::StartPlay);
+	assert!(reopened.active_prop_preview().is_none());
+	let play_world = reopened.backend.session().render_world().unwrap();
+	assert_eq!(
+		model_bounds(play_world, &mut assets),
+		Bounds3::new([7.5, 1.5, -4.5], [8.5, 2.5, -3.5]).unwrap()
+	);
+	run(&mut reopened, Command::StopPlay);
+	assert_eq!(reopened.backend.session().authored_document(), authored);
+}
+
+#[test]
 fn accepted_draft_edits_refresh_the_pinned_preview_and_keep_the_scene_and_disk_unchanged() {
 	let fixture = Fixture::new();
 	let mut workspace = fixture.open();
