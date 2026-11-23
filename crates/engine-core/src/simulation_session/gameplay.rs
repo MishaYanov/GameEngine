@@ -184,6 +184,10 @@ pub trait GameModule: Send {
 }
 
 pub trait GameModuleFactory: Send + Sync {
+	fn object_scripts(&self) -> &[super::ObjectScriptRegistration] {
+		&[]
+	}
+
 	/// Explicit references for portable authored assemblies. Modules define these
 	/// paths; core must never infer identities from arbitrary matching strings.
 	fn prefab_references(

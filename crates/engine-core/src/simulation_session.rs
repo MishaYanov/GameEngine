@@ -22,6 +22,7 @@ mod conditional_input;
 mod control_graph;
 mod gameplay;
 mod input;
+mod object_scripts;
 mod player_control;
 pub use control_graph::ControlGraphResolver;
 pub use player_control::InputActionsResolver;
@@ -32,6 +33,9 @@ pub use gameplay::{
 	SimulationAction, resolve_default_gameplay,
 };
 pub use input::{InputFrame, MovementTarget};
+pub use object_scripts::{
+	ObjectScript, ObjectScriptCommands, ObjectScriptContext, ObjectScriptRegistration,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedInputAction {
@@ -72,6 +76,7 @@ pub struct SimulationSession {
 	animator_resolver: Option<crate::animation::AnimatorResolver>,
 	characters: crate::character_controller::CharacterRuntime,
 	lifecycle: crate::runtime_lifecycle::RuntimeLifecycle,
+	object_scripts: object_scripts::ObjectScripts,
 	project: Arc<ProjectData>,
 	world: RuntimeWorld,
 	collisions: CollisionWorld,
@@ -96,6 +101,12 @@ pub struct SimulationSession {
 	camera_input: CameraInputLatch,
 	camera_exclusions: Option<CameraExclusions>,
 }
+impl Drop for SimulationSession {
+	fn drop(&mut self) {
+		self.object_scripts.stop();
+	}
+}
+
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
 	pub const MAX_MATRIX_UPDATES_PER_TICK: u64 = 1_000_000;
@@ -177,6 +188,7 @@ impl SimulationSession {
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
 		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
+		let object_scripts = object_scripts::ObjectScripts::prepare(&world, &lifecycle, factory.object_scripts())?;
 		let mut camera_exclusions = None;
 		let mut preparation_budget = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let camera = GameCameraController::new_with_lifecycle(
@@ -201,6 +213,7 @@ impl SimulationSession {
 			animator_resolver: None,
 			characters,
 			lifecycle,
+			object_scripts,
 			project,
 			world,
 			collisions,
@@ -299,6 +312,7 @@ impl SimulationSession {
 			&& (self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
+				|| self.object_scripts.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
@@ -324,6 +338,7 @@ impl SimulationSession {
 			&& (self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
+				|| self.object_scripts.needs_tick()
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
@@ -461,6 +476,8 @@ impl SimulationSession {
 		characters.reconcile(&world, &self.project)?;
 		let mut lifecycle = self.lifecycle.clone();
 		lifecycle.admit(&prepared, self.tick)?;
+		let mut object_scripts = self.object_scripts.clone();
+		object_scripts.admit(&world, &lifecycle, &prepared.entities)?;
 		// A new collider can occupy the existing arm even while the target rests.
 		// Prepare the pose with the spawn. Keep elapsed time and pending input untouched.
 		let mut camera = self.camera.clone();
@@ -532,6 +549,7 @@ impl SimulationSession {
 		self.collisions = collisions;
 		self.characters = characters;
 		self.lifecycle = lifecycle;
+		self.object_scripts = object_scripts;
 		self.triggers.structural_change(&self.world);
 		Ok(WorldChange {
 			changed_entities: keys,
@@ -613,6 +631,8 @@ impl SimulationSession {
 		let mut characters = self.characters.clone();
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
+		let mut object_scripts = self.object_scripts.clone();
+		let mut retired_scripts = object_scripts::ObjectScripts::default();
 		let mut camera = self.camera.clone();
 		let mut camera_objects = self.camera_objects.clone();
 		let mut camera_input = self.camera_input.clone();
@@ -687,6 +707,13 @@ impl SimulationSession {
 					camera_delta.yaw_delta = f64::from(route.intent.look.delta[0]);
 					camera_delta.pitch_delta = f64::from(route.intent.look.delta[1]);
 				}
+				object_scripts.plan_tick(
+					&self.world,
+					&lifecycle,
+					self.tick + u64::from(steps) + 1,
+					report.step_seconds,
+					&mut ActionWriter { actions: &mut self.actions },
+				)?;
 				let look_rate = step_input.controller_look;
 				self.module.plan_with_progress(
 					GameplayContext {
@@ -825,6 +852,7 @@ impl SimulationSession {
 							let change = self.world.remove_runtime_entities(&keys)?;
 							self.collisions = CollisionWorld::new(&self.world)?;
 							lifecycle.removed(&keys)?;
+							object_scripts.prune(&lifecycle, &mut retired_scripts);
 							characters.prune(&self.world);
 							lifecycle.prune_states(&self.world);
 							triggers.invalidate();
@@ -1211,6 +1239,8 @@ impl SimulationSession {
 			available.retain(|key| self.world.entity_index(key).is_some());
 		}
 		self.lifecycle = lifecycle;
+		self.object_scripts = object_scripts;
+		retired_scripts.stop();
 		self.characters = characters;
 		self.animations = animations;
 		self.animation_bindings
