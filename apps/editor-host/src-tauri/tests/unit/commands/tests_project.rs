@@ -261,6 +261,21 @@ fn a_listener_claims_an_unfinished_native_window_close_but_not_the_reviewed_file
 }
 
 #[test]
+fn a_missing_listener_on_the_editor_route_does_not_use_native_only_fallback() {
+	for path in [
+		"/editor",
+		"/editor/",
+		"/editor;mode=preview",
+		"/editor/project",
+	] {
+		assert!(is_editor_route(path), "{path}");
+	}
+	for path in ["/", "/setup", "/index.html", "/editor-preview"] {
+		assert!(!is_editor_route(path), "{path}");
+	}
+}
+
+#[test]
 fn invalid_project_request_returns_an_error_without_building() {
 	let result = compiler::create_authoring_project("../escape", "relative");
 	assert!(matches!(result, Err(message) if message.contains("project name")));

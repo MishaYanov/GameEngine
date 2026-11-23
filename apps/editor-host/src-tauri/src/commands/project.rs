@@ -186,8 +186,19 @@ async fn dispatch_window_close(window: &WebviewWindow) -> Result<(), String> {
 			)
 			.map_err(|error| format!("The editor could not request a close review: {error}"));
 	}
+	let path = window.url().map_err(|error| error.to_string())?;
+	if is_editor_route(path.path()) {
+		return Err(
+			"The title-bar close review is unavailable. Choose File → Exit or try Close again."
+				.into(),
+		);
+	}
 	request_editor_exit(window.clone(), ExitRequest::WindowClose).await?;
 	Ok(())
+}
+
+fn is_editor_route(path: &str) -> bool {
+	path.trim_start_matches('/').split(['/', ';']).next() == Some("editor")
 }
 
 async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Result<bool, String> {

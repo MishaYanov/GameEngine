@@ -8,6 +8,7 @@ import {EditorClientError, EditorService} from "../../core/editor/editor.service
 import {EditorSettingsService} from '../../core/editor/settings/editor-settings.service';
 import {EditorSettingsDialog} from '../editor-settings/editor-settings-dialog';
 import {EditorContextMenu} from '../../shared/components/context-menu/context-menu';
+import {watchDesktopClose} from './desktop-close-review';
 
 enum OpenMessages {
     RESTORING = 'Checking for the open project…',
@@ -39,18 +40,25 @@ export class Editor {
     protected openMessage = signal<string | null>(null);
     protected openError = signal<string | null>(null);
     protected readonly opening = computed(() => this.openMessage() !== null);
-    protected readonly canExit = computed(() =>
+    private readonly reviewingExit = signal(false);
+    private readonly canStartExit = computed(() =>
         this.editorService.nativeAvailable &&
         !this.opening() &&
         !this.editorService.busy() &&
         !this.editorService.snapshot()?.transaction
     );
+    protected readonly canExit = computed(() => this.canStartExit() && !this.reviewingExit());
     protected readonly canOpenProject = computed(() => this.canExit() && !this.editorService.playing());
     private readonly workspace = viewChild(EditorWorkspace);
+    private stopWatchingClose?: () => void;
     private destroyed = false;
 
     async ngOnInit(): Promise<void> {
         if (!this.editorService.nativeAvailable) return;
+        this.stopWatchingClose = watchDesktopClose(
+            () => void this.exitEditor(true),
+            () => this.openError.set('The title-bar close review is unavailable. Use File → Exit to close the editor.'),
+        );
         void this.editorService.loadCapabilities().catch(() => undefined);
         if (this.editorService.snapshot()) return;
         this.openMessage.set(OpenMessages.RESTORING);
@@ -132,24 +140,37 @@ export class Editor {
         }
     }
 
-    protected async exitEditor(): Promise<void> {
-        if (!this.canExit()) return;
-        const workspace = this.workspace();
-        if ((workspace && !await workspace.reviewProjectNavigation()) || !this.canExit()) return;
-        this.openError.set(null);
-        this.openMessage.set(OpenMessages.EXITING);
+    protected async exitEditor(fromTitleBar = false): Promise<void> {
+        if (this.destroyed || this.reviewingExit()) return;
+        if (!this.canStartExit()) {
+            if (fromTitleBar && this.openMessage() !== OpenMessages.EXITING) {
+                this.openError.set(this.editorService.snapshot()?.transaction
+                    ? 'Finish the current edit before closing the editor.'
+                    : 'Wait for the current editor operation to finish, then close again.');
+            }
+            return;
+        }
+        this.reviewingExit.set(true);
         let closing = false;
         try {
+            const workspace = this.workspace();
+            const generation = this.editorService.workspaceGeneration();
+            if (workspace && !await workspace.reviewProjectNavigation()) return;
+            if (this.destroyed || !this.canStartExit() || generation !== this.editorService.workspaceGeneration()) return;
+            this.openError.set(null);
+            this.openMessage.set(OpenMessages.EXITING);
             closing = await this.editorService.requestExit();
         } catch (error: unknown) {
             if (!this.destroyed) this.openError.set(error instanceof Error ? error.message : String(error));
         } finally {
-            if (!closing) this.openMessage.set(null);
+            if (!closing && this.openMessage() === OpenMessages.EXITING) this.openMessage.set(null);
+            this.reviewingExit.set(false);
         }
     }
 
     private destroyCallBack() {
         this.destroyed = true;
+        this.stopWatchingClose?.();
         this.settings.setOpen(false);
     }
 }
