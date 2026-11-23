@@ -793,6 +793,8 @@ fn apply_collider_update(
 
 #[path = "editor_workspace/agent_context.rs"]
 mod agent_context;
+#[path = "editor_workspace/agent_context_workshop.rs"]
+mod agent_context_workshop;
 #[path = "editor_workspace/assets.rs"]
 mod assets;
 #[path = "editor_workspace/colliders.rs"]

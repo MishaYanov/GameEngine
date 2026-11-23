@@ -1,6 +1,6 @@
 # Object authoring roadmap, Milestones 163–202
 
-Design proposal for a consistent Create → Hierarchy → Inspector → specialist editor workflow. It follows [Milestones 154–162](editor-access-and-particles-154-162.md), which introduced the Objects menu, the current Animation layout, and Particle Designer. The examples below show the intended implementation and acceptance checks. Introduce the proposed names through the stated files and adapt the examples to their actual signatures.
+This roadmap tracks the implemented Create → Hierarchy → Inspector → specialist editor workflow. It follows [Milestones 154–162](editor-access-and-particles-154-162.md), which introduced the Objects menu, the Animation layout, and Particle Designer. The milestones retain their file-level implementation guidance, examples, and acceptance checks. See [Windows Editor quickstart](../../docs/windows-editor-quickstart.md) and [object authoring and Agent package acceptance](../../docs/testing.md#object-authoring-and-agent-package-acceptance) for the current workflow and verification procedure.
 
 ## Authoring model
 
@@ -11,7 +11,7 @@ Design proposal for a consistent Create → Hierarchy → Inspector → speciali
 | Inspector | The selected object’s identity, transform, component bindings, and short property cards. Add Component attaches capabilities. |
 | Specialist panes | Detailed authoring for Animation, Animator, Controls Graph, Audio, Particles, and behavior settings. Cards open the relevant pane with the selected object and asset in context. |
 | Prop Workspace | The reusable definition and its object tree. Placed instances show their inherited properties and supported overrides. |
-| Agent | A future mode for the right drawer. It receives the same selected object or Prop address as Inspector and combines current project facts with published guidance. |
+| Agent | An alternate mode for the right drawer. It receives the same selected object or Prop address as Inspector and combines current project facts with published guidance. |
 | Scene and Project settings | Shared responsibilities such as Scene Lighting, active cameras, input layouts, and collision layers. |
 
 Generate the first four primitives as ordinary project GLBs using the existing mesh builders and asset transaction. This keeps picking, render bounds, Prop previews, and export on the existing asset path. Keep the first Inspector integration on the current component views and typed commands. Each specialist pane owns its draft and preview, and receives the exact selected object when it opens.

@@ -71,7 +71,7 @@ describe('AgentDrawerService', () => {
     it('preserves bounded keyword sources when the model is absent', async () => {
         await session.start('Authoring', null);
         const {id} = session.answers()[0];
-        const citation = {corpus: 'engine_help', source_id: 'workspace', relative_path: 'editor-workspace.md',
+        const citation = {corpus: 'engine-help', source_id: 'workspace', relative_path: 'editor-workspace.md',
             heading: 'Authoring', ordinal: 1, source_revision: 'v1', content_hash: 'hash'};
         send({type: 'sources', workspace_generation: 12, id, citations: [
             {citation, excerpt: 'Inspect the selected object.'},

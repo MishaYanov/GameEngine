@@ -11,7 +11,7 @@ Inspector reset, graph framing, and Timeline and exit review. It includes step-b
 2. Open the `/editor` route and choose **File → Open Project…**. **New Project…** opens setup, creates authoring files without compiling a player, and opens the created manifest; cancellation/failure retains its path and an Open in Editor retry.
 3. Select `project.json` in the native file chooser. Cancel leaves the installed workspace unchanged.
 4. If the currently reviewed snapshot is dirty, choose **Discard and open** or **Keep current project** in the native confirmation dialog.
-5. After successful candidate installation, the header shows project name, active scene ID and overall unsaved state. Scene is the default view; its native viewport remains available for inspection during Play.
+5. After successful candidate installation, the header shows the project name and unsaved state. **Game → Scene Information…** shows the active scene ID. Scene is the default view; its native viewport remains available for inspection during Play.
 
 Opening requires the desktop bridge and embedded-viewport capability. The component disables it while opening, busy, playing or inside a transaction. Browser mode displays an unavailable state rather than inventing project data. The chooser filters JSON, but `ProjectLocation` still validates the required manifest filename, root and contained assets; choosing any JSON file does not make it a project.
 
@@ -31,7 +31,7 @@ The expected revision is null when no workspace is open. A direct caller replaci
 | Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
 | Scene / Game tabs         | Select the native view through editor-only actions. Arrows, Home and End move tab focus. Enter, Space or click activate a tab |
 | Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
-| Inspector                 | Edits name/transform and typed Mesh Renderer, Collider and Native Behavior components; linked members expose overrides and explicit update/revert/unpack |
+| Inspector                 | Edits name/transform and typed component cards with separate Animation, Animator, Controls Graph, Audio and Behavior workspaces; linked members expose overrides and explicit update/revert/unpack |
 | Runtime Inspector         | Game during Play exposes read-only handles, origins, component state and bounded entity pages through explicit Refresh |
 | Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                 |
 | Assets                    | Search by project path or name, open scenes, place models, copy prefabs, and edit and link Prop sources |
@@ -47,6 +47,23 @@ module uses configured behaviors without inventing Courtyard roles. Collider fie
 share the existing edit reservation, history and Save/Play barriers. Colliders is a view-only toggle: continuous cyan
 outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlaps provide fixed-step Enter/Stay/Exit
 events. See the [Milestone 4–6 workflow](milestones-4-6-review.md) for component editing, source review and runtime inspection.
+
+## Inspector and Agent
+
+Use **Inspector** for the selected Scene object or Prop. Create **Plane**, **Cube**, **Sphere**, and **Capsule** from
+**Objects** or **Hierarchy → Create**. Add supported object features with **Add Component**. Open the specialist
+pane on its existing component card. Use **Game** for scene information and lighting, and **Project** for physics
+layers and input layouts.
+
+Switch the right drawer to **Agent** to ask about the current selection. **Pin** keeps that exact object while you
+inspect another object. Choose an attachment under **Ask about** to bind the question to a component ID. Project
+replacement clears the thread and pin. The answer displays the selection it captured, and **Show Object** or **Open
+Component Editor** revalidates the target before moving focus. During Play, the Game tab shows the Runtime Inspector.
+
+The Windows release includes the Agent worker and help files. Keyword lookup is available offline. For optional
+generated answers, run an already installed local Ollama model and set `ENGINE_AGENT_OLLAMA_MODEL` in the Editor
+launch environment. The worker accepts a loopback port through `ENGINE_AGENT_OLLAMA_PORT`.
+[Agent package acceptance](testing.md#object-authoring-and-agent-package-acceptance)
 
 ## One native surface, two views
 

@@ -218,6 +218,40 @@ Native generated-project compilation retains output and is not the same as launc
 generated scene. The JSON asset omission is fixed with bounded validation; generation compilation still does not
 establish final installed runtime acceptance.
 
+## Object authoring and Agent package acceptance
+
+Use separate D: locations for Cargo output, the native template test and the release. Template generation copies the
+workspace and requires a destination outside the source checkout. For example, set `ENGINE_QA_TEMPLATE_ROOT` to an
+existing `D:\Builds\editor\qa-native-template` through PowerShell before running the native aggregate.
+
+1. Build the Editor with `apps/editor-host/build-windows-release.ps1`. Check that the portable folder includes
+   `release/player/game.exe`, `release/agent/authoring-agent-worker.exe`, `release/agent/bundle.json`, and
+   `release/agent/engine-help`. Validate the same files in the installed layout on a Windows test machine.
+2. Launch the Editor from an unrelated working directory with Cargo and the engine checkout removed from PATH. Open
+   a copy of `apps/headless/tests/fixtures/agent-context-workshop/project.json`. In North, select the standalone
+   Signal Cap. Switch the right drawer to **Agent**, pin the object and choose its `mesh` attachment in **Ask about**.
+3. Ask how to change the selected object's material. With the model configuration unset, check **Sources** and the
+   keyword completion status. Change the Hierarchy selection while a request is pending, then use **Show Object** to
+   return to its original target. **Open Component Editor** focuses that attachment or opens its specialist pane.
+4. Repeat in South for the Signal Cap under the Gate Prop. Compare the names and native addresses. A later question
+   about a second project must not retain the pinned target, sources, or conversation from the first project.
+5. With a separately configured, local Ollama model, set `ENGINE_AGENT_OLLAMA_MODEL` before starting the Editor. If the
+   service uses a different loopback port, also set `ENGINE_AGENT_OLLAMA_PORT`. Check the streamed text, **Stop**,
+   and authoring responsiveness while a request is pending. Confirm that Save and Undo history are unaffected by the
+   query. To verify offline behavior again, unset the model and reopen the Editor.
+
+The packaged help index uses version-matched authoring guides and approved project manifest metadata. The worker runs
+separately from the Editor, and requests bind to the authored object address and revision. Keyword lookup and optional
+embedding ranking have deterministic coverage. The tests do not need a model download.
+[Agent workspace usage](editor-workspace.md#inspector-and-agent) · [Windows Editor and export workflow](windows-editor-quickstart.md)
+
+The November 2026 package run exercised native primitive creation, the Agent drawer, offline citations, exact object
+navigation, hierarchy dragging, save and reopen, and the exported Player from a separate working directory. A 12,000
+object scene mounted 19–24 hierarchy rows. Seventeen Arrow Down inputs that
+changed focus had a p95 of 44.1 ms measured through two WebView animation frames. The native host
+kept one viewport at 800×580. The NSIS installer was built and its resource manifest checked. Clean-machine
+installation and a real local model remain separate checks.
+
 ## Remaining independent checks
 
 Current visible native UI/control/lighting acceptance, measured performance budgets, clean-checkout reproducibility,

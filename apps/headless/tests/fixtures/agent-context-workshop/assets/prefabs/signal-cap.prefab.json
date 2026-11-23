@@ -1,0 +1,47 @@
+{
+  "schema_version": 3,
+  "entities": [
+    {
+      "key": "status-sphere",
+      "name": "Signal Cap",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.35,
+          0.35,
+          0.35
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/sphere.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000003",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.24,
+                0.85,
+                0.62,
+                1
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

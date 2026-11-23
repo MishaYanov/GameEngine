@@ -5981,14 +5981,21 @@
     ]
   },
   "object_authoring_roadmap_163_202": {
-    "inspected_head": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
+    "inspected_head": "8e7069a12d7f808f9e52e62f9070d7275ace0cc7",
     "path": "designs/editor-viewport/object-authoring-roadmap-163-202.md",
-    "scope": "Milestones 163 through 202 for primitives, object components, specialist panes, reusable Props, and the future contextual Game Development Agent.",
-    "status": "design proposal",
+    "scope": "Milestones 163 through 202 for primitives, object components, specialist panes, reusable Props, and the contextual Game Development Agent.",
+    "status": "implemented with package verification recorded",
     "verification": [
-      "Verified 40 consecutive milestone headings, each with a problem, implementation files, code example, acceptance checks, and resources.",
-      "After the audit corrections, the documentation site generated and link-checked 73 pages. All eight tests passed and the complete roadmap rendered.",
-      "The fixed Windows PowerShell CPU benchmark completed five runs in the workspace target and five runs in a redirected D: target. All measured budgets passed."
+      "Milestones 163 through 201 were recorded as individual commits before recording the final acceptance evidence.",
+      "The full Rust workspace passed 1,330 tests with 24 ignored by default. Documentation tests, formatting and strict all-target/all-feature Clippy passed.",
+      "The Angular Editor passed 759 tests and the production budget check without warnings. The Dashboard passed 16 frontend tests and Python passed 151 tests.",
+      "The native aggregate passed Dashboard template generation, Vulkan initialization, scene rendering and save/reload. Cinder Oath, Full Authoring Practice Yard, Conditional Door Lab and Particle Workbench staged successfully and each Windows Player presented a frame.",
+      "The release script built the x64 installer and portable Editor. The generated NSIS manifest and portable hashes verified the Player, Agent worker, bundle and four help files. The build retained the optional Dashboard prompt.",
+      "The Agent Context Workshop resolved the exact nested component and kept authored state unchanged. The source and packaged replay switched scenes and entered Play with matching state and camera hashes.",
+      "The documentation site built and link-checked 73 pages and passed all eight tests.",
+      "The native portable Editor returned offline citations for a pinned Cube after the selection changed, then returned the Inspector to the addressed Cube from the answer.",
+      "The same run dragged a camera and folder, saved and reopened the Blank project, and exported a byte-verified Player that presented a Vulkan frame with Cargo off PATH.",
+      "The native 12,000-object hierarchy probe measured 44.1 ms at p95 over 17 successful focus moves. It kept 19–24 visible DOM rows and checked an 800×580 workspace with one viewport."
     ],
     "audit_scope": [
       "Updated the glTF test locations, inspector and agent workspace scopes, release qualification, and Agent worker and help packaging requirements.",
@@ -5996,11 +6003,8 @@
       "Documented the Dashboard source checkout trust review."
     ],
     "verification_limits": [
-      "Milestone implementation and packaged native acceptance remain future work.",
-      "The existing CPU fixture does not cover particle workloads."
-    ],
-    "pending_documentation_changes": [
-      "Record implemented contracts, packaged acceptance, and the planned large-scene and particle performance evidence as the corresponding milestones land."
+      "The installer package was built and its resource layout checked. Clean-machine installed UI and a downloaded Ollama model remain separate acceptance runs.",
+      "The normal packaged Agent uses lexical search. Optional hybrid ranking and streamed local-provider cancellation have deterministic test coverage."
     ]
   }
 }

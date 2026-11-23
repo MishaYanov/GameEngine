@@ -11,7 +11,7 @@ const MAX_ANSWER = 32_768;
 
 export interface AgentReference {
     readonly citation: {
-        readonly corpus: 'engine_help' | 'active_project';
+        readonly corpus: 'engine-help' | 'active-project';
         readonly source_id: string;
         readonly relative_path: string;
         readonly heading: string;
@@ -197,7 +197,7 @@ function agentError(error: unknown): string {
 
 function isReference(hit: AgentReference): boolean {
     const citation = hit?.citation;
-    return !!citation && (citation.corpus === 'engine_help' || citation.corpus === 'active_project') &&
+    return !!citation && (citation.corpus === 'engine-help' || citation.corpus === 'active-project') &&
         typeof citation.relative_path === 'string' && citation.relative_path.length <= 512 &&
         typeof citation.heading === 'string' && citation.heading.length <= 512 &&
         typeof hit.excerpt === 'string' && hit.excerpt.length <= 2_048;

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "91000000-0000-4000-8000-000000000002",
+      "path": "models/primitives/v1/cube.glb",
+      "kind": "model",
+      "bytes": 1852,
+      "fingerprint": "ca694b6cea9cc7a8ee3b8a2bc70aec2fa644365003ba908a4f197c6ae1e0386a",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Cube",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000003",
+      "path": "models/primitives/v1/sphere.glb",
+      "kind": "model",
+      "bytes": 30428,
+      "fingerprint": "c967306c11d9505c6e9056c8eebcc660bfe9a343405d47415609c1e9ea4861fe",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Sphere",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000007",
+      "path": "prefabs/signal-cap.prefab.json",
+      "kind": "prefab",
+      "bytes": 897,
+      "fingerprint": "6664d76af9c4d56013aa41d5f47974241698ff71d5254344049f7635c4775e78",
+      "revision": 1,
+      "dependencies": [
+        "91000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000008",
+      "path": "prefabs/workshop-gate.prefab.json",
+      "kind": "prefab",
+      "bytes": 6014,
+      "fingerprint": "77d89dabe65a8be27b7407a2960c0fc8f8efa823cdf37b7d3688d5749b59af16",
+      "revision": 1,
+      "dependencies": [
+        "91000000-0000-4000-8000-000000000002",
+        "91000000-0000-4000-8000-000000000007"
+      ]
+    }
+  ]
+}
