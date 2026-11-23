@@ -30,6 +30,7 @@ pub mod picking;
 pub mod project;
 pub mod project_format;
 pub mod runtime_lifecycle;
+pub mod scene_audio;
 pub mod scene_catalog;
 pub mod scene_data;
 pub mod scene_format;

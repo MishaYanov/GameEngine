@@ -207,6 +207,8 @@ fn deserialize_keyboard_keys<'de, D: de::Deserializer<'de>>(
 
 #[derive(Default)]
 pub(super) struct Measurements {
+	audio: engine_core::scene_audio::SceneAudioState,
+	pub(super) audio_events: Vec<engine_core::scene_audio::SceneAudioOp>,
 	pub(super) commands: u64,
 	pub(super) tick_calls: u32,
 	pub(super) fixed_steps: u64,
@@ -216,6 +218,35 @@ pub(super) struct Measurements {
 	pub(super) fresh_ids: bool,
 	pub(super) accepted_action_presses: Vec<engine_core::simulation_session::CommittedInputAction>,
 	pub(super) bounds: HashSet<(String, usize)>,
+}
+
+impl Measurements {
+	fn observe_scene_audio(&mut self, engine: &Engine) {
+		use engine_core::scene_audio::{SceneAudioOp, SceneAudioOwner};
+
+		const MAX_AUDIO_EVENTS: usize = 256;
+		let scene = engine.session().render_document();
+		let next = engine
+			.play_status()
+			.as_ref()
+			.map(SceneAudioOwner::from_play)
+			.map(|owner| (owner, scene.as_ref()));
+		for change in self.audio.sync(next) {
+			if self.audio_events.len() == MAX_AUDIO_EVENTS {
+				break;
+			}
+			match &change {
+				SceneAudioOp::Start { .. } => self.audio_events.push(change),
+				SceneAudioOp::StopOwner { owner } => {
+					if self.audio_events.iter().rev().any(
+						|event| matches!(event, SceneAudioOp::Start { owner: started, .. } if owner == started),
+					) {
+						self.audio_events.push(change);
+					}
+				}
+			}
+		}
+	}
 }
 
 #[derive(Default)]
@@ -413,6 +444,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 					measures.bounds.insert((path, mesh_index));
 				}
 			}
+			measures.observe_scene_audio(&engine);
 		}
 	}
 	if steps > 0 {
@@ -424,6 +456,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 				})
 				.map_err(|e| e.to_string())?;
 			measures.commands += 1;
+			measures.observe_scene_audio(&engine);
 		}
 		let elapsed = options
 			.dt
@@ -474,6 +507,7 @@ fn advance(
 				engine.commit_play_scene(prepared).map_err(|error| {
 					format!("Cannot install requested scene {destination:?}: {error}")
 				})?;
+				measures.observe_scene_audio(engine);
 				scene_changed = true;
 			}
 			if !engine.session().is_paused() {

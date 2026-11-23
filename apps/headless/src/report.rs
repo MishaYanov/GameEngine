@@ -108,6 +108,8 @@ pub(super) struct Summary {
 	fixed_steps: u64,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	accepted_action_presses: Vec<engine_core::simulation_session::CommittedInputAction>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	scene_audio_events: Vec<engine_core::scene_audio::SceneAudioOp>,
 	simulation_tick: u64,
 	dropped_seconds: f64,
 	matrix_updates: u64,
@@ -218,6 +220,7 @@ pub(super) fn finish(
 		tick_calls: measures.tick_calls,
 		fixed_steps: measures.fixed_steps,
 		accepted_action_presses: measures.accepted_action_presses.clone(),
+		scene_audio_events: measures.audio_events.clone(),
 		simulation_tick: stats.map_or(0, |s| s.0),
 		dropped_seconds: measures.dropped,
 		matrix_updates: stats.map_or(0, |s| s.1),

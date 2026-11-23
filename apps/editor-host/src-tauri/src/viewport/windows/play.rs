@@ -1,6 +1,43 @@
 use super::*;
 
 impl Worker {
+	pub(super) fn sync_scene_audio(&mut self) {
+		use runtime::scene_audio::{SceneAudioMix, SceneAudioOwner};
+
+		let snapshot = self.shared.lock().ok().and_then(|guard| {
+			let workspace = guard.as_ref()?;
+			let status = workspace.backend.play_status()?;
+			let scene = workspace.backend.session().render_document();
+			Some((status, scene, workspace.asset_root.clone()))
+		});
+		let audible = self.active()
+			&& !self.failed
+			&& self.interaction.settings.view == bridge::viewport::ViewportView::Game
+			&& snapshot
+				.as_ref()
+				.is_some_and(|(status, _, _)| !status.paused);
+		let next = snapshot.as_ref().map(|(status, scene, path)| {
+			(
+				SceneAudioOwner::from_play(status),
+				scene.as_ref(),
+				path.as_path(),
+			)
+		});
+		let shared = &self.shared;
+		self.scene_audio
+			.synchronize(next, audible, SceneAudioMix::default(), |owner| {
+				shared.lock().ok().is_some_and(|guard| {
+					guard
+						.as_ref()
+						.and_then(|workspace| workspace.backend.play_status())
+						.is_some_and(|status| {
+							status.run_id == owner.run_id
+								&& status.scene_generation == owner.scene_generation
+						})
+				})
+			});
+	}
+
 	pub(super) fn poll_gamepad(&mut self, now: Instant) -> Option<Instant> {
 		let context = if self.active() && !self.failed && self.native_keyboard_focused() {
 			self.shared

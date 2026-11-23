@@ -21,5 +21,7 @@ glam = "0.33.6"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input_XboxController"] }
 
+windows-sys-audio = { package = "windows-sys", version = "0.61", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Security", "Win32_System_Threading"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -18,6 +18,7 @@ pub mod input;
 pub mod model_instance;
 pub mod picking;
 pub mod scene;
+pub mod scene_audio;
 pub mod scene_data;
 pub mod scene_editor;
 pub mod scene_io;

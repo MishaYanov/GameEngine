@@ -113,6 +113,7 @@ struct GameApp {
 	feedback_audio: feedback_audio::FeedbackAudio,
 	feedback_captions: feedback_captions::FeedbackCaptions,
 	project_sound: project_sound::ProjectSound,
+	scene_audio: runtime::scene_audio::NativeSceneAudio,
 	scene_load_timing: Option<SceneLoadTiming>,
 	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
 	scene_prefetch_enabled: bool,
@@ -193,18 +194,45 @@ impl GameApp {
 	}
 
 	fn set_project_sound_focus(&mut self, focused: bool) {
-		if !self.project_sound.has_soundtrack() {
-			return;
-		}
 		let visible = self.window.as_ref().is_some_and(|window| {
 			let size = window.inner_size();
 			size.width > 0 && size.height > 0
 		});
-		self.project_sound.update(
-			self.editor.is_playing(),
-			focused && visible && !self.window_occluded,
-			self.player_controls.feedback_mix().effective_percent(),
+		let active_window = focused && visible && !self.window_occluded;
+		let mix = self.player_controls.feedback_mix();
+		let total = mix.effective_percent();
+		let status = self.editor.play_status();
+		let document = self.editor.play_document();
+		let active = status
+			.as_ref()
+			.zip(document.as_deref())
+			.zip(self.asset_root.as_deref())
+			.map(|((status, document), path)| {
+				(
+					runtime::scene_audio::SceneAudioOwner::from_play(status),
+					document,
+					path,
+				)
+			});
+		self.scene_audio.synchronize(
+			active,
+			active_window && !self.editor.simulation_paused() && !self.smoke_test,
+			runtime::scene_audio::SceneAudioMix {
+				master_percent: total,
+				effects_percent: mix
+					.category_percent(bridge::feedback_audio::FeedbackBus::Mechanisms),
+				music_percent: 100,
+			},
+			|_| true,
 		);
+		if self.project_sound.has_soundtrack() {
+			self.project_sound.update(
+				self.editor.is_playing(),
+				active_window,
+				total,
+				self.scene_audio.authored_music(),
+			);
+		}
 	}
 
 	fn update_keyboard_camera(&mut self, delta_seconds: f32) {

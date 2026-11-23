@@ -281,7 +281,11 @@ impl Drop for GpuState {
 		let assets = unsafe { ManuallyDrop::take(&mut self.assets) };
 		if self
 			.renderer
-			.retire_resources((std::mem::take(&mut self.scene), self.prop_preview.take(), assets))
+			.retire_resources((
+				std::mem::take(&mut self.scene),
+				self.prop_preview.take(),
+				assets,
+			))
 			.is_err()
 		{
 			engine_logger::error!(target: "editor_viewport", "Viewport teardown failed: operation=gpu_wait_idle, generation={}", self.generation);
@@ -317,6 +321,7 @@ struct AuthoredLoad {
 }
 
 struct Worker {
+	scene_audio: runtime::scene_audio::NativeSceneAudio,
 	warm_measurement: bool,
 	authored_load: Option<AuthoredLoad>,
 	last_authored_present: Option<(u64, SceneId)>,
@@ -369,6 +374,7 @@ impl Worker {
 	) -> Self {
 		let now = Instant::now();
 		Self {
+			scene_audio: Default::default(),
 			warm_measurement: std::env::var_os("ENGINE_EDITOR_WARM_MEASURE").as_deref()
 				== Some(std::ffi::OsStr::new("1")),
 			authored_load: None,
@@ -668,8 +674,7 @@ impl Worker {
 							&& !matches!(
 								request.action,
 								ViewportActionDto::Cancel | ViewportActionDto::CancelPlacement
-							)
-						{
+							) {
 							return Err("Close the Prop preview to use Scene tools".into());
 						}
 						self.interaction
@@ -1163,8 +1168,7 @@ impl ApplicationHandler<Wake> for Worker {
 						self.raw_input_surface().0.is_some()
 					} else {
 						self.input_surface().0.is_some()
-					})
-				{
+					}) {
 					self.focus_keyboard();
 					if button == "left" {
 						self.refresh_game_camera();
@@ -1319,6 +1323,7 @@ impl ApplicationHandler<Wake> for Worker {
 				self.next_frame = now;
 			}
 		}
+		self.sync_scene_audio();
 		self.publish_editor(false);
 		if self.dirty
 			&& self.active()
