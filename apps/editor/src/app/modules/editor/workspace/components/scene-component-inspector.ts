@@ -1,6 +1,7 @@
+import {checkedComponentChange, sceneComponentCommand} from './component-actions';
 import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
 import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
-import type { EditorCommand, SceneEntity } from '../../../../core/editor/editor.models';
+import type { SceneEntity } from '../../../../core/editor/editor.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { ViewportEditorService } from '../../../../core/editor/viewport-editor.service';
 import { SceneEditingService } from '../scene-editing.service';
@@ -359,43 +360,8 @@ export class SceneComponentInspector {
 						(candidate) => candidate.key === entity.key,
 					);
 					if (!latest) return;
-					const id =
-						intent.kind === 'add' || intent.kind === 'replace'
-							? intent.component.id
-							: intent.component_id;
-					const existing = latest.component_views?.find((component) => component.id === id);
-					if (
-						'expected' in intent &&
-						JSON.stringify(existing ?? null) !== (intent.expected ?? 'null')
-					) {
-						throw new Error(
-							'This component changed. Discard the draft and review its current values.',
-						);
-					}
-					let command: EditorCommand;
-					if (intent.kind === 'add' || intent.kind === 'replace')
-						command = {
-							type: intent.kind === 'add' ? 'add_component' : 'replace_component',
-							key: entity.key,
-							component: intent.component,
-						};
-					else if (intent.kind === 'remove')
-						command = {
-							type: 'remove_component',
-							key: entity.key,
-							component_id: intent.component_id,
-						};
-					else {
-						if (!existing) throw new Error('This component is no longer attached.');
-						if (existing.enabled === intent.enabled) return;
-						command = {
-							type: 'set_component_enabled',
-							key: entity.key,
-							component_id: intent.component_id,
-							enabled: intent.enabled,
-						};
-					}
-					await this.editor.execute(command, generation, snapshot.revision);
+					if (!checkedComponentChange(latest.component_views ?? [], intent)) return;
+					await this.editor.execute(sceneComponentCommand(entity.key, intent), generation, snapshot.revision);
 					if (current()) this.acknowledged.update((value) => value + 1);
 				} catch (error) {
 					if (current()) this.error.set(error instanceof Error ? error.message : String(error));

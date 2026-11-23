@@ -1,3 +1,4 @@
+import {checkedComponentChange} from '../components/component-actions';
 import {
     afterNextRender, computed, DestroyRef, DOCUMENT, effect, inject, Injectable, Injector, signal, untracked,
 } from '@angular/core';
@@ -396,22 +397,22 @@ export class PropWorkspaceService {
         const draft = this.draft();
         const entity = draft?.prefab.entities.find(entity => entity.key === key);
         if (!draft || !entity || this.selectedObject()?.key !== key || !this.canEditDraft()) return Promise.resolve(false);
-        const id = 'component' in intent ? intent.component.id : intent.component_id;
-        const current = entity.components.find(component => component.id === id);
-        const supported = (record: ComponentRecord) => record.data.kind === 'audio_source' || record.data.kind === 'script';
-        if (('component' in intent && !supported(intent.component)) ||
-            (current && !supported(current)) || (intent.kind !== 'add' && !current) ||
-            ('expected' in intent && intent.expected !== (current ? JSON.stringify(current) : null))) {
-            this.failure.set('This component changed. Discard the edit and review its current values.');
+        try {
+            const change = checkedComponentChange(entity.components, intent,
+                record => record.data.kind === 'audio_source' || record.data.kind === 'script');
+            if (!change) return Promise.resolve(true);
+            const {id, next} = change;
+            let components: readonly ComponentRecord[];
+            if (!next) components = entity.components.filter(component => component.id !== id);
+            else if (intent.kind === 'add') components = [...entity.components, next];
+            else components = entity.components.map(component => component.id === id ? next : component);
+            return this.editDraft({type: 'apply', prefab: {...draft.prefab,
+                entities: draft.prefab.entities.map(candidate => candidate.key === key ? {...entity, components} : candidate),
+            }});
+        } catch (error) {
+            this.failure.set(error instanceof Error ? error.message : String(error));
             return Promise.resolve(false);
         }
-        const components = entity.components.filter(component => component.id !== id);
-        const next = 'component' in intent ? intent.component : intent.kind === 'enabled' && current
-            ? {...current, enabled: intent.enabled} : null;
-        if (next) components.push(next);
-        return this.editDraft({type: 'apply', prefab: {...draft.prefab,
-            entities: draft.prefab.entities.map(candidate => candidate.key === key ? {...entity, components} : candidate),
-        }});
     }
 
     async saveDraft(target = this.tab()): Promise<boolean> {

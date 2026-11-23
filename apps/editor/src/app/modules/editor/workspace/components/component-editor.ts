@@ -55,7 +55,7 @@ export type ComponentEditIntent =
 			readonly expected: string | null;
 	  }
 	| { readonly kind: 'remove'; readonly component_id: string; readonly expected: string }
-	| { readonly kind: 'enabled'; readonly component_id: string; readonly enabled: boolean };
+	| { readonly kind: 'enabled'; readonly component_id: string; readonly enabled: boolean; readonly expected?: string };
 
 @Component({
 	selector: 'editor-component-editor',
@@ -404,6 +404,7 @@ export class ComponentEditor {
 				kind: 'enabled',
 				component_id: component.id,
 				enabled: !component.enabled,
+				expected: JSON.stringify(component),
 			});
 	}
 

@@ -126,7 +126,8 @@ describe('Interactable Inspector', () => {
         more.click();
         expect(card.querySelector('details')?.open).toBe(true);
         card.querySelector<HTMLButtonElement>('button[aria-label="Enable Interactable"]')!.click();
-        expect(panel.intents).toEqual([{kind: 'enabled', component_id: 'interaction', enabled: true}]);
+        expect(panel.intents).toEqual([{kind: 'enabled', component_id: 'interaction', enabled: true,
+            expected: JSON.stringify({...interaction, enabled: false})}]);
     });
 
     it('shows the prefab source value and excludes native instance edit intents', async () => {
