@@ -85,6 +85,8 @@ export class ComponentEditor {
     readonly inputActionAssetsEnabled = input(false);
     readonly skyPanoramaAssetsEnabled = input(false);
     readonly focusedComponent = input<ComponentRecord | null>(null);
+    readonly behaviorWorkspaceAvailable = input(false);
+    readonly behaviorWorkspaceRequested = output<string>();
     readonly audioWorkspaceAvailable = input(false);
     readonly audioWorkspaceRequested = output<string>();
     readonly animationWorkspaceAvailable = input(false);
@@ -337,6 +339,20 @@ export class ComponentEditor {
         if (!this.available() || !this.open() || this.draft().kind !== 'mesh_renderer' ||
             !this.meshModels().some(model => model.path === path) || path === this.draft().model_path) return;
         this.draft.update(value => ({...value, model_path: path, mesh_index: ''}));
+    }
+
+    protected scriptAssignment(id: string): string {
+        return this.scriptTypes().find(type => type.id === id)?.label ?? 'Unavailable script · ' + id;
+    }
+
+    protected behaviorAssignment(kind: string): string {
+        switch (kind) {
+            case 'key_door': return 'Key and Door';
+            case 'collectible': return 'Collectible';
+            case 'timed_spawner': return 'Timed Spawner';
+            case 'state_machine': return 'State Machine';
+            default: return kind;
+        }
     }
 
     protected audioClipPath(id: string | undefined): string {

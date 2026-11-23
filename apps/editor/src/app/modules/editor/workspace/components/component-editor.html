@@ -21,6 +21,12 @@
                 @case ('interactable') {
                     <p class="binding">{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
                 }
+                @case ('script') {
+                    <p class="binding">{{ scriptAssignment(component.data.settings.script_id) }}</p>
+                }
+                @case ('native_behavior') {
+                    <p class="binding">{{ behaviorAssignment(component.data.behavior.kind) }}</p>
+                }
                 @case ('audio_source') {
                     @if (audioWorkspaceAvailable()) {
                         <p class="binding">{{ audioClipPath(component.data.settings.clip?.asset) }}</p>
@@ -73,6 +79,10 @@
                     @if (component.data.kind === 'animation' && animationWorkspaceAvailable()) {
                         <button class="primary-action" type="button" [disabled]="!available() || open()"
                                 (click)="animationWorkspaceRequested.emit(component.id)">Open Animation</button>
+                    } @else if (behaviorWorkspaceAvailable() &&
+                        (component.data.kind === 'script' || component.data.kind === 'native_behavior')) {
+                        <button class="primary-action" type="button" [disabled]="!available() || open()"
+                                (click)="behaviorWorkspaceRequested.emit(component.id)">Edit Behavior</button>
                     } @else if (component.data.kind === 'audio_source' && audioWorkspaceAvailable()) {
                         <button class="primary-action" type="button" [disabled]="!available() || open()"
                                 (click)="audioWorkspaceRequested.emit(component.id)">Edit Audio</button>

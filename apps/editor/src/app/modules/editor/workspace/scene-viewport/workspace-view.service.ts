@@ -9,6 +9,7 @@ interface AuthoringAvailability {
     readonly animator: () => boolean;
     readonly controlsGraph: () => boolean;
     readonly audio?: () => boolean;
+    readonly behavior?: () => boolean;
 }
 
 const PRIMARY_VIEWS = ['scene-viewport', 'game-preview'] as const;
@@ -17,6 +18,7 @@ const PRIMARY_VIEWS = ['scene-viewport', 'game-preview'] as const;
 @Injectable()
 export class WorkspaceViewService {
     readonly gameView = computed(() => this.activeViewKind() === 'game-preview');
+    readonly behaviorView = computed(() => this.activeViewKind() === 'behavior-workspace');
     readonly audioView = computed(() => this.activeViewKind() === 'audio-workspace');
     private readonly audioOriginState = signal<'scene' | 'prop'>('scene');
     readonly audioOrigin = this.audioOriginState.asReadonly();
@@ -47,6 +49,7 @@ export class WorkspaceViewService {
         if (authoring?.animator()) views.push('animation-controller');
         if (authoring?.controlsGraph()) views.push('controls-graph');
         if (authoring?.audio?.()) views.push('audio-workspace');
+        if (authoring?.behavior?.()) views.push('behavior-workspace');
         return views;
     });
     private readonly activeView = signal<WorkspaceViewKind>('scene-viewport');
@@ -85,7 +88,7 @@ export class WorkspaceViewService {
         });
         effect(() => {
             const state = this.viewport.state();
-            if (!state || this.propView() || this.animationView() || this.animatorView() || this.controlsGraphView() || this.audioView()) return;
+            if (!state || this.propView() || this.animationView() || this.animatorView() || this.controlsGraphView() || this.audioView() || this.behaviorView()) return;
             const view = this.gameView() ? 'game' : 'scene';
             if (state.settings.view === view || this.requestedView === view) return;
             this.requestedView = view;

@@ -3,7 +3,7 @@ import type {AudioAuditionScope} from '../../../../core/editor/audio-source.mode
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
-import {type InspectorSubject, inspectorAddressKey, linkedInspectorRoot, sceneInspectorSubject} from '../inspector-panel/inspector-subject';
+import {type InspectorSubject, inspectorAddressKey, linkedInspectorRoot, linkedInspectorSubject, sceneInspectorSubject} from '../inspector-panel/inspector-subject';
 import {PropPreviewService} from '../prop-workspace/prop-preview.service';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
@@ -12,7 +12,7 @@ import {ScopedPaneRequests, type ScopedPaneTarget} from '../scoped-pane-request'
 import {checkedComponentChange, sceneComponentCommand} from './component-actions';
 import type {ComponentEditor, ComponentEditIntent} from './component-editor';
 
-export type ComponentWorkspaceKind = 'audio-workspace';
+export type ComponentWorkspaceKind = 'audio-workspace' | 'behavior-workspace';
 
 interface ComponentTarget extends ScopedPaneTarget {
     readonly view: ComponentWorkspaceKind;
@@ -24,6 +24,11 @@ interface ComponentTarget extends ScopedPaneTarget {
 
 function ownerIdentity(subject: InspectorSubject): string {
     return inspectorAddressKey(subject.address, subject.scope.workspaceGeneration, subject.scope.nativeGeneration);
+}
+
+function supports(record: ComponentRecord, view: ComponentWorkspaceKind): boolean {
+    return view === 'audio-workspace' ? record.data.kind === 'audio_source'
+        : record.data.kind === 'script' || record.data.kind === 'native_behavior';
 }
 
 /** Binds a reusable component form to the exact Scene object or editable Prop source that opened it. */
@@ -46,7 +51,7 @@ export class ComponentWorkspaceSession {
 
     readonly target = computed(() => {
         const opened = this.opened();
-        return opened ? this.resolve(opened.view, opened.subject, opened.componentId) : null;
+        return opened ? this.resolve(opened.view, opened.subject, opened.componentId, opened.ownerKey) : null;
     });
     readonly record = computed(() => this.target()?.record ?? this.opened()?.record ?? null);
     readonly ownerKey = computed(() => this.opened()?.ownerKey ?? '');
@@ -57,6 +62,12 @@ export class ComponentWorkspaceSession {
         return opened ? JSON.stringify([ownerIdentity(opened.subject), opened.componentId, opened.view]) : '';
     });
     readonly models = computed(() => this.editor.modelAssets() ?? []);
+    readonly scriptTypes = computed(() => this.editor.capabilities()?.object_scripts ?? []);
+    readonly objectTargets = computed(() => this.origin() === 'prop'
+        ? this.props.document()?.objects ?? [] : this.editor.snapshot()?.document.entities ?? []);
+    readonly gameActions = computed(() => this.editor.snapshot()?.project.input_profile?.actions?.map(action => action.id) ?? []);
+    readonly scriptSlots = computed(() => this.origin() === 'prop' ? Object.keys(this.props.draft()?.prefab.reference_slots ?? {}) : []);
+    readonly scriptType = (id: string) => this.scriptTypes().find(type => type.id === id);
     readonly pending = this.applying.asReadonly();
     readonly error = this.failure.asReadonly();
     readonly confirming = this.reviewing.asReadonly();
@@ -98,15 +109,15 @@ export class ComponentWorkspaceSession {
 
     async open(view: ComponentWorkspaceKind, subject: InspectorSubject, componentId: string): Promise<boolean> {
         const origin = this.views.activeViewKind();
-        const target = this.resolve(view, subject, componentId);
+        const target = this.resolve(view, subject, componentId, this.editing.selectedEntity()?.key);
         if (!target) return false;
         return this.panes.open<ComponentTarget>({
             pane: view, subject, componentId, asset: target.asset,
         }, {
-            resolve: () => this.views.activeViewKind() === origin ? this.resolve(view, subject, componentId) : null,
+            resolve: () => this.views.activeViewKind() === origin ? this.resolve(view, subject, componentId, target.ownerKey) : null,
             load: async resolved => {
-                const prepared = this.resolve(view, resolved.subject, componentId);
-                return prepared && {value: prepared, asset: prepared.asset};
+                const prepared = this.resolve(view, resolved.subject, componentId, target.ownerKey);
+                return prepared && await this.verifyLinked(prepared) ? {value: prepared, asset: prepared.asset} : null;
             },
             activate: prepared => {
                 this.failure.set(null);
@@ -118,8 +129,11 @@ export class ComponentWorkspaceSession {
         });
     }
 
-    connectForm(form: ComponentEditor | undefined): void {
+    connectForm(form: ComponentEditor | undefined): () => void {
         this.form.set(form);
+        return () => {
+            if (this.form() === form) this.form.set(undefined);
+        };
     }
 
     reviewNavigation(): Promise<boolean> {
@@ -148,7 +162,8 @@ export class ComponentWorkspaceSession {
 
     async apply(intent: ComponentEditIntent): Promise<boolean> {
         const opened = this.opened();
-        if (!opened || !this.editable() || intent.kind !== 'replace' || intent.component.id !== opened.componentId) return false;
+        if (!opened || !this.editable() || intent.kind !== 'replace' || intent.component.id !== opened.componentId ||
+            intent.component.data.kind !== opened.record.data.kind) return false;
         this.applying.set(true);
         this.failure.set(null);
         try {
@@ -157,12 +172,13 @@ export class ComponentWorkspaceSession {
             if (address.kind === 'prop') {
                 applied = await this.props.editComponent(address.sourceObject, intent);
                 if (!applied) throw new Error(this.props.error() ?? 'The Prop component could not be updated.');
-            } else if (address.kind === 'scene') {
+            } else {
                 const committed = await this.editing.withCommittedEdit(async () => {
                     const target = this.opened() === opened && this.target();
-                    if (!target) return;
-                    if (!checkedComponentChange([target.record], intent, component => component.data.kind === 'audio_source')) return;
-                    await this.editor.execute(sceneComponentCommand(address.object, intent),
+                    if (!target || !await this.verifyLinked(target) ||
+                        target.subject.scope.revision !== this.editor.snapshot()?.revision || !this.target()) return;
+                    if (!checkedComponentChange([target.record], intent, component => supports(component, opened.view))) return;
+                    await this.editor.execute(sceneComponentCommand(target.ownerKey, intent),
                         target.subject.scope.workspaceGeneration, target.subject.scope.revision);
                     applied = true;
                 });
@@ -179,7 +195,22 @@ export class ComponentWorkspaceSession {
         }
     }
 
-    private resolve(view: ComponentWorkspaceKind, captured: InspectorSubject, id: string): ComponentTarget | null {
+    private async verifyLinked(target: ComponentTarget): Promise<boolean> {
+        const {address, scope} = target.subject;
+        if (address.kind !== 'linked') return true;
+        const object = target.ownerKey;
+        try {
+            const result = await this.editor.inspectLinkedPropAddress(object, scope);
+            const snapshot = this.editor.snapshot();
+            const verified = snapshot && linkedInspectorSubject(snapshot,
+                {object, scene: address.scene, root: address.root, scope}, result, true);
+            return !!verified && ownerIdentity(verified) === ownerIdentity(target.subject);
+        } catch {
+            return false;
+        }
+    }
+
+    private resolve(view: ComponentWorkspaceKind, captured: InspectorSubject, id: string, key?: string): ComponentTarget | null {
         const snapshot = this.editor.snapshot();
         if (!snapshot || snapshot.mode !== 'edit' || this.editor.playing()) return null;
         const {address} = captured;
@@ -192,20 +223,26 @@ export class ComponentWorkspaceSession {
             if (!source) return null;
             object = source;
             record = source.components.find(component => component.id === id);
-        } else if (address.kind === 'scene' && captured.access === 'scene-edit') {
+        } else if (address.kind === 'scene' && captured.access === 'scene-edit' ||
+            address.kind === 'linked' && captured.access === 'linked-overrides' && view === 'behavior-workspace') {
             const selected = this.editing.selectedEntity();
             const nativeGeneration = this.viewport.state()?.workspace_generation;
-            if (!selected || selected.key !== address.object || nativeGeneration == null || selected.linked_prefab ||
-                (selected.parent && linkedInspectorRoot(selected, snapshot.document.entities))) return null;
+            if (!selected || nativeGeneration == null) return null;
+            const scope = {workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision};
+            const root = selected.parent ? linkedInspectorRoot(selected, snapshot.document.entities) : null;
+            if (address.kind === 'linked') {
+                if (selected.key !== key || root !== address.root || address.scene !== snapshot.active_scene_id) return null;
+                subject = {address, scope, contentRevision: snapshot.scene_revision, access: 'linked-overrides'};
+            } else {
+                if (selected.key !== address.object || root || (view === 'audio-workspace' && selected.linked_prefab)) return null;
+                subject = sceneInspectorSubject(snapshot, selected.key, scope, true);
+            }
             object = selected;
             record = selected.component_views?.find(component => component.id === id);
-            subject = sceneInspectorSubject(snapshot, selected.key, {
-                workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision,
-            }, true);
         } else return null;
         if (!subject || subject.access !== captured.access || ownerIdentity(subject) !== ownerIdentity(captured) ||
-            record?.data.kind !== 'audio_source') return null;
-        const clip = record.data.settings.clip?.asset;
+            !record || !supports(record, view) || (address.kind === 'prop' && record.data.kind === 'native_behavior')) return null;
+        const clip = record.data.kind === 'audio_source' ? record.data.settings.clip?.asset : undefined;
         const asset = clip ? this.models().find(model => model.asset_id === clip) : undefined;
         return {view, subject, componentId: id, ownerKey: object.key, ownerName: object.name, record,
             asset: clip ? {id: clip, revision: asset?.revision ?? undefined, fingerprint: asset?.fingerprint ?? undefined} : undefined};

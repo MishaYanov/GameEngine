@@ -47,8 +47,7 @@ export class AudioWorkspace {
 
     constructor() {
         effect(onCleanup => {
-            this.session.connectForm(this.editor());
-            onCleanup(() => this.session.connectForm(undefined));
+            onCleanup(this.session.connectForm(this.editor()));
         });
     }
 

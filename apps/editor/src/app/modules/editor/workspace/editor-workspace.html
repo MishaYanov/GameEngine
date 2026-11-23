@@ -1,7 +1,7 @@
 <section class="workspace-layout">
     <div class="workspace-controls">
         <workspace-toolbar (paletteRequested)="openPalette()"
-                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView()"
+                           [sceneActionsVisible]="!workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !componentPaneActive()"
                            [opening]="workspaceActionBlocked()" [paletteAvailable]="canOpenPalette()"/>
         <editor-scene-actions [opening]="opening()" (repairRequested)="repairSceneDependency($event)"/>
         <editor-game-input [opening]="workspaceActionBlocked()"/>
@@ -75,7 +75,7 @@
                 (usagesRequested)="showUsages($event)"
         />
         <section aria-label="Workspace" class="workspace-center" data-editor-shortcut-scope="scene">
-            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView() && !previewingCamera()) {
+            @if (!workspaceView.gameView() && !workspaceView.propView() && !workspaceView.animationView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !componentPaneActive() && !previewingCamera()) {
                 <editor-viewport-toolbar [opening]="workspaceActionBlocked()"/>
             }
             <div
@@ -86,7 +86,7 @@
                     tabindex="0"
             >
                 <editor-pane [icon]="workspaceView.animationView() || workspaceView.animatorView() || workspaceView.controlsGraphView() ? 'graph' : workspaceView.propView() ? 'object' : workspaceView.gameView() ? 'play' : 'cube'"
-                             [title]="workspaceView.audioView() ? 'Audio' : workspaceView.controlsGraphView() ? 'Controls Graph' : workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
+                             [title]="workspaceView.behaviorView() ? 'Behavior' : workspaceView.audioView() ? 'Audio' : workspaceView.controlsGraphView() ? 'Controls Graph' : workspaceView.animatorView() ? 'Animator' : workspaceView.animationView() ? 'Animation' : workspaceView.propView() ? 'Prop Workspace' : selectedCameraPreview.active() ? 'Camera Preview' : previewingCamera() ? 'Orbit Camera Preview' : workspaceView.gameView() ? 'Game Preview' : 'Scene'">
                     @if (!workspaceView.propView() && !workspaceView.animationView() && sceneProgress(); as progress) {
                         <div class="scene-load" pane-actions>
                             <span [title]="progress.name" role="status">{{ progress.label }}</span>
@@ -135,6 +135,8 @@
                                 <editor-control-graph-workspace/>
                             } @else if (workspaceView.audioView()) {
                                 <editor-audio-workspace/>
+                            } @else if (workspaceView.behaviorView()) {
+                                <editor-behavior-workspace/>
                             } @else if (!workspaceView.animationView() && !showingViewport()) {
                                 <div class="empty-scene">
                                     <div class="empty-content">
@@ -174,7 +176,7 @@
         </section>
         @if (workspaceView.gameView() && editorService.playing()) {
             <editor-runtime-inspector [opening]="workspaceActionBlocked()" drawerMaxWidth="var(--workspace-inspector-max)"/>
-        } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !workspaceView.audioView()) {
+        } @else if (!workspaceView.propView() && !workspaceView.animatorView() && !workspaceView.controlsGraphView() && !componentPaneActive()) {
         <inspector-panel
                 [hidden]="workspaceView.animationView()"
                 data-editor-shortcut-scope="inspector"

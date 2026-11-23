@@ -39,6 +39,8 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 		[inputActionAssets]="inputActions?.assets() ?? []"
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[skyPanoramaAssetsEnabled]="skyPanoramaAssetsEnabled()"
+        [behaviorWorkspaceAvailable]="behaviorWorkspaceAvailable()"
+        (behaviorWorkspaceRequested)="openBehavior($event)"
         [audioWorkspaceAvailable]="audioWorkspaceAvailable()"
         (audioWorkspaceRequested)="openAudio($event)"
         [animationWorkspaceAvailable]="animationWorkspaceAvailable()"
@@ -111,6 +113,10 @@ export class SceneComponentInspector {
 	readonly editable = input(false);
     readonly subject = input<InspectorSubject | null>(null);
     private readonly componentWorkspace = inject(ComponentWorkspaceSession, {optional: true});
+    protected readonly behaviorWorkspaceAvailable = computed(() => {
+        const access = this.subject()?.access;
+        return !!this.componentWorkspace && (access === 'scene-edit' || access === 'linked-overrides');
+    });
     protected readonly audioWorkspaceAvailable = computed(() =>
         this.componentWorkspace !== null && this.subject()?.access === 'scene-edit');
     private readonly animation = inject(AnimationWorkspaceService, {optional: true});
@@ -253,6 +259,11 @@ export class SceneComponentInspector {
 			this.error.set(null);
 		});
 	}
+
+    protected openBehavior(componentId: string): void {
+        const subject = this.subject();
+        if (subject && this.available()) void this.componentWorkspace?.open('behavior-workspace', subject, componentId);
+    }
 
     protected openAudio(componentId: string): void {
         const subject = this.subject();

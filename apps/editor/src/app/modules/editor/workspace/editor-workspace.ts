@@ -47,6 +47,7 @@ import {SceneLightsDialog} from './scene-lights/scene-lights-dialog';
 import {ParticleDesigner} from './particle-designer/particle-designer';
 import {AudioWorkspace} from './audio-source/audio-workspace';
 import {ComponentWorkspaceSession} from './components/component-workspace-session';
+import {BehaviorWorkspace} from './components/behavior-workspace';
 import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
@@ -69,7 +70,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     imports: [
         EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel,
         WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
-        CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector, AudioWorkspace,
+        CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector, AudioWorkspace, BehaviorWorkspace,
         CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
     templateUrl: './editor-workspace.html',
@@ -128,8 +129,9 @@ export class EditorWorkspace {
         const snapshot = this.editorService.snapshot();
         return snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path.split('/').at(-1) ?? 'Scene';
     });
+    protected readonly componentPaneActive = computed(() => this.workspaceView.audioView() || this.workspaceView.behaviorView());
     protected readonly showingViewport = computed(() =>
-        this.workspaceView.animatorView() || this.workspaceView.controlsGraphView() || this.workspaceView.audioView() ? false :
+        this.workspaceView.animatorView() || this.workspaceView.controlsGraphView() || this.componentPaneActive() ? false :
         this.workspaceView.animationView() ? this.animationPreview.ready() :
         this.workspaceView.propView() ? this.propPreview.ready() :
             this.previewingCamera() || !this.workspaceView.gameView() || this.editorService.playing()
@@ -225,6 +227,7 @@ export class EditorWorkspace {
             animator: this.animatorAssets.supported,
             controlsGraph: this.controlsGraph.supported,
             audio: () => this.componentWorkspace.available('audio-workspace'),
+            behavior: () => this.componentWorkspace.available('behavior-workspace'),
         });
         let previousView = this.workspaceView.activeViewKind();
         effect(() => {
@@ -319,7 +322,7 @@ export class EditorWorkspace {
         const context = this.sceneContext();
         if (this.workspaceView.animationView() && view !== 'animation-workspace' &&
             !await this.animationPreview.reviewNavigation()) return;
-        if (this.workspaceView.audioView() && view !== 'audio-workspace' &&
+        if (this.componentPaneActive() && view !== this.workspaceView.activeViewKind() &&
             !await this.componentWorkspace.reviewNavigation()) return;
         if (context === this.sceneContext()) this.workspaceView.selectView(view);
     }

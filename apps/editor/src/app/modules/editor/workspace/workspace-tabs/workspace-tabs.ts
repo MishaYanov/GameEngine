@@ -17,6 +17,7 @@ const WORKSPACE_TABS: readonly WorkspaceTabDefinition[] = [
     {kind: 'animation-controller', label: 'Animator', icon: 'graph'},
     {kind: 'controls-graph', label: 'Controls Graph', icon: 'graph'},
     {kind: 'audio-workspace', label: 'Audio', icon: 'play'},
+    {kind: 'behavior-workspace', label: 'Behavior', icon: 'script'},
 ];
 
 let nextWorkspaceTabsId = 0;

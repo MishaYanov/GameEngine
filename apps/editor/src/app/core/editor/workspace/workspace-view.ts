@@ -5,6 +5,7 @@ export type WorkspaceView =
     | { readonly kind: 'prop-workspace' }
     | { readonly kind: 'animation-workspace' }
     | { readonly kind: 'audio-workspace' }
+    | { readonly kind: 'behavior-workspace' }
     | { readonly kind: 'animation-controller'; readonly assetId: string }
     | { readonly kind: 'controls-graph' }
     | { readonly kind: 'shader-graph'; readonly assetId: string };
