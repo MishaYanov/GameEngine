@@ -1,13 +1,21 @@
 import {computed, effect, inject, Injectable, signal, untracked} from '@angular/core';
 import {
-    type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture,
+    type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture, type ControlGraphDocument,
     type ControlGraphProbe, controlIssues, controlPath, emptyControlGraph, readControlGraph,
 } from '../../../../core/editor/controls-graph.models';
+import type {EntityKey} from '../../../../core/editor/editor.models';
 import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {GraphCanvasSelection} from '../../../../shared/components/graph/graph';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
+import {ScopedPaneRequests, type ScopedPaneAsset, type ScopedPaneTarget} from '../scoped-pane-request';
 import {controlCanvas, type ControlEdit, editControlGraph} from './control-graph-draft';
+
+export interface ControlGraphPaneTarget extends ScopedPaneTarget {
+    readonly actorKey: EntityKey;
+    readonly componentId: string;
+    readonly asset: ScopedPaneAsset;
+}
 
 interface Draft {
     readonly asset: ControlGraphAsset | null;
@@ -27,6 +35,8 @@ export class ControlGraphWorkspaceService {
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService);
     private readonly views = inject(WorkspaceViewService);
+    private readonly panes = inject(ScopedPaneRequests, {optional: true});
+    private readonly binding = signal<ControlGraphPaneTarget | null>(null);
     private readonly catalog = signal<readonly ControlGraphAsset[]>([]);
     private readonly draft = signal<Draft | null>(null);
     private readonly sample = signal<SampleResult | null>(null);
@@ -70,8 +80,14 @@ export class ControlGraphWorkspaceService {
     readonly canRedo = computed(() => !!this.draft()?.forward.length && !this.pending());
     readonly actorKey = computed(() => {
         const snapshot = this.editor.snapshot();
-        const selected = snapshot?.selection[0];
-        return snapshot?.document.entities.find(entity => entity.key === selected && entity.player_controller)?.key ?? null;
+        const target = this.binding();
+        const selected = target?.actorKey ?? snapshot?.selection[0];
+        const actor = snapshot?.document.entities.find(entity => entity.key === selected && entity.player_controller);
+        if (!actor) return null;
+        if (target && (target.subject.address.kind === 'prop' || target.subject.address.scene !== snapshot?.active_scene_id ||
+            !this.current(target.subject.scope) || actor.player_controller?.id !== target.componentId ||
+            actor.player_controller.settings.control_graph !== target.asset.id)) return null;
+        return actor.key;
     });
 
     constructor() {
@@ -118,6 +134,7 @@ export class ControlGraphWorkspaceService {
         const current = () => this.current(origin) && !this.editor.playing() &&
             this.editor.snapshot()?.active_scene_id === scene && this.views.activeViewKind() === view;
         if (this.asset()?.id === id) {
+            this.binding.set(null);
             this.views.selectView('controls-graph');
             return true;
         }
@@ -131,8 +148,8 @@ export class ControlGraphWorkspaceService {
             const document = await this.editor.openControlGraph(id, scope);
             if (request !== this.serial || !current() || this.scope()?.revision !== scope.revision) return false;
             if (document.asset.id !== id) throw new Error('The editor opened a different Controls Graph asset.');
-            this.destinationState.set(document.asset.path);
-            this.accept({asset: document.asset, graph: document.graph, baseline: document.graph, back: [], forward: []});
+            this.adopt(document);
+            this.binding.set(null);
             this.views.selectView('controls-graph');
             return true;
         } catch (error) {
@@ -143,9 +160,54 @@ export class ControlGraphWorkspaceService {
         }
     }
 
+    async openScoped(request: ControlGraphPaneTarget, resolve: () => ControlGraphPaneTarget | null): Promise<boolean> {
+        if (!this.panes || !this.scope() || this.pending() || this.editor.playing()) return false;
+        const origin = this.views.activeViewKind();
+        const current = () => origin === this.views.activeViewKind() && !this.editor.playing();
+        this.errorState.set(null);
+        return this.panes.open<ControlGraphDocument>({...request, pane: 'controls-graph'}, {
+            resolve: () => {
+                const target = current() ? resolve() : null;
+                return target?.actorKey === request.actorKey ? target : null;
+            },
+            load: async target => {
+                const id = target.asset?.id;
+                if (!id || this.pending()) return null;
+                const request = ++this.serial;
+                this.pendingState.set(true);
+                try {
+                    const document = await this.editor.openControlGraph(id, target.subject.scope);
+                    if (request !== this.serial) return null;
+                    return {value: document, asset: document.asset};
+                } catch (error) {
+                    if (request === this.serial && current()) this.showError(error);
+                    return null;
+                } finally {
+                    if (request === this.serial) this.pendingState.set(false);
+                }
+            },
+            activate: (document, target) => {
+                if (!this.views.availableViews().includes('controls-graph')) return false;
+                this.adopt(document);
+                this.binding.set({...request, subject: target.subject});
+                this.views.selectView('controls-graph');
+                return true;
+            },
+        });
+    }
+
+    private adopt(document: ControlGraphDocument): void {
+        const previous = this.asset();
+        if (previous?.id === document.asset.id && previous.fingerprint === document.asset.fingerprint &&
+            previous.revision === document.asset.revision && !this.dirty()) return;
+        this.destinationState.set(document.asset.path);
+        this.accept({asset: document.asset, graph: document.graph, baseline: document.graph, back: [], forward: []});
+    }
+
     async create(): Promise<void> {
         if (!await this.reviewNavigation() || this.editor.playing()) return;
         const graph = emptyControlGraph();
+        this.binding.set(null);
         this.destinationState.set('controls/player.controls.json');
         this.accept({asset: null, baseline: graph, graph, back: [], forward: []});
         this.errorState.set(null);
@@ -304,6 +366,7 @@ export class ControlGraphWorkspaceService {
         this.serial++;
         this.pendingState.set(false);
         this.draft.set(null);
+        this.binding.set(null);
         this.selectionState.set(null);
         this.errorState.set(null);
         this.invalidateSample();

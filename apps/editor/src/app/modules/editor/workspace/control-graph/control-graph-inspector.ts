@@ -2,7 +2,8 @@ import {Component, computed, ElementRef, inject, input, linkedSignal, signal, vi
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {SceneEntity} from '../../../../core/editor/editor.models';
 import {SceneEditingService} from '../scene-editing.service';
-import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
+import {type ControlGraphPaneTarget, ControlGraphWorkspaceService} from './control-graph-workspace.service';
+import type {InspectorSubject} from '../inspector-panel/inspector-subject';
 
 @Component({
     selector: 'editor-control-graph-inspector',
@@ -22,7 +23,8 @@ import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
                     </select>
                 </label>
                 <button type="button" [disabled]="!available() || workspace.loadingCatalog()" (click)="workspace.refresh()">Refresh Controls Graphs</button>
-                <button type="button" [disabled]="!available() || !selected()" (click)="workspace.open(selected())">Open Controls Graph</button>
+                @if (attached() && selected() !== attached()) { <p>Saved control route: {{ attachedLabel() }}</p> }
+                <button type="button" [disabled]="!canOpenAttached()" (click)="openAttached()">Open Controls Graph</button>
                 <button type="button" [disabled]="!available()" (click)="workspace.create()">New Controls Graph</button>
                 <button type="button" (click)="apply()" [disabled]="!available() || selected() === attached() || (!!selected() && !listed())">
                     Apply Control Route
@@ -36,6 +38,7 @@ import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
 export class ControlGraphInspector {
     readonly actor = input.required<SceneEntity>();
     readonly editable = input(false);
+    readonly subject = input<InspectorSubject | null>(null);
     private readonly routePicker = viewChild<ElementRef<HTMLSelectElement>>('choice');
     protected readonly workspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly editor = inject(EditorService);
@@ -46,12 +49,39 @@ export class ControlGraphInspector {
         computation: source => source.attached,
     });
     protected readonly listed = computed(() => this.workspace?.assets().some(asset => asset.id === this.selected()) === true);
+    protected readonly attachedLabel = computed(() =>
+        this.workspace?.assets().find(asset => asset.id === this.attached())?.path ?? 'Unavailable Controls Graph');
     protected readonly pending = signal(false);
     protected readonly error = signal<string | null>(null);
     protected readonly available = computed(() => this.editable() && this.editing.ready() && !this.pending() && !!this.workspace?.scope());
 
+    protected readonly canOpenAttached = computed(() => this.available() && !!this.paneTarget() && !this.workspace?.pending());
+
     focusAttachment(): void {
         if (this.available()) this.routePicker()?.nativeElement.focus();
+    }
+
+    protected async openAttached(): Promise<void> {
+        const workspace = this.workspace, target = this.paneTarget();
+        if (!workspace || !target || !this.canOpenAttached()) return;
+        this.error.set(null);
+        if (!await workspace.openScoped(target, () => this.paneTarget()) &&
+            this.paneTarget()?.actorKey === target.actorKey && workspace.error()) {
+            this.error.set(workspace.error());
+        }
+    }
+
+    private paneTarget(): ControlGraphPaneTarget | null {
+        const subject = this.subject(), snapshot = this.editor.snapshot();
+        const key = this.actor().key;
+        if (!subject || subject.address.kind === 'prop' || snapshot?.mode !== 'edit' ||
+            snapshot.active_scene_id !== subject.address.scene || snapshot.selection[0] !== key ||
+            (subject.address.kind === 'scene' && subject.address.object !== key)) return null;
+        const controller = snapshot.document.entities.find(entity => entity.key === key)?.player_controller;
+        const id = controller?.settings.control_graph;
+        if (!controller || !id) return null;
+        const asset = this.workspace?.assets().find(candidate => candidate.id === id) ?? {id};
+        return {actorKey: key, subject, componentId: controller.id, asset};
     }
 
     protected async apply(): Promise<void> {

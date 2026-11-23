@@ -6,11 +6,16 @@ import {
     type ControlGraph, type ControlGraphAsset, type ControlGraphProbe, type ControlGraphOutput, readControlGraph,
 } from '../../../../core/editor/controls-graph.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import type {SceneEntity} from '../../../../core/editor/editor.models';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {EditorGraph} from '../../../../shared/components/graph/graph';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import {ControlGraphWorkspace} from './control-graph-workspace';
-import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
+import {type ControlGraphPaneTarget, ControlGraphWorkspaceService} from './control-graph-workspace.service';
+import {ControlGraphInspector} from './control-graph-inspector';
+import {ScopedPaneRequests} from '../scoped-pane-request';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
+import {SceneEditingService} from '../scene-editing.service';
 
 const graph: ControlGraph = {schema_version: 1, nodes: [
     {id: 'sample_jump', data: {kind: 'action', action: 'jump', value: 'button'}},
@@ -23,27 +28,35 @@ const output: ControlGraphOutput = {intent: {
     jump: {held: true, pressed: true, released: false}, attack: {held: false, pressed: false, released: false},
 }, presentation: {}};
 const result: ControlGraphProbe = {output, order: ['sample_jump', 'jump_output'], active_node_ids: ['sample_jump', 'jump_output']};
-const actor = {key: 'player', name: 'Knight', player_controller: {}};
+const alternate = {...asset, id: '12345678-1234-4234-8234-123456789031', path: 'controls/alternate.controls.json'};
+const actor: SceneEntity = {
+    key: 'player', name: 'Knight', model_path: 'knight.glb', renderable: true,
+    transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+    player_controller: {id: 'controller', enabled: true, settings: {
+        input: {kind: 'project_default'}, space: 'world', local: true, control_graph: asset.id,
+    }},
+};
 
 async function setup() {
     const playing = signal(false);
     const view = signal<string>('controls-graph');
-    const snapshot = signal({mode: 'edit', revision: 7, selection: ['player'],
+    const snapshot = signal({mode: 'edit', active_scene_id: 'main', revision: 7, selection: ['player'],
         document: {entities: [actor, {...actor, key: 'second', name: 'Second Knight'}]}});
     const workspaceGeneration = signal(1);
     const probe = vi.fn(async (): Promise<ControlGraphProbe> => result);
     const save = vi.fn(async (_: string, saved: ControlGraph) => ({asset, graph: saved}));
     const open = vi.fn(async (id: string) => ({asset: {...asset, id}, graph}));
     TestBed.configureTestingModule({imports: [ControlGraphWorkspace], providers: [
-        ControlGraphWorkspaceService,
+        ControlGraphWorkspaceService, ScopedPaneRequests, WorkspaceDraftReview,
+        {provide: SceneEditingService, useValue: {ready: signal(true)}},
         {provide: EditorService, useValue: {
             capabilities: signal({controls_graph_assets: true}), workspaceGeneration, snapshot, playing,
-            listControlGraphs: vi.fn(async () => [asset]), openControlGraph: open,
+            listControlGraphs: vi.fn(async () => [asset, alternate]), openControlGraph: open,
             probeControlsGraph: probe, saveControlGraph: save,
         }},
         {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 2})}},
         {provide: WorkspaceViewService, useValue: {activeViewKind: view, controlsGraphView: () => view() === 'controls-graph',
-            selectView: (kind: string) => view.set(kind)}},
+            selectView: (kind: string) => view.set(kind), availableViews: () => ['scene-viewport', 'controls-graph']}},
     ]});
     const fixture = TestBed.createComponent(ControlGraphWorkspace);
     const workspace = TestBed.inject(ControlGraphWorkspaceService);
@@ -57,7 +70,57 @@ async function setup() {
     return {fixture, workspace, element, button, field, playing, snapshot, workspaceGeneration, probe, save, open, view};
 }
 
+const boundRequest: ControlGraphPaneTarget = {
+    actorKey: actor.key, componentId: actor.player_controller!.id, asset,
+    subject: {address: {kind: 'scene', scene: 'main', object: actor.key},
+        scope: {workspaceGeneration: 1, nativeGeneration: 2, revision: 7}, contentRevision: 1, access: 'scene-edit'},
+};
+
 describe('Controls Graph workspace', () => {
+    it('opens the saved route from the Player card and samples the correct originating player', async () => {
+        const {workspace, snapshot, view, open, probe, fixture} = await setup();
+        const inspector = TestBed.createComponent(ControlGraphInspector);
+        inspector.componentRef.setInput('actor', actor);
+        inspector.componentRef.setInput('subject', boundRequest.subject);
+        inspector.componentRef.setInput('editable', true);
+        view.set('scene-viewport');
+        await inspector.whenStable();
+
+        const element = inspector.nativeElement as HTMLElement;
+        const choice = element.querySelector<HTMLSelectElement>('select')!;
+        choice.value = alternate.id;
+        choice.dispatchEvent(new Event('change', {bubbles: true}));
+        await inspector.whenStable();
+        expect(element.textContent).toContain('Saved control route: controls/player.controls.json');
+        const button = [...element.querySelectorAll<HTMLButtonElement>('button')]
+            .find(action => action.textContent?.trim() === 'Open Controls Graph')!;
+        expect(button.disabled).toBe(false);
+        button.click();
+        await vi.waitFor(() => expect(view()).toBe('controls-graph'));
+        expect(open).toHaveBeenCalledExactlyOnceWith(asset.id, boundRequest.subject.scope);
+        snapshot.update(current => ({...current, selection: ['second']}));
+        await fixture.whenStable();
+        expect(workspace.actorKey()).toBe(actor.key);
+        await workspace.probe([]);
+        expect(probe).toHaveBeenCalledWith(graph, [], {id: asset.id, fingerprint: asset.fingerprint},
+            actor.key, boundRequest.subject.scope);
+    });
+
+    it('does not switch the pane when the captured Player binding changes during graph loading', async () => {
+        const {workspace, view, open} = await setup();
+        view.set('scene-viewport');
+        let respond!: (value: Awaited<ReturnType<typeof open>>) => void;
+        open.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+        const scope = signal<ControlGraphPaneTarget | null>(boundRequest);
+        const pending = workspace.openScoped(boundRequest, scope);
+        await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+        expect(view()).toBe('scene-viewport');
+        scope.set({...boundRequest, asset: alternate});
+        respond({asset, graph});
+        expect(await pending).toBe(false);
+        expect(view()).toBe('scene-viewport');
+        expect(workspace.asset()).toBeNull();
+    });
     it('keeps the current workspace view until review and the requested graph load succeed', async () => {
         const {workspace, view, open} = await setup();
         await workspace.open(asset.id);

@@ -61,7 +61,7 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
         <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
     }
     @if (entity(); as actor) {
-        @if (actor.player_controller) { <editor-control-graph-inspector [actor]="actor" [editable]="editable()"/> }
+        @if (actor.player_controller) { <editor-control-graph-inspector [subject]="subject()" [actor]="actor" [editable]="editable()"/> }
     }
     @if (showSceneRoles()) {
         <section aria-label="Scene roles" class="scene-roles">
