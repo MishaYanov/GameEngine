@@ -10,7 +10,7 @@
         <editor-asset-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
         <editor-prefab-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
         <button (click)="loadModels()" [disabled]="!canLoadModels()" pane-actions type="button">
-            {{ loading() ? 'Loading models…' : models() === null ? 'Load Models' : 'Refresh Models' }}
+            {{ loading() ? 'Loading assets…' : models() === null ? 'Load Assets' : 'Refresh Assets' }}
         </button>
         <div class="asset-browser">
             @if (!projectOpen()) {
@@ -31,6 +31,13 @@
                     <button (click)="upOneFolder(location)" [disabled]="!folder()" type="button">Up</button>
                     <span #location tabindex="-1">{{ folder() ? 'Assets / ' + folder() : 'Assets' }}</span>
                 </nav>
+                <label class="asset-filter">
+                    Asset kind
+                    <select #kind [value]="assetFilter()" (change)="filterAssets(kind.value)">
+                        <option value="all">All assets</option>
+                        <option value="audio_clip">Audio Clips</option>
+                    </select>
+                </label>
                 @if (error(); as message) {
                     <p role="alert">{{ message }}</p>
                 }
@@ -63,7 +70,14 @@
                             >
                                 <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
                                 <span>{{ file.name }}</span>
-                                <span class="asset-kind">{{ file.kind === 'scene' ? 'Scene' : file.kind === 'prefab' ? 'Prop' : 'Model' }}</span>
+                                <span class="asset-kind">
+                                    @switch (file.kind) {
+                                        @case ('scene') { Scene }
+                                        @case ('prefab') { Prop }
+                                        @case ('audio_clip') { Audio Clip }
+                                        @case ('model') { Model }
+                                    }
+                                </span>
                                 @if (isActiveScene(file)) {
                                     <span class="active-scene">Active</span>
                                 }
@@ -85,6 +99,8 @@
                                     type="button">
                                 Open Scene
                             </button>
+                        } @else if (file.kind === 'audio_clip') {
+                            <editor-audio-clip-details [asset]="file"/>
                         } @else {
                             @if (file.kind === 'prefab' && propWorkspace) {
                                 <button (click)="openProp(file)" [disabled]="!canOpenProp()" type="button">Open Prop Workspace</button>

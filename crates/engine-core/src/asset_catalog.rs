@@ -43,6 +43,7 @@ impl<'de> Deserialize<'de> for AssetId {
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
 	AnimatorGraph,
+	AudioClip,
 	ControlsGraph,
 	InputActions,
 	Model,
@@ -127,6 +128,17 @@ impl PersistentAsset {
 			|| self.bytes > 64 * 1024 * 1024
 		{
 			return Err("Asset revision, fingerprint or source byte budget is invalid".into());
+		}
+		if self.kind == AssetKind::AudioClip
+			&& (!self.path.to_ascii_lowercase().ends_with(".wav")
+				|| !(46..=crate::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES as u64).contains(&self.bytes)
+				|| !self.dependencies.is_empty()
+				|| self
+					.aliases
+					.iter()
+					.any(|alias| !alias.to_ascii_lowercase().ends_with(".wav")))
+		{
+			return Err("Audio Clip catalog entries require bounded self-contained .wav files and .wav aliases".into());
 		}
 		if self.aliases.len() > 64
 			|| self.meshes.len() > 10_000

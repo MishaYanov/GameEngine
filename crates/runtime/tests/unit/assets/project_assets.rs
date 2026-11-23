@@ -2,6 +2,75 @@ use super::migration::migrate_catalog_with_budget;
 use super::*;
 
 struct Fixture(PathBuf);
+
+#[test]
+fn audio_clip_reopens_and_moves_with_its_identity_and_duration() {
+	let fixture = Fixture::new();
+	let wave = include_bytes!("../../../../../projects/cinder-oath/assets/audio/blade-hit.wav");
+	let source = fixture.0.join("bell.WAV");
+	fs::write(&source, wave).unwrap();
+	let root = fixture.root();
+	let pending = prepare_audio_clip_import(&root, &source, "bell.wav").unwrap();
+	assert!(!root.join("bell.wav").exists());
+	assert!(!root.join(CATALOG_FILE).exists());
+	let id = pending.publish().unwrap().id;
+	let reloaded = load_catalog(&root).unwrap();
+	let audio = reloaded.by_id(&id).unwrap();
+	let clip = load_audio_clip(&root, audio).unwrap();
+	assert_eq!(audio.kind, AssetKind::AudioClip);
+	assert_eq!(clip.info().sample_rate_hz, 16_000);
+	assert_eq!(clip.info().channels, 1);
+	assert_eq!(clip.info().frames, (wave.len() as u32 - 44) / 2);
+	assert_eq!(clip.pcm_bytes(), &wave[44..]);
+	assert!(prepare_move(&root, &id, "bell.mp3").is_err());
+	let moved = prepare_move(&root, &id, "door-bell.wav")
+		.unwrap()
+		.publish()
+		.unwrap();
+	assert_eq!(moved.id, id);
+	assert_eq!(moved.revision, 2);
+	assert_eq!(moved.aliases, vec!["bell.wav"]);
+	assert!(!root.join("bell.wav").exists());
+	assert_eq!(
+		load_catalog(&root).unwrap().by_id(&id).unwrap().path,
+		"door-bell.wav"
+	);
+	let after_move = load_audio_clip(&root, &moved).unwrap();
+	assert_eq!(after_move.info(), clip.info());
+	assert_eq!(after_move.wav_bytes(), wave);
+	let mut modified = wave.to_vec();
+	modified[44] ^= 1;
+	fs::write(root.join("door-bell.wav"), modified).unwrap();
+	assert!(
+		load_audio_clip(&root, &moved)
+			.unwrap_err()
+			.contains("changed outside")
+	);
+	assert!(prepare_move(&root, &id, "changed.wav").is_err());
+}
+
+#[test]
+fn invalid_audio_clip_import_does_not_publish_files_or_catalog() {
+	let fixture = Fixture::new();
+	let root = fixture.root();
+	let valid = include_bytes!("../../../../../projects/cinder-oath/assets/audio/blade-hit.wav");
+	let source = fixture.0.join("source.wav");
+	let wrong_extension = fixture.0.join("source.mp3");
+	fs::write(&source, valid).unwrap();
+	fs::write(&wrong_extension, valid).unwrap();
+	assert!(prepare_audio_clip_import(&root, &source, "../escaped.wav").is_err());
+	assert!(prepare_audio_clip_import(&root, &source, "bad.mp3").is_err());
+	assert!(prepare_audio_clip_import(&root, &wrong_extension, "clip.wav").is_err());
+	fs::write(&source, &valid[..valid.len() - 1]).unwrap();
+	assert!(prepare_audio_clip_import(&root, &source, "clip.wav").is_err());
+	let large = fs::File::create(&source).unwrap();
+	large
+		.set_len(engine_core::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES as u64 + 1)
+		.unwrap();
+	drop(large);
+	assert!(prepare_audio_clip_import(&root, &source, "clip.wav").is_err());
+	assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+}
 impl Fixture {
 	fn new() -> Self {
 		let path = std::env::temp_dir().join(format!(

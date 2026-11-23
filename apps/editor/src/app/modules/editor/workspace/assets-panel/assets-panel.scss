@@ -24,6 +24,22 @@ li button {
   overflow-wrap: anywhere;
 }
 
+.asset-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.asset-filter select {
+  min-height: var(--space-7);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
 ul {
   display: flex;
   flex-wrap: wrap;

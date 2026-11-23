@@ -441,7 +441,7 @@ export interface GameplayModuleDescriptor {
 export interface ModelAsset {
     readonly name: string;
     readonly path: string;
-    readonly kind?: 'model' | 'prefab';
+    readonly kind?: 'model' | 'prefab' | 'audio_clip';
     readonly asset_id?: string | null;
     readonly fingerprint?: string | null;
     readonly revision?: number | null;

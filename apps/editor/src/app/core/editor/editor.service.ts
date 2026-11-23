@@ -1,3 +1,4 @@
+import {type AudioClipDetails, readAudioClipDetails} from './audio-clip.models';
 import {
     type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture, type ControlGraphDocument,
     type ControlGraphProbe, readControlGraphCatalog, readControlGraphDocument, readControlGraphProbe,
@@ -492,16 +493,35 @@ export class EditorService {
         return this.snapshotOperation('editor_import_model', {path, position}, false, {expectedGeneration, expectedRevision});
     }
 
-    async chooseExternalGlb(): Promise<string | null> {
+    chooseExternalGlb(): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_glb');
+    }
+
+    chooseExternalWav(): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_wav');
+    }
+
+    private async chooseExternalAssetSource(operation: 'editor_choose_external_glb' | 'editor_choose_external_wav'): Promise<string | null> {
         const generation = this.workspaceGeneration();
         const current = () => !this.destroyed && generation === this.workspaceGeneration();
         try {
-            const source = await this.native<string | null>('editor_choose_external_glb');
+            const source = await this.native<string | null>(operation);
             return current() ? source : null;
         } catch (cause) {
-            if (!current()) throw this.clientError('editor_choose_external_glb', cause);
-            throw this.recordError('editor_choose_external_glb', cause);
+            if (!current()) throw this.clientError(operation, cause);
+            throw this.recordError(operation, cause);
         }
+    }
+
+    async audioClipDetails(
+        assetId: string, expectedGeneration: number, expectedRevision: number, nativeGeneration: number | null,
+    ): Promise<AudioClipDetails> {
+        this.requireGeneration(expectedGeneration);
+        const response = await this.native<unknown>('editor_audio_clip_info', {
+            assetId, expectedRevision, expectedGeneration: nativeGeneration,
+        });
+        this.requireGeneration(expectedGeneration);
+        return readAudioClipDetails(response);
     }
 
     feedbackCues(expectedGeneration: number): Promise<FeedbackCueDraft> {
@@ -548,6 +568,10 @@ export class EditorService {
     }
     importExternalGlb(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
         return this.mutateAsset('editor_import_external_glb', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
+    }
+
+    importExternalWav(sourcePath: string, destinationPath: string, expectedGeneration?: number, expectedRevision?: number): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_external_wav', {sourcePath, destinationPath}, expectedGeneration, expectedRevision);
     }
 
     reimportAsset(

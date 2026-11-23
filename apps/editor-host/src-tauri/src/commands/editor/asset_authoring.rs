@@ -15,6 +15,19 @@ pub struct AssetOperationDto {
 	asset: ModelAssetDto,
 	snapshot: EditorSnapshotDto,
 }
+
+#[derive(Serialize)]
+pub struct AudioClipDetailsDto {
+	#[serde(flatten)]
+	info: runtime::audio_clip::AudioClipInfo,
+	references: Vec<AudioClipReferenceDto>,
+}
+
+#[derive(Serialize)]
+struct AudioClipReferenceDto {
+	asset_id: AssetId,
+	path: String,
+}
 #[derive(Clone, Serialize)]
 struct Progress {
 	operation_id: String,
@@ -44,14 +57,28 @@ fn progress(
 
 #[tauri::command]
 pub async fn editor_choose_external_glb(window: WebviewWindow) -> Result<Option<String>, String> {
+	choose_external_file(window, "Import binary glTF model", "Binary glTF", "glb").await
+}
+
+#[tauri::command]
+pub async fn editor_choose_external_wav(window: WebviewWindow) -> Result<Option<String>, String> {
+	choose_external_file(window, "Import Audio Clip", "PCM WAV", "wav").await
+}
+
+async fn choose_external_file(
+	window: WebviewWindow,
+	title: &'static str,
+	label: &'static str,
+	extension: &'static str,
+) -> Result<Option<String>, String> {
 	trusted_window(&window)?;
 	tauri::async_runtime::spawn_blocking(move || {
 		window
 			.dialog()
 			.file()
 			.set_parent(&window)
-			.set_title("Import binary glTF model")
-			.add_filter("Binary glTF", &["glb"])
+			.set_title(title)
+			.add_filter(label, &[extension])
 			.blocking_pick_file()
 			.map(|file| {
 				file.into_path()
@@ -65,6 +92,10 @@ pub async fn editor_choose_external_glb(window: WebviewWindow) -> Result<Option<
 }
 enum Change {
 	Import {
+		source: PathBuf,
+		destination: String,
+	},
+	ImportAudioClip {
 		source: PathBuf,
 		destination: String,
 	},
@@ -121,8 +152,9 @@ async fn operate(
 				w.backend
 					.validate_asset_invalidation()
 					.map_err(|e| e.to_string())?;
-				if let Change::Import { destination, .. } | Change::Move { destination, .. } =
-					&change
+				if let Change::Import { destination, .. }
+				| Change::ImportAudioClip { destination, .. }
+				| Change::Move { destination, .. } = &change
 				{
 					w.validate_asset_destination(destination)?;
 				}
@@ -142,6 +174,10 @@ async fn operate(
 					}
 					project_assets::prepare_import(&root, &source, &destination)?
 				}
+				Change::ImportAudioClip {
+					source,
+					destination,
+				} => project_assets::prepare_audio_clip_import(&root, &source, &destination)?,
 				Change::Reimport {
 					id,
 					source,
@@ -201,6 +237,60 @@ pub async fn editor_import_external_glb(
 			destination: destination_path,
 		},
 	)
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_import_external_wav(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	source_path: String,
+	destination_path: String,
+	expected_revision: u64,
+) -> Result<AssetOperationDto, String> {
+	operate(
+		window,
+		state,
+		expected_revision,
+		Change::ImportAudioClip {
+			source: PathBuf::from(source_path),
+			destination: destination_path,
+		},
+	)
+	.await
+}
+
+#[tauri::command]
+pub async fn editor_audio_clip_info(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	asset_id: String,
+	expected_revision: u64,
+	expected_generation: Option<u64>,
+) -> Result<AudioClipDetailsDto, String> {
+	trusted_window(&window)?;
+	let id = AssetId::new(asset_id)?;
+	workspace(state, false, Some("audio_clip_info"), move |workspace| {
+		workspace.check_revision(expected_revision)?;
+		if expected_generation.is_some_and(|generation| workspace.generation != generation) {
+			return Err("Audio Clip selection belongs to another workspace".into());
+		}
+		let catalog = project_assets::load_catalog(&workspace.asset_root)?;
+		let asset = catalog
+			.by_id(&id)
+			.ok_or("Audio Clip identity is unavailable")?;
+		let info = project_assets::load_audio_clip(&workspace.asset_root, asset)?.info();
+		let references = catalog
+			.assets
+			.iter()
+			.filter(|owner| owner.dependencies.contains(&id))
+			.map(|owner| AudioClipReferenceDto {
+				asset_id: owner.id.clone(),
+				path: owner.path.clone(),
+			})
+			.collect();
+		Ok(AudioClipDetailsDto { info, references })
+	})
 	.await
 }
 #[tauri::command]

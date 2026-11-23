@@ -10,6 +10,7 @@ import {AssetAuthoring} from './asset-authoring';
 
 const model: ModelAsset = {name: 'Actor', path: 'models/actor.glb', kind: 'model',
     asset_id: 'actor-id', fingerprint: 'original', source_path: 'C:/Models/actor.glb'};
+const bell: ModelAsset = {name: 'Bell', path: 'audio/bell.wav', kind: 'audio_clip', asset_id: 'bell-id'};
 
 describe('AssetAuthoring', () => {
     const prototype = HTMLDialogElement.prototype;
@@ -34,9 +35,11 @@ describe('AssetAuthoring', () => {
         });
         const generation = signal(1);
         const chooseExternalGlb = vi.fn(async (): Promise<string | null> => 'C:/Models/new.glb');
+        const chooseExternalWav = vi.fn(async (): Promise<string | null> => 'C:/Audio/bell.wav');
         const assets = vi.fn(async () => [model]);
         const operation = () => ({operation_id: 'operation', asset: model, snapshot: current()});
         const importExternalGlb = vi.fn(async (_source: string, _path: string, _generation?: number, _revision?: number) => operation());
+        const importExternalWav = vi.fn(async (_source: string, _path: string, _generation?: number, _revision?: number) => ({...operation(), asset: bell}));
         const reimportAsset = vi.fn(async (_id: string, _fingerprint: string, _source?: string | null, _generation?: number, _revision?: number) => operation());
         const moveAsset = vi.fn(async (_id: string, _path: string, _generation?: number, _revision?: number) => operation());
         const savePrefab = vi.fn(async (_path: string, _generation?: number, _revision?: number) => ({path: 'gameplay.json'}));
@@ -46,7 +49,7 @@ describe('AssetAuthoring', () => {
             {provide: EditorService, useValue: {
                 nativeAvailable: true, snapshot: current, workspaceGeneration: generation, busy: () => false,
                 playing: computed(() => current().mode === 'play'),
-                chooseExternalGlb, importExternalGlb, reimportAsset, moveAsset, savePrefab, assets,
+                chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets,
             }},
             {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
         ]});
@@ -60,8 +63,50 @@ describe('AssetAuthoring', () => {
             field.value = value; field.dispatchEvent(new Event('input'));
             await fixture.whenStable();
         };
-        return {fixture, root, button, path, current, generation, chooseExternalGlb, importExternalGlb, reimportAsset, moveAsset, savePrefab, assets, committed};
+        return {fixture, root, button, path, current, generation, chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets, committed};
     }
+
+    it('imports a PCM WAV, surfaces invalid content and moves the imported clip by ID', async () => {
+        const panel = await setup();
+        panel.button('Import Audio Clip…').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector<HTMLInputElement>('input')?.value).toBe('bell.wav');
+        await panel.path('audio/bell.mp3');
+        expect(panel.button('Apply Asset Operation').disabled).toBe(true);
+        await panel.path('audio/bell.wav');
+        panel.importExternalWav.mockRejectedValueOnce(new Error('Expected 16-bit mono PCM at 16000 Hz.'));
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('dialog[open] [role="alert"]')?.textContent).toContain('Expected 16-bit mono PCM');
+        expect(panel.assets).not.toHaveBeenCalled();
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.importExternalWav).toHaveBeenLastCalledWith('C:/Audio/bell.wav', 'audio/bell.wav', 1, 7);
+        expect(panel.assets).toHaveBeenCalledExactlyOnceWith(true);
+
+        panel.fixture.componentRef.setInput('selected', bell);
+        await panel.fixture.whenStable();
+        expect(panel.button('Reimport GLB…').disabled).toBe(true);
+        panel.button('Move Asset…').click();
+        await panel.fixture.whenStable();
+        await panel.path('audio/cues/bell.wav');
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.moveAsset).toHaveBeenCalledExactlyOnceWith('bell-id', 'audio/cues/bell.wav', 1, 7);
+    });
+
+    it('returns focus to the Audio Clip import button after the picker is cancelled', async () => {
+        const panel = await setup();
+        panel.chooseExternalWav.mockImplementationOnce(async () => {
+            panel.button('Save Gameplay Prefab…').focus();
+            return null;
+        });
+        const trigger = panel.button('Import Audio Clip…');
+        trigger.click();
+        await panel.fixture.whenStable();
+        expect(document.activeElement).toBe(trigger);
+        expect(panel.root.querySelector('dialog[open]')).toBeNull();
+    });
 
     it('imports an external GLB after committing edits with a captured workspace and revision', async () => {
         const panel = await setup();

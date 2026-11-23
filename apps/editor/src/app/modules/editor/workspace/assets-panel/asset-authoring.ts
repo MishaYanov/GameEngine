@@ -1,11 +1,11 @@
-import {Component, computed, effect, inject, input, signal} from '@angular/core';
+import {afterNextRender, Component, computed, DestroyRef, effect, inject, Injector, input, signal} from '@angular/core';
 import {form, FormField} from '@angular/forms/signals';
 import type {ModelAsset} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {SceneEditingService} from '../scene-editing.service';
 
-type FileAction = 'import' | 'move' | 'prefab';
+type FileAction = 'import' | 'import-audio' | 'move' | 'prefab';
 
 @Component({
     selector: 'editor-asset-authoring',
@@ -18,6 +18,8 @@ export class AssetAuthoring {
     readonly selected = input<ModelAsset | null>(null);
     protected readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService, {optional: true});
+    private readonly injector = inject(Injector);
+    private readonly destroy = inject(DestroyRef);
     protected readonly pending = signal<string | null>(null);
     protected readonly error = signal<string | null>(null);
     protected readonly status = signal<string | null>(null);
@@ -28,22 +30,33 @@ export class AssetAuthoring {
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         this.editor.snapshot()?.mode === 'edit' && !this.opening() && !this.pending() &&
         (this.editing?.ready() ?? (!this.editor.busy() && !this.editor.snapshot()?.transaction)));
-    protected readonly selectedGlb = computed(() => this.selected()?.kind !== 'prefab' &&
+    protected readonly selectedGlb = computed(() => (this.selected()?.kind ?? 'model') === 'model' &&
         /\.glb$/i.test(this.selected()?.path ?? ''));
     protected readonly canReimport = computed(() => this.available() && this.selectedGlb() &&
         !!this.selected()?.asset_id && !!this.selected()?.fingerprint);
     protected readonly canMove = computed(() => this.available() && !!this.selected()?.asset_id &&
-        (this.selectedGlb() || this.selected()?.kind === 'prefab'));
+        (this.selectedGlb() || this.selected()?.kind === 'prefab' || this.selected()?.kind === 'audio_clip'));
     protected readonly unsupportedLegacyModel = computed(() => !!this.selected() &&
-        this.selected()?.kind !== 'prefab' && !this.selectedGlb());
-    protected readonly title = computed(() => this.mode() === 'import' ? 'Import External GLB'
-        : this.mode() === 'move' ? 'Move Asset' : 'Save Gameplay Prefab');
+        (this.selected()?.kind ?? 'model') === 'model' && !this.selectedGlb());
+    protected readonly title = computed(() => {
+        switch (this.mode()) {
+            case 'import': return 'Import External GLB';
+            case 'import-audio': return 'Import Audio Clip';
+            case 'move': return 'Move Asset';
+            case 'prefab': return 'Save Gameplay Prefab';
+        }
+    });
+    protected readonly destinationExtension = computed(() => {
+        const mode = this.mode();
+        const kind = this.selected()?.kind;
+        if (mode === 'prefab' || (mode === 'move' && kind === 'prefab')) return '.json';
+        return mode === 'import-audio' || (mode === 'move' && kind === 'audio_clip') ? '.wav' : '.glb';
+    });
     protected readonly validPath = computed(() => {
         const value = this.draft().path.trim();
         return value.length > 0 && !/[:\\\p{Cc}]/u.test(value) && !value.startsWith('/') &&
             value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..') &&
-            (this.mode() === 'prefab' || (this.mode() === 'move' && this.selected()?.kind === 'prefab')
-                ? value.endsWith('.json') : /\.glb$/i.test(value));
+            (this.destinationExtension() === '.json' ? value : value.toLowerCase()).endsWith(this.destinationExtension());
     });
     private source = '';
     private context: {generation: number; sceneId: string; asset: ModelAsset | null; selection: string} | null = null;
@@ -60,20 +73,25 @@ export class AssetAuthoring {
         });
     }
 
-    protected async chooseImport(): Promise<void> {
+    protected async chooseImport(format: 'glb' | 'wav' = 'glb', opener?: HTMLButtonElement): Promise<void> {
         if (!this.available()) return;
         const generation = this.editor.workspaceGeneration();
-        this.pending.set('Choosing a GLB source…');
+        this.pending.set(format === 'wav' ? 'Choosing a PCM WAV source…' : 'Choosing a GLB source…');
         this.error.set(null);
         try {
-            const source = await this.editor.chooseExternalGlb();
+            const source = await (format === 'wav' ? this.editor.chooseExternalWav() : this.editor.chooseExternalGlb());
             if (!source || generation !== this.editor.workspaceGeneration() || this.editor.playing()) return;
             this.source = source;
-            this.show('import', source.split(/[\\/]/).at(-1) ?? 'model.glb', true);
+            this.show(format === 'wav' ? 'import-audio' : 'import', source.split(/[\\/]/).at(-1) ?? `asset.${format}`, true);
         } catch (error) {
             if (generation === this.editor.workspaceGeneration()) this.error.set(String(error instanceof Error ? error.message : error));
         } finally {
             this.pending.set(null);
+            if (opener && !this.destroy.destroyed && !this.open() && generation === this.editor.workspaceGeneration()) {
+                afterNextRender(() => {
+                    if (!this.open() && generation === this.editor.workspaceGeneration() && opener.isConnected) opener.focus();
+                }, {injector: this.injector});
+            }
         }
     }
 
@@ -99,6 +117,7 @@ export class AssetAuthoring {
             const snapshot = this.editor.snapshot()!;
             if (snapshot.active_scene_id !== context.sceneId) throw new Error('The scene changed. Choose the asset operation again.');
             if (mode === 'import') await this.editor.importExternalGlb(this.source, path, context.generation, snapshot.revision);
+            else if (mode === 'import-audio') await this.editor.importExternalWav(this.source, path, context.generation, snapshot.revision);
             else if (mode === 'move') {
                 if (!context.asset?.asset_id) return;
                 await this.editor.moveAsset(context.asset.asset_id, path, context.generation, snapshot.revision);
@@ -109,7 +128,8 @@ export class AssetAuthoring {
             if (context.generation !== this.editor.workspaceGeneration()) return;
             await this.editor.assets(true);
             if (context.generation !== this.editor.workspaceGeneration()) return;
-            this.status.set(mode === 'prefab' ? 'Gameplay prefab saved.' : mode === 'move' ? 'Asset moved.' : 'External GLB imported.');
+            this.status.set(mode === 'prefab' ? 'Gameplay prefab saved.' : mode === 'move' ? 'Asset moved.'
+                : mode === 'import-audio' ? 'Audio Clip imported.' : 'External GLB imported.');
             this.open.set(false);
         });
     }

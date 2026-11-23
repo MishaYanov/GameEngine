@@ -18,6 +18,7 @@ use std::{
 
 mod animation_clip;
 mod animator;
+mod audio_clip;
 mod controls_graph;
 mod input_actions;
 mod migration;
@@ -25,12 +26,20 @@ mod prefab;
 
 pub use animation_clip::{prepare_animation_clip, read_animation_clip};
 pub use animator::prepare_animator;
+pub use audio_clip::{load_audio_clip, prepare_audio_clip_import};
 pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;
 
 const MAX_SOURCE: usize = 64 * 1024 * 1024;
+fn asset_byte_limit(kind: AssetKind) -> usize {
+	if kind == AssetKind::AudioClip {
+		engine_core::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES
+	} else {
+		MAX_SOURCE
+	}
+}
 pub fn fingerprint(bytes: &[u8]) -> String {
 	format!("{:x}", Sha256::digest(bytes))
 }
@@ -318,12 +327,13 @@ impl PreparedAssetChange {
 		if catalog_bytes(&self.root)? != self.original_catalog {
 			return Err("Asset catalog changed while preparing the operation".into());
 		}
+		let byte_limit = asset_byte_limit(self.asset.kind);
 		if let Some((path, expected)) = &self.original_asset
-			&& fingerprint(&read(path, MAX_SOURCE)?) != *expected
+			&& fingerprint(&read(path, byte_limit)?) != *expected
 		{
 			return Err("Asset changed while preparing the operation".into());
 		}
-		if fingerprint(&read(&self.candidate, MAX_SOURCE)?) != self.asset.fingerprint {
+		if fingerprint(&read(&self.candidate, byte_limit)?) != self.asset.fingerprint {
 			return Err("Prepared asset changed before publication".into());
 		}
 		let destination = asset_path(&self.root, &self.destination, false)?;
@@ -340,6 +350,7 @@ impl PreparedAssetChange {
 		mut install: impl FnMut(&Path, &Path) -> Result<(), String>,
 	) -> Result<PersistentAsset, String> {
 		self.validate_current()?;
+		let byte_limit = asset_byte_limit(self.asset.kind);
 		let target = asset_path(&self.root, &self.destination, false)?;
 		let catalog_path = self.root.join(CATALOG_FILE);
 		let catalog_temp = unique(&self.root, "catalog.tmp");
@@ -360,7 +371,7 @@ impl PreparedAssetChange {
 					.as_ref()
 					.ok_or("Replacement source is unavailable")?
 					.1;
-				if fingerprint(&read(&backup, MAX_SOURCE)?) != *expected {
+				if fingerprint(&read(&backup, byte_limit)?) != *expected {
 					return Err("Asset changed at the publication boundary".into());
 				}
 			}
@@ -379,7 +390,7 @@ impl PreparedAssetChange {
 			if !self.reimport
 				&& let Some((old, expected)) = &self.original_asset
 			{
-				if fingerprint(&read(old, MAX_SOURCE)?) != *expected {
+				if fingerprint(&read(old, byte_limit)?) != *expected {
 					return Err("Moved asset changed at the publication boundary".into());
 				}
 				fs::remove_file(old).map_err(|e| e.to_string())?;
@@ -448,7 +459,11 @@ fn prepare(
 	if (previous.is_none() || move_asset) && target.exists() {
 		return Err("Asset destination already exists".into());
 	}
-	let bytes = read(source, MAX_SOURCE)?;
+	let bytes = if let Some(old) = previous.filter(|asset| asset.kind == AssetKind::AudioClip) {
+		load_audio_clip(&asset_root, old)?.into_wav()
+	} else {
+		read(source, MAX_SOURCE)?
+	};
 	let candidate = unique(&asset_root, "candidate.tmp");
 	write_new(&candidate, &bytes)?;
 	let result = (|| {
@@ -583,6 +598,11 @@ pub fn prepare_move(
 				return Err("Input Actions assets use .input-actions.json".into());
 			}
 			load_input_actions(asset_root, old)?;
+		}
+		AssetKind::AudioClip => {
+			if !destination.to_ascii_lowercase().ends_with(".wav") {
+				return Err("Audio Clip destinations use .wav".into());
+			}
 		}
 		_ => return Err("This asset kind does not support moving".into()),
 	}

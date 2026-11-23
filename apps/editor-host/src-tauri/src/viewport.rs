@@ -197,13 +197,16 @@ impl ViewportHost {
 	) -> crate::asset_reimport_gpu::AssetChangeResult {
 		#[cfg(windows)]
 		{
-			self.reap();
-			let control = self
-				.running
-				.lock()
-				.map_err(|_| "Viewport lifecycle lock is poisoned")?
-				.as_ref()
-				.map(|running| Arc::clone(&running.control));
+			let control = if change.asset().kind == runtime::asset_catalog::AssetKind::AudioClip {
+				None
+			} else {
+				self.reap();
+				self.running
+					.lock()
+					.map_err(|_| "Viewport lifecycle lock is poisoned")?
+					.as_ref()
+					.map(|running| Arc::clone(&running.control))
+			};
 			if let Some(control) = control {
 				let (reply, receiver) = mpsc::sync_channel(1);
 				control.request_asset_change(
@@ -216,8 +219,8 @@ impl ViewportHost {
 				})?;
 			}
 		}
-		// No live native owner means there are no GPU caches to replace. Future
-		// viewport creation imports the freshly published, validated bytes.
+		// Audio Clip publication uses only the catalog. If the viewport is
+		// detached, other asset kinds also have no GPU caches to replace.
 		let mut shared = self
 			.shared
 			.lock()

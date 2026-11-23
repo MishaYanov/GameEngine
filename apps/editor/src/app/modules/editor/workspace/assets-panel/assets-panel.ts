@@ -13,6 +13,7 @@ import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
+import {AudioClipDetails} from './audio-clip-details';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
 import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
@@ -28,7 +29,7 @@ interface AssetFile {
 }
 
 type SceneAsset = AssetFile & { readonly kind: 'scene'; readonly sceneId: SceneId };
-type AssetEntry = SceneAsset | (ModelAsset & {readonly kind: 'model' | 'prefab'});
+type AssetEntry = SceneAsset | (ModelAsset & {readonly kind: 'model' | 'prefab' | 'audio_clip'});
 type AssetAction = 'models' | 'add';
 
 interface AssetMenuContext {
@@ -39,7 +40,7 @@ interface AssetMenuContext {
 
 @Component({
     selector: 'editor-assets-panel',
-    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, PrefabAuthoring, EditorContextMenuTrigger],
+    imports: [Drawer, EditorPane, EditorIcon, AssetAuthoring, AudioClipDetails, PrefabAuthoring, EditorContextMenuTrigger],
     templateUrl: './assets-panel.html',
     styleUrl: './assets-panel.scss',
 })
@@ -71,6 +72,7 @@ export class AssetsPanel {
     protected readonly canOpenScene = computed(() => this.canRunAction() && this.sceneSwitch.canSwitch());
     protected readonly projectOpen = computed(() => this.editor.snapshot() !== null);
     protected readonly models = this.editor.modelAssets;
+    protected readonly assetFilter = signal<'all' | 'audio_clip'>('all');
     protected readonly canRunAction = computed(() => {
         const snapshot = this.editor.snapshot();
         return snapshot?.mode === 'edit' && this.editor.nativeAvailable && !this.opening() &&
@@ -91,8 +93,10 @@ export class AssetsPanel {
         })),
         ...(this.models() ?? []).map(model => ({...model, kind: model.kind ?? 'model' as const})),
     ]);
+    private readonly visibleEntries = computed(() => this.assetFilter() === 'audio_clip'
+        ? this.entries().filter(entry => entry.kind === 'audio_clip') : this.entries());
     protected readonly selected = linkedSignal({
-        source: this.entries,
+        source: this.visibleEntries,
         computation: (entries, previous): AssetEntry | null => {
             const selected = previous?.value;
             if (!selected) return null;
@@ -104,7 +108,7 @@ export class AssetsPanel {
         return selected && selected.kind !== 'scene' ? selected : null;
     });
     protected readonly folder = linkedSignal({
-        source: this.entries,
+        source: this.visibleEntries,
         computation: (entries, previous): string => {
             const folder = previous?.value ?? '';
             return entries.some(entry => entry.path.startsWith(`${folder}/`)) ? folder : '';
@@ -115,7 +119,7 @@ export class AssetsPanel {
         const prefix = folder ? `${folder}/` : '';
         const folders = new Map<string, string>();
         const files: AssetEntry[] = [];
-        for (const entry of this.entries()) {
+        for (const entry of this.visibleEntries()) {
             if (!entry.path.startsWith(prefix)) continue;
             const remainder = entry.path.slice(prefix.length);
             const separator = remainder.indexOf('/');
@@ -248,6 +252,7 @@ export class AssetsPanel {
             this.error.set('The linked Prop source is unavailable in Assets.');
             return;
         }
+        this.assetFilter.set('all');
         this.folder.set(file.path.slice(0, Math.max(0, file.path.lastIndexOf('/'))));
         this.selectFile(file);
         afterNextRender(() => {
@@ -261,6 +266,10 @@ export class AssetsPanel {
     protected upOneFolder(location: HTMLElement): void {
         const path = this.folder();
         this.openFolder(path.slice(0, Math.max(0, path.lastIndexOf('/'))), location);
+    }
+
+    protected filterAssets(value: string): void {
+        this.assetFilter.set(value === 'audio_clip' ? 'audio_clip' : 'all');
     }
 
     protected openFolder(path: string, location: HTMLElement): void {
@@ -285,7 +294,7 @@ export class AssetsPanel {
     }
 
     protected canDrag(file: AssetEntry): boolean {
-        if (file.kind === 'prefab') return false;
+        if (file.kind === 'prefab' || file.kind === 'audio_clip') return false;
         return this.assetDrag?.canBegin() === true && (file.kind === 'scene'
             ? this.canOpenScene() && !this.isActiveScene(file)
             : this.canRunAction());
@@ -325,12 +334,13 @@ export class AssetsPanel {
     }
 
     private async addModelFile(selected: Exclude<AssetEntry, SceneAsset>): Promise<void> {
+        if (selected.kind === 'audio_clip') return;
         const generation = this.editor.workspaceGeneration();
         const sceneId = this.editor.snapshot()?.active_scene_id;
         await this.addAsset(async () => {
             if (generation !== this.editor.workspaceGeneration() || sceneId !== this.editor.snapshot()?.active_scene_id) return;
             const file = this.entries().find(entry => this.sameFile(entry, selected));
-            if (!file || file.kind === 'scene') return;
+            if (!file || file.kind === 'scene' || file.kind === 'audio_clip') return;
             if (file.kind === 'prefab') {
                 await this.editor.loadPrefab(file.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);
             } else await this.editor.importModel(file.path, [0, 0, 0], generation, this.editor.snapshot()!.revision);

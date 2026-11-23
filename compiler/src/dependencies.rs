@@ -84,6 +84,13 @@ impl Closure<'_> {
         Ok(key)
     }
     fn file(&mut self, relative: &Path) -> Result<Vec<u8>, String> {
+		self.file_for_kind(relative, None)
+	}
+	fn file_for_kind(
+		&mut self,
+		relative: &Path,
+		kind: Option<AssetKind>,
+	) -> Result<Vec<u8>, String> {
         let relative = self.key(relative)?;
         let path = checked_asset_path(self.root, &relative)
             .map_err(|error| format!("Dependency {}: {error}", relative.display()))?;
@@ -93,6 +100,16 @@ impl Closure<'_> {
             .and_then(|value| value.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
+		let audio_clip = kind == Some(AssetKind::AudioClip);
+		if audio_clip
+			&& (extension != "wav"
+				|| metadata.len() > engine_core::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES as u64)
+		{
+			return Err(format!(
+				"Audio Clip {} requires a .wav file within the 30-second budget",
+				relative.display()
+			));
+		}
         if relative
             .to_string_lossy()
             .to_ascii_lowercase()
@@ -129,7 +146,9 @@ impl Closure<'_> {
                 relative.display()
             ));
         }
-        if !["gltf", "glb", "bin", "png", "jpg", "jpeg", "json"].contains(&extension.as_str()) {
+		if !audio_clip
+			&& !["gltf", "glb", "bin", "png", "jpg", "jpeg", "json"].contains(&extension.as_str())
+		{
             return Err(format!(
                 "Unsupported dependency format: {}",
                 relative.display()

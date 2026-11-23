@@ -3,6 +3,7 @@ pub mod animation;
 pub mod asset_catalog;
 pub mod asset_jobs;
 pub mod asset_registry;
+pub mod audio_clip;
 pub mod bounds;
 pub mod camera;
 pub mod camera_controller;

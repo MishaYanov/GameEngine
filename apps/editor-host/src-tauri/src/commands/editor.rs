@@ -300,10 +300,10 @@ impl ModelAssetDto {
 				.unwrap_or("Asset")
 				.into(),
 			path: asset.path.clone(),
-			kind: if asset.kind == runtime::asset_catalog::AssetKind::Prefab {
-				"prefab"
-			} else {
-				"model"
+			kind: match asset.kind {
+				runtime::asset_catalog::AssetKind::Prefab => "prefab",
+				runtime::asset_catalog::AssetKind::AudioClip => "audio_clip",
+				_ => "model",
 			},
 			asset_id: Some(asset.id.clone()),
 			fingerprint: Some(asset.fingerprint.clone()),
@@ -338,6 +338,7 @@ pub async fn editor_assets(
 					asset.kind,
 					runtime::asset_catalog::AssetKind::Model
 						| runtime::asset_catalog::AssetKind::Prefab
+						| runtime::asset_catalog::AssetKind::AudioClip
 				)
 			})
 			.map(ModelAssetDto::from_asset)

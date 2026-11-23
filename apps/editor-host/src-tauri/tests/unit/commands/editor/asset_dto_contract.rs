@@ -1,6 +1,6 @@
 use super::*;
 #[test]
-fn catalog_dto_carries_stable_identity_and_explicit_optional_metadata_for_models_and_prefabs() {
+fn catalog_dto_carries_stable_identity_and_format_kind() {
 	let mut asset = runtime::asset_catalog::PersistentAsset {
 		id: runtime::asset_catalog::AssetId::generate(),
 		path: "model.glb".into(),
@@ -33,4 +33,11 @@ fn catalog_dto_carries_stable_identity_and_explicit_optional_metadata_for_models
 	assert_eq!(prefab["path"], "assembly.json");
 	assert!(prefab["mesh_count"].is_null());
 	assert!(prefab["source_path"].is_null());
+	asset.path = "audio/bell.wav".into();
+	asset.kind = runtime::asset_catalog::AssetKind::AudioClip;
+	let audio = serde_json::to_value(ModelAssetDto::from_asset(&asset)).unwrap();
+	assert_eq!(audio["kind"], "audio_clip");
+	assert_eq!(audio["asset_id"], asset.id.as_str());
+	assert_eq!(audio["path"], "audio/bell.wav");
+	assert!(audio["mesh_count"].is_null());
 }

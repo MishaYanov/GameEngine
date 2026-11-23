@@ -4,6 +4,7 @@ import {By} from '@angular/platform-browser';
 import {invoke} from '@tauri-apps/api/core';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
+import type {AudioClipDetails} from '../../../../core/editor/audio-clip.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
@@ -18,6 +19,11 @@ vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => tr
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 
 const robot: ModelAsset = {name: 'Robot', path: 'props/robot.glb'};
+const bell: ModelAsset = {name: 'Bell', path: 'bell.wav', kind: 'audio_clip', asset_id: 'bell-id'};
+const bellDetails: AudioClipDetails = {
+    sample_rate_hz: 16000, frames: 24000, channels: 1,
+    references: [{asset_id: 'hardware', path: 'props/hardware.json'}],
+};
 
 function snapshot(): EditorSnapshot {
     return {
@@ -48,6 +54,7 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
     const modelAssets = signal<readonly ModelAsset[] | null>(options.models ?? null);
     const workspaceGeneration = signal(1);
     const busy = signal(false);
+    const audioClipDetails = vi.fn(async (_id: string, _generation: number, _revision: number, _nativeGeneration: number | null) => bellDetails);
     const assets = vi.fn(async () => {
         modelAssets.set([robot]);
         return modelAssets()!;
@@ -69,7 +76,7 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
             nativeAvailable: options.nativeAvailable ?? true,
             capabilities: () => ({}),
             snapshot: current, busy, playing: computed(() => current().mode === 'play'),
-                modelAssets, assets, importModel, loadPrefab, workspaceGeneration,
+                modelAssets, assets, importModel, loadPrefab, workspaceGeneration, audioClipDetails,
         }},
             {provide: SceneSwitchService, useValue: {request, canSwitch: () => true}},
             {provide: ViewportAssetDragService, useValue: drag},
@@ -106,6 +113,7 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         current,
         modelAssets,
         workspaceGeneration,
+        audioClipDetails,
         busy,
         assets,
         request,
@@ -116,6 +124,40 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
 }
 
 describe('AssetsPanel', () => {
+    it('filters Audio Clips and shows native duration, format and reverse references with focus on the row', async () => {
+        const panel = await createPanel({models: [robot, bell]});
+        const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
+        filter.value = 'audio_clip';
+        filter.dispatchEvent(new Event('change'));
+        await panel.fixture.whenStable();
+        expect(panel.root.textContent).not.toContain('props');
+
+        const row = panel.file(bell.path);
+        row.focus();
+        row.click();
+        await panel.fixture.whenStable();
+        expect(panel.audioClipDetails).toHaveBeenCalledExactlyOnceWith('bell-id', 1, 1, null);
+        expect(row.classList.contains('drag-source')).toBe(false);
+        expect(document.activeElement).toBe(row);
+        const details = panel.root.querySelector('[aria-label="Audio Clip details"]');
+        expect(details?.textContent).toContain('1.5 s');
+        expect(details?.textContent).toContain('16-bit mono PCM WAV');
+        expect(details?.textContent).toContain('props/hardware.json');
+        expect(panel.root.textContent).not.toContain('Add to Scene');
+    });
+
+    it('offers a retry when native Audio Clip metadata fails', async () => {
+        const panel = await createPanel({models: [bell]});
+        panel.audioClipDetails.mockRejectedValueOnce(new Error('The WAV no longer matches its asset fingerprint.'));
+        panel.file(bell.path).click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('editor-audio-clip-details [role="alert"]')?.textContent).toContain('asset fingerprint');
+        panel.button('Retry Audio Clip details').click();
+        await panel.fixture.whenStable();
+        expect(panel.audioClipDetails).toHaveBeenCalledTimes(2);
+        expect(panel.root.querySelector('[aria-label="Audio Clip details"]')).not.toBeNull();
+    });
+
     it('reveals a linked Prop by stable asset ID and focuses its current catalogue row', async () => {
         const source: ModelAsset = {
             kind: 'prefab', asset_id: 'gate-source', name: 'Gate', path: 'props/moved/gate.json',
@@ -290,7 +332,7 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         panel.file(robot.path).click();
         await panel.fixture.whenStable();
-        panel.button('Refresh Models').click();
+        panel.button('Refresh Assets').click();
         await panel.fixture.whenStable();
         expect(panel.assets).toHaveBeenCalledTimes(2);
         expect(panel.assets).toHaveBeenLastCalledWith(true);
@@ -384,7 +426,7 @@ describe('AssetsPanel', () => {
         panel.current.update(value => ({...value, mode: 'play'}));
         await panel.fixture.whenStable();
         expect(panel.button('Add to Scene').disabled).toBe(true);
-        expect(panel.button('Refresh Models').disabled).toBe(true);
+        expect(panel.button('Refresh Assets').disabled).toBe(true);
         panel.button('Add to Scene').click();
         expect(panel.importModel).not.toHaveBeenCalled();
 

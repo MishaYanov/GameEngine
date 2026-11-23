@@ -28,7 +28,7 @@ impl Closure<'_> {
 			.by_id(id)
 			.ok_or("Unresolved dependency asset identity")?
 			.clone();
-		let bytes = self.file(Path::new(&asset.path))?;
+		let bytes = self.file_for_kind(Path::new(&asset.path), Some(asset.kind))?;
 		if bytes.len() as u64 != asset.bytes
 			|| format!("{:x}", Sha256::digest(&bytes)) != asset.fingerprint
 		{
@@ -50,6 +50,10 @@ impl Closure<'_> {
 			}
 			AssetKind::ControlsGraph => {
 				engine_core::input::ControlGraph::from_json(&bytes)?;
+			}
+			AssetKind::AudioClip => {
+				bridge::audio_clip::inspect(&bytes)
+					.map_err(|error| format!("{}: {error}", asset.path))?;
 			}
 			AssetKind::Scene => {
 				let scene = SceneData::from_json(

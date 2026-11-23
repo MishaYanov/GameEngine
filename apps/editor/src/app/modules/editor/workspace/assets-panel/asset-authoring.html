@@ -1,5 +1,6 @@
 <div class="asset-controls" aria-label="Asset authoring">
     <button type="button" [disabled]="!available()" (click)="chooseImport()">Import GLB…</button>
+    <button #wavImport type="button" [disabled]="!available()" (click)="chooseImport('wav', wavImport)">Import Audio Clip…</button>
     <button type="button" [disabled]="!canReimport()" (click)="reimport()">Reimport GLB…</button>
     <button type="button" [disabled]="!canMove()" (click)="show('move')">Move Asset…</button>
     <button type="button" [disabled]="!available() || !editor.snapshot()?.selection?.length" (click)="show('prefab')">Save Gameplay Prefab…</button>
@@ -12,6 +13,9 @@
 @if (!open() && error(); as text) { <p class="error" role="alert">{{ text }}</p> }
 <editor-dialog [(open)]="open" [title]="title()" [renderFields]="false" [config]="{width: '34rem'}">
     <p>Choose a path relative to this project's Assets folder. The destination folder must already exist.</p>
+    @if (mode() === 'import-audio') {
+        <p>Use a canonical 16 kHz, 16-bit mono PCM WAV up to 30 seconds long.</p>
+    }
     @if (mode() === 'prefab') {
         <p>Saving to an existing prefab updates that assembly and preserves its asset identity.</p>
     } @else {
@@ -20,7 +24,7 @@
     <fieldset class="fields" [disabled]="!!pending()">
         <legend>{{ title() }}</legend>
         <label>Destination path<input [formField]="fields.path" autocomplete="off"
-            [placeholder]="mode() === 'prefab' ? 'gameplay.json' : 'model.glb'"/></label>
+            [placeholder]="'asset' + destinationExtension()"/></label>
     </fieldset>
     @if (error(); as text) { <p class="error" role="alert">{{ text }}</p> }
     @if (pending(); as text) { <p role="status">{{ text }}</p> }
