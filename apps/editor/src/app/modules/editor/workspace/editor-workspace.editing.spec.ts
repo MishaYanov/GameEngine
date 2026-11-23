@@ -1261,6 +1261,37 @@ describe('Workspace live editing flow', () => {
         expect(palette.open).toBe(false);
     });
 
+    it('requires Controls and Physics Layers drafts to be resolved before leaving the project', async () => {
+        const workspace = fixture.componentInstance;
+        const root: HTMLElement = fixture.nativeElement;
+        const click = async (selector: string, label: string) => {
+            const button = Array.from(root.querySelectorAll<HTMLButtonElement>(selector + ' button'))
+                .find(item => item.textContent?.trim() === label);
+            expect(button).toBeDefined();
+            button!.click();
+            await fixture.whenStable();
+        };
+
+        workspace.openControls();
+        await fixture.whenStable();
+        await click('editor-game-input', 'Add Action');
+        expect(await workspace.reviewProjectNavigation()).toBe(false);
+        await fixture.whenStable();
+        await click('editor-game-input', 'Discard and Close');
+        expect(await workspace.reviewProjectNavigation()).toBe(true);
+
+        expect(workspace.openPhysicsLayers()).toBe(true);
+        await fixture.whenStable();
+        await click('editor-physics-layers', 'Preview Standard World');
+        await click('editor-physics-layers', 'Use preset');
+        expect(await workspace.reviewProjectNavigation()).toBe(false);
+        await fixture.whenStable();
+        expect(root.querySelector('editor-physics-layers [role="alert"]')?.textContent)
+            .toContain('Apply your Physics Layers changes');
+        await click('editor-physics-layers', 'Cancel');
+        expect(await workspace.reviewProjectNavigation()).toBe(true);
+    });
+
     it('applies game bindings, saves the project and reopens with the authored profile before Play', async () => {
         fixture.componentInstance.openControls();
         await fixture.whenStable();

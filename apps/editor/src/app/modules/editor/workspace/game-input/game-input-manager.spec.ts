@@ -181,7 +181,7 @@ describe('Game Input Manager', () => {
         button('Add Action').click();
         await fixture.whenStable();
         const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
-        dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+        expect(fixture.componentInstance.canLeaveProject()).toBe(false);
         await fixture.whenStable();
         expect(dialog.open).toBe(true);
         expect(button('Apply and Close').disabled).toBe(true);
@@ -193,6 +193,7 @@ describe('Game Input Manager', () => {
         button('Discard and Close').click();
         await fixture.whenStable();
         expect(dialog.open).toBe(false);
+        expect(fixture.componentInstance.canLeaveProject()).toBe(true);
         expect(execute).not.toHaveBeenCalled();
         expect(document.activeElement).toBe(opener);
     });

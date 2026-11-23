@@ -146,11 +146,10 @@ impl ObjectScriptCommands<'_, '_> {
 		if !self.write_owner_transform || !radians.is_finite() {
 			return Err("Script cannot write this local rotation".into());
 		}
-		let mut transform = self.context.transform(self.context.owner)?.clone();
-		transform.rotation[1] = radians;
-		self.actions.push(SimulationAction::SetTransform {
+		self.context.lifecycle.validate_handle(self.context.owner)?;
+		self.actions.push(SimulationAction::SetLocalYaw {
 			entity: self.context.owner.key.clone(),
-			transform,
+			radians,
 		})
 	}
 }
@@ -176,6 +175,7 @@ impl Instance {
 		registration: ObjectScriptRegistration,
 	) -> Result<Self, ScriptIssue> {
 		descriptor.validate_attachment(
+			entity,
 			&attachment.settings,
 			|key| {
 				world

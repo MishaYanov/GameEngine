@@ -5,10 +5,12 @@ use engine_core::{
 	components::PLAYER_CONTROLLER_TYPE,
 	editor::{EditorSession, PrefabData},
 	linked_prefab::LinkedPrefabSource,
+	simulation_session::ConfiguredBehaviorFactory,
 };
 use std::collections::HashSet;
 
 fn conditional_controls(
+	factory: &dyn GameModuleFactory,
 	configure: impl FnOnce(&SceneId) -> engine_core::input::InputActionMap,
 ) -> SimulationSession {
 	use engine_core::{
@@ -29,7 +31,7 @@ fn conditional_controls(
 			..Default::default()
 		},
 	}));
-	let mut run = SimulationSession::new(project, Arc::new(data)).unwrap();
+	let mut run = SimulationSession::with_factory(project, Arc::new(data), factory).unwrap();
 	let map = configure(run.scene_id());
 	let resolver: InputActionsResolver = Arc::new(move |_| Ok(Some(map.clone())));
 	run.set_input_actions_resolver(&resolver).unwrap();
@@ -55,7 +57,7 @@ fn conditional_layouts_wait_for_committed_motion_and_respect_first_matching_scen
 	let mut map = InputActionMap::starter();
 	map.schema_version = 2;
 	map.layouts = motion_layouts();
-	let mut run = conditional_controls(|_| map.clone());
+	let mut run = conditional_controls(&ConfiguredBehaviorFactory, |_| map.clone());
 	assert_eq!(run.active_input_layout(), Some("default"));
 	tick(&mut run);
 	assert_eq!(run.active_input_layout(), Some("default"));
@@ -70,7 +72,7 @@ fn conditional_layouts_wait_for_committed_motion_and_respect_first_matching_scen
 	tick(&mut run);
 	assert_eq!(run.active_input_layout(), Some("airborne"));
 
-	let mut world = conditional_controls(|scene_id| {
+	let mut world = conditional_controls(&ConfiguredBehaviorFactory, |scene_id| {
 		map.layouts.insert(
 			0,
 			ConditionalInputLayout {
@@ -88,6 +90,65 @@ fn conditional_layouts_wait_for_committed_motion_and_respect_first_matching_scen
 	assert_eq!(world.active_input_layout(), Some("world"));
 	tick(&mut world);
 	assert_eq!(world.active_input_layout(), Some("world"));
+}
+
+#[test]
+fn rejected_catch_up_preserves_the_committed_layout_and_discards_jump_input() {
+	struct RejectAirborne;
+	impl GameModuleFactory for RejectAirborne {
+		fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+			Ok(Box::new(Self))
+		}
+	}
+	impl GameModule for RejectAirborne {
+		fn needs_tick(&self, _: &InputFrame) -> bool {
+			false
+		}
+
+		fn plan(
+			&self,
+			world: &RuntimeWorld,
+			_: &InputFrame,
+			_: f32,
+			_: &mut ActionWriter<'_>,
+		) -> Result<(), String> {
+			if world.data().entities[0].transform.position[1] > 1.0 {
+				return Err("fixture rejects an airborne step".into());
+			}
+			Ok(())
+		}
+	}
+
+	let mut run = conditional_controls(&RejectAirborne, |_| {
+		let mut map = engine_core::input::InputActionMap::starter();
+		map.schema_version = 2;
+		map.layouts = motion_layouts();
+		map
+	});
+	tick(&mut run);
+	tick(&mut run);
+	assert_eq!(run.active_input_layout(), Some("land"));
+	let before = position(&run);
+	let mut keyboard = engine_core::InputState::default();
+	keyboard.press(Key::Space);
+	run.sample_action_keys(&keyboard, Default::default())
+		.unwrap();
+	assert_eq!(run.tick(0.5 / 60.).unwrap().steps, 0);
+	let error = run.tick(1.5 / 60.).unwrap_err();
+	assert!(error.contains("fixture rejects an airborne step"));
+	assert_eq!(run.active_input_layout(), Some("land"));
+	assert_eq!(position(&run), before);
+
+	run.set_paused(false);
+	run.sample_action_keys(&keyboard, Default::default())
+		.unwrap();
+	assert!(
+		run.tick(1. / 60.)
+			.unwrap()
+			.accepted_action_presses
+			.is_empty()
+	);
+	assert_eq!(run.active_input_layout(), Some("land"));
 }
 
 #[test]
@@ -117,7 +178,7 @@ fn conditional_remap_requires_fresh_keyboard_and_gamepad_presses() {
 				],
 			},
 		];
-		let mut run = conditional_controls(|_| map);
+		let mut run = conditional_controls(&ConfiguredBehaviorFactory, |_| map);
 		tick(&mut run);
 		tick(&mut run);
 		let sample = |run: &mut SimulationSession, held: bool| {

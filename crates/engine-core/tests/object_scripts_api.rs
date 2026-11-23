@@ -9,10 +9,13 @@ use engine_core::{
 	},
 	project::ProjectData,
 	scene_catalog::SceneId,
+	scene_data::TransformData,
 	simulation_session::{
-		ConfiguredBehaviorFactory, GameModule, GameModuleFactory, ObjectScript,
-		ObjectScriptCommands, ObjectScriptContext, ObjectScriptRegistration, SimulationSession,
+		ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, InputFrame,
+		ObjectScript, ObjectScriptCommands, ObjectScriptContext, ObjectScriptRegistration,
+		SimulationAction, SimulationSession,
 	},
+	world::RuntimeWorld,
 };
 
 use support::{entity, scene};
@@ -272,4 +275,46 @@ fn rejected_catch_up_rolls_back_world_and_instance_state() {
 	game.set_paused(false);
 	assert_eq!(game.tick(0.018).unwrap().steps, 1);
 	assert_eq!(game.world().data().entities[0].transform.rotation[1], 2.);
+}
+
+#[test]
+fn local_yaw_action_preserves_other_transform_edits_in_the_same_step() {
+	struct YawAfterTransform;
+	impl GameModuleFactory for YawAfterTransform {
+		fn create(&self, _: &ProjectData, _: &SceneId) -> Result<Box<dyn GameModule>, String> {
+			Ok(Box::new(Self))
+		}
+	}
+	impl GameModule for YawAfterTransform {
+		fn needs_tick(&self, _: &InputFrame) -> bool {
+			true
+		}
+		fn plan(
+			&self,
+			world: &RuntimeWorld,
+			_: &InputFrame,
+			_: f32,
+			out: &mut ActionWriter<'_>,
+		) -> Result<(), String> {
+			let entity = world.data().entities[0].key.clone();
+			out.push(SimulationAction::SetTransform {
+				entity: entity.clone(),
+				transform: TransformData {
+					position: [3., 4., 5.],
+					rotation: [0.25, 0., 0.5],
+					scale: [2.; 3],
+				},
+			})?;
+			out.push(SimulationAction::SetLocalYaw { entity, radians: 1. })
+		}
+	}
+
+	let data = scene(vec![entity("door", [0.; 3])]);
+	let project = ProjectData::for_scene("Yaw", "scenes/main.json", &data).unwrap();
+	let mut game = SimulationSession::with_factory(project, Arc::new(data), &YawAfterTransform).unwrap();
+	game.tick(0.018).unwrap();
+	let transform = &game.world().data().entities[0].transform;
+	assert_eq!(transform.position, [3., 4., 5.]);
+	assert_eq!(transform.rotation, [0.25, 1., 0.5]);
+	assert_eq!(transform.scale, [2.; 3]);
 }

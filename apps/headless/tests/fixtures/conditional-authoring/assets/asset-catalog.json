@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "90000000-0000-4000-8000-000000000001",
+      "kind": "model",
+      "path": "models/cube.glb",
+      "revision": 1,
+      "fingerprint": "14bbbf8651fe679f39b8c6c46cad49233d4f686fdf97b84545460a9cd68febdb",
+      "bytes": 1916,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "cube",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000002",
+      "kind": "input_actions",
+      "path": "controls/conditional.input-actions.json",
+      "revision": 1,
+      "fingerprint": "145d55d675f8af83ed881ac030ebc6af76509c6c97310a291cc014805a8d6daa",
+      "bytes": 1916
+    },
+    {
+      "id": "90000000-0000-4000-8000-000000000031",
+      "kind": "prefab",
+      "path": "prefabs/trigger-door.prefab.json",
+      "revision": 1,
+      "fingerprint": "9c345c12826d87c5bd0a2911716629101549f8ddae2122640cff518028fa56f9",
+      "bytes": 2973,
+      "dependencies": [
+        "90000000-0000-4000-8000-000000000001"
+      ]
+    }
+  ]
+}

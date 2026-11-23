@@ -629,6 +629,11 @@ impl SimulationSession {
 		}
 		let mut clock = self.clock.clone();
 		let report = clock.advance(elapsed)?;
+		if report.steps == 0 {
+			self.clock = clock;
+			outcome.dropped_seconds = report.dropped_seconds;
+			return Ok(outcome);
+		}
 		if self.tick.checked_add(report.steps as u64).is_none() {
 			return Err("Simulation tick counter is exhausted".into());
 		}
@@ -641,6 +646,10 @@ impl SimulationSession {
 		let mut triggers = self.triggers.clone();
 		let mut object_scripts = self.object_scripts.clone();
 		let mut retired_scripts = object_scripts::ObjectScripts::default();
+		let input_layout = self
+			.conditional_input
+			.as_ref()
+			.map(conditional_input::ConditionalInputs::selection);
 		let mut camera = self.camera.clone();
 		let mut camera_objects = self.camera_objects.clone();
 		let mut camera_input = self.camera_input.clone();
@@ -818,6 +827,7 @@ impl SimulationSession {
 					let forbidden = match &action {
 						SimulationAction::Move { entity, .. }
 						| SimulationAction::Rotate { entity, .. }
+						| SimulationAction::SetLocalYaw { entity, .. }
 						| SimulationAction::SetTransform { entity, .. } => characters.contains(entity),
 						SimulationAction::SetCollisionEnabled { entity, enabled } => {
 							characters.forbids_collider_change(&self.world, entity, *enabled)
@@ -938,6 +948,7 @@ impl SimulationSession {
 						| SimulationAction::SetVisible { entity, .. }
 						| SimulationAction::SetCollisionEnabled { entity, .. }
 						| SimulationAction::SetMaterial { entity, .. }
+						| SimulationAction::SetLocalYaw { entity, .. }
 						| SimulationAction::SetTransform { entity, .. } => entity,
 					};
 					let index = self
@@ -984,6 +995,13 @@ impl SimulationSession {
 							changes
 						}
 						SimulationAction::SetTransform { entity, transform } => {
+							let changes = self.world.set_transform(&entity, transform)?;
+							self.collisions.synchronize(&self.world, &changes)?;
+							changes
+						}
+						SimulationAction::SetLocalYaw { entity, radians } => {
+							let mut transform = self.world.data().entities[index].transform.clone();
+							transform.rotation[1] = radians;
 							let changes = self.world.set_transform(&entity, transform)?;
 							self.collisions.synchronize(&self.world, &changes)?;
 							changes
@@ -1222,6 +1240,9 @@ impl SimulationSession {
 			}
 			self.world = RuntimeWorld::new(Arc::new(restored))?;
 			self.collisions = CollisionWorld::with_matrix(&self.world, self.collisions.matrix())?;
+			if let Some((input, layout)) = self.conditional_input.as_mut().zip(input_layout) {
+				input.restore_selection(layout);
+			}
 			self.paused = true;
 			self.clear_input();
 			self.actions.clear();

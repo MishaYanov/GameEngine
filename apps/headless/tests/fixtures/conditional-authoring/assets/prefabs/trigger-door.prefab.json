@@ -1,0 +1,159 @@
+{
+  "schema_version": 4,
+  "entities": [
+    {
+      "key": "frame",
+      "name": "Door frame",
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": []
+    },
+    {
+      "key": "gate",
+      "name": "Door pivot",
+      "transform": {
+        "position": [
+          0,
+          0,
+          -0.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "open-door",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "script",
+            "settings": {
+              "script_id": "project.open_door_on_trigger",
+              "config_version": 1,
+              "properties": {
+                "open_angle_degrees": 90,
+                "speed_degrees_per_second": 180
+              },
+              "references": {
+                "sensor": {
+                  "entity": "sensor"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "parent": "frame"
+    },
+    {
+      "key": "door-visual",
+      "name": "Door",
+      "transform": {
+        "position": [
+          0.6,
+          1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.2,
+          2,
+          0.14
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/cube.glb",
+            "asset_id": "90000000-0000-4000-8000-000000000001",
+            "mesh_index": 0
+          }
+        }
+      ],
+      "parent": "gate"
+    },
+    {
+      "key": "sensor",
+      "name": "Door trigger",
+      "transform": {
+        "position": [
+          0.3,
+          1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "components": [
+        {
+          "id": "collider",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.8,
+                0.95,
+                0.65
+              ],
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 32,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ],
+      "parent": "frame"
+    }
+  ],
+  "reference_slots": {},
+  "composition": {}
+}

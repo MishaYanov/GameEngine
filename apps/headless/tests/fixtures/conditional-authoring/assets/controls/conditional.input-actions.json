@@ -1,0 +1,105 @@
+{
+  "schema_version": 2,
+  "actions": [
+    {
+      "id": "move",
+      "label": "Move",
+      "value": "vector2",
+      "bindings": [
+        {
+          "kind": "keyboard_vector",
+          "keys": {
+            "negative_x": "arrow_left",
+            "positive_x": "arrow_right",
+            "negative_y": "arrow_down",
+            "positive_y": "arrow_up"
+          }
+        },
+        {
+          "kind": "gamepad_left_stick"
+        }
+      ]
+    },
+    {
+      "id": "look",
+      "label": "Look",
+      "value": "delta2",
+      "bindings": [
+        {
+          "kind": "pointer_delta"
+        },
+        {
+          "kind": "gamepad_right_stick"
+        }
+      ]
+    },
+    {
+      "id": "jump",
+      "label": "Jump",
+      "value": "button",
+      "bindings": [
+        {
+          "kind": "key",
+          "key": "space"
+        },
+        {
+          "kind": "gamepad_button",
+          "button": "a"
+        }
+      ]
+    },
+    {
+      "id": "attack",
+      "label": "Attack",
+      "value": "button",
+      "bindings": [
+        {
+          "kind": "key",
+          "key": "f"
+        },
+        {
+          "kind": "gamepad_button",
+          "button": "x"
+        }
+      ]
+    }
+  ],
+  "layouts": [
+    {
+      "id": "airborne",
+      "label": "Airborne",
+      "when": {
+        "kind": "character_grounded",
+        "value": false
+      },
+      "overrides": [
+        {
+          "action_id": "jump",
+          "bindings": []
+        },
+        {
+          "action_id": "attack",
+          "bindings": [
+            {
+              "kind": "key",
+              "key": "space"
+            },
+            {
+              "kind": "gamepad_button",
+              "button": "a"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "land",
+      "label": "Land",
+      "when": {
+        "kind": "character_grounded",
+        "value": true
+      },
+      "overrides": []
+    }
+  ]
+}

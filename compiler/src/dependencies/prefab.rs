@@ -108,6 +108,7 @@ fn validate_scripts(prefab: &PrefabData) -> Result<(), String> {
 				.ok_or_else(|| ScriptIssue::MissingRegistration(script.settings.script_id.clone()))
 				.and_then(|descriptor| {
 					descriptor.validate_attachment(
+						entity,
 						&script.settings,
 						|key| entities.get(key).copied(),
 						|reference| match reference {

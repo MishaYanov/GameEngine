@@ -126,6 +126,16 @@ export class GameInputManager {
         this.open.set(true);
     }
 
+    canLeaveProject(): boolean {
+        if (!this.open()) return true;
+        if (this.editingPending() || this.dirty()) {
+            this.reviewClose();
+            return false;
+        }
+        this.open.set(false);
+        return true;
+    }
+
     protected showAssetTools(active: boolean): void {
         if (active === this.showingAssets() || this.dirty() || this.editingPending()) return;
         this.clearPreview();

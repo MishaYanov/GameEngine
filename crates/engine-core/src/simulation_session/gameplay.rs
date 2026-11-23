@@ -33,6 +33,10 @@ pub enum SimulationAction {
 		entity: EntityKey,
 		transform: TransformData,
 	},
+	SetLocalYaw {
+		entity: EntityKey,
+		radians: f32,
+	},
 	SetVisible {
 		entity: EntityKey,
 		visible: bool,

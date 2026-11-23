@@ -70,6 +70,24 @@ export class PhysicsLayersDialog {
         return true;
     }
 
+    canLeaveProject(): boolean {
+        if (!this.open()) return true;
+        if (this.pending()) {
+            this.error.set('Wait for Physics Layers to finish applying, then leave the project.');
+            return false;
+        }
+        if (this.preview()) {
+            this.error.set('Use or discard the Standard World preview, or cancel Physics Layers, before leaving the project.');
+            return false;
+        }
+        if (this.changed()) {
+            this.error.set('Apply your Physics Layers changes or cancel the dialog before leaving the project.');
+            return false;
+        }
+        this.open.set(false);
+        return true;
+    }
+
     protected allowed(a: number, b: number): boolean {
         return !this.ignored().has(layerPairKey(a, b));
     }

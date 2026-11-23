@@ -292,6 +292,9 @@ export class EditorWorkspace {
     }
 
     async reviewProjectNavigation(): Promise<boolean> {
+        if (this.gameInput()?.canLeaveProject() === false || this.physicsLayers()?.canLeaveProject() === false) {
+            return false;
+        }
         return await this.reviewPropNavigation() && await this.animatorWorkspace.reviewNavigation() &&
             await this.controlsGraph.reviewNavigation();
     }

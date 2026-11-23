@@ -130,6 +130,7 @@ impl Verification<'_> {
 				.find(|descriptor| descriptor.id == script.settings.script_id);
 			let result = match descriptor {
 				Some(descriptor) => descriptor.validate_attachment(
+					entity,
 					&script.settings,
 					|key| self.entities.get(key).copied(),
 					|_| false,

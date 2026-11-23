@@ -1,13 +1,15 @@
 use compiler::{DependencyOpen, DependencySeverity, inspect_scene_dependencies, prepare_project};
 use engine_core::{
-	EntityKey, SceneData,
+	EntityKey, Key, SceneData,
 	asset_catalog::{AssetCatalog, AssetId, AssetKind, MeshSignature, PersistentAsset},
+	character_controller::{CharacterControllerComponent, CharacterControllerSettings},
 	command::{EditorCommandDto, EditorCommandRequest},
 	components::{
 		ComponentData, ComponentId, ComponentRecord, NO_MESH_PATH, NativeBehaviorComponent,
 		NativeBehaviorSpec, ScriptComponent, ScriptReference, ScriptSettings, SkyBackground, SkySettings,
 	},
 	editor::{EditorSession, PrefabData},
+	input::{GameInputBinding, InputProfile},
 	linked_prefab::{LinkedPrefabSource, NestedPlacement, PinnedAssetVersion, PlacementId},
 	project::{PhysicsLayer, PhysicsLayers, ProjectData},
 	scene_data::{
@@ -76,7 +78,15 @@ fn script_diagnostics_match_play_and_package_preflight_until_repaired() {
 		default_game_camera: None,
 		environment: Default::default(),
 	};
-	let project = ProjectData::for_scene("Door diagnostics", "scenes/main.json", &scene).unwrap();
+	let mut project = ProjectData::for_scene("Door diagnostics", "scenes/main.json", &scene).unwrap();
+	project.input_profile = Some(InputProfile {
+		actions: vec![GameInputBinding {
+			id: "jump".into(),
+			key: Key::Space,
+			animation_parameter: None,
+		}],
+		..Default::default()
+	});
 	let factory = gameplay_catalog::resolve(&project).unwrap();
 	let diagnose = |scene: &SceneData, code: &str| {
 		fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
@@ -115,6 +125,18 @@ fn script_diagnostics_match_play_and_package_preflight_until_repaired() {
 		},
 	}));
 	scene.entities[1] = sensor;
+	scene.entities[0] = scene.entities[0].clone().with_collider(Some(ColliderData::Box {
+		half_extents: [0.3, 0.9, 0.3],
+		offset: [0.; 3],
+		interaction: Default::default(),
+	}));
+	scene.entities[0].character_controller = Some(CharacterControllerComponent {
+		id: ComponentId::new("door-character").unwrap(),
+		enabled: true,
+		settings: CharacterControllerSettings::default(),
+	});
+	diagnose(&scene, "script_configuration_invalid");
+	scene.entities[0].character_controller.as_mut().unwrap().enabled = false;
 	fs::write(root.join("scenes/main.json"), scene.to_json().unwrap()).unwrap();
 	assert!(
 		inspect_scene_dependencies(&project, &project.startup_scene_id, &scene, &root)

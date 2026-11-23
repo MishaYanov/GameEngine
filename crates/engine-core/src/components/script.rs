@@ -262,12 +262,21 @@ impl ScriptDescriptor {
 	/// External reference capabilities can be deferred when checking a reusable Prop.
 	pub fn validate_attachment<'a>(
 		&self,
+		owner: &EntityData,
 		settings: &ScriptSettings,
 		find_entity: impl Fn(&EntityKey) -> Option<&'a EntityData>,
 		is_external: impl Fn(&ScriptReference) -> bool,
 	) -> Result<(), ScriptIssue> {
 		self.validate_config(settings)
 			.map_err(ScriptIssue::InvalidConfiguration)?;
+		if self.write_owner_transform
+			&& owner.character_controller.as_ref().is_some_and(|component| component.enabled)
+		{
+			return Err(ScriptIssue::InvalidConfiguration(format!(
+				"{} writes its owner's transform, which is owned by the enabled Character Controller",
+				self.label
+			)));
+		}
 		for field in &self.references {
 			let invalid = |target, reason| ScriptIssue::InvalidReference {
 				field: field.key.clone(),

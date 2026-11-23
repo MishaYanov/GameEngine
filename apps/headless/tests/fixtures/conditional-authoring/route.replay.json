@@ -1,0 +1,89 @@
+{
+  "schema_version": 5,
+  "actions": [
+    {
+      "type": "command",
+      "command": {
+        "type": "start_play"
+      }
+    },
+    {
+      "type": "tick",
+      "count": 4
+    },
+    {
+      "type": "mark",
+      "label": "land"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "Space"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 3
+    },
+    {
+      "type": "mark",
+      "label": "held-jump"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "Space"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 1
+    },
+    {
+      "type": "mark",
+      "label": "fresh-airborne-attack"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 65
+    },
+    {
+      "type": "mark",
+      "label": "land-again"
+    },
+    {
+      "type": "keyboard_input",
+      "keys": [
+        "ArrowRight"
+      ]
+    },
+    {
+      "type": "tick",
+      "count": 50
+    },
+    {
+      "type": "keyboard_input",
+      "keys": []
+    },
+    {
+      "type": "tick",
+      "count": 42
+    },
+    {
+      "type": "mark",
+      "label": "arrived-at-first-door"
+    }
+  ]
+}

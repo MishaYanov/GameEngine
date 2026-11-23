@@ -107,4 +107,31 @@ describe('Physics Layers project dialog', () => {
         expect(root.querySelector('dialog[open]')).not.toBeNull();
         expect(root.querySelector('[role=alert]')?.textContent).toContain('Physics layers changed');
     });
+
+    it('keeps preview and draft changes open when project navigation is attempted', async () => {
+        const {fixture, root, click, execute} = await setup();
+        const dialog = fixture.componentInstance;
+        await click('Preview Standard World');
+        expect(dialog.canLeaveProject()).toBe(false);
+        await fixture.whenStable();
+        expect(root.querySelector('dialog[open]')).not.toBeNull();
+        expect(root.querySelector('[role=alert]')?.textContent).toContain('Use or discard');
+
+        await click('Discard preview');
+        expect(dialog.canLeaveProject()).toBe(true);
+        await fixture.whenStable();
+        expect(root.querySelector('dialog[open]')).toBeNull();
+
+        expect(dialog.show()).toBe(true);
+        await fixture.whenStable();
+        await click('Default and Default, Allow');
+        expect(dialog.canLeaveProject()).toBe(false);
+        await fixture.whenStable();
+        expect(root.querySelector('dialog[open]')).not.toBeNull();
+        expect(root.querySelector('[role=alert]')?.textContent).toContain('Apply your Physics Layers changes');
+        expect(execute).not.toHaveBeenCalled();
+
+        await click('Cancel');
+        expect(dialog.canLeaveProject()).toBe(true);
+    });
 });

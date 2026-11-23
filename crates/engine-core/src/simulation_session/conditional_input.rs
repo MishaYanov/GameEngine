@@ -24,11 +24,16 @@ struct PreparedLayout {
 	map: InputActionMap,
 }
 
+#[derive(Clone, Default)]
+pub(super) struct InputLayoutSelection {
+	active: Option<usize>,
+	owner: Option<Option<RuntimeEntityHandle>>,
+}
+
 pub(super) struct ConditionalInputs {
 	default: InputActionMap,
 	layouts: Vec<PreparedLayout>,
-	active: Option<usize>,
-	owner: Option<Option<RuntimeEntityHandle>>,
+	selection: InputLayoutSelection,
 	physical_keys: Vec<(Key, String)>,
 	last_sample: PhysicalActionSample,
 	pending: VecDeque<PhysicalActionSample>,
@@ -66,8 +71,7 @@ impl ConditionalInputs {
 				layouts: Vec::new(),
 			},
 			layouts,
-			active: None,
-			owner: None,
+			selection: InputLayoutSelection::default(),
 			physical_keys,
 			last_sample: PhysicalActionSample::default(),
 			pending: VecDeque::new(),
@@ -77,13 +81,23 @@ impl ConditionalInputs {
 	}
 
 	pub(super) fn current_map(&self) -> &InputActionMap {
-		self.active
+		self.selection
+			.active
 			.map_or(&self.default, |index| &self.layouts[index].map)
 	}
 
 	pub(super) fn active_id(&self) -> &str {
-		self.active
+		self.selection
+			.active
 			.map_or("default", |index| self.layouts[index].id.as_str())
+	}
+
+	pub(super) fn selection(&self) -> InputLayoutSelection {
+		self.selection.clone()
+	}
+
+	pub(super) fn restore_selection(&mut self, selection: InputLayoutSelection) {
+		self.selection = selection;
 	}
 
 	pub(super) fn sample_keys(
@@ -123,6 +137,7 @@ impl ConditionalInputs {
 	) -> (bool, Vec<ResolvedInputActions>) {
 		let has_owner = owner.is_some();
 		let owner_changed = self
+			.selection
 			.owner
 			.replace(owner.clone())
 			.is_some_and(|old| old != owner);
@@ -133,10 +148,10 @@ impl ConditionalInputs {
 			.layouts
 			.iter()
 			.position(|layout| layout.condition.matches(scene, grounded));
-		let changed = self.active != active;
+		let changed = self.selection.active != active;
 		if changed {
 			self.mute_remapped_buttons(active);
-			self.active = active;
+			self.selection.active = active;
 		}
 		let mut frames = Vec::with_capacity(self.pending.len() + usize::from(changed));
 		if owner_changed {
@@ -159,7 +174,7 @@ impl ConditionalInputs {
 
 	fn mute_remapped_buttons(&mut self, active: Option<usize>) {
 		let layout_map = |index: usize| &self.layouts[index].map;
-		let previous = self.active.map_or(&self.default, layout_map);
+		let previous = self.selection.active.map_or(&self.default, layout_map);
 		let next = active.map_or(&self.default, layout_map);
 		for (key, code) in &self.physical_keys {
 			if self.last_sample.keys.contains(code)
