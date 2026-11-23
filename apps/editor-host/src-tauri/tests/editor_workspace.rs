@@ -791,6 +791,8 @@ fn apply_collider_update(
 	update
 }
 
+#[path = "editor_workspace/agent_context.rs"]
+mod agent_context;
 #[path = "editor_workspace/assets.rs"]
 mod assets;
 #[path = "editor_workspace/colliders.rs"]
@@ -799,10 +801,10 @@ mod colliders;
 mod documents;
 #[path = "editor_workspace/incremental.rs"]
 mod incremental;
-#[path = "editor_workspace/object_authoring.rs"]
-mod object_authoring;
 #[path = "editor_workspace/nested_prop.rs"]
 mod nested_prop;
+#[path = "editor_workspace/object_authoring.rs"]
+mod object_authoring;
 #[path = "editor_workspace/play.rs"]
 mod play;
 #[path = "editor_workspace/prop_overrides.rs"]

@@ -22,6 +22,8 @@ use std::{
 	time::Instant,
 };
 use tauri::{Emitter, State, WebviewWindow};
+mod agent_context;
+pub use agent_context::*;
 mod asset_authoring;
 pub use asset_authoring::*;
 mod audio_audition;

@@ -1,4 +1,6 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
+#[path = "editor/agent_context.rs"]
+pub(crate) mod agent_context;
 #[path = "editor/asset_sources.rs"]
 pub(crate) mod asset_sources;
 #[path = "editor/assets.rs"]

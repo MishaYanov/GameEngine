@@ -207,6 +207,17 @@ impl EditorWorkspace {
 		}
 		Ok(source)
 	}
+	/// Capture the admitted local draft without resolving paths or reading the saved source.
+	pub(crate) fn agent_prop_draft_document(&self, draft_id: &str) -> Option<(Arc<str>, u64)> {
+		let capture = self.prefab_source_drafts.captures.get(draft_id)?;
+		(capture.generation == self.generation).then(|| {
+			(
+				Arc::clone(capture.history.document()),
+				capture.history.revision(),
+			)
+		})
+	}
+
 	pub(crate) fn reviewed_prop_preview_source(
 		&self,
 		draft_id: &str,

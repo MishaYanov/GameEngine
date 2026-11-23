@@ -72,6 +72,7 @@ pub fn run() {
 		})
 		.invoke_handler(tauri::generate_handler![
 			engine_status,
+			editor_agent_context,
 			editor_runtime_inspect,
 			create_project,
 			choose_project_destination,
