@@ -523,6 +523,10 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 		.edit_clip_timeline_draft(&timeline.draft_id, 0, moved)
 		.unwrap();
 	assert_eq!(draft.draft_revision, 1);
+	assert_eq!(
+		workspace.clip_timeline_drafts.revisions(),
+		vec![(draft.draft_id.clone(), draft.draft_revision)]
+	);
 	assert!(draft.can_undo && draft.dirty);
 	assert!(workspace
 		.sample_authored_clip_preview(&preview.token, 0)

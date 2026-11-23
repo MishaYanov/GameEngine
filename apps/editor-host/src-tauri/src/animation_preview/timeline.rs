@@ -15,6 +15,19 @@ use std::{collections::HashMap, sync::Arc};
 #[derive(Default)]
 pub(crate) struct ClipTimelineDrafts(HashMap<String, ClipDraft>);
 
+impl ClipTimelineDrafts {
+	/// A stable snapshot of up to four open drafts, independent of scene revision.
+	pub(crate) fn revisions(&self) -> Vec<(String, u64)> {
+		let mut revisions: Vec<_> = self
+			.0
+			.iter()
+			.map(|(id, draft)| (id.clone(), draft.history.revision()))
+			.collect();
+		revisions.sort_unstable();
+		revisions
+	}
+}
+
 #[derive(Clone)]
 struct ClipDraft {
 	asset: ClipAssetIndex,

@@ -3,13 +3,18 @@ use crate::{
 	animation_preview::timeline::{ClipDraftDto, ClipDraftOperation},
 	project_location::ProjectLocation,
 };
+use bridge::editor::{EditorCommandDto, EditorCommandRequest};
 use runtime::animation::TimelineEdit;
 
-fn open_timeline() -> (EditorWorkspace, ClipDraftDto) {
+fn open_workspace_for_exit() -> EditorWorkspace {
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../../headless/tests/fixtures/authoring-controller/project.json");
 	let location = ProjectLocation::from_manifest(&manifest).unwrap();
-	let mut workspace = EditorWorkspace::open_project_with_notifier(location, || {}).unwrap();
+	EditorWorkspace::open_project_with_notifier(location, || {}).unwrap()
+}
+
+fn open_timeline() -> (EditorWorkspace, ClipDraftDto) {
+	let mut workspace = open_workspace_for_exit();
 	let asset = workspace.authored_clip_assets().unwrap().remove(0);
 	let timeline = workspace
 		.open_clip_timeline_draft(&asset.asset_id, workspace.backend.session().revision())
@@ -17,35 +22,100 @@ fn open_timeline() -> (EditorWorkspace, ClipDraftDto) {
 	(workspace, timeline)
 }
 
-#[test]
-fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
-	let (mut workspace, timeline) = open_timeline();
-	let revision = Some(workspace.backend.session().revision());
-	assert_eq!(exit_review(Some(&workspace), revision).unwrap(), None);
-
-	let dirty = workspace
+fn add_marker(workspace: &mut EditorWorkspace, timeline: &ClipDraftDto, at: u32) -> ClipDraftDto {
+	workspace
 		.edit_clip_timeline_draft(
 			&timeline.draft_id,
 			timeline.draft_revision,
 			ClipDraftOperation::Edit {
 				edit: TimelineEdit::AddMarker {
-					at: 100,
+					at,
 					label: "Impact".into(),
 				},
 			},
 		)
-		.unwrap();
+		.unwrap()
+}
+
+#[test]
+fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
+	let (mut workspace, timeline) = open_timeline();
+	let revision = Some(workspace.backend.session().revision());
+	assert_eq!(
+		ExitReview::capture(Some(&workspace), revision)
+			.unwrap()
+			.warning,
+		None
+	);
+
+	let dirty = add_marker(&mut workspace, &timeline, 100);
 	assert!(dirty.dirty);
 	assert!(!workspace.backend.session().is_dirty());
-	assert!(exit_review(Some(&workspace), revision)
+	assert!(ExitReview::capture(Some(&workspace), revision)
 		.unwrap()
+		.warning
 		.unwrap()
 		.contains("Animation Clip Timeline"));
 
 	workspace
 		.close_clip_timeline_draft(&timeline.draft_id, true)
 		.unwrap();
-	assert_eq!(exit_review(Some(&workspace), revision).unwrap(), None);
+	assert_eq!(
+		ExitReview::capture(Some(&workspace), revision)
+			.unwrap()
+			.warning,
+		None
+	);
+}
+
+#[test]
+fn exit_review_refuses_new_edits_in_an_already_dirty_timeline() {
+	let (mut workspace, timeline) = open_timeline();
+	let revision = Some(workspace.backend.session().revision());
+	let dirty = add_marker(&mut workspace, &timeline, 100);
+	let review = ExitReview::capture(Some(&workspace), revision).unwrap();
+	review.verify(Some(&workspace)).unwrap();
+
+	let changed = add_marker(&mut workspace, &dirty, 200);
+	assert!(changed.dirty);
+	assert_eq!(Some(workspace.backend.session().revision()), revision);
+	assert_eq!(
+		ExitReview::capture(Some(&workspace), revision)
+			.unwrap()
+			.warning,
+		review.warning
+	);
+	assert!(review.verify(Some(&workspace)).is_err());
+
+	workspace
+		.edit_clip_timeline_draft(
+			&changed.draft_id,
+			changed.draft_revision,
+			ClipDraftOperation::Undo,
+		)
+		.unwrap();
+	assert!(review.verify(Some(&workspace)).is_err());
+}
+
+#[test]
+fn exit_review_refuses_replacement_and_scene_edits_after_review() {
+	let mut workspace = open_workspace_for_exit();
+	let revision = workspace.backend.session().revision();
+	let review = ExitReview::capture(Some(&workspace), Some(revision)).unwrap();
+	let replacement = open_workspace_for_exit();
+	assert_eq!(replacement.backend.session().revision(), revision);
+	assert!(review.verify(Some(&replacement)).is_err());
+
+	workspace
+		.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: EditorCommandDto::Rename {
+				key: "yard-player".into(),
+				name: "Reviewed player".into(),
+			},
+		})
+		.unwrap();
+	assert!(review.verify(Some(&workspace)).is_err());
 }
 
 #[test]
@@ -69,10 +139,12 @@ fn window_close_reviews_current_revision_and_file_exit_checks_the_caller_revisio
 	assert_eq!(close.reviewed_revision(None), None);
 	assert_eq!(close.reviewed_revision(Some(&workspace)), Some(current));
 	assert_eq!(
-		exit_review(Some(&workspace), close.reviewed_revision(Some(&workspace))).unwrap(),
+		ExitReview::capture(Some(&workspace), close.reviewed_revision(Some(&workspace)))
+			.unwrap()
+			.warning,
 		None
 	);
-	assert!(exit_review(
+	assert!(ExitReview::capture(
 		Some(&workspace),
 		stale_file_menu.reviewed_revision(Some(&workspace))
 	)

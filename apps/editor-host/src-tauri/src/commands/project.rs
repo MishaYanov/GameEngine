@@ -19,6 +19,53 @@ impl ExitRequest {
 	}
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct ExitReview {
+	generation: Option<u64>,
+	revision: Option<u64>,
+	timeline_revisions: Vec<(String, u64)>,
+	warning: Option<&'static str>,
+}
+
+impl ExitReview {
+	fn capture(
+		workspace: Option<&EditorWorkspace>,
+		expected_revision: Option<u64>,
+	) -> Result<Self, String> {
+		let session = workspace.map(|workspace| workspace.backend.session());
+		let revision = session.map(|session| session.revision());
+		if revision != expected_revision {
+			return Err("Revision conflict: the open project changed. Try Exit again.".into());
+		}
+		if session.is_some_and(|session| session.has_transaction()) {
+			return Err("Finish the current edit before exiting.".into());
+		}
+		let scene_dirty = session.is_some_and(|session| session.is_dirty());
+		let timeline_dirty = workspace.is_some_and(EditorWorkspace::has_dirty_clip_timelines);
+		let warning = match (scene_dirty, timeline_dirty) {
+			(false, false) => None,
+			(true, false) => Some("Exiting the editor will discard all unsaved scene and project changes."),
+			(false, true) => Some("Exiting the editor will discard unsaved Animation Clip Timeline changes."),
+			(true, true) => Some("Exiting the editor will discard unsaved scene, project, and Animation Clip Timeline changes."),
+		};
+		Ok(Self {
+			generation: workspace.map(|workspace| workspace.generation),
+			revision,
+			timeline_revisions: workspace
+				.map(|workspace| workspace.clip_timeline_drafts.revisions())
+				.unwrap_or_default(),
+			warning,
+		})
+	}
+
+	fn verify(&self, workspace: Option<&EditorWorkspace>) -> Result<(), String> {
+		if Self::capture(workspace, self.revision)? != *self {
+			return Err("Revision conflict: the project or its Animation Clip Timeline changed. Try Exit again.".into());
+		}
+		Ok(())
+	}
+}
+
 #[tauri::command]
 pub async fn choose_project_manifest(
 	window: tauri::WebviewWindow,
@@ -92,15 +139,12 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 		let Some(_permit) = exit_review_permit(&exit_review_gate)? else {
 			return Ok(false);
 		};
-		let (expected_revision, warning) = {
+		let review = {
 			let workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
 			let expected_revision = request.reviewed_revision(workspace.as_ref());
-			(
-				expected_revision,
-				exit_review(workspace.as_ref(), expected_revision)?,
-			)
+			ExitReview::capture(workspace.as_ref(), expected_revision)?
 		};
-		if let Some(message) = warning {
+		if let Some(message) = review.warning {
 			if !confirm_discard(&window, message, "Discard and exit", "Keep editing") {
 				return Ok(false);
 			}
@@ -108,11 +152,7 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 
 		let mut host = viewport.lock().map_err(|_| "Viewport state lock failed")?;
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
-		if exit_review(workspace.as_ref(), expected_revision)? != warning {
-			return Err(
-				"Revision conflict: the project has new unsaved changes. Try Exit again.".into(),
-			);
-		}
+		review.verify(workspace.as_ref())?;
 		// Retire the reviewed workspace before background completions can adopt more edits.
 		let retired = workspace.take();
 		drop(workspace);
@@ -131,27 +171,6 @@ fn exit_review_permit(gate: &Mutex<()>) -> Result<Option<MutexGuard<'_, ()>>, St
 		Err(TryLockError::WouldBlock) => Ok(None),
 		Err(TryLockError::Poisoned(_)) => Err("Exit review state lock failed".into()),
 	}
-}
-
-fn exit_review(
-	workspace: Option<&EditorWorkspace>,
-	expected_revision: Option<u64>,
-) -> Result<Option<&'static str>, String> {
-	let session = workspace.map(|workspace| workspace.backend.session());
-	if session.map(|session| session.revision()) != expected_revision {
-		return Err("Revision conflict: the open project changed. Try Exit again.".into());
-	}
-	if session.is_some_and(|session| session.has_transaction()) {
-		return Err("Finish the current edit before exiting.".into());
-	}
-	let scene_dirty = session.is_some_and(|session| session.is_dirty());
-	let timeline_dirty = workspace.is_some_and(EditorWorkspace::has_dirty_clip_timelines);
-	Ok(match (scene_dirty, timeline_dirty) {
-		(false, false) => None,
-		(true, false) => Some("Exiting the editor will discard all unsaved scene and project changes."),
-		(false, true) => Some("Exiting the editor will discard unsaved Animation Clip Timeline changes."),
-		(true, true) => Some("Exiting the editor will discard unsaved scene, project, and Animation Clip Timeline changes."),
-	})
 }
 
 fn confirm_discard(
