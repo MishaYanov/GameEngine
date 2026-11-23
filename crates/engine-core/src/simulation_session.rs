@@ -34,7 +34,8 @@ pub use gameplay::{
 };
 pub use input::{InputFrame, MovementTarget};
 pub use object_scripts::{
-	ObjectScript, ObjectScriptCommands, ObjectScriptContext, ObjectScriptRegistration,
+	ObjectScript, ObjectScriptAction, ObjectScriptCommands, ObjectScriptContext,
+	ObjectScriptRegistration, ObjectScriptTrigger,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,7 +313,7 @@ impl SimulationSession {
 			&& (self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
-				|| self.object_scripts.needs_tick()
+				|| self.object_scripts.needs_tick(&self.inputs)
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
@@ -338,7 +339,7 @@ impl SimulationSession {
 			&& (self.animations.needs_tick()
 				|| self.characters.needs_tick()
 				|| self.lifecycle.needs_tick()
-				|| self.object_scripts.needs_tick()
+				|| self.object_scripts.needs_tick(&self.inputs)
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
 				|| !self.inputs.action_presses.is_empty()
@@ -712,8 +713,11 @@ impl SimulationSession {
 					&lifecycle,
 					self.tick + u64::from(steps) + 1,
 					report.step_seconds,
+					step_input,
+					characters.local_input_owner(&self.world),
 					&mut ActionWriter { actions: &mut self.actions },
 				)?;
+				object_scripts.stage_triggers(&lifecycle, &trigger_events[event_start..])?;
 				let look_rate = step_input.controller_look;
 				self.module.plan_with_progress(
 					GameplayContext {

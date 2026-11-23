@@ -92,12 +92,114 @@ fn create(settings: &ScriptSettings) -> Result<Box<dyn ObjectScript>, String> {
 }
 
 struct Factory;
+
+#[derive(Clone)]
+struct EventProbe;
+
+impl ObjectScript for EventProbe {
+	fn clone_instance(&self) -> Box<dyn ObjectScript> {
+		Box::new(self.clone())
+	}
+	fn needs_update(&self) -> bool {
+		false
+	}
+	fn on_trigger(
+		&mut self,
+		context: &ObjectScriptContext<'_>,
+		edge: &engine_core::simulation_session::ObjectScriptTrigger,
+		commands: &mut ObjectScriptCommands<'_, '_>,
+	) -> Result<(), String> {
+		if edge.phase == engine_core::triggers::TriggerPhase::Enter {
+			let yaw = context.transform(context.owner())?.rotation[1];
+			commands.set_local_yaw(yaw + 1.)?;
+		}
+		Ok(())
+	}
+}
+
+fn event_descriptor() -> ScriptDescriptor {
+	let mut desc = descriptor();
+	desc.id = "test.trigger".into();
+	desc.fields.clear();
+	desc.references = vec![engine_core::components::ScriptReferenceField {
+		key: "sensor".into(),
+		label: "Sensor".into(),
+		requires: engine_core::components::ScriptReferenceKind::TriggerCollider,
+	}];
+	desc
+}
+
+fn event_script(_: &ScriptSettings) -> Result<Box<dyn ObjectScript>, String> {
+	Ok(Box::new(EventProbe))
+}
+
+#[test]
+fn trigger_hooks_receive_only_the_selected_sensor_on_the_next_step() {
+	use engine_core::{
+		EntityKey,
+		components::ScriptReference,
+		scene_data::{ColliderData, ColliderInteraction},
+	};
+	let collider = |sensor| {
+		Some(ColliderData::Box {
+			half_extents: [0.5; 3],
+			offset: [0.; 3],
+			interaction: ColliderInteraction {
+				sensor,
+				..Default::default()
+			},
+		})
+	};
+	let mut door = entity("door", [5., 0., 0.]);
+	door.put_component(
+		ComponentRecord {
+			id: ComponentId::new("watch-sensor").unwrap(),
+			schema_version: 1,
+			enabled: true,
+			data: ComponentData::Script {
+				settings: ScriptSettings {
+					script_id: "test.trigger".into(),
+					config_version: 1,
+					properties: Default::default(),
+					references: [(
+						"sensor".into(),
+						ScriptReference::Entity {
+							entity: EntityKey::new("sensor").unwrap(),
+						},
+					)]
+					.into(),
+				},
+			},
+		},
+		false,
+	)
+	.unwrap();
+	let data = scene(vec![
+		door,
+		entity("sensor", [0.; 3]).with_collider(collider(true)),
+		entity("actor", [0.; 3]).with_collider(collider(false)),
+		entity("other-sensor", [9., 0., 0.]).with_collider(collider(true)),
+		entity("other-actor", [9., 0., 0.]).with_collider(collider(false)),
+	]);
+	let project = ProjectData::for_scene("Scripts", "scenes/main.json", &data).unwrap();
+	let mut game = SimulationSession::with_factory(project, Arc::new(data), &Factory).unwrap();
+	assert_eq!(game.tick(0.018).unwrap().trigger_events.len(), 2);
+	assert_eq!(game.world().data().entities[0].transform.rotation[1], 0.);
+	assert_eq!(game.tick(0.035).unwrap().trigger_events.len(), 0);
+	assert_eq!(game.world().data().entities[0].transform.rotation[1], 1.);
+}
 impl GameModuleFactory for Factory {
 	fn object_scripts(&self) -> &[ObjectScriptRegistration] {
-		&[ObjectScriptRegistration {
-			descriptor,
-			instantiate: create,
-		}]
+		&[
+			ObjectScriptRegistration {
+				descriptor,
+				instantiate: create,
+			},
+			ObjectScriptRegistration {
+				descriptor: event_descriptor,
+				instantiate: event_script,
+			},
+		]
 	}
 	fn create(
 		&self,
