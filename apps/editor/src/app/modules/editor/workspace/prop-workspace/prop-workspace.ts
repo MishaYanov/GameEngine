@@ -3,7 +3,7 @@ import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey} from '../../../../core/editor/editor.models';
 import type {NestedPropPlacement, NestedPropPlacementRequest} from '../../../../core/editor/linked-prefabs.models';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
-import {type PropWorkspaceObject, PropWorkspaceService} from './prop-workspace.service';
+import {canEditPropComponent, type PropWorkspaceObject, PropWorkspaceService} from './prop-workspace.service';
 import {PropPreviewService} from './prop-preview.service';
 import {PropObjectEditor} from './prop-object-editor';
 import {NestedPropEditor} from './nested-prop-editor';
@@ -32,12 +32,20 @@ export class PropWorkspace {
     private readonly editor = inject(EditorService);
     protected readonly assetGeneration = this.editor.workspaceGeneration;
     protected readonly authoringTypes = computed(() => this.editor.capabilities()?.component_types?.filter(
-        type => type.kind === 'audio_source' || type.kind === 'script',
+        type => canEditPropComponent(type.kind) && (type.kind !== 'script' || this.scriptTypes().length > 0),
     ) ?? []);
     protected readonly scriptTypes = computed(() => this.editor.capabilities()?.object_scripts ?? []);
     protected readonly authoringComponents = computed(() => this.prop.selectedObject()?.components.filter(
-        record => record.data.kind === 'audio_source' || record.data.kind === 'script',
+        record => canEditPropComponent(record.data.kind),
     ) ?? []);
+    protected readonly managedElsewhere = computed(() => this.prop.selectedObject()?.components.filter(
+        record => !canEditPropComponent(record.data.kind),
+    ) ?? []);
+    protected readonly componentContext = computed(() => {
+        const document = this.prop.document(), object = this.prop.selectedObject();
+        return document && object ? JSON.stringify([document.scope.generation,
+            document.kind === 'source' ? document.draft.draft_id : document.root, object.key]) : '';
+    });
     protected readonly audioScope = computed<AudioAuditionScope | null>(() => {
         const selected = this.prop.selectedObject();
         const preview = this.preview.currentState();

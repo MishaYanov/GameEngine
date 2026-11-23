@@ -36,9 +36,11 @@ fn source_preview_selection_and_frame_are_scoped_without_editing_the_scene() {
 	let preview = workspace
 		.open_prop_preview(target.clone(), revision, generation, 2)
 		.unwrap();
-	assert!(workspace
-		.open_prop_preview(target, revision, generation, 1)
-		.is_err());
+	assert!(
+		workspace
+			.open_prop_preview(target, revision, generation, 1)
+			.is_err()
+	);
 	let frame = workspace.active_prop_preview().unwrap();
 	assert_eq!(frame.frame_request, 0);
 	assert!(frame.editable_source);
@@ -56,9 +58,11 @@ fn source_preview_selection_and_frame_are_scoped_without_editing_the_scene() {
 		selected.selection.as_ref().map(EntityKey::as_str),
 		Some("a")
 	);
-	assert!(workspace
-		.select_prop_preview(&preview.token, Some(EntityKey::new("other").unwrap()))
-		.is_err());
+	assert!(
+		workspace
+			.select_prop_preview(&preview.token, Some(EntityKey::new("other").unwrap()))
+			.is_err()
+	);
 	workspace.frame_prop_preview(&preview.token).unwrap();
 	assert_eq!(workspace.active_prop_preview().unwrap().frame_request, 1);
 	assert_eq!(
@@ -103,20 +107,24 @@ fn pinned_inspection_stays_available_without_its_source_and_invalidates_on_scene
 	assert!(!frame.editable_source);
 	let render_document = frame.document;
 	assert_eq!(render_document.entities.len(), 2);
-	assert!(render_document
-		.entities
-		.iter()
-		.all(|entity| entity.linked_prefab.is_none()));
+	assert!(
+		render_document
+			.entities
+			.iter()
+			.all(|entity| entity.linked_prefab.is_none())
+	);
 	let anchor = render_document
 		.entities
 		.iter()
 		.find(|entity| entity.key == root)
 		.unwrap();
 	assert_eq!(anchor.transform.position, [0.0; 3]);
-	assert!(render_document
-		.entities
-		.iter()
-		.all(|entity| entity.key.as_str() != "a"));
+	assert!(
+		render_document
+			.entities
+			.iter()
+			.all(|entity| entity.key.as_str() != "a")
+	);
 	let newer = workspace
 		.open_prop_preview(target, revision(&workspace), workspace.generation, 2)
 		.unwrap();
@@ -149,12 +157,16 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 		draft_id: draft.draft_id,
 	};
 	let wrong_generation = workspace.generation + 1;
-	assert!(workspace
-		.open_prop_preview(target.clone(), revision(&workspace), wrong_generation, 3)
-		.is_err());
-	assert!(workspace
-		.open_prop_preview(target.clone(), 0, workspace.generation, 1)
-		.is_err());
+	assert!(
+		workspace
+			.open_prop_preview(target.clone(), revision(&workspace), wrong_generation, 3)
+			.is_err()
+	);
+	assert!(
+		workspace
+			.open_prop_preview(target.clone(), 0, workspace.generation, 1)
+			.is_err()
+	);
 	let preview = workspace
 		.open_prop_preview(
 			target.clone(),
@@ -165,9 +177,11 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 		.unwrap();
 	run(&mut workspace, Command::StartPlay);
 	assert!(workspace.active_prop_preview().is_none());
-	assert!(workspace
-		.open_prop_preview(target, revision(&workspace), workspace.generation, 3)
-		.is_err());
+	assert!(
+		workspace
+			.open_prop_preview(target, revision(&workspace), workspace.generation, 3)
+			.is_err()
+	);
 	run(&mut workspace, Command::StopPlay);
 	assert!(workspace.active_prop_preview().is_none());
 	assert!(!workspace.close_prop_preview(&preview.token));
@@ -176,13 +190,13 @@ fn opening_a_preview_checks_the_workspace_and_play_discards_the_preview() {
 #[test]
 fn a_published_primitive_keeps_its_model_and_bounds_in_prop_preview_and_play() {
 	use runtime::{
+		Bounds3, PrimitiveKind,
 		asset_registry::AssetRef,
 		assets::{
-			project_assets::{prepare_primitive, resolve_asset, PreparedPrimitive},
 			AssetManager,
+			project_assets::{PreparedPrimitive, prepare_primitive, resolve_asset},
 		},
 		world::RuntimeWorld,
-		Bounds3, PrimitiveKind,
 	};
 
 	let fixture = Fixture::new();
@@ -228,9 +242,11 @@ fn a_published_primitive_keeps_its_model_and_bounds_in_prop_preview_and_play() {
 		scene_id: placement.active_scene_id,
 		root_key: root.clone(),
 	};
-	assert!(reopened
-		.open_prop_preview(target.clone(), revision(&reopened), previous_generation, 1)
-		.is_err());
+	assert!(
+		reopened
+			.open_prop_preview(target.clone(), revision(&reopened), previous_generation, 1)
+			.is_err()
+	);
 	let preview = reopened
 		.open_prop_preview(target, revision(&reopened), reopened.generation, 2)
 		.unwrap();
@@ -321,13 +337,17 @@ fn accepted_draft_edits_refresh_the_pinned_preview_and_keep_the_scene_and_disk_u
 	assert_eq!(frame.content_revision, applied.draft_revision);
 	assert_eq!(frame.document.entities[0].name, "Edited local source");
 	assert!(!workspace.prop_preview_content_is_current(&preview.token, draft.draft_revision));
-	assert!(workspace
-		.edit_prop_draft(&draft.draft_id, draft.draft_revision, PropDraftEdit::Undo)
-		.is_err());
+	assert!(
+		workspace
+			.edit_prop_draft(&draft.draft_id, draft.draft_revision, PropDraftEdit::Undo)
+			.is_err()
+	);
 	assert!(workspace.close_prefab_source(&draft.draft_id).is_err());
-	assert!(workspace
-		.reload_with_policy(revision(&workspace), ReloadPolicy::DiscardUnsaved)
-		.is_err());
+	assert!(
+		workspace
+			.reload_with_policy(revision(&workspace), ReloadPolicy::DiscardUnsaved)
+			.is_err()
+	);
 	assert_eq!(fs::read(&path).unwrap(), bytes);
 	assert_eq!(
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
@@ -353,6 +373,66 @@ fn accepted_draft_edits_refresh_the_pinned_preview_and_keep_the_scene_and_disk_u
 	assert_eq!(discarded.prefab, draft.prefab);
 	assert_eq!(fs::read(&path).unwrap(), bytes);
 	workspace.close_prefab_source(&draft.draft_id).unwrap();
+}
+
+#[test]
+fn prop_collider_is_validated_and_undo_keeps_the_scene_untouched() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let draft = create_source(&mut workspace);
+	let before = workspace.backend.session().authored_document();
+	let scene_revision = revision(&workspace);
+	let mut candidate = draft.prefab.clone();
+	let components = candidate["entities"][0]["components"]
+		.as_array_mut()
+		.unwrap();
+	assert!(
+		!components
+			.iter()
+			.any(|record| record["data"]["kind"] == "collider")
+	);
+	let index = components.len();
+	components.push(serde_json::json!({
+		"id": "inspector-collider", "schema_version": 1, "enabled": true,
+		"data": {"kind": "collider", "collider": {
+			"kind": "box", "half_extents": [-0.5, 0.1, 0.5], "offset": [0, 0, 0]
+		}}
+	}));
+	assert!(
+		workspace
+			.edit_prop_draft(
+				&draft.draft_id,
+				draft.draft_revision,
+				PropDraftEdit::Apply {
+					prefab: candidate.clone()
+				}
+			)
+			.is_err()
+	);
+
+	candidate["entities"][0]["components"][index]["data"]["collider"]["half_extents"][0] =
+		serde_json::json!(0.5);
+	let edited = workspace
+		.edit_prop_draft(
+			&draft.draft_id,
+			draft.draft_revision,
+			PropDraftEdit::Apply { prefab: candidate },
+		)
+		.unwrap();
+	assert!(edited.can_undo);
+	assert!(
+		edited.prefab["entities"][0]["components"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.any(|record| record["id"] == "inspector-collider")
+	);
+	let undone = workspace
+		.edit_prop_draft(&draft.draft_id, edited.draft_revision, PropDraftEdit::Undo)
+		.unwrap();
+	assert_eq!(undone.prefab, draft.prefab);
+	assert_eq!(revision(&workspace), scene_revision);
+	assert_eq!(workspace.backend.session().authored_document(), before);
 }
 
 #[test]
@@ -406,11 +486,13 @@ fn prop_save_updates_source_without_updating_existing_pins_and_refuses_external_
 	let mut external = fs::read(&path).unwrap();
 	external.extend_from_slice(b"\n");
 	fs::write(&path, &external).unwrap();
-	assert!(workspace
-		.save_prop_draft(&draft.draft_id, applied.draft_revision)
-		.err()
-		.unwrap()
-		.contains("changed on disk"));
+	assert!(
+		workspace
+			.save_prop_draft(&draft.draft_id, applied.draft_revision)
+			.err()
+			.unwrap()
+			.contains("changed on disk")
+	);
 	assert_eq!(fs::read(&path).unwrap(), external);
 	let undo = workspace
 		.edit_prop_draft(&draft.draft_id, applied.draft_revision, PropDraftEdit::Undo)
@@ -434,9 +516,11 @@ fn position_gesture_is_one_owned_draft_edit_and_rejects_obsolete_releases() {
 		)
 		.unwrap();
 	let child = EntityKey::new("a").unwrap();
-	assert!(workspace
-		.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [1.0; 3])
-		.is_err());
+	assert!(
+		workspace
+			.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [1.0; 3])
+			.is_err()
+	);
 	workspace
 		.select_prop_preview(&preview.token, Some(child.clone()))
 		.unwrap();
@@ -450,9 +534,11 @@ fn position_gesture_is_one_owned_draft_edit_and_rejects_obsolete_releases() {
 			.position,
 		[1.0; 3]
 	);
-	assert!(workspace
-		.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [3.0; 3])
-		.is_err());
+	assert!(
+		workspace
+			.apply_prop_preview_position(&preview.token, draft.draft_revision, &child, [3.0; 3])
+			.is_err()
+	);
 	let undone = workspace
 		.edit_prop_draft(&draft.draft_id, moved.draft_revision, PropDraftEdit::Undo)
 		.unwrap();
@@ -460,7 +546,9 @@ fn position_gesture_is_one_owned_draft_edit_and_rejects_obsolete_releases() {
 	assert_eq!(undone.prefab, draft.prefab);
 	assert_eq!(revision(&workspace), preview.revision);
 	workspace.close_prop_preview(&preview.token);
-	assert!(workspace
-		.apply_prop_preview_position(&preview.token, undone.draft_revision, &child, [1.0; 3])
-		.is_err());
+	assert!(
+		workspace
+			.apply_prop_preview_position(&preview.token, undone.draft_revision, &child, [1.0; 3])
+			.is_err()
+	);
 }

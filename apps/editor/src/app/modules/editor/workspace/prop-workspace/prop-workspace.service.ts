@@ -3,7 +3,7 @@ import {
     afterNextRender, computed, DestroyRef, DOCUMENT, effect, inject, Injectable, Injector, signal, untracked,
 } from '@angular/core';
 import {listen} from '@tauri-apps/api/event';
-import type {ComponentRecord} from '../../../../core/editor/editor-components';
+import type {ComponentData, ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey, ModelAsset, SceneEntity, SceneId, Transform} from '../../../../core/editor/editor.models';
 import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
@@ -65,6 +65,10 @@ interface PropObjectRecord {
     readonly parent: EntityKey | null;
     readonly transform: Transform;
     readonly components: readonly ComponentRecord[];
+}
+
+export function canEditPropComponent(kind: ComponentData['kind']): boolean {
+    return kind === 'audio_source' || kind === 'script' || kind === 'mesh_renderer' || kind === 'collider';
 }
 
 /** Owns the isolated Prop document and retained draft trail for nested source navigation. */
@@ -399,7 +403,7 @@ export class PropWorkspaceService {
         if (!draft || !entity || this.selectedObject()?.key !== key || !this.canEditDraft()) return Promise.resolve(false);
         try {
             const change = checkedComponentChange(entity.components, intent,
-                record => record.data.kind === 'audio_source' || record.data.kind === 'script');
+                record => canEditPropComponent(record.data.kind));
             if (!change) return Promise.resolve(true);
             const {id, next} = change;
             let components: readonly ComponentRecord[];

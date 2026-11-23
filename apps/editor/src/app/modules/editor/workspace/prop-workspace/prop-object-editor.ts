@@ -27,11 +27,15 @@ export type PropObjectEdit =
                     }
                 </select>
             </label>
-            @for (field of fields; track field.key) {
-                <editor-vector3-field [label]="field.label" [value]="transform()[field.key]" [disabled]="disabled()"
-                                      (valueChanged)="change(field.key, $event)" (editCommitted)="commit()"
-                                      (editCancelled)="cancel()"/>
-            }
+            <section aria-label="Local transform">
+                <h4>Transform <small>Local space</small></h4>
+                @for (field of fields; track field.key) {
+                    <editor-vector3-field [label]="field.label" [unit]="field.key === 'rotation' ? 'degrees' : ''"
+                                          [value]="displayTransform()[field.key]" [disabled]="disabled()"
+                                          (valueChanged)="change(field.key, $event)" (editCommitted)="commit()"
+                                          (editCancelled)="cancel()"/>
+                }
+            </section>
         </fieldset>
         @if (error(); as message) {
             <p role="alert">{{ message }}</p>
@@ -46,6 +50,8 @@ export type PropObjectEdit =
             border: 1px solid var(--color-border);
             margin: 0;
         }
+        section {display: grid; gap: var(--space-1);}
+        h4 {margin: 0;}
         label {display: grid; gap: var(--space-1);}
         input, select {
             min-width: 0;
@@ -69,10 +75,15 @@ export class PropObjectEditor {
     readonly edited = output<PropObjectEdit>();
 
     protected readonly transform = linkedSignal(() => this.object().transform);
+    protected readonly displayTransform = computed(() => {
+        const transform = this.transform();
+        const [x, y, z] = transform.rotation;
+        return {...transform, rotation: [x * 180 / Math.PI, y * 180 / Math.PI, z * 180 / Math.PI] as const};
+    });
     protected readonly error = linkedSignal({source: this.object, computation: (): string | null => null});
     protected readonly fields = [
         {key: 'position', label: 'Prop local position'},
-        {key: 'rotation', label: 'Prop local rotation (radians)'},
+        {key: 'rotation', label: 'Prop local rotation'},
         {key: 'scale', label: 'Prop local scale'},
     ] as const;
     protected readonly parents = computed(() => {
@@ -106,10 +117,11 @@ export class PropObjectEditor {
     }
 
     protected change(field: keyof Transform, change: Vector3Change): void {
-        if (this.disabled() || !Number.isFinite(Math.fround(change.value))) return;
+        const authored = field === 'rotation' ? change.value * Math.PI / 180 : change.value;
+        if (this.disabled() || !Number.isFinite(Math.fround(authored))) return;
         const value = this.transform();
         const next: [number, number, number] = [...value[field]];
-        next[change.axis] = change.value;
+        next[change.axis] = authored;
         this.transform.set({...value, [field]: next});
     }
 
