@@ -57,6 +57,23 @@ describe('InspectorPanel', () => {
         expect(changed).toEqual([{field: 'rotation', axis: 1, value: Math.PI, linked: false}]);
     });
 
+    it('offers whole and per-channel resets that follow Inspector availability', async () => {
+        await select();
+        const reset = vi.fn();
+        fixture.componentInstance.transformResetRequested.subscribe(reset);
+        const root: HTMLElement = fixture.nativeElement;
+        const buttons = [...root.querySelectorAll<HTMLButtonElement>('[aria-label="Reset local transform"] button')];
+        expect(buttons.map(button => button.textContent?.trim())).toEqual([
+            'Reset Transform', 'Reset Position', 'Reset Rotation', 'Reset Scale',
+        ]);
+        buttons.forEach(button => button.click());
+        expect(reset.mock.calls).toEqual([['all'], ['position'], ['rotation'], ['scale']]);
+
+        fixture.componentRef.setInput('editable', false);
+        await fixture.whenStable();
+        expect(buttons.every(button => button.disabled)).toBe(true);
+    });
+
     it('links only the chosen transform vector and keeps that choice across selections', async () => {
         await select();
         const changed: InspectorTransformChange[] = [];

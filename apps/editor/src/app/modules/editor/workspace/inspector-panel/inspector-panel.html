@@ -77,8 +77,16 @@
                             (editCommitted)="editCommitted.emit()"
                             (editCancelled)="editCancelled.emit()"
                     />
-                    <button class="reset-transform" type="button" [disabled]="!editable()"
-                            (click)="transformResetRequested.emit()">Reset Transform</button>
+                    <div aria-label="Reset local transform" class="reset-transform" role="group">
+                        <button type="button" [disabled]="!editable()"
+                                (click)="transformResetRequested.emit('all')">Reset Transform</button>
+                        <button type="button" [disabled]="!editable()"
+                                (click)="transformResetRequested.emit('position')">Reset Position</button>
+                        <button type="button" [disabled]="!editable()"
+                                (click)="transformResetRequested.emit('rotation')">Reset Rotation</button>
+                        <button type="button" [disabled]="!editable()"
+                                (click)="transformResetRequested.emit('scale')">Reset Scale</button>
+                    </div>
                 </section>
                 @if (selected.component_views !== undefined) {
                     <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>

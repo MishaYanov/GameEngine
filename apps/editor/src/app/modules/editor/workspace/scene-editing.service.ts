@@ -33,6 +33,9 @@ export interface TransformFieldEdit {
     readonly linked?: boolean;
 }
 
+const TRANSFORM_FIELDS = ['position', 'rotation', 'scale'] as const;
+const IDENTITY_LOCAL_TRANSFORM: Transform = {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]};
+
 function linkedVector(original: Vec3, {field, axis, value}: TransformFieldEdit): Vec3 | null {
     const start = original[axis];
     if (field !== 'scale') {
@@ -179,19 +182,21 @@ export class SceneEditingService {
         }], 'local'));
     }
 
-    resetTransform(): Promise<boolean> {
+    resetTransform(field: TransformField | 'all' = 'all'): Promise<boolean> {
         const context = this.editor.snapshot();
         const generation = this.editor.workspaceGeneration();
         const key = context?.selection[0];
         if (!context || !key || !this.editable()) return Promise.resolve(false);
-        const transform: Transform = {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]};
         return this.withCommittedEdit(async () => {
             const snapshot = this.editor.snapshot();
             if (this.editor.workspaceGeneration() !== generation || snapshot?.active_scene_id !== context.active_scene_id ||
                 snapshot.mode !== 'edit' || snapshot.transaction !== null || snapshot.selection[0] !== key) return;
             const entity = snapshot.document.entities.find(candidate => candidate.key === key);
-            if (!entity || (['position', 'rotation', 'scale'] as const).every(field =>
-                entity.transform[field].every((value, axis) => value === transform[field][axis]))) return;
+            const fields = field === 'all' ? TRANSFORM_FIELDS : [field];
+            if (!entity || fields.every(channel =>
+                entity.transform[channel].every((value, axis) => value === IDENTITY_LOCAL_TRANSFORM[channel][axis]))) return;
+            const transform = field === 'all' ? IDENTITY_LOCAL_TRANSFORM :
+                {...entity.transform, [field]: IDENTITY_LOCAL_TRANSFORM[field]};
             await this.execute(CommandBuilder.transforms([{key, transform}], 'local'), generation);
             this.errorState.set(null);
         });
@@ -364,7 +369,7 @@ export class SceneEditingService {
 
     private update(edit: FieldEdit, command: EditorCommand): void {
         edit.changed = edit.entity.name !== edit.original.name || !sameCollider(edit.entity.collider, edit.original.collider) ||
-            (['position', 'rotation', 'scale'] as const).some(field =>
+            TRANSFORM_FIELDS.some(field =>
                 edit.entity.transform[field].some((value, axis) => value !== edit.original.transform[field][axis]));
         this.draft.set({edit, entity: edit.entity});
         // At most one preview command waits behind the command in flight.

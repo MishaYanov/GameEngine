@@ -79,7 +79,9 @@ dd {
 }
 
 .reset-transform {
-  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
 
 h3 {
@@ -115,7 +117,8 @@ h3 span,
   background: var(--color-danger-bg);
 }
 
-.discard-edit {
+.discard-edit,
+.reset-transform button {
   min-height: 2rem;
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-input-edge);
@@ -127,12 +130,17 @@ h3 span,
   cursor: var(--cursor-action);
 }
 
-.discard-edit:hover {
+:is(.discard-edit, .reset-transform button):enabled:hover {
   background: var(--color-control-hover);
 }
 
-.discard-edit:active {
+:is(.discard-edit, .reset-transform button):enabled:active {
   background: var(--color-control-pressed);
+}
+
+.reset-transform button:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
 }
 
 .error {

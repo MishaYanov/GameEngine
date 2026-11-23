@@ -51,7 +51,7 @@ export class InspectorPanel {
     readonly editStarted = output<InspectorField>();
     readonly nameChanged = output<string>();
     readonly transformChanged = output<InspectorTransformChange>();
-    readonly transformResetRequested = output<void>();
+    readonly transformResetRequested = output<TransformProperty | 'all'>();
     readonly colliderChanged = output<Collider>();
     readonly colliderInvalid = output<void>();
     readonly colliderShapeChanged = output<ColliderKind>();

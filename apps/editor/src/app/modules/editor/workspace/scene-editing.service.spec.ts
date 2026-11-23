@@ -209,6 +209,35 @@ describe('SceneEditingService', () => {
         expect(await editing.resetTransform()).toBe(false);
     });
 
+    it('resets one channel after settling queued edits to the other channels', async () => {
+        bridge.setVector('position', [8, 2, -3]);
+        bridge.setVector('rotation', [1, 2, 3]);
+        bridge.setVector('scale', [2, 3, 4]);
+        const preview = bridge.holdNext('set_transforms');
+        editing.transform({field: 'scale', axis: 1, value: 7});
+        await preview.started;
+        const reset = editing.resetTransform('position');
+        preview.release();
+        expect(await reset).toBe(true);
+        expect(bridge.types()).toEqual(['begin_transaction', 'set_transforms', 'commit_transaction', 'set_transforms']);
+        expect(bridge.history[1].entities[0].transform).toEqual({
+            position: [8, 2, -3], rotation: [1, 2, 3], scale: [2, 7, 4],
+        });
+        expect(editing.entity()?.transform).toEqual({
+            position: [0, 0, 0], rotation: [1, 2, 3], scale: [2, 7, 4],
+        });
+
+        await editing.resetTransform('position');
+        expect(bridge.history).toHaveLength(2);
+        await editing.resetTransform('rotation');
+        expect(editing.entity()?.transform).toEqual({
+            position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 7, 4],
+        });
+        bridge.snapshot.update(snapshot => ({...snapshot, transaction: 'An external edit'}));
+        expect(await editing.resetTransform('scale')).toBe(false);
+        expect(bridge.history).toHaveLength(3);
+    });
+
     it('adds, changes and removes collider shapes as atomic edits preserving offsets', async () => {
         expect(await editing.replaceCollider('box')).toBe(true);
         expect(editing.entity()?.collider).toEqual({kind: 'box', half_extents: [0.5, 0.5, 0.5], offset: [0, 0, 0]});
