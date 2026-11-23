@@ -1,3 +1,6 @@
+import {AnimationWorkspaceService} from '../animation/animation-workspace.service';
+import type {AnimationPaneRequest} from '../animation/animation-pane-request';
+import type {InspectorSubject} from '../inspector-panel/inspector-subject';
 import {checkedComponentChange, sceneComponentCommand} from './component-actions';
 import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
 import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
@@ -35,6 +38,8 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 		[inputActionAssets]="inputActions?.assets() ?? []"
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[skyPanoramaAssetsEnabled]="skyPanoramaAssetsEnabled()"
+        [animationWorkspaceAvailable]="animationWorkspaceAvailable()"
+        (animationWorkspaceRequested)="openAnimation($event)"
 		[particleDesignerAvailable]="particleDesigner !== null"
 		(particleDesignerRequested)="openParticleDesigner()"
 		[editable]="available()"
@@ -101,6 +106,9 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 export class SceneComponentInspector {
 	readonly entity = input<SceneEntity | null>(null);
 	readonly editable = input(false);
+    readonly subject = input<InspectorSubject | null>(null);
+    private readonly animation = inject(AnimationWorkspaceService, {optional: true});
+    protected readonly animationWorkspaceAvailable = computed(() => this.animation !== null && this.subject() !== null);
     private readonly componentEditor = viewChild(ComponentEditor);
     private readonly animatorInspector = viewChild(AnimatorInspector);
     private readonly controlsInspector = viewChild(ControlGraphInspector);
@@ -235,6 +243,29 @@ export class SceneComponentInspector {
 			this.error.set(null);
 		});
 	}
+
+    protected async openAnimation(componentId: string): Promise<void> {
+        if (!this.animation || !this.available()) return;
+        const context = this.context();
+        const resolve = (): AnimationPaneRequest | null => {
+            const subject = this.subject();
+            const record = this.basicComponents().find(component => component.id === componentId);
+            if (!subject || record?.data.kind !== 'animation') return null;
+            const {source, playback} = record.data.settings;
+            return {
+                library: 'imported', subject, componentId,
+                asset: {id: source.asset_id, fingerprint: source.expected_sha256},
+                clipIndex: playback.kind === 'single_clip' ? playback.clip_index : playback.idle,
+            };
+        };
+        const request = resolve();
+        if (!request) return;
+        try {
+            await this.animation.openScoped(request, resolve);
+        } catch (error) {
+            if (context === this.context()) this.error.set(error instanceof Error ? error.message : String(error));
+        }
+    }
 
     protected focusSpecialistAttachment(kind: SpecialistAttachment): void {
         if (!this.available() || !this.specialistAttachments().some(choice => choice.id === kind && !choice.unavailableReason)) return;

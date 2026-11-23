@@ -93,7 +93,7 @@
                     </div>
                 </section>
                 @if (selected.component_views !== undefined) {
-                    <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>
+                    <editor-scene-component-inspector [entity]="selected" [subject]="subject()" [editable]="editable()"/>
                     <editor-linked-prefab-inspector [editable]="editable()" [entity]="selected"
                                                     aria-label="Linked prefab" data-reference-prefab tabindex="-1"/>
                 } @else if (selected.collider || !catalogCollider()) {

@@ -14,6 +14,9 @@ import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import {AnimationWorkspace} from './animation-workspace';
 import {AnimationWorkspaceService} from './animation-workspace.service';
+import type {AnimationPaneRequest} from './animation-pane-request';
+import {ScopedPaneRequests} from '../scoped-pane-request';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 
 vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn(async () => () => undefined)}));
 
@@ -101,7 +104,7 @@ function setup(useRealViews = false) {
     const closeAuthoredClipPreview = vi.fn(async (_token: string) => undefined);
     TestBed.configureTestingModule({
         providers: [
-            AnimationWorkspaceService,
+            AnimationWorkspaceService, ScopedPaneRequests, WorkspaceDraftReview,
             {provide: EditorService, useValue: {
                 nativeAvailable: true, workspaceGeneration: generation, playing,
                 snapshot: () => ({
@@ -111,6 +114,13 @@ function setup(useRealViews = false) {
                 inspectAnimation: inspect, openAnimationWorkspacePreview: open, importedAnimationKeys,
                 sampleAnimationWorkspacePreview: sample, closeAnimationPreview: close, frameAnimationWorkspacePreview: frame,
                 listAuthoredClips, openAuthoredClip, saveAuthoredClip, openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview,
+                openClipTimelineDraft: async (id: string) => ({
+                    ...library.get(id)!, draft_id: 'timeline-draft', draft_revision: 0,
+                    dirty: false, can_undo: false, can_redo: false,
+                }),
+                openClipTimelinePreview: openAuthoredClipPreview,
+                sampleClipTimelinePreview: sampleAuthoredClipPreview,
+                closeClipTimelineDraft: async () => undefined,
             }},
             {provide: SceneEditingService, useValue: {entity: selected}},
             useRealViews ? WorkspaceViewService
@@ -127,7 +137,111 @@ function setup(useRealViews = false) {
     };
 }
 
+const importedRequest: AnimationPaneRequest = {
+    library: 'imported',
+    clipIndex: 2,
+    subject: {
+        address: {kind: 'scene', scene: 'arena', object: actor.key},
+        scope: {workspaceGeneration: 1, nativeGeneration: 11, revision: 4},
+        contentRevision: 5, access: 'scene-edit',
+    },
+    componentId: actor.animation!.id,
+    asset: {id: settings.source.asset_id, fingerprint: settings.source.expected_sha256},
+};
+
 describe('Animation workspace', () => {
+    it('reviews drafts and loads the requested imported clip before opening the pane', async () => {
+        const {fixture, workspace, views, inspect, open} = setup(true);
+        await fixture.whenStable();
+        const review = vi.fn(async () => false);
+        TestBed.inject(WorkspaceDraftReview).setReviewers([review]);
+        const resolve = () => importedRequest;
+        expect(await workspace.openScoped(importedRequest, resolve)).toBe(false);
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        expect(inspect).not.toHaveBeenCalled();
+
+        review.mockResolvedValue(true);
+        const missing = {...importedRequest, clipIndex: 99};
+        expect(await workspace.openScoped(missing, resolve)).toBe(false);
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        expect(open).not.toHaveBeenCalled();
+
+        inspect.mockClear();
+        expect(await workspace.openScoped(importedRequest, resolve)).toBe(true);
+        await fixture.whenStable();
+        expect(views.activeViewKind()).toBe('animation-workspace');
+        expect(inspect).toHaveBeenCalledExactlyOnceWith(settings.source.asset_id, 1, 4);
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({entity_key: actor.key}), 2, 1, 4, 11, expect.any(Number));
+        expect(workspace.clipIndex()).toBe(2);
+    });
+
+    it('leaves the original pane intact if import preparation finishes after its binding changes', async () => {
+        const {fixture, workspace, views, inspect, open} = setup(true);
+        await fixture.whenStable();
+        const response = await inspect();
+        inspect.mockClear();
+        let finish!: (review: typeof response) => void;
+        inspect.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+        const target = signal<AnimationPaneRequest | null>(importedRequest);
+        const result = workspace.openScoped(importedRequest, target);
+        await vi.waitFor(() => expect(inspect).toHaveBeenCalledOnce());
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        target.set({...importedRequest, asset: {...importedRequest.asset, fingerprint: 'b'.repeat(64)}});
+        finish(response);
+        expect(await result).toBe(false);
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        expect(open).not.toHaveBeenCalled();
+    });
+
+    it('opens the exact requested clip for the selected nested linked Prop object', async () => {
+        const {fixture, workspace, selected, entities, open} = setup(true);
+        const outer: SceneEntity = {
+            ...actor, key: 'assembly', animation: null, renderable: false,
+            linked_prefab: {source: {source_id: 'assembly-source', path: 'props/assembly.json'}, bindings: {}},
+        };
+        const member = {...actor, key: 'left-knight', parent: outer.key};
+        entities.set([outer, member, {...member, key: 'right-knight'}]);
+        selected.set(member);
+        const address = {kind: 'object', placement_path: ['left', 'knight'], source_entity: 'knight'} as const;
+        const request: AnimationPaneRequest = {
+            ...importedRequest,
+            subject: {...importedRequest.subject, access: 'linked-overrides',
+                address: {kind: 'linked', scene: 'arena', root: outer.key, address}},
+        };
+        expect(await workspace.openScoped(request, () => request)).toBe(true);
+        await fixture.whenStable();
+        expect(open).toHaveBeenCalledWith({
+            document: {kind: 'instance', scene_id: 'arena', root_key: outer.key},
+            entity_key: member.key, component_id: actor.animation!.id, address,
+        }, 2, 1, 4, 11, expect.any(Number));
+        expect(workspace.preview()?.target.entity_key).toBe(member.key);
+    });
+
+    it('preloads an authored marker and opens its precise timeline instead of a library default', async () => {
+        const {fixture, workspace, views, openAuthoredClip, saveAuthoredClip} = setup(true);
+        const document = await saveAuthoredClip('props/knight.clip.json', {
+            schema_version: 2, name: 'Knight Turn', duration_ticks: 1000,
+            owner: {kind: 'scene', scene_id: 'arena'},
+            markers: [{id: 'turn-finish', label: 'Turn finish', at: 376}],
+            tracks: [{target: {kind: 'scene', entity_key: actor.key}, track: {
+                kind: 'local_position', interpolation: 'linear',
+                keys: [{id: 'start', at: 0, value: [0, 0, 0]}, {id: 'end', at: 1000, value: [1, 0, 0]}],
+            }}],
+        });
+        const request: AnimationPaneRequest = {
+            library: 'authored', markerId: 'turn-finish', subject: importedRequest.subject,
+            asset: {id: document.asset.asset_id, revision: document.asset.revision, fingerprint: document.asset.fingerprint},
+        };
+        expect(await workspace.openScoped({...request, markerId: 'removed-marker'}, () => request)).toBe(false);
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        openAuthoredClip.mockClear();
+        expect(await workspace.openScoped(request, () => request)).toBe(true);
+        await fixture.whenStable();
+        const timeline = fixture.nativeElement.querySelector('editor-clip-timeline') as HTMLElement;
+        expect(openAuthoredClip).toHaveBeenCalledExactlyOnceWith(document.asset.asset_id, 1);
+        expect(timeline.querySelector('[aria-label="Timeline bookmarks"] [aria-pressed="true"]')?.textContent)
+            .toContain('Turn finish · 376 ms');
+    });
     it('offers a clear empty view and opens the selected imported clip independently', async () => {
         const {fixture, selected, inspect, open, workspace, frame} = setup();
         selected.set(null);

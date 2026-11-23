@@ -4,20 +4,40 @@ import type {AnimationReview, AnimationSource} from '../../../../core/editor/ani
 import {
     matchesAnimationTarget, reserveAnimationPreviewRequest, type ScopedAnimationPreview,
 } from '../../../../core/editor/animation-workspace.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import type {ClipAssetDocument} from '../../../../core/editor/authored-clip.models';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {type PropWorkspaceDocument, PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
-import {type AnimationTargetOption, propAnimationTargets, sceneAnimationTarget} from './animation-workspace-target';
+import {ScopedPaneRequests, type PreparedScopedPane, type ScopedPaneTarget} from '../scoped-pane-request';
+import type {AnimationPaneRequest} from './animation-pane-request';
+import {type AnimationTargetOption, boundAnimationTarget, propAnimationTargets, sceneAnimationTarget} from './animation-workspace-target';
 
 interface AuthoredClipReveal {
-    readonly assetId: string;
+    readonly document: ClipAssetDocument;
     readonly markerId: string;
-    readonly generation: number;
-    readonly scene: string;
-    readonly prop: PropWorkspaceDocument | null;
-    readonly subject: string | null;
+    readonly openTimeline: boolean;
+    readonly current: () => boolean;
 }
+
+interface PreparedImportedClip {
+    readonly library: 'imported';
+    readonly scope: 'scene' | 'prop';
+    readonly workspace: WorkspaceAssetScope;
+    readonly option: AnimationTargetOption;
+    readonly review: AnimationReview;
+    readonly clipIndex: number;
+}
+
+interface PreparedAuthoredClip {
+    readonly library: 'authored';
+    readonly scope: 'scene' | 'prop';
+    readonly document: ClipAssetDocument;
+    readonly markerId: string;
+}
+
+type PreparedAnimationClip = PreparedImportedClip | PreparedAuthoredClip;
 
 interface PreviewOwner {
     readonly key: string;
@@ -50,6 +70,10 @@ export class AnimationWorkspaceService {
     private readonly views = inject(WorkspaceViewService);
     private readonly props = inject(PropWorkspaceService);
     private readonly editing = inject(SceneEditingService);
+    private readonly panes = inject(ScopedPaneRequests, {optional: true});
+    private readonly viewport = inject(ViewportEditorService, {optional: true});
+    private readonly preparedImport = signal<PreparedImportedClip | null>(null);
+    private readonly pinnedScope = signal<'scene' | 'prop' | null>(null);
     private readonly pin = signal<ScopedAnimationPreview | null>(null);
     private readonly failure = signal<string | null>(null);
     private readonly status = signal<'loading' | 'opening' | null>(null);
@@ -104,9 +128,11 @@ export class AnimationWorkspaceService {
         const snapshot = this.editor.snapshot();
         if (!this.nativeAvailable || this.library() !== 'imported' || !this.views.animationView() || snapshot?.mode !== 'edit' ||
             snapshot.transaction !== null || this.editor.playing()) return null;
-        const option = this.target();
-        if (!option) return null;
+        const selection = this.target();
+        if (!selection) return null;
         const generation = this.editor.workspaceGeneration();
+        const prepared = this.preparedImport();
+        const option = this.matchesPreparedImport(prepared, selection, generation, snapshot.revision) ? prepared.option : selection;
         return {
             option, generation, revision: snapshot.revision,
             key: JSON.stringify([generation, snapshot.revision, option.key, this.retryVersion()]),
@@ -117,7 +143,11 @@ export class AnimationWorkspaceService {
         effect(() => {
             const origin = this.views.animationOrigin();
             const active = this.views.animationView();
-            if (active) untracked(() => this.chooseScope(origin));
+            if (active) this.scope.set(this.pinnedScope() ?? origin);
+            else untracked(() => {
+                this.pinnedScope.set(null);
+                this.preparedImport.set(null);
+            });
         });
         effect(() => {
             if (!this.views.animationView() || this.library() !== 'authored') this.authoredReveal.set(null);
@@ -153,7 +183,10 @@ export class AnimationWorkspaceService {
     }
 
     chooseScope(value: string): void {
-        if (value === 'scene' || value === 'prop') this.scope.set(value);
+        if (value !== 'scene' && value !== 'prop') return;
+        if (value !== this.scope()) this.preparedImport.set(null);
+        this.pinnedScope.set(value);
+        this.scope.set(value);
     }
 
     openAuthored(): void {
@@ -162,35 +195,118 @@ export class AnimationWorkspaceService {
         this.views.selectView('animation-workspace');
     }
 
+    async openScoped(request: AnimationPaneRequest, resolve: () => ScopedPaneTarget | null): Promise<boolean> {
+        if (!this.panes || !this.nativeAvailable || this.editor.playing()) return false;
+        const origin = this.views.activeViewKind();
+        const propOrigin = this.views.propView() || this.views.animationView() && this.scope() === 'prop';
+        let activated = false;
+        return this.panes.open<PreparedAnimationClip>({...request, pane: 'animation-workspace'}, {
+            resolve: () => {
+                if (this.destroyed || this.editor.playing() ||
+                    this.views.activeViewKind() !== (activated ? 'animation-workspace' : origin)) return null;
+                return resolve();
+            },
+            load: target => this.prepareScopedClip(request, target, propOrigin),
+            activate: (prepared, _target, stillCurrent) => {
+                if (!this.views.availableViews().includes('animation-workspace')) return false;
+                this.views.selectView('animation-workspace');
+                activated = true;
+                this.chooseScope(prepared.scope);
+                this.library.set(prepared.library);
+                if (prepared.library === 'imported') {
+                    this.preparedImport.set(prepared);
+                    this.targetKey.set(prepared.option.key);
+                    this.retryVersion.update(version => version + 1);
+                } else {
+                    this.authoredReveal.set({
+                        document: prepared.document, markerId: prepared.markerId, openTimeline: true, current: stillCurrent,
+                    });
+                }
+                return true;
+            },
+        });
+    }
+
+    private async prepareScopedClip(
+        request: AnimationPaneRequest, target: ScopedPaneTarget, propOrigin: boolean,
+    ): Promise<PreparedScopedPane<PreparedAnimationClip> | null> {
+        const snapshot = this.editor.snapshot();
+        const workspace = target.subject.scope;
+        const asset = target.asset;
+        if (!asset || !snapshot || snapshot.mode !== 'edit' || snapshot.revision !== workspace.revision) return null;
+        try {
+            if (request.library === 'authored') {
+                const document = await this.loadAuthoredClip(asset.id, request.markerId, workspace);
+                return document ? {
+                    value: {library: 'authored', document, markerId: request.markerId ?? '',
+                        scope: target.subject.address.kind === 'prop' || propOrigin ? 'prop' : 'scene'},
+                    asset: {id: document.asset.asset_id, revision: document.asset.revision, fingerprint: document.asset.fingerprint},
+                } : null;
+            }
+            const bound = boundAnimationTarget(target.subject.address, request.componentId, snapshot.active_scene_id,
+                this.editing.entity(), snapshot.document.entities, this.props.document(), this.props.selectedObject(), propOrigin);
+            const source = bound?.option.settings.source;
+            if (!bound || !source || source.asset_id !== asset.id) return null;
+            const review = await this.editor.inspectAnimation(asset.id, workspace.workspaceGeneration, workspace.revision);
+            if (review.workspace_generation !== workspace.nativeGeneration || review.revision !== workspace.revision ||
+                !sameAnimationSource(review.metadata.source, source) ||
+                !review.metadata.clips.some(clip => clip.index === request.clipIndex)) return null;
+            const revision = asset.revision === undefined ? undefined
+                : this.editor.modelAssets()?.find(model => model.asset_id === asset.id)?.revision ?? undefined;
+            return {
+                value: {library: 'imported', ...bound, workspace, review, clipIndex: request.clipIndex},
+                asset: {id: source.asset_id, fingerprint: source.expected_sha256, revision},
+            };
+        } catch {
+            return null;
+        }
+    }
+
     async revealAuthoredClip(assetId: string, markerId: string): Promise<void> {
         const snapshot = this.editor.snapshot();
         if (!assetId || snapshot?.mode !== 'edit' || this.editor.playing()) return;
         const origin = this.views.activeViewKind();
         const prop = this.views.propView() ? this.props.document() : null;
-        const request: AuthoredClipReveal = {
-            assetId, markerId, generation: this.editor.workspaceGeneration(), scene: snapshot.active_scene_id,
-            prop, subject: this.clipRevealSubject(prop),
+        const subject = this.clipRevealSubject(prop);
+        const generation = this.editor.workspaceGeneration();
+        const nativeGeneration = this.viewport?.state()?.workspace_generation;
+        if (nativeGeneration == null) return;
+        const sameSubject = () => {
+            const live = this.editor.snapshot();
+            return !this.destroyed && live?.mode === 'edit' && !this.editor.playing() &&
+                live.active_scene_id === snapshot.active_scene_id && this.editor.workspaceGeneration() === generation &&
+                this.viewport?.state()?.workspace_generation === nativeGeneration &&
+                (!prop || this.props.document() === prop) && this.clipRevealSubject(prop) === subject;
         };
-        if (!await this.reviewNavigation() || !this.matchesClipRevealOrigin(request) ||
-            this.views.activeViewKind() !== origin) return;
-        this.authoredReveal.set(request);
-        this.openAuthored();
+        if (!await this.reviewNavigation() || !sameSubject() || this.views.activeViewKind() !== origin) return;
+        const revision = this.editor.snapshot()!.revision;
+        const current = () => sameSubject() && this.editor.snapshot()?.revision === revision;
+        try {
+            const document = await this.loadAuthoredClip(assetId, markerId, {workspaceGeneration: generation, nativeGeneration, revision});
+            if (!document || !current() || this.views.activeViewKind() !== origin) return;
+            this.authoredReveal.set({document, markerId, openTimeline: !!markerId, current});
+            this.openAuthored();
+        } catch {
+            // The originating field already reports unavailable clip assets.
+        }
+    }
+
+    private async loadAuthoredClip(
+        id: string, markerId: string | undefined, scope: WorkspaceAssetScope,
+    ): Promise<ClipAssetDocument | null> {
+        const document = await this.editor.openAuthoredClip(id, scope.workspaceGeneration);
+        return document?.asset.asset_id === id && document.workspace_generation === scope.nativeGeneration &&
+            (!markerId || document.clip.markers?.some(marker => marker.id === markerId))
+            ? document : null;
     }
 
     isCurrentClipReveal(request: AuthoredClipReveal): boolean {
         return this.authoredReveal() === request && this.library() === 'authored' &&
-            this.views.animationView() && this.matchesClipRevealOrigin(request);
+            this.views.animationView() && request.current();
     }
 
     finishClipReveal(request: AuthoredClipReveal): void {
         if (this.authoredReveal() === request) this.authoredReveal.set(null);
-    }
-
-    private matchesClipRevealOrigin(request: AuthoredClipReveal): boolean {
-        const snapshot = this.editor.snapshot();
-        return !this.destroyed && snapshot?.mode === 'edit' && !this.editor.playing() &&
-            snapshot.active_scene_id === request.scene && this.editor.workspaceGeneration() === request.generation &&
-            (!request.prop || this.props.document() === request.prop) && this.clipRevealSubject(request.prop) === request.subject;
     }
 
     private clipRevealSubject(prop: PropWorkspaceDocument | null): string | null {
@@ -258,7 +374,21 @@ export class AnimationWorkspaceService {
         this.failure.set(null);
         this.time.set(0);
         this.status.set(owner ? 'loading' : null);
-        if (owner) void this.inspect(owner);
+        if (!owner) return;
+        const prepared = this.preparedImport();
+        if (this.matchesPreparedImport(prepared, owner.option, owner.generation, owner.revision)) {
+            const context = {owner, review: prepared.review};
+            this.context.set(context);
+            this.openClip(context, prepared.clipIndex);
+        } else void this.inspect(owner);
+    }
+
+    private matchesPreparedImport(
+        prepared: PreparedImportedClip | null, option: AnimationTargetOption, generation: number, revision: number,
+    ): prepared is PreparedImportedClip {
+        return prepared !== null && prepared.option.key === option.key &&
+            prepared.workspace.workspaceGeneration === generation && prepared.workspace.revision === revision &&
+            prepared.workspace.nativeGeneration === this.viewport?.state()?.workspace_generation;
     }
 
     private async inspect(owner: PreviewOwner): Promise<void> {

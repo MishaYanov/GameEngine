@@ -129,19 +129,10 @@ export class AuthoredClipEditor {
                     this.animation.finishClipReveal(request);
                     return;
                 }
-                void this.run(async () => {
-                    const clip = await this.editor.openAuthoredClip(request.assetId, request.generation);
-                    if (!this.current(request.generation) || !this.animation.isCurrentClipReveal(request)) return;
-                    if (clip.asset.asset_id !== request.assetId) throw new Error('The editor opened a different Animation Clip.');
-                    this.accept(clip);
-                    if (!request.markerId) return;
-                    if (!clip.clip.markers?.some(marker => marker.id === request.markerId)) {
-                        this.error.set('The saved marker is unavailable in this Animation Clip.');
-                        return;
-                    }
-                    this.timelineMarker.set(request.markerId);
-                    this.timelineOpen.set(true);
-                }).finally(() => this.animation.finishClipReveal(request));
+                this.accept(request.document);
+                this.timelineMarker.set(request.markerId);
+                this.timelineOpen.set(request.openTimeline);
+                this.animation.finishClipReveal(request);
             });
         });
         let unsubscribe: (() => void) | undefined;

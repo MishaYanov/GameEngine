@@ -62,7 +62,10 @@
                 <p class="binding">Edit the Prop source or unpack this instance to change its {{ label(component) }}.</p>
             } @else {
                 <div class="actions component-actions">
-                    @if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
+                    @if (component.data.kind === 'animation' && animationWorkspaceAvailable()) {
+                        <button class="primary-action" type="button" [disabled]="!available() || open()"
+                                (click)="animationWorkspaceRequested.emit(component.id)">Open Animation</button>
+                    } @else if (component.data.kind === 'particle_emitter' && particleDesignerAvailable()) {
                         <button class="primary-action" (click)="particleDesignerRequested.emit()"
                                 [disabled]="!available() || open()" aria-haspopup="dialog" type="button">Edit Particles…</button>
                     } @else {
@@ -73,6 +76,9 @@
                     <details class="component-more">
                         <summary [attr.aria-label]="'More actions for ' + label(component)">More actions</summary>
                         <div class="actions">
+                            @if (component.data.kind === 'animation' && animationWorkspaceAvailable()) {
+                                <button type="button" [disabled]="!available() || open()" (click)="start(component)">Edit Binding</button>
+                            }
                             <button type="button" [disabled]="!available() || open()" (click)="toggle(component)"
                                     [attr.aria-label]="(component.enabled ? 'Disable ' : 'Enable ') + label(component)">
                                 {{ component.enabled ? 'Disable' : 'Enable' }}

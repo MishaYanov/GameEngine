@@ -5,6 +5,7 @@ import type {EntityKey, SceneEntity, SceneId} from '../../../../core/editor/edit
 import type {NestedPropPlacement, PrefabSourceEntity} from '../../../../core/editor/linked-prefabs.models';
 import type {PropWorkspaceDocument, PropWorkspaceObject} from '../prop-workspace/prop-workspace.service';
 import {readPrefabSource} from '../prefabs/prefab-source-values';
+import type {InspectorAddress} from '../inspector-panel/inspector-subject';
 
 export interface AnimationTargetOption {
     readonly key: string;
@@ -76,6 +77,37 @@ export function propAnimationTargets(
     };
     visit(placement, [], []);
     return result;
+}
+
+/** Resolves a selected component without letting the visible tab choose another object. */
+export function boundAnimationTarget(
+    address: InspectorAddress, componentId: string, sceneId: SceneId, sceneSelection: SceneEntity | null,
+    entities: readonly SceneEntity[], prop: PropWorkspaceDocument | null, propObject: PropWorkspaceObject | null,
+    propVisible: boolean,
+): {readonly option: AnimationTargetOption; readonly scope: 'scene' | 'prop'} | null {
+    if (address.kind === 'prop') {
+        const option = prop?.kind === 'source' && prop.draft.draft_id === address.draftId &&
+            propObject?.key === address.sourceObject
+            ? objectOption(propObject, {kind: 'source', asset_id: prop.draft.asset_id, draft_id: address.draftId,
+                draft_revision: prop.draft.draft_revision ?? 0})
+            : null;
+        return option?.target.component_id === componentId ? {option, scope: 'prop'} : null;
+    }
+    if (address.scene !== sceneId) return null;
+    if (address.kind === 'scene') {
+        const option = sceneSelection?.key === address.object
+            ? sceneAnimationTarget(sceneSelection, entities, sceneId) : null;
+        return option?.target.component_id === componentId && option.target.document.kind === 'scene'
+            ? {option, scope: 'scene'} : null;
+    }
+    if (address.address.kind !== 'object') return null;
+    const useProp = propVisible && prop?.kind === 'instance' && prop.root === address.root;
+    const option = useProp && propObject
+        ? objectOption(propObject, {kind: 'instance', scene_id: sceneId, root_key: address.root})
+        : sceneAnimationTarget(sceneSelection, entities, sceneId);
+    if (option?.target.component_id !== componentId || option.target.document.kind !== 'instance' ||
+        option.target.document.root_key !== address.root) return null;
+    return {option: {...option, target: {...option.target, address: address.address}}, scope: useProp ? 'prop' : 'scene'};
 }
 
 function objectOption(

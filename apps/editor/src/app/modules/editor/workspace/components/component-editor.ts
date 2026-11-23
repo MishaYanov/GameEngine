@@ -82,6 +82,8 @@ export class ComponentEditor {
     readonly inputActionAssets = input<readonly InputActionsAsset[]>([]);
     readonly inputActionAssetsEnabled = input(false);
     readonly skyPanoramaAssetsEnabled = input(false);
+    readonly animationWorkspaceAvailable = input(false);
+    readonly animationWorkspaceRequested = output<string>();
     readonly particleDesignerAvailable = input(false);
     readonly particleDesignerRequested = output<void>();
 	readonly ownerKey = input('');
