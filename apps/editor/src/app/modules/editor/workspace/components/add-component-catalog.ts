@@ -45,7 +45,7 @@ export function addComponentCatalog(
         label: type.label,
         group: groups[type.kind] ?? 'Gameplay',
         keywords: type.type_id,
-        description: type.description,
+        description: type.kind === 'collider' ? 'Add a Box or Sphere collider in local space.' : type.description,
         unavailableReason: pinned(type.kind) ? 'Edit the Prop source to attach this component.'
             : objectCapacity >= capacity ? 'This object already has 16 components.'
             : (counts.get(type.kind) ?? 0) >= type.max_per_object ? 'This object already has its maximum for this type.'

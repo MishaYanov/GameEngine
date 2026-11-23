@@ -64,6 +64,7 @@ export class InspectorPanel {
     readonly colliderInteractionChanged = output<ColliderInteractionChange>();
     readonly editCommitted = output<void>();
     readonly editCancelled = output<void>();
+    readonly physicsLayersRequested = output<void>();
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly injector = inject(Injector);
     private readonly drawer = viewChild(Drawer);
@@ -71,6 +72,10 @@ export class InspectorPanel {
     private readonly editor = inject(EditorService, {optional: true});
     private readonly viewport = inject(ViewportEditorService, {optional: true});
 
+    protected readonly catalogCollider = computed(() => this.editor?.capabilities()?.component_types?.some(type =>
+        type.kind === 'collider') === true);
+    protected readonly physicsLayersAvailable = computed(() => this.editor?.capabilities()?.commands?.some(command =>
+        command.name === 'set_project') === true);
     protected readonly positionLinked = signal(false);
     protected readonly rotationLinked = signal(false);
     protected readonly scaleLinked = signal(false);

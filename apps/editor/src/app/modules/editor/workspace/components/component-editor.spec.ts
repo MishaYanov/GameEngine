@@ -104,6 +104,24 @@ describe('Interactable Inspector', () => {
         }}]);
     });
 
+    it('attaches a Box from the catalog without treating a plane mesh as its collision shape', async () => {
+        const panel = await setup();
+        panel.fixture.componentRef.setInput('types', [{
+            type_id: 'engine.collider', kind: 'collider', label: 'Collider', description: 'Collision shape',
+            max_per_object: 1,
+        }]);
+        const box = {kind: 'box', half_extents: [0.5, 0.05, 0.5], offset: [0, -0.05, 0]};
+        panel.fixture.componentRef.setInput('initialCollider', box);
+        await panel.fixture.whenStable();
+        panel.button('Add Component').click();
+        await panel.fixture.whenStable();
+        expect(panel.host.querySelector<HTMLSelectElement>('.component-form select')!.value).toBe('box');
+        panel.button('Apply Component').click();
+        expect(panel.intents).toEqual([expect.objectContaining({kind: 'add', component: expect.objectContaining({
+            data: {kind: 'collider', collider: box},
+        })})]);
+    });
+
     it('keeps invalid input in a draft until selection changes', async () => {
         const panel = await setup();
         panel.button('Add Component').click();

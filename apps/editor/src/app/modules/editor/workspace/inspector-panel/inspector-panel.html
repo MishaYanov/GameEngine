@@ -96,13 +96,16 @@
                     <editor-scene-component-inspector [entity]="selected" [editable]="editable()"/>
                     <editor-linked-prefab-inspector [editable]="editable()" [entity]="selected"
                                                     aria-label="Linked prefab" data-reference-prefab tabindex="-1"/>
-                } @else {
+                } @else if (selected.collider || !catalogCollider()) {
                 <editor-collider-inspector
                     [collider]="selected.collider ?? null" [contextKey]="selection.identity" [editable]="editable()"
                     (editStarted)="editStarted.emit('collider')" (colliderChanged)="colliderChanged.emit($event)"
                     (draftInvalid)="colliderInvalid.emit()" (shapeChanged)="colliderShapeChanged.emit($event)"
                     (interactionChanged)="colliderInteractionChanged.emit($event)"
                     (editCommitted)="editCommitted.emit()" (editCancelled)="editCancelled.emit()"/>
+                @if (physicsLayersAvailable()) {
+                    <button type="button" [disabled]="!editable()" (click)="physicsLayersRequested.emit()">Physics Layers…</button>
+                }
                 }
             </div>
         } @empty {

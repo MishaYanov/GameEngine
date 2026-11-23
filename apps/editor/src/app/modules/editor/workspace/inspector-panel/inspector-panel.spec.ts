@@ -21,7 +21,7 @@ it('projects the active scene, native generation, and content revision from the 
     });
     const native = signal({workspace_generation: 7});
     TestBed.configureTestingModule({providers: [
-        {provide: EditorService, useValue: {snapshot, workspaceGeneration: signal(2)}},
+        {provide: EditorService, useValue: {snapshot, workspaceGeneration: signal(2), capabilities: () => null}},
         {provide: ViewportEditorService, useValue: {state: native}},
     ]});
     const fixture = TestBed.createComponent(InspectorPanel);

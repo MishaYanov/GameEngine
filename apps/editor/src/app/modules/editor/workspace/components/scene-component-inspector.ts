@@ -1,7 +1,7 @@
 import {checkedComponentChange, sceneComponentCommand} from './component-actions';
 import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
 import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
-import type { SceneEntity } from '../../../../core/editor/editor.models';
+import type { Collider, SceneEntity } from '../../../../core/editor/editor.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { ViewportEditorService } from '../../../../core/editor/viewport-editor.service';
 import { SceneEditingService } from '../scene-editing.service';
@@ -25,6 +25,7 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
         (specialistAttachmentRequested)="focusSpecialistAttachment($event)"
 		[scriptTypes]="scriptTypes()"
 		[ownerKey]="entity()?.key ?? ''"
+        [initialCollider]="initialCollider()"
 		[contextKey]="context()"
 		[entities]="targets()"
 		[models]="models()"
@@ -107,6 +108,10 @@ export class SceneComponentInspector {
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types?.filter(type =>
         type.kind !== 'animator' && (type.kind !== 'script' || this.scriptTypes().length > 0)) ?? []);
 	protected readonly animatorSupported = computed(() => this.editor.capabilities()?.animator_assets === true);
+    protected readonly initialCollider = computed<Collider | null>(() =>
+        this.entity()?.model_path === 'models/primitives/v1/plane.glb'
+            ? {kind: 'box', half_extents: [0.5, 0.05, 0.5], offset: [0, -0.05, 0]}
+            : null);
     protected readonly specialistAttachments = computed<readonly SpecialistAttachmentChoice[]>(() => {
         const actor = this.entity();
         if (!actor) return [];

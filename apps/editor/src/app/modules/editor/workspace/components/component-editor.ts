@@ -85,6 +85,7 @@ export class ComponentEditor {
     readonly particleDesignerAvailable = input(false);
     readonly particleDesignerRequested = output<void>();
 	readonly ownerKey = input('');
+    readonly initialCollider = input<Collider | null>(null);
 	readonly contextKey = input('');
 	readonly editable = input(false);
 	readonly pending = input(false);
@@ -372,7 +373,7 @@ export class ComponentEditor {
 			componentDraft(kind, component?.id ?? crypto.randomUUID(), this.ownerKey(), component),
 		);
 		this.collider.set(
-			component?.data.kind === 'collider' ? component.data.collider : defaultCollider('box')!,
+			component?.data.kind === 'collider' ? component.data.collider : this.initialCollider() ?? defaultCollider('box')!,
 		);
 		this.colliderInvalid.set(false);
 		this.open.set(true);

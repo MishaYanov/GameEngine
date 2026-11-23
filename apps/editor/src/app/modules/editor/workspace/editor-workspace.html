@@ -187,6 +187,7 @@
                 (transformResetRequested)="sceneEditing.resetTransform($event)"
                 (colliderChanged)="sceneEditing.collider($event)"
                 (colliderInvalid)="sceneEditing.invalidateCollider()"
+                (physicsLayersRequested)="openPhysicsLayers()"
                 (colliderShapeChanged)="sceneEditing.replaceCollider($event)"
                 (colliderInteractionChanged)="sceneEditing.changeColliderInteraction($event)"
                 (editCommitted)="sceneEditing.commit()"
