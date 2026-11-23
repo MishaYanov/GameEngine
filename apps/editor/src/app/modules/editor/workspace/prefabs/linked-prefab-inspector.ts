@@ -28,6 +28,7 @@ import { PrefabSourceEditor } from './prefab-source-editor';
 import { ReferenceBindings } from './reference-bindings';
 import { readPrefabSource } from './prefab-source-values';
 import { PropAssetSelection } from './prop-asset-selection';
+import type {InspectorSubject} from '../inspector-panel/inspector-subject';
 import { PropWorkspaceService } from '../prop-workspace/prop-workspace.service';
 
 interface OverrideReview {
@@ -60,11 +61,33 @@ interface RecoveryCapture {
 export class LinkedPrefabInspector {
 	readonly entity = input<SceneEntity | null>(null);
 	readonly editable = input(false);
+    readonly subject = input<InspectorSubject | null>(null);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
 	private readonly propAssets = inject(PropAssetSelection, { optional: true });
 	protected readonly propWorkspace = inject(PropWorkspaceService, { optional: true });
 	protected readonly status = signal<LinkedPrefabStatus | null>(null);
+    protected readonly selectedAddress = computed(() => {
+        const address = this.subject()?.address;
+        return address?.kind === 'linked' ? address.address : null;
+    });
+    protected readonly visibleOverrides = computed(() => {
+        const address = this.selectedAddress();
+        return this.status()?.overrides.filter(override =>
+            !address || memberKey(override.address) === memberKey(address)) ?? [];
+    });
+    protected readonly inheritedFields = computed(() => {
+        const entity = this.entity();
+        const overrides = this.visibleOverrides();
+        if (!entity || !this.selectedAddress() || this.status() === null) return [];
+        const fields = [
+            {kind: 'name', label: 'Name', value: entity.name},
+            {kind: 'transform_position', label: 'Position', value: entity.transform.position.join(', ')},
+            {kind: 'transform_rotation', label: 'Rotation (radians)', value: entity.transform.rotation.join(', ')},
+            {kind: 'transform_scale', label: 'Scale', value: entity.transform.scale.join(', ')},
+        ];
+        return fields.filter(field => !overrides.some(row => row.target.property.kind === field.kind));
+    });
 	protected readonly error = signal<string | null>(null);
 	protected readonly pending = signal(false);
 	protected readonly source = signal<PrefabSourceDraft | null>(null);
@@ -217,6 +240,13 @@ export class LinkedPrefabInspector {
 	protected async openSource(update: boolean): Promise<void> {
 		const status = this.status();
 		if (!status || status.source_error) return;
+        if (!update && this.propWorkspace) {
+            const context = this.context();
+            const opened = await this.propWorkspace.openSource({asset_id: status.source_id,
+                path: status.source_path, name: status.source_path.split('/').at(-1) ?? status.source_path});
+            if (!opened && this.context() === context) this.error.set(this.propWorkspace.error());
+            return;
+        }
 		await this.run(async (generation, revision, current) => {
 			const draft = await this.openReviewedSource(status.source_path, status.source_id, generation, revision, current);
 			if (!draft) return;
@@ -549,4 +579,8 @@ export class LinkedPrefabInspector {
 			this.pending.set(false);
 		}
 	}
+}
+
+function memberKey(address: PropAddress): string {
+    return JSON.stringify([address.kind, address.placement_path, address.kind === 'object' ? address.source_entity : null]);
 }

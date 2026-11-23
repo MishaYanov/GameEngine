@@ -68,10 +68,18 @@
 		} @else {
 			<p>Unpack keeps the current objects and removes their source link. Scene Undo can restore it.</p>
 		}
+        @if (inheritedFields().length) {
+            <dl aria-label="Inherited Prop properties">
+                @for (field of inheritedFields(); track field.kind) {
+                    <dt>{{ field.label }} <small>Inherited</small></dt>
+                    <dd>{{ field.value }}</dd>
+                }
+            </dl>
+        }
 		<ul aria-label="Prefab overrides">
-			@for (override of status.overrides; track overrideKey(override)) {
+			@for (override of visibleOverrides(); track overrideKey(override)) {
 				<li>
-					<h4>{{ property(override.target) }}</h4>
+					<h4>{{ property(override.target) }} <small>Overridden</small></h4>
 					<small class="reference" [title]="overrideKey(override)">{{ addressLabel(override.address) }}</small>
 					<dl>
 						<dt>Base</dt>
@@ -93,7 +101,7 @@
 					</div>
 				</li>
 			} @empty {
-				<li>No local overrides.</li>
+				<li>{{ selectedAddress() ? 'No local overrides on this object.' : 'No local overrides.' }}</li>
 			}
 		</ul>
 	</section>
@@ -132,7 +140,7 @@
 		<ul aria-label="Reviewed property changes">
 			@for (row of rows; track overrideKey(row)) {
 				<li>
-					<h4>{{ property(row.target) }}</h4>
+					<h4>{{ property(row.target) }} <small>{{ row.conflict ? 'Conflict' : 'Overridden' }}</small></h4>
 					<small class="reference" [title]="overrideKey(row)">{{ addressLabel(row.address) }}</small>
 					<dl>
 						<dt>Saved base</dt>
