@@ -1,3 +1,4 @@
+import {validAudioSourceSettings, type AudioSourceSettings} from './audio-source.models';
 import type { CameraComponentSettings, Collider, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
@@ -48,6 +49,7 @@ export type NativeBehaviorSpec =
 	  };
 
 export type ComponentData =
+    | { readonly kind: 'audio_source'; readonly settings: AudioSourceSettings }
 	| {
 			readonly kind: 'mesh_renderer';
 			readonly model_path: string;
@@ -172,6 +174,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 			(material == null || (record(material) && vector(material['base_color_factor'], 4, 0, 1)))
 		);
 	}
+	if (data['kind'] === 'audio_source') return validAudioSourceSettings(data['settings']);
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
 	if (data['kind'] === 'player_controller') return validPlayerControllerSettings(data['settings']) &&
@@ -230,6 +233,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		new Set(value.map((component) => component.id)).size === value.length &&
 		value.filter((component) => component.data.kind === 'mesh_renderer').length <= 1 &&
 		value.filter((component) => component.data.kind === 'collider').length <= 1 &&
+		value.filter((component) => component.data.kind === 'audio_source').length <= 1 &&
 		value.filter((component) => component.data.kind === 'character_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'player_controller').length <= 1 &&
 		value.filter((component) => component.data.kind === 'animation').length <= 1 &&
@@ -250,6 +254,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 				[
 					'mesh_renderer',
 					'collider',
+					'audio_source',
 					'native_behavior',
 					'character_controller',
 					'player_controller',

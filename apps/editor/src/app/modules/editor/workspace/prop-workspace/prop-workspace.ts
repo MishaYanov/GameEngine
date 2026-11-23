@@ -7,6 +7,9 @@ import {type PropWorkspaceObject, PropWorkspaceService} from './prop-workspace.s
 import {PropPreviewService} from './prop-preview.service';
 import {PropObjectEditor} from './prop-object-editor';
 import {NestedPropEditor} from './nested-prop-editor';
+import {EditorService} from '../../../../core/editor/editor.service';
+import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
+import {ComponentEditor} from '../components/component-editor';
 
 interface PlacementRefresh {
     readonly draftId: string;
@@ -17,7 +20,7 @@ interface PlacementRefresh {
 
 @Component({
     selector: 'editor-prop-workspace',
-    imports: [EditorIcon, PropObjectEditor, NestedPropEditor],
+    imports: [EditorIcon, PropObjectEditor, NestedPropEditor, ComponentEditor],
     templateUrl: './prop-workspace.html',
     styleUrl: './prop-workspace.scss',
 })
@@ -26,6 +29,20 @@ export class PropWorkspace {
     protected readonly prop = inject(PropWorkspaceService);
     protected readonly preview = inject(PropPreviewService);
     private readonly injector = inject(Injector);
+    private readonly editor = inject(EditorService);
+    protected readonly assetGeneration = this.editor.workspaceGeneration;
+    protected readonly audioTypes = computed(() => this.editor.capabilities()?.component_types?.filter(type => type.kind === 'audio_source') ?? []);
+    protected readonly audioComponents = computed(() => this.prop.selectedObject()?.components.filter(record => record.data.kind === 'audio_source') ?? []);
+    protected readonly audioScope = computed<AudioAuditionScope | null>(() => {
+        const selected = this.prop.selectedObject();
+        const preview = this.preview.currentState();
+        const snapshot = this.editor.snapshot();
+        if (!selected || !preview || preview.selection !== selected.key || !this.preview.ready() ||
+            !snapshot || snapshot.mode !== 'edit' || snapshot.transaction) return null;
+        return {owner: {kind: 'prop', preview_token: preview.token, key: selected.key}, generation: this.assetGeneration(),
+            nativeGeneration: preview.workspace_generation, revision: snapshot.revision,
+            contentRevision: this.prop.draft()?.draft_revision ?? snapshot.scene_revision};
+    });
     protected readonly parentName = computed(() => {
         const key = this.prop.selectedObject()?.parent;
         return this.prop.document()?.objects.find(object => object.key === key)?.name ?? 'Prop root';

@@ -1,3 +1,4 @@
+import type {AudioSourceBus, AudioSourcePlayback} from '../../../../core/editor/audio-source.models';
 import {
     validInteractionReach,
     type ComponentData,
@@ -45,6 +46,7 @@ export interface ComponentDraft {
 	playerController: {input: InputActionsRef; space: PlayerMovementSpace; control_graph?: string};
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
+    audioSource: {clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus};
     interactable: { action: string; reach: string };
 	actor: string;
 	key_trigger: string;
@@ -86,6 +88,7 @@ export function componentDraft(
 		playerController: {input: {kind: 'project_default'}, space: 'camera_relative'},
 		animation: null,
 		camera: cameraComponentDraft(),
+        audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects'},
         interactable: {action: 'interact', reach: '1'},
 		actor: '',
 		key_trigger: '',
@@ -132,6 +135,9 @@ export function componentDraft(
 	} else if (value.data.kind === 'player_controller') {
 		const {input, space, control_graph} = value.data.settings;
 		draft.playerController = {input, space, ...(control_graph ? {control_graph} : {})};
+	} else if (value.data.kind === 'audio_source') {
+        const {clip, gain, loop, playback, bus} = value.data.settings;
+        draft.audioSource = {clipId: clip?.asset ?? '', gain: String(gain), loop, playback, bus};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
@@ -211,7 +217,15 @@ export function componentFromDraft(
 	};
 	const optionalReference = (key: string, label: string) => (key ? reference(key, label) : null);
 	let data: ComponentData;
-	if (draft.kind === 'mesh_renderer') {
+	if (draft.kind === 'audio_source') {
+        const {clipId, gain, loop, playback, bus} = draft.audioSource;
+        if (clipId && !models.some(asset => asset.kind === 'audio_clip' && asset.asset_id === clipId)) {
+            throw new Error('Assign an Audio Clip from this project.');
+        }
+        data = {kind: 'audio_source', settings: {
+            clip: clipId ? {asset: clipId} : null, gain: finite(gain, 'Gain', 0, 1), loop, playback, bus,
+        }};
+    } else if (draft.kind === 'mesh_renderer') {
 		if (!relativeAssetPath(draft.model_path) || draft.model_path === '__no_mesh__')
 			throw new Error('Choose an asset-relative model path.');
 		const color: Vec4 = draft.tint
@@ -230,7 +244,7 @@ export function componentFromDraft(
 			kind: 'mesh_renderer',
 			model_path: draft.model_path,
 			asset_id:
-				models.find((model) => model.kind !== 'prefab' && model.path === draft.model_path)
+				models.find((model) => (!model.kind || model.kind === 'model') && model.path === draft.model_path)
 					?.asset_id ??
 				previous ??
 				null,

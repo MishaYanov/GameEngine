@@ -338,6 +338,7 @@ impl Scene {
 					character_controller: entity.character_controller.clone(),
 					camera: entity.camera.clone(),
 					player_controller: entity.player_controller.clone(),
+					audio_source: entity.audio_source.clone(),
 				}
 			};
 			entry.parent.clone_from(&entity.parent);

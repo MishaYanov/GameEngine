@@ -47,6 +47,7 @@ struct SceneEntry {
 	character_controller: Option<engine_core::character_controller::CharacterControllerComponent>,
 	camera: Option<Box<CameraComponent>>,
 	player_controller: Option<Box<engine_core::components::PlayerControllerComponent>>,
+	audio_source: Option<Box<engine_core::components::AudioSourceComponent>>,
 }
 
 impl SceneEntry {
@@ -87,6 +88,7 @@ impl SceneEntry {
 			.clone_from(&entity.character_controller);
 		self.camera.clone_from(&entity.camera);
 		self.player_controller.clone_from(&entity.player_controller);
+		self.audio_source.clone_from(&entity.audio_source);
 	}
 }
 
@@ -302,6 +304,7 @@ impl Scene {
 						&& entry.interactable == saved.interactable
 						&& entry.camera == saved.camera
 						&& entry.player_controller == saved.player_controller
+						&& entry.audio_source == saved.audio_source
 				}) && camera.position == saved_camera.position
 			&& camera.yaw == saved_camera.yaw
 			&& camera.pitch == saved_camera.pitch
@@ -577,6 +580,7 @@ impl Scene {
 			character_controller: None,
 			camera: None,
 			player_controller: None,
+			audio_source: None,
 		});
 		self.authored_children = None;
 
@@ -691,6 +695,7 @@ impl Scene {
 				character_controller: entry.character_controller.clone(),
 				camera: entry.camera.clone(),
 				player_controller: entry.player_controller.clone(),
+				audio_source: entry.audio_source.clone(),
 			});
 		}
 
@@ -843,6 +848,7 @@ impl Scene {
 		entry.interactable = source_metadata.interactable;
 		entry.camera = source_metadata.camera;
 		entry.player_controller = source_metadata.player_controller;
+		entry.audio_source = source_metadata.audio_source;
 		if let Some(controller) = &mut entry.player_controller {
 			controller.settings.local = false;
 		}

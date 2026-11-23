@@ -12,6 +12,7 @@ import {readPrefabSource} from '../prefabs/prefab-source-values';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import type {PropObjectEdit} from './prop-object-editor';
+import type {ComponentEditIntent} from '../components/component-editor';
 
 export interface PropWorkspaceObject {
     readonly key: EntityKey;
@@ -354,6 +355,27 @@ export class PropWorkspaceService {
 
     editDraft(edit: PropDraftEdit): Promise<boolean> {
         return this.runDraft((draft, revision, generation) => this.editor.editPropDraft(draft.draft_id, revision, edit, generation));
+    }
+
+    editAudioSource(key: EntityKey, intent: ComponentEditIntent): Promise<boolean> {
+        const draft = this.draft();
+        const entity = draft?.prefab.entities.find(entity => entity.key === key);
+        if (!draft || !entity || this.selectedObject()?.key !== key || !this.canEditDraft()) return Promise.resolve(false);
+        const id = 'component' in intent ? intent.component.id : intent.component_id;
+        const current = entity.components.find(component => component.id === id);
+        if (('component' in intent && intent.component.data.kind !== 'audio_source') ||
+            (current && current.data.kind !== 'audio_source') || (intent.kind !== 'add' && !current) ||
+            ('expected' in intent && intent.expected !== (current ? JSON.stringify(current) : null))) {
+            this.failure.set('This Audio Source changed. Discard the edit and review its current values.');
+            return Promise.resolve(false);
+        }
+        const components = entity.components.filter(component => component.id !== id);
+        const next = 'component' in intent ? intent.component : intent.kind === 'enabled' && current
+            ? {...current, enabled: intent.enabled} : null;
+        if (next) components.push(next);
+        return this.editDraft({type: 'apply', prefab: {...draft.prefab,
+            entities: draft.prefab.entities.map(candidate => candidate.key === key ? {...entity, components} : candidate),
+        }});
     }
 
     async saveDraft(target = this.tab()): Promise<boolean> {

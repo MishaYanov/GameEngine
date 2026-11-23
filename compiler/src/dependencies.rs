@@ -230,6 +230,10 @@ impl Closure<'_> {
     }
 
     fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
+		if let Some(clip) = entity.audio_source.as_ref().and_then(|source| source.settings.clip.as_ref()) {
+			self.catalog.audio_clip(&clip.asset)?;
+			self.record(&clip.asset).map_err(|error| format!("Audio Source {}: {error}", entity.key.as_str()))?;
+		}
         if let Some(animator) = &entity.animator {
             let id = &animator.settings.asset_id;
             if self

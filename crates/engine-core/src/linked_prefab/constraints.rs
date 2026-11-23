@@ -10,6 +10,7 @@ pub(crate) fn is_transform_only_anchor(entity: &EntityData) -> bool {
         && entity.interactable.is_none()
         && entity.camera.is_none()
         && entity.player_controller.is_none()
+		&& entity.audio_source.is_none()
 }
 
 pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
@@ -114,6 +115,9 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
                 return Err(
                     "Linked Animator belongs to its source; open the Prop source or Unpack".into(),
                 );
+            }
+            if actual.audio_source != expected.audio_source {
+                return Err("Linked Audio Source is owned by the Prop source; edit the source or Unpack first".into());
             }
             if actual.interactable != expected.interactable {
                 return Err("Linked Interactable is owned by the prefab source; edit the source or Unpack first".into());

@@ -43,6 +43,7 @@ export class PropPreviewService {
     private destroyed = false;
 
     readonly ready = computed(() => this.state() !== null && !this.failure());
+    readonly currentState = this.state.asReadonly();
     readonly loading = this.busy.asReadonly();
     readonly error = this.failure.asReadonly();
     private readonly owner = computed<PreviewOwner | null>(() => {
@@ -73,7 +74,10 @@ export class PropPreviewService {
         if (this.editor.nativeAvailable) {
             this.subscribe('editor://prop-preview-selection', value => {
                 const state = readPreviewState(value);
-                if (state && this.matches(state) && state.selection) this.props.selectObject(state.selection);
+                if (state && this.matches(state)) {
+                    this.state.set(state);
+                    if (state.selection) this.props.selectObject(state.selection);
+                }
             });
             this.subscribe('editor://prop-preview-error', value => {
                 const state = readPreviewState(value);
@@ -109,7 +113,10 @@ export class PropPreviewService {
         const current = this.state();
         if (!current || !this.ready()) return;
         try {
-            await invoke('editor_prop_preview_select', {token: current.token, key});
+            const selected = readPreviewState(await invoke('editor_prop_preview_select', {token: current.token, key}));
+            if (selected && this.matches(selected) && this.props.selectedObject()?.key === selected.selection) {
+                this.state.set(selected);
+            }
         } catch (error) {
             this.reportFailure(current, error);
         }
@@ -145,6 +152,10 @@ export class PropPreviewService {
             }
             this.state.set(state);
             if (state.selection) this.props.selectObject(state.selection);
+            else {
+                const selected = this.props.selectedObject()?.key;
+                if (selected) void this.select(selected);
+            }
         } catch (error) {
             if (this.current(owner, request)) this.failure.set(String(error));
         } finally {

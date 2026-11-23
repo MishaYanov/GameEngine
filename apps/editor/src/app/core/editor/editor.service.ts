@@ -558,6 +558,20 @@ export class EditorService {
         }, false, expectedGeneration);
     }
 
+    async auditionAudioSource(
+        scope: import('./audio-source.models').AudioAuditionScope, componentId: string, requestId: number,
+    ): Promise<unknown> {
+        this.requireGeneration(scope.generation);
+        return this.native('editor_audio_source_audition', {
+            target: {...scope.owner, component_id: componentId}, expectedGeneration: scope.nativeGeneration,
+            expectedRevision: scope.revision, requestId,
+        });
+    }
+
+    stopAudioSourceAudition(token: string): Promise<void> {
+        return this.native('editor_audio_source_audition_stop', {token});
+    }
+
     async previewFeedbackCue(
         workspaceGeneration: number, relativePath: string, expectedGeneration: number,
     ): Promise<unknown> {

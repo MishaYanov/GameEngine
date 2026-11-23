@@ -275,6 +275,7 @@ impl EditorWorkspace {
 					&prefab.entities,
 					&prefab.reference_slots,
 				)?;
+				self.validate_prefab_audio_clips(&prefab)?;
 				next.history.apply(expected, prefab.to_json()?.into())?;
 			}
 			PropDraftEdit::Undo => next.history.undo(expected)?,
@@ -341,12 +342,28 @@ impl EditorWorkspace {
 		self.source_draft(id, revision)?;
 		let prefab = PrefabData::from_json(&value.to_string())?;
 		prefab.validate_linked_player_components()?;
+		self.validate_prefab_audio_clips(&prefab)?;
 		let bytes = prefab.to_json()?.len();
 		Ok(PrefabSourceValidationDto {
 			draft_id: id.into(),
 			entity_count: prefab.entities.len(),
 			bytes,
 		})
+	}
+
+	fn validate_prefab_audio_clips(&self, prefab: &PrefabData) -> Result<(), String> {
+		let expanded = prefab.expanded_entities()?;
+		let mut clips = expanded
+			.iter()
+			.filter_map(|entity| entity.audio_source.as_ref()?.settings.clip.as_ref())
+			.peekable();
+		if clips.peek().is_some() {
+			let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+			for clip in clips {
+				catalog.audio_clip(&clip.asset)?;
+			}
+		}
+		Ok(())
 	}
 	pub fn save_prefab_source(
 		&mut self,

@@ -1,4 +1,5 @@
 import {Component, computed, effect, inject, input, signal, viewChild} from '@angular/core';
+import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
 import type { EditorCommand, SceneEntity } from '../../../../core/editor/editor.models';
 import { EditorService } from '../../../../core/editor/editor.service';
 import { ViewportEditorService } from '../../../../core/editor/viewport-editor.service';
@@ -27,6 +28,8 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
 		[editable]="available()"
 		[previewAllowed]="true"
+		[audioScope]="audioScope()"
+		[assetGeneration]="generation()"
 		[pending]="pending()"
 		[error]="error()"
 		[acknowledged]="acknowledged()"
@@ -78,6 +81,17 @@ export class SceneComponentInspector {
 	protected readonly animatorSupported = computed(() => this.editor.capabilities()?.animator_assets === true);
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
+	protected readonly generation = this.editor.workspaceGeneration;
+	protected readonly audioScope = computed<AudioAuditionScope | null>(() => {
+		const key = this.entity()?.key;
+		const snapshot = this.editor.snapshot();
+		const nativeGeneration = this.viewport?.state()?.workspace_generation;
+		if (!key || !snapshot || snapshot.mode !== 'edit' || snapshot.transaction ||
+			nativeGeneration == null || !snapshot.selection.includes(key) || this.selectedPreview?.active() ||
+			(this.views && this.views.activeViewKind() !== 'scene-viewport')) return null;
+		return {owner: {kind: 'scene', scene_id: snapshot.active_scene_id, key}, generation: this.generation(),
+			nativeGeneration, revision: snapshot.revision, contentRevision: snapshot.scene_revision};
+	});
     protected readonly gameActions = computed(() =>
         this.editor.snapshot()?.project.input_profile?.actions?.map(action => action.id) ?? [],
     );

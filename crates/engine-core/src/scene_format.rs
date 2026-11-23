@@ -186,6 +186,14 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 	{
 		return Err("Player Controller requires scene schema 7".into());
 	}
+	if version < 7
+		&& scene
+			.entities
+			.iter()
+			.any(|entity| entity.audio_source.is_some())
+	{
+		return Err("Audio Source requires scene schema 7".into());
+	}
 	scene.refresh_game_camera_projection()?;
 	Ok(scene)
 }

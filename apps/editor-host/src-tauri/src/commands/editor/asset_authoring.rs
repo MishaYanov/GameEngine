@@ -25,7 +25,7 @@ pub struct AudioClipDetailsDto {
 
 #[derive(Serialize)]
 struct AudioClipReferenceDto {
-	asset_id: AssetId,
+	asset_id: String,
 	path: String,
 }
 #[derive(Clone, Serialize)]
@@ -276,19 +276,38 @@ pub async fn editor_audio_clip_info(
 			return Err("Audio Clip selection belongs to another workspace".into());
 		}
 		let catalog = project_assets::load_catalog(&workspace.asset_root)?;
-		let asset = catalog
-			.by_id(&id)
-			.ok_or("Audio Clip identity is unavailable")?;
+		let asset = catalog.audio_clip(&id)?;
 		let info = project_assets::load_audio_clip(&workspace.asset_root, asset)?.info();
-		let references = catalog
+		let mut references: Vec<_> = catalog
 			.assets
 			.iter()
 			.filter(|owner| owner.dependencies.contains(&id))
 			.map(|owner| AudioClipReferenceDto {
-				asset_id: owner.id.clone(),
+				asset_id: owner.id.as_str().into(),
 				path: owner.path.clone(),
 			})
 			.collect();
+		let session = workspace.backend.session();
+		for entry in session.project().scenes.iter() {
+			if session.scene_document(entry.id()).is_ok_and(|document| {
+				document.entities.iter().any(|entity| {
+					entity
+						.audio_source
+						.as_ref()
+						.and_then(|source| source.settings.clip.as_ref())
+						.is_some_and(|clip| clip.asset == id)
+				})
+			}) && !references
+				.iter()
+				.any(|reference| reference.path == entry.asset_path())
+			{
+				references.push(AudioClipReferenceDto {
+					asset_id: format!("scene:{}", entry.id().as_str()),
+					path: entry.asset_path().into(),
+				});
+			}
+		}
+		references.truncate(runtime::asset_catalog::MAX_CATALOG_ASSETS);
 		Ok(AudioClipDetailsDto { info, references })
 	})
 	.await

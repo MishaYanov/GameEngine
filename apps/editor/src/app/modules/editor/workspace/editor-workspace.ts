@@ -92,7 +92,7 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
-    protected readonly hierarchyCreation = computed(() => (['create_camera', 'create_player'] as const).filter(
+    protected readonly hierarchyCreation = computed(() => (['create_camera', 'create_player', 'create_audio_source'] as const).filter(
         type => this.editorService.capabilities()?.commands?.some(command => command.name === type),
     ));
     protected readonly batchParentingEnabled = computed(() =>

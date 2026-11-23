@@ -107,7 +107,12 @@ impl EditorWorkspace {
 						fingerprint: source.fingerprint,
 						draft_revision,
 					},
-					source.prefab.expanded_entities()?.iter().map(visual_entity).collect(),
+					source
+						.prefab
+						.expanded_entities()?
+						.iter()
+						.map(visual_entity)
+						.collect(),
 					draft_revision,
 				)
 			}
@@ -168,7 +173,11 @@ impl EditorWorkspace {
 		} else {
 			let prefab = PrefabData::from_json(prefab)?;
 			Some(Arc::new(preview_document(
-				prefab.expanded_entities()?.iter().map(visual_entity).collect(),
+				prefab
+					.expanded_entities()?
+					.iter()
+					.map(visual_entity)
+					.collect(),
 			)?))
 		};
 		Ok(Some(PropDraftPreviewRefresh {
@@ -272,7 +281,9 @@ impl EditorWorkspace {
 			preview.frame.state.token == token
 				&& preview.frame.content_revision == revision
 				&& preview.belongs_to(self)
-		}) || (revision == 0 && (self.animation_aperture_is_current(token) || self.authored_clip_aperture_current(token)))
+		}) || (revision == 0
+			&& (self.animation_aperture_is_current(token)
+				|| self.authored_clip_aperture_current(token)))
 	}
 
 	pub(crate) fn prop_preview_edit_draft(
@@ -385,6 +396,7 @@ pub(crate) fn visual_entity(entity: &EntityData) -> EntityData {
 		.with_collider(entity.collider.clone())
 		.with_mesh_index(entity.mesh_index);
 	visual.collision_enabled = entity.collision_enabled;
+	visual.audio_source.clone_from(&entity.audio_source);
 	visual
 }
 

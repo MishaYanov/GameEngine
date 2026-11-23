@@ -1,6 +1,8 @@
 //! Project-scoped CPU application service. No window/input policy lives here.
 #[path = "editor/assets.rs"]
 mod assets;
+#[path = "editor/audio_audition.rs"]
+pub(crate) mod audio_audition;
 #[path = "editor/documents.rs"]
 mod documents;
 #[path = "prefab_sources.rs"]
@@ -59,6 +61,7 @@ pub struct EditorWorkspace {
 	pub(crate) camera_preview: Option<crate::camera_preview::CameraPreview>,
 	pub(crate) prop_preview: Option<prop_preview::PropPreview>,
 	pub(crate) prop_preview_request: u64,
+	pub(crate) audio_audition: audio_audition::AudioAuditionLane,
 	prefab_source_drafts: prefab_sources::PrefabSourceDrafts,
 	pub generation: u64,
 	scene_verification_gate: Arc<std::sync::Mutex<()>>,
@@ -289,6 +292,18 @@ impl EditorWorkspace {
 		// Prepare filesystem-dependent intent before the coordinator mutates.
 		let preflight: Result<(), String> = (|| {
 			match &request.command {
+				Command::AddComponent { component, .. }
+				| Command::ReplaceComponent { component, .. } => {
+					if let runtime::components::ComponentData::AudioSource { settings } =
+						&component.data
+					{
+						component.validate()?;
+						if let Some(clip) = &settings.clip {
+							runtime::assets::project_assets::load_catalog(&self.asset_root)?
+								.audio_clip(&clip.asset)?;
+						}
+					}
+				}
 				Command::SetPlayCameraInput {
 					workspace_generation,
 					..
@@ -341,6 +356,7 @@ impl EditorWorkspace {
 		let receipt = self.backend.execute(request)?;
 		self.discard_stale_camera_preview();
 		self.discard_stale_prop_preview();
+		self.discard_stale_audio_audition();
 		if pauses {
 			self.camera_capture_epoch = self.camera_capture_epoch.wrapping_add(1);
 		}
@@ -412,6 +428,7 @@ impl EditorWorkspace {
 			camera_preview: None,
 			prop_preview: None,
 			prop_preview_request: 0,
+			audio_audition: Default::default(),
 			prefab_source_drafts: Default::default(),
 			generation: NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed),
 			scene_verification_gate: Default::default(),

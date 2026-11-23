@@ -294,6 +294,7 @@ export type EditorCommand =
     | { readonly type: 'duplicate_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'create_camera' }
     | { readonly type: 'create_player' }
+    | { readonly type: 'create_audio_source' }
     | { readonly type: 'set_local_player'; readonly key: EntityKey | null }
     | { readonly type: 'set_default_game_camera'; readonly key: EntityKey }
     | { readonly type: 'align_camera_to_scene_view'; readonly key: EntityKey; readonly position: Vec3; readonly yaw: number; readonly pitch: number }

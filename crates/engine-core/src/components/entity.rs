@@ -3,6 +3,14 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(source) = &self.audio_source {
+			bytes = bytes
+				.saturating_add(std::mem::size_of_val(source.as_ref()))
+				.saturating_add(source.id.as_str().len());
+			if let Some(clip) = &source.settings.clip {
+				bytes = bytes.saturating_add(clip.asset.as_str().len());
+			}
+		}
 		if let Some(controller) = &self.player_controller {
 			bytes = bytes
 				.saturating_add(controller.id.as_str().len())
@@ -90,6 +98,16 @@ impl EntityData {
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
 		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		if let Some(source) = &self.audio_source {
+			records.push(ComponentRecord {
+				id: source.id.clone(),
+				schema_version: 1,
+				enabled: source.enabled,
+				data: ComponentData::AudioSource {
+					settings: source.settings.clone(),
+				},
+			});
+		}
 		if let Some(controller) = &self.player_controller {
 			records.push(ComponentRecord {
 				id: controller.id.clone(),
@@ -240,6 +258,13 @@ impl EntityData {
 			return Err("Object component count exceeds its limit".into());
 		}
 		match component.data {
+			ComponentData::AudioSource { settings } => {
+				self.audio_source = Some(Box::new(AudioSourceComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::PlayerController { settings } => {
 				self.player_controller = Some(Box::new(PlayerControllerComponent {
 					id: component.id,
@@ -328,6 +353,7 @@ impl EntityData {
 			.find(|record| &record.id == id)
 			.ok_or("Component does not exist")?;
 		match record.data {
+			ComponentData::AudioSource { .. } => self.audio_source = None,
 			ComponentData::PlayerController { .. } => self.player_controller = None,
 			ComponentData::Camera { .. } => self.camera = None,
 			ComponentData::CharacterController { .. } => self.character_controller = None,

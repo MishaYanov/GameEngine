@@ -367,6 +367,7 @@ impl CommandFactory {
 			}
 			EditorCommandDto::CreateCamera
 			| EditorCommandDto::CreatePlayer
+			| EditorCommandDto::CreateAudioSource
 			| EditorCommandDto::DeleteSelection
 			| EditorCommandDto::FrameSelection
 			| EditorCommandDto::CommitTransaction
@@ -383,6 +384,13 @@ impl CommandFactory {
 	pub fn capabilities() -> Vec<CommandDescriptorDto> {
 		[
 			("create_player", "Create Player", "player", true, false),
+			(
+				"create_audio_source",
+				"Create Audio Source",
+				"component",
+				true,
+				false,
+			),
 			(
 				"set_local_player",
 				"Set Local Player",

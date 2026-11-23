@@ -113,6 +113,7 @@ export class EditorSearchPicker {
     protected choose(option: SearchPickerOption): void {
         if (this.disabled() || option.disabled) return;
         this.close();
+        this.field().nativeElement.value = option.label;
         this.picked.emit(option.id);
     }
 

@@ -123,6 +123,8 @@ pub fn run() {
 			editor_choose_external_wav,
 			editor_import_external_wav,
 			editor_audio_clip_info,
+			editor_audio_source_audition,
+			editor_audio_source_audition_stop,
 			editor_feedback_cues_read,
 			editor_feedback_cue_import,
 			editor_feedback_cues_apply,

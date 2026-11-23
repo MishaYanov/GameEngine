@@ -14,6 +14,7 @@ import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AssetAuthoring} from './asset-authoring';
 import {AudioClipDetails} from './audio-clip-details';
+import {startAudioClipDrag} from '../audio-source/audio-clip-drag';
 import {PrefabAuthoring} from '../prefabs/prefab-authoring';
 import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
@@ -47,6 +48,10 @@ interface AssetMenuContext {
 export class AssetsPanel {
     private readonly assetDrag = inject(ViewportAssetDragService, {optional: true});
     readonly opening = input(false);
+
+    protected dragAudioClip(file: AssetEntry, event: DragEvent): void {
+        if (file.kind === 'audio_clip' && file.asset_id) startAudioClipDrag(event, file.asset_id, this.editor.workspaceGeneration());
+    }
 
     private readonly pendingAction = signal<AssetAction | null>(null);
     protected readonly loading = computed(() => this.pendingAction() === 'models');

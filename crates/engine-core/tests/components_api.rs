@@ -33,6 +33,73 @@ fn collider(id: &str, enabled: bool, offset: [f32; 3]) -> ComponentRecord {
 		},
 	}
 }
+
+#[test]
+fn audio_source_create_update_undo_duplication_and_save_are_atomic() {
+	use engine_core::{
+		asset_catalog::AssetId, audio_clip::AudioClipRef, components::AudioSourceSettings,
+	};
+	let data = scene(vec![]);
+	let project = ProjectData::for_scene("Audio Sources", "scenes/main.json", &data).unwrap();
+	let mut engine = Engine::new(data, project).unwrap();
+	run(&mut engine, Command::CreateAudioSource);
+	let key = engine.session().selection()[0].clone();
+	let mut component = engine.session().authored_document().entities[0]
+		.component_records()
+		.remove(0);
+	let clip = Some(AudioClipRef {
+		asset: AssetId::generate(),
+	});
+	component.data = ComponentData::AudioSource {
+		settings: AudioSourceSettings {
+			clip: clip.clone(),
+			gain: 0.4,
+			r#loop: true,
+			..Default::default()
+		},
+	};
+	run(
+		&mut engine,
+		Command::ReplaceComponent {
+			key: key.as_str().into(),
+			component,
+		},
+	);
+	run(&mut engine, Command::Undo);
+	assert!(
+		engine.session().authored_document().entities[0]
+			.audio_source
+			.as_ref()
+			.unwrap()
+			.settings
+			.clip
+			.is_none()
+	);
+	run(&mut engine, Command::Redo);
+	run(
+		&mut engine,
+		Command::DuplicateSelection {
+			offset: [1., 0., 0.],
+		},
+	);
+	let document = engine.session().authored_document();
+	assert_ne!(document.entities[0].key, document.entities[1].key);
+	assert!(
+		document
+			.entities
+			.iter()
+			.all(|entity| entity.audio_source.as_ref().unwrap().settings.clip == clip)
+	);
+	let saved = document.to_json().unwrap();
+	assert_eq!(SceneData::from_json(&saved).unwrap(), *document);
+	let mut invalid: serde_json::Value = serde_json::from_str(&saved).unwrap();
+	invalid["entities"][0]["components"][0]["data"]["settings"]["gain"] = 1.5.into();
+	assert!(
+		SceneData::from_json(&invalid.to_string())
+			.unwrap_err()
+			.contains("Audio Source gain")
+	);
+}
 #[test]
 fn canonical_scene_has_one_typed_payload_and_flat_transport_is_a_read_projection() {
 	let mut actor = entity("actor", [0.; 3]);

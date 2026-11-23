@@ -61,6 +61,8 @@
                                     (click)="selectFile(file)"
                                     (dblclick)="openProp(file)"
                                     (pointerdown)="beginAssetDrag(file, $event)"
+                                    (dragstart)="dragAudioClip(file, $event)"
+                                    [draggable]="file.kind === 'audio_clip' && !!file.asset_id"
                                     [attr.aria-pressed]="isSelected(file)"
                                     [attr.data-asset-id]="file.kind === 'scene' ? null : file.asset_id"
                                     [class.drag-source]="canDrag(file)"

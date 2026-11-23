@@ -19,8 +19,8 @@ export function auditionGain({levelPercent, muted, categoryPercent = 100, sceneP
     return muted ? 0 : auditionCeiling * combinedFeedbackPercent(levelPercent, categoryPercent, scenePercent) / 100;
 }
 
-export function decodeCue(context: BaseAudioContext, bytes: unknown): Promise<AudioBuffer> {
-    if (!Array.isArray(bytes) || bytes.length < minimumWaveSize || bytes.length > maximumWaveSize ||
+export function decodeCue(context: BaseAudioContext, bytes: unknown, maximumBytes = maximumWaveSize): Promise<AudioBuffer> {
+    if (!Array.isArray(bytes) || bytes.length < minimumWaveSize || bytes.length > maximumBytes ||
         !bytes.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) {
         return Promise.reject(new Error('Invalid audio preview bytes.'));
     }
@@ -35,8 +35,10 @@ export class CuePreview {
     private gain: GainNode | null = null;
     private generation = 0;
 
-    constructor(private readonly createContext: () => AudioContext = () => new AudioContext()) {
-    }
+    constructor(
+        private readonly createContext: () => AudioContext = () => new AudioContext(),
+        private readonly maximumBytes = maximumWaveSize,
+    ) {}
 
     async play(
         load: () => Promise<unknown>, mix: AuditionMix, active: () => boolean, ended: () => void,
@@ -54,7 +56,7 @@ export class CuePreview {
         const resumed = context.resume();
         const [bytes] = await Promise.all([Promise.resolve().then(load), resumed]);
         if (!current()) return;
-        const buffer = await decodeCue(context, bytes);
+        const buffer = await decodeCue(context, bytes, this.maximumBytes);
         if (!current()) return;
 
         const source = context.createBufferSource();

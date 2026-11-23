@@ -36,6 +36,9 @@ import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
 import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
+import {AudioSourceInspector} from '../audio-source/audio-source-inspector';
+import type {AudioAuditionScope} from '../../../../core/editor/audio-source.models';
+import {audioClipDragType, readAudioClipDrag} from '../audio-source/audio-clip-drag';
 
 export type ComponentEditIntent =
 	| { readonly kind: 'add'; readonly component: ComponentRecord; readonly expected: string | null }
@@ -49,7 +52,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -70,6 +73,8 @@ export class ComponentEditor {
 	readonly error = input<string | null>(null);
 	readonly acknowledged = input(0);
 	readonly previewAllowed = input(false);
+    readonly audioScope = input<AudioAuditionScope | null>(null);
+    readonly assetGeneration = input<number | null>(null);
 	readonly actionRequested = output<ComponentEditIntent>();
 	readonly draftOpenChanged = output<boolean>();
     private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -94,6 +99,11 @@ export class ComponentEditor {
 				JSON.stringify(this.draft().animation?.source)
 		);
 	});
+    protected readonly audioClips = computed(() => this.models().filter(asset => asset.kind === 'audio_clip' && asset.asset_id));
+    protected readonly audioClipOptions = computed(() => this.audioClips().flatMap(clip =>
+        clip.asset_id ? [{id: clip.asset_id, label: clip.name, description: clip.path}] : []
+    ));
+    protected readonly meshModels = computed(() => this.models().filter(asset => !asset.kind || asset.kind === 'model'));
 	protected readonly available = computed(() => this.editable() && !this.pending());
 	protected readonly addTypes = computed(() =>
 		this.components().length >= 16
@@ -199,6 +209,7 @@ export class ComponentEditor {
 	}
 
 	protected label(component: ComponentRecord): string {
+		if (component.data.kind === 'audio_source') return 'Audio Source';
 		if (component.data.kind === 'camera') return 'Camera';
 		if (component.data.kind === 'player_controller') return 'Player Controller';
 		if (component.data.kind === 'native_behavior')
@@ -230,7 +241,26 @@ export class ComponentEditor {
     }
 
     protected pinned(kind: ComponentData['kind']): boolean {
-        return kind === 'interactable' && this.interactablePinned();
+        return (kind === 'interactable' || kind === 'audio_source') && this.interactablePinned();
+    }
+
+    protected chooseAudioClip(id: string): void {
+        if (!this.available() || !this.open() || this.draft().kind !== 'audio_source') return;
+        if (!id || this.audioClips().some(clip => clip.asset_id === id)) this.fields.audioSource.clipId().value.set(id);
+    }
+
+    protected allowAudioDrop(event: DragEvent): void {
+        const transfer = event.dataTransfer;
+        if (!this.available() || this.assetGeneration() === null || !transfer?.types.includes(audioClipDragType)) return;
+        event.preventDefault();
+        transfer.dropEffect = 'copy';
+    }
+
+    protected dropAudioClip(event: DragEvent): void {
+        const id = readAudioClipDrag(event.dataTransfer, this.assetGeneration());
+        if (id === null || !this.audioClips().some(clip => clip.asset_id === id)) return;
+        event.preventDefault();
+        this.chooseAudioClip(id);
     }
 
 	protected start(component?: ComponentRecord): void {

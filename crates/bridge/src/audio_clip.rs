@@ -8,6 +8,10 @@ use engine_core::audio_clip::{
 };
 use std::{fs, path::Path};
 
+/// Audition is a one-shot excerpt, independent of authored loop playback.
+pub const MAX_AUDIO_AUDITION_WAV_BYTES: usize =
+	HEADER_BYTES + 4 * AUDIO_CLIP_SAMPLE_RATE_HZ as usize;
+
 #[derive(Debug)]
 pub struct AudioClip {
 	wav: Vec<u8>,
@@ -26,6 +30,18 @@ impl AudioClip {
 	}
 	pub fn into_wav(self) -> Vec<u8> {
 		self.wav
+	}
+
+	pub fn into_audition_wav(self) -> Vec<u8> {
+		let mut wave = self.wav;
+		if wave.len() > MAX_AUDIO_AUDITION_WAV_BYTES {
+			wave.truncate(MAX_AUDIO_AUDITION_WAV_BYTES);
+			let riff_bytes = (wave.len() - 8) as u32;
+			let pcm_bytes = (wave.len() - HEADER_BYTES) as u32;
+			wave[4..8].copy_from_slice(&riff_bytes.to_le_bytes());
+			wave[40..44].copy_from_slice(&pcm_bytes.to_le_bytes());
+		}
+		wave
 	}
 }
 
@@ -88,6 +104,13 @@ mod tests {
 			inspect(&boundary).unwrap().frames,
 			engine_core::audio_clip::MAX_AUDIO_CLIP_FRAMES
 		);
+		let clip = AudioClip {
+			info: inspect(&boundary).unwrap(),
+			wav: boundary.clone(),
+		};
+		let excerpt = clip.into_audition_wav();
+		assert_eq!(excerpt.len(), MAX_AUDIO_AUDITION_WAV_BYTES);
+		assert_eq!(inspect(&excerpt).unwrap().frames, 32_000);
 		boundary.push(0);
 		assert!(inspect(&boundary).unwrap_err().contains("30-second"));
 		let mut wrong_format = short.to_vec();

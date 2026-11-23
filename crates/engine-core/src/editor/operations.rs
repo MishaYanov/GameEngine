@@ -1,5 +1,6 @@
 //! CPU command implementations. Input bindings and Angular widgets choose
 //! commands; neither participates in their scene mutation semantics.
+mod audio_source;
 mod camera;
 use camera::{
 	align_camera, camera_forward, camera_right, create_camera, dolly, frame_selection, orbit,
@@ -67,6 +68,9 @@ pub(super) fn apply(
 		}
 		EditorCommandDto::CreateCamera => {
 			*selection = vec![create_camera(data)?];
+		}
+		EditorCommandDto::CreateAudioSource => {
+			*selection = vec![audio_source::create_audio_source(data)?];
 		}
 		EditorCommandDto::SetLocalPlayer { key } => player::set_local_player(data, key.as_ref())?,
 		EditorCommandDto::AlignCameraToSceneView {

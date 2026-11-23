@@ -8,6 +8,11 @@
 			<small class="reference">{{ component.id }}</small>
             @if (component.data.kind === 'interactable') {
                 <p>{{ component.data.settings.action }} · {{ component.data.settings.reach }} m</p>
+            } @else if (component.data.kind === 'audio_source') {
+                <editor-audio-source-inspector [componentId]="component.id" [enabled]="component.enabled"
+                    [settings]="component.data.settings" [scope]="audioScope()" [clips]="audioClips()"
+                    [assignable]="available() && !open() && !pinned(component.data.kind)"
+                    (assign)="revealReference(component.id, 'Audio Clip')"/>
             } @else if (component.data.kind === 'camera') {
                 <p>{{ component.data.settings.rig.mode }}</p>
             } @else if (component.data.kind === 'player_controller') {
@@ -15,7 +20,7 @@
                 <p>{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
             }
             @if (pinned(component.data.kind)) {
-                <p>Edit the prefab source or unpack this instance to change its Interactable.</p>
+                <p>Edit the prefab source or unpack this instance to change its {{ label(component) }}.</p>
             } @else {
 			<div class="actions">
 				<button
@@ -68,6 +73,28 @@
 			<p>Apply accepts one undoable change. Discard leaves the component unchanged.</p>
 			<label class="check"><input type="checkbox" [formField]="fields.enabled" />Enabled</label>
 			@switch (draft().kind) {
+                @case ('audio_source') {
+                    <div data-component-reference-field="Audio Clip"
+                         (dragover)="allowAudioDrop($event)" (drop)="dropAudioClip($event)">
+                        <editor-search-picker label="Audio Clip" placeholder="Search Audio Clips…"
+                            [value]="draft().audioSource.clipId || null" [options]="audioClipOptions()"
+                            [clearable]="true" [disabled]="!available()" (picked)="chooseAudioClip($event)"/>
+                    </div>
+                    <label>Gain<input type="text" inputmode="decimal" [formField]="fields.audioSource.gain"/></label>
+                    <label class="check"><input type="checkbox" [formField]="fields.audioSource.loop"/>Loop</label>
+                    <label>Playback
+                        <select [formField]="fields.audioSource.playback">
+                            <option value="on_scene_enter">On Scene Enter</option>
+                            <option value="on_event">On Event</option>
+                        </select>
+                    </label>
+                    <label>Bus
+                        <select [formField]="fields.audioSource.bus">
+                            <option value="effects">Effects</option>
+                            <option value="music">Music</option>
+                        </select>
+                    </label>
+                }
 				@case ('camera') {
 					<fieldset>
 						<legend>Lens</legend>
@@ -92,10 +119,8 @@
 							autocomplete="off"
 					/></label>
 					<datalist [id]="modelListId">
-						@for (model of models(); track model.path) {
-							@if (model.kind !== 'prefab') {
-								<option [value]="model.path">{{ model.name }}</option>
-							}
+						@for (model of meshModels(); track model.path) {
+							<option [value]="model.path">{{ model.name }}</option>
 						}
 					</datalist>
 					<label

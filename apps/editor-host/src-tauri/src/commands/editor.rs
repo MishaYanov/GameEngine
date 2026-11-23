@@ -24,6 +24,8 @@ use std::{
 use tauri::{Emitter, State, WebviewWindow};
 mod asset_authoring;
 pub use asset_authoring::*;
+mod audio_audition;
+pub use audio_audition::*;
 mod feedback_audio;
 pub use feedback_audio::*;
 mod input_actions;
@@ -105,6 +107,7 @@ async fn workspace_with_error<T: Send + 'static, E: From<String> + Send + 'stati
 			let prop_preview_closed = workspace.discard_stale_prop_preview();
 			let animation_preview_closed = workspace.discard_stale_animation_preview();
 			let authored_clip_closed = workspace.discard_stale_authored_clip_preview();
+			workspace.discard_stale_audio_audition();
 			let preview_closed = prop_preview_closed || camera_preview_closed || animation_preview_closed || authored_clip_closed;
 			let current = workspace.backend.session();
 			if current.active_scene_id() != &scene {

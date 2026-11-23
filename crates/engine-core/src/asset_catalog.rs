@@ -292,6 +292,13 @@ impl AssetCatalog {
 	pub fn by_id(&self, id: &AssetId) -> Option<&PersistentAsset> {
 		self.assets.iter().find(|asset| &asset.id == id)
 	}
+	pub fn audio_clip(&self, id: &AssetId) -> Result<&PersistentAsset, String> {
+		let asset = self.by_id(id).ok_or("Audio Clip identity is unavailable")?;
+		if asset.kind != AssetKind::AudioClip {
+			return Err("Audio Source requires an Audio Clip asset".into());
+		}
+		Ok(asset)
+	}
 	pub fn by_path(&self, path: &str) -> Option<&PersistentAsset> {
 		let folded = path.to_lowercase();
 		self.assets.iter().find(|asset| {

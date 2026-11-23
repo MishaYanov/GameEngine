@@ -1,4 +1,5 @@
 //! Typed component adapters over the existing single entity backing store.
+mod audio_source;
 mod entity;
 mod interactable;
 mod native_behavior;
@@ -9,6 +10,9 @@ use crate::{
 	EntityKey,
 	asset_catalog::AssetId,
 	scene_data::{ColliderData, EntityData, MaterialOverrideData, SceneData, validate_model_path},
+};
+pub use audio_source::{
+	AudioSourceBus, AudioSourceComponent, AudioSourcePlayback, AudioSourceSettings,
 };
 pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
@@ -33,6 +37,7 @@ pub const ANIMATOR_TYPE: &str = "engine.animator";
 pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const CAMERA_TYPE: &str = "engine.camera";
 pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
+pub const AUDIO_SOURCE_TYPE: &str = "engine.audio_source";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -69,6 +74,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	AudioSource {
+		settings: AudioSourceSettings,
+	},
 	PlayerController {
 		settings: PlayerControllerSettings,
 	},
@@ -114,6 +122,7 @@ pub struct ComponentRecord {
 impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
+			ComponentData::AudioSource { .. } => AUDIO_SOURCE_TYPE,
 			ComponentData::PlayerController { .. } => PLAYER_CONTROLLER_TYPE,
 			ComponentData::Camera { .. } => CAMERA_TYPE,
 			ComponentData::CharacterController { .. } => CHARACTER_TYPE,
@@ -131,6 +140,7 @@ impl ComponentRecord {
 			return Err("Unsupported component schema version".into());
 		}
 		match &self.data {
+			ComponentData::AudioSource { settings } => settings.validate(),
 			ComponentData::PlayerController { settings } if settings.local && !self.enabled => {
 				Err("A disabled Player Controller cannot own local input".into())
 			}
@@ -177,6 +187,13 @@ pub struct ComponentTypeDescriptor {
 }
 pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 	[
+		(
+			AUDIO_SOURCE_TYPE,
+			"audio_source",
+			"Audio Source",
+			"Clip, gain, playback and audio bus for this object.",
+			1,
+		),
 		(
 			PLAYER_CONTROLLER_TYPE,
 			"player_controller",

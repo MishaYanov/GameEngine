@@ -69,6 +69,8 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub player_controller: Option<Box<crate::components::PlayerControllerComponent>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub audio_source: Option<Box<crate::components::AudioSourceComponent>>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
@@ -99,6 +101,7 @@ impl EntityData {
 			interactable: None,
 			camera: None,
 			player_controller: None,
+			audio_source: None,
 			linked_prefab: None,
 		}
 	}
@@ -170,6 +173,8 @@ struct EntityProjection {
 	#[serde(default)]
 	player_controller: Option<Box<crate::components::PlayerControllerComponent>>,
 	#[serde(default)]
+	audio_source: Option<Box<crate::components::AudioSourceComponent>>,
+	#[serde(default)]
 	linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 	/// A read-only transport projection; commands never take this as mutation authority.
 	#[serde(default)]
@@ -206,6 +211,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			interactable: value.interactable,
 			camera: value.camera,
 			player_controller: value.player_controller,
+			audio_source: value.audio_source,
 			linked_prefab: value.linked_prefab,
 		})
 	}
@@ -258,6 +264,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.player_controller {
 			map.serialize_entry("player_controller", value)?;
+		}
+		if let Some(value) = &self.audio_source {
+			map.serialize_entry("audio_source", value)?;
 		}
 		if let Some(value) = &self.linked_prefab {
 			map.serialize_entry("linked_prefab", value)?;

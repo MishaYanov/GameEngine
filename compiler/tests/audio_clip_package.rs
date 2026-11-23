@@ -3,6 +3,8 @@ use engine_core::{
 	asset_catalog::{
 		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MeshSignature, PersistentAsset,
 	},
+	audio_clip::AudioClipRef,
+	components::{AudioSourceSettings, ComponentData, ComponentId, ComponentRecord},
 	project::ProjectData,
 	scene_data::{CURRENT_SCHEMA_VERSION, EntityData},
 };
@@ -55,10 +57,25 @@ fn packaging_copies_only_reachable_verified_audio_clips() {
 		name: "cube".into(),
 		primitives: 1,
 	});
-	// Use the generic typed dependency edge until scenes gain Audio Source components.
-	model.dependencies.push(clip.id.clone());
-	let cube = EntityData::new(EntityKey::new("cube").unwrap(), "Cube", "cube.glb")
+	let mut cube = EntityData::new(EntityKey::new("cube").unwrap(), "Cube", "cube.glb")
 		.with_asset_id(Some(model.id.clone()));
+	cube.put_component(
+		ComponentRecord {
+			id: ComponentId::new("bell").unwrap(),
+			schema_version: 1,
+			enabled: true,
+			data: ComponentData::AudioSource {
+				settings: AudioSourceSettings {
+					clip: Some(AudioClipRef {
+						asset: clip.id.clone(),
+					}),
+					..Default::default()
+				},
+			},
+		},
+		false,
+	)
+	.unwrap();
 	let scene = SceneData {
 		schema_version: CURRENT_SCHEMA_VERSION,
 		bindings: Default::default(),

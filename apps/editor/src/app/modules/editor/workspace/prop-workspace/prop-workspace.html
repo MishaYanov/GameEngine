@@ -137,11 +137,22 @@
                         <dt>Scale</dt><dd>{{ object.transform.scale.join(', ') }}</dd>
                     </dl>
                     }
-                    @if (object.components.length) {
+                    @if (audioComponents().length || (document.kind === 'source' && audioTypes().length)) {
+                        <editor-component-editor [components]="audioComponents()"
+                            [types]="document.kind === 'source' ? audioTypes() : []"
+                            [ownerKey]="object.key" [contextKey]="document.path + ':' + object.key"
+                            [models]="prop.assets()" [audioScope]="audioScope()" [assetGeneration]="assetGeneration()"
+                            [editable]="document.kind === 'source' && prop.canEditDraft()"
+                            [pending]="prop.draftPending()" [acknowledged]="prop.draft()?.draft_revision ?? 0"
+                            (actionRequested)="prop.editAudioSource(object.key, $event)"/>
+                    }
+                    @if (object.components.length > audioComponents().length) {
                         <h4>Components</h4>
                         <ul>
                             @for (component of object.components; track component.id) {
-                                <li class="component-type">{{ componentLabel(component) }}</li>
+                                @if (component.data.kind !== 'audio_source') {
+                                    <li class="component-type">{{ componentLabel(component) }}</li>
+                                }
                             }
                         </ul>
                     }
