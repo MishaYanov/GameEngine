@@ -40,6 +40,11 @@ function setup() {
         return {...initial, clip: history[cursor], dirty: cursor > 0,
             draft_revision: ++revision, can_undo: cursor > 0, can_redo: cursor + 1 < history.length};
     });
+    const saveDraft = vi.fn(async () => ({
+        ...initial, asset: {...initial.asset, revision: 2}, clip: history[cursor],
+        draft_revision: ++revision, dirty: false,
+    }));
+    const closeDraft = vi.fn(async (_id: string, _discard: boolean) => undefined);
     let preview: VisualClipPreview;
     const open = vi.fn(async (request: ClipTimelinePreviewRequest) => {
         preview = {
@@ -61,12 +66,13 @@ function setup() {
             openClipTimelinePreview: open,
             sampleClipTimelinePreview: sample,
             closeAuthoredClipPreview: close,
-            closeClipTimelineDraft: async () => undefined,
+            saveClipTimelineDraft: saveDraft,
+            closeClipTimelineDraft: closeDraft,
         }},
     ]});
     const fixture = TestBed.createComponent(ClipTimeline);
     fixture.componentRef.setInput('asset', initial);
-    return {fixture, edit, open, sample, close, showPreview, timeline: fixture.debugElement.injector.get(TimelineEditService)};
+    return {fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, timeline: fixture.debugElement.injector.get(TimelineEditService)};
 }
 
 function apply(clip: ClipTimelineDraft['clip'], edit: TimelineEdit): ClipTimelineDraft['clip'] {
@@ -159,6 +165,62 @@ describe('Authored clip timeline', () => {
         button(root, 'Rename Bookmark').click();
         await fixture.whenStable();
         expect(timeline.draft()?.clip.markers).toEqual([{id: 'bookmark', at: 200, label: 'Lever locked'}]);
+    });
+
+    it('keeps a dirty draft on cancel or failed save and closes only after a successful save', async () => {
+        const prototype = HTMLDialogElement.prototype;
+        const show = Object.getOwnPropertyDescriptor(prototype, 'showModal');
+        const close = Object.getOwnPropertyDescriptor(prototype, 'close');
+        Object.defineProperty(prototype, 'showModal', {configurable: true, value(this: HTMLDialogElement) {
+            this.setAttribute('open', '');
+        }});
+        Object.defineProperty(prototype, 'close', {configurable: true, value(this: HTMLDialogElement) {
+            this.removeAttribute('open');
+            this.dispatchEvent(new Event('close'));
+        }});
+        try {
+            const {fixture, timeline, saveDraft, closeDraft} = setup();
+            await fixture.whenStable();
+            const root = fixture.nativeElement as HTMLElement;
+            const trigger = button(root, 'Close Timeline');
+            const events: string[] = [];
+            fixture.componentInstance.saved.subscribe(() => events.push('saved'));
+            fixture.componentInstance.closed.subscribe(() => events.push('closed'));
+            await timeline.edit({type: 'edit', edit: {kind: 'remove_key', key_id: 'start'}});
+            await fixture.whenStable();
+
+            trigger.focus();
+            trigger.click();
+            await fixture.whenStable();
+            const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
+            button(dialog, 'Keep Editing').focus();
+            button(dialog, 'Keep Editing').click();
+            await fixture.whenStable();
+            expect(document.activeElement).toBe(trigger);
+            expect(timeline.draft()?.dirty).toBe(true);
+            expect(closeDraft).not.toHaveBeenCalled();
+
+            trigger.click();
+            await fixture.whenStable();
+            saveDraft.mockRejectedValueOnce(new Error('Cannot save the clip.'));
+            button(dialog, 'Save and Close Timeline').click();
+            await fixture.whenStable();
+            expect(dialog.open).toBe(true);
+            expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('Cannot save the clip.');
+            expect(closeDraft).not.toHaveBeenCalled();
+
+            button(dialog, 'Save and Close Timeline').click();
+            await fixture.whenStable();
+            expect(saveDraft).toHaveBeenLastCalledWith('draft-clip', 1, 1, 2);
+            expect(closeDraft).toHaveBeenCalledExactlyOnceWith('draft-clip', false);
+            expect(events).toEqual(['saved', 'closed']);
+            expect(dialog.open).toBe(false);
+        } finally {
+            if (show) Object.defineProperty(prototype, 'showModal', show);
+            else Reflect.deleteProperty(prototype, 'showModal');
+            if (close) Object.defineProperty(prototype, 'close', close);
+            else Reflect.deleteProperty(prototype, 'close');
+        }
     });
 
     it('loops the editor transport inside the chosen range and releases it on destruction', async () => {

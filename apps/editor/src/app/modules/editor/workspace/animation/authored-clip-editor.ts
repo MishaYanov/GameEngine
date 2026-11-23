@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, effect, inject, signal, untracked} from '@angular/core';
+import {afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, signal, untracked, viewChild} from '@angular/core';
 import {listen} from '@tauri-apps/api/event';
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import {reserveAnimationPreviewRequest} from '../../../../core/editor/animation-workspace.models';
@@ -51,6 +51,8 @@ export class AuthoredClipEditor {
     protected readonly preview = signal<VisualClipPreview | null>(null);
     protected readonly busy = signal(false);
     protected readonly timelineOpen = signal(false);
+    private readonly timelineTrigger = viewChild<ElementRef<HTMLButtonElement>>('timelineTrigger');
+    private readonly injector = inject(Injector);
     protected readonly error = signal<string | null>(null);
     protected readonly message = signal<string | null>(null);
     protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
@@ -143,6 +145,11 @@ export class AuthoredClipEditor {
         if (!this.available() || !this.selected()) return;
         this.closePreview();
         this.timelineOpen.set(true);
+    }
+
+    protected closeTimeline(): void {
+        this.timelineOpen.set(false);
+        afterNextRender(() => this.timelineTrigger()?.nativeElement.focus({preventScroll: true}), {injector: this.injector});
     }
 
     protected timelineSaved(draft: ClipTimelineDraft): void {

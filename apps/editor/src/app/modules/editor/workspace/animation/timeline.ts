@@ -2,10 +2,12 @@ import {Component, computed, effect, inject, input, linkedSignal, output, signal
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import type {ClipAssetDocument, ClipKey, ClipKeyValue, ClipTimelineDraft, Quaternion, TimelineEdit} from '../../../../core/editor/authored-clip.models';
 import type {Vec3} from '../../../../core/editor/editor.models';
+import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {TimelineEditService} from './timeline-edit.service';
 
 @Component({
     selector: 'editor-clip-timeline',
+    imports: [EditorDialog],
     providers: [TimelineEditService],
     templateUrl: './timeline.html',
     styleUrl: './timeline.scss',
@@ -28,6 +30,8 @@ export class ClipTimeline {
     protected readonly selectedMarker = computed(() => this.markers().find(marker => marker.id === this.marker()) ?? null);
     protected readonly label = linkedSignal(() => this.selectedMarker()?.label ?? '');
     protected readonly closing = signal(false);
+    protected readonly resolvingClose = signal(false);
+    protected readonly closePending = computed(() => this.resolvingClose() || this.timeline.busy());
 
     constructor() {
         effect(() => {
@@ -106,12 +110,32 @@ export class ClipTimeline {
         if (saved) this.saved.emit(saved);
     }
 
-    protected async close(discard: boolean): Promise<void> {
-        if (!discard && this.timeline.draft()?.dirty) {
+    protected async requestClose(): Promise<void> {
+        if (this.closePending()) return;
+        if (this.timeline.draft()?.dirty) {
+            this.timeline.stop();
             this.closing.set(true);
-            return;
+        } else {
+            await this.resolveClose('close');
         }
-        if (await this.timeline.close(discard)) this.closed.emit();
+    }
+
+    protected async resolveClose(choice: 'save' | 'discard' | 'close'): Promise<void> {
+        if (this.closePending()) return;
+        this.resolvingClose.set(true);
+        try {
+            if (choice === 'save') {
+                const saved = await this.timeline.save();
+                if (!saved) return;
+                this.saved.emit(saved);
+            }
+            if (await this.timeline.close(choice === 'discard')) {
+                this.closing.set(false);
+                this.closed.emit();
+            }
+        } finally {
+            this.resolvingClose.set(false);
+        }
     }
 
     protected onKeys(event: KeyboardEvent): void {
