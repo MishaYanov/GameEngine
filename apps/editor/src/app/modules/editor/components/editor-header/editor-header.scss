@@ -41,6 +41,10 @@ header {
   anchor-name: --editor-game-trigger;
 }
 
+.project-trigger {
+  anchor-name: --editor-project-trigger;
+}
+
 .game-trigger:hover,
 .controls-trigger:enabled:hover,
 .objects-trigger:enabled:hover,
@@ -76,6 +80,10 @@ header {
   box-shadow: var(--shadow-popover);
 }
 
+.project-menu {
+  position-anchor: --editor-project-trigger;
+}
+
 .game-menu:popover-open {
   display: grid;
 }
@@ -104,6 +112,11 @@ h1 {
 
 @media (max-width: tokens.$breakpoint-compact) {
   header {
+    flex-wrap: wrap;
+  }
+
+  .editor-menus {
+    min-width: 0;
     flex-wrap: wrap;
   }
 

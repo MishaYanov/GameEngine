@@ -6,6 +6,31 @@
                 <dt>Active scene ID</dt>
                 <dd>{{ snapshot.active_scene_id }}</dd>
             </dl>
+            @if (cameraRoleSupported() || skyRoleSupported()) {
+                <fieldset [disabled]="!available()" class="gameplay-roles">
+                    <legend>Scene roles</legend>
+                    @if (cameraRoleSupported()) {
+                        <label>Game Camera
+                            <select #camera (change)="assignSceneRole('camera', camera)">
+                                <option [selected]="!snapshot.document.default_game_camera" value="" disabled>Unassigned</option>
+                                @for (object of cameras(); track object.key) {
+                                    <option [value]="object.key" [selected]="object.key === snapshot.document.default_game_camera">{{ object.name }}</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (skyRoleSupported()) {
+                        <label>Scene Sky
+                            <select #sky (change)="assignSceneRole('sky', sky)">
+                                <option [selected]="!snapshot.document.environment?.active_sky" value="">Unassigned</option>
+                                @for (object of skies(); track object.key) {
+                                    <option [value]="object.key" [selected]="object.key === snapshot.document.environment?.active_sky">{{ object.name }}</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                </fieldset>
+            }
             @if (informationOpen() && environmentSupported()) {
                 <editor-scene-environment-inspector [editable]="available()"/>
             }

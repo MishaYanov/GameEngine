@@ -38,7 +38,7 @@ describe('EditorHeader', () => {
         const menuTriggers = [...root.querySelectorAll('button[popovertarget]')]
             .map(button => button.textContent.trim());
         const sceneInformation = root.querySelector<HTMLButtonElement>('#editor-game-menu button')!;
-        expect(menuTriggers).toEqual(['File', 'Game']);
+        expect(menuTriggers).toEqual(['File', 'Game', 'Project']);
         expect(sceneInformation.textContent.trim()).toBe('Scene Information…');
         expect(sceneInformation.disabled).toBe(true);
 

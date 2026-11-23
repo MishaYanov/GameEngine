@@ -22,11 +22,11 @@
             >Scene Information…
             </button>
             <button
-                    (click)="gameMenu.hidePopover(); gameTrigger.focus(); physicsLayersRequested.emit()"
-                    [disabled]="opening() || editorService.snapshot()?.mode !== 'edit'"
+                    (click)="gameMenu.hidePopover(); gameTrigger.focus(); objectActionRequested.emit('edit_lights')"
+                    [disabled]="opening() || !availableObjectActions().includes('edit_lights')"
                     aria-haspopup="dialog"
                     type="button"
-            >Physics Layers…
+            >Scene Lighting…
             </button>
         </div>
         <button #controlsTrigger class="controls-trigger" type="button" aria-haspopup="dialog"
@@ -37,6 +37,15 @@
                 aria-haspopup="menu"
                 class="objects-trigger"
                 type="button">Objects <span aria-hidden="true">▾</span></button>
+        <button #projectTrigger class="game-trigger project-trigger" popovertarget="editor-project-menu" type="button">Project</button>
+        <div #projectMenu class="game-menu project-menu" id="editor-project-menu" popover>
+            <button (click)="projectMenu.hidePopover(); projectTrigger.focus(); physicsLayersRequested.emit()"
+                    [disabled]="opening() || editorService.snapshot()?.mode !== 'edit'"
+                    aria-haspopup="dialog" autofocus type="button">Physics Layers…</button>
+            <button (click)="projectMenu.hidePopover(); projectTrigger.focus(); controlsRequested.emit()"
+                    [disabled]="opening() || !canOpenControls()"
+                    aria-haspopup="dialog" type="button">Controls and Input Layouts…</button>
+        </div>
     </div>
 
     <div class="breadcrumb">

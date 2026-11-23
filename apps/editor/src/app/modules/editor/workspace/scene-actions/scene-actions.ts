@@ -13,7 +13,7 @@ import {SceneSwitchService} from './scene-switch.service';
 import {SceneVerification} from './scene-verification';
 import {SceneEnvironmentInspector} from './scene-environment-inspector';
 import {rolesForScene} from '../../../../core/editor/gameplay-modules';
-import type {EditorCommand, SceneId} from '../../../../core/editor/editor.models';
+import type {EditorCommand, EntityKey, SceneId} from '../../../../core/editor/editor.models';
 import type {SceneDependencyRequest} from '../../../../core/editor/scene-verification.models';
 
 interface WarmingContext {
@@ -86,6 +86,14 @@ export class SceneActions {
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         !this.opening() && !this.pending() && !this.sceneSwitch.pending() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
+    protected readonly cameras = computed(() => (this.editor.document()?.entities ?? [])
+        .filter(entity => entity.camera?.enabled));
+    protected readonly skies = computed(() => (this.editor.document()?.entities ?? [])
+        .filter(entity => entity.sky?.enabled && !entity.parent && !entity.linked_prefab));
+    protected readonly cameraRoleSupported = computed(() =>
+        this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') === true);
+    protected readonly skyRoleSupported = computed(() =>
+        this.editor.capabilities()?.commands?.some(command => command.name === 'set_active_sky') === true);
     protected readonly warmingResult = computed(() => {
         const state = this.viewport.state();
         const snapshot = this.editor.snapshot();
@@ -265,6 +273,20 @@ export class SceneActions {
             if (current()) {
                 this.warmingFailure.set({context, message: error instanceof Error ? error.message : String(error)});
             }
+        });
+    }
+
+    protected async assignSceneRole(role: 'camera' | 'sky', select: HTMLSelectElement): Promise<void> {
+        const key: EntityKey = select.value;
+        const scene = this.editor.document();
+        select.value = role === 'camera' ? scene?.default_game_camera ?? '' : scene?.environment?.active_sky ?? '';
+        if (!this.available() || (role === 'camera' ? !this.cameras().some(camera => camera.key === key) :
+            key !== '' && !this.skies().some(sky => sky.key === key))) return;
+        const command: EditorCommand = role === 'camera' ? {type: 'set_default_game_camera', key} :
+            {type: 'set_active_sky', key: key || null};
+        await this.run(async () => {
+            const snapshot = this.editor.snapshot();
+            if (snapshot?.mode === 'edit') await this.editor.execute(command, this.editor.workspaceGeneration(), snapshot.revision);
         });
     }
 
