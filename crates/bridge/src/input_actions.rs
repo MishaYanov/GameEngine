@@ -2,7 +2,9 @@
 use crate::asset_io::{contained_file, is_link, read_bounded};
 use engine_core::{
 	SceneData,
-	asset_catalog::{AssetCatalog, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset},
+	asset_catalog::{
+		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset,
+	},
 	components::InputActionsRef,
 	input::{InputActionMap, MAX_INPUT_ACTION_MAP_BYTES},
 };
@@ -37,13 +39,7 @@ pub fn load(root: &Path, asset: &PersistentAsset) -> Result<InputActionMap, Stri
 }
 
 pub fn load_scene(root: &Path, scene: &SceneData) -> Result<Option<InputActionMap>, String> {
-	let Some(component) = scene
-		.local_player()
-		.and_then(|actor| actor.player_controller.as_ref())
-	else {
-		return Ok(None);
-	};
-	let InputActionsRef::Asset { asset_id } = &component.settings.input else {
+	let Some(asset_id) = scene_asset_id(scene) else {
 		return Ok(None);
 	};
 	let root = canonical_root(root)?;
@@ -52,6 +48,14 @@ pub fn load_scene(root: &Path, scene: &SceneData) -> Result<Option<InputActionMa
 		.by_id(asset_id)
 		.ok_or("Player Controller Input Actions identity is unavailable")?;
 	load(&root, asset).map(Some)
+}
+
+pub fn scene_asset_id(scene: &SceneData) -> Option<&AssetId> {
+	let component = scene.local_player()?.player_controller.as_ref()?;
+	match &component.settings.input {
+		InputActionsRef::Asset { asset_id } => Some(asset_id),
+		InputActionsRef::ProjectDefault => None,
+	}
 }
 
 pub(crate) fn read_catalog(root: &Path) -> Result<AssetCatalog, String> {

@@ -331,8 +331,8 @@ impl InputActionMap {
 			.iter()
 			.map(|action| (action.id.as_str(), (action.value, &action.bindings)))
 			.collect();
-		let payload = serde_json::to_vec(&(self.schema_version, bindings))
-			.map_err(|error| error.to_string())?;
+		// The saved overlay targets Default, independently of the authored asset's format.
+		let payload = serde_json::to_vec(&(1_u32, bindings)).map_err(|error| error.to_string())?;
 		Ok(format!("{:x}", Sha256::digest(payload)))
 	}
 

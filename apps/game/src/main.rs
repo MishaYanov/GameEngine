@@ -224,13 +224,14 @@ impl GameApp {
 				music_percent: 100,
 			},
 			|_| true,
-			|voice| {
-				match (self.editor.play_world(), self.editor.render_camera()) {
-					(Some(world), Some(camera)) => runtime::scene_audio::scene_stereo_gains(
-						world, &camera, &voice.entity, voice.spatial,
-					),
-					_ => [0.0; 2],
-				}
+			|voice| match (self.editor.play_world(), self.editor.render_camera()) {
+				(Some(world), Some(camera)) => runtime::scene_audio::scene_stereo_gains(
+					world,
+					&camera,
+					&voice.entity,
+					voice.spatial,
+				),
+				_ => [0.0; 2],
 			},
 		);
 		if self.project_sound.has_soundtrack() {
@@ -676,6 +677,7 @@ impl GameApp {
 		)?;
 		// Install only after every fallible initialization step has succeeded.
 		if self.standalone_runtime {
+			editor.set_personal_input_layout_reader(self.personal_input_layout_reader());
 			editor.start_play(&mut loaded.scene)?;
 		}
 		self.scene = loaded.scene;

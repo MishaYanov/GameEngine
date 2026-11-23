@@ -5,7 +5,11 @@ use super::{
 	display::{DisplaySettings, TextSize},
 };
 use crate::local_player_files::{lock, ordinary_file, profile_directory, read_bounded};
-use runtime::{input::ControllerBindings, scene_io::replace_bytes};
+use runtime::{
+	asset_catalog::AssetId,
+	input::{ControllerBindings, InputActionLayout, MAX_INPUT_ACTION_MAP_BYTES},
+	scene_io::replace_bytes,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -141,6 +145,7 @@ impl Record {
 	}
 }
 
+#[derive(Clone)]
 pub(super) struct Preferences {
 	root: PathBuf,
 	filename: String,
@@ -218,6 +223,53 @@ impl Preferences {
 			|| Ok(ControlsSettings::default()),
 			|folder| self.load_from(&folder),
 		)
+	}
+
+	pub(super) fn load_action_layout(
+		&self,
+		asset: &AssetId,
+	) -> Result<Option<InputActionLayout>, String> {
+		let Some(folder) = self.folder(false)? else {
+			return Ok(None);
+		};
+		Self::read_action_layout(&self.action_layout_path(&folder, asset))
+	}
+
+	pub(super) fn save_action_layout(
+		&self,
+		asset: &AssetId,
+		expected: Option<&InputActionLayout>,
+		layout: Option<&InputActionLayout>,
+	) -> Result<(), String> {
+		self.with_record_lock(true, |folder, _| {
+			let path = self.action_layout_path(folder, asset);
+			if Self::read_action_layout(&path)?.as_ref() != expected {
+				return Err(
+					"Local keyboard bindings changed. Reopen Keyboard before editing.".into(),
+				);
+			}
+			let bytes = serde_json::to_vec(&layout).map_err(|error| error.to_string())?;
+			if bytes.len() > MAX_INPUT_ACTION_MAP_BYTES {
+				return Err("Saved Input Actions exceed the local profile limit".into());
+			}
+			ordinary_file(&path)?;
+			replace_bytes(&path, &bytes)
+		})
+	}
+
+	fn action_layout_path(&self, folder: &Path, asset: &AssetId) -> PathBuf {
+		folder
+			.join(&self.filename)
+			.with_extension(format!("{}.input-actions.json", asset.as_str()))
+	}
+
+	fn read_action_layout(path: &Path) -> Result<Option<InputActionLayout>, String> {
+		match read_bounded(path, MAX_INPUT_ACTION_MAP_BYTES)? {
+			Some(bytes) => {
+				serde_json::from_slice(&bytes).map_err(|_| "Saved Input Actions are invalid".into())
+			}
+			None => Ok(None),
+		}
 	}
 
 	fn load_from(&self, folder: &Path) -> Result<ControlsSettings, String> {

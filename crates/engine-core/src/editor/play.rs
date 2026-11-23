@@ -159,6 +159,21 @@ impl EditorSession {
 		self.play.as_ref()?.active().input_action_map()
 	}
 
+	/// Replace the runtime map after validating a local Player keyboard edit.
+	pub fn replace_play_input_action_map(
+		&mut self,
+		map: crate::input::InputActionMap,
+	) -> Result<(), String> {
+		let active = self
+			.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut();
+		active.install_input_action_map(Some(map))?;
+		active.clear_input();
+		Ok(())
+	}
+
 	pub fn action_map_binds_key(&self, key: crate::Key) -> Option<bool> {
 		self.play.as_ref()?.active().authored_action_binds_key(key)
 	}

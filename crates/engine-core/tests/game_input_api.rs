@@ -1,5 +1,78 @@
 mod support;
 
+#[test]
+fn local_layouts_follow_default_without_replacing_explicit_conditional_bindings() {
+	use engine_core::{
+		asset_catalog::AssetId,
+		input::{
+			ActionBinding, ConditionalInputLayout, InputActionKind, InputActionLayout,
+			InputActionMap, InputBindingOverride, InputLayoutCondition, NamedInputAction,
+		},
+	};
+	use std::collections::BTreeMap;
+
+	let bind = |key| vec![ActionBinding::Key { key }];
+	let asset = AssetId::generate();
+	let mut authored = InputActionMap::starter();
+	authored.actions.push(NamedInputAction {
+		id: "interact".into(),
+		label: "Interact".into(),
+		value: InputActionKind::Button,
+		bindings: bind(Key::E),
+	});
+	let binding_digest = authored.binding_digest().unwrap();
+	authored.schema_version = 2;
+	authored.layouts.push(ConditionalInputLayout {
+		id: "airborne".into(),
+		label: "Airborne".into(),
+		when: InputLayoutCondition::CharacterGrounded { value: false },
+		overrides: vec![InputBindingOverride {
+			action_id: "attack".into(),
+			bindings: bind(Key::T),
+		}],
+	});
+	assert_eq!(authored.binding_digest().unwrap(), binding_digest);
+	let mut layout = InputActionLayout {
+		schema_version: 1,
+		asset_id: asset.clone(),
+		binding_digest,
+		overrides: BTreeMap::from([
+			("attack".into(), bind(Key::G)),
+			("interact".into(), bind(Key::Q)),
+		]),
+	};
+	let effective = authored.with_layout(&asset, &layout).unwrap();
+	let conditional = effective.effective_actions(&effective.layouts[0]).unwrap();
+	assert_eq!(
+		conditional
+			.iter()
+			.find(|action| action.id == "attack")
+			.unwrap()
+			.bindings,
+		bind(Key::T)
+	);
+	assert_eq!(
+		conditional
+			.iter()
+			.find(|action| action.id == "interact")
+			.unwrap()
+			.bindings,
+		bind(Key::Q)
+	);
+	layout.overrides.insert("interact".into(), bind(Key::T));
+	let error = authored.with_layout(&asset, &layout).unwrap_err();
+	for label in ["Airborne", "attack", "interact"] {
+		assert!(error.contains(label), "{error}");
+	}
+	layout.binding_digest = "stale".into();
+	assert!(
+		authored
+			.with_layout(&asset, &layout)
+			.unwrap_err()
+			.contains("binding revision")
+	);
+}
+
 use engine_core::{
 	EntityKey, InputState, Key,
 	command::{EditorCommandDto as Command, EditorCommandRequest},

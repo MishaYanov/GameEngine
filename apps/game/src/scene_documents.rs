@@ -77,6 +77,7 @@ impl GameApp {
 			&playback.startup_scene_id,
 		)?;
 		if self.standalone_runtime {
+			editor.set_personal_input_layout_reader(self.personal_input_layout_reader());
 			editor.start_play(&mut loaded.scene)?;
 		}
 		let saved = loaded.scene.to_data(&loaded.camera)?;

@@ -161,6 +161,7 @@ impl SceneEditor {
 		self.finish_gesture()?;
 		if let Some(root) = scene.animation_root().map(std::path::Path::to_path_buf) {
 			let input_root = root.clone();
+			let personal_inputs = self.personal_input_layouts.clone();
 			let controls_root = root.clone();
 			let animator_root = root.clone();
 			self.session
@@ -174,7 +175,22 @@ impl SceneEditor {
 				.as_mut()
 				.expect("initialized session")
 				.set_input_actions_resolver(Arc::new(move |data| {
-					bridge::input_actions::load_scene(&input_root, data)
+					let authored = bridge::input_actions::load_scene(&input_root, data)?;
+					let (Some(map), Some(id), Some(read)) = (
+						authored.as_ref(),
+						bridge::input_actions::scene_asset_id(data),
+						&personal_inputs,
+					) else {
+						return Ok(authored);
+					};
+					match read(id).and_then(|layout| layout.map(|layout| map.with_layout(id, &layout)).transpose()) {
+						Ok(Some(effective)) => Ok(Some(effective)),
+						Ok(None) => Ok(authored),
+						Err(problem) => {
+							engine_logger::warn!(target: "runtime::play_input", "Player keyboard uses authored bindings: {problem}");
+							Ok(authored)
+						}
+					}
 				}))?;
 			self.session
 				.as_mut()

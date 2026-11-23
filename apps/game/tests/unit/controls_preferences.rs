@@ -25,6 +25,34 @@ impl Drop for Scratch {
 }
 
 #[test]
+fn action_layout_is_asset_scoped_and_checks_the_previously_reviewed_record() {
+	let root = Scratch::new();
+	let settings = Preferences::test_profile(root.path());
+	let asset = AssetId::generate();
+	let another = AssetId::generate();
+	let layout = InputActionLayout {
+		schema_version: 1,
+		asset_id: asset.clone(),
+		binding_digest: "first".into(),
+		overrides: Default::default(),
+	};
+	settings
+		.save_action_layout(&asset, None, Some(&layout))
+		.unwrap();
+	assert_eq!(
+		settings.load_action_layout(&asset).unwrap().as_ref(),
+		Some(&layout)
+	);
+	assert_eq!(settings.load_action_layout(&another).unwrap(), None);
+	assert!(settings.save_action_layout(&asset, None, None).is_err());
+	settings
+		.save_action_layout(&asset, Some(&layout), None)
+		.unwrap();
+	assert_eq!(settings.load_action_layout(&asset).unwrap(), None);
+	assert_eq!(settings.load().unwrap(), ControlsSettings::default());
+}
+
+#[test]
 fn preferences_round_trip_and_replace_within_the_local_directory() {
 	let root = Scratch::new();
 	let settings = Preferences {
@@ -176,7 +204,7 @@ fn v4_migrates_bus_levels_only_when_applied_and_current_record_requires_three_va
 		"muted": true,
 		"bus_percent": { "collection": 0, "mechanisms": 90, "completion": 40 }
 	}))
-		.unwrap();
+	.unwrap();
 	prefs.save(&settings).unwrap();
 	assert_eq!(prefs.load().unwrap(), settings);
 

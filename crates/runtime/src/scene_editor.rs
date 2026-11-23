@@ -20,6 +20,7 @@ pub use authoring::movement_direction;
 pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};
 pub use engine_core::simulation_session::{MovementTarget, SimulationSession, TickOutcome};
+pub use play_input::PersonalInputLayoutReader;
 
 #[derive(Default)]
 pub struct SceneEditor {
@@ -29,6 +30,7 @@ pub struct SceneEditor {
 	movement_entity: Option<EntityId>,
 	play_input_target: MovementTarget,
 	play_input_override: Option<InputProfile>,
+	personal_input_layouts: Option<PersonalInputLayoutReader>,
 }
 
 impl SceneEditor {

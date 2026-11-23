@@ -1,6 +1,7 @@
 //! Installed Player Controls and input presentation.
 
 mod action_keys;
+mod action_layout;
 mod audio;
 mod checkpoint_menu;
 #[cfg(any(windows, test))]
@@ -24,15 +25,15 @@ use runtime::{
 	input::{ControllerBindings, FaceButton, InputProfile, MovementBindings},
 };
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use super::{GameApp, feedback_audio::FeedbackAudio, project_sound::ProjectSound};
 use action_keys::ActionKeyOverride;
 pub(crate) use audio::FeedbackMix;
 use audio::{AudioAction, AudioMenu};
 use checkpoint_menu::{CheckpointMenu, MenuAction as CheckpointAction};
-use display::{DisplayAction, DisplayMenu};
 pub(super) use display::DisplaySettings;
+use display::{DisplayAction, DisplayMenu};
 use input_preset_menu::{PresetAction, PresetMenu};
 use keyboard_menu::{KeyboardAction, KeyboardMenu};
 use preferences::Preferences;
@@ -287,6 +288,13 @@ impl PlayerControls {
 		self.menu.is_some()
 	}
 
+	pub(super) fn personal_input_layout_reader(
+		&self,
+	) -> Option<runtime::scene_editor::PersonalInputLayoutReader> {
+		let preferences = self.preferences.clone().filter(|_| !self.override_active)?;
+		Some(Arc::new(move |asset| preferences.load_action_layout(asset)))
+	}
+
 	pub(super) fn controller(&self) -> ControllerBindings {
 		self.applied.controller
 	}
@@ -335,7 +343,12 @@ impl PlayerControls {
 
 	#[cfg(test)]
 	pub(super) fn rows_with_layout(&self, capacity: usize, columns: usize) -> Option<Vec<String>> {
-		self.rows_with_feedback(capacity, columns, &FeedbackAudio::default(), &ProjectSound::default())
+		self.rows_with_feedback(
+			capacity,
+			columns,
+			&FeedbackAudio::default(),
+			&ProjectSound::default(),
+		)
 	}
 
 	pub(super) fn rows_with_feedback(
@@ -361,7 +374,12 @@ impl PlayerControls {
 			Page::Keyboard(keyboard) => keyboard.rows(columns),
 			Page::Presets(presets) => presets.rows(),
 			Page::Checkpoints(checkpoints) => checkpoints.rows(),
-			Page::Audio(menu) => menu.rows(audio, project_sound, self.applied.audio, self.applied.display.cue_captions),
+			Page::Audio(menu) => menu.rows(
+				audio,
+				project_sound,
+				self.applied.audio,
+				self.applied.display.cue_captions,
+			),
 			Page::Main => self.main_rows(menu),
 		};
 		let help = if self.captures_action_key() {
@@ -469,14 +487,27 @@ impl PlayerControls {
 }
 
 impl GameApp {
+	pub(super) fn personal_input_layout_reader(
+		&self,
+	) -> Option<runtime::scene_editor::PersonalInputLayoutReader> {
+		if self.play_trace.is_some() {
+			return None;
+		}
+		self.player_controls.personal_input_layout_reader()
+	}
+
 	#[cfg(test)]
 	pub(super) fn player_controls_rows(
 		&self,
 		capacity: usize,
 		columns: usize,
 	) -> Option<Vec<String>> {
-		self.player_controls
-			.rows_with_feedback(capacity, columns, &self.feedback_audio, &self.project_sound)
+		self.player_controls.rows_with_feedback(
+			capacity,
+			columns,
+			&self.feedback_audio,
+			&self.project_sound,
+		)
 	}
 
 	pub(super) fn player_controls_key(&mut self, key: Key) -> bool {
@@ -587,7 +618,9 @@ impl GameApp {
 				return true;
 			}
 			Key::ArrowUp | Key::ArrowDown => {
-				menu.focus = menu.focus.adjacent(key == Key::ArrowDown, menu.presets, menu.checkpoints);
+				menu.focus =
+					menu.focus
+						.adjacent(key == Key::ArrowDown, menu.presets, menu.checkpoints);
 			}
 			Key::ArrowLeft | Key::ArrowRight
 				if !self.player_controls.override_active && matches!(menu.focus, Row::Layout) =>
@@ -625,6 +658,26 @@ impl GameApp {
 				};
 			}
 			Key::Enter if matches!(menu.focus, Row::Keyboard) => {
+				if let Some(root) = self.asset_root.as_deref() {
+					match self.editor.authored_play_input_asset(root) {
+						Ok(Some((asset, map))) => {
+							let editable = !self.player_controls.override_active;
+							let stored = self
+								.personal_input_layout_reader()
+								.map_or(Ok(None), |read| read(&asset));
+							let (keyboard, problem) =
+								action_layout::keyboard_menu(asset, map, stored, editable);
+							menu.page = Page::Keyboard(keyboard);
+							self.player_controls.message = problem;
+							return false;
+						}
+						Err(error) => {
+							self.player_controls.message = Some(error);
+							return false;
+						}
+						Ok(None) => {}
+					}
+				}
 				let editable = !self.player_controls.override_active;
 				let keyboard = if editable {
 					KeyboardMenu::new(
@@ -651,7 +704,8 @@ impl GameApp {
 				}
 				Err(error) => self.player_controls.message = Some(error),
 			},
-			Key::Enter if matches!(menu.focus, Row::Checkpoints) => match CheckpointMenu::new(self) {
+			Key::Enter if matches!(menu.focus, Row::Checkpoints) => match CheckpointMenu::new(self)
+			{
 				Ok(checkpoints) => {
 					self.player_controls.message = None;
 					menu.page = Page::Checkpoints(Box::new(checkpoints));
@@ -667,7 +721,8 @@ impl GameApp {
 				let cinder = self.project.as_ref().is_some_and(|project| {
 					project.gameplay_module.as_deref() == Some(gameplay_catalog::CINDER_OATH_ID)
 				});
-				menu.page = Page::Audio(AudioMenu::new(self.player_controls.feedback_mix(), cinder));
+				menu.page =
+					Page::Audio(AudioMenu::new(self.player_controls.feedback_mix(), cinder));
 			}
 			_ => {}
 		}
@@ -697,6 +752,24 @@ impl GameApp {
 					Some("Keyboard cannot change during playtrace recording".into());
 			}
 			action @ (KeyboardAction::Edited | KeyboardAction::Apply) => {
+				if let Some(asset) = menu.asset() {
+					let result = asset.prepare(menu.draft()).and_then(|(layout, map)| {
+						if matches!(action, KeyboardAction::Apply) {
+							self.apply_authored_keyboard(asset, layout.as_ref(), map)?;
+						}
+						Ok(())
+					});
+					self.player_controls.message = match result {
+						Ok(()) if matches!(action, KeyboardAction::Apply) => {
+							self.clear_controls_input();
+							self.player_controls.message = Some("Keyboard mapping saved".into());
+							return true;
+						}
+						Ok(()) => None,
+						Err(problem) => Some(problem),
+					};
+					return false;
+				}
 				let settings = ControlsSettings {
 					actions: menu.draft().to_vec(),
 					..self.player_controls.applied.clone()
@@ -726,6 +799,35 @@ impl GameApp {
 			}
 		}
 		false
+	}
+
+	fn apply_authored_keyboard(
+		&mut self,
+		expected: &action_layout::AuthoredKeyboard,
+		layout: Option<&runtime::input::InputActionLayout>,
+		map: runtime::input::InputActionMap,
+	) -> Result<(), String> {
+		let root = self
+			.asset_root
+			.as_deref()
+			.ok_or("Game assets are unavailable")?;
+		if !self.editor.has_authored_input_actions() {
+			return Err("The active Player Input Actions are unavailable".into());
+		}
+		let current = self.editor.authored_play_input_asset(root)?;
+		if current
+			.as_ref()
+			.is_none_or(|(id, map)| id != &expected.asset || map != &expected.map)
+		{
+			return Err("Authored Input Actions changed. Reopen Keyboard before editing.".into());
+		}
+		let preferences = self
+			.player_controls
+			.preferences
+			.as_ref()
+			.ok_or("Local controls storage is unavailable")?;
+		preferences.save_action_layout(&expected.asset, expected.stored.as_ref(), layout)?;
+		self.editor.replace_play_input_action_map(map)
 	}
 
 	fn display_menu_key(&mut self, menu: &mut DisplayMenu, key: Key) -> bool {
@@ -767,7 +869,11 @@ impl GameApp {
 				false
 			}
 			AudioAction::ProjectAudition(cue) => {
-				self.project_sound.audition(cue, self.player_controls.feedback_mix(), std::time::Instant::now());
+				self.project_sound.audition(
+					cue,
+					self.player_controls.feedback_mix(),
+					std::time::Instant::now(),
+				);
 				false
 			}
 			AudioAction::ResetPreview => {
@@ -775,7 +881,9 @@ impl GameApp {
 				self.player_controls.message = None;
 				false
 			}
-			AudioAction::CloseCheck => unreachable!("the audio menu consumes its internal back action"),
+			AudioAction::CloseCheck => {
+				unreachable!("the audio menu consumes its internal back action")
+			}
 			AudioAction::Apply(mix) => {
 				// The running mix changes only once the matching local preferences are saved.
 				match self.feedback_audio.prepare_mix(mix).and_then(|prepared| {

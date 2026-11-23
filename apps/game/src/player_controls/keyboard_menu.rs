@@ -5,6 +5,7 @@ use runtime::{Key, input::InputProfile};
 use super::{
 	PromptDevice,
 	action_keys::{ActionKeyOverride, can_remap_key},
+	action_layout::AuthoredKeyboard,
 	input_labels::compact_key_name,
 };
 
@@ -14,6 +15,7 @@ pub(super) struct KeyboardMenu {
 	draft: Vec<ActionKeyOverride>,
 	capturing: Option<String>,
 	editable: bool,
+	asset: Option<AuthoredKeyboard>,
 }
 
 impl KeyboardMenu {
@@ -28,7 +30,17 @@ impl KeyboardMenu {
 			draft: draft.to_vec(),
 			capturing: None,
 			editable,
+			asset: None,
 		}
+	}
+
+	pub(super) fn with_asset(mut self, asset: AuthoredKeyboard) -> Self {
+		self.asset = Some(asset);
+		self
+	}
+
+	pub(super) fn asset(&self) -> Option<&AuthoredKeyboard> {
+		self.asset.as_ref()
 	}
 
 	pub(super) fn captures_key(&self) -> bool {
@@ -72,11 +84,16 @@ impl KeyboardMenu {
 			} else {
 				"Apply disabled"
 			}
-				.into(),
+			.into(),
 		);
 		rows.push("Restore defaults".into());
 		rows.push("Back".into());
-		("Keyboard".into(), rows, self.focus)
+		let title = if self.asset.is_some() {
+			"Default keyboard"
+		} else {
+			"Keyboard"
+		};
+		(title.into(), rows, self.focus)
 	}
 
 	pub(super) fn key(&mut self, key: Key, device: PromptDevice) -> KeyboardAction {

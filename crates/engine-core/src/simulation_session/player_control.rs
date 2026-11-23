@@ -98,6 +98,13 @@ impl SimulationSession {
 		resolver: &InputActionsResolver,
 	) -> Result<(), String> {
 		let candidate = resolver(self.world.data())?;
+		self.install_input_action_map(candidate)
+	}
+
+	pub(crate) fn install_input_action_map(
+		&mut self,
+		candidate: Option<InputActionMap>,
+	) -> Result<(), String> {
 		if candidate.is_none() && self.has_configured_input_asset() {
 			return Err("The local Player Controller's Input Actions asset is unavailable".into());
 		}

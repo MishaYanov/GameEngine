@@ -3,10 +3,18 @@
 use super::{MovementTarget, SceneEditor};
 use crate::{
 	EntityKey, InputState, Key,
+	asset_catalog::AssetId,
 	editor::command::EditorCommandDto as Command,
-	input::{GamepadSample, InputProfile, MovementBindings, PhysicalGamepadSample},
+	input::{
+		GamepadSample, InputActionLayout, InputActionMap, InputProfile, MovementBindings,
+		PhysicalGamepadSample,
+	},
 };
 use engine_core::camera_input::{CameraInputOwner, CameraIntent};
+use std::{path::Path, sync::Arc};
+
+pub type PersonalInputLayoutReader =
+	Arc<dyn Fn(&AssetId) -> Result<Option<InputActionLayout>, String> + Send + Sync>;
 
 impl SceneEditor {
 	pub fn set_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
@@ -128,6 +136,31 @@ impl SceneEditor {
 
 	pub fn play_input_action_map(&self) -> Option<&crate::input::InputActionMap> {
 		self.session.as_ref()?.play_input_action_map()
+	}
+
+	pub fn set_personal_input_layout_reader(&mut self, reader: Option<PersonalInputLayoutReader>) {
+		self.personal_input_layouts = reader;
+	}
+
+	pub fn authored_play_input_asset(
+		&self,
+		root: &Path,
+	) -> Result<Option<(AssetId, InputActionMap)>, String> {
+		let Some(session) = &self.session else {
+			return Ok(None);
+		};
+		let document = session.render_document();
+		let Some(id) = bridge::input_actions::scene_asset_id(&document) else {
+			return Ok(None);
+		};
+		Ok(bridge::input_actions::load_scene(root, &document)?.map(|map| (id.clone(), map)))
+	}
+
+	pub fn replace_play_input_action_map(&mut self, map: InputActionMap) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.replace_play_input_action_map(map)
 	}
 
 	pub fn has_authored_input_actions(&self) -> bool {
