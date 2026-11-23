@@ -28,6 +28,7 @@ pub mod linked_prefab;
 mod native_behavior_runtime;
 pub mod particles;
 pub mod picking;
+pub mod primitive_kind;
 pub mod project;
 pub mod project_format;
 pub mod runtime_lifecycle;
@@ -52,6 +53,7 @@ pub use engine::{BackendError, BackendErrorCode, CommandReceipt, Engine, EngineB
 pub use entity_key::EntityKey;
 pub use input::{InputButton, InputState, Key, MouseButton, NativeKeyCode};
 pub use picking::CpuCameraRay;
+pub use primitive_kind::PrimitiveKind;
 pub use scene_data::SceneData;
 pub use time::FrameClock;
 pub use transform::Transform;
