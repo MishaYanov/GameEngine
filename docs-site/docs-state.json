@@ -1,9 +1,25 @@
 {
-  "last_checked_commit": "36c3ee18072f863ce56eb742c7f25da53d5ba699",
+  "last_checked_commit": "3632784f74b7a061dbf5b4054518e3e62efa1267",
   "last_checked_date": "2026-11-23",
-  "last_documentation_update_commit": "2cec79f0d89930b17f368e8a90eb280ac4c0fc60",
+  "last_documentation_update_commit": "e8b5012eefa741785f0cdc0fe38644b045a9bca0",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
-  "baseline_note": "The inspection commit includes all source changes covered by the editor authoring polish guide. last_documentation_update_commit names the most recent committed documentation at inspection. Older entries retain historical evidence.",
+  "baseline_note": "The inspection commit covers the editor authoring workflows and close lifecycle review. last_documentation_update_commit identifies the preceding committed documentation. Older entries retain historical evidence.",
+  "authoring_workflow_milestones_122_133": {
+    "inspected_head": "3632784f74b7a061dbf5b4054518e3e62efa1267",
+    "scope": "Milestones 122–133 and the follow-up close lifecycle review. The guide includes editor exercises, exact source paths, code excerpts, acceptance checks, and resources.",
+    "verification": [
+      "Angular passed 652 tests. The production build and bundle boundary check passed without Angular template or stylesheet budget warnings.",
+      "The Rust workspace passed 1,245 tests on Windows, with 22 opt-in cases skipped. The all-targets check completed without compiler diagnostics.",
+      "Python passed 151 tests. The documentation site generated and link-checked 67 pages and passed eight tests.",
+      "Headless Edge verified ruler geometry with the compiled editor stylesheet and representative markup at 340 px and 650 px, each at 1× and 4× zoom. Angular exercises playhead reveal inside the scroll lane and checks that keyboard focus stays in place.",
+      "The separate test, documentation, optimization, Angular, and Rust reviews covered selection, layout budgets, native close ownership, and the pending-exit input hold."
+    ],
+    "verification_limits": [
+      "The physical Windows title-bar action and native dialog still need a live desktop check. The desktop automation runtime failed to start on this host.",
+      "The Rust tests cover native policy and the Angular tests cover the close event and component lifecycle with test doubles.",
+      "The full test output includes OneDrive incremental-cache and jsdom browser-emulation notices."
+    ]
+  },
   "authoring_polish_milestones_110_121": {
     "inspected_head": "36c3ee18072f863ce56eb742c7f25da53d5ba699",
     "scope": "Editor warning and layout fixes, individual Milestones 110–121 and follow-up Angular and Rust changes. The guide contains source paths, snippets, verification and resources for every milestone.",

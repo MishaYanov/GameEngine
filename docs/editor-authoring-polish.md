@@ -5,6 +5,9 @@ project files. Open a Prop to inspect it in isolation. Use **Animation** for cli
 **Controls Graph** is the editor's separate graph for input and gameplay controls. The following exercises start from
 an open project. Paths are relative to the repository root.
 
+The next milestones cover close and project navigation, Assets browsing, Hierarchy actions, Inspector resets,
+and Timeline navigation. [Editor authoring workflows 122–133](editor-authoring-workflows-122-133.md).
+
 ## 110. Activate workspace tabs with Enter or Space
 
 Tab to the workspace tabs. Use Left and Right to move between available tabs and Home or End to jump to either end.
@@ -238,8 +241,11 @@ tauri::WindowEvent::CloseRequested { api, .. } => {
 }
 ```
 
-The title-bar route reviews native scene, project, Timeline, and Prop source state. File → Exit also runs the
-Angular Prop, Animator, and Controls Graph review. The Rust tests in
+At the end of this batch, the title-bar route reviewed native scene, project, Timeline, and Prop source state,
+and File → Exit also ran the Angular draft review. The next batch shares the Angular review with the title bar.
+[Current close workflow](editor-authoring-workflows-122-133.md#123-review-graph-drafts-before-exiting).
+
+The Rust tests in
 `apps/editor-host/src-tauri/tests/unit/commands/tests_project.rs` exercise the revision source and
 single-review gate. A physical click on the Windows title-bar button and its dialog flow remain unverified.
 

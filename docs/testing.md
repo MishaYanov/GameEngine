@@ -22,6 +22,25 @@ The Angular integration exercises the real workspace with a mocked native bridge
 the native decision and its revision checks. The title-bar click and its dialog flow are separate desktop
 acceptance steps. [Milestones 110–121 and browser layout results](editor-authoring-polish.md).
 
+## Editor authoring workflows 122–133
+
+Run the editor tests and production bundle check from `apps/editor`.
+
+```powershell
+npm.cmd test -- --watch=false
+npm.cmd run check:production
+```
+
+Run the native close ownership and exit review tests from the repository root.
+
+```powershell
+cargo test --locked --offline -p app --lib commands::project
+```
+
+The editor tests exercise cancelled route changes, Assets and Hierarchy actions, undoable Inspector resets,
+and exact Timeline navigation. Native unit tests cover close registration and teardown decisions. Test the physical
+Windows title-bar button on desktop for end-to-end confirmation. [Milestones 122–133 and Timeline ruler evidence](editor-authoring-workflows-122-133.md).
+
 ## Camera authoring and host parity
 
 ```powershell
