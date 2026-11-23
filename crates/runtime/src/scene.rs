@@ -41,6 +41,7 @@ struct SceneEntry {
 	renderable: bool,
 	component_ids: BTreeMap<String, engine_core::components::ComponentId>,
 	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
+	scripts: Vec<engine_core::components::ScriptComponent>,
 	linked_prefab: Option<engine_core::linked_prefab::LinkedPrefabInstance>,
 	animation: Option<engine_core::animation::AnimationComponent>,
 	animator: Option<Box<engine_core::animation::AnimatorComponent>>,
@@ -82,6 +83,7 @@ impl SceneEntry {
 		self.renderable = entity.renderable;
 		self.component_ids.clone_from(&entity.component_ids);
 		self.native_behaviors.clone_from(&entity.native_behaviors);
+		self.scripts.clone_from(&entity.scripts);
 		self.linked_prefab.clone_from(&entity.linked_prefab);
 		self.animation.clone_from(&entity.animation);
 		self.animator.clone_from(&entity.animator);
@@ -303,6 +305,7 @@ impl Scene {
 						&& entry.renderable == saved.renderable
 						&& entry.component_ids == saved.component_ids
 						&& entry.native_behaviors == saved.native_behaviors
+						&& entry.scripts == saved.scripts
 						&& entry.linked_prefab == saved.linked_prefab
 						&& entry.animation == saved.animation
 						&& entry.animator == saved.animator
@@ -587,6 +590,7 @@ impl Scene {
 			renderable: true,
 			component_ids: BTreeMap::new(),
 			native_behaviors: Vec::new(),
+			scripts: Vec::new(),
 			linked_prefab: None,
 			animation: None,
 			animator: None,
@@ -706,6 +710,7 @@ impl Scene {
 				renderable: entry.renderable,
 				component_ids: entry.component_ids.clone(),
 				native_behaviors: entry.native_behaviors.clone(),
+				scripts: entry.scripts.clone(),
 				linked_prefab: entry.linked_prefab.clone(),
 				animation: entry.animation.clone(),
 				animator: entry.animator.clone(),
@@ -855,6 +860,7 @@ impl Scene {
 		entry.renderable = source_metadata.renderable;
 		entry.component_ids = source_metadata.component_ids;
 		entry.native_behaviors = source_metadata.native_behaviors;
+		entry.scripts = source_metadata.scripts;
 		if let (Some(old), Some(new)) = (source_metadata.key, entry.key.clone()) {
 			let remap = HashMap::from([(old, new)]);
 			for component in &mut entry.native_behaviors {

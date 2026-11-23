@@ -5,6 +5,7 @@ mod interactable;
 mod native_behavior;
 mod player_controller;
 mod scene_validation;
+mod script;
 mod sky;
 
 use crate::{
@@ -24,6 +25,7 @@ pub use player_controller::{
 };
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 use serde::{Deserialize, Deserializer, Serialize};
+pub use script::{MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptProperty, ScriptReference, ScriptSettings};
 pub use sky::{
 	DEFAULT_AMBIENT_LINEAR, MAX_SKY_EXPOSURE_EV, MAX_SKY_PANORAMA_FILE_BYTES,
 	MAX_SKY_PANORAMA_HEIGHT, MAX_SKY_PANORAMA_WIDTH, SceneEnvironment, SkyBackground, SkyComponent,
@@ -36,6 +38,7 @@ pub const MAX_NATIVE_BEHAVIORS_PER_OBJECT: usize = 8;
 pub const MAX_ACTIVE_NATIVE_BEHAVIORS: usize = 4096;
 pub const MESH_TYPE: &str = "engine.mesh_renderer";
 pub const COLLIDER_TYPE: &str = "engine.collider";
+pub const SCRIPT_TYPE: &str = "engine.script";
 pub const NATIVE_TYPE: &str = "engine.native_behavior";
 pub const CHARACTER_TYPE: &str = "engine.character_controller";
 pub const ANIMATION_TYPE: &str = "engine.animation";
@@ -120,6 +123,9 @@ pub enum ComponentData {
 	NativeBehavior {
 		behavior: NativeBehaviorSpec,
 	},
+	Script {
+		settings: ScriptSettings,
+	},
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -143,6 +149,7 @@ impl ComponentRecord {
 			ComponentData::MeshRenderer { .. } => MESH_TYPE,
 			ComponentData::Collider { .. } => COLLIDER_TYPE,
 			ComponentData::NativeBehavior { .. } => NATIVE_TYPE,
+			ComponentData::Script { .. } => SCRIPT_TYPE,
 		}
 	}
 	pub fn validate(&self) -> Result<(), String> {
@@ -184,6 +191,7 @@ impl ComponentRecord {
 			}
 			ComponentData::Collider { collider } => collider.validate(),
 			ComponentData::NativeBehavior { behavior } => behavior.validate(),
+			ComponentData::Script { settings } => settings.validate(),
 		}
 	}
 }
@@ -275,6 +283,13 @@ pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 			"Native Behavior",
 			"Independent native gameplay state for this attachment.",
 			MAX_NATIVE_BEHAVIORS_PER_OBJECT,
+		),
+		(
+			SCRIPT_TYPE,
+			"script",
+			"Script",
+			"Project script, saved settings, and object references.",
+			MAX_SCRIPTS_PER_OBJECT,
 		),
 	]
 	.into_iter()

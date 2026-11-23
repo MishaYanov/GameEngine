@@ -1,6 +1,7 @@
 import type {AudioEventBinding, AudioGameplaySignal, AudioSourceBus, AudioSourcePlayback, LegacyCombatCue} from '../../../../core/editor/audio-source.models';
 import {
     validInteractionReach,
+    validScriptSettings,
     type ComponentData,
     type ComponentRecord
 } from '../../../../core/editor/editor-components';
@@ -38,6 +39,7 @@ export interface ComponentDraft {
 	kind: ComponentData['kind'];
 	enabled: boolean;
 	model_path: string;
+	scriptId: string;
 	mesh_index: string;
 	tint: boolean;
 	color: { r: string; g: string; b: string; a: string };
@@ -81,6 +83,7 @@ export function componentDraft(
 		kind,
 		enabled: value?.enabled ?? true,
 		model_path: '',
+		scriptId: '',
 		mesh_index: '',
 		tint: false,
 		color: { r: '1', g: '1', b: '1', a: '1' },
@@ -159,6 +162,8 @@ export function componentDraft(
 		draft.sky = skyComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
         draft.interactable = {action: value.data.settings.action, reach: String(value.data.settings.reach)};
+	} else if (value.data.kind === 'script') {
+		draft.scriptId = value.data.settings.script_id;
 	} else if (value.data.kind === 'native_behavior') {
 		const behavior = value.data.behavior;
 		draft.behavior_kind = behavior.kind;
@@ -234,7 +239,13 @@ export function componentFromDraft(
 	};
 	const optionalReference = (key: string, label: string) => (key ? reference(key, label) : null);
 	let data: ComponentData;
-	if (draft.kind === 'sky') {
+	if (draft.kind === 'script') {
+        const previous = original?.data.kind === 'script' ? original.data.settings : null;
+        const script_id = draft.scriptId.trim();
+        const settings = previous?.script_id === script_id ? previous : {script_id, config_version: 1};
+        if (!validScriptSettings(settings)) throw new Error('Enter a valid project script ID.');
+        data = {kind: 'script', settings};
+    } else if (draft.kind === 'sky') {
 		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
 	} else if (draft.kind === 'audio_source') {
         const {clipId, gain, loop, playback, bus, spatial, near, far, eventKind, signal, eventClip, eventMarker, replacesCue} = draft.audioSource;

@@ -515,6 +515,7 @@ export class LinkedPrefabInspector {
         if (data.kind === 'audio_source') return `${enabled} · ${data.settings.clip?.asset ?? 'No Audio Clip'}`;
         if (data.kind === 'animator') return `${enabled} · Animator ${data.settings.asset_id}`;
         if (data.kind === 'sky') return `${enabled} · Sky`;
+		if (data.kind === 'script') return `${enabled} · ${data.settings.script_id}`;
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;
 	}
 

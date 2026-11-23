@@ -66,7 +66,38 @@ export type ComponentData =
 	| { readonly kind: 'camera'; readonly settings: CameraComponentSettings }
 	| { readonly kind: 'sky'; readonly settings: SkySettings }
     | { readonly kind: 'interactable'; readonly settings: InteractableSettings }
+	| { readonly kind: 'script'; readonly settings: ScriptSettings }
 	| { readonly kind: 'native_behavior'; readonly behavior: NativeBehaviorSpec };
+
+export type ScriptReference = {readonly entity: string} | {readonly slot: string};
+export type ScriptProperty = boolean | number | string;
+
+export interface ScriptSettings {
+    readonly script_id: string;
+    readonly config_version: number;
+    readonly properties?: Readonly<Record<string, ScriptProperty>>;
+    readonly references?: Readonly<Record<string, ScriptReference>>;
+}
+
+export function validScriptSettings(value: unknown): value is ScriptSettings {
+    if (!record(value) || Object.keys(value).some(key =>
+        !['script_id', 'config_version', 'properties', 'references'].includes(key))) return false;
+    const id = value['script_id'];
+    const field = (name: string) => /^[A-Za-z0-9_-]{1,64}$/.test(name);
+    if (typeof id !== 'string' || id.length > 128 || !id.split('.').every(field) ||
+        !integer(value['config_version'], 1, 4_294_967_295)) return false;
+    const properties = value['properties'];
+    if (properties !== undefined && (!record(properties) || Object.keys(properties).length > 32 ||
+        !Object.entries(properties).every(([name, property]) => field(name) &&
+            (typeof property === 'boolean' ||
+                (typeof property === 'number' && Number.isFinite(Math.fround(property))) ||
+                (typeof property === 'string' && new TextEncoder().encode(property).length <= 256))))) return false;
+    const references = value['references'];
+    return references === undefined || (record(references) && Object.keys(references).length <= 32 &&
+        Object.entries(references).every(([name, reference]) => field(name) && record(reference) &&
+            Object.keys(reference).length === 1 &&
+            (nonempty(reference['entity']) || (typeof reference['slot'] === 'string' && field(reference['slot'])))));
+}
 
 export interface ComponentRecord {
 	readonly id: string;
@@ -178,6 +209,7 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	}
 	if (data['kind'] === 'audio_source') return validAudioSourceSettings(data['settings']);
 	if (data['kind'] === 'sky') return validSkySettings(data['settings']);
+	if (data['kind'] === 'script') return validScriptSettings(data['settings']);
 	if (data['kind'] === 'collider') return collider(data['collider']);
 	if (data['kind'] === 'character_controller') return validControllerSettings(data['settings']);
 	if (data['kind'] === 'player_controller') return validPlayerControllerSettings(data['settings']) &&
@@ -243,6 +275,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'animator').length <= 1 &&
 		value.filter((component) => component.data.kind === 'camera').length <= 1 &&
         value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
+		value.filter((component) => component.data.kind === 'script').length <= 8 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
 	);
 }
@@ -259,6 +292,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'collider',
 					'audio_source',
 					'native_behavior',
+					'script',
 					'character_controller',
 					'player_controller',
 					'animation',
@@ -269,7 +303,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 				].includes(String(item['kind'])) &&
 				nonempty(item['label']) &&
 				nonempty(item['description']) &&
-				integer(item['max_per_object'], 1, item['kind'] === 'native_behavior' ? 8 : 1),
+				integer(item['max_per_object'], 1, item['kind'] === 'native_behavior' || item['kind'] === 'script' ? 8 : 1),
 		)
 	)
 		return false;

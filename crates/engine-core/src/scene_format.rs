@@ -162,6 +162,7 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 		if projection.schema_version == 3
 			&& projection.entities.iter().any(|entity| {
 				!entity.native_behaviors.is_empty()
+					|| !entity.scripts.is_empty()
 					|| !entity.component_ids.is_empty()
 					|| entity.linked_prefab.is_some()
 					|| entity.character_controller.is_some()

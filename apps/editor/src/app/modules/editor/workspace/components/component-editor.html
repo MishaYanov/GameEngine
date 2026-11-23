@@ -223,6 +223,9 @@
 						(editCancelled)="resetCollider()"
 					/>
 				}
+                @case ('script') {
+                    <label>Script ID<input [formField]="fields.scriptId" /></label>
+                }
 				@case ('native_behavior') {
 					<label
 						>Native behavior<select [formField]="fields.behavior_kind">

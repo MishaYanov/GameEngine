@@ -339,6 +339,7 @@ impl Scene {
 					renderable: entity.renderable,
 					component_ids: entity.component_ids.clone(),
 					native_behaviors: entity.native_behaviors.clone(),
+					scripts: entity.scripts.clone(),
 					linked_prefab: entity.linked_prefab.clone(),
 					animation: entity.animation.clone(),
 					animator: entity.animator.clone(),

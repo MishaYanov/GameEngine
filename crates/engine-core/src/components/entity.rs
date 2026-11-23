@@ -89,6 +89,11 @@ impl EntityData {
 				}
 			}
 		}
+		for script in &self.scripts {
+			bytes = bytes.saturating_add(size_of::<ScriptComponent>())
+				.saturating_add(script.id.as_str().len())
+				.saturating_add(script.settings.retained_bytes());
+		}
 		bytes
 	}
 	pub fn has_mesh_component(&self) -> bool {
@@ -105,7 +110,7 @@ impl EntityData {
 		})
 	}
 	pub fn component_records(&self) -> Vec<ComponentRecord> {
-		let mut records = Vec::with_capacity(2 + self.native_behaviors.len());
+		let mut records = Vec::with_capacity(2 + self.native_behaviors.len() + self.scripts.len());
 		if let Some(sky) = &self.sky {
 			records.push(ComponentRecord {
 				id: sky.id.clone(),
@@ -221,10 +226,17 @@ impl EntityData {
 					},
 				}),
 		);
+		records.extend(self.scripts.iter().map(|script| ComponentRecord {
+			id: script.id.clone(),
+			schema_version: 1,
+			enabled: script.enabled,
+			data: ComponentData::Script { settings: script.settings.clone() },
+		}));
 		records
 	}
 	pub fn validate_components(&self) -> Result<(), String> {
 		if self.native_behaviors.len() > MAX_NATIVE_BEHAVIORS_PER_OBJECT
+			|| self.scripts.len() > MAX_SCRIPTS_PER_OBJECT
 			|| self.component_records().len() > MAX_COMPONENTS_PER_OBJECT
 		{
 			return Err("Object component count exceeds its limit".into());
@@ -268,9 +280,14 @@ impl EntityData {
 			return Err("Component ID is already attached".into());
 		}
 		let type_id = component.type_id();
-		if type_id != NATIVE_TYPE && !replace && records.iter().any(|old| old.type_id() == type_id)
+		if !matches!(type_id, NATIVE_TYPE | SCRIPT_TYPE)
+			&& !replace
+			&& records.iter().any(|old| old.type_id() == type_id)
 		{
 			return Err("This component type permits one attachment per object".into());
+		}
+		if !replace && type_id == SCRIPT_TYPE && self.scripts.len() >= MAX_SCRIPTS_PER_OBJECT {
+			return Err("Object script count exceeds its limit".into());
 		}
 		if !replace && records.len() >= MAX_COMPONENTS_PER_OBJECT {
 			return Err("Object component count exceeds its limit".into());
@@ -352,6 +369,14 @@ impl EntityData {
 				self.component_ids
 					.insert(COLLIDER_TYPE.into(), component.id);
 			}
+			ComponentData::Script { settings } => {
+				let attachment = ScriptComponent { id: component.id, enabled: component.enabled, settings };
+				if let Some(old) = self.scripts.iter_mut().find(|old| old.id == attachment.id) {
+					*old = attachment;
+				} else {
+					self.scripts.push(attachment);
+				}
+			}
 			ComponentData::NativeBehavior { behavior } => {
 				let attachment = NativeBehaviorComponent {
 					id: component.id,
@@ -399,6 +424,7 @@ impl EntityData {
 				self.collision_enabled = true;
 				self.component_ids.remove(COLLIDER_TYPE);
 			}
+			ComponentData::Script { .. } => self.scripts.retain(|component| &component.id != id),
 			ComponentData::NativeBehavior { .. } => self
 				.native_behaviors
 				.retain(|component| &component.id != id),

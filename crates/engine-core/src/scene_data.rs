@@ -58,6 +58,8 @@ pub struct EntityData {
 	pub component_ids: BTreeMap<String, crate::components::ComponentId>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub native_behaviors: Vec<crate::components::NativeBehaviorComponent>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub scripts: Vec<crate::components::ScriptComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub character_controller: Option<crate::character_controller::CharacterControllerComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,6 +101,7 @@ impl EntityData {
 			mesh_index: None,
 			component_ids: BTreeMap::new(),
 			native_behaviors: Vec::new(),
+			scripts: Vec::new(),
 			character_controller: None,
 			animation: None,
 			animator: None,
@@ -166,6 +169,8 @@ struct EntityProjection {
 	#[serde(default)]
 	native_behaviors: Vec<crate::components::NativeBehaviorComponent>,
 	#[serde(default)]
+	scripts: Vec<crate::components::ScriptComponent>,
+	#[serde(default)]
 	character_controller: Option<crate::character_controller::CharacterControllerComponent>,
 	#[serde(default)]
 	animation: Option<crate::animation::AnimationComponent>,
@@ -212,6 +217,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			mesh_index: value.mesh_index,
 			component_ids: value.component_ids,
 			native_behaviors: value.native_behaviors,
+			scripts: value.scripts,
 			character_controller: value.character_controller,
 			animation: value.animation,
 			animator: value.animator,
@@ -251,6 +257,9 @@ impl Serialize for EntityData {
 		}
 		if !self.component_ids.is_empty() {
 			map.serialize_entry("component_ids", &self.component_ids)?;
+		}
+		if !self.scripts.is_empty() {
+			map.serialize_entry("scripts", &self.scripts)?;
 		}
 		if !self.native_behaviors.is_empty() {
 			map.serialize_entry("native_behaviors", &self.native_behaviors)?;

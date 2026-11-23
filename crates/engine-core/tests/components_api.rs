@@ -11,6 +11,37 @@ use engine_core::{
 };
 use std::collections::HashMap;
 use support::*;
+
+#[test]
+fn script_component_round_trips_undoes_and_keeps_unknown_ids_for_repair() {
+	let original = scene(vec![entity("door", [0., 0., 0.])]);
+	let legacy = original.to_json().unwrap();
+	assert!(SceneData::from_json(&legacy).unwrap().entities[0].scripts.is_empty());
+	let project = ProjectData::for_scene("Scripts", "scenes/main.json", &original).unwrap();
+	let mut engine = Engine::new(original, project).unwrap();
+	let script: ComponentRecord = serde_json::from_value(serde_json::json!({
+		"id": "door-control",
+		"schema_version": 1,
+		"enabled": true,
+		"data": {
+			"kind": "script",
+			"settings": {
+				"script_id": "project.unregistered",
+				"config_version": 1,
+				"properties": {"speed": 2.0, "on": true},
+				"references": {"sensor": {"slot": "door_sensor"}}
+			}
+		}
+	})).unwrap();
+	run(&mut engine, Command::AddComponent { key: "door".into(), component: script.clone() });
+	let saved = engine.session().authored_document().to_json().unwrap();
+	let reopened = SceneData::from_json(&saved).unwrap();
+	assert!(reopened.entities[0].component_records().contains(&script));
+	run(&mut engine, Command::Undo);
+	assert!(engine.session().authored_document().entities[0].scripts.is_empty());
+	run(&mut engine, Command::Redo);
+	assert_eq!(engine.session().authored_document().entities[0].scripts[0].settings.script_id, "project.unregistered");
+}
 fn run(engine: &mut Engine, command: Command) {
 	engine
 		.execute(EditorCommandRequest {
