@@ -145,6 +145,7 @@ pub fn run() {
 			editor_feedback_cues_apply,
 			editor_feedback_cue_preview,
 			editor_import_external_glb,
+			editor_ensure_primitive,
 			editor_reimport_asset,
 			editor_move_asset,
 			editor_list_animators,

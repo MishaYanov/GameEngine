@@ -3,7 +3,8 @@
 use super::*;
 use crate::editor::asset_sources::AssetSourceKind;
 use runtime::asset_catalog::AssetId;
-use runtime::assets::project_assets::{self, PreparedAssetChange};
+use runtime::assets::project_assets::{self, PreparedAssetChange, PreparedPrimitive};
+use runtime::PrimitiveKind;
 use std::{collections::HashSet, fs, path::PathBuf};
 use tauri_plugin_dialog::DialogExt;
 
@@ -149,6 +150,7 @@ fn check_asset_generation(
 }
 
 enum Change {
+	EnsurePrimitive(PrimitiveKind),
 	Import {
 		source: PathBuf,
 		destination: String,
@@ -172,6 +174,8 @@ enum Change {
 	},
 }
 static ACTIVE_OPERATIONS: AtomicU64 = AtomicU64::new(0);
+// Keep a second primitive request from preparing against an unfinished publication.
+static PRIMITIVE_PUBLICATION: Mutex<()> = Mutex::new(());
 struct Admission;
 impl Admission {
 	fn acquire() -> Result<Self, String> {
@@ -206,6 +210,15 @@ async fn operate(
 		let operation_id = AssetId::generate().as_str().to_owned();
 		progress(&window, &operation_id, "validating", 0, None);
 		let result: Result<AssetOperationDto, String> = (|| {
+			let _reservation = if matches!(&change, Change::EnsurePrimitive(_)) {
+				Some(
+					PRIMITIVE_PUBLICATION
+						.lock()
+						.map_err(|_| "Primitive publication lock failed")?,
+				)
+			} else {
+				None
+			};
 			let (root, generation, used) = {
 				let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
 				let w = slot
@@ -221,7 +234,7 @@ async fn operate(
 					Change::ImportSkyPanorama { source, .. } => {
 						Some((AssetSourceKind::SkyPng, source))
 					}
-					Change::Move { .. } => None,
+					Change::EnsurePrimitive(_) | Change::Move { .. } => None,
 				};
 				if let Some((kind, source)) = selected {
 					w.asset_sources.require(kind, source)?;
@@ -243,6 +256,30 @@ async fn operate(
 				(w.asset_root.clone(), w.generation, used)
 			};
 			let prepared: PreparedAssetChange = match change {
+				Change::EnsurePrimitive(kind) => {
+					match project_assets::prepare_primitive(&root, kind, embedded_primitive(kind))?
+					{
+						PreparedPrimitive::New(change) => *change,
+						PreparedPrimitive::Existing(asset) => {
+							let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+							let workspace = slot
+								.as_ref()
+								.ok_or("Open a project before importing assets")?;
+							check_asset_generation(workspace, expected_generation)?;
+							workspace.check_revision(expected_revision)?;
+							workspace.validate_asset_destination(&asset.path)?;
+							let snapshot = workspace
+								.backend
+								.snapshot()
+								.map_err(|error| error.to_string())?;
+							return Ok(AssetOperationDto {
+								operation_id: operation_id.clone(),
+								asset: ModelAssetDto::from_asset(&asset),
+								snapshot,
+							});
+						}
+					}
+				}
 				Change::Import {
 					source,
 					destination,
@@ -277,21 +314,48 @@ async fn operate(
 				.lock()
 				.map_err(|_| "Viewport state lock failed")?
 				.request_asset_change(prepared, generation, expected_revision)?;
-			progress(&window, &operation_id, "complete", 3, None);
 			Ok(AssetOperationDto {
 				operation_id: operation_id.clone(),
 				asset: ModelAssetDto::from_asset(&asset),
 				snapshot,
 			})
 		})();
-		if let Err(error) = &result {
-			progress(&window, &operation_id, "failed", 0, Some(error.clone()));
+		match &result {
+			Ok(_) => progress(&window, &operation_id, "complete", 3, None),
+			Err(error) => progress(&window, &operation_id, "failed", 0, Some(error.clone())),
 		}
 		result
 	})
 	.await
 	.map_err(|e| format!("Asset authoring worker failed: {e}"))?
 }
+fn embedded_primitive(kind: PrimitiveKind) -> &'static [u8] {
+	match kind {
+		PrimitiveKind::Plane => include_bytes!("../../../assets/primitives/plane.glb"),
+		PrimitiveKind::Cube => include_bytes!("../../../assets/primitives/cube.glb"),
+		PrimitiveKind::Sphere => include_bytes!("../../../assets/primitives/sphere.glb"),
+		PrimitiveKind::Capsule => include_bytes!("../../../assets/primitives/capsule.glb"),
+	}
+}
+
+#[tauri::command]
+pub async fn editor_ensure_primitive(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	kind: PrimitiveKind,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<AssetOperationDto, String> {
+	operate(
+		window,
+		state,
+		expected_revision,
+		expected_generation,
+		Change::EnsurePrimitive(kind),
+	)
+	.await
+}
+
 #[tauri::command]
 pub async fn editor_import_external_glb(
 	window: WebviewWindow,

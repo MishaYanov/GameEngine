@@ -35,6 +35,7 @@ pub use bounds::Bounds3;
 pub use camera::Camera;
 pub use camera_controller::CameraController;
 pub use engine::{GraphicsProbe, GraphicsProbeError};
+pub use engine_core::PrimitiveKind;
 pub use engine_core::camera_preview::FrozenOrbitPreview;
 pub use engine_core::camera_replay;
 pub use engine_core::components;

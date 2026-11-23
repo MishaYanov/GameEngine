@@ -474,3 +474,89 @@ fn controls_graph_asset_rejects_wrong_kind_invalid_replacements_and_changed_disk
 		.is_err()
 	);
 }
+
+#[test]
+fn concurrent_embedded_primitive_preparations_publish_one_catalog_identity() {
+	let fixture = Fixture::new();
+	let root = fixture.root();
+	let bytes = glb("Built-in cube", 1.0);
+	let prepare =
+		|| match prepare_primitive(&root, engine_core::PrimitiveKind::Cube, &bytes).unwrap() {
+			PreparedPrimitive::New(change) => *change,
+			PreparedPrimitive::Existing(_) => panic!("fixture has no published primitive yet"),
+		};
+	let (first, second) = std::thread::scope(|scope| {
+		let first = scope.spawn(prepare);
+		let second = scope.spawn(prepare);
+		(first.join().unwrap(), second.join().unwrap())
+	});
+	let candidate = second.candidate_path().to_owned();
+	let destination = root.join("models/primitives/v1/cube.glb");
+	assert!(!destination.exists() && !root.join(CATALOG_FILE).exists());
+
+	let first = first.publish().unwrap();
+	assert!(second.publish().unwrap_err().contains("catalog changed"));
+	assert!(!candidate.exists());
+	let PreparedPrimitive::Existing(reused) =
+		prepare_primitive(&root, engine_core::PrimitiveKind::Cube, &bytes).unwrap()
+	else {
+		panic!("repeat must reuse the published primitive");
+	};
+	assert_eq!(first.id, reused.id);
+	assert_eq!(reused.revision, 1);
+	assert_eq!(reused.meshes[0].name, "Built-in cube");
+	assert!(reused.source_path.is_none());
+	assert_eq!(load_catalog(&root).unwrap().assets.len(), 1);
+	assert_eq!(fs::read(destination).unwrap(), bytes);
+}
+
+#[test]
+fn embedded_primitives_respect_user_files_and_reject_invalid_models() {
+	let fixture = Fixture::new();
+	let root = fixture.root();
+	let bytes = glb("Built-in cube", 1.0);
+	let kind = engine_core::PrimitiveKind::Cube;
+	assert!(prepare_primitive(&root, kind, b"glTF truncated").is_err());
+	assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+	let destination = root.join("models/primitives/v1/cube.glb");
+	fs::create_dir_all(destination.parent().unwrap()).unwrap();
+	let user_bytes = glb("User cube", 3.0);
+	fs::write(&destination, &user_bytes).unwrap();
+	let error = prepare_primitive(&root, kind, &bytes).err().unwrap();
+	assert!(error.contains("already exists"));
+	assert!(!root.join(CATALOG_FILE).exists());
+	assert_eq!(fs::read(&destination).unwrap(), user_bytes);
+
+	fs::remove_file(&destination).unwrap();
+	let PreparedPrimitive::New(change) = prepare_primitive(&root, kind, &bytes).unwrap() else {
+		panic!("primitive must use the unoccupied destination");
+	};
+	let asset = change.publish().unwrap();
+	let mut changed = bytes.clone();
+	*changed.last_mut().unwrap() ^= 1;
+	fs::write(&destination, &changed).unwrap();
+	assert!(prepare_primitive(&root, kind, &bytes).is_err());
+	assert_eq!(fs::read(&destination).unwrap(), changed);
+	assert_eq!(
+		load_catalog(&root)
+			.unwrap()
+			.by_path(&asset.path)
+			.unwrap()
+			.id,
+		asset.id
+	);
+}
+
+#[cfg(unix)]
+#[test]
+fn embedded_primitive_does_not_follow_a_linked_parent() {
+	let fixture = Fixture::new();
+	let root = fixture.root();
+	let outside = fixture.0.join("outside");
+	fs::create_dir(&outside).unwrap();
+	std::os::unix::fs::symlink(&outside, root.join("models")).unwrap();
+	let bytes = glb("Built-in cube", 1.0);
+	assert!(prepare_primitive(&root, engine_core::PrimitiveKind::Cube, &bytes).is_err());
+	assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+	assert!(!root.join(CATALOG_FILE).exists());
+}

@@ -91,3 +91,59 @@ fn source_selections_are_confined_to_the_workspace_and_kind() {
 		.require(AssetSourceKind::Glb, &source)
 		.is_err());
 }
+
+#[test]
+fn embedded_primitives_use_the_scoped_native_publication_boundary() {
+	use crate::asset_reimport_gpu::{publish, validate_context};
+
+	struct Fixture(PathBuf);
+	impl Drop for Fixture {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.0);
+		}
+	}
+
+	let fixture = Fixture(std::env::temp_dir().join(format!(
+		"editor-primitive-assets-{}",
+		AssetId::generate().as_str()
+	)));
+	fs::create_dir(&fixture.0).unwrap();
+	let project =
+		compiler::create_blank_project("Primitive test", fixture.0.to_str().unwrap()).unwrap();
+	let mut workspace = EditorWorkspace::open_project_with_notifier(
+		ProjectLocation::from_manifest(&project.join("project.json")).unwrap(),
+		|| {},
+	)
+	.unwrap();
+	let root = workspace.asset_root.clone();
+	let generation = workspace.generation;
+	let revision = workspace.backend.session().revision();
+
+	let kind = PrimitiveKind::Cube;
+	let bytes = embedded_primitive(kind);
+	let pending = || match project_assets::prepare_primitive(&root, kind, bytes).unwrap() {
+		PreparedPrimitive::New(change) => *change,
+		PreparedPrimitive::Existing(_) => panic!("primitive publication is not yet committed"),
+	};
+	let stale = pending();
+	let candidate = stale.candidate_path().to_owned();
+	assert!(validate_context(&workspace, &stale, generation + 1, revision).is_err());
+	assert!(validate_context(&workspace, &stale, generation, revision + 1).is_err());
+	drop(stale);
+	assert!(!candidate.exists());
+	assert!(!root.join(runtime::asset_catalog::CATALOG_FILE).exists());
+	assert!(!root.join("models/primitives/v1/cube.glb").exists());
+
+	let fresh = pending();
+	validate_context(&workspace, &fresh, generation, revision).unwrap();
+	let (asset, snapshot) = publish(fresh, &mut workspace, || {}).unwrap();
+	assert!(snapshot.revision > revision);
+	let PreparedPrimitive::Existing(reused) =
+		project_assets::prepare_primitive(&root, kind, bytes).unwrap()
+	else {
+		panic!("primitive retry must use the established catalog identity");
+	};
+	assert_eq!(asset.id, reused.id);
+	assert_eq!(project_assets::load_catalog(&root).unwrap().assets.len(), 1);
+	assert_eq!(fs::read(root.join(&asset.path)).unwrap(), bytes);
+}

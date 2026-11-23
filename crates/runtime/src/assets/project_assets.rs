@@ -1,5 +1,6 @@
 //! Bounded authoring asset transactions. Preparation never replaces live files.
 //! Publication is failure-atomic (not a crash-atomic multi-file database).
+use crate::scene_io::paths::is_linked;
 use engine_core::{
 	asset_catalog::{
 		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, MeshSignature,
@@ -23,6 +24,7 @@ mod controls_graph;
 mod input_actions;
 mod migration;
 mod prefab;
+mod primitive;
 mod sky_panorama;
 
 pub use animation_clip::{prepare_animation_clip, read_animation_clip};
@@ -33,6 +35,7 @@ pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;
+pub use primitive::{PreparedPrimitive, prepare_primitive};
 pub use sky_panorama::{prepare_sky_panorama_import, read_sky_panorama};
 
 const MAX_SOURCE: usize = 64 * 1024 * 1024;
@@ -51,7 +54,7 @@ pub fn fingerprint(bytes: &[u8]) -> String {
 }
 fn read(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
 	let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-	if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit as u64 {
+	if !metadata.is_file() || is_linked(&metadata) || metadata.len() > limit as u64 {
 		return Err("Asset must be a regular file within its byte limit".into());
 	}
 	let mut bytes = Vec::new();
@@ -67,7 +70,7 @@ fn read(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
 }
 fn root(path: &Path) -> Result<PathBuf, String> {
 	let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-	if !metadata.is_dir() || metadata.file_type().is_symlink() {
+	if !metadata.is_dir() || is_linked(&metadata) {
 		return Err("Asset root must be a directory without symbolic links".into());
 	}
 	path.canonicalize().map_err(|e| e.to_string())
@@ -81,7 +84,7 @@ pub fn asset_path(asset_root: &Path, relative: &str, must_exist: bool) -> Result
 	for component in Path::new(relative).components() {
 		path.push(component);
 		if let Ok(metadata) = fs::symlink_metadata(&path)
-			&& metadata.file_type().is_symlink()
+			&& is_linked(&metadata)
 		{
 			return Err("Asset paths must not contain symbolic links".into());
 		}
@@ -128,7 +131,6 @@ pub(super) fn warm_model_path(asset_root: &Path, relative: &str) -> Result<PathB
 }
 
 pub(super) fn open_warm_file(path: &Path) -> std::io::Result<fs::File> {
-	use crate::scene_io::paths::is_linked;
 	if is_linked(&fs::symlink_metadata(path)?) {
 		return Err(std::io::Error::other(
 			"Warm source must be an ordinary file",
