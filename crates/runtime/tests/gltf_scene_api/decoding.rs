@@ -91,3 +91,74 @@ fn static_import_bounds_depth_and_node_count_before_recursive_or_unbounded_work(
 			.contains("10000")
 	);
 }
+
+#[test]
+fn starter_primitives_import_with_expected_geometry_and_no_external_files() {
+	use engine_core::PrimitiveKind;
+	use glam::Vec3;
+	use std::{fs, path::Path};
+
+	let models = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../../apps/editor-host/src-tauri/assets/primitives");
+	let directory = Directory::new("starter-primitives");
+	for kind in PrimitiveKind::ALL {
+		let filename = format!("{}.glb", kind.as_str());
+		let bytes = fs::read(models.join(&filename)).unwrap();
+		let glb = gltf::Gltf::from_slice(&bytes).unwrap();
+		assert!(glb.blob.is_some());
+		assert_eq!(glb.buffers().len(), 1);
+		assert!(matches!(
+			glb.buffers().next().unwrap().source(),
+			gltf::buffer::Source::Bin
+		));
+		assert_eq!(glb.images().len(), 0);
+
+		// Import the model from an otherwise empty asset root.
+		let path = directory.0.join(&filename);
+		fs::write(&path, &bytes).unwrap();
+		let scene = gltf_loader::load_scene(&path).unwrap();
+		assert_eq!(scene.referenced_bytes, bytes.len());
+		assert_eq!(scene.root_node_indices, vec![0]);
+		assert_eq!(scene.nodes.len(), 1);
+		assert_eq!(scene.nodes[0].name, kind.display_name());
+		assert_eq!(
+			scene.nodes[0].local_transform,
+			engine_core::Transform::default()
+		);
+		assert_eq!(scene.mesh_count, 1);
+		let (min, max) = match kind {
+			PrimitiveKind::Plane => ([-0.5, 0.0, -0.5], [0.5, 0.0, 0.5]),
+			PrimitiveKind::Cube | PrimitiveKind::Sphere => ([-0.5; 3], [0.5; 3]),
+			PrimitiveKind::Capsule => ([-0.5, -1.0, -0.5], [0.5, 1.0, 0.5]),
+		};
+		let bounds = scene.mesh_bounds[0].unwrap();
+		assert_eq!(bounds.min(), min);
+		assert_eq!(bounds.max(), max);
+
+		let primitives = gltf_loader::load_first_mesh(&path).unwrap();
+		assert_eq!(primitives.len(), 1);
+		let primitive = &primitives[0];
+		assert_eq!(primitive.material.base_color_factor, [0.7, 0.7, 0.7, 1.0]);
+		assert!(!primitive.material.double_sided);
+		let vertices = primitive.mesh.vertices();
+		let indices = primitive.mesh.indices();
+		assert!(!vertices.is_empty() && !indices.is_empty());
+		assert_eq!(indices.len() % 3, 0);
+		for vertex in vertices {
+			assert!(Vec3::from_array(vertex.position).is_finite());
+			assert!((Vec3::from_array(vertex.normal).length() - 1.0).abs() < 1e-4);
+			assert!(vertex.uv.into_iter().all(|uv| (0.0..=1.0).contains(&uv)));
+		}
+		for triangle in indices.chunks_exact(3) {
+			let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+				.map(|index| Vec3::from_array(vertices[index as usize].position));
+			let outside = if kind == PrimitiveKind::Plane {
+				Vec3::Y
+			} else {
+				a + b + c
+			};
+			assert!((b - a).cross(c - a).dot(outside) > 0.0, "{kind:?} winding");
+		}
+		fs::remove_file(path).unwrap();
+	}
+}
