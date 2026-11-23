@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "entry": "ring",
+  "states": [
+    {
+      "id": "ring",
+      "name": "Ring Once",
+      "clip": {
+        "kind": "authored",
+        "asset_id": "91000000-0000-4000-8000-000000000009",
+        "expected_sha256": "5be7fdd8fc3415386b716866fe139b546aa3415e591bd872c1fde00ad69c81c8"
+      },
+      "looping": false
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": 3,
+  "name": "Primitive Workshop",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behavior_definitions": [],
+  "behaviors": [],
+  "scenes": [
+    {
+      "id": "main",
+      "asset_path": "scenes/workshop.json"
+    }
+  ],
+  "startup_scene_id": "main",
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "jump",
+        "key": "space"
+      }
+    ]
+  },
+  "physics_layers": {
+    "layers": [
+      {
+        "bit": 0,
+        "id": "default",
+        "label": "Default"
+      },
+      {
+        "bit": 1,
+        "id": "terrain",
+        "label": "Terrain"
+      },
+      {
+        "bit": 2,
+        "id": "world",
+        "label": "World"
+      },
+      {
+        "bit": 3,
+        "id": "player",
+        "label": "Player"
+      },
+      {
+        "bit": 4,
+        "id": "prop",
+        "label": "Prop"
+      },
+      {
+        "bit": 5,
+        "id": "trigger",
+        "label": "Trigger"
+      }
+    ],
+    "ignored_pairs": [
+      [
+        0,
+        5
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        5
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        4,
+        5
+      ],
+      [
+        5,
+        5
+      ]
+    ]
+  }
+}

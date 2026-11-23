@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "id": "move",
+      "label": "Move",
+      "value": "vector2",
+      "bindings": [
+        {
+          "kind": "keyboard_vector",
+          "keys": {
+            "negative_x": "arrow_left",
+            "positive_x": "arrow_right",
+            "negative_y": "arrow_down",
+            "positive_y": "arrow_up"
+          }
+        },
+        {
+          "kind": "gamepad_left_stick"
+        }
+      ]
+    },
+    {
+      "id": "look",
+      "label": "Look",
+      "value": "delta2",
+      "bindings": [
+        {
+          "kind": "pointer_delta"
+        },
+        {
+          "kind": "gamepad_right_stick"
+        }
+      ]
+    },
+    {
+      "id": "jump",
+      "label": "Jump",
+      "value": "button",
+      "bindings": [
+        {
+          "kind": "key",
+          "key": "j"
+        },
+        {
+          "kind": "gamepad_button",
+          "button": "a"
+        }
+      ]
+    }
+  ]
+}

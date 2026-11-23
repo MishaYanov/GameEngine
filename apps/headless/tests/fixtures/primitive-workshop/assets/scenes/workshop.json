@@ -1,0 +1,1053 @@
+{
+  "schema_version": 8,
+  "bindings": {
+    "player": "player"
+  },
+  "entities": [
+    {
+      "key": "floor-plane",
+      "name": "Plane Floor",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          12.0,
+          1.0,
+          10.0
+        ]
+      },
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/plane.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000001",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.32,
+                0.4,
+                0.42,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "floor-box",
+      "name": "Floor Collider",
+      "transform": {
+        "position": [
+          0.0,
+          -0.1,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "floor",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                6.0,
+                0.1,
+                5.0
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 2,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "player",
+      "name": "Capsule Player",
+      "transform": {
+        "position": [
+          0.0,
+          0.901,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "player",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "player_controller",
+            "settings": {
+              "input": {
+                "kind": "asset",
+                "asset_id": "91000000-0000-4000-8000-000000000005"
+              },
+              "space": "camera_relative",
+              "local": true,
+              "control_graph": "91000000-0000-4000-8000-000000000006"
+            }
+          }
+        },
+        {
+          "id": "character",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "character_controller",
+            "settings": {
+              "walk_speed": 4.0,
+              "ground_acceleration": 30.0,
+              "air_acceleration": 8.0,
+              "gravity": 20.0,
+              "max_fall_speed": 30.0,
+              "jump_speed": 7.0,
+              "ground_probe": 0.02,
+              "step_height": 0.25,
+              "coyote_ticks": 5,
+              "jump_buffer_ticks": 5,
+              "jump_action": "jump"
+            }
+          }
+        },
+        {
+          "id": "body",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.35,
+                0.9,
+                0.35
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "interaction": {
+                "sensor": false,
+                "layers": 8,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "player-visual",
+      "name": "Capsule Mesh",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.7,
+          0.9,
+          0.7
+        ]
+      },
+      "parent": "player",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/capsule.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000004",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.28,
+                0.52,
+                0.91,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "camera",
+      "name": "Orbit Camera",
+      "transform": {
+        "position": [
+          0.0,
+          2.05,
+          5.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "camera",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "camera",
+            "settings": {
+              "lens": {
+                "vertical_fov": 1.0471976,
+                "near": 0.1,
+                "far": 100.0
+              },
+              "rig": {
+                "mode": "orbit",
+                "settings": {
+                  "target": "player",
+                  "pivot_offset": [
+                    0.0,
+                    0.65,
+                    0.0
+                  ],
+                  "initial_yaw": 0.0,
+                  "initial_pitch": -0.1,
+                  "initial_distance": 5.6,
+                  "min_distance": 0.5,
+                  "max_distance": 12.0,
+                  "min_pitch": -1.3,
+                  "max_pitch": 0.9,
+                  "follow_seconds": 0.1,
+                  "recovery_seconds": 0.22,
+                  "teleport_distance": 8.0,
+                  "probe_radius": 0.25,
+                  "obstruction_mask": 2
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "workshop-bell",
+      "name": "Workshop Bell",
+      "transform": {
+        "position": [
+          2.85,
+          1.8,
+          -1.6
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "components": [
+        {
+          "id": "bell-audio",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "audio_source",
+            "settings": {
+              "clip": {
+                "asset": "91000000-0000-4000-8000-000000000011"
+              },
+              "gain": 0.65,
+              "loop": false,
+              "playback": "on_event",
+              "bus": "effects",
+              "spatial": {
+                "mode": "spatial",
+                "near": 0.7,
+                "far": 22.0
+              },
+              "event": {
+                "kind": "animation_marker",
+                "clip": "91000000-0000-4000-8000-000000000009",
+                "marker": "bell-contact"
+              }
+            }
+          }
+        },
+        {
+          "id": "bell-animator",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "animator",
+            "settings": {
+              "asset_id": "91000000-0000-4000-8000-000000000010",
+              "binding": {
+                "kind": "visual",
+                "targets": [
+                  {
+                    "channel": {
+                      "kind": "scene",
+                      "entity_key": "workshop-bell-visual"
+                    },
+                    "entity_key": "workshop-bell-visual"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "workshop-bell-visual",
+      "name": "Bell Visual",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.48,
+          0.58,
+          0.48
+        ]
+      },
+      "parent": "workshop-bell",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/sphere.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000003",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.96,
+                0.58,
+                0.16,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "477d400a-289a-445a-b672-337694ba61a8",
+      "name": "Linked prefab instance",
+      "transform": {
+        "position": [
+          3.2,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "linked_prefab": {
+        "source": {
+          "source_id": "91000000-0000-4000-8000-000000000008",
+          "path": "prefabs/workshop-gate.prefab.json",
+          "fingerprint": "77d89dabe65a8be27b7407a2960c0fc8f8efa823cdf37b7d3688d5749b59af16",
+          "prefab": {
+            "schema_version": 4,
+            "entities": [
+              {
+                "key": "frame",
+                "name": "Gate Frame",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "components": []
+              },
+              {
+                "key": "pillar",
+                "name": "Hinge Post",
+                "transform": {
+                  "position": [
+                    0.0,
+                    1.1,
+                    -0.76
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.24,
+                    2.2,
+                    0.24
+                  ]
+                },
+                "parent": "frame",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/primitives/v1/cube.glb",
+                      "asset_id": "91000000-0000-4000-8000-000000000002",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.2,
+                          0.28,
+                          0.38,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "gate",
+                "name": "Gate Pivot",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    -0.7
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "parent": "frame",
+                "components": [
+                  {
+                    "id": "open-gate",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "script",
+                      "settings": {
+                        "script_id": "project.open_door_on_trigger",
+                        "config_version": 1,
+                        "properties": {
+                          "open_angle_degrees": 90.0,
+                          "speed_degrees_per_second": 180.0
+                        },
+                        "references": {
+                          "sensor": {
+                            "entity": "sensor"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "door",
+                "name": "Signal Gate",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.96,
+                    0.69
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    0.15,
+                    1.85,
+                    1.34
+                  ]
+                },
+                "parent": "gate",
+                "components": [
+                  {
+                    "id": "mesh",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "mesh_renderer",
+                      "model_path": "models/primitives/v1/cube.glb",
+                      "asset_id": "91000000-0000-4000-8000-000000000002",
+                      "mesh_index": 0,
+                      "material": {
+                        "base_color_factor": [
+                          0.63,
+                          0.31,
+                          0.13,
+                          1.0
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "sensor",
+                "name": "Gate Sensor",
+                "transform": {
+                  "position": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "parent": "frame",
+                "components": [
+                  {
+                    "id": "trigger",
+                    "schema_version": 1,
+                    "enabled": true,
+                    "data": {
+                      "kind": "collider",
+                      "collider": {
+                        "kind": "box",
+                        "half_extents": [
+                          0.95,
+                          0.92,
+                          0.8
+                        ],
+                        "offset": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "interaction": {
+                          "sensor": true,
+                          "layers": 32,
+                          "mask": 4294967295
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "gameplay": null,
+            "reference_slots": {},
+            "composition": {
+              "placements": [
+                {
+                  "id": "signal-cap",
+                  "name": "Signal Cap",
+                  "target": {
+                    "asset_id": "91000000-0000-4000-8000-000000000007",
+                    "fingerprint": "6664d76af9c4d56013aa41d5f47974241698ff71d5254344049f7635c4775e78"
+                  },
+                  "parent": "frame",
+                  "local": {
+                    "position": [
+                      0.0,
+                      2.37,
+                      -0.76
+                    ],
+                    "rotation": [
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    "scale": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ]
+                  }
+                }
+              ],
+              "pins": [
+                {
+                  "version": {
+                    "asset_id": "91000000-0000-4000-8000-000000000007",
+                    "fingerprint": "6664d76af9c4d56013aa41d5f47974241698ff71d5254344049f7635c4775e78"
+                  },
+                  "path": "prefabs/signal-cap.prefab.json",
+                  "entities": [
+                    {
+                      "key": "status-sphere",
+                      "name": "Signal Cap",
+                      "transform": {
+                        "position": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "rotation": [
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "scale": [
+                          0.35,
+                          0.35,
+                          0.35
+                        ]
+                      },
+                      "components": [
+                        {
+                          "id": "mesh",
+                          "schema_version": 1,
+                          "enabled": true,
+                          "data": {
+                            "kind": "mesh_renderer",
+                            "model_path": "models/primitives/v1/sphere.glb",
+                            "asset_id": "91000000-0000-4000-8000-000000000003",
+                            "mesh_index": 0,
+                            "material": {
+                              "base_color_factor": [
+                                0.24,
+                                0.85,
+                                0.62,
+                                1.0
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "entity_map": {
+          "door": "1b3a156f-0dbf-4b60-8a72-770189e1a565",
+          "frame": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+          "gate": "43463479-9b2a-4e88-a278-a7191b339222",
+          "pillar": "645a09bc-2cbd-4593-a46f-198b9030286d",
+          "prop-1b287aa846a4544f155402c0bd3a11308d0eb6fbfef53cb44f8881e4ebdbc444": "88423021-705f-400f-b434-6ea6c29825aa",
+          "prop-dc5e2351d3eb83aae4ba2d901635b22a253a64362662ccb87cf400e7c08756e0": "5ffa8190-d914-45f4-8cc4-9857425bae1b",
+          "sensor": "2e9fba3e-0fc9-4f72-aa4d-c3aba364c695"
+        },
+        "bindings": {},
+        "overrides": []
+      },
+      "components": []
+    },
+    {
+      "key": "1b3a156f-0dbf-4b60-8a72-770189e1a565",
+      "name": "Signal Gate",
+      "transform": {
+        "position": [
+          0.0,
+          0.96,
+          0.69
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.15,
+          1.85,
+          1.34
+        ]
+      },
+      "parent": "43463479-9b2a-4e88-a278-a7191b339222",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/cube.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000002",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.63,
+                0.31,
+                0.13,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+      "name": "Gate Frame",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "477d400a-289a-445a-b672-337694ba61a8",
+      "components": []
+    },
+    {
+      "key": "43463479-9b2a-4e88-a278-a7191b339222",
+      "name": "Gate Pivot",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          -0.7
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+      "components": [
+        {
+          "id": "open-gate",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "script",
+            "settings": {
+              "script_id": "project.open_door_on_trigger",
+              "config_version": 1,
+              "properties": {
+                "open_angle_degrees": 90.0,
+                "speed_degrees_per_second": 180.0
+              },
+              "references": {
+                "sensor": {
+                  "entity": "2e9fba3e-0fc9-4f72-aa4d-c3aba364c695"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "645a09bc-2cbd-4593-a46f-198b9030286d",
+      "name": "Hinge Post",
+      "transform": {
+        "position": [
+          0.0,
+          1.1,
+          -0.76
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.24,
+          2.2,
+          0.24
+        ]
+      },
+      "parent": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/cube.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000002",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.2,
+                0.28,
+                0.38,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "88423021-705f-400f-b434-6ea6c29825aa",
+      "name": "Signal Cap",
+      "transform": {
+        "position": [
+          0.0,
+          2.37,
+          -0.76
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+      "components": []
+    },
+    {
+      "key": "5ffa8190-d914-45f4-8cc4-9857425bae1b",
+      "name": "Signal Cap",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.35,
+          0.35,
+          0.35
+        ]
+      },
+      "parent": "88423021-705f-400f-b434-6ea6c29825aa",
+      "components": [
+        {
+          "id": "mesh",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "mesh_renderer",
+            "model_path": "models/primitives/v1/sphere.glb",
+            "asset_id": "91000000-0000-4000-8000-000000000003",
+            "mesh_index": 0,
+            "material": {
+              "base_color_factor": [
+                0.24,
+                0.85,
+                0.62,
+                1.0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "2e9fba3e-0fc9-4f72-aa4d-c3aba364c695",
+      "name": "Gate Sensor",
+      "transform": {
+        "position": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "parent": "5345a0e7-62c2-4760-8106-a86c0aa3e3d6",
+      "components": [
+        {
+          "id": "trigger",
+          "schema_version": 1,
+          "enabled": true,
+          "data": {
+            "kind": "collider",
+            "collider": {
+              "kind": "box",
+              "half_extents": [
+                0.95,
+                0.92,
+                0.8
+              ],
+              "offset": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "interaction": {
+                "sensor": true,
+                "layers": 32,
+                "mask": 4294967295
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "default_game_camera": "camera",
+  "lights": [
+    {
+      "key": "yard-sun",
+      "name": "Sun",
+      "kind": "directional",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "direction": [
+        0.4,
+        -0.8,
+        -0.6
+      ],
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 0.75,
+      "range": 10.0
+    }
+  ],
+  "organization": {
+    "folders": [
+      {
+        "id": "floor",
+        "name": "Floor"
+      }
+    ],
+    "root_membership": {
+      "floor-box": "floor",
+      "floor-plane": "floor"
+    }
+  },
+  "environment": {
+    "ambient_linear": [
+      0.26,
+      0.29,
+      0.34
+    ]
+  }
+}

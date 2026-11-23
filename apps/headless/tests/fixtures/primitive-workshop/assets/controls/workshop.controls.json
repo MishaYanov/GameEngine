@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "move_action",
+      "data": {
+        "kind": "action",
+        "action": "move",
+        "value": "vector2"
+      }
+    },
+    {
+      "id": "move_intent",
+      "data": {
+        "kind": "move",
+        "input": "move_action"
+      }
+    },
+    {
+      "id": "look_action",
+      "data": {
+        "kind": "action",
+        "action": "look",
+        "value": "delta2"
+      }
+    },
+    {
+      "id": "look_intent",
+      "data": {
+        "kind": "look",
+        "input": "look_action"
+      }
+    },
+    {
+      "id": "jump_action",
+      "data": {
+        "kind": "action",
+        "action": "jump",
+        "value": "button"
+      }
+    },
+    {
+      "id": "jump_intent",
+      "data": {
+        "kind": "jump",
+        "input": "jump_action"
+      }
+    }
+  ],
+  "layout": {
+    "move_action": {
+      "x": 40,
+      "y": 30
+    },
+    "move_intent": {
+      "x": 310,
+      "y": 30
+    },
+    "look_action": {
+      "x": 40,
+      "y": 146
+    },
+    "look_intent": {
+      "x": 310,
+      "y": 146
+    },
+    "jump_action": {
+      "x": 40,
+      "y": 262
+    },
+    "jump_intent": {
+      "x": 310,
+      "y": 262
+    }
+  }
+}

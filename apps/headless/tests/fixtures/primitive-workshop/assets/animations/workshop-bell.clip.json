@@ -1,0 +1,80 @@
+{
+  "schema_version": 2,
+  "name": "Workshop Bell Swing",
+  "owner": {
+    "kind": "scene",
+    "scene_id": "main"
+  },
+  "duration_ticks": 1040,
+  "tracks": [
+    {
+      "target": {
+        "kind": "scene",
+        "entity_key": "workshop-bell-visual"
+      },
+      "track": {
+        "kind": "local_rotation",
+        "interpolation": "linear",
+        "keys": [
+          {
+            "id": "bell-key-0",
+            "at": 0,
+            "value": [
+              0,
+              0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "bell-key-1",
+            "at": 260,
+            "value": [
+              0,
+              0,
+              -0.18885889,
+              0.98200424
+            ]
+          },
+          {
+            "id": "bell-key-2",
+            "at": 450,
+            "value": [
+              0,
+              0,
+              0.15931821,
+              0.98722728
+            ]
+          },
+          {
+            "id": "bell-key-3",
+            "at": 680,
+            "value": [
+              0,
+              0,
+              -0.11474669,
+              0.99339478
+            ]
+          },
+          {
+            "id": "bell-key-4",
+            "at": 1040,
+            "value": [
+              0,
+              0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "markers": [
+    {
+      "id": "bell-contact",
+      "at": 450,
+      "label": "Bell contact"
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "91000000-0000-4000-8000-000000000001",
+      "path": "models/primitives/v1/plane.glb",
+      "kind": "model",
+      "bytes": 1088,
+      "fingerprint": "aeea82fe4a895a16ebd901fbaae593960d613558b51646ec373e2a26170b3e08",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Plane",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000002",
+      "path": "models/primitives/v1/cube.glb",
+      "kind": "model",
+      "bytes": 1852,
+      "fingerprint": "ca694b6cea9cc7a8ee3b8a2bc70aec2fa644365003ba908a4f197c6ae1e0386a",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Cube",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000003",
+      "path": "models/primitives/v1/sphere.glb",
+      "kind": "model",
+      "bytes": 30428,
+      "fingerprint": "c967306c11d9505c6e9056c8eebcc660bfe9a343405d47415609c1e9ea4861fe",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Sphere",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000004",
+      "path": "models/primitives/v1/capsule.glb",
+      "kind": "model",
+      "bytes": 32256,
+      "fingerprint": "0a933a270502923c75a78ca753d27b7fc9df3a457f85e9a2b5f06ba09ea96a52",
+      "revision": 1,
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Capsule",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000005",
+      "path": "controls/workshop.input-actions.json",
+      "kind": "input_actions",
+      "bytes": 942,
+      "fingerprint": "72d0f5d2939547c93c002a02fdd0b0b56d087d2d8562bba8d163a1bf8030e409",
+      "revision": 1
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000006",
+      "path": "controls/workshop.controls.json",
+      "kind": "controls_graph",
+      "bytes": 1194,
+      "fingerprint": "032f5bfaf5b190c7f7bd8d20268835e253bb9b96b9a41e9c77c21bfd4f7a1d75",
+      "revision": 1
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000007",
+      "path": "prefabs/signal-cap.prefab.json",
+      "kind": "prefab",
+      "bytes": 897,
+      "fingerprint": "6664d76af9c4d56013aa41d5f47974241698ff71d5254344049f7635c4775e78",
+      "revision": 1,
+      "dependencies": [
+        "91000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000008",
+      "path": "prefabs/workshop-gate.prefab.json",
+      "kind": "prefab",
+      "bytes": 6014,
+      "fingerprint": "77d89dabe65a8be27b7407a2960c0fc8f8efa823cdf37b7d3688d5749b59af16",
+      "revision": 1,
+      "dependencies": [
+        "91000000-0000-4000-8000-000000000002",
+        "91000000-0000-4000-8000-000000000007"
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000009",
+      "path": "animations/workshop-bell.clip.json",
+      "kind": "animation_clip",
+      "bytes": 1486,
+      "fingerprint": "5be7fdd8fc3415386b716866fe139b546aa3415e591bd872c1fde00ad69c81c8",
+      "revision": 1
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000010",
+      "path": "animations/workshop-bell.animator.json",
+      "kind": "animator_graph",
+      "bytes": 353,
+      "fingerprint": "aff69d380d0b890a4dd16ccd3d79b6ebc76d14f81346e4706b29072f35b7dde8",
+      "revision": 1,
+      "dependencies": [
+        "91000000-0000-4000-8000-000000000009"
+      ]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000011",
+      "path": "audio/workshop-bell.wav",
+      "kind": "audio_clip",
+      "bytes": 8364,
+      "fingerprint": "454b0e188f56b1f09856deff4a7724e0b84d20e6fe3fbc4f189bbb5d54694210",
+      "revision": 1
+    }
+  ]
+}
