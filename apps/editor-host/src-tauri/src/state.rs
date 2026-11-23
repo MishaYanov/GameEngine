@@ -17,6 +17,7 @@ pub struct EditorState {
 	pub engine_status: Arc<Mutex<Option<EngineStatusDto>>>,
 	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
 	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
+	pub exit_review_gate: Arc<Mutex<()>>,
 	pub last_build: Arc<Mutex<Option<compiler::InstalledProject>>>,
 	pub pending_build: Arc<Mutex<ProjectBuildState>>,
 }
@@ -31,6 +32,7 @@ impl Default for EditorState {
 			engine_status: Arc::new(Mutex::new(None)),
 			editor,
 			viewport,
+			exit_review_gate: Arc::new(Mutex::new(())),
 			last_build: Arc::new(Mutex::new(None)),
 			pending_build: Arc::new(Mutex::new(ProjectBuildState::default())),
 		}

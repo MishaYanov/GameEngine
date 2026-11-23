@@ -279,8 +279,8 @@ impl ViewportHost {
 		let _ = visible;
 	}
 
-	/// CloseRequested must first be prevented. The real parent HWND is destroyed
-	/// only after the child worker has waited for GPU completion and exited.
+	/// Finish an accepted exit without emitting another CloseRequested event.
+	/// Destroy the parent HWND after the child worker finishes GPU teardown.
 	pub fn close_parent_when_ready(&mut self, parent: tauri::WebviewWindow) {
 		if self.shutting_down {
 			return;

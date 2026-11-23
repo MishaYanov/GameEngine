@@ -49,6 +49,37 @@ fn exit_review_protects_unsaved_timeline_changes_on_a_clean_scene() {
 }
 
 #[test]
+fn exit_review_gate_rejects_a_second_request_until_the_first_finishes() {
+	let gate = Mutex::new(());
+	let first = exit_review_permit(&gate).unwrap().unwrap();
+	assert!(exit_review_permit(&gate).unwrap().is_none());
+	drop(first);
+	assert!(exit_review_permit(&gate).unwrap().is_some());
+}
+
+#[test]
+fn window_close_reviews_current_revision_and_file_exit_checks_the_caller_revision() {
+	let (workspace, _) = open_timeline();
+	let current = workspace.backend.session().revision();
+	let close = ExitRequest::WindowClose;
+	let stale_file_menu = ExitRequest::FileMenu {
+		expected_revision: Some(current + 1),
+	};
+
+	assert_eq!(close.reviewed_revision(None), None);
+	assert_eq!(close.reviewed_revision(Some(&workspace)), Some(current));
+	assert_eq!(
+		exit_review(Some(&workspace), close.reviewed_revision(Some(&workspace))).unwrap(),
+		None
+	);
+	assert!(exit_review(
+		Some(&workspace),
+		stale_file_menu.reviewed_revision(Some(&workspace))
+	)
+	.is_err());
+}
+
+#[test]
 fn invalid_project_request_returns_an_error_without_building() {
 	let result = compiler::create_authoring_project("../escape", "relative");
 	assert!(matches!(result, Err(message) if message.contains("project name")));

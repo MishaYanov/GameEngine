@@ -1,9 +1,23 @@
 use crate::{editor::EditorWorkspace, state::EditorState};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::State;
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use tauri::{Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+enum ExitRequest {
+	FileMenu { expected_revision: Option<u64> },
+	WindowClose,
+}
+
+impl ExitRequest {
+	fn reviewed_revision(&self, workspace: Option<&EditorWorkspace>) -> Option<u64> {
+		match self {
+			Self::FileMenu { expected_revision } => *expected_revision,
+			Self::WindowClose => workspace.map(|workspace| workspace.backend.session().revision()),
+		}
+	}
+}
 
 #[tauri::command]
 pub async fn choose_project_manifest(
@@ -47,16 +61,44 @@ pub async fn confirm_project_discard(window: tauri::WebviewWindow) -> Result<boo
 
 #[tauri::command]
 pub async fn editor_exit(
-	window: tauri::WebviewWindow,
-	state: State<'_, EditorState>,
+	window: WebviewWindow,
 	expected_revision: Option<u64>,
 ) -> Result<bool, String> {
 	super::editor::trusted_window(&window)?;
+	request_editor_exit(window, ExitRequest::FileMenu { expected_revision }).await
+}
+
+pub(crate) fn request_window_close(window: WebviewWindow) {
+	tauri::async_runtime::spawn(async move {
+		if let Err(message) = request_editor_exit(window.clone(), ExitRequest::WindowClose).await {
+			engine_logger::warn!(target: "editor", "Window close kept the editor open: {message}");
+			window
+				.dialog()
+				.message(message)
+				.title("Editor remains open")
+				.parent(&window)
+				.kind(MessageDialogKind::Info)
+				.show(|_| {});
+		}
+	});
+}
+
+async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Result<bool, String> {
+	let state = window.state::<EditorState>();
 	let editor = Arc::clone(&state.editor);
+	let viewport = Arc::clone(&state.viewport);
+	let exit_review_gate = Arc::clone(&state.exit_review_gate);
 	tauri::async_runtime::spawn_blocking(move || {
-		let warning = {
+		let Some(_permit) = exit_review_permit(&exit_review_gate)? else {
+			return Ok(false);
+		};
+		let (expected_revision, warning) = {
 			let workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
-			exit_review(workspace.as_ref(), expected_revision)?
+			let expected_revision = request.reviewed_revision(workspace.as_ref());
+			(
+				expected_revision,
+				exit_review(workspace.as_ref(), expected_revision)?,
+			)
 		};
 		if let Some(message) = warning {
 			if !confirm_discard(&window, message, "Discard and exit", "Keep editing") {
@@ -64,22 +106,31 @@ pub async fn editor_exit(
 			}
 		}
 
+		let mut host = viewport.lock().map_err(|_| "Viewport state lock failed")?;
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
 		if exit_review(workspace.as_ref(), expected_revision)? != warning {
 			return Err(
 				"Revision conflict: the project has new unsaved changes. Try Exit again.".into(),
 			);
 		}
-		// CloseRequested already waits for the native viewport before destroying its parent.
-		window.close().map_err(|error| error.to_string())?;
 		// Retire the reviewed workspace before background completions can adopt more edits.
 		let retired = workspace.take();
 		drop(workspace);
+		host.close_parent_when_ready(window);
+		drop(host);
 		drop(retired);
 		Ok(true)
 	})
 	.await
 	.map_err(|error| error.to_string())?
+}
+
+fn exit_review_permit(gate: &Mutex<()>) -> Result<Option<MutexGuard<'_, ()>>, String> {
+	match gate.try_lock() {
+		Ok(guard) => Ok(Some(guard)),
+		Err(TryLockError::WouldBlock) => Ok(None),
+		Err(TryLockError::Poisoned(_)) => Err("Exit review state lock failed".into()),
+	}
 }
 
 fn exit_review(

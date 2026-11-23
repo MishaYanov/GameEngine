@@ -42,11 +42,7 @@ pub fn run() {
 			parent.on_window_event(move |event| match event {
 				tauri::WindowEvent::CloseRequested { api, .. } => {
 					api.prevent_close();
-					if let Ok(mut host) = viewport.lock() {
-						host.close_parent_when_ready(window.clone());
-					} else {
-						engine_logger::error!("Cannot acquire viewport state during shutdown");
-					}
+					commands::project::request_window_close(window.clone());
 				}
 				tauri::WindowEvent::Resized(size) => {
 					if let Ok(host) = viewport.lock() {
