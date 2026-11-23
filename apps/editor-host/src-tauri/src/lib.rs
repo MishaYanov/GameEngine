@@ -21,6 +21,7 @@ use crate::commands::project::{
 };
 use crate::commands::runtime_inspection::editor_runtime_inspect;
 use state::EditorState;
+use tauri::webview::PageLoadEvent;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,6 +34,14 @@ pub fn run() {
 	tauri::Builder::default()
 		.plugin(tauri_plugin_dialog::init())
 		.manage(EditorState::default())
+		.on_page_load(|webview, payload| {
+			if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Started) {
+				webview
+					.state::<EditorState>()
+					.exit
+					.reset_window_close_page();
+			}
+		})
 		.setup(|app| {
 			let parent = app
 				.get_webview_window("main")

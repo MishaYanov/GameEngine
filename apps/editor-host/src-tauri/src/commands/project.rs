@@ -1,6 +1,6 @@
 use crate::{
 	editor::EditorWorkspace,
-	state::{EditorExitState, EditorState},
+	state::{EditorExitState, EditorState, WindowCloseReview},
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -176,7 +176,7 @@ async fn dispatch_window_close(window: &WebviewWindow) -> Result<(), String> {
 	if exit.is_committed() {
 		return Ok(());
 	}
-	let owner = exit.window_close_owner()?.clone();
+	let owner = exit.window_close_review()?.owner().map(str::to_owned);
 	if let Some(owner) = owner {
 		return window
 			.emit_to(
@@ -246,15 +246,15 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 fn hold_unclaimed_window_close<'a>(
 	exit: &'a EditorExitState,
 	request: &ExitRequest,
-) -> Result<Option<MutexGuard<'a, Option<String>>>, String> {
+) -> Result<Option<MutexGuard<'a, WindowCloseReview>>, String> {
 	if !matches!(request, ExitRequest::WindowClose) {
 		return Ok(None);
 	}
-	let owner = exit.window_close_owner()?;
-	if owner.is_some() {
+	let review = exit.window_close_review()?;
+	if review.owner().is_some() {
 		return Err("The editor is ready to review changes. Request Close again.".into());
 	}
-	Ok(Some(owner))
+	Ok(Some(review))
 }
 
 fn exit_review_permit(gate: &Mutex<()>) -> Result<Option<MutexGuard<'_, ()>>, String> {

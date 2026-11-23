@@ -1,5 +1,5 @@
 use std::sync::{
-	atomic::{AtomicBool, Ordering},
+	atomic::{AtomicBool, AtomicU64, Ordering},
 	Arc, Mutex, MutexGuard,
 };
 
@@ -17,17 +17,41 @@ pub struct ProjectBuildState {
 }
 
 #[derive(Default)]
+pub(crate) struct WindowCloseReview {
+	page: u64,
+	owner: Option<String>,
+}
+
+impl WindowCloseReview {
+	pub(crate) fn owner(&self) -> Option<&str> {
+		self.owner.as_deref()
+	}
+}
+
+#[derive(Default)]
 pub(crate) struct EditorExitState {
 	pub(crate) review_gate: Mutex<()>,
 	committed: AtomicBool,
-	window_close_owner: Mutex<Option<String>>,
+	window_close_page: AtomicU64,
+	window_close_review: Mutex<WindowCloseReview>,
 }
 
 impl EditorExitState {
-	pub(crate) fn window_close_owner(&self) -> Result<MutexGuard<'_, Option<String>>, String> {
-		self.window_close_owner
+	pub(crate) fn window_close_review(&self) -> Result<MutexGuard<'_, WindowCloseReview>, String> {
+		let mut review = self
+			.window_close_review
 			.lock()
-			.map_err(|_| "Window close review state lock failed".into())
+			.map_err(|_| "Window close review state lock failed")?;
+		let page = self.window_close_page.load(Ordering::Relaxed);
+		if review.page != page {
+			*review = WindowCloseReview { page, owner: None };
+		}
+		Ok(review)
+	}
+
+	/// A new WebView document has no editor listener. Invalidate its predecessor on the UI thread.
+	pub(crate) fn reset_window_close_page(&self) {
+		self.window_close_page.fetch_add(1, Ordering::Relaxed);
 	}
 
 	pub(crate) fn set_window_close_owner(
@@ -43,12 +67,12 @@ impl EditorExitState {
 		{
 			return Err("Invalid window close review owner.".into());
 		}
-		let mut current = self.window_close_owner()?;
+		let mut current = self.window_close_review()?;
 		if enabled {
 			self.ensure_project_can_open()?;
-			*current = Some(owner);
-		} else if current.as_deref() == Some(owner.as_str()) {
-			*current = None;
+			current.owner = Some(owner);
+		} else if current.owner() == Some(owner.as_str()) {
+			current.owner = None;
 		}
 		Ok(())
 	}

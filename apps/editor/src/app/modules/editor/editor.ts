@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, inject, signal, viewChild} from '@angular/core';
+import {Component, computed, DestroyRef, ElementRef, inject, signal, viewChild} from '@angular/core';
 import {RouterOutlet} from "@angular/router";
 import {EditorHeader} from "./components/editor-header/editor-header";
 import {EditorWorkspace} from './workspace/editor-workspace';
@@ -50,6 +50,7 @@ export class Editor {
     protected readonly canExit = computed(() => this.idle() && !this.reviewingDeparture());
     protected readonly canOpenProject = computed(() => this.canExit() && !this.editorService.playing());
     private readonly workspace = viewChild(EditorWorkspace);
+    private readonly workspaceElement = viewChild<EditorWorkspace, ElementRef<HTMLElement>>(EditorWorkspace, {read: ElementRef});
     private stopWatchingClose?: () => void;
     private destroyed = false;
 
@@ -152,12 +153,23 @@ export class Editor {
         }
         await this.withReviewedWorkspace('exit', async () => {
             this.openError.set(null);
+            const workspace = this.workspaceElement()?.nativeElement;
+            const focused = workspace?.ownerDocument.activeElement;
+            // Close the input window before the native request can run, even before Angular renders the closing status.
+            workspace?.setAttribute('inert', '');
             this.openMessage.set(OpenMessages.EXITING);
             let closing = false;
             try {
                 closing = await this.editorService.requestExit();
             } finally {
-                if (!closing) this.openMessage.set(null);
+                if (!closing) {
+                    workspace?.removeAttribute('inert');
+                    this.openMessage.set(null);
+                    if (focused instanceof HTMLElement && workspace?.contains(focused) &&
+                        workspace.ownerDocument.activeElement === workspace.ownerDocument.body && !this.destroyed) {
+                        focused.focus({preventScroll: true});
+                    }
+                }
             }
         });
     }

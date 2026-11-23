@@ -234,9 +234,9 @@ fn close_review_owner_is_bounded_and_late_cleanup_keeps_the_replacement() {
 	exit.set_window_close_owner("older".into(), true).unwrap();
 	exit.set_window_close_owner("newer".into(), true).unwrap();
 	exit.set_window_close_owner("older".into(), false).unwrap();
-	assert_eq!(exit.window_close_owner().unwrap().as_deref(), Some("newer"));
+	assert_eq!(exit.window_close_review().unwrap().owner(), Some("newer"));
 	exit.set_window_close_owner("newer".into(), false).unwrap();
-	assert!(exit.window_close_owner().unwrap().is_none());
+	assert!(exit.window_close_review().unwrap().owner().is_none());
 	exit.commit();
 	assert!(exit
 		.set_window_close_owner("after-exit".into(), true)
@@ -258,6 +258,41 @@ fn a_listener_claims_an_unfinished_native_window_close_but_not_the_reviewed_file
 	assert!(hold_unclaimed_window_close(&exit, &reviewed)
 		.unwrap()
 		.is_none());
+}
+
+#[test]
+fn full_page_load_invalidates_stale_owner_without_waiting_for_the_previous_review_lock() {
+	let exit = EditorExitState::default();
+	exit.set_window_close_owner("old-page".into(), true)
+		.unwrap();
+	let previous_review = exit.window_close_review().unwrap();
+	assert_eq!(previous_review.owner(), Some("old-page"));
+	// The UI callback must run even while a worker holds the review lock.
+	let (finished, did_finish) = std::sync::mpsc::channel();
+	std::thread::scope(|scope| {
+		scope.spawn(|| {
+			exit.reset_window_close_page();
+			finished.send(()).unwrap();
+		});
+		let completed = did_finish.recv_timeout(std::time::Duration::from_secs(2));
+		drop(previous_review);
+		assert!(completed.is_ok());
+	});
+	assert!(
+		hold_unclaimed_window_close(&exit, &ExitRequest::WindowClose)
+			.unwrap()
+			.is_some()
+	);
+	assert!(exit.window_close_review().unwrap().owner().is_none());
+
+	exit.set_window_close_owner("new-page".into(), true)
+		.unwrap();
+	exit.set_window_close_owner("old-page".into(), false)
+		.unwrap();
+	assert_eq!(
+		exit.window_close_review().unwrap().owner(),
+		Some("new-page")
+	);
 }
 
 #[test]

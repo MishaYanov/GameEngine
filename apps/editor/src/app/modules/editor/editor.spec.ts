@@ -164,4 +164,44 @@ describe('desktop close review', () => {
         header.exitRequested.emit();
         await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('editor_exit', {expectedRevision: null}));
     });
+
+    it.each(['cancel', 'error'] as const)('locks workspace input during native exit and restores it after %s', async outcome => {
+        let approveDraftReview!: (approved: boolean) => void;
+        const review = vi.spyOn(EditorWorkspace.prototype, 'reviewProjectNavigation')
+            .mockImplementation(() => new Promise<boolean>(resolve => approveDraftReview = resolve));
+        let finishExit!: () => void;
+        const useNative = vi.mocked(invoke).getMockImplementation()!;
+        const fixture = TestBed.createComponent(Editor);
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const workspace = root.querySelector<HTMLElement>('editor-workspace')!;
+        const header = fixture.debugElement.query(By.directive(EditorHeader)).componentInstance as EditorHeader;
+        vi.mocked(invoke).mockImplementation((command, payload, options) => {
+            if (command !== 'editor_exit') return useNative(command, payload, options);
+            expect(workspace.hasAttribute('inert')).toBe(true);
+            return new Promise((resolve, reject) => {
+                finishExit = outcome === 'cancel' ? () => resolve(false) : () => reject(new Error('Exit retry needed.'));
+            });
+        });
+
+        header.exitRequested.emit();
+        expect(review).toHaveBeenCalledTimes(1);
+        expect(workspace.hasAttribute('inert')).toBe(false);
+        approveDraftReview(true);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(finishExit).toBeTypeOf('function');
+            expect(workspace.hasAttribute('inert')).toBe(true);
+            expect(root.querySelector('.open-status')?.textContent).toContain('Closing the editor');
+            expect(root.querySelector('.open-status')?.closest('[inert]')).toBeNull();
+        });
+
+        finishExit();
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(workspace.hasAttribute('inert')).toBe(false);
+            expect(header.canExit()).toBe(true);
+            if (outcome === 'error') expect(root.querySelector('.open-error')?.textContent).toContain('Exit retry needed.');
+        });
+    });
 });
