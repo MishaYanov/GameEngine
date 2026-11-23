@@ -4,7 +4,8 @@ import {
 import {listen} from '@tauri-apps/api/event';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {EntityKey, ModelAsset, SceneEntity, SceneId, Transform} from '../../../../core/editor/editor.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {
     NestedPropPlacement, NestedPropPlacementRequest, NestedPropSource, PrefabSourceDraft, PropDraftEdit,
 } from '../../../../core/editor/linked-prefabs.models';
@@ -13,6 +14,10 @@ import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import type {PropObjectEdit} from './prop-object-editor';
 import type {ComponentEditIntent} from '../components/component-editor';
+import {
+    type InspectorSubject, linkedInspectorSubject, type LinkedInspectorTarget, sameLinkedInspectorTarget,
+    sceneInspectorSubject, sourceInspectorSubject, watchLinkedInspectorAddress,
+} from '../inspector-panel/inspector-subject';
 
 export interface PropWorkspaceObject {
     readonly key: EntityKey;
@@ -65,6 +70,7 @@ interface PropObjectRecord {
 @Injectable()
 export class PropWorkspaceService {
     private readonly editor = inject(EditorService);
+    private readonly viewport = inject(ViewportEditorService, {optional: true});
     private readonly editing = inject(SceneEditingService);
     private readonly views = inject(WorkspaceViewService);
     private readonly injector = inject(Injector);
@@ -141,6 +147,35 @@ export class PropWorkspaceService {
         if (this.selectedPlacement()) return null;
         const objects = this.document()?.objects ?? [];
         return objects.find(item => item.key === this.selectedKey()) ?? objects[0] ?? null;
+    });
+
+    private readonly inspectorScope = computed<WorkspaceAssetScope | null>(() => {
+        const snapshot = this.editor.snapshot();
+        const document = this.document();
+        if (!snapshot || !document || document.scope.generation !== this.editor.workspaceGeneration()) return null;
+        const currentNative = this.viewport?.state()?.workspace_generation;
+        const nativeGeneration = currentNative ?? (document.kind === 'source' ? document.draft.workspace_generation : null);
+        return nativeGeneration === null ? null : {
+            workspaceGeneration: document.scope.generation, nativeGeneration, revision: snapshot.revision,
+        };
+    });
+    private readonly inspectorTarget = computed<LinkedInspectorTarget | null>(() => {
+        const document = this.document(), object = this.selectedObject(), scope = this.inspectorScope();
+        const snapshot = this.editor.snapshot();
+        if (document?.kind !== 'instance' || !snapshot || snapshot.transaction !== null ||
+            document.scope.sceneId !== snapshot.active_scene_id || !object || object.key === document.root || !scope) return null;
+        return {scene: document.scope.sceneId, object: object.key, root: document.root, scope};
+    }, {equal: sameLinkedInspectorTarget});
+    private readonly linkedInspectorAddress = watchLinkedInspectorAddress(this.editor, this.inspectorTarget);
+    readonly inspectorSubject = computed<InspectorSubject | null>(() => {
+        const document = this.document(), object = this.selectedObject(), scope = this.inspectorScope();
+        const snapshot = this.editor.snapshot();
+        if (!document || !object || !scope || !snapshot) return null;
+        if (document.kind === 'source') return sourceInspectorSubject(document.draft, object.key, scope, this.canEditDraft());
+        if (document.scope.sceneId !== snapshot.active_scene_id) return null;
+        if (object.key === document.root) return sceneInspectorSubject(snapshot, object.key, scope, false);
+        const target = this.inspectorTarget();
+        return target ? linkedInspectorSubject(snapshot, target, this.linkedInspectorAddress(), false) : null;
     });
 
     constructor() {

@@ -99,6 +99,39 @@ export type PropAddress =
     | { readonly kind: 'object'; readonly placement_path: readonly string[]; readonly source_entity: EntityKey }
     | { readonly kind: 'placement'; readonly placement_path: readonly string[] };
 
+export interface LinkedPropAddress {
+    readonly root_key: EntityKey;
+    readonly entity_key: EntityKey;
+    readonly scene_id: string;
+    readonly address: PropAddress;
+}
+
+export function readLinkedPropAddress(value: unknown): LinkedPropAddress | null {
+    if (value === null) return null;
+    if (!isRecord(value) || !nonemptyString(value['root_key']) || !nonemptyString(value['entity_key']) ||
+        !nonemptyString(value['scene_id']) || !isRecord(value['address'])) {
+        throw new Error('The linked Prop subject response is invalid.');
+    }
+    const address = value['address'];
+    const path: unknown = address['placement_path'];
+    if (!Array.isArray(path) || !path.every(nonemptyString)) throw new Error('The linked Prop placement path is invalid.');
+    const kind = address['kind'];
+    const header = {root_key: value['root_key'], entity_key: value['entity_key'], scene_id: value['scene_id']};
+    if (kind === 'object' && nonemptyString(address['source_entity'])) {
+        return {...header, address: {kind, placement_path: path, source_entity: address['source_entity']}};
+    }
+    if (kind === 'placement' && path.length > 0) return {...header, address: {kind, placement_path: path}};
+    throw new Error('The linked Prop address is invalid.');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function nonemptyString(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0;
+}
+
 export type LinkedPrefabPropertyKind =
     | 'name'
     | 'transform_position'

@@ -1,8 +1,99 @@
 use super::*;
 use bridge::viewport::PropPreviewTargetDto;
 use editor::prefab_sources::{nested::NestedPropPlacementDto, PropDraftEdit};
-use runtime::linked_prefab::PlacementId;
+use runtime::linked_prefab::{PlacementId, PropAddress};
 use runtime::scene_data::TransformData;
+
+#[test]
+fn inspector_resolves_nested_members_without_overrides_in_native_scope() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	let generation = workspace.generation;
+	let revision = workspace.backend.session().revision();
+	let outer = workspace
+		.create_linked_prefab_source("prefabs/subject.json", Default::default(), revision)
+		.unwrap();
+	let child = workspace
+		.create_linked_prefab_source("prefabs/subject-child.json", Default::default(), revision)
+		.unwrap();
+	let mut draft_revision = outer.draft_revision;
+	let mut addresses = Vec::new();
+	for (index, name) in ["Left", "Right"].into_iter().enumerate() {
+		let assembled = workspace
+			.add_prop_draft_placement(
+				&outer.draft_id,
+				draft_revision,
+				NestedPropPlacementDto {
+					asset_id: child.asset_id.clone(),
+					fingerprint: child.fingerprint.clone(),
+					name: name.into(),
+					parent: EntityKey::new("a").unwrap(),
+					local: TransformData::default(),
+					bindings: Default::default(),
+				},
+			)
+			.unwrap();
+		draft_revision = assembled.draft_revision;
+		let id = assembled.prefab["composition"]["placements"][index]["id"]
+			.as_str()
+			.unwrap();
+		addresses.push(PropAddress::Object {
+			placement_path: vec![PlacementId::new(id).unwrap()],
+			source_entity: EntityKey::new("a").unwrap(),
+		});
+	}
+	workspace
+		.save_prop_draft(&outer.draft_id, draft_revision)
+		.unwrap();
+	let revision = workspace.backend.session().revision();
+	let placed = workspace
+		.instantiate_linked_source(
+			&outer.path,
+			&outer.draft_id,
+			[0.0; 3],
+			Default::default(),
+			revision,
+		)
+		.unwrap();
+	let root = EntityKey::new(&placed.selection[0]).unwrap();
+	let authored = workspace.backend.session().authored_document();
+	let link = authored
+		.entities
+		.iter()
+		.find(|entity| entity.key == root)
+		.unwrap()
+		.linked_prefab
+		.as_ref()
+		.unwrap();
+	assert!(link.overrides.is_empty());
+	for expected in addresses {
+		let member = &link.entity_map[&expected.materialized_key().unwrap()];
+		let found = workspace
+			.linked_prop_address(member.as_str(), generation, placed.revision)
+			.unwrap()
+			.unwrap();
+		assert_eq!(found.root_key, root);
+		assert_eq!(&found.entity_key, member);
+		assert_eq!(found.address, expected);
+		assert!(workspace
+			.linked_prop_address(member.as_str(), generation + 1, placed.revision)
+			.is_err());
+		assert!(workspace
+			.linked_prop_address(member.as_str(), generation, revision)
+			.is_err());
+	}
+	assert!(workspace
+		.linked_prop_address(root.as_str(), generation, placed.revision)
+		.unwrap()
+		.is_none());
+	assert_eq!(workspace.backend.session().revision(), placed.revision);
+}
 
 #[test]
 fn reviewed_child_is_reused_with_independent_transforms_and_shared_draft_history() {

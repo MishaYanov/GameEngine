@@ -2,11 +2,18 @@
 //! mutates an authored instance; updates remain undoable commands.
 use super::*;
 use crate::editor::prefab_sources::{
-	LinkedPrefabStatusDto, PrefabSourceDraftDto, PrefabSourceSaveDto, PrefabSourceValidationDto,
-	PropDraftEdit,
+	LinkedPrefabStatusDto, LinkedPropAddressDto, PrefabSourceDraftDto, PrefabSourceSaveDto,
+	PrefabSourceValidationDto, PropDraftEdit,
 };
 use runtime::{linked_prefab::PrefabConflictResolution, EntityKey};
 use std::collections::BTreeMap;
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum LinkedPrefabInspectionDto {
+	Status(LinkedPrefabStatusDto),
+	Address(LinkedPropAddressDto),
+}
 
 #[tauri::command]
 pub async fn editor_prefab_source_open(
@@ -144,10 +151,29 @@ pub async fn editor_linked_prefab_status(
 	state: State<'_, EditorState>,
 	root_key: String,
 	expected_revision: u64,
-) -> Result<Option<LinkedPrefabStatusDto>, String> {
+	address_only: Option<bool>,
+	expected_generation: Option<u64>,
+) -> Result<Option<LinkedPrefabInspectionDto>, String> {
 	trusted_window(&window)?;
+	if address_only == Some(true) {
+		let generation =
+			expected_generation.ok_or("The Inspector subject needs a workspace generation")?;
+		let shared = Arc::clone(&state.editor);
+		return tauri::async_runtime::spawn_blocking(move || {
+			let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+			let workspace = slot
+				.as_ref()
+				.ok_or("Open a scene before using the editor")?;
+			workspace
+				.linked_prop_address(&root_key, generation, expected_revision)
+				.map(|address| address.map(LinkedPrefabInspectionDto::Address))
+		})
+		.await
+		.map_err(|error| format!("Editor worker failed: {error}"))?;
+	}
 	workspace(state, false, None, move |w| {
 		w.linked_prefab_status(&root_key, expected_revision)
+			.map(|status| status.map(LinkedPrefabInspectionDto::Status))
 	})
 	.await
 }

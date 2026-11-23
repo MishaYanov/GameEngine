@@ -47,6 +47,7 @@ import {
 } from './authored-clip.models';
 import {readRuntimeInspection, type RuntimeInspection} from './runtime-inspection';
 import {isSceneSchemaVersion} from './editor.models';
+import {readLinkedPropAddress, type LinkedPropAddress} from './linked-prefabs.models';
 import type {
     LinkedPrefabOverrideResolution,
     LinkedPrefabOverrideReview,
@@ -780,6 +781,17 @@ export class EditorService {
             const result = await this.native<LinkedPrefabStatus | null>('editor_linked_prefab_status', {rootKey, expectedRevision: expectedRevision ?? this.revision()});
             this.requireGeneration(expectedGeneration);
             return result;
+        });
+    }
+
+    inspectLinkedPropAddress(key: EntityKey, scope: WorkspaceAssetScope): Promise<LinkedPropAddress | null> {
+        return this.queue.then(async () => {
+            this.requireGeneration(scope.workspaceGeneration);
+            const response = await this.native<unknown>('editor_linked_prefab_status', {
+                rootKey: key, addressOnly: true, expectedRevision: scope.revision, expectedGeneration: scope.nativeGeneration,
+            });
+            this.requireGeneration(scope.workspaceGeneration);
+            return readLinkedPropAddress(response);
         });
     }
 

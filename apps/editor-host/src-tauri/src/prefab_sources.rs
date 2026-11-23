@@ -4,7 +4,9 @@ use super::*;
 use runtime::{
 	asset_catalog::{AssetId, AssetKind},
 	editor::command::{EditorCommandDto, EditorCommandRequest},
-	linked_prefab::{LinkedPrefabOverrideDto, LinkedPrefabSource, PrefabConflictResolution},
+	linked_prefab::{
+		LinkedPrefabOverrideDto, LinkedPrefabSource, PrefabConflictResolution, PropAddress,
+	},
 };
 use serde::Serialize;
 
@@ -74,6 +76,14 @@ pub struct LinkedPrefabStatusDto {
 	pub direct_placements: usize,
 	pub bindings: std::collections::BTreeMap<String, EntityKey>,
 	pub overrides: Vec<LinkedPrefabOverrideDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LinkedPropAddressDto {
+	pub root_key: EntityKey,
+	pub entity_key: EntityKey,
+	pub scene_id: SceneId,
+	pub address: PropAddress,
 }
 
 impl EditorWorkspace {

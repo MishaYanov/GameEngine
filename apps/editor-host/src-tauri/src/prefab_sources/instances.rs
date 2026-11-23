@@ -42,6 +42,58 @@ impl EditorWorkspace {
 			})
 			.map(|entity| entity.key.clone()))
 	}
+	/// Resolve an authored member through the pinned source, even if it has no overrides.
+	pub fn linked_prop_address(
+		&self,
+		key: &str,
+		generation: u64,
+		revision: u64,
+	) -> Result<Option<LinkedPropAddressDto>, String> {
+		if generation != self.generation {
+			return Err("The Inspector subject belongs to an earlier workspace".into());
+		}
+		self.check_revision(revision)?;
+		let key = EntityKey::new(key)?;
+		let session = self.backend.session();
+		let scene = session.authored_document();
+		let member = scene.entities.iter().find_map(|entity| {
+			let link = entity.linked_prefab.as_ref()?;
+			let source = link
+				.entity_map
+				.iter()
+				.find(|(_, placed)| *placed == &key)?
+				.0;
+			Some((&entity.key, &link.source, source))
+		});
+		let Some((root, source, member)) = member else {
+			return Ok(None);
+		};
+		let address = if source
+			.prefab
+			.entities
+			.iter()
+			.any(|entity| &entity.key == member)
+		{
+			PropAddress::Object {
+				placement_path: Vec::new(),
+				source_entity: member.clone(),
+			}
+		} else {
+			source
+				.prefab
+				.expanded_composition(Some(&source.source_id))?
+				.addresses
+				.remove(member)
+				.ok_or("The pinned Prop member has no semantic address")?
+		};
+		Ok(Some(LinkedPropAddressDto {
+			root_key: root.clone(),
+			entity_key: key,
+			scene_id: session.active_scene_id().clone(),
+			address,
+		}))
+	}
+
 	pub fn linked_prefab_status(
 		&self,
 		key: &str,

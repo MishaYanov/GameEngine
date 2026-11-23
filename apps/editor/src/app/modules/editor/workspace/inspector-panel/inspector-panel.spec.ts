@@ -1,6 +1,9 @@
+import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import axe from 'axe-core';
 import type {SceneEntity} from '../../../../core/editor/editor.models';
+import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {type InspectorField, InspectorPanel, type InspectorTransformChange} from './inspector-panel';
 
 const entity: SceneEntity = {
@@ -10,6 +13,33 @@ const entity: SceneEntity = {
     renderable: true,
     transform: {position: [1, 2, 3], rotation: [0, Math.PI / 2, 0], scale: [1, 1, 1]},
 };
+
+it('projects the active scene, native generation, and content revision from the mounted Inspector', async () => {
+    const snapshot = signal({
+        active_scene_id: 'left', revision: 12, scene_revision: 3, transaction: null,
+        selection: [entity.key], document: {entities: [entity]}, project: {},
+    });
+    const native = signal({workspace_generation: 7});
+    TestBed.configureTestingModule({providers: [
+        {provide: EditorService, useValue: {snapshot, workspaceGeneration: signal(2)}},
+        {provide: ViewportEditorService, useValue: {state: native}},
+    ]});
+    const fixture = TestBed.createComponent(InspectorPanel);
+    fixture.componentRef.setInput('entity', entity);
+    fixture.componentRef.setInput('editable', true);
+    await fixture.whenStable();
+    const inspector = fixture.componentInstance;
+    expect(inspector.subject()).toEqual({
+        address: {kind: 'scene', scene: 'left', object: entity.key},
+        scope: {workspaceGeneration: 2, nativeGeneration: 7, revision: 12},
+        contentRevision: 3, access: 'scene-edit',
+    });
+    inspector.revealReference(entity.key);
+    snapshot.update(current => ({...current, active_scene_id: 'right', revision: 13, scene_revision: 1}));
+    await fixture.whenStable();
+    expect(inspector.subject()).toMatchObject({address: {scene: 'right'}, contentRevision: 1});
+    expect(document.activeElement).not.toBe(fixture.nativeElement.querySelector('[data-reference-entity]'));
+});
 
 describe('InspectorPanel', () => {
     let fixture: ComponentFixture<InspectorPanel>;

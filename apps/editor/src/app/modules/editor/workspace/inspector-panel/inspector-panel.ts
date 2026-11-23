@@ -15,13 +15,19 @@ import {Drawer} from "../../../../shared/components/drawer/drawer";
 import {EditorPane} from "../../../../shared/components/pane/pane";
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
-import type {Collider, SceneEntity, Vec3} from '../../../../core/editor/editor.models';
+import type {Collider, EntityKey, SceneEntity, Vec3} from '../../../../core/editor/editor.models';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {type Vector3Change, Vector3Field} from '../../../../shared/components/vector3-field/vector3-field';
 import type {InspectorField, TransformFieldEdit} from '../scene-editing.service';
 import {ColliderInspector} from '../collider/collider-inspector';
 import type {ColliderInteractionChange, ColliderKind} from '../collider/collider';
 import {SceneComponentInspector} from '../components/scene-component-inspector';
 import {LinkedPrefabInspector} from '../prefabs/linked-prefab-inspector';
+import {
+    inspectorAddressKey, type InspectorSubject, linkedInspectorRoot, linkedInspectorSubject, type LinkedInspectorTarget,
+    sameLinkedInspectorTarget, sceneInspectorSubject, watchLinkedInspectorAddress,
+} from './inspector-subject';
 
 export type {InspectorField} from '../scene-editing.service';
 export type TransformProperty = TransformFieldEdit['field'];
@@ -62,6 +68,8 @@ export class InspectorPanel {
     private readonly injector = inject(Injector);
     private readonly drawer = viewChild(Drawer);
     private readonly components = viewChild(SceneComponentInspector);
+    private readonly editor = inject(EditorService, {optional: true});
+    private readonly viewport = inject(ViewportEditorService, {optional: true});
 
     protected readonly positionLinked = signal(false);
     protected readonly rotationLinked = signal(false);
@@ -72,21 +80,45 @@ export class InspectorPanel {
         maxWidth: '45%',
     };
 
-    // A new context also replaces drafts when two scenes reuse the same entity key.
-    protected readonly selectedEntities = computed(() => {
+    private readonly snapshot = computed(() => this.editor?.snapshot() ?? null);
+    private readonly nativeGeneration = computed(() => this.viewport?.state()?.workspace_generation ?? null);
+    private readonly scope = computed<WorkspaceAssetScope | null>(() => {
+        const snapshot = this.snapshot();
+        const nativeGeneration = this.nativeGeneration();
+        return this.editor && snapshot && nativeGeneration !== null
+            ? {workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision}
+            : null;
+    });
+    private readonly linkedTarget = computed<LinkedInspectorTarget | null>(() => {
+        const snapshot = this.snapshot(), object = this.entity(), scope = this.scope();
+        if (!snapshot || !object || !scope || snapshot.transaction !== null || snapshot.selection[0] !== object.key) return null;
+        const root = linkedInspectorRoot(object, snapshot.document.entities);
+        return root ? {scene: snapshot.active_scene_id, object: object.key, root, scope} : null;
+    }, {equal: sameLinkedInspectorTarget});
+    private readonly linkedAddress = watchLinkedInspectorAddress(this.editor, this.linkedTarget);
+    readonly subject = computed<InspectorSubject | null>(() => {
+        const snapshot = this.snapshot(), object = this.entity(), scope = this.scope();
+        if (!snapshot || !object || !scope || snapshot.selection[0] !== object.key) return null;
+        const target = this.linkedTarget();
+        if (target) return linkedInspectorSubject(snapshot, target, this.linkedAddress(), this.editable());
+        if (snapshot.transaction !== null && linkedInspectorRoot(object, snapshot.document.entities)) return null;
+        return sceneInspectorSubject(snapshot, object.key, scope, this.editable());
+    });
+
+    // The rendered entity remains stable while its optional semantic linked address loads.
+    private readonly selectionIdentity = computed(() => {
         const entity = this.entity();
-        const context = this.contextKey();
-        return entity ? [{identity: `${context}:${entity.key}`, entity}] : [];
+        return entity ? this.identityFor(entity.key) : null;
+    });
+    protected readonly selectedEntities = computed(() => {
+        const entity = this.entity(), identity = this.selectionIdentity();
+        return entity && identity ? [{identity, entity}] : [];
     });
     protected readonly rotationDegrees = computed<Vec3>(() => {
         const radians = this.entity()?.transform.rotation ?? [0, 0, 0];
         return [radians[0] * 180 / Math.PI, radians[1] * 180 / Math.PI, radians[2] * 180 / Math.PI];
     });
     private readonly nameEntity = signal<string | null>(null);
-    private readonly selectionIdentity = computed(() => {
-        const entity = this.entity();
-        return entity ? `${this.contextKey()}:${entity.key}` : null;
-    });
     protected readonly nameDraft = signal('');
     protected readonly invalidName = signal(false);
     protected readonly nameErrorId = `inspector-name-error-${nextInspectorId++}`;
@@ -112,7 +144,7 @@ export class InspectorPanel {
     }
 
     revealReference(key: string, componentId?: string, section?: 'prefab', slot?: string, field?: string): void {
-        const identity = `${this.contextKey()}:${key}`;
+        const identity = this.identityFor(key);
         const focus = () => {
             if (this.selectionIdentity() !== identity) return;
             const components = this.components();
@@ -137,6 +169,13 @@ export class InspectorPanel {
                 afterNextRender(focus, {injector: this.injector});
             } else focus();
         }, {injector: this.injector});
+    }
+
+    private identityFor(object: EntityKey): string {
+        const snapshot = this.snapshot();
+        if (!snapshot || !this.editor) return JSON.stringify([this.contextKey(), object]);
+        return inspectorAddressKey({kind: 'scene', scene: snapshot.active_scene_id, object},
+            this.editor.workspaceGeneration(), this.nativeGeneration());
     }
 
     protected startName(input: HTMLInputElement): void {
