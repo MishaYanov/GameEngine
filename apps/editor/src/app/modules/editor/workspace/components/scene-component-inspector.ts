@@ -53,42 +53,50 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
         <button type="button" [disabled]="!canAlignCamera()" (click)="alignCamera()">Align Camera to Scene View</button>
     }
     @if (supportsDefaultCamera() && entity()?.camera) {
-        @if (isDefaultCamera()) {
-            <p role="status">Default Game Camera</p>
-        } @else {
-            <button type="button" [disabled]="!canSetDefault()" (click)="setDefaultCamera()">Set as Game Camera</button>
-        }
         <button #previewButton type="button" [disabled]="!canPreviewCamera()" (click)="previewCamera(previewButton)">Preview Selected Camera</button>
-    }
-    @if (supportsSceneSky() && entity()?.sky; as sky) {
-        @if (isSceneSky()) {
-            <p role="status">Active Scene Sky</p>
-        } @else if (!sky.enabled) {
-            <p>Enable the Sky component to use it as the scene background.</p>
-        } @else if (!canUseSceneSky()) {
-            <p>Choose a Sky on an independent root object.</p>
-        }
-        <button type="button" [disabled]="!available() || (!isSceneSky() && !canUseSceneSky())"
-                (click)="setSceneSky(!isSceneSky())">
-            {{ isSceneSky() ? 'Clear Scene Sky' : 'Set as Scene Sky' }}
-        </button>
     }
     @if (entity(); as actor) {
         @if (actor.player_controller) { <editor-control-graph-inspector [actor]="actor" [editable]="editable()"/> }
     }
-    @if (supportsPlayerOwnership() && entity()?.player_controller; as player) {
-        @if (playerBodyIssue(); as issue) {
-            <p role="status">{{ issue }}</p>
-        } @else if (!player.enabled) {
-            <p role="status">Enable the Player Controller to assign local input.</p>
-        }
-        @if (player.settings.local) {
-            <button type="button" [disabled]="!available()" (click)="setLocalPlayer(false)">Clear Local Player</button>
-        } @else {
-            <button type="button" [disabled]="!available() || !player.enabled || !!playerBodyIssue()"
-                    (click)="setLocalPlayer(true)">Set Local Player</button>
-        }
+    @if (showSceneRoles()) {
+        <section aria-label="Scene roles" class="scene-roles">
+            <h3>Scene roles</h3>
+            @if (supportsDefaultCamera() && entity()?.camera) {
+                @if (isDefaultCamera()) {
+                    <p role="status">Default Game Camera</p>
+                } @else {
+                    <button type="button" [disabled]="!canSetDefault()" (click)="setDefaultCamera()">Set as Game Camera</button>
+                }
+            }
+            @if (supportsSceneSky() && entity()?.sky; as sky) {
+                @if (isSceneSky()) {
+                    <p role="status">Active Scene Sky</p>
+                } @else if (!sky.enabled) {
+                    <p>Enable the Sky component to use it as the scene background.</p>
+                } @else if (!canUseSceneSky()) {
+                    <p>Choose a Sky on an independent root object.</p>
+                }
+                <button type="button" [disabled]="!available() || (!isSceneSky() && !canUseSceneSky())"
+                        (click)="setSceneSky(!isSceneSky())">
+                    {{ isSceneSky() ? 'Clear Scene Sky' : 'Set as Scene Sky' }}
+                </button>
+            }
+            @if (supportsPlayerOwnership() && entity()?.player_controller; as player) {
+                @if (playerBodyIssue(); as issue) {
+                    <p role="status">{{ issue }}</p>
+                } @else if (!player.enabled) {
+                    <p role="status">Enable the Player Controller to assign local input.</p>
+                }
+                @if (player.settings.local) {
+                    <button type="button" [disabled]="!available()" (click)="setLocalPlayer(false)">Clear Local Player</button>
+                } @else {
+                    <button type="button" [disabled]="!available() || !player.enabled || !!playerBodyIssue()"
+                            (click)="setLocalPlayer(true)">Set Local Player</button>
+                }
+            }
+        </section>
     }`,
+    styles: '.scene-roles { display: grid; gap: .35rem; margin-block: .65rem; } .scene-roles :is(h3,p) { margin: 0; }',
 })
 export class SceneComponentInspector {
 	readonly entity = input<SceneEntity | null>(null);
@@ -195,6 +203,12 @@ export class SceneComponentInspector {
 	protected readonly canUseSceneSky = computed(() => sceneSkyCandidate(this.entity()));
 	protected readonly supportsPlayerOwnership = computed(() =>
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_local_player') ?? false);
+    protected readonly showSceneRoles = computed(() => {
+        const object = this.entity();
+        return !!(object?.camera && this.supportsDefaultCamera() ||
+            object?.sky && this.supportsSceneSky() ||
+            object?.player_controller && this.supportsPlayerOwnership());
+    });
 	protected readonly playerBodyIssue = computed(() => playerBodyIssue(this.entity()));
 	protected readonly isDefaultCamera = computed(() => {
 		const key = this.entity()?.key;

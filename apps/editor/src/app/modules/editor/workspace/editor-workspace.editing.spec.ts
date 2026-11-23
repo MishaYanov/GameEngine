@@ -814,6 +814,8 @@ describe('Workspace live editing flow', () => {
         expect(root.textContent).toContain('Game preview is stopped');
         expect(document.activeElement).toBe(preview);
 
+        expect(button('Set as Game Camera').closest('[aria-label="Scene roles"]')).not.toBeNull();
+        expect(button('Preview Selected Camera').closest('[aria-label="Scene roles"]')).toBeNull();
         button('Set as Game Camera').click();
         await vi.waitFor(() => expect(editor.document()?.default_game_camera).toBe('camera-2'));
         expect(root.textContent).toContain('Default Game Camera');
