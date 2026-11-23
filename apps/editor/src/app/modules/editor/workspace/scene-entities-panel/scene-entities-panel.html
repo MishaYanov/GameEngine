@@ -73,7 +73,7 @@
                     <p class="placeholder">This scene contains no entities.</p>
                 }
                 <div class="hierarchy-actions" role="group" aria-label="Hierarchy actions">
-                    @if (creationCommands().length) {
+                    @if (creationActions().length) {
                         <button #createButton type="button" (click)="openCreateMenu(createButton)" [disabled]="!canCreate()"
                                 [editorContextMenu]="createMenu" editorContextMenuLabel="Create scene object"
                                 aria-haspopup="menu" [attr.aria-expanded]="contextMenu.request()?.owner === createButton">

@@ -107,8 +107,7 @@ describe('EditorHeader', () => {
         const camera = menu.request()!.items.find(item => item.id === 'create_camera')!;
         const particle = menu.request()!.items.find(item => item.id === 'create_particle_emitter')!;
         expect(camera).toMatchObject({label: 'Camera', disabled: false});
-        expect(particle).toMatchObject({label: 'Particle Emitter', disabled: true});
-        menu.execute(particle);
+        expect(particle).toBeUndefined();
         expect(execute).not.toHaveBeenCalled();
         menu.execute(camera);
         await fixture.whenStable();

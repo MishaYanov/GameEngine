@@ -831,7 +831,7 @@ describe('Workspace live editing flow', () => {
         const menu = TestBed.inject(ContextMenuService);
         const create = async (key: string) => {
             button('Create').click();
-            const player = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Player');
+            const player = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Player Controller');
             expect(player).toBeDefined();
             menu.execute(player!);
             await vi.waitFor(() => expect(editor.selection()).toEqual([key]));

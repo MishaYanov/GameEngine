@@ -114,6 +114,32 @@ describe('SceneEntitiesPanel hierarchy', () => {
         throw new Error(`Missing entity context action: ${id}`);
     }
 
+    it('uses the same creation actions at scene root and scopes object creation to the selected folder', async () => {
+        await openFolders();
+        fixture.componentRef.setInput('creationActions', ['create_empty', 'create_directional_light']);
+        fixture.componentRef.setInput('contextKey', 'first-scene');
+        await fixture.whenStable();
+        const created = vi.fn();
+        component.creationRequested.subscribe(created);
+
+        const emptyAtRoot = contextAction(action('Create'), 'hierarchy.create_empty');
+        const lightAtRoot = contextAction(action('Create'), 'hierarchy.create_directional_light');
+        const emptyInFolder = contextAction(folder('floor'), 'hierarchy.create_empty');
+        expect(emptyAtRoot.label).toBe(emptyInFolder.label);
+        expect(() => contextAction(folder('floor'), 'hierarchy.create_directional_light')).toThrow();
+        await lightAtRoot.execute();
+        await emptyInFolder.execute();
+        expect(created.mock.calls).toEqual([
+            [{action: 'create_directional_light', folder: null}],
+            [{action: 'create_empty', folder: 'floor'}],
+        ]);
+
+        fixture.componentRef.setInput('contextKey', 'replacement-scene');
+        await fixture.whenStable();
+        await emptyInFolder.execute();
+        expect(created).toHaveBeenCalledTimes(2);
+    });
+
     it('builds entity actions for the clicked row independently of the current selection', async () => {
         await open(nested, ['parent']);
         const usages = vi.fn();

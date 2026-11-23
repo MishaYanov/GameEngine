@@ -15,6 +15,7 @@ import {
     viewChild
 } from '@angular/core';
 import type {EntityKey, FolderId, FolderRecord} from '../../../../core/editor/editor.models';
+import {OBJECT_MENU_GROUPS, type ObjectMenuAction, type ObjectMenuEntry} from '../../../../core/editor/editor-object-menu';
 import {EditorPane} from '../../../../shared/components/pane/pane';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
@@ -50,17 +51,19 @@ export interface HierarchyReparentRequest {
     readonly keepWorld?: boolean;
 }
 
-export type HierarchyCreateCommand = 'create_camera' | 'create_player' | 'create_audio_source' | 'create_sky';
-interface CreationMenuContext {readonly contextKey: string}
-
-interface EntityMenuContext {
-    readonly key: EntityKey;
-    readonly contextKey: string;
+export interface HierarchyCreateRequest {
+    readonly action: ObjectMenuAction;
+    readonly folder: FolderId | null;
 }
 
-interface FolderMenuContext {
+interface CreationMenuContext {readonly contextKey: string; readonly folder: FolderId | null}
+
+interface EntityMenuContext extends CreationMenuContext {
+    readonly key: EntityKey;
+}
+
+interface FolderMenuContext extends CreationMenuContext {
     readonly id: FolderId;
-    readonly contextKey: string;
 }
 
 type HierarchyDrop = {readonly key: HierarchyKey | null; readonly valid: boolean};
@@ -89,7 +92,7 @@ export class SceneEntitiesPanel {
     readonly disabled = input(false);
     readonly foldersEnabled = input(false);
     readonly batchParentingEnabled = input(false);
-    readonly creationCommands = input<readonly HierarchyCreateCommand[]>([]);
+    readonly creationActions = input<readonly ObjectMenuAction[]>([]);
     readonly sceneLabel = input('Scene');
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
@@ -98,7 +101,7 @@ export class SceneEntitiesPanel {
     readonly usagesRequested = output<EntityKey>();
     readonly reparentRequested = output<HierarchyReparentRequest>();
     readonly folderRequested = output<HierarchyFolderCommand>();
-    readonly creationRequested = output<HierarchyCreateCommand>();
+    readonly creationRequested = output<HierarchyCreateRequest>();
 
     protected readonly rowHeight = 28;
     protected readonly treeId = `editor-hierarchy-${nextHierarchyId++}`;
@@ -192,13 +195,9 @@ export class SceneEntitiesPanel {
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
     protected readonly contextMenu = inject(ContextMenuService);
-    protected readonly canCreate = computed(() => this.creationCommands().length > 0 && this.scene().projectOpen && !this.disabled());
-    private readonly createCameraAction = this.creationAction('create_camera', 'Camera');
-    private readonly createPlayerAction = this.creationAction('create_player', 'Player');
-    private readonly createAudioSourceAction = this.creationAction('create_audio_source', 'Audio Source');
-    private readonly createSkyAction = this.creationAction('create_sky', 'Sky');
+    protected readonly canCreate = computed(() => this.creationActions().length > 0 && this.scene().projectOpen && !this.disabled());
     private readonly createMenuBuilder = this.creationMenu(ContextMenuBuilder.create<CreationMenuContext>());
-    protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey()});
+    protected readonly createMenu = () => this.createMenuBuilder.build({contextKey: this.contextKey(), folder: null});
     private readonly entityMenuBuilder = ContextMenuBuilder.create<EntityMenuContext>()
         .action(ContextActionBuilder.create<EntityMenuContext>('entity.select', 'Select')
             .icon('object')
@@ -268,8 +267,8 @@ export class SceneEntitiesPanel {
     protected itemMenu(item: HierarchyItem): () => readonly ContextMenuItem[] {
         const contextKey = this.contextKey();
         return item.kind === 'entity'
-            ? () => this.entityMenuBuilder.build({key: item.entity.key, contextKey})
-            : () => this.folderMenuBuilder.build({id: item.folder.id, contextKey});
+            ? () => this.entityMenuBuilder.build({key: item.entity.key, contextKey, folder: null})
+            : () => this.folderMenuBuilder.build({id: item.folder.id, contextKey, folder: item.folder.id});
     }
 
     protected openCreateMenu(button: HTMLButtonElement): void {
@@ -285,19 +284,27 @@ export class SceneEntitiesPanel {
         });
     }
 
-    private creationAction(command: HierarchyCreateCommand, label: string) {
-        const allowed = (context: CreationMenuContext) => this.canCreate() &&
-            this.creationCommands().includes(command) && context.contextKey === this.contextKey();
-        return ContextActionBuilder.create<CreationMenuContext>('hierarchy.' + command, label)
-            .when(() => this.creationCommands().includes(command))
+    private creationAction(entry: ObjectMenuEntry) {
+        const visible = (context: CreationMenuContext) => this.creationActions().includes(entry.id) &&
+            (context.folder === null || (entry.action.kind === 'create' && entry.action.allowFolder));
+        const allowed = (context: CreationMenuContext) => visible(context) && this.canCreate() &&
+            context.contextKey === this.contextKey() &&
+            (context.folder === null || this.canEditFolders() && this.forest().folders.has(context.folder));
+        return ContextActionBuilder.create<CreationMenuContext>('hierarchy.' + entry.id, entry.label)
+            .when(visible)
             .enabledWhen(allowed)
-            .run(context => { if (allowed(context)) this.creationRequested.emit(command); })
+            .run(context => {
+                if (allowed(context)) this.creationRequested.emit({action: entry.id, folder: context.folder});
+            })
             .build();
     }
 
     private creationMenu<T extends CreationMenuContext>(menu: ContextMenuBuilder<T>): ContextMenuBuilder<T> {
-        return menu.action(this.createCameraAction).action(this.createPlayerAction)
-            .action(this.createAudioSourceAction).action(this.createSkyAction);
+        for (const [index, group] of OBJECT_MENU_GROUPS.entries()) {
+            if (index > 0) menu.separator();
+            for (const entry of group) menu.action(this.creationAction(entry));
+        }
+        return menu;
     }
 
     private canUseEntityMenu(context: EntityMenuContext): boolean {

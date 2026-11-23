@@ -1,6 +1,6 @@
 import {afterNextRender, Component, computed, DOCUMENT, effect, inject, Injector, input, output, signal, viewChild} from '@angular/core';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
-import {OBJECT_MENU_GROUPS, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
+import {availableObjectMenuActions, objectMenuEntry, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {EditorPane} from '../../../shared/components/pane/pane';
@@ -21,7 +21,7 @@ import {AnimationWorkspaceService} from './animation/animation-workspace.service
 import {PropWorkspace} from './prop-workspace/prop-workspace';
 import {PropWorkspaceService} from './prop-workspace/prop-workspace.service';
 import {PropPreviewService} from './prop-workspace/prop-preview.service';
-import type {HierarchyCreateCommand, HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
+import type {HierarchyReparentRequest} from './scene-entities-panel/scene-entities-panel';
 import {SceneEntitiesPanel} from "./scene-entities-panel/scene-entities-panel";
 import {InspectorPanel} from './inspector-panel/inspector-panel';
 import {WorkspaceToolbar} from './workspace-toolbar/workspace-toolbar';
@@ -47,7 +47,7 @@ import {ParticleDesigner} from './particle-designer/particle-designer';
 import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
-import {CommandBuilder, type EditorCommand, type EntityKey} from '../../../core/editor/editor.models';
+import {CommandBuilder, type EditorCommand, type EntityKey, type FolderId} from '../../../core/editor/editor.models';
 import type {SceneDependencyRequest} from '../../../core/editor/scene-verification.models';
 import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
@@ -103,16 +103,10 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
-    protected readonly hierarchyCreation = computed(() => (['create_camera', 'create_player', 'create_audio_source', 'create_sky'] as const).filter(
-        type => this.editorService.capabilities()?.commands?.some(command => command.name === type),
-    ));
     readonly availableObjectActions = computed<readonly ObjectMenuAction[]>(() => {
         if (!this.editorService.nativeAvailable || this.workspaceActionBlocked() || !this.sceneEditing.ready() ||
             this.editorService.snapshot()?.mode !== 'edit') return [];
-        const commands = new Set(this.editorService.capabilities()?.commands?.map(command => command.name));
-        return OBJECT_MENU_GROUPS.flatMap(group => group.filter(
-            item => !('capability' in item) || commands.has(item.capability),
-        ).map(item => item.id));
+        return availableObjectMenuActions(new Set(this.editorService.capabilities()?.commands?.map(command => command.name)));
     });
     protected readonly batchParentingEnabled = computed(() =>
         this.editorService.capabilities()?.commands?.some(command => command.name === 'reparent_objects') ?? false,
@@ -318,30 +312,19 @@ export class EditorWorkspace {
         if (context === this.sceneContext()) this.workspaceView.selectView(view);
     }
 
-    async runObjectAction(action: ObjectMenuAction): Promise<void> {
-        if (!this.availableObjectActions().includes(action) || this.document.querySelector('dialog[open]')) return;
-        const context = this.sceneContext();
-        if (this.workspaceView.animationView() && !await this.animationPreview.reviewNavigation()) return;
-        if (context !== this.sceneContext() || !this.availableObjectActions().includes(action)) return;
-        this.workspaceView.selectView('scene-viewport');
-        switch (action) {
-            case 'browse_props':
-            case 'browse_models':
-                this.assets()?.browse(action === 'browse_props' ? 'prefab' : 'model');
-                return;
-            case 'edit_lights':
-                this.lights()?.show();
-                return;
-            case 'create_point_light':
-            case 'create_directional_light':
-                await this.createSceneObject({
-                    type: 'create_light',
-                    light_kind: action === 'create_point_light' ? 'point' : 'directional'
-                });
-                return;
-            default:
-                await this.createSceneObject({type: action});
-        }
+    async runObjectAction(id: ObjectMenuAction, folder: FolderId | null = null): Promise<void> {
+        const entry = objectMenuEntry(id);
+        if (!entry || !this.availableObjectActions().includes(id) || this.document.querySelector('dialog[open]')) return;
+        if (folder && (entry.action.kind !== 'create' || !entry.action.allowFolder || !this.hierarchyFoldersEnabled())) return;
+        const target = this.draftReview.capture();
+        await this.draftReview.run(target, async () => {
+            if (!this.availableObjectActions().includes(id)) return;
+            this.workspaceView.selectView('scene-viewport');
+            const action = entry.action;
+            if (action.kind === 'browse') this.assets()?.browse(action.asset);
+            else if (action.kind === 'scene-settings') this.lights()?.show();
+            else await this.createSceneObject(action.command, folder);
+        });
     }
 
     protected showUsages(key: EntityKey): void {
@@ -522,12 +505,7 @@ export class EditorWorkspace {
         }
     }
 
-    protected async createHierarchyObject(type: HierarchyCreateCommand): Promise<void> {
-        if (!this.hierarchyCreation().includes(type) || this.workspaceActionBlocked()) return;
-        await this.createSceneObject({type});
-    }
-
-    private async createSceneObject(command: EditorCommand): Promise<void> {
+    private async createSceneObject(command: EditorCommand, folder: FolderId | null): Promise<void> {
         const context = this.sceneContext();
         this.hierarchyError.set(null);
         let light: EntityKey | undefined;
@@ -536,7 +514,10 @@ export class EditorWorkspace {
             if (context !== this.sceneContext() || this.workspaceActionBlocked()) return;
             const current = this.editorService.snapshot();
             if (!current) return;
-            const snapshot = await this.editorService.execute(command, this.editorService.workspaceGeneration(), current.revision);
+            const generation = this.editorService.workspaceGeneration();
+            const snapshot = folder
+                ? await this.createInFolder(command, folder, generation, current.revision)
+                : await this.editorService.execute(command, generation, current.revision);
             if (context !== this.sceneContext()) return;
             if (command.type === 'create_light') {
                 light = snapshot.document.lights.find(item => !current.document.lights.some(previous => previous.key === item.key))?.key;
@@ -552,5 +533,23 @@ export class EditorWorkspace {
         }
         if (light) this.lights()?.show(light);
         if (emitter) this.particles.open(emitter);
+    }
+
+    private async createInFolder(command: EditorCommand, folder: FolderId, generation: number, revision: number) {
+        const editor = this.editorService;
+        const started = await editor.execute({type: 'begin_transaction', label: 'Create object in folder'}, generation, revision);
+        try {
+            const created = await editor.execute(command, generation, started.revision);
+            const key = created.selection[0];
+            if (!key) throw new Error('The editor did not select the new object.');
+            const placed = await editor.execute({type: 'move_roots_to_folder', roots: [key], folder}, generation, created.revision);
+            return await editor.execute({type: 'commit_transaction'}, generation, placed.revision);
+        } catch (cause) {
+            if (editor.workspaceGeneration() === generation && started.transaction &&
+                editor.snapshot()?.transaction === started.transaction) {
+                await editor.execute({type: 'cancel_transaction'}, generation, editor.snapshot()?.revision);
+            }
+            throw cause;
+        }
     }
 }

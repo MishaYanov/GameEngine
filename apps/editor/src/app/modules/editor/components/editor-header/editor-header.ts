@@ -49,8 +49,10 @@ export class EditorHeader {
         const scene = this.editorService.snapshot()?.active_scene_id;
         const items: ContextMenuItem[] = [];
         for (const group of OBJECT_MENU_GROUPS) {
+            const available = group.filter(entry => this.availableObjectActions().includes(entry.id));
+            if (!available.length) continue;
             if (items.length) items.push({kind: 'separator', id: group[0].id + '-separator'});
-            for (const {id, label} of group) {
+            for (const {id, label} of available) {
                 items.push({
                     kind: 'action',
                     id,
