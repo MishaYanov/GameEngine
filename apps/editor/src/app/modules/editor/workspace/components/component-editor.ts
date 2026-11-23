@@ -1,3 +1,4 @@
+import {addComponentCatalog, type AddComponentChoice, type SpecialistAttachment, type SpecialistAttachmentChoice} from './add-component-catalog';
 import {
     afterNextRender,
     Component,
@@ -68,6 +69,9 @@ export class ComponentEditor {
         (a, b) => a.data.kind.localeCompare(b.data.kind) || a.id.localeCompare(b.id),
     ));
 	readonly types = input<readonly ComponentTypeDescriptor[]>([]);
+    readonly attachmentCount = input<number | null>(null);
+    readonly specialistAttachments = input<readonly SpecialistAttachmentChoice[]>([]);
+    readonly specialistAttachmentRequested = output<SpecialistAttachment>();
 	readonly scriptTypes = input<readonly ScriptDescriptor[]>([]);
 	readonly scriptSlots = input<readonly string[]>([]);
 	readonly entities = input<readonly ComponentTarget[]>([]);
@@ -94,7 +98,7 @@ export class ComponentEditor {
     private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
     private readonly injector = inject(Injector);
 	protected readonly open = signal(false);
-	protected readonly selectedKind = signal<ComponentData['kind']>('native_behavior');
+	protected readonly selectedKind = signal<AddComponentChoice['id']>('native_behavior');
 	protected readonly draft = signal(componentDraft('native_behavior', '', ''));
 	protected readonly fields = form(this.draft);
 	protected readonly collider = signal<Collider>(defaultCollider('box')!);
@@ -132,24 +136,18 @@ export class ComponentEditor {
     ));
     protected readonly meshModels = computed(() => this.models().filter(asset => !asset.kind || asset.kind === 'model'));
 	protected readonly available = computed(() => this.editable() && !this.pending());
-	protected readonly addTypes = computed(() =>
-		this.components().length >= 16
-			? []
-			: this.types().filter(
-					(type) =>
-                        !this.pinned(type.kind) &&
-						this.components().filter((component) => component.data.kind === type.kind).length <
-						type.max_per_object,
-				),
-	);
-	protected readonly canAdd = computed(() =>
-		this.addTypes().some((type) => type.kind === this.selectedKind()),
-	);
-    protected readonly typeOptions = computed(() => this.addTypes().map(type => ({
-        id: type.kind,
-        label: type.label,
-        description: type.description,
-        keywords: type.type_id,
+    protected readonly choices = computed(() => addComponentCatalog(
+        this.types(), this.components(), kind => this.pinned(kind), this.specialistAttachments(),
+        this.attachmentCount() ?? this.components().length,
+    ));
+    protected readonly selectedChoice = computed(() => this.choices().find(choice => choice.id === this.selectedKind()));
+    protected readonly canAdd = computed(() => !!this.selectedChoice() && !this.selectedChoice()?.unavailableReason);
+    protected readonly typeOptions = computed(() => this.choices().map(choice => ({
+        id: choice.id,
+        label: choice.label,
+        description: choice.group + ' · ' + (choice.unavailableReason ?? choice.description),
+        keywords: choice.keywords,
+        disabled: !!choice.unavailableReason,
     })));
     protected readonly entityOptions = computed(() => sceneReferenceOptions(this.entities()));
 	protected readonly cameraTargets = computed(() => this.entities().filter(entity => entity.key !== this.ownerKey()));
@@ -265,15 +263,15 @@ export class ComponentEditor {
 			this.draftOpenChanged.emit(this.open());
 		});
 		effect(() => {
-			const types = this.addTypes();
-			if (!types.some((type) => type.kind === this.selectedKind()) && types[0])
-				this.selectedKind.set(types[0].kind);
+            const selected = this.selectedChoice();
+            const first = this.choices().find(choice => !choice.unavailableReason);
+            if ((!selected || selected.unavailableReason) && first) this.selectedKind.set(first.id);
 		});
 	}
 
 	protected chooseKind(value: string): void {
-		const type = this.addTypes().find((type) => type.kind === value);
-		if (type) this.selectedKind.set(type.kind);
+        const choice = this.choices().find(candidate => candidate.id === value && !candidate.unavailableReason);
+        if (choice) this.selectedKind.set(choice.id);
 	}
 
 	protected readonly skyChannels = skyColorChannels;
@@ -347,8 +345,16 @@ export class ComponentEditor {
 
 	protected start(component?: ComponentRecord): void {
 		if (!this.available() || this.open()) return;
-		const kind = component?.data.kind ?? this.selectedKind();
-        if (this.pinned(kind) || (!component && !this.addTypes().some((type) => type.kind === kind))) return;
+        const choice = this.selectedChoice();
+        if (!component && (!choice || choice.unavailableReason)) return;
+        const kind = component?.data.kind ?? choice?.id;
+        if (!kind) return;
+        if (kind === 'controls_graph' || (!component && kind === 'animator' &&
+            this.specialistAttachments().some(attachment => attachment.id === kind))) {
+            this.specialistAttachmentRequested.emit(kind);
+            return;
+        }
+        if (this.pinned(kind)) return;
 		this.original.set(component);
 		this.draft.set(
 			componentDraft(kind, component?.id ?? crypto.randomUUID(), this.ownerKey(), component),

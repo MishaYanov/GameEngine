@@ -36,6 +36,27 @@ describe('Interactable Inspector', () => {
         return {fixture, host, intents, button, field, set};
     }
 
+    it('chooses Animator from the shared picker and explains an unavailable Controls Graph', async () => {
+        const panel = await setup();
+        const chosen: string[] = [];
+        panel.fixture.componentInstance.specialistAttachmentRequested.subscribe(kind => chosen.push(kind));
+        panel.fixture.componentRef.setInput('specialistAttachments', [
+            {id: 'animator'}, {id: 'controls_graph', unavailableReason: 'Attach a Player Controller first.'},
+        ]);
+        await panel.fixture.whenStable();
+        panel.host.querySelector<HTMLInputElement>('input[role="combobox"]')!.click();
+        await panel.fixture.whenStable();
+        const options = Array.from(panel.host.querySelectorAll<HTMLElement>('[role="option"]'));
+        const controls = options.find(option => option.textContent?.includes('Controls Graph'))!;
+        expect(controls.textContent).toContain('Attach a Player Controller first.');
+        expect(controls.getAttribute('aria-disabled')).toBe('true');
+        options.find(option => option.textContent?.includes('Animator'))!.click();
+        await panel.fixture.whenStable();
+        panel.button('Add Component').click();
+        expect(chosen).toEqual(['animator']);
+        expect(panel.intents).toEqual([]);
+    });
+
     it('submits one typed record with the authored action and reach', async () => {
         const panel = await setup();
         panel.button('Add Component').click();

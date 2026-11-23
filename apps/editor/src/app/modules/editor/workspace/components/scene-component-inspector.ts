@@ -10,6 +10,7 @@ import { InputActionsCatalog } from '../game-input/input-actions-catalog.service
 import { AnimatorInspector } from '../animator/animator-inspector';
 import {ControlGraphInspector} from '../control-graph/control-graph-inspector';
 import { ComponentEditor, type ComponentEditIntent } from './component-editor';
+import type {SpecialistAttachment, SpecialistAttachmentChoice} from './add-component-catalog';
 import {ParticleDesignerSession} from '../particle-designer/particle-designer-session';
 
 @Component({
@@ -18,6 +19,9 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 	template: `<editor-component-editor
 		[components]="basicComponents()"
 		[types]="types()"
+        [attachmentCount]="entity()?.component_views?.length ?? null"
+        [specialistAttachments]="specialistAttachments()"
+        (specialistAttachmentRequested)="focusSpecialistAttachment($event)"
 		[scriptTypes]="scriptTypes()"
 		[ownerKey]="entity()?.key ?? ''"
 		[contextKey]="context()"
@@ -88,6 +92,8 @@ export class SceneComponentInspector {
 	readonly entity = input<SceneEntity | null>(null);
 	readonly editable = input(false);
     private readonly componentEditor = viewChild(ComponentEditor);
+    private readonly animatorInspector = viewChild(AnimatorInspector);
+    private readonly controlsInspector = viewChild(ControlGraphInspector);
 	private readonly editor = inject(EditorService);
 	private readonly editing = inject(SceneEditingService);
     protected readonly particleDesigner = inject(ParticleDesignerSession, {optional: true});
@@ -100,6 +106,30 @@ export class SceneComponentInspector {
 	protected readonly types = computed(() => this.editor.capabilities()?.component_types?.filter(type =>
         type.kind !== 'animator' && (type.kind !== 'script' || this.scriptTypes().length > 0)) ?? []);
 	protected readonly animatorSupported = computed(() => this.editor.capabilities()?.animator_assets === true);
+    protected readonly specialistAttachments = computed<readonly SpecialistAttachmentChoice[]>(() => {
+        const actor = this.entity();
+        if (!actor) return [];
+        const choices: SpecialistAttachmentChoice[] = [];
+        if (this.animatorSupported()) {
+            const previous = actor.animator !== undefined && actor.animator !== null;
+            const legacy = actor.animation?.enabled || this.basicComponents().some(component =>
+                component.enabled && component.data.kind === 'animation');
+            choices.push({
+                id: 'animator',
+                unavailableReason: previous ? 'The object already has an Animator.'
+                    : legacy ? 'Disable its existing Animation component before attaching an Animator.' : undefined,
+            });
+        }
+        if (this.editor.capabilities()?.controls_graph_assets) {
+            const controller = actor.player_controller;
+            choices.push({
+                id: 'controls_graph',
+                unavailableReason: !controller ? 'Attach a Player Controller before assigning a Controls Graph.'
+                    : controller.settings.control_graph ? 'The Player Controller already has a Controls Graph.' : undefined,
+            });
+        }
+        return choices;
+    });
 	protected readonly targets = computed(() => this.editor.snapshot()?.document.entities ?? []);
 	protected readonly models = computed(() => this.editor.modelAssets() ?? []);
 	protected readonly generation = this.editor.workspaceGeneration;
@@ -185,6 +215,12 @@ export class SceneComponentInspector {
 			this.error.set(null);
 		});
 	}
+
+    protected focusSpecialistAttachment(kind: SpecialistAttachment): void {
+        if (!this.available() || !this.specialistAttachments().some(choice => choice.id === kind && !choice.unavailableReason)) return;
+        if (kind === 'animator') this.animatorInspector()?.focusAttachment();
+        else this.controlsInspector()?.focusAttachment();
+    }
 
     revealReference(componentId: string, field: string): boolean {
         const editor = this.componentEditor();

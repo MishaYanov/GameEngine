@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, effect, inject, input, signal, untracked} from '@angular/core';
+import {Component, computed, DestroyRef, effect, ElementRef, inject, input, signal, untracked, viewChild} from '@angular/core';
 import {
     animatorChannelKey, type AnimatorActorValidation, type AnimatorBinding, type AnimatorDocument, type AnimatorParameterSource,
 } from '../../../../core/editor/animator.models';
@@ -26,6 +26,7 @@ export class AnimatorInspector {
     protected readonly workspace = inject(AnimatorWorkspaceService, {optional: true});
     readonly actor = input.required<SceneEntity>();
     readonly editable = input(false);
+    private readonly assetPicker = viewChild<ElementRef<HTMLSelectElement>>('asset');
     protected readonly library = inject(AnimatorAssets);
     private readonly editor = this.library.editor;
     private readonly editing = inject(SceneEditingService);
@@ -104,6 +105,10 @@ export class AnimatorInspector {
             });
         });
         inject(DestroyRef).onDestroy(() => this.request++);
+    }
+
+    focusAttachment(): void {
+        if (this.available()) this.assetPicker()?.nativeElement.focus();
     }
 
     protected async review(id: string): Promise<void> {

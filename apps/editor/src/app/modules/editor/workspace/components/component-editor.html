@@ -88,9 +88,9 @@
 	} @empty {
 		<p>No components attached.</p>
 	}
-	@if (types().length) {
+	@if (choices().length) {
 		<div class="actions">
-            <editor-search-picker (picked)="chooseKind($event)" [disabled]="!available() || open() || !addTypes().length"
+            <editor-search-picker (picked)="chooseKind($event)" [disabled]="!available() || open()"
                                   [options]="typeOptions()" [value]="canAdd() ? selectedKind() : null"
                                   label="Component type"
                                   placeholder="Search component types…"/>

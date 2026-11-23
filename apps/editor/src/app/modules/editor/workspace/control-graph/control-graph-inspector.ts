@@ -1,4 +1,4 @@
-import {Component, computed, inject, input, linkedSignal, signal} from '@angular/core';
+import {Component, computed, ElementRef, inject, input, linkedSignal, signal, viewChild} from '@angular/core';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {SceneEntity} from '../../../../core/editor/editor.models';
 import {SceneEditingService} from '../scene-editing.service';
@@ -36,6 +36,7 @@ import {ControlGraphWorkspaceService} from './control-graph-workspace.service';
 export class ControlGraphInspector {
     readonly actor = input.required<SceneEntity>();
     readonly editable = input(false);
+    private readonly routePicker = viewChild<ElementRef<HTMLSelectElement>>('choice');
     protected readonly workspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService);
@@ -48,6 +49,10 @@ export class ControlGraphInspector {
     protected readonly pending = signal(false);
     protected readonly error = signal<string | null>(null);
     protected readonly available = computed(() => this.editable() && this.editing.ready() && !this.pending() && !!this.workspace?.scope());
+
+    focusAttachment(): void {
+        if (this.available()) this.routePicker()?.nativeElement.focus();
+    }
 
     protected async apply(): Promise<void> {
         const workspace = this.workspace;
