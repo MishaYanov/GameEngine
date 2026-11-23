@@ -65,6 +65,7 @@ export class ComponentEditor {
 	readonly components = input<readonly ComponentRecord[]>([]);
 	readonly types = input<readonly ComponentTypeDescriptor[]>([]);
 	readonly scriptTypes = input<readonly ScriptDescriptor[]>([]);
+	readonly scriptSlots = input<readonly string[]>([]);
 	readonly entities = input<readonly ComponentTarget[]>([]);
 	readonly models = input<readonly ModelAsset[]>([]);
     readonly gameActions = input<readonly string[]>([]);
@@ -170,6 +171,7 @@ export class ComponentEditor {
 					this.models(),
 					this.original(),
 					this.scriptTypes(),
+					this.scriptSlots(),
 				),
 				error: null,
 			};
@@ -196,10 +198,12 @@ export class ComponentEditor {
     }
     protected scriptTarget(key: string): string {
         const reference = this.draft().script.references[key];
-        return reference && 'entity' in reference ? reference.entity : '';
+        if (!reference) return '';
+        return 'entity' in reference ? 'entity:' + reference.entity : 'slot:' + reference.slot;
     }
-    protected setScriptTarget(key: string, entity: string): void {
-        this.draft.update(value => ({...value, script: {...value.script, references: {...value.script.references, [key]: {entity}}}}));
+    protected setScriptTarget(key: string, option: string): void {
+        const reference = option.startsWith('slot:') ? {slot: option.slice(5)} : {entity: option.slice(7)};
+        this.draft.update(value => ({...value, script: {...value.script, references: {...value.script.references, [key]: reference}}}));
     }
 	protected readonly references = computed<
 		readonly {

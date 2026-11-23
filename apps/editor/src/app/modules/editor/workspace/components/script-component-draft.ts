@@ -32,6 +32,7 @@ export function scriptSettings(
     descriptors: readonly ScriptDescriptor[],
     targets: readonly ComponentTarget[],
     previous?: ScriptSettings,
+    slots: readonly string[] = [],
 ): ScriptSettings {
     const descriptor = descriptors.find(script => script.id === draft.id);
     if (!descriptor) {
@@ -58,8 +59,10 @@ export function scriptSettings(
     const references: Record<string, ScriptReference> = Object.create(null);
     for (const field of descriptor.references) {
         const reference = draft.references[field.key];
-        if (!reference || 'slot' in reference ||
-            !targets.some(target => target.key === reference.entity && servesScriptReference(target, field.requires))) {
+        const compatible = reference && ('slot' in reference
+            ? slots.includes(reference.slot)
+            : targets.some(target => target.key === reference.entity && servesScriptReference(target, field.requires)));
+        if (!compatible) {
             throw new Error('Choose a compatible ' + field.label + '.');
         }
         references[field.key] = reference;

@@ -1,6 +1,6 @@
 //! Saved, bounded settings and reference bindings for a compiled object script.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,28 @@ pub struct ScriptSettings {
 }
 
 impl ScriptSettings {
+	pub fn remap_entities(&mut self, remap: &HashMap<EntityKey, EntityKey>) {
+		for reference in self.references.values_mut() {
+			if let ScriptReference::Entity { entity } = reference
+				&& let Some(mapped) = remap.get(entity)
+			{
+				entity.clone_from(mapped);
+			}
+		}
+	}
+
+	pub(crate) fn bind_slots(&mut self, bindings: &BTreeMap<String, EntityKey>) -> Result<(), String> {
+		for reference in self.references.values_mut() {
+			if let ScriptReference::Slot { slot } = reference {
+				let entity = bindings
+					.get(slot)
+					.ok_or_else(|| format!("Script reference slot '{slot}' is unbound"))?;
+				*reference = ScriptReference::Entity { entity: entity.clone() };
+			}
+		}
+		Ok(())
+	}
+
 	pub fn validate(&self) -> Result<(), String> {
 		if self.script_id.is_empty()
 			|| self.script_id.len() > 128

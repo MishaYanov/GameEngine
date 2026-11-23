@@ -149,20 +149,21 @@
                         <dt>Scale</dt><dd>{{ object.transform.scale.join(', ') }}</dd>
                     </dl>
                     }
-                    @if (audioComponents().length || (document.kind === 'source' && audioTypes().length)) {
-                        <editor-component-editor [components]="audioComponents()"
-                            [types]="document.kind === 'source' ? audioTypes() : []"
+                    @if (authoringComponents().length || (document.kind === 'source' && authoringTypes().length)) {
+                        <editor-component-editor [components]="authoringComponents()"
+                            [types]="document.kind === 'source' ? authoringTypes() : []"
+                            [entities]="document.objects" [scriptTypes]="scriptTypes()" [scriptSlots]="nestedOuterSlots()"
                             [ownerKey]="object.key" [contextKey]="document.path + ':' + object.key"
                             [models]="prop.assets()" [audioScope]="audioScope()" [assetGeneration]="assetGeneration()"
                             [editable]="document.kind === 'source' && prop.canEditDraft()"
                             [pending]="prop.draftPending()" [acknowledged]="prop.draft()?.draft_revision ?? 0"
-                            (actionRequested)="prop.editAudioSource(object.key, $event)"/>
+                            (actionRequested)="prop.editComponent(object.key, $event)"/>
                     }
-                    @if (object.components.length > audioComponents().length) {
+                    @if (object.components.length > authoringComponents().length) {
                         <h4>Components</h4>
                         <ul>
                             @for (component of object.components; track component.id) {
-                                @if (component.data.kind !== 'audio_source') {
+                                @if (component.data.kind !== 'audio_source' && component.data.kind !== 'script') {
                                     <li class="component-type">{{ componentLabel(component) }}</li>
                                 }
                             }

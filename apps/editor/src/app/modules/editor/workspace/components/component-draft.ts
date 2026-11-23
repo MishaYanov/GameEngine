@@ -236,6 +236,7 @@ export function componentFromDraft(
 	models: readonly ModelAsset[],
 	original?: ComponentRecord,
 	scriptTypes: readonly ScriptDescriptor[] = [],
+	scriptSlots: readonly string[] = [],
 ): ComponentRecord {
 	const reference = (key: string, label: string): string => {
 		if (!targets.some((target) => target.key === key))
@@ -246,7 +247,7 @@ export function componentFromDraft(
 	let data: ComponentData;
 	if (draft.kind === 'script') {
         const previous = original?.data.kind === 'script' ? original.data.settings : undefined;
-        data = {kind: 'script', settings: scriptSettings(draft.script, scriptTypes, targets, previous)};
+        data = {kind: 'script', settings: scriptSettings(draft.script, scriptTypes, targets, previous, scriptSlots)};
     } else if (draft.kind === 'sky') {
 		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
 	} else if (draft.kind === 'audio_source') {

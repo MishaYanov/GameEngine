@@ -492,6 +492,7 @@ export class LinkedPrefabInspector {
 			character_controller: 'Character Controller',
 			animation: 'Animation',
 			native_behavior: 'Native Behavior',
+			script: 'Script',
 		}[target.property.kind];
 	}
 	protected value(value: LinkedPrefabValue): string {

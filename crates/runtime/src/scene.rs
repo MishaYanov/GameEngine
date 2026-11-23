@@ -866,6 +866,9 @@ impl Scene {
 			for component in &mut entry.native_behaviors {
 				component.behavior.remap_entity_references(&remap);
 			}
+			for component in &mut entry.scripts {
+				component.settings.remap_entities(&remap);
+			}
 		}
 		entry.linked_prefab = source_metadata.linked_prefab;
 		entry.animation = source_metadata.animation;

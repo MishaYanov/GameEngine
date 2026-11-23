@@ -204,6 +204,23 @@ impl PrefabData {
 				.with_renderable(false),
 			);
 		}
+		for entity in &entities[..original_count] {
+			for component in &entity.scripts {
+				use crate::components::ScriptReference;
+				for reference in component.settings.references.values() {
+					let valid = match reference {
+						ScriptReference::Entity { entity } => keys.contains(entity),
+						ScriptReference::Slot { slot } => self.reference_slots.contains_key(slot),
+					};
+					if !valid {
+						return Err(format!(
+							"Script {} on {} requires a local object or a declared Prop reference slot",
+							component.id.as_str(), entity.key.as_str()
+						));
+					}
+				}
+			}
+		}
 		let mut validation = SceneData {
 			schema_version: CURRENT_SCHEMA_VERSION,
 			organization: Default::default(),
@@ -632,6 +649,9 @@ impl PrefabData {
 					})
 					.transpose()?;
 				entity.remap_component_references(&remap)?;
+				for component in &mut entity.scripts {
+					component.settings.bind_slots(bindings)?;
+				}
 				Ok(entity)
 			})
 			.collect()

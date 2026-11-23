@@ -495,6 +495,9 @@ impl<K: Fn(&PropAddress) -> Result<EntityKey, String>> PropExpansion<K> {
 				None => anchor.cloned(),
 			};
 			entity.remap_component_references(&remap)?;
+			for component in &mut entity.scripts {
+				component.settings.bind_slots(bindings)?;
+			}
 			self.result.entities.push(entity);
 		}
 		for placement in frame.placements {

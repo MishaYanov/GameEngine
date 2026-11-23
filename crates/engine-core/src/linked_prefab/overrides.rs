@@ -18,6 +18,9 @@ pub(crate) fn properties(entities: &[&EntityData]) -> BTreeSet<LinkedPrefabPrope
 				component_id: component.id.clone(),
 			});
 		}
+		for component in &entity.scripts {
+			properties.insert(Script { component_id: component.id.clone() });
+		}
 	}
 	properties
 }
@@ -58,6 +61,11 @@ pub(crate) fn value(entity: &EntityData, property: &LinkedPrefabProperty) -> Lin
 				record.type_id() == crate::components::NATIVE_TYPE && &record.id == component_id
 			}))
 		}
+		Script { component_id } => {
+			LinkedPrefabValue::Component(entity.component_records().into_iter().find(|record| {
+				record.type_id() == crate::components::SCRIPT_TYPE && &record.id == component_id
+			}))
+		}
 	}
 }
 
@@ -94,6 +102,10 @@ pub(crate) fn apply_value(
 						component.type_id() == crate::components::NATIVE_TYPE
 							&& &component.id == component_id
 					}
+					Script { component_id } => {
+						component.type_id() == crate::components::SCRIPT_TYPE
+							&& &component.id == component_id
+					}
 					_ => false,
 				};
 				if !correct {
@@ -117,7 +129,7 @@ pub(crate) fn supports_source_override(
 	use LinkedPrefabProperty::*;
 	match address {
 		PropAddress::Object { placement_path, .. } => {
-			placement_path.is_empty() && !matches!(property, NativeBehavior { .. })
+			placement_path.is_empty() && !matches!(property, NativeBehavior { .. } | Script { .. })
 		}
 		PropAddress::Placement { placement_path } => {
 			placement_path.len() == 1

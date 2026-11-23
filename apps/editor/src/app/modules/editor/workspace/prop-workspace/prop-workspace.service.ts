@@ -357,16 +357,17 @@ export class PropWorkspaceService {
         return this.runDraft((draft, revision, generation) => this.editor.editPropDraft(draft.draft_id, revision, edit, generation));
     }
 
-    editAudioSource(key: EntityKey, intent: ComponentEditIntent): Promise<boolean> {
+    editComponent(key: EntityKey, intent: ComponentEditIntent): Promise<boolean> {
         const draft = this.draft();
         const entity = draft?.prefab.entities.find(entity => entity.key === key);
         if (!draft || !entity || this.selectedObject()?.key !== key || !this.canEditDraft()) return Promise.resolve(false);
         const id = 'component' in intent ? intent.component.id : intent.component_id;
         const current = entity.components.find(component => component.id === id);
-        if (('component' in intent && intent.component.data.kind !== 'audio_source') ||
-            (current && current.data.kind !== 'audio_source') || (intent.kind !== 'add' && !current) ||
+        const supported = (record: ComponentRecord) => record.data.kind === 'audio_source' || record.data.kind === 'script';
+        if (('component' in intent && !supported(intent.component)) ||
+            (current && !supported(current)) || (intent.kind !== 'add' && !current) ||
             ('expected' in intent && intent.expected !== (current ? JSON.stringify(current) : null))) {
-            this.failure.set('This Audio Source changed. Discard the edit and review its current values.');
+            this.failure.set('This component changed. Discard the edit and review its current values.');
             return Promise.resolve(false);
         }
         const components = entity.components.filter(component => component.id !== id);

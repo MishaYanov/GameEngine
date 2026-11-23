@@ -463,6 +463,9 @@ impl EntityData {
 		for component in &mut self.native_behaviors {
 			component.behavior.remap_entity_references(remap);
 		}
+		for component in &mut self.scripts {
+			component.settings.remap_entities(remap);
+		}
 		self.validate_components()
 	}
 }

@@ -98,6 +98,16 @@ impl EditorSession {
 			let mut entity = entity.clone();
 			entity.linked_prefab = None;
 			entity.clear_local_player();
+			for component in &mut entity.scripts {
+				use crate::components::ScriptReference;
+				for reference in component.settings.references.values_mut() {
+					if let ScriptReference::Entity { entity } = reference
+						&& let Some((slot, _)) = reference_slots.iter().find(|(_, key)| *key == entity)
+					{
+						*reference = ScriptReference::Slot { slot: slot.clone() };
+					}
+				}
+			}
 			if entity
 				.parent
 				.as_ref()

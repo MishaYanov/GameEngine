@@ -108,11 +108,12 @@ export type LinkedPrefabPropertyKind =
     | 'collider'
     | 'character_controller'
     | 'animation'
-    | 'native_behavior';
+    | 'native_behavior'
+    | 'script';
 
 export type LinkedPrefabProperty =
-    | { readonly kind: Exclude<LinkedPrefabPropertyKind, 'native_behavior'> }
-    | { readonly kind: 'native_behavior'; readonly component_id: string };
+    | { readonly kind: Exclude<LinkedPrefabPropertyKind, 'native_behavior' | 'script'> }
+    | { readonly kind: 'native_behavior' | 'script'; readonly component_id: string };
 
 export interface LinkedPrefabOverrideTarget {
     readonly source_entity: EntityKey;

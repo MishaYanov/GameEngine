@@ -31,8 +31,13 @@ export class PropWorkspace {
     private readonly injector = inject(Injector);
     private readonly editor = inject(EditorService);
     protected readonly assetGeneration = this.editor.workspaceGeneration;
-    protected readonly audioTypes = computed(() => this.editor.capabilities()?.component_types?.filter(type => type.kind === 'audio_source') ?? []);
-    protected readonly audioComponents = computed(() => this.prop.selectedObject()?.components.filter(record => record.data.kind === 'audio_source') ?? []);
+    protected readonly authoringTypes = computed(() => this.editor.capabilities()?.component_types?.filter(
+        type => type.kind === 'audio_source' || type.kind === 'script',
+    ) ?? []);
+    protected readonly scriptTypes = computed(() => this.editor.capabilities()?.object_scripts ?? []);
+    protected readonly authoringComponents = computed(() => this.prop.selectedObject()?.components.filter(
+        record => record.data.kind === 'audio_source' || record.data.kind === 'script',
+    ) ?? []);
     protected readonly audioScope = computed<AudioAuditionScope | null>(() => {
         const selected = this.prop.selectedObject();
         const preview = this.preview.currentState();

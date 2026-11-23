@@ -53,6 +53,7 @@ pub enum LinkedPrefabProperty {
 	CharacterController,
 	Animation,
 	NativeBehavior { component_id: ComponentId },
+	Script { component_id: ComponentId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

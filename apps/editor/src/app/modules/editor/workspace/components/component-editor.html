@@ -252,7 +252,10 @@
                                 <select #target [value]="scriptTarget(field.key)" (change)="setScriptTarget(field.key, target.value)">
                                     <option value="">Choose an object</option>
                                     @for (object of scriptTargets(field); track object.key) {
-                                        <option [value]="object.key">{{ object.name }}</option>
+                                        <option [value]="'entity:' + object.key">{{ object.name }}</option>
+                                    }
+                                    @for (slot of scriptSlots(); track slot) {
+                                        <option [value]="'slot:' + slot">Prop slot · {{ slot }}</option>
                                     }
                                 </select>
                             </label>

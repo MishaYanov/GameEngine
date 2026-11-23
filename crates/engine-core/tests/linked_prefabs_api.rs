@@ -3,6 +3,7 @@ use engine_core::{
 	EntityKey,
 	asset_catalog::AssetId,
 	command::{EditorCommandDto as Command, EditorCommandRequest},
+	components::{ComponentData, ComponentId, ComponentRecord, ScriptProperty, ScriptSettings},
 	editor::{EditorSession, PrefabData},
 	linked_prefab::{
 		LinkedPrefabOverrideTarget, LinkedPrefabProperty, LinkedPrefabSource,
@@ -112,6 +113,50 @@ fn update(
 			bindings: None,
 		},
 	)
+}
+
+#[test]
+fn script_override_uses_component_identity_across_refresh_and_revert() {
+	let id = ComponentId::new("door-script").unwrap();
+	let make_record = |speed| ComponentRecord {
+		schema_version: 1,
+		id: id.clone(),
+		enabled: true,
+		data: ComponentData::Script {
+			settings: ScriptSettings {
+				script_id: "test.door".into(),
+				config_version: 1,
+				properties: BTreeMap::from([("speed".into(), ScriptProperty::Number(speed))]),
+				references: BTreeMap::new(),
+			},
+		},
+	};
+	let mut original = source();
+	original.prefab.entities[0].put_component(make_record(90.), false).unwrap();
+	let mut session = session();
+	let (root, body) = instantiate(&mut session, original.clone());
+	execute(&mut session, Command::ReplaceComponent {
+		key: body.as_str().into(), component: make_record(180.),
+	}).unwrap();
+	let property = LinkedPrefabOverrideTarget {
+		source_entity: key("body"),
+		property: LinkedPrefabProperty::Script { component_id: id.clone() },
+	};
+	let mut fresh = original;
+	fresh.fingerprint = "2".repeat(64);
+	fresh.prefab.entities[1].name = "Changed child".into();
+	update(&mut session, &root, fresh, PrefabConflictResolution::Reject).unwrap();
+	let read = |session: &EditorSession| {
+		session.authored_document().entities.iter().find(|entity| entity.key == body).unwrap()
+			.component_records().into_iter().find(|record| record.id == id).unwrap()
+	};
+	assert_eq!(read(&session), make_record(180.));
+	execute(&mut session, Command::RevertLinkedPrefab {
+		root_key: root.as_str().into(), property: Some(property),
+	}).unwrap();
+	assert_eq!(read(&session), make_record(90.));
+	execute(&mut session, Command::Undo).unwrap();
+	assert_eq!(read(&session), make_record(180.));
 }
 
 #[test]

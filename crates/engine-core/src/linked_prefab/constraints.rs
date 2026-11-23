@@ -4,6 +4,7 @@ pub(crate) fn is_transform_only_anchor(entity: &EntityData) -> bool {
     !entity.has_mesh_component()
         && entity.collider.is_none()
         && entity.native_behaviors.is_empty()
+        && entity.scripts.is_empty()
         && entity.character_controller.is_none()
         && entity.animation.is_none()
         && entity.animator.is_none()
