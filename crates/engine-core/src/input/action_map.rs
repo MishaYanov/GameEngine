@@ -3,10 +3,10 @@ use super::{
 	PhysicalGamepadSample, valid_game_action_id,
 };
 use crate::asset_catalog::AssetId;
-use crate::scene_catalog::SceneId;
+use crate::scene_catalog::{SceneCatalog, SceneId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub const MAX_INPUT_ACTION_MAP_BYTES: usize = 64 * 1024;
 pub const INPUT_ACTION_MAP_SUFFIX: &str = ".input-actions.json";
@@ -232,6 +232,7 @@ impl InputActionMap {
 		if self.layouts.len() > MAX_CONDITIONAL_INPUT_LAYOUTS {
 			return Err("Input Actions support up to 16 conditional layouts".into());
 		}
+		validate_actions(&self.actions)?;
 		let mut layout_ids = HashSet::new();
 		for layout in &self.layouts {
 			if !valid_game_action_id(&layout.id)
@@ -267,54 +268,50 @@ impl InputActionMap {
 					));
 				}
 			}
+			let effective = self.effective_actions(layout)?;
+			validate_actions(&effective)
+				.map_err(|error| format!("Layout {:?}: {error}", layout.label))?;
 		}
-		let mut ids = HashSet::new();
-		let mut controls = HashSet::new();
-		for action in &self.actions {
-			if !valid_game_action_id(&action.id) || !ids.insert(action.id.as_str()) {
-				return Err(format!(
-					"Invalid or duplicate Input Action ID {:?}",
-					action.id
-				));
-			}
-			if !valid_display_label(&action.label) {
-				return Err(format!(
-					"Action {:?} requires a display name of 1–96 bytes",
-					action.id
-				));
-			}
-			let expected = match action.id.as_str() {
-				"move" => InputActionKind::Vector2,
-				"look" => InputActionKind::Delta2,
-				"jump" | "attack" | "interact" => InputActionKind::Button,
-				_ => action.value,
-			};
-			if expected != action.value || action.bindings.len() > MAX_BINDINGS {
-				return Err(format!(
-					"Action {:?} has the wrong value type or more than eight bindings",
-					action.id
-				));
-			}
-			for binding in &action.bindings {
-				if binding.kind() != action.value {
-					return Err(format!(
-						"Action {:?} has a binding with the wrong value type",
-						action.id
-					));
-				}
-				for control in binding.controls().into_iter().flatten() {
-					if matches!(control, PhysicalControl::Key(key) if !supported_key(key))
-						|| !controls.insert(control)
-					{
-						return Err(format!(
-							"Action {:?} uses a reserved or conflicting control",
-							action.id
-						));
-					}
-				}
+		Ok(())
+	}
+
+	pub fn validate_scenes(&self, scenes: &SceneCatalog) -> Result<(), String> {
+		for layout in &self.layouts {
+			if let InputLayoutCondition::SceneIs { scene_id } = &layout.when {
+				scenes.get(scene_id).map_err(|_| {
+					format!(
+						"Layout {:?} references a missing scene {:?}",
+						layout.label,
+						scene_id.as_str()
+					)
+				})?;
 			}
 		}
 		Ok(())
+	}
+
+	pub fn effective_actions(
+		&self,
+		layout: &ConditionalInputLayout,
+	) -> Result<Vec<NamedInputAction>, String> {
+		let mut overrides: HashMap<_, _> = layout
+			.overrides
+			.iter()
+			.map(|entry| (entry.action_id.as_str(), &entry.bindings))
+			.collect();
+		let mut actions = self.actions.clone();
+		for action in &mut actions {
+			if let Some(bindings) = overrides.remove(action.id.as_str()) {
+				action.bindings.clone_from(bindings);
+			}
+		}
+		if !overrides.is_empty() {
+			return Err(format!(
+				"Layout {:?} overrides an unknown Input Action",
+				layout.label
+			));
+		}
+		Ok(actions)
 	}
 
 	/// Display names can change without invalidating a saved local layout.
@@ -472,6 +469,57 @@ impl InputActionMap {
 		}
 		resolved
 	}
+}
+
+fn validate_actions(actions: &[NamedInputAction]) -> Result<(), String> {
+	let mut ids = HashSet::new();
+	let mut controls = HashMap::new();
+	for action in actions {
+		if !valid_game_action_id(&action.id) || !ids.insert(action.id.as_str()) {
+			return Err(format!(
+				"Invalid or duplicate Input Action ID {:?}",
+				action.id
+			));
+		}
+		if !valid_display_label(&action.label) {
+			return Err(format!(
+				"Action {:?} requires a display name of 1–96 bytes",
+				action.id
+			));
+		}
+		let expected = match action.id.as_str() {
+			"move" => InputActionKind::Vector2,
+			"look" => InputActionKind::Delta2,
+			"jump" | "attack" | "interact" => InputActionKind::Button,
+			_ => action.value,
+		};
+		if expected != action.value || action.bindings.len() > MAX_BINDINGS {
+			return Err(format!(
+				"Action {:?} has the wrong value type or more than eight bindings",
+				action.id
+			));
+		}
+		for binding in &action.bindings {
+			if binding.kind() != action.value {
+				return Err(format!(
+					"Action {:?} has a binding with the wrong value type",
+					action.id
+				));
+			}
+			for control in binding.controls().into_iter().flatten() {
+				if matches!(control, PhysicalControl::Key(key) if !supported_key(key)) {
+					return Err(format!("Action {:?} uses a reserved control", action.id));
+				}
+				if let Some(previous) = controls.insert(control, action.id.as_str()) {
+					return Err(format!(
+						"Actions {previous:?} and {:?} use a conflicting control",
+						action.id
+					));
+				}
+			}
+		}
+	}
+	Ok(())
 }
 
 fn valid_display_label(label: &str) -> bool {

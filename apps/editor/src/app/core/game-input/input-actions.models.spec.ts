@@ -1,4 +1,6 @@
-import {type InputActionMap, readInputActionsAsset, readInputActionsDocument, starterInputActions} from './input-actions.models';
+import {
+    type InputActionMap, readInputActionsAsset, readInputActionsDocument, starterInputActions, validateInputActions,
+} from './input-actions.models';
 
 it('round-trips ordered conditional layouts and v1 maps', () => {
     const asset = readInputActionsAsset({
@@ -22,4 +24,17 @@ it('round-trips ordered conditional layouts and v1 maps', () => {
     expect(() => readInputActionsDocument({asset, map: {...map, layouts: [
         {...map.layouts![1], when: {kind: 'scene_is', scene_id: 'bad scene'}},
     ]}})).toThrow(/invalid Input Actions map/);
+});
+
+it('diagnoses inherited conflicts and rejects missing scene targets before writing', () => {
+    const map: InputActionMap = {...starterInputActions(), schema_version: 2, layouts: [{
+        id: 'roof', label: 'Rooftop', when: {kind: 'scene_is', scene_id: 'roof'},
+        overrides: [{action_id: 'attack', bindings: [{kind: 'key', key: 'space'}]}],
+    }]};
+    expect(validateInputActions(map)).toMatch(/Rooftop.*jump and attack/);
+    const fixed: InputActionMap = {...map, layouts: map.layouts!.map(layout => ({
+        ...layout, overrides: [...layout.overrides, {action_id: 'jump', bindings: []}],
+    }))};
+    expect(validateInputActions(fixed)).toBeNull();
+    expect(validateInputActions(fixed, new Set(['lobby']))).toMatch(/available scene for Rooftop/);
 });

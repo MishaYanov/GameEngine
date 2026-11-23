@@ -103,10 +103,22 @@ export function validInputActionsPath(path: string): boolean {
         !/[:\\\p{Cc}]/u.test(path) && path.split('/').every(part => !!part && part !== '.' && part !== '..');
 }
 
-export function validateInputActions(map: InputActionMap): string | null {
+export function effectiveLayoutActions(
+    map: InputActionMap, layout: ConditionalInputLayout | null,
+): readonly NamedInputAction[] {
+    if (!layout) return map.actions;
+    const overrides = new Map(layout.overrides.map(item => [item.action_id, item.bindings]));
+    return map.actions.map(action => overrides.has(action.id)
+        ? {...action, bindings: overrides.get(action.id)!} : action);
+}
+
+export function validateInputActions(map: InputActionMap, scenes?: ReadonlySet<string>): string | null {
     if (!map.actions.length || map.actions.length > MAX_INPUT_ACTIONS) {
         return 'Add between 1 and 64 input actions.';
     }
+    const defaultError = validateActions(map.actions);
+    if (defaultError) return defaultError;
+    const actions = new Set(map.actions.map(action => action.id));
     const layouts = map.layouts ?? [];
     if (map.schema_version === 1 && layouts.length) return 'Conditional layouts require Input Actions schema 2.';
     if (layouts.length > MAX_CONDITIONAL_INPUT_LAYOUTS) return 'Add up to 16 conditional layouts.';
@@ -117,19 +129,28 @@ export function validateInputActions(map: InputActionMap): string | null {
         }
         layoutIds.add(layout.id);
         if (!validLabel(layout.label)) return `Enter a display name of 1–96 bytes for layout ${layout.id}.`;
-        if (layout.when.kind === 'scene_is' && !sceneId(layout.when.scene_id)) return `Choose a scene for ${layout.label}.`;
+        if (layout.when.kind === 'scene_is' &&
+            (!sceneId(layout.when.scene_id) || scenes && !scenes.has(layout.when.scene_id))) {
+            return `Choose an available scene for ${layout.label}.`;
+        }
         if (layout.overrides.length > MAX_INPUT_ACTIONS) return `Layout ${layout.label} has too many action overrides.`;
         const overrides = new Set<string>();
         for (const entry of layout.overrides) {
-            if (!validGameActionId(entry.action_id) || overrides.has(entry.action_id) || entry.bindings.length > MAX_ACTION_BINDINGS) {
+            if (!actions.has(entry.action_id) || overrides.has(entry.action_id) || entry.bindings.length > MAX_ACTION_BINDINGS) {
                 return `Layout ${layout.label} has invalid or repeated action overrides.`;
             }
             overrides.add(entry.action_id);
         }
+        const problem = validateActions(effectiveLayoutActions(map, layout));
+        if (problem) return `Layout ${layout.label}. ${problem}`;
     }
+    return encoder.encode(JSON.stringify(map, null, 2)).length > MAX_BYTES ? 'Input Actions must fit within 64 KiB.' : null;
+}
+
+function validateActions(actions: readonly NamedInputAction[]): string | null {
     const ids = new Set<string>();
-    const controls = new Set<string>();
-    for (const [index, action] of map.actions.entries()) {
+    const controls = new Map<string, string>();
+    for (const [index, action] of actions.entries()) {
         if (!validGameActionId(action.id) || ids.has(action.id)) {
             return `Action ${index + 1} needs a unique ID such as jump or use_item.`;
         }
@@ -144,14 +165,14 @@ export function validateInputActions(map: InputActionMap): string | null {
                 return `${action.id} has a binding with the wrong value type.`;
             }
             for (const control of bindingControls(binding)) {
-                if (control === 'key:escape' || controls.has(control)) {
-                    return `${action.id} uses a reserved or conflicting control.`;
-                }
-                controls.add(control);
+                if (control === 'key:escape') return `${action.id} uses a reserved control.`;
+                const previous = controls.get(control);
+                if (previous) return `${previous} and ${action.id} use a conflicting control.`;
+                controls.set(control, action.id);
             }
         }
     }
-    return encoder.encode(JSON.stringify(map, null, 2)).length > MAX_BYTES ? 'Input Actions must fit within 64 KiB.' : null;
+    return null;
 }
 
 export function readInputActionsAsset(value: unknown): InputActionsAsset {

@@ -36,11 +36,13 @@ export class InputActionsEditor {
     protected readonly failure = signal<string | null>(null);
     protected readonly message = signal<string | null>(null);
     private readonly saved = signal<InputActionMap | null>(null);
+    protected readonly scenes = computed(() => this.editor.snapshot()?.project.scenes ?? []);
+    private readonly sceneIds = computed(() => new Set(this.scenes().map(scene => scene.id)));
     private generation = '';
     private autoOpened = false;
     protected readonly invalid = computed(() => {
         const map = this.draft();
-        return map ? validateInputActions(map) : null;
+        return map ? validateInputActions(map, this.sceneIds()) : null;
     });
     protected readonly dirty = computed(() => this.draft() !== null &&
         (JSON.stringify(this.draft()) !== JSON.stringify(this.saved()) || !this.source() && this.path() !== DEFAULT_PATH));

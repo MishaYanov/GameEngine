@@ -103,6 +103,7 @@ impl SimulationSession {
 		}
 		if let Some(map) = &candidate {
 			map.validate()?;
+			map.validate_scenes(&self.project.scenes)?;
 		}
 		self.input_action_map = candidate;
 		Ok(())

@@ -451,3 +451,36 @@ fn ordered_conditional_layouts_round_trip_without_changing_schema_one_assets() {
 	map.schema_version = 1;
 	assert!(map.to_json().unwrap_err().contains("schema 2"));
 }
+
+#[test]
+fn conditional_layout_validation_reports_inherited_conflicts_and_missing_scenes() {
+	use engine_core::input::{
+		ActionBinding, ConditionalInputLayout, InputActionMap, InputBindingOverride,
+		InputLayoutCondition,
+	};
+	use engine_core::scene_catalog::{SceneCatalog, SceneId};
+	let mut map = InputActionMap::starter();
+	map.schema_version = 2;
+	let roof = SceneId::new("roof").unwrap();
+	map.layouts = vec![ConditionalInputLayout {
+		id: "roof".into(),
+		label: "Rooftop".into(),
+		when: InputLayoutCondition::SceneIs { scene_id: roof },
+		overrides: vec![InputBindingOverride {
+			action_id: "attack".into(),
+			bindings: vec![ActionBinding::Key { key: Key::Space }],
+		}],
+	}];
+	let problem = map.validate().unwrap_err();
+	assert!(problem.contains("Rooftop") && problem.contains("jump") && problem.contains("attack"));
+	map.layouts[0].overrides.push(InputBindingOverride {
+		action_id: "jump".into(),
+		bindings: Vec::new(),
+	});
+	map.validate().unwrap();
+	assert!(
+		map.validate_scenes(&SceneCatalog::default())
+			.unwrap_err()
+			.contains("missing scene")
+	);
+}

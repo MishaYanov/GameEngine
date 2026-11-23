@@ -86,6 +86,7 @@ pub async fn editor_save_input_actions(
 			return Err("Finish the current edit and stop Play before saving Input Actions".into());
 		}
 		current.validate_asset_destination(&destination)?;
+		map.validate_scenes(&current.backend.session().project().scenes)?;
 		let prepared = project_assets::prepare_input_actions(
 			&current.asset_root,
 			&destination,
