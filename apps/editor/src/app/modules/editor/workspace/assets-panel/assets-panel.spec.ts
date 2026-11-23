@@ -5,11 +5,16 @@ import {invoke} from '@tauri-apps/api/core';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ModelAsset} from '../../../../core/editor/editor.models';
 import type {AudioClipDetails} from '../../../../core/editor/audio-clip.models';
+import type {AnimatorAsset} from '../../../../core/editor/animator.models';
+import type {ControlGraphAsset} from '../../../../core/editor/controls-graph.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {SceneSwitchService} from '../scene-actions/scene-switch.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {ViewportAssetDragService} from '../viewport-asset-drag.service';
+import {AnimatorAssets} from '../animator/animator-assets.service';
+import {AnimatorWorkspaceService} from '../animator/animator-workspace.service';
+import {ControlGraphWorkspaceService} from '../control-graph/control-graph-workspace.service';
 import {AssetsPanel} from './assets-panel';
 import {PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -49,7 +54,15 @@ function snapshot(): EditorSnapshot {
 
 type EditingStub = Pick<SceneEditingService, 'ready' | 'error' | 'withCommittedEdit'>;
 
-async function createPanel(options: {models?: readonly ModelAsset[]; editing?: EditingStub; nativeAvailable?: boolean} = {}) {
+interface PanelOptions {
+    readonly models?: readonly ModelAsset[];
+    readonly editing?: EditingStub;
+    readonly nativeAvailable?: boolean;
+    readonly animators?: readonly AnimatorAsset[];
+    readonly controls?: readonly ControlGraphAsset[];
+}
+
+async function createPanel(options: PanelOptions = {}) {
     const current = signal(snapshot());
     const modelAssets = signal<readonly ModelAsset[] | null>(options.models ?? null);
     const workspaceGeneration = signal(1);
@@ -69,6 +82,8 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         return current();
     });
     const loadPrefab = vi.fn(async (_path: string, _position: readonly [number, number, number], _generation?: number, _revision?: number) => current());
+    const openAnimator = vi.fn(async () => true);
+    const openControls = vi.fn(async () => true);
     TestBed.configureTestingModule({providers: [
         PropAssetSelection,
         {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
@@ -81,6 +96,13 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
             {provide: SceneSwitchService, useValue: {request, canSwitch: () => true}},
             {provide: ViewportAssetDragService, useValue: drag},
         ...(options.editing ? [{provide: SceneEditingService, useValue: options.editing}] : []),
+        ...(options.animators ? [
+            {provide: AnimatorAssets, useValue: {supported: () => true, assets: signal(options.animators)}},
+            {provide: AnimatorWorkspaceService, useValue: {open: openAnimator}},
+        ] : []),
+        ...(options.controls ? [{provide: ControlGraphWorkspaceService, useValue: {
+            supported: () => true, assets: signal(options.controls), open: openControls,
+        }}] : []),
     ]});
     const fixture = TestBed.createComponent(AssetsPanel);
     const root = fixture.nativeElement as HTMLElement;
@@ -93,6 +115,12 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         const candidate = root.querySelector<HTMLButtonElement>(`.asset-file[title="${path}"] button`);
         if (!candidate) throw new Error(`Missing asset file: ${path}`);
         return candidate;
+    };
+    const search = async (value: string): Promise<void> => {
+        const input = root.querySelector<HTMLInputElement>('input[aria-label="Search Assets"]')!;
+        input.value = value;
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
     };
     const contextAction = (path: string, id: string): Extract<ContextMenuItem, { kind: 'action' }> => {
         const trigger = fixture.debugElement.queryAll(By.directive(EditorContextMenuTrigger))
@@ -119,11 +147,69 @@ async function createPanel(options: {models?: readonly ModelAsset[]; editing?: E
         request,
         importModel,
         loadPrefab,
+        openAnimator,
+        openControls,
+        search,
         drag
     };
 }
 
 describe('AssetsPanel', () => {
+    it('searches the full catalog by display name or path and restores the current folder when cleared', async () => {
+        const prop: ModelAsset = {name: 'Main Gate', path: 'blueprints/entrance.json', kind: 'prefab', asset_id: 'gate'};
+        const panel = await createPanel({models: [robot, prop, bell]});
+        panel.button('props').click();
+        await panel.fixture.whenStable();
+        expect(panel.file(robot.path)).toBeTruthy();
+
+        await panel.search('  MAIN gATE  ');
+        expect(panel.file(prop.path).textContent).toContain(prop.path);
+        expect(panel.root.querySelector('.asset-file[title="props/robot.glb"]')).toBeNull();
+        await panel.search('props\\robot');
+        panel.file(robot.path).click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[aria-label="Selected asset"]')?.textContent).toContain('Robot');
+
+        await panel.search('absent asset');
+        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
+        expect(panel.root.querySelector('[aria-label="Selected asset"]')).toBeNull();
+        await panel.search('');
+        expect(panel.root.querySelector('.folder-location')?.textContent).toContain('Assets / props');
+        expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('opens matched graph assets and combines search with the Audio Clips kind filter', async () => {
+        const animator: AnimatorAsset = {
+            id: 'animator', kind: 'animator_graph', path: 'animators/bell.animator.json',
+            revision: 1, fingerprint: 'animator-fixture', bytes: 50,
+        };
+        const controls: ControlGraphAsset = {
+            id: 'controls', kind: 'controls_graph', path: 'controls/bell.controls.json',
+            revision: 1, fingerprint: 'controls-fixture', bytes: 50,
+        };
+        const panel = await createPanel({models: [robot, bell], animators: [animator], controls: [controls]});
+        await panel.search('animators/bell');
+        const animatorButton = panel.root.querySelector<HTMLButtonElement>('button[aria-label^="Open Animator"]')!;
+        expect(animatorButton.closest('details')?.open).toBe(true);
+        expect(panel.root.textContent).not.toContain('No matching assets.');
+        animatorButton.click();
+        expect(panel.openAnimator).toHaveBeenCalledExactlyOnceWith(animator.id);
+
+        await panel.search('BELL');
+        const controlsButton = panel.root.querySelector<HTMLButtonElement>('button[aria-label^="Open Controls Graph"]')!;
+        expect(controlsButton.closest('details')?.open).toBe(true);
+        controlsButton.click();
+        expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
+        const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
+        filter.value = 'audio_clip';
+        filter.dispatchEvent(new Event('change'));
+        await panel.fixture.whenStable();
+        expect(panel.file(bell.path)).toBeTruthy();
+        expect(panel.root.querySelector('details')).toBeNull();
+        await panel.search('robot');
+        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
+    });
+
     it('filters Audio Clips and shows native duration, format and reverse references with focus on the row', async () => {
         const panel = await createPanel({models: [robot, bell]});
         const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
@@ -166,9 +252,11 @@ describe('AssetsPanel', () => {
         const panel = await createPanel({models: [duplicate, source]});
         const reveal = TestBed.inject(PropAssetSelection);
 
+        await panel.search('unrelated search');
         reveal.reveal({sourceId: source.asset_id!, workspaceGeneration: 1, sceneId: 'main'});
         await panel.fixture.whenStable();
         expect(panel.root.textContent).toContain('Assets / props/moved');
+        expect(panel.root.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('');
         const selected = panel.file(source.path);
         expect(selected.getAttribute('aria-pressed')).toBe('true');
         expect(panel.root.ownerDocument.activeElement).toBe(selected);

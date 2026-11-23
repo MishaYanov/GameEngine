@@ -24,13 +24,33 @@ li button {
   overflow-wrap: anywhere;
 }
 
+.asset-controls,
 .asset-filter {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.asset-controls {
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.asset-controls input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+.asset-controls ~ details {
   margin-top: var(--space-2);
 }
 
+.folder-location[hidden] {
+  display: none;
+}
+
+.asset-controls input,
 .asset-filter select {
   min-height: var(--space-7);
   border: var(--border-width) solid var(--color-pane-edge);
@@ -128,4 +148,8 @@ p[role='alert'] {
 
 p[role='status'] {
   color: var(--color-success);
+}
+
+.search-feedback[role='status'] {
+  color: var(--color-text-secondary);
 }

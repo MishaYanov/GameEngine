@@ -16,35 +16,53 @@
             @if (!projectOpen()) {
                 <p>Open a project to browse its assets.</p>
             } @else {
-                @if (animatorAssets && animatorAssets.supported() && animatorAssets.assets().length) {
-                    <details>
-                        <summary>Animators</summary>
-                        <ul aria-label="Animator assets">
-                            @for (asset of animatorAssets.assets(); track asset.id) {
-                                <li><button type="button" (click)="animatorWorkspace?.open(asset.id)" [disabled]="!canRunAction()"
-                                    [attr.aria-label]="'Open Animator ' + asset.path">{{ asset.path }}</button></li>
-                            }
-                        </ul>
-                    </details>
-                }
-                <nav aria-label="Asset folders" class="folder-location">
+                <div class="asset-controls">
+                    <input #search aria-label="Search Assets" placeholder="Search Assets" type="search"
+                           [value]="searchQuery()" (input)="searchQuery.set(search.value)"
+                           (keydown.escape)="searchQuery.set('')"/>
+                    <label class="asset-filter">
+                        Asset kind
+                        <select #kind [value]="assetFilter()" (change)="filterAssets(kind.value)">
+                            <option value="all">All assets</option>
+                            <option value="audio_clip">Audio Clips</option>
+                        </select>
+                    </label>
+                </div>
+                <nav aria-label="Asset folders" class="folder-location" [hidden]="searching()">
                     <button (click)="upOneFolder(location)" [disabled]="!folder()" type="button">Up</button>
                     <span #location tabindex="-1">{{ folder() ? 'Assets / ' + folder() : 'Assets' }}</span>
                 </nav>
-                <label class="asset-filter">
-                    Asset kind
-                    <select #kind [value]="assetFilter()" (change)="filterAssets(kind.value)">
-                        <option value="all">All assets</option>
-                        <option value="audio_clip">Audio Clips</option>
-                    </select>
-                </label>
                 @if (error(); as message) {
                     <p role="alert">{{ message }}</p>
                 }
                 @if (status(); as message) {
                     <p role="status">{{ message }}</p>
                 }
-                <ul aria-label="Folder contents">
+                @if (animators().length) {
+                    <details [open]="searching()">
+                        <summary>Animators</summary>
+                        <ul aria-label="Animator assets">
+                            @for (asset of animators(); track asset.id) {
+                                <li><button type="button" (click)="animatorWorkspace?.open(asset.id)"
+                                    [disabled]="!canRunAction() || !animatorWorkspace"
+                                    [attr.aria-label]="'Open Animator ' + asset.path">{{ asset.path }}</button></li>
+                            }
+                        </ul>
+                    </details>
+                }
+                @if (controlGraphs().length) {
+                    <details [open]="searching()">
+                        <summary>Controls Graphs</summary>
+                        <ul aria-label="Controls Graphs">
+                            @for (asset of controlGraphs(); track asset.id) {
+                                <li><button type="button" (click)="controlsWorkspace?.open(asset.id)"
+                                    [disabled]="!canRunAction()"
+                                    [attr.aria-label]="'Open Controls Graph ' + asset.path">{{ asset.path }}</button></li>
+                            }
+                        </ul>
+                    </details>
+                }
+                <ul [attr.aria-label]="searching() ? 'Asset file results' : 'Folder contents'">
                     @for (folder of folderContents().folders; track folder[1]) {
                         <li>
                             <button (click)="openFolder(folder[1], location)" type="button">
@@ -83,11 +101,16 @@
                                 @if (isActiveScene(file)) {
                                     <span class="active-scene">Active</span>
                                 }
+                                @if (searching()) {
+                                    <span class="asset-kind">{{ file.path }}</span>
+                                }
                             </button>
                         </li>
                     }
                 </ul>
-                @if (folderContents().folders.length === 0 && folderContents().files.length === 0) {
+                @if (noSearchMatches()) {
+                    <p class="search-feedback" role="status">No matching assets.</p>
+                } @else if (!searching() && folderContents().folders.length === 0 && folderContents().files.length === 0) {
                     <p>No catalogued assets in this folder.</p>
                 }
                 @if (selected(); as file) {

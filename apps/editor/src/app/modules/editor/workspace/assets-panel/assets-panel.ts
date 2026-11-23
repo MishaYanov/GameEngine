@@ -20,6 +20,7 @@ import {type PropAssetReveal, PropAssetSelection} from '../prefabs/prop-asset-se
 import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {AnimatorAssets} from '../animator/animator-assets.service';
 import {AnimatorWorkspaceService} from '../animator/animator-workspace.service';
+import {ControlGraphWorkspaceService} from '../control-graph/control-graph-workspace.service';
 import {ContextActionBuilder} from '../../../../shared/actions/context-action';
 import {ContextMenuBuilder, type ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
@@ -37,6 +38,10 @@ interface AssetMenuContext {
     readonly file: AssetEntry;
     readonly generation: number;
     readonly sceneId: SceneId | null;
+}
+
+function searchable(text: string): string {
+    return text.trim().replaceAll('\\', '/').toLocaleLowerCase();
 }
 
 @Component({
@@ -65,8 +70,9 @@ export class AssetsPanel {
     private readonly editor = inject(EditorService);
     private readonly propAssetSelection = inject(PropAssetSelection, {optional: true});
     protected readonly propWorkspace = inject(PropWorkspaceService, {optional: true});
-    protected readonly animatorAssets = inject(AnimatorAssets, {optional: true});
+    private readonly animatorAssets = inject(AnimatorAssets, {optional: true});
     protected readonly animatorWorkspace = inject(AnimatorWorkspaceService, {optional: true});
+    protected readonly controlsWorkspace = inject(ControlGraphWorkspaceService, {optional: true});
     private readonly drawer = viewChild(Drawer);
     private readonly propAuthoring = viewChild(PrefabAuthoring);
     private readonly injector = inject(Injector);
@@ -78,6 +84,13 @@ export class AssetsPanel {
     protected readonly projectOpen = computed(() => this.editor.snapshot() !== null);
     protected readonly models = this.editor.modelAssets;
     protected readonly assetFilter = signal<'all' | 'audio_clip'>('all');
+    protected readonly searchQuery = linkedSignal({source: this.editor.workspaceGeneration, computation: () => ''});
+    private readonly query = computed(() => searchable(this.searchQuery()));
+    protected readonly searching = computed(() => this.query().length > 0);
+    protected readonly animators = computed(() => this.assetFilter() === 'all' && this.animatorAssets?.supported()
+        ? this.animatorAssets.assets().filter(asset => searchable(asset.path).includes(this.query())) : []);
+    protected readonly controlGraphs = computed(() => this.assetFilter() === 'all' && this.controlsWorkspace?.supported()
+        ? this.controlsWorkspace.assets().filter(asset => searchable(asset.path).includes(this.query())) : []);
     protected readonly canRunAction = computed(() => {
         const snapshot = this.editor.snapshot();
         return snapshot?.mode === 'edit' && this.editor.nativeAvailable && !this.opening() &&
@@ -101,7 +114,7 @@ export class AssetsPanel {
     ]);
     private readonly visibleEntries = computed(() => this.assetFilter() === 'audio_clip'
         ? this.entries().filter(entry => entry.kind === 'audio_clip') : this.entries());
-    protected readonly selected = linkedSignal({
+    private readonly selection = linkedSignal({
         source: this.visibleEntries,
         computation: (entries, previous): AssetEntry | null => {
             const selected = previous?.value;
@@ -122,10 +135,15 @@ export class AssetsPanel {
     });
     protected readonly folderContents = computed(() => {
         const folder = this.folder();
+        const query = this.query();
         const prefix = folder ? `${folder}/` : '';
         const folders = new Map<string, string>();
         const files: AssetEntry[] = [];
         for (const entry of this.visibleEntries()) {
+            if (query) {
+                if (searchable(entry.name).includes(query) || searchable(entry.path).includes(query)) files.push(entry);
+                continue;
+            }
             if (!entry.path.startsWith(prefix)) continue;
             const remainder = entry.path.slice(prefix.length);
             const separator = remainder.indexOf('/');
@@ -141,6 +159,12 @@ export class AssetsPanel {
             files: files.sort((a, b) => a.name.localeCompare(b.name)),
         };
     });
+    protected readonly selected = computed(() => {
+        const selection = this.selection();
+        return selection && this.folderContents().files.includes(selection) ? selection : null;
+    });
+    protected readonly noSearchMatches = computed(() => this.searching() &&
+        !this.folderContents().files.length && !this.animators().length && !this.controlGraphs().length);
     private readonly assetMenuBuilder = ContextMenuBuilder.create<AssetMenuContext>()
         .action(ContextActionBuilder.create<AssetMenuContext>('asset.select', 'Select Asset')
             .icon('object')
@@ -259,6 +283,7 @@ export class AssetsPanel {
             return;
         }
         this.assetFilter.set('all');
+        this.searchQuery.set('');
         this.folder.set(file.path.slice(0, Math.max(0, file.path.lastIndexOf('/'))));
         this.selectFile(file);
         afterNextRender(() => {
@@ -280,12 +305,12 @@ export class AssetsPanel {
 
     protected openFolder(path: string, location: HTMLElement): void {
         this.folder.set(path);
-        this.selected.set(null);
+        this.selection.set(null);
         location.focus();
     }
 
     protected selectFile(file: AssetEntry): void {
-        this.selected.set(file);
+        this.selection.set(file);
         this.error.set(null);
         this.status.set(null);
     }
