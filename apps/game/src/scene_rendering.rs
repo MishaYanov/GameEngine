@@ -225,7 +225,11 @@ impl GameApp {
 		self.tools.stats = stats;
 
 		renderer.set_lights(&self.scene.renderer_lights())?;
-		renderer.set_sky(self.scene.renderer_sky());
+		runtime::scene::Scene::configure_sky(
+			renderer,
+			self.asset_manager.as_mut(),
+			self.scene.sky_settings(),
+		)?;
 		match game_rect {
 			Some(rect) => renderer.draw_in_rect(&camera_uniform, &objects, rect.pixels()),
 			None => renderer.draw(&camera_uniform, &objects),

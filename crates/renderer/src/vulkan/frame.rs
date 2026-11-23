@@ -86,7 +86,13 @@ pub(crate) struct FrameView<'a> {
 	pub uniform: &'a CameraUniform,
 	pub region: vk::Rect2D,
 	pub editor: Option<FrameEditor<'a>>,
-	pub sky: Option<(&'a super::sky::SkyPass, super::SkyGradient)>,
+	pub sky: Option<FrameSky<'a>>,
+}
+
+pub(crate) struct FrameSky<'a> {
+	pub pass: &'a super::sky::SkyPass,
+	pub gradient: super::SkyGradient,
+	pub panorama: Option<&'a super::VulkanTexture>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

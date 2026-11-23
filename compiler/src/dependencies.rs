@@ -101,6 +101,15 @@ impl Closure<'_> {
             .unwrap_or("")
             .to_ascii_lowercase();
 		let audio_clip = kind == Some(AssetKind::AudioClip);
+		if kind == Some(AssetKind::SkyPanorama)
+			&& (extension != "png"
+				|| metadata.len() > engine_core::components::MAX_SKY_PANORAMA_FILE_BYTES as u64)
+		{
+			return Err(format!(
+				"Sky Panorama {} exceeds the 12 MiB .png budget",
+				relative.display()
+			));
+		}
 		if audio_clip
 			&& (extension != "wav"
 				|| metadata.len() > engine_core::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES as u64)
@@ -230,6 +239,10 @@ impl Closure<'_> {
     }
 
     fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
+        if let Some(image) = entity.sky.as_ref().and_then(|sky| sky.settings.background.image()) {
+            self.catalog.sky_panorama(image)?;
+            self.record(image)?;
+        }
 		if let Some(clip) = entity.audio_source.as_ref().and_then(|source| source.settings.clip.as_ref()) {
 			self.catalog.audio_clip(&clip.asset)?;
 			self.record(&clip.asset).map_err(|error| format!("Audio Source {}: {error}", entity.key.as_str()))?;

@@ -295,6 +295,18 @@ impl EditorWorkspace {
 			match &request.command {
 				Command::AddComponent { component, .. }
 				| Command::ReplaceComponent { component, .. } => {
+					if let runtime::components::ComponentData::Sky { settings } = &component.data {
+						if let Some(id) = settings.background.image() {
+							let catalog =
+								runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+							let asset = catalog.sky_panorama(id)?;
+							bridge::sky_panorama::project_info(
+								&self.asset_root,
+								&asset.path,
+								asset.bytes,
+							)?;
+						}
+					}
 					if let runtime::components::ComponentData::AudioSource { settings } =
 						&component.data
 					{

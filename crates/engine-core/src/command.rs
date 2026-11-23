@@ -436,4 +436,6 @@ pub struct EditorCapabilitiesDto {
 	pub animator_assets: bool,
 	#[serde(default)]
 	pub controls_graph_assets: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub sky_panorama_assets: bool,
 }

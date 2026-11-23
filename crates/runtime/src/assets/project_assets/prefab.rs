@@ -8,6 +8,13 @@ pub(super) fn prefab_dependencies(
 ) -> Result<Vec<AssetId>, String> {
 	let mut dependencies = HashSet::new();
 	for entity in prefab.expanded_entities()?.iter() {
+		if let Some(image) = entity
+			.sky
+			.as_ref()
+			.and_then(|sky| sky.settings.background.image())
+		{
+			dependencies.insert(catalog.sky_panorama(image)?.id.clone());
+		}
 		if let Some(clip) = entity
 			.audio_source
 			.as_ref()

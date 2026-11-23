@@ -143,6 +143,17 @@ impl ViewportHost {
 		}
 	}
 
+	pub fn refresh_sky(&self, generation: u64) {
+		#[cfg(windows)]
+		if let Ok(running) = self.running.lock() {
+			if let Some(running) = running.as_ref() {
+				running.control.refresh_sky(generation);
+			}
+		}
+		#[cfg(not(windows))]
+		let _ = generation;
+	}
+
 	pub fn editor_state(&self) -> Result<ViewportEditorStateDto, String> {
 		self.editor_state
 			.lock()
@@ -197,7 +208,11 @@ impl ViewportHost {
 	) -> crate::asset_reimport_gpu::AssetChangeResult {
 		#[cfg(windows)]
 		{
-			let control = if change.asset().kind == runtime::asset_catalog::AssetKind::AudioClip {
+			let control = if matches!(
+				change.asset().kind,
+				runtime::asset_catalog::AssetKind::AudioClip
+					| runtime::asset_catalog::AssetKind::SkyPanorama
+			) {
 				None
 			} else {
 				self.reap();

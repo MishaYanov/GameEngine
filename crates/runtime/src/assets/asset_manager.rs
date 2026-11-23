@@ -22,6 +22,7 @@ use super::{
 };
 
 mod gpu_budget;
+mod sky;
 mod source_cache;
 mod upload;
 
@@ -39,6 +40,9 @@ pub struct AssetManager {
 	source_fingerprints: HashMap<PathBuf, String>,
 	source_cache: SourceCache,
 	gpu_budget: GpuBudget,
+	sky_texture: Option<sky::SkyTextureSlot>,
+	sky_decode: Option<sky::SkyDecode>,
+	sky_update_deadline: Option<std::time::Instant>,
 }
 
 impl AssetManager {
@@ -58,6 +62,9 @@ impl AssetManager {
 			source_fingerprints: HashMap::new(),
 			source_cache: SourceCache::default(),
 			gpu_budget: GpuBudget::default(),
+			sky_texture: None,
+			sky_decode: None,
+			sky_update_deadline: None,
 		})
 	}
 

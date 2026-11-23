@@ -174,8 +174,13 @@ impl VulkanFrame {
 			self.device
 				.cmd_set_scissor(self.command_buffer, 0, &[region]);
 
-			if let Some((pass, gradient)) = view.sky {
-				pass.record(self.command_buffer, view.uniform, gradient);
+			if let Some(sky) = &view.sky {
+				sky.pass.record(
+					self.command_buffer,
+					view.uniform,
+					sky.gradient,
+					sky.panorama,
+				);
 			}
 
 			/*

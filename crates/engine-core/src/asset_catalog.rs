@@ -49,6 +49,7 @@ pub enum AssetKind {
 	Model,
 	Prefab,
 	Scene,
+	SkyPanorama,
 	Texture,
 	AnimationClip,
 }
@@ -139,6 +140,20 @@ impl PersistentAsset {
 					.any(|alias| !alias.to_ascii_lowercase().ends_with(".wav")))
 		{
 			return Err("Audio Clip catalog entries require bounded self-contained .wav files and .wav aliases".into());
+		}
+		if self.kind == AssetKind::SkyPanorama
+			&& (!self.path.to_ascii_lowercase().ends_with(".png")
+				|| !(33..=crate::components::MAX_SKY_PANORAMA_FILE_BYTES as u64)
+					.contains(&self.bytes)
+				|| !self.dependencies.is_empty()
+				|| self
+					.aliases
+					.iter()
+					.any(|alias| !alias.to_ascii_lowercase().ends_with(".png")))
+		{
+			return Err(
+				"Sky Panorama requires a bounded self-contained .png asset and .png aliases".into(),
+			);
 		}
 		if self.aliases.len() > 64
 			|| self.meshes.len() > 10_000
@@ -296,6 +311,15 @@ impl AssetCatalog {
 		let asset = self.by_id(id).ok_or("Audio Clip identity is unavailable")?;
 		if asset.kind != AssetKind::AudioClip {
 			return Err("Audio Source requires an Audio Clip asset".into());
+		}
+		Ok(asset)
+	}
+	pub fn sky_panorama(&self, id: &AssetId) -> Result<&PersistentAsset, String> {
+		let asset = self
+			.by_id(id)
+			.ok_or("Sky Panorama identity is unavailable")?;
+		if asset.kind != AssetKind::SkyPanorama {
+			return Err("Sky requires a Sky Panorama asset".into());
 		}
 		Ok(asset)
 	}

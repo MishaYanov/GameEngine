@@ -55,6 +55,10 @@ impl Closure<'_> {
 				bridge::audio_clip::inspect(&bytes)
 					.map_err(|error| format!("{}: {error}", asset.path))?;
 			}
+			AssetKind::SkyPanorama => {
+				bridge::sky_panorama::decode(&bytes)
+					.map_err(|error| format!("{}: {error}", asset.path))?;
+			}
 			AssetKind::Scene => {
 				let scene = SceneData::from_json(
 					std::str::from_utf8(&bytes).map_err(|error| error.to_string())?,

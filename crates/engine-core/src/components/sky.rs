@@ -1,5 +1,5 @@
 use super::ComponentId;
-use crate::{EntityKey, SceneData};
+use crate::{EntityKey, SceneData, asset_catalog::AssetId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -8,6 +8,34 @@ pub struct SkySettings {
 	pub zenith: [f32; 3],
 	pub horizon: [f32; 3],
 	pub yaw_degrees: f32,
+	#[serde(default, skip_serializing_if = "SkyBackground::is_gradient")]
+	pub background: SkyBackground,
+}
+
+pub const MAX_SKY_PANORAMA_WIDTH: u32 = 2_048;
+pub const MAX_SKY_PANORAMA_HEIGHT: u32 = 1_024;
+pub const MAX_SKY_PANORAMA_FILE_BYTES: usize = 12 * 1024 * 1024;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SkyBackground {
+	#[default]
+	Gradient,
+	Panorama {
+		image: AssetId,
+	},
+}
+
+impl SkyBackground {
+	pub fn is_gradient(&self) -> bool {
+		matches!(self, Self::Gradient)
+	}
+	pub fn image(&self) -> Option<&AssetId> {
+		match self {
+			Self::Gradient => None,
+			Self::Panorama { image } => Some(image),
+		}
+	}
 }
 
 impl Default for SkySettings {
@@ -16,6 +44,7 @@ impl Default for SkySettings {
 			zenith: [0.035, 0.075, 0.18],
 			horizon: [0.30, 0.46, 0.65],
 			yaw_degrees: 0.0,
+			background: Default::default(),
 		}
 	}
 }

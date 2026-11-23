@@ -412,6 +412,7 @@ export interface CommandDescriptor {
 
 export interface EditorCapabilities {
     readonly input_action_assets?: boolean;
+    readonly sky_panorama_assets?: boolean;
     readonly animator_assets?: boolean;
     readonly controls_graph_assets?: boolean;
     readonly state_machines?: MachineDescriptor;
@@ -446,7 +447,7 @@ export interface GameplayModuleDescriptor {
 export interface ModelAsset {
     readonly name: string;
     readonly path: string;
-    readonly kind?: 'model' | 'prefab' | 'audio_clip';
+    readonly kind?: 'model' | 'prefab' | 'audio_clip' | 'sky_panorama';
     readonly asset_id?: string | null;
     readonly fingerprint?: string | null;
     readonly revision?: number | null;

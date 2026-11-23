@@ -378,7 +378,7 @@ impl Worker {
 			self.dirty = true;
 			return Ok(());
 		}
-		gpu.renderer.set_sky(None);
+		Scene::configure_sky(&mut gpu.renderer, Some(&mut gpu.assets), None)?;
 		let status = gpu.renderer.draw(&uniform, &objects)?;
 		if status == DrawStatus::NeedsRedraw {
 			self.dirty = true;

@@ -23,17 +23,23 @@ mod controls_graph;
 mod input_actions;
 mod migration;
 mod prefab;
+mod sky_panorama;
 
 pub use animation_clip::{prepare_animation_clip, read_animation_clip};
 pub use animator::prepare_animator;
+use audio_clip::prepare_binary_import;
 pub use audio_clip::{load_audio_clip, prepare_audio_clip_import};
 pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;
+pub use sky_panorama::{prepare_sky_panorama_import, read_sky_panorama};
 
 const MAX_SOURCE: usize = 64 * 1024 * 1024;
 fn asset_byte_limit(kind: AssetKind) -> usize {
+	if kind == AssetKind::SkyPanorama {
+		return engine_core::components::MAX_SKY_PANORAMA_FILE_BYTES;
+	}
 	if kind == AssetKind::AudioClip {
 		engine_core::audio_clip::MAX_AUDIO_CLIP_WAV_BYTES
 	} else {
@@ -459,10 +465,12 @@ fn prepare(
 	if (previous.is_none() || move_asset) && target.exists() {
 		return Err("Asset destination already exists".into());
 	}
-	let bytes = if let Some(old) = previous.filter(|asset| asset.kind == AssetKind::AudioClip) {
-		load_audio_clip(&asset_root, old)?.into_wav()
-	} else {
-		read(source, MAX_SOURCE)?
+	let bytes = match previous {
+		Some(old) if old.kind == AssetKind::AudioClip => {
+			load_audio_clip(&asset_root, old)?.into_wav()
+		}
+		Some(old) if old.kind == AssetKind::SkyPanorama => read_sky_panorama(&asset_root, old)?.0,
+		_ => read(source, MAX_SOURCE)?,
 	};
 	let candidate = unique(&asset_root, "candidate.tmp");
 	write_new(&candidate, &bytes)?;
@@ -602,6 +610,11 @@ pub fn prepare_move(
 		AssetKind::AudioClip => {
 			if !destination.to_ascii_lowercase().ends_with(".wav") {
 				return Err("Audio Clip destinations use .wav".into());
+			}
+		}
+		AssetKind::SkyPanorama => {
+			if !destination.to_ascii_lowercase().ends_with(".png") {
+				return Err("Sky Panorama destinations use .png".into());
 			}
 		}
 		_ => return Err("This asset kind does not support moving".into()),

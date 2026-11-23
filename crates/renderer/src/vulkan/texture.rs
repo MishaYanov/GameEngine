@@ -91,6 +91,10 @@ pub struct VulkanTexture {
 }
 
 impl VulkanTexture {
+	pub(crate) fn belongs_to(&self, device: &Device) -> bool {
+		self.device.handle() == device.handle()
+	}
+
 	pub fn set_debug_label(&self, label: &str) {
 		for guard in &self._metrics {
 			guard.set_label(label);

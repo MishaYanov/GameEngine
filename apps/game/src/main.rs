@@ -1220,6 +1220,14 @@ impl ApplicationHandler for GameApp {
 			return;
 		};
 		let size = window.inner_size();
+		let sky_deadline = self
+			.asset_manager
+			.as_ref()
+			.and_then(AssetManager::sky_update_deadline)
+			.filter(|_| size.width != 0 && size.height != 0 && !self.window_occluded);
+		if sky_deadline.is_some_and(|deadline| now >= deadline) {
+			window.request_redraw();
+		}
 		let frame_deadline =
 			if !self.needs_continuous_redraw() || size.width == 0 || size.height == 0 {
 				self.next_frame_deadline = None;
@@ -1257,6 +1265,7 @@ impl ApplicationHandler for GameApp {
 			.into_iter()
 			.chain(controller_deadline)
 			.chain(caption_deadline)
+			.chain(sky_deadline.filter(|deadline| *deadline > now))
 			.chain(self.project_sound.preview_deadline())
 			.min();
 		event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));

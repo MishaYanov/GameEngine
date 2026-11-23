@@ -1,5 +1,6 @@
 import {parseF32} from '../../../../core/editor/authoring-number';
 import type {Vec3} from '../../../../core/editor/editor.models';
+import {validInputActionsId} from '../../../../core/game-input/input-actions.models';
 import {
     SKY_DEFAULT_HORIZON, SKY_DEFAULT_ZENITH, SKY_YAW_LIMIT, type SkySettings, validSkyColor,
 } from '../../../../core/editor/sky.models';
@@ -14,6 +15,7 @@ export interface SkyComponentDraft {
     readonly zenith: SkyColorDraft;
     readonly horizon: SkyColorDraft;
     readonly yawDegrees: string;
+    readonly panorama: string;
 }
 
 export const skyColorChannels = [
@@ -31,6 +33,7 @@ export function skyComponentDraft(settings?: SkySettings): SkyComponentDraft {
         zenith: skyColorDraft(settings?.zenith ?? SKY_DEFAULT_ZENITH),
         horizon: skyColorDraft(settings?.horizon ?? SKY_DEFAULT_HORIZON),
         yawDegrees: String(settings?.yaw_degrees ?? 0),
+        panorama: settings?.background?.kind === 'panorama' ? settings.background.image : '',
     };
 }
 
@@ -49,5 +52,11 @@ export function skyComponentFromDraft(draft: SkyComponentDraft): SkySettings {
     if (yaw === null || Math.abs(yaw) > SKY_YAW_LIMIT) {
         throw new Error(`Yaw must be between −${SKY_YAW_LIMIT} and ${SKY_YAW_LIMIT} degrees.`);
     }
-    return {zenith, horizon, yaw_degrees: yaw};
+    if (draft.panorama && !validInputActionsId(draft.panorama)) {
+        throw new Error('Choose a registered panorama image.');
+    }
+    return {
+        zenith, horizon, yaw_degrees: yaw,
+        ...(draft.panorama ? {background: {kind: 'panorama', image: draft.panorama}} : {}),
+    };
 }

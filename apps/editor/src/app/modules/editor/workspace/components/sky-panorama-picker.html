@@ -1,0 +1,33 @@
+@if (review()) {
+    @if (selected(); as asset) {
+        <p>Panorama {{ asset.path }}</p>
+    }
+} @else {
+    <editor-search-picker label="Panorama image" placeholder="Search registered PNGs…"
+                          [value]="image() || null" [options]="options()" [clearable]="true"
+                          [disabled]="!available() || loading()" (picked)="choose($event)"/>
+    @if (source()) {
+        <div class="import-fields">
+            <p>Import {{ sourceName() }}</p>
+            <label>Project image path
+                <input [formField]="pathForm.destination" placeholder="sky/day.png"/>
+            </label>
+            <div class="actions">
+                <button type="button" [disabled]="!canImport()" (click)="importAndAssign()">Import and Assign</button>
+                <button type="button" [disabled]="pending()" (click)="cancelImport()">Cancel Import</button>
+            </div>
+        </div>
+    } @else {
+        <div class="actions">
+            <button type="button" [disabled]="!available()" (click)="chooseSource()">Import Panorama…</button>
+            <button type="button" [disabled]="!available() || loading()" (click)="refresh()">Refresh Panoramas</button>
+        </div>
+        <small>Use a 2:1 PNG up to 2048 × 1024 pixels. Clear the image to use the gradient.</small>
+    }
+}
+@if (missing()) {
+    <p role="status">The selected panorama is unavailable. The Sky shows its gradient.</p>
+}
+@if (failure(); as message) {
+    <p role="alert">{{ message }}</p>
+}

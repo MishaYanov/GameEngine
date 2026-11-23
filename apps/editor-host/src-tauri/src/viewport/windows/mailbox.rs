@@ -4,6 +4,7 @@ pub(super) struct Latest {
 	pub(super) bounds: ViewportBoundsDto,
 	pub(super) dpi: f64,
 	pub(super) invalidated: bool,
+	pub(super) sky_refresh_generation: Option<u64>,
 	pub(super) attached: bool,
 	pub(super) parent_visible: bool,
 	pub(super) clear_input: bool,
@@ -49,6 +50,7 @@ impl Control {
 				bounds,
 				dpi,
 				invalidated: true,
+				sky_refresh_generation: None,
 				attached: true,
 				parent_visible: true,
 				clear_input: true,
@@ -206,6 +208,28 @@ impl Control {
 			latest.invalidated = true;
 		}
 		self.wake();
+	}
+	pub(in crate::viewport) fn refresh_sky(&self, generation: u64) {
+		let queued = self.latest.lock().is_ok_and(|mut latest| {
+			if latest.stop
+				|| !latest.attached
+				|| !latest.parent_visible
+				|| !latest.bounds.visible
+				|| latest.bounds.width == 0.0
+				|| latest.bounds.height == 0.0
+			{
+				return false;
+			}
+			latest.sky_refresh_generation = Some(
+				latest
+					.sky_refresh_generation
+					.map_or(generation, |pending| pending.max(generation)),
+			);
+			true
+		});
+		if queued {
+			self.wake();
+		}
 	}
 	pub(in crate::viewport) fn stop(&self) {
 		if let Ok(mut latest) = self.latest.lock() {

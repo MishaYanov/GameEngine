@@ -15,6 +15,13 @@
                     (assign)="revealReference(component.id, 'Audio Clip')"/>
             } @else if (component.data.kind === 'camera') {
                 <p>{{ component.data.settings.rig.mode }}</p>
+            } @else if (component.data.kind === 'sky' && skyPanoramaAssetsEnabled() && !open()) {
+                @if (component.data.settings.background; as background) {
+                    @if (background.kind === 'panorama') {
+                        <editor-sky-panorama-picker [image]="background.image" [review]="true"
+                            [context]="contextKey() + ':' + component.id"/>
+                    }
+                }
             } @else if (component.data.kind === 'player_controller') {
                 <p>Input source: {{ inputSource(component.data.settings.input) }}</p>
                 <p>{{ component.data.settings.local ? 'Local input assigned' : 'Local input unassigned' }}</p>
@@ -164,6 +171,10 @@
 						}
 					</fieldset>
 					<label>Yaw (degrees)<input inputmode="decimal" [formField]="fields.sky.yawDegrees"/></label>
+					@if (skyPanoramaAssetsEnabled()) {
+						<editor-sky-panorama-picker [image]="draft().sky.panorama" [editable]="available()"
+							[context]="contextKey() + ':' + draft().id" (picked)="chooseSkyPanorama($event)"/>
+					}
 				}
 				@case ('mesh_renderer') {
 					<label

@@ -162,6 +162,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		animator_assets: true,
 		controls_graph_assets: true,
 		input_action_assets: true,
+		sky_panorama_assets: true,
 	}
 }
 
@@ -306,6 +307,7 @@ impl ModelAssetDto {
 			kind: match asset.kind {
 				runtime::asset_catalog::AssetKind::Prefab => "prefab",
 				runtime::asset_catalog::AssetKind::AudioClip => "audio_clip",
+				runtime::asset_catalog::AssetKind::SkyPanorama => "sky_panorama",
 				_ => "model",
 			},
 			asset_id: Some(asset.id.clone()),

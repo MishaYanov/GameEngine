@@ -124,7 +124,7 @@ impl Scene {
 		Ok(count)
 	}
 
-	pub fn renderer_sky(&self) -> Option<renderer::vulkan::SkyGradient> {
+	pub fn sky_settings(&self) -> Option<&engine_core::components::SkySettings> {
 		let key = self.environment.active_sky.as_ref()?;
 		let id = self.key_ids.get(key)?;
 		let entry = &self.entries[*self.id_indices.get(id)?];
@@ -132,10 +132,24 @@ impl Scene {
 			.sky
 			.as_ref()
 			.filter(|sky| sky.enabled && entry.parent.is_none())?;
-		Some(renderer::vulkan::SkyGradient {
-			zenith: sky.settings.zenith,
-			horizon: sky.settings.horizon,
-		})
+		Some(&sky.settings)
+	}
+
+	pub fn configure_sky(
+		renderer: &mut renderer::WindowRenderer,
+		assets: Option<&mut crate::assets::AssetManager>,
+		settings: Option<&engine_core::components::SkySettings>,
+	) -> Result<(), String> {
+		let gradient = settings.map(|sky| renderer::vulkan::SkyGradient {
+			zenith: sky.zenith,
+			horizon: sky.horizon,
+			yaw_degrees: sky.yaw_degrees,
+		});
+		let image = settings.and_then(|sky| sky.background.image());
+		let texture = assets.and_then(|assets| assets.sky_texture(renderer, image));
+		renderer.set_sky_panorama(texture)?;
+		renderer.set_sky(gradient);
+		Ok(())
 	}
 
 	pub fn renderer_lights(&self) -> Vec<renderer::vulkan::Light> {

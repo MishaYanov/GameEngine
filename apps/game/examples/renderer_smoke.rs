@@ -44,6 +44,58 @@ fn pipeline_ids(renderer: &WindowRenderer) -> Option<Vec<u64>> {
 	})
 }
 
+fn exercise_async_panorama(renderer: &mut WindowRenderer, camera: &CameraUniform) {
+	use runtime::asset_catalog::AssetId;
+	use std::{fs, path::PathBuf};
+	struct Fixture(PathBuf);
+	impl Drop for Fixture {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.0);
+		}
+	}
+	let root =
+		Fixture(std::env::temp_dir().join(format!("sky-smoke-{}", AssetId::generate().as_str())));
+	fs::create_dir(&root.0).unwrap();
+	let input = root.0.join("source.png");
+	fs::write(
+		&input,
+		include_bytes!("../../../compiler/tests/fixtures/sky-panorama-4x2.png"),
+	)
+	.unwrap();
+	let prepared =
+		assets::project_assets::prepare_sky_panorama_import(&root.0, &input, "panorama.png")
+			.unwrap();
+	let id = prepared.asset().id.clone();
+	prepared.publish().unwrap();
+	let mut manager = assets::AssetManager::new(&root.0).unwrap();
+	assert!(!manager.refresh_active_sky());
+	assert!(manager.sky_texture(renderer, Some(&id)).is_none());
+	assert!(manager.sky_update_deadline().is_some());
+	assert_eq!(renderer.draw(camera, &[]).unwrap(), DrawStatus::Rendered);
+	assert!(manager.sky_texture(renderer, None).is_none());
+	assert!(manager.sky_update_deadline().is_none());
+	let deadline = Instant::now() + Duration::from_secs(3);
+	let texture = loop {
+		if let Some(texture) = manager.sky_texture(renderer, Some(&id)) {
+			break texture;
+		}
+		assert!(
+			Instant::now() < deadline,
+			"Sky Panorama decode never completed"
+		);
+		std::thread::sleep(Duration::from_millis(10));
+	};
+	assert!(manager.sky_update_deadline().is_none());
+	assert!(manager.refresh_active_sky());
+	let retained = manager.sky_texture(renderer, Some(&id)).unwrap();
+	assert!(Arc::ptr_eq(&texture, &retained));
+	fs::remove_file(root.0.join("panorama.png")).unwrap();
+	assert!(manager.refresh_active_sky());
+	assert!(manager.sky_texture(renderer, Some(&id)).is_none());
+	assert!(manager.sky_update_deadline().is_none());
+	renderer.set_sky_panorama(Some(texture)).unwrap();
+}
+
 fn check_upload_batch(renderer: &WindowRenderer) {
 	use renderer::{MeshUpload, Rgba8Upload, vulkan::Vertex};
 	let vertices = [Vertex::new([0.0; 3], [0.0; 2]); 3];
@@ -162,10 +214,12 @@ impl ApplicationHandler for Smoke {
 			])
 			.unwrap();
 		check_upload_batch(&renderer);
-		if std::env::args_os().any(|arg| arg == "--sky") {
+		let panorama = std::env::args_os().any(|arg| arg == "--panorama");
+		if panorama || std::env::args_os().any(|arg| arg == "--sky") {
 			renderer.set_sky(Some(renderer::vulkan::SkyGradient {
 				zenith: [0.035, 0.075, 0.18],
 				horizon: [0.30, 0.46, 0.65],
+				yaw_degrees: 0.0,
 			}));
 			let camera = CameraUniform::perspective(
 				[0.0; 3],
@@ -176,6 +230,9 @@ impl ApplicationHandler for Smoke {
 				0.1,
 				100.0,
 			);
+			if panorama {
+				exercise_async_panorama(&mut renderer, &camera);
+			}
 			self.warmed_sky = renderer.draw(&camera, &[]).unwrap() == DrawStatus::Rendered;
 			assert!(self.warmed_sky);
 		}

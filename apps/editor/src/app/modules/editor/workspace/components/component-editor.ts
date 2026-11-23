@@ -34,6 +34,7 @@ import {EditorSearchPicker} from '../../../../shared/components/search-picker/se
 import {sceneReferenceOptions} from '../scene-reference-options';
 import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {skyColorChannels} from './sky-component-draft';
+import {SkyPanoramaPicker} from './sky-panorama-picker';
 import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
 import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
@@ -54,7 +55,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector, AudioMarkerFields],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector, AudioMarkerFields, SkyPanoramaPicker],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -68,6 +69,7 @@ export class ComponentEditor {
     readonly playerBodyIssue = input<string | null>(null);
     readonly inputActionAssets = input<readonly InputActionsAsset[]>([]);
     readonly inputActionAssetsEnabled = input(false);
+    readonly skyPanoramaAssetsEnabled = input(false);
 	readonly ownerKey = input('');
 	readonly contextKey = input('');
 	readonly editable = input(false);
@@ -260,6 +262,12 @@ export class ComponentEditor {
     protected chooseAudioClip(id: string): void {
         if (!this.available() || !this.open() || this.draft().kind !== 'audio_source') return;
         if (!id || this.audioClips().some(clip => clip.asset_id === id)) this.fields.audioSource.clipId().value.set(id);
+    }
+
+    protected chooseSkyPanorama(id: string): void {
+        if (this.available() && this.open() && this.draft().kind === 'sky') {
+            this.fields.sky.panorama().value.set(id);
+        }
     }
 
     protected allowAudioDrop(event: DragEvent): void {

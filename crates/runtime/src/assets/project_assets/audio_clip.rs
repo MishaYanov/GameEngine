@@ -24,6 +24,21 @@ pub fn prepare_audio_clip_import(
 	if !destination.to_ascii_lowercase().ends_with(".wav") {
 		return Err("Audio Clip destinations use .wav".into());
 	}
+	let clip = audio_clip::read_external(source)?;
+	prepare_binary_import(
+		asset_root,
+		destination,
+		AssetKind::AudioClip,
+		clip.wav_bytes(),
+	)
+}
+
+pub(super) fn prepare_binary_import(
+	asset_root: &Path,
+	destination: &str,
+	kind: AssetKind,
+	bytes: &[u8],
+) -> Result<PreparedAssetChange, String> {
 	let root = root(asset_root)?;
 	let target = asset_path(&root, destination, false)?;
 	let original_catalog = catalog_bytes(&root)?;
@@ -34,14 +49,12 @@ pub fn prepare_audio_clip_import(
 		None => AssetCatalog::default(),
 	};
 	if target.exists() || catalog.by_path(destination).is_some() {
-		return Err("Audio Clip destination is already in use".into());
+		return Err("Asset destination is already in use".into());
 	}
-	let clip = audio_clip::read_external(source)?;
-	let bytes = clip.wav_bytes();
 	let asset = PersistentAsset {
 		id: AssetId::generate(),
 		path: destination.into(),
-		kind: AssetKind::AudioClip,
+		kind,
 		aliases: Vec::new(),
 		revision: 1,
 		fingerprint: fingerprint(bytes),

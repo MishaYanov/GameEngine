@@ -872,6 +872,7 @@ impl Worker {
 					latest.parent_visible,
 					latest.clear_input,
 					latest.stop,
+					latest.sky_refresh_generation.take(),
 				);
 				latest.invalidated = false;
 				latest.wake_queued = false;
@@ -879,7 +880,16 @@ impl Worker {
 				values
 			})
 			.map_err(|_| ());
-		let Ok((bounds, dpi, invalidated, attached, parent_visible, clear_input, stop)) = values
+		let Ok((
+			bounds,
+			dpi,
+			invalidated,
+			attached,
+			parent_visible,
+			clear_input,
+			stop,
+			sky_refresh_generation,
+		)) = values
 		else {
 			self.fail("control_state", "Viewport control lock is poisoned");
 			event_loop.exit();
@@ -944,6 +954,20 @@ impl Worker {
 		}
 		if invalidated || changed {
 			self.dirty = true;
+		}
+		if self.active()
+			&& !self.failed
+			&& sky_refresh_generation.is_some_and(|generation| {
+				self.shared.lock().is_ok_and(|workspace| {
+					workspace
+						.as_ref()
+						.is_some_and(|workspace| workspace.generation == generation)
+				})
+			}) {
+			self.dirty |= self
+				.gpu
+				.as_mut()
+				.is_some_and(|gpu| gpu.assets.refresh_active_sky());
 		}
 		if !self.active() {
 			self.last_tick = None;
@@ -1325,6 +1349,14 @@ impl ApplicationHandler<Wake> for Worker {
 		}
 		self.sync_scene_audio();
 		self.publish_editor(false);
+		let sky_deadline = self
+			.gpu
+			.as_ref()
+			.and_then(|gpu| gpu.assets.sky_update_deadline())
+			.filter(|_| self.active() && !self.failed);
+		if sky_deadline.is_some_and(|deadline| now >= deadline) {
+			self.dirty = true;
+		}
 		if self.dirty
 			&& self.active()
 			&& !self.failed
@@ -1351,6 +1383,9 @@ impl ApplicationHandler<Wake> for Worker {
 		} else {
 			None
 		};
+		if let Some(sky) = sky_deadline.filter(|deadline| *deadline > now) {
+			deadline = Some(deadline.map_or(sky, |deadline| deadline.min(sky)));
+		}
 		if let Some(gamepad) = gamepad_deadline {
 			deadline = Some(deadline.map_or(gamepad, |deadline| deadline.min(gamepad)));
 		}

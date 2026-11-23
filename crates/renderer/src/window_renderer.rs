@@ -23,6 +23,8 @@ struct RendererResources {
 	targets: Option<RenderTargets>,
 	editor: Option<crate::vulkan::editor::EditorPass>,
 	sky: Option<crate::vulkan::sky::SkyPass>,
+	sky_panorama_pass: Option<crate::vulkan::sky::SkyPass>,
+	sky_panorama: Option<Arc<VulkanTexture>>,
 	pipelines: Option<VulkanMaterialPipelines>,
 	camera: VulkanCamera,
 	material_layout: Arc<VulkanMaterialLayout>,
@@ -88,6 +90,8 @@ impl WindowRenderer {
 				targets: None,
 				editor: None,
 				sky: None,
+				sky_panorama_pass: None,
+				sky_panorama: None,
 				pipelines: None,
 				camera,
 				material_layout,
@@ -183,6 +187,28 @@ impl WindowRenderer {
 		self.sky = sky;
 	}
 
+	/// Retain the currently sampled texture until Vulkan finishes its last draw.
+	pub fn set_sky_panorama(&mut self, panorama: Option<Arc<VulkanTexture>>) -> Result<(), String> {
+		if panorama
+			.as_ref()
+			.is_some_and(|texture| !texture.belongs_to(self.resources.device.raw()))
+		{
+			return Err("Sky Panorama texture belongs to a different Vulkan device".into());
+		}
+		let current = self.resources.sky_panorama.as_ref();
+		if current
+			.zip(panorama.as_ref())
+			.is_some_and(|(old, new)| Arc::ptr_eq(old, new))
+		{
+			return Ok(());
+		}
+		if current.is_some() {
+			self.wait_idle()?;
+		}
+		self.resources.sky_panorama = panorama;
+		Ok(())
+	}
+
 	/// Editor-only presentation; no scene entities/materials are created.
 	pub fn set_editor_visuals(&mut self, visuals: &crate::EditorVisuals) -> Result<(), String> {
 		visuals.validate()?;
@@ -237,21 +263,28 @@ impl WindowRenderer {
 		let sky = if let Some(gradient) = self.sky {
 			let color = targets.swapchain.format();
 			let depth = targets.depth.format();
-			if resources
-				.sky
+			let texture = resources.sky_panorama.as_deref();
+			let pass_slot = if texture.is_some() {
+				&mut resources.sky_panorama_pass
+			} else {
+				&mut resources.sky
+			};
+			if pass_slot
 				.as_ref()
 				.is_none_or(|pass| !pass.supports_formats(color, depth))
 			{
-				resources.sky = Some(crate::vulkan::sky::SkyPass::new(
+				*pass_slot = Some(crate::vulkan::sky::SkyPass::new(
 					resources.device.raw(),
 					color,
 					depth,
+					texture.map(|_| resources.material_layout.raw()),
 				)?);
 			}
-			Some((
-				resources.sky.as_ref().expect("sky pass initialized"),
+			Some(crate::vulkan::frame::FrameSky {
+				pass: pass_slot.as_ref().expect("sky pass initialized"),
 				gradient,
-			))
+				panorama: texture,
+			})
 		} else {
 			None
 		};

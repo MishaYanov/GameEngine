@@ -19,6 +19,7 @@ fn main() {
 		"editor-lines.frag",
 		"sky.vert",
 		"sky.frag",
+		"sky_panorama.frag",
 	] {
 		println!("cargo:rerun-if-changed=shaders/{shader}");
 		compile_shader(&format!("shaders/{shader}"), &format!("{shader}.spv"));

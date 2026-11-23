@@ -3,12 +3,13 @@ use ash::{Device, util::read_spv, vk};
 use glam::{Mat4, Vec3};
 use std::{io::Cursor, mem::size_of};
 
-use super::CameraUniform;
+use super::{CameraUniform, VulkanTexture};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SkyGradient {
 	pub zenith: [f32; 3],
 	pub horizon: [f32; 3],
+	pub yaw_degrees: f32,
 }
 
 #[repr(C)]
@@ -55,21 +56,26 @@ impl SkyPass {
 		device: &Device,
 		color: vk::Format,
 		depth: vk::Format,
+		panorama_layout: Option<vk::DescriptorSetLayout>,
 	) -> Result<Self, String> {
 		let vertex = Shader::new(
 			device,
 			include_bytes!(concat!(env!("OUT_DIR"), "/sky.vert.spv")),
 		)?;
-		let fragment = Shader::new(
-			device,
-			include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv")),
-		)?;
+		let fragment_bytes: &[u8] = if panorama_layout.is_some() {
+			include_bytes!(concat!(env!("OUT_DIR"), "/sky_panorama.frag.spv"))
+		} else {
+			include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv"))
+		};
+		let fragment = Shader::new(device, fragment_bytes)?;
 		let range = [vk::PushConstantRange::default()
 			.stage_flags(vk::ShaderStageFlags::FRAGMENT)
 			.size(size_of::<SkyPush>() as u32)];
 		let layout = unsafe {
 			device.create_pipeline_layout(
-				&vk::PipelineLayoutCreateInfo::default().push_constant_ranges(&range),
+				&vk::PipelineLayoutCreateInfo::default()
+					.push_constant_ranges(&range)
+					.set_layouts(panorama_layout.as_slice()),
 				None,
 			)
 		}
@@ -166,6 +172,7 @@ impl SkyPass {
 		command: vk::CommandBuffer,
 		camera: &CameraUniform,
 		gradient: SkyGradient,
+		panorama: Option<&VulkanTexture>,
 	) {
 		let Some((ray_x, ray_y, forward)) = world_rays(camera) else {
 			return;
@@ -173,7 +180,7 @@ impl SkyPass {
 		let push = SkyPush {
 			ray_x: ray_x.extend(0.0).to_array(),
 			ray_y: ray_y.extend(0.0).to_array(),
-			forward: forward.extend(0.0).to_array(),
+			forward: forward.extend(gradient.yaw_degrees / 360.0).to_array(),
 			zenith: Vec3::from_array(gradient.zenith).extend(0.0).to_array(),
 			horizon: Vec3::from_array(gradient.horizon).extend(0.0).to_array(),
 		};
@@ -182,6 +189,16 @@ impl SkyPass {
 				std::slice::from_raw_parts((&raw const push).cast::<u8>(), size_of::<SkyPush>());
 			self.device
 				.cmd_bind_pipeline(command, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+			if let Some(texture) = panorama {
+				self.device.cmd_bind_descriptor_sets(
+					command,
+					vk::PipelineBindPoint::GRAPHICS,
+					self.layout,
+					0,
+					&[texture.descriptor_set()],
+					&[],
+				);
+			}
 			self.device.cmd_push_constants(
 				command,
 				self.layout,

@@ -65,6 +65,13 @@ pub async fn editor_choose_external_wav(window: WebviewWindow) -> Result<Option<
 	choose_external_file(window, "Import Audio Clip", "PCM WAV", "wav").await
 }
 
+#[tauri::command]
+pub async fn editor_choose_external_sky_png(
+	window: WebviewWindow,
+) -> Result<Option<String>, String> {
+	choose_external_file(window, "Import Sky Panorama", "PNG image", "png").await
+}
+
 async fn choose_external_file(
 	window: WebviewWindow,
 	title: &'static str,
@@ -98,6 +105,11 @@ enum Change {
 	ImportAudioClip {
 		source: PathBuf,
 		destination: String,
+	},
+	ImportSkyPanorama {
+		source: PathBuf,
+		destination: String,
+		expected_generation: u64,
 	},
 	Reimport {
 		id: AssetId,
@@ -149,11 +161,21 @@ async fn operate(
 					.as_ref()
 					.ok_or("Open a project before importing assets")?;
 				w.check_revision(expected_revision)?;
+				if let Change::ImportSkyPanorama {
+					expected_generation,
+					..
+				} = &change
+				{
+					if w.generation != *expected_generation {
+						return Err("Sky Panorama import belongs to another workspace".into());
+					}
+				}
 				w.backend
 					.validate_asset_invalidation()
 					.map_err(|e| e.to_string())?;
 				if let Change::Import { destination, .. }
 				| Change::ImportAudioClip { destination, .. }
+				| Change::ImportSkyPanorama { destination, .. }
 				| Change::Move { destination, .. } = &change
 				{
 					w.validate_asset_destination(destination)?;
@@ -178,6 +200,11 @@ async fn operate(
 					source,
 					destination,
 				} => project_assets::prepare_audio_clip_import(&root, &source, &destination)?,
+				Change::ImportSkyPanorama {
+					source,
+					destination,
+					..
+				} => project_assets::prepare_sky_panorama_import(&root, &source, &destination)?,
 				Change::Reimport {
 					id,
 					source,
@@ -258,6 +285,80 @@ pub async fn editor_import_external_wav(
 		},
 	)
 	.await
+}
+
+#[tauri::command]
+pub async fn editor_import_sky_panorama(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	source_path: String,
+	destination_path: String,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<AssetOperationDto, String> {
+	operate(
+		window,
+		state,
+		expected_revision,
+		Change::ImportSkyPanorama {
+			source: PathBuf::from(source_path),
+			destination: destination_path,
+			expected_generation,
+		},
+	)
+	.await
+}
+
+#[derive(Serialize)]
+pub struct SkyPanoramaAssetDto {
+	id: AssetId,
+	path: String,
+	#[serde(flatten)]
+	info: bridge::sky_panorama::PanoramaInfo,
+}
+
+#[tauri::command]
+pub async fn editor_list_sky_panoramas(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<Vec<SkyPanoramaAssetDto>, String> {
+	trusted_window(&window)?;
+	let check = move |workspace: &mut EditorWorkspace| {
+		workspace.check_revision(expected_revision)?;
+		if workspace.generation != expected_generation {
+			return Err("Sky Panorama picker belongs to another workspace".into());
+		}
+		Ok(workspace.asset_root.clone())
+	};
+	let root = workspace(state.clone(), false, None, check).await?;
+	let assets = tauri::async_runtime::spawn_blocking(move || {
+		let catalog = project_assets::load_catalog(&root)?;
+		let mut assets: Vec<_> = catalog
+			.assets
+			.into_iter()
+			.filter(|asset| asset.kind == runtime::asset_catalog::AssetKind::SkyPanorama)
+			.filter_map(|asset| {
+				let info =
+					bridge::sky_panorama::project_info(&root, &asset.path, asset.bytes).ok()?;
+				Some(SkyPanoramaAssetDto {
+					id: asset.id,
+					path: asset.path,
+					info,
+				})
+			})
+			.collect();
+		assets.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+		Ok::<_, String>(assets)
+	})
+	.await
+	.map_err(|error| error.to_string())??;
+	workspace(state.clone(), false, None, check).await?;
+	if let Ok(viewport) = state.viewport.lock() {
+		viewport.refresh_sky(expected_generation);
+	}
+	Ok(assets)
 }
 
 #[tauri::command]

@@ -570,7 +570,11 @@ impl Worker {
 			)?
 		};
 		gpu.renderer.set_editor_visuals(&visuals)?;
-		gpu.renderer.set_sky(gpu.scene.renderer_sky());
+		Scene::configure_sky(
+			&mut gpu.renderer,
+			Some(&mut gpu.assets),
+			gpu.scene.sky_settings(),
+		)?;
 		let frustum = runtime::visibility::Frustum::from_view_projection(
 			glam::Mat4::from_cols_array(&uniform.view_projection),
 		)?;

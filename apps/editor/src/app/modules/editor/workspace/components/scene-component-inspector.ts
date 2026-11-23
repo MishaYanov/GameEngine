@@ -26,6 +26,7 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 		[playerBodyIssue]="playerBodyIssue()"
 		[inputActionAssets]="inputActions?.assets() ?? []"
 		[inputActionAssetsEnabled]="inputActions?.supported() ?? false"
+		[skyPanoramaAssetsEnabled]="skyPanoramaAssetsEnabled()"
 		[editable]="available()"
 		[previewAllowed]="true"
 		[audioScope]="audioScope()"
@@ -143,6 +144,7 @@ export class SceneComponentInspector {
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') ?? false);
 	protected readonly supportsSceneSky = computed(() =>
 		this.editor.capabilities()?.commands?.some(command => command.name === 'set_active_sky') ?? false);
+	protected readonly skyPanoramaAssetsEnabled = computed(() => this.editor.capabilities()?.sky_panorama_assets === true);
 	protected readonly isSceneSky = computed(() => {
 		const key = this.entity()?.key;
 		return key !== undefined && this.editor.document()?.environment?.active_sky === key;

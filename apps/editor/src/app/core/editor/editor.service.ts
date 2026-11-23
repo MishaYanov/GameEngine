@@ -1,4 +1,5 @@
 import {type AudioClipDetails, readAudioClipDetails} from './audio-clip.models';
+import {readSkyPanoramas, type SkyPanoramaAsset, type SkyPanoramaScope} from './sky.models';
 import {
     type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture, type ControlGraphDocument,
     type ControlGraphProbe, readControlGraphCatalog, readControlGraphDocument, readControlGraphProbe,
@@ -501,7 +502,13 @@ export class EditorService {
         return this.chooseExternalAssetSource('editor_choose_external_wav');
     }
 
-    private async chooseExternalAssetSource(operation: 'editor_choose_external_glb' | 'editor_choose_external_wav'): Promise<string | null> {
+    chooseExternalSkyPng(): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_external_sky_png');
+    }
+
+    private async chooseExternalAssetSource(
+        operation: 'editor_choose_external_glb' | 'editor_choose_external_wav' | 'editor_choose_external_sky_png',
+    ): Promise<string | null> {
         const generation = this.workspaceGeneration();
         const current = () => !this.destroyed && generation === this.workspaceGeneration();
         try {
@@ -522,6 +529,21 @@ export class EditorService {
         });
         this.requireGeneration(expectedGeneration);
         return readAudioClipDetails(response);
+    }
+
+    async listSkyPanoramas(scope: SkyPanoramaScope): Promise<readonly SkyPanoramaAsset[]> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const result = await this.native<unknown>('editor_list_sky_panoramas', {
+            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return readSkyPanoramas(result);
+    }
+
+    importSkyPanorama(sourcePath: string, destinationPath: string, scope: SkyPanoramaScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_sky_panorama', {
+            sourcePath, destinationPath, expectedGeneration: scope.nativeGeneration,
+        }, scope.workspaceGeneration, scope.revision);
     }
 
     feedbackCues(expectedGeneration: number): Promise<FeedbackCueDraft> {

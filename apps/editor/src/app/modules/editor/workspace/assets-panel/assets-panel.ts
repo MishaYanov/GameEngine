@@ -96,7 +96,8 @@ export class AssetsPanel {
             kind: 'scene' as const,
             sceneId: scene.id,
         })),
-        ...(this.models() ?? []).map(model => ({...model, kind: model.kind ?? 'model' as const})),
+        ...(this.models() ?? []).flatMap(model => model.kind === 'sky_panorama'
+            ? [] : [{...model, kind: model.kind ?? 'model' as const}]),
     ]);
     private readonly visibleEntries = computed(() => this.assetFilter() === 'audio_clip'
         ? this.entries().filter(entry => entry.kind === 'audio_clip') : this.entries());

@@ -7,6 +7,9 @@ impl EntityData {
 			bytes = bytes
 				.saturating_add(std::mem::size_of_val(sky.as_ref()))
 				.saturating_add(sky.id.as_str().len());
+			if let Some(image) = sky.settings.background.image() {
+				bytes = bytes.saturating_add(image.as_str().len());
+			}
 		}
 		if let Some(source) = &self.audio_source {
 			bytes = bytes
