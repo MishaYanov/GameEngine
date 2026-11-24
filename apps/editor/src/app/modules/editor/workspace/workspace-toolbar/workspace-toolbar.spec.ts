@@ -33,7 +33,7 @@ async function setup(
             {
                 provide: EditorService, useValue: {
                     nativeAvailable: true, snapshot, workspaceGeneration: generation,
-                    busy: () => false, playing: () => false, execute,
+                    busy: () => false, playing: () => false, savedFiles: () => [], execute,
                 }
             },
             {provide: SceneEditingService, useValue: {ready: () => true, withCommittedEdit}},

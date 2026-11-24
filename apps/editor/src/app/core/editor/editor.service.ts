@@ -12,6 +12,7 @@ import {
     readAnimatorCatalog, readAnimatorDocument, readAnimatorValidation,
 } from './animator.models';
 import {EditorClientError} from './editor-client-error';
+import type {RecoveryReview, SaveFileReport} from './document-persistence.models';
 import {
     type InputActionMap, type InputActionsAsset, type InputActionsCapture, type InputActionsDocument,
     readInputActionsAsset, readInputActionsCatalog, readInputActionsDocument,
@@ -128,6 +129,11 @@ export class EditorService {
     readonly snapshot = this.snapshotState.asReadonly();
     private readonly workspaceGenerationState = signal(0);
     readonly workspaceGeneration = this.workspaceGenerationState.asReadonly();
+    private readonly savedFilesState = signal<{generation: number; files: readonly SaveFileReport[]} | null>(null);
+    readonly savedFiles = computed(() => {
+        const report = this.savedFilesState();
+        return report?.generation === this.workspaceGeneration() ? report.files : [];
+    });
     readonly document = computed(() => this.snapshotState()?.document ?? null);
     readonly selection = computed(() => this.snapshotState()?.selection ?? []);
     readonly dirty = computed(() => this.snapshotState()?.dirty ?? false);
@@ -316,7 +322,44 @@ export class EditorService {
     }
 
     saveAll(): Promise<EditorSnapshot> {
-        return this.snapshotOperation('editor_save_all');
+        const generation = this.workspaceGeneration();
+        if (!this.capabilities()?.document_recovery_supported) {
+            return this.snapshotOperation('editor_save_all', {}, false, {expectedGeneration: generation});
+        }
+        return this.enqueue('editor_save_all_report', async () => {
+            this.requireGeneration(generation);
+            this.savedFilesState.set(null);
+            const report = await this.native<{snapshot: EditorSnapshot; files: readonly SaveFileReport[]}>(
+                'editor_save_all_report', {expectedRevision: this.revision()},
+            );
+            this.requireGeneration(generation);
+            this.savedFilesState.set({generation, files: report.files});
+            return this.accept(report.snapshot);
+        }, true, generation);
+    }
+
+    clearSaveReport(): void {
+        this.savedFilesState.set(null);
+    }
+
+    reviewDocumentRecovery(generation: number): Promise<RecoveryReview> {
+        return this.enqueue('editor_review_document_recovery', () => {
+            this.requireGeneration(generation);
+            return this.native<RecoveryReview>('editor_review_document_recovery', {expectedRevision: this.revision()});
+        }, false, generation);
+    }
+
+    applyDocumentRecovery(generation: number, review: RecoveryReview, restore: boolean): Promise<EditorSnapshot> {
+        if (!review.offer) return Promise.reject(new Error('Review the recovery file again.'));
+        return this.snapshotOperation('editor_apply_document_recovery', {
+            expectedGeneration: review.workspace_generation,
+            token: review.offer.token,
+            restore,
+        }, false, {expectedGeneration: generation, expectedRevision: review.revision});
+    }
+
+    checkpointDocuments(nativeGeneration: number): Promise<boolean> {
+        return this.native<boolean>('editor_checkpoint_documents', {expectedGeneration: nativeGeneration});
     }
 
     prepareBuild(destination: string, expectedGeneration?: number, expectedRevision?: number): Promise<ProjectBuildPreparation> {

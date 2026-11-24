@@ -1,0 +1,32 @@
+@if (!open() && offer()) {
+    <button type="button" (click)="reviewDrafts()">Review recovered drafts</button>
+}
+@if (!open() && error(); as message) {
+    <p role="status">Draft recovery is unavailable. {{ message }}</p>
+    <button type="button" (click)="reviewDrafts()">Retry recovery review</button>
+}
+<editor-dialog title="Recover unsaved drafts" closeLabel="Review later" [renderFields]="false"
+               [closeBlocked]="applying()" [(open)]="open">
+    @if (offer(); as draft) {
+        @if (draft.issue; as issue) {
+            <p role="alert">{{ issue }}</p>
+        } @else {
+            <p>The Editor found unsaved changes from {{ draft.captured_at_ms | date:'medium' }}.
+                Restoring them leaves your project files unchanged until you save.</p>
+            <ul aria-label="Recovered project files">
+                @for (file of draft.files; track $index) { <li>{{ file }}</li> }
+            </ul>
+        }
+        <p>Keep disk version discards this recovery file. Review later keeps it available.</p>
+        @if (error(); as message) {
+            <p role="alert">{{ message }}</p>
+            <button type="button" (click)="reviewDrafts()" [disabled]="applying()">Refresh recovery review</button>
+        }
+    }
+    <ng-container dialog-actions>
+        @if (offer(); as draft) {
+            <button type="button" (click)="apply(false)" [disabled]="applying()">Keep disk version</button>
+            <button type="button" (click)="apply(true)" [disabled]="applying() || !!draft.issue">Restore drafts</button>
+        }
+    </ng-container>
+</editor-dialog>

@@ -399,11 +399,23 @@ fn save_all_keeps_successful_scene_baselines_when_manifest_write_fails_then_retr
 	for path in &blocked {
 		fs::write(path, b"held").unwrap();
 	}
-	let error = workspace
-		.save_all(workspace.backend.session().revision())
-		.unwrap_err();
-	assert!(error.contains("Cannot allocate temporary file"), "{error}");
-	let partial = workspace.backend.snapshot().unwrap();
+	let report = workspace
+		.save_all_report(workspace.backend.session().revision())
+		.unwrap();
+	assert_eq!(
+		report.files[0].outcome,
+		editor::documents::SaveOutcome::Written
+	);
+	assert_eq!(
+		report.files[1].outcome,
+		editor::documents::SaveOutcome::Failed
+	);
+	assert!(report.files[1]
+		.message
+		.as_deref()
+		.unwrap()
+		.contains("Cannot allocate temporary file"));
+	let partial = report.snapshot;
 	assert!(partial.project_dirty);
 	assert!(partial.dirty);
 	assert!(partial.scenes.iter().all(|scene| !scene.dirty));

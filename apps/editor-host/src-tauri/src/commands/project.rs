@@ -230,10 +230,13 @@ async fn request_editor_exit(window: WebviewWindow, request: ExitRequest) -> Res
 		let mut host = viewport.lock().map_err(|_| "Viewport state lock failed")?;
 		let mut workspace = editor.lock().map_err(|_| "Editor state lock failed")?;
 		// Close the slot to late edits and prepared project opens at the same time.
-		let retired = {
+		let mut retired = {
 			let _unclaimed = hold_unclaimed_window_close(&exit, &request)?;
 			review.retire(&mut workspace, &exit)?
 		};
+		if let Some(workspace) = retired.as_mut() {
+			workspace.clear_generated_recovery();
+		}
 		drop(workspace);
 		host.close_parent_when_ready(window);
 		drop(host);

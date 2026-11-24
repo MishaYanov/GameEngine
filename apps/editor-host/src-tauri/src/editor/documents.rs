@@ -1,4 +1,104 @@
+//! Authored document loading and checked per-file publication.
 use super::*;
+use runtime::{project::MAX_PROJECT_BYTES, scene_data::MAX_SCENE_BYTES};
+use sha2::{Digest, Sha256};
+
+pub(super) type Fingerprint = [u8; 32];
+
+#[derive(Default)]
+pub(super) struct SavedFiles {
+	pub(super) manifest: Option<Fingerprint>,
+	scenes: HashMap<String, Fingerprint>,
+}
+
+impl SavedFiles {
+	pub(super) fn new(manifest: Option<Fingerprint>, scenes: HashMap<String, Fingerprint>) -> Self {
+		Self { manifest, scenes }
+	}
+
+	pub(super) fn scene(&self, path: &str) -> Option<Fingerprint> {
+		self.scenes.get(&scene_path_key(path)).copied()
+	}
+
+	pub(super) fn record_scene(&mut self, path: &str, fingerprint: Fingerprint) {
+		self.scenes.insert(scene_path_key(path), fingerprint);
+	}
+}
+
+pub(super) struct LoadedScenes {
+	pub(super) scenes: Vec<(SceneId, SceneData)>,
+	pub(super) fingerprints: HashMap<String, Fingerprint>,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SaveOutcome {
+	Written,
+	Conflict,
+	Failed,
+	Blocked,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct SaveFileReport {
+	pub path: String,
+	pub outcome: SaveOutcome,
+	pub message: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct SaveAllReport {
+	pub snapshot: EditorSnapshotDto,
+	pub files: Vec<SaveFileReport>,
+}
+
+enum SaveTarget {
+	Scene {
+		id: SceneId,
+		path: String,
+		document: Arc<SceneData>,
+	},
+	Manifest {
+		project: Arc<ProjectData>,
+	},
+}
+
+impl SaveTarget {
+	fn path(&self) -> &str {
+		match self {
+			Self::Scene { path, .. } => path,
+			Self::Manifest { .. } => "project.json",
+		}
+	}
+
+	fn encode(&self) -> Result<String, String> {
+		match self {
+			Self::Scene { document, .. } => scene_json(document),
+			Self::Manifest { project } => project.to_json(),
+		}
+	}
+
+	fn destination(
+		&self,
+		workspace: &EditorWorkspace,
+	) -> Result<(PathBuf, Option<Fingerprint>, usize), String> {
+		match self {
+			Self::Scene { id, path, .. } => Ok((
+				workspace.scene_output(path, Some(id))?,
+				workspace.saved_files.scene(path),
+				MAX_SCENE_BYTES,
+			)),
+			Self::Manifest { .. } => {
+				verify_saved_parent(&workspace.project_path)?;
+				Ok((
+					workspace.project_path.clone(),
+					workspace.saved_files.manifest,
+					MAX_PROJECT_BYTES,
+				))
+			}
+		}
+	}
+}
 
 impl EditorWorkspace {
 	pub(super) fn scene_output(
@@ -30,17 +130,11 @@ impl EditorWorkspace {
 		if self.backend.session().has_transaction() {
 			return Err("Commit or cancel the grouped edit before saving".into());
 		}
-		let path = self
-			.backend
-			.session()
-			.project()
-			.scene_path(self.backend.session().active_scene_id())?;
-		let output = self.scene_output(path, Some(self.backend.session().active_scene_id()))?;
-		file_operation(
-			"save_scene",
-			runtime::scene_io::save_data(&output, &self.backend.session().authored_document()),
-		)?;
-		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
+		let id = self.backend.session().active_scene_id().clone();
+		let path = self.backend.session().project().scene_path(&id)?.to_owned();
+		let document = self.backend.session().authored_document();
+		self.write_save_target(&SaveTarget::Scene { id, path, document })
+			.map_err(|(_, message)| message)?;
 		engine_logger::info!(target: "editor", "Scene saved: generation={}, revision={}", self.generation, self.backend.session().revision());
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
@@ -77,17 +171,21 @@ impl EditorWorkspace {
 		} else {
 			WorkspaceKind::StandaloneScene
 		};
-		let project = match next_kind {
+		let (project, manifest_fingerprint) = match next_kind {
 			WorkspaceKind::ManifestBacked => {
-				file_operation("reload_project", ProjectData::load(&self.project_path))?
+				let (project, fingerprint) =
+					read_project_with_fingerprint(&self.project_path, "reload_project")?;
+				(project, Some(fingerprint))
 			}
-			WorkspaceKind::StandaloneScene => self.backend.session().project().clone(),
+			WorkspaceKind::StandaloneScene => (self.backend.session().project().clone(), None),
 		};
 		let scene_path = resolve_existing(&self.asset_root, project.startup_scene_path()?)?;
-		let data = read_editor_scene(&scene_path, "reload_scene")?;
-		let documents = load_project_documents(&self.asset_root, &project, &data)?;
+		let (data, startup_fingerprint) = read_scene_with_fingerprint(&scene_path, "reload_scene")?;
+		let documents =
+			load_project_documents(&self.asset_root, &project, &data, startup_fingerprint)?;
+		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let mut candidate = runtime::EngineBuilder::new(data, project)
-			.with_scenes(documents)
+			.with_scenes(documents.scenes)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&self.asset_root))
 			.input_actions_resolver(input_actions_resolver(&self.asset_root))
@@ -100,7 +198,9 @@ impl EditorWorkspace {
 			.map_err(|e| e.to_string())?;
 		let snapshot = candidate.snapshot().map_err(|e| e.to_string())?;
 		self.jobs.advance_generation().map_err(|e| e.to_string())?;
+		self.clear_generated_recovery();
 		self.backend = candidate;
+		self.recovery = recovery::RecoveryState::open(&self.project_path);
 		self.animation_preview = None;
 		self.authored_clip_preview = None;
 		self.clip_timeline_drafts = Default::default();
@@ -112,6 +212,7 @@ impl EditorWorkspace {
 		// new workspace generation also forces existing viewport caches to resync.
 		self.generation = NEXT_WORKSPACE.fetch_add(1, Ordering::Relaxed);
 		self.workspace_kind = next_kind;
+		self.saved_files = saved_files;
 		self.scene_path = scene_path;
 		self.metadata.clear();
 		self.pending.clear();
@@ -148,7 +249,7 @@ impl EditorWorkspace {
 				return Err("Scene file is already registered".into());
 			}
 		}
-		let document = read_editor_scene(&resolved, "register_scene")?;
+		let (document, fingerprint) = read_scene_with_fingerprint(&resolved, "register_scene")?;
 		let id = SceneId::generate();
 		self.check_compound_capacity()?;
 		self.backend
@@ -164,6 +265,7 @@ impl EditorWorkspace {
 		self.backend
 			.mark_scene_saved_by_id(&id)
 			.map_err(|e| e.to_string())?;
+		self.saved_files.record_scene(path, fingerprint);
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
 
@@ -190,9 +292,10 @@ impl EditorWorkspace {
 		}
 		// An unsuccessful catalog commit may leave a new unreferenced file;
 		// the old file and authored state are preserved.
+		let bytes = scene_json(&self.backend.session().authored_document())?;
 		file_operation(
 			"save_scene_as",
-			runtime::scene_io::save_data(&output, &self.backend.session().authored_document()),
+			runtime::scene_io::save_new_bytes(&output, bytes.as_bytes()),
 		)?;
 		self.execute_receipt(EditorCommandRequest {
 			expected_revision: revision,
@@ -203,6 +306,9 @@ impl EditorWorkspace {
 		})
 		.map_err(|e| e.to_string())?;
 		self.backend.mark_scene_saved().map_err(|e| e.to_string())?;
+		self.saved_files
+			.record_scene(path, fingerprint(bytes.as_bytes()));
+		self.recovery_after_save();
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
 
@@ -213,7 +319,7 @@ impl EditorWorkspace {
 				"Stop Play and finish the grouped edit before saving project settings".into(),
 			);
 		}
-		let project = self.backend.session().project();
+		let project = self.backend.session().project_document();
 		self.backend.session().validate_all_documents()?;
 		let mut files = HashSet::new();
 		for entry in project.scenes.iter() {
@@ -221,19 +327,25 @@ impl EditorWorkspace {
 				return Err("Catalog scenes resolve to the same file".into());
 			}
 		}
-		file_operation("save_project", atomic_json(&self.project_path, project))?;
-		// The manifest now exists even if marking its saved baseline later fails.
-		self.workspace_kind = WorkspaceKind::ManifestBacked;
-		self.backend
-			.mark_project_saved()
-			.map_err(|e| e.to_string())?;
+		self.write_save_target(&SaveTarget::Manifest { project })
+			.map_err(|(_, message)| message)?;
+
 		engine_logger::info!(target:"editor","Project settings saved: generation={}, revision={}",self.generation,self.backend.session().revision());
 		self.backend.snapshot().map_err(|e| e.to_string())
 	}
 
-	/// Persist dirty authored documents without changing the active scene.
-	/// Successful replacements advance their own baselines before the next write.
+	/// Compatibility entry point preserves the existing snapshot/error contract.
+	#[cfg_attr(not(test), allow(dead_code))]
 	pub fn save_all(&mut self, revision: u64) -> Result<EditorSnapshotDto, String> {
+		let report = self.save_all_report(revision)?;
+		if let Some(message) = report.files.into_iter().find_map(|file| file.message) {
+			return Err(message);
+		}
+		Ok(report.snapshot)
+	}
+
+	/// Check every destination before publication and keep successful baselines on partial failure.
+	pub(crate) fn save_all_report(&mut self, revision: u64) -> Result<SaveAllReport, String> {
 		self.check_revision(revision)?;
 		let session = self.backend.session();
 		if session.is_playing() || session.has_transaction() {
@@ -241,35 +353,35 @@ impl EditorWorkspace {
 		}
 		session.validate_all_documents()?;
 		let state = session.state();
-		let mut scenes = Vec::new();
-		// Preflight every output before writing, including unsaved paths and aliases.
-		for scene in state.scenes {
-			let output = self.scene_output(&scene.asset_path, Some(&scene.id))?;
-			if scene.dirty {
-				let document = session.scene_document(&scene.id)?;
-				document.to_json()?;
-				scenes.push((scene.id, output, document));
-			}
-		}
-		let manifest_exists = match fs::symlink_metadata(&self.project_path) {
-			Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => true,
-			Ok(_) => return Err("Project manifest must be a regular file".into()),
-			Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-			Err(error) => return Err(error.to_string()),
-		};
-		let write_manifest = state.project_dirty || !manifest_exists;
 		let project = session.project_document();
-		if write_manifest {
-			project.to_json()?;
-			let parent = self
-				.project_path
-				.parent()
-				.ok_or("Project manifest has no parent")?;
-			if !parent.is_dir() {
-				return Err("Project folder is unavailable".into());
+		let write_manifest = state.project_dirty || self.saved_files.manifest.is_none();
+		let mut targets = Vec::new();
+		let mut clean_references = Vec::new();
+		for scene in state.scenes {
+			if scene.dirty {
+				targets.push(SaveTarget::Scene {
+					document: session.scene_document(&scene.id)?,
+					id: scene.id,
+					path: scene.asset_path,
+				});
+			} else if write_manifest {
+				clean_references.push((scene.id, scene.asset_path));
+			} else {
+				self.scene_output(&scene.asset_path, Some(&scene.id))?;
 			}
 		}
-		let writes = scenes.len() as u64 + u64::from(write_manifest);
+		if write_manifest {
+			targets.push(SaveTarget::Manifest { project });
+		}
+		let mut files = targets
+			.iter()
+			.map(|target| SaveFileReport {
+				path: target.path().to_owned(),
+				outcome: SaveOutcome::Blocked,
+				message: None,
+			})
+			.collect::<Vec<_>>();
+		let writes = targets.len() as u64;
 		if writes > 0
 			&& (session.revision().checked_add(writes + 1).is_none()
 				|| session.scene_revision() == u64::MAX
@@ -281,26 +393,193 @@ impl EditorWorkspace {
 		{
 			return Err("Workspace revision/event space is exhausted".into());
 		}
-		for (id, output, document) in scenes {
-			file_operation(
-				"save_all_scene",
-				runtime::scene_io::save_data(&output, &document),
-			)?;
-			self.backend
-				.mark_scene_saved_by_id(&id)
-				.map_err(|e| e.to_string())?;
+		for (id, path) in clean_references {
+			if let Err(message) = self.verify_catalog_scene(&id, &path) {
+				files.push(SaveFileReport {
+					path,
+					outcome: SaveOutcome::Conflict,
+					message: Some(message),
+				});
+				return self.save_report(files);
+			}
 		}
-		if write_manifest {
-			file_operation(
-				"save_all_project",
-				atomic_json(&self.project_path, project.as_ref()),
-			)?;
-			self.workspace_kind = WorkspaceKind::ManifestBacked;
-			self.backend
-				.mark_project_saved()
-				.map_err(|e| e.to_string())?;
+
+		for (target, file) in targets.iter().zip(&mut files) {
+			let check = target
+				.destination(self)
+				.map_err(|error| (SaveOutcome::Failed, error))
+				.and_then(|(output, baseline, limit)| {
+					verify_disk_baseline(&output, baseline, limit)
+						.map_err(|error| (SaveOutcome::Conflict, error))
+				})
+				.and_then(|()| {
+					target
+						.encode()
+						.map(drop)
+						.map_err(|error| (SaveOutcome::Failed, error))
+				});
+			if let Err((outcome, message)) = check {
+				file.outcome = outcome;
+				file.message = Some(message);
+				return self.save_report(files);
+			}
 		}
-		self.backend.snapshot().map_err(|e| e.to_string())
+		if !write_manifest {
+			if let Err(message) = verify_saved_parent(&self.project_path).and_then(|()| {
+				verify_disk_baseline(
+					&self.project_path,
+					self.saved_files.manifest,
+					MAX_PROJECT_BYTES,
+				)
+			}) {
+				files.push(SaveFileReport {
+					path: "project.json".into(),
+					outcome: SaveOutcome::Conflict,
+					message: Some(message),
+				});
+				return self.save_report(files);
+			}
+		}
+		for (target, file) in targets.into_iter().zip(&mut files) {
+			match self.write_save_target(&target) {
+				Ok(()) => file.outcome = SaveOutcome::Written,
+				Err((outcome, message)) => {
+					file.outcome = outcome;
+					file.message = Some(message);
+					break;
+				}
+			}
+		}
+		self.save_report(files)
+	}
+
+	fn save_report(&self, files: Vec<SaveFileReport>) -> Result<SaveAllReport, String> {
+		let snapshot = self.backend.snapshot().map_err(|error| error.to_string())?;
+		Ok(SaveAllReport { snapshot, files })
+	}
+
+	fn verify_catalog_scene(&self, id: &SceneId, path: &str) -> Result<(), String> {
+		let output = self.scene_output(path, Some(id))?;
+		let baseline = self.saved_files.scene(path)
+			.ok_or_else(|| format!("Save conflict: '{path}' has no saved file baseline. Save the scene before saving the project."))?;
+		verify_disk_baseline(&output, Some(baseline), MAX_SCENE_BYTES)
+	}
+
+	fn write_save_target(&mut self, target: &SaveTarget) -> Result<(), (SaveOutcome, String)> {
+		let (output, baseline, limit) = target
+			.destination(self)
+			.map_err(|error| (SaveOutcome::Failed, error))?;
+		if let SaveTarget::Manifest { project } = target {
+			for entry in project.scenes.iter() {
+				self.verify_catalog_scene(entry.id(), entry.asset_path())
+					.map_err(|error| (SaveOutcome::Conflict, error))?;
+			}
+		}
+
+		let bytes = target
+			.encode()
+			.map_err(|error| (SaveOutcome::Failed, error))?;
+		verify_disk_baseline(&output, baseline, limit)
+			.map_err(|error| (SaveOutcome::Conflict, error))?;
+		let result = match (baseline, target) {
+			(None, _) => runtime::scene_io::save_new_bytes(&output, bytes.as_bytes()),
+			(_, SaveTarget::Scene { .. }) => {
+				runtime::scene_io::replace_bytes(&output, bytes.as_bytes())
+			}
+			(_, SaveTarget::Manifest { .. }) => replace_project_bytes(&output, bytes.as_bytes()),
+		};
+		file_operation("save_document", result).map_err(|error| (SaveOutcome::Failed, error))?;
+		let fingerprint = fingerprint(bytes.as_bytes());
+		match target {
+			SaveTarget::Scene { id, path, .. } => {
+				self.saved_files.record_scene(path, fingerprint);
+				self.backend.mark_scene_saved_by_id(id)
+			}
+			SaveTarget::Manifest { .. } => {
+				self.saved_files.manifest = Some(fingerprint);
+				self.workspace_kind = WorkspaceKind::ManifestBacked;
+				self.backend.mark_project_saved()
+			}
+		}
+		.map_err(|error| (SaveOutcome::Failed, error.to_string()))?;
+		self.recovery_after_save();
+		Ok(())
+	}
+}
+
+pub(super) fn fingerprint(bytes: &[u8]) -> Fingerprint {
+	Sha256::digest(bytes).into()
+}
+
+fn scene_path_key(path: &str) -> String {
+	if cfg!(windows) {
+		path.to_lowercase()
+	} else {
+		path.to_owned()
+	}
+}
+
+pub(super) fn verify_saved_parent(path: &Path) -> Result<(), String> {
+	let saved_parent = path.parent().ok_or("Missing project directory")?;
+	let current = saved_parent
+		.canonicalize()
+		.map_err(|error| format!("Cannot check the project directory: {error}"))?;
+	if current != saved_parent || !current.is_dir() {
+		return Err(
+			"The project directory changed on disk. Reopen the project before writing.".into(),
+		);
+	}
+	Ok(())
+}
+
+pub(super) fn disk_fingerprint(path: &Path, limit: usize) -> Result<Option<Fingerprint>, String> {
+	let current = match fs::symlink_metadata(path) {
+		Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
+			Some(fingerprint(&read_bounded(path, limit as u64).map_err(
+				|error| format!("Cannot check '{}' before saving: {error}", path.display()),
+			)?))
+		}
+		Ok(_) => {
+			return Err(format!(
+				"Save conflict: '{}' is no longer a regular file.",
+				path.display()
+			))
+		}
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+		Err(error) => {
+			return Err(format!(
+				"Cannot check '{}' before saving: {error}",
+				path.display()
+			))
+		}
+	};
+	Ok(current)
+}
+
+pub(super) fn verify_disk_baseline(
+	path: &Path,
+	expected: Option<Fingerprint>,
+	limit: usize,
+) -> Result<(), String> {
+	if disk_fingerprint(path, limit)? == expected {
+		Ok(())
+	} else {
+		Err(format!(
+			"Save conflict: '{}' changed on disk. Review the disk version before saving.",
+			path.display()
+		))
+	}
+}
+
+pub(super) fn scene_json(data: &SceneData) -> Result<String, String> {
+	let mut bytes = data.to_json()?;
+	terminate_scene_json(&mut bytes);
+	Ok(bytes)
+}
+
+pub(super) fn terminate_scene_json(source: &mut String) {
+	if source.len() < MAX_SCENE_BYTES {
+		source.push('\n');
 	}
 }
 
@@ -325,7 +604,7 @@ pub(super) fn resolve_existing(root: &Path, path: &str) -> Result<PathBuf, Strin
 	Ok(candidate)
 }
 #[cfg(windows)]
-fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
+pub(super) fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
 	use std::os::windows::ffi::OsStrExt;
 	#[link(name = "kernel32")]
 	extern "system" {
@@ -356,10 +635,10 @@ fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
 	}
 }
 #[cfg(not(windows))]
-fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
+pub(super) fn same_destination(left: &Path, right: &Path) -> Result<bool, String> {
 	Ok(left == right)
 }
-fn resolve_output(root: &Path, path: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_output(root: &Path, path: &str) -> Result<PathBuf, String> {
 	relative(path)?;
 	let candidate = root.join(path);
 	let parent = candidate
@@ -388,11 +667,7 @@ pub(super) fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
 	}
 	Ok(bytes)
 }
-fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
-	let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-	if bytes.len() > 16 * 1024 * 1024 {
-		return Err("Prefab exceeds 16 MiB".into());
-	}
+fn replace_project_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 	let mut temporary = None;
 	for id in 0..128 {
 		let candidate = path.with_file_name(format!(
@@ -416,7 +691,7 @@ fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String>
 		}
 	}
 	let (temporary, mut file) = temporary.ok_or("Cannot allocate temporary file")?;
-	let result = file.write_all(&bytes).and_then(|_| file.sync_all());
+	let result = file.write_all(bytes).and_then(|_| file.sync_all());
 	drop(file);
 	if let Err(error) = result {
 		let _ = fs::remove_file(&temporary);
@@ -430,42 +705,84 @@ fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String>
 }
 
 pub(super) fn read_editor_scene(path: &Path, operation: &'static str) -> Result<SceneData, String> {
-	let mut scene = file_operation(operation, runtime::scene_io::load_data(path))?.data;
-	scene.migrate_legacy_lights()?;
-	Ok(scene)
+	read_scene_with_fingerprint(path, operation).map(|(scene, _)| scene)
+}
+
+pub(super) fn read_scene_with_fingerprint(
+	path: &Path,
+	operation: &'static str,
+) -> Result<(SceneData, Fingerprint), String> {
+	file_operation(
+		operation,
+		(|| {
+			let bytes = read_bounded(path, MAX_SCENE_BYTES as u64)?;
+			let source = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
+			let mut scene = SceneData::from_json(source)?;
+			scene.migrate_legacy_lights()?;
+			Ok((scene, fingerprint(&bytes)))
+		})(),
+	)
+	.map_err(|error| format!("Failed to load scene '{}': {error}", path.display()))
+}
+
+pub(super) fn read_project_with_fingerprint(
+	path: &Path,
+	operation: &'static str,
+) -> Result<(ProjectData, Fingerprint), String> {
+	file_operation(
+		operation,
+		(|| {
+			verify_saved_parent(path)?;
+			let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+			if !metadata.is_file() || metadata.file_type().is_symlink() {
+				return Err("Project manifest must be a regular file".into());
+			}
+			let bytes = read_bounded(path, MAX_PROJECT_BYTES as u64)?;
+			let source = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
+			Ok((ProjectData::from_json(source)?, fingerprint(&bytes)))
+		})(),
+	)
+	.map_err(|error| format!("Cannot read project: '{}': {error}", path.display()))
 }
 
 pub(super) fn load_project_documents(
 	root: &Path,
 	project: &ProjectData,
 	startup: &SceneData,
-) -> Result<Vec<(SceneId, runtime::scene_data::SceneData)>, String> {
+	startup_fingerprint: Fingerprint,
+) -> Result<LoadedScenes, String> {
 	let mut seen = HashSet::new();
-	let mut documents = Vec::new();
+	let mut scenes = Vec::new();
+	let mut fingerprints = HashMap::new();
 	let mut retained_bytes = 0usize;
 	for entry in project.scenes.iter() {
 		let path = resolve_existing(root, entry.asset_path())?;
 		if !seen.insert(path.clone()) {
 			return Err("Catalog entries resolve to the same scene file".into());
 		}
-		let document = if entry.id() == &project.startup_scene_id {
-			Cow::Borrowed(startup)
+		let (document, fingerprint) = if entry.id() == &project.startup_scene_id {
+			(Cow::Borrowed(startup), startup_fingerprint)
 		} else {
-			Cow::Owned(read_editor_scene(&path, "load_scene")?)
+			let (document, fingerprint) = read_scene_with_fingerprint(&path, "load_scene")?;
+			(Cow::Owned(document), fingerprint)
 		};
 		retained_bytes = retained_bytes.saturating_add(
 			document
 				.serialized_size()?
 				.saturating_mul(4)
-				.saturating_add(std::mem::size_of::<runtime::scene_data::SceneData>()),
+				.saturating_add(std::mem::size_of::<SceneData>()),
 		);
 		if retained_bytes > runtime::editor::EditorSession::MAX_RETAINED_DOCUMENT_BYTES {
 			return Err("Retained scene document byte budget exceeded".into());
 		}
 		project.validate_scene_for(entry.id(), &document)?;
+		fingerprints.insert(scene_path_key(entry.asset_path()), fingerprint);
 		if entry.id() != &project.startup_scene_id {
-			documents.push((entry.id().clone(), document.into_owned()));
+			scenes.push((entry.id().clone(), document.into_owned()));
 		}
 	}
-	Ok(documents)
+	Ok(LoadedScenes {
+		scenes,
+		fingerprints,
+	})
 }

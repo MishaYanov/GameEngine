@@ -454,6 +454,7 @@ export interface EditorCapabilities {
     readonly embedded_viewport_supported: boolean;
     readonly scene_warming_supported?: boolean;
     readonly scene_verification_supported?: boolean;
+    readonly document_recovery_supported?: boolean;
     readonly incremental_commands?: boolean;
     readonly resumable_changes?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];

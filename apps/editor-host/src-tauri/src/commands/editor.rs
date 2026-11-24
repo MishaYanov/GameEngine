@@ -64,6 +64,8 @@ pub use build::*;
 pub use material_graph::editor_compile_material_graph;
 mod documents;
 pub use documents::*;
+mod document_recovery;
+pub use document_recovery::*;
 mod scene_verification;
 pub use scene_verification::*;
 mod viewport;
@@ -155,6 +157,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		embedded_viewport_supported: cfg!(target_os = "windows"),
 		scene_warming_supported: cfg!(target_os = "windows"),
 		scene_verification_supported: true,
+		document_recovery_supported: true,
 		animator_assets: true,
 		controls_graph_assets: true,
 		input_action_assets: true,

@@ -833,6 +833,8 @@ mod agent_context_workshop;
 mod assets;
 #[path = "editor_workspace/colliders.rs"]
 mod colliders;
+#[path = "editor_workspace/document_persistence.rs"]
+mod document_persistence;
 #[path = "editor_workspace/documents.rs"]
 mod documents;
 #[path = "editor_workspace/incremental.rs"]

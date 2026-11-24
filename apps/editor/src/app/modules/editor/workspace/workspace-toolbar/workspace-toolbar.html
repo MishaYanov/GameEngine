@@ -41,6 +41,20 @@
         </button>
     </div>
 </div>
+@if (editorService.savedFiles(); as files) {
+    @if (files.length) {
+        <section aria-label="Save All results" class="save-report" role="status" tabindex="0">
+            <ul>
+                @for (file of files; track $index) {
+                    <li>{{ file.path }} — {{ saveOutcomes[file.outcome] }}
+                        @if (file.message) { <span>{{ file.message }}</span> }
+                    </li>
+                }
+            </ul>
+            <button type="button" (click)="editorService.clearSaveReport()">Dismiss save results</button>
+        </section>
+    }
+}
 @if (actionError(); as message) {
     <div class="action-error" role="alert">{{ message }}</div>
 }

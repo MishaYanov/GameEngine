@@ -1479,6 +1479,49 @@ describe('EditorService native command and viewport queues', () => {
         expect(invoke).toHaveBeenLastCalledWith('editor_run_build', {expectedPath: 'D:/Exports/Game'});
     });
 
+    it('adopts partial Save All results and clears their scope on project replacement', async () => {
+        const files = [
+            {path: 'scenes/main.json', outcome: 'written', message: null},
+            {path: 'project.json', outcome: 'failed', message: 'Disk write failed'},
+        ];
+        const partial = {...snapshot(8), dirty: true, project_dirty: true};
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({...snapshot(7), dirty: true})
+            .mockResolvedValueOnce({...capabilities, document_recovery_supported: true})
+            .mockResolvedValueOnce({snapshot: partial, files})
+            .mockResolvedValueOnce(snapshot(9));
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        await service.loadCapabilities();
+        await service.saveAll();
+        expect(invoke).toHaveBeenLastCalledWith('editor_save_all_report', {expectedRevision: 7});
+        expect(service.snapshot()).toEqual(partial);
+        expect(service.savedFiles()).toEqual(files);
+        await service.openProject('second/project.json');
+        expect(service.savedFiles()).toEqual([]);
+    });
+
+    it('refuses to apply recovery reviewed against a replaced workspace', async () => {
+        const replacement = deferred<EditorSnapshot>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(1))
+            .mockResolvedValueOnce({
+                workspace_generation: 12, revision: 1,
+                offer: {token: Array(32).fill(8), files: ['scenes/main.json'], issue: null, captured_at_ms: 0},
+            })
+            .mockReturnValueOnce(replacement.promise);
+        const service = TestBed.inject(EditorService);
+        await service.openProject('project.json');
+        const generation = service.workspaceGeneration();
+        const review = await service.reviewDocumentRecovery(generation);
+        const opening = service.openProject('second/project.json');
+        const applying = expect(service.applyDocumentRecovery(generation, review, true)).rejects.toThrow('workspace changed');
+        replacement.resolve(snapshot(2));
+        await opening;
+        await applying;
+        expect(invoke).toHaveBeenCalledTimes(3);
+    });
+
     it('cleans up a native listener that resolves after its Angular owner was destroyed', async () => {
         const subscription = deferred<() => void>();
         vi.mocked(listen).mockReturnValueOnce(subscription.promise);

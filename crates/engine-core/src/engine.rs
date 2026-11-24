@@ -243,6 +243,16 @@ impl Engine {
 	) -> Result<CommandReceipt, BackendError> {
 		self.mutate_session(|session| session.replace_project_document(data, project))
 	}
+	/// Adopt checked recovery drafts without marking them saved or touching disk.
+	pub fn restore_editor_recovery(
+		&mut self,
+		project: ProjectData,
+		active_scene: crate::scene_catalog::SceneId,
+		documents: Vec<(crate::scene_catalog::SceneId, SceneData)>,
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|session| session.restore_recovery(project, active_scene, documents))
+	}
+
 	pub fn mark_saved(&mut self) -> Result<CommandReceipt, BackendError> {
 		self.mutate_session(EditorSession::mark_saved)
 	}

@@ -10,6 +10,7 @@ import {EditorSettingsService} from '../../core/editor/settings/editor-settings.
 import {EditorSettingsDialog} from '../editor-settings/editor-settings-dialog';
 import {EditorContextMenu} from '../../shared/components/context-menu/context-menu';
 import {watchDesktopClose} from './desktop-close-review';
+import {EditorDocumentRecovery} from './document-recovery/document-recovery';
 
 enum OpenMessages {
     RESTORING = 'Checking for the open project…',
@@ -29,6 +30,7 @@ enum OpenMessages {
         EditorPortal,
         EditorSettingsDialog,
         EditorContextMenu,
+        EditorDocumentRecovery,
     ],
     templateUrl: './editor.html',
     styleUrl: './editor.scss',

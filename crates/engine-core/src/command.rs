@@ -479,6 +479,8 @@ pub struct EditorCapabilitiesDto {
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub scene_verification_supported: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub document_recovery_supported: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub input_action_assets: bool,
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub animator_assets: bool,

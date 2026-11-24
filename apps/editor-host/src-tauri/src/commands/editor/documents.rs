@@ -64,7 +64,7 @@ async fn open_workspace(
 			}
 			// Recheck under the installation lock: candidate preparation and native
 			// dialogs must never authorize discarding edits made in the meantime.
-			if let Some(replacement) = replacement {
+			if let Some(replacement) = replacement.as_ref() {
 				replacement.validate(current.as_ref())?;
 			}
 			if let Some(old) = current.as_ref() {
@@ -76,6 +76,11 @@ async fn open_workspace(
 			if !ready.is_empty() { let _ = window.emit("editor://asset-completions", ready); }
 			let snapshot = candidate.backend.snapshot().map_err(|e| e.to_string())?;
 			candidate.scene_switch = Some((snapshot.scene_revision, requested, std::time::Instant::now()));
+			if replacement.as_ref().is_some_and(|review| review.discard_unsaved) {
+				if let Some(old) = current.as_mut() {
+					old.clear_generated_recovery();
+				}
+			}
 			*current = Some(candidate);
 			snapshot
 		};
@@ -152,6 +157,19 @@ pub async fn editor_save_all(
 	})
 	.await
 }
+#[tauri::command]
+pub async fn editor_save_all_report(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_revision: u64,
+) -> Result<crate::editor::documents::SaveAllReport, String> {
+	trusted_window(&window)?;
+	workspace(state, false, Some("save_all_report"), move |w| {
+		w.save_all_report(expected_revision)
+	})
+	.await
+}
+
 #[tauri::command]
 pub async fn editor_save(
 	window: WebviewWindow,

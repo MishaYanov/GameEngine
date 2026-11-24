@@ -27,3 +27,7 @@ __pycache__/
 /.learning-guides/
 
 /temp/
+
+# Project-local editor draft snapshots
+.engine-draft-recovery.json
+.engine-draft-recovery.json.tmp-*

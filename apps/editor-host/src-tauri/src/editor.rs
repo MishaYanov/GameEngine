@@ -8,11 +8,13 @@ mod assets;
 #[path = "editor/audio_audition.rs"]
 pub(crate) mod audio_audition;
 #[path = "editor/documents.rs"]
-mod documents;
+pub(crate) mod documents;
 #[path = "prefab_sources.rs"]
 pub(crate) mod prefab_sources;
 #[path = "prop_preview.rs"]
 pub(crate) mod prop_preview;
+#[path = "editor/recovery.rs"]
+pub(crate) mod recovery;
 #[path = "editor/scene_verification.rs"]
 pub(crate) mod scene_verification;
 #[path = "editor/scene_warming.rs"]
@@ -22,7 +24,10 @@ use crate::project_location::ProjectLocation;
 use assets::PendingAsset;
 pub use assets::{AssetCompletion, AssetTicket};
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto};
-use documents::{load_project_documents, read_bounded, read_editor_scene, resolve_existing};
+use documents::{
+	load_project_documents, read_bounded, read_editor_scene, read_project_with_fingerprint,
+	read_scene_with_fingerprint, resolve_existing, SavedFiles,
+};
 use runtime::scene_catalog::SceneId;
 use runtime::{
 	asset_jobs::{AssetJobError, AssetJobId, AssetJobLimits},
@@ -78,6 +83,8 @@ pub struct EditorWorkspace {
 	pub scene_path: PathBuf,
 	pub project_path: PathBuf,
 	workspace_kind: WorkspaceKind,
+	saved_files: SavedFiles,
+	recovery: recovery::RecoveryState,
 	metadata: AssetManager,
 	jobs: AssetImportService,
 	pending: HashMap<AssetJobId, PendingAsset>,
@@ -115,7 +122,7 @@ impl EditorWorkspace {
 		}
 		let relative_scene = scene_path;
 		let scene_path = resolve_existing(&asset_root, relative_scene)?;
-		let scene = read_editor_scene(&scene_path, "load_scene")?;
+		let (scene, startup_fingerprint) = read_scene_with_fingerprint(&scene_path, "load_scene")?;
 		let project_path = asset_root
 			.parent()
 			.ok_or("Assets need a project directory")?
@@ -128,21 +135,24 @@ impl EditorWorkspace {
 		{
 			return Err("Project manifest must not be a symbolic link".into());
 		}
-		let (project, workspace_kind) = if project_path.exists() {
-			let project = file_operation("load_project", ProjectData::load(&project_path))?;
+		let (project, workspace_kind, manifest_fingerprint) = if project_path.exists() {
+			let (project, fingerprint) =
+				read_project_with_fingerprint(&project_path, "load_project")?;
 			if resolve_existing(&asset_root, project.startup_scene_path()?)? != scene_path {
 				return Err("Open the configured startup scene for this project".into());
 			}
-			(project, WorkspaceKind::ManifestBacked)
+			(project, WorkspaceKind::ManifestBacked, Some(fingerprint))
 		} else {
 			(
 				ProjectData::for_scene("Untitled", relative_scene, &scene)?,
 				WorkspaceKind::StandaloneScene,
+				None,
 			)
 		};
-		let documents = load_project_documents(&asset_root, &project, &scene)?;
+		let documents = load_project_documents(&asset_root, &project, &scene, startup_fingerprint)?;
+		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let backend = runtime::EngineBuilder::new(scene, project)
-			.with_scenes(documents)
+			.with_scenes(documents.scenes)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
@@ -156,7 +166,7 @@ impl EditorWorkspace {
 		let jobs =
 			AssetImportService::with_notifier(&asset_root, AssetJobLimits::default(), on_ready)?;
 
-		let mut workspace = Self::generate_wrokspace(
+		let mut workspace = Self::new_workspace(
 			asset_root,
 			scene_path,
 			project_path,
@@ -165,6 +175,7 @@ impl EditorWorkspace {
 			metadata,
 			jobs,
 		);
+		workspace.saved_files = saved_files;
 		workspace.cache_bounds();
 
 		engine_logger::info!(target: "editor", "Scene workspace loaded: generation={}", workspace.generation);
@@ -178,15 +189,18 @@ impl EditorWorkspace {
 		let asset_root = location.assets().to_path_buf();
 		let project_path = location.manifest().to_path_buf();
 
-		let project = file_operation("load_project", ProjectData::load(location.manifest()))?;
+		let (project, fingerprint) =
+			read_project_with_fingerprint(location.manifest(), "load_project")?;
+		let manifest_fingerprint = Some(fingerprint);
 
 		let scene_path = resolve_existing(location.assets(), project.startup_scene_path()?)?;
 
-		let scene = read_editor_scene(&scene_path, "load_scene")?;
+		let (scene, startup_fingerprint) = read_scene_with_fingerprint(&scene_path, "load_scene")?;
 
-		let documents = load_project_documents(&asset_root, &project, &scene)?;
+		let documents = load_project_documents(&asset_root, &project, &scene, startup_fingerprint)?;
+		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let backend = runtime::EngineBuilder::new(scene, project)
-			.with_scenes(documents)
+			.with_scenes(documents.scenes)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
@@ -203,7 +217,7 @@ impl EditorWorkspace {
 			on_ready,
 		)?;
 
-		let mut workspace = Self::generate_wrokspace(
+		let mut workspace = Self::new_workspace(
 			asset_root,
 			scene_path,
 			project_path,
@@ -212,6 +226,7 @@ impl EditorWorkspace {
 			metadata,
 			jobs,
 		);
+		workspace.saved_files = saved_files;
 		workspace.cache_bounds();
 
 		engine_logger::info!(target: "editor", "Scene workspace loaded: generation={}", workspace.generation);
@@ -464,7 +479,7 @@ impl EditorWorkspace {
 		Ok(())
 	}
 	/// Capture every retained authored scene, including inactive unsaved drafts.
-	fn generate_wrokspace(
+	fn new_workspace(
 		asset_root: PathBuf,
 		scene_path: PathBuf,
 		project_path: PathBuf,
@@ -473,6 +488,7 @@ impl EditorWorkspace {
 		metadata: AssetManager,
 		jobs: AssetImportService,
 	) -> EditorWorkspace {
+		let recovery = recovery::RecoveryState::open(&project_path);
 		Self {
 			animation_preview: None,
 			animation_preview_request: 0,
@@ -494,6 +510,8 @@ impl EditorWorkspace {
 			scene_path,
 			project_path,
 			workspace_kind,
+			saved_files: SavedFiles::default(),
+			recovery,
 			metadata,
 			jobs,
 			pending: HashMap::new(),

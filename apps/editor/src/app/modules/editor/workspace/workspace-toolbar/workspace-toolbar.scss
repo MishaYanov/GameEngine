@@ -65,6 +65,20 @@
   background: var(--color-control-disabled);
 }
 
+.save-report {
+  max-block-size: min(12rem, 25vh);
+  min-inline-size: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.save-report ul {
+  margin-block: var(--space-1);
+  padding-inline-start: var(--space-5);
+}
+
 .action-error {
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-danger-border);

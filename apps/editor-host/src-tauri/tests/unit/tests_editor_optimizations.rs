@@ -572,16 +572,18 @@ fn catalog_loader_reuses_startup_and_still_validates_other_documents() {
 		.insert(runtime::scene_catalog::SceneDescriptor::new(other.clone(), "other.json").unwrap())
 		.unwrap();
 	fs::write(fixture.0.join("other.json"), startup.to_json().unwrap()).unwrap();
-	let documents = load_project_documents(&fixture.0, &project, &startup).unwrap();
-	assert_eq!(documents, vec![(other, startup.clone())]);
+	let documents = load_project_documents(&fixture.0, &project, &startup, [0; 32]).unwrap();
+	assert_eq!(documents.scenes, vec![(other, startup.clone())]);
+	assert_eq!(documents.fingerprints["main.json"], [0; 32]);
 	fs::write(fixture.0.join("other.json"), "invalid inactive scene").unwrap();
-	assert!(load_project_documents(&fixture.0, &project, &startup).is_err());
+	assert!(load_project_documents(&fixture.0, &project, &startup, [0; 32]).is_err());
 	let mut invalid_startup = startup;
 	invalid_startup.camera.far_plane = -1.0;
 	assert!(load_project_documents(
 		&fixture.0,
 		&ProjectData::for_scene("Reuse", "main.json", &fixture.document(0)).unwrap(),
-		&invalid_startup
+		&invalid_startup,
+		[0; 32],
 	)
 	.is_err());
 }

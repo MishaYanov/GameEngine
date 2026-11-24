@@ -156,6 +156,87 @@ impl EditorSession {
 		Ok(())
 	}
 
+	/// Restore checked authoring snapshots against the already loaded disk baselines.
+	/// A recovered project starts a new undo boundary and keeps its changes dirty.
+	pub(crate) fn restore_recovery(
+		&mut self,
+		project: ProjectData,
+		active_id: SceneId,
+		documents: Vec<(SceneId, SceneData)>,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.require_no_transaction()?;
+		if self.is_dirty() {
+			return Err("Recovery can only replace a clean workspace".into());
+		}
+		self.ensure_revision_capacity()?;
+		project
+			.scenes
+			.get(&active_id)
+			.map_err(|error| error.to_string())?;
+		let mut replacements = HashMap::new();
+		for (id, mut document) in documents {
+			document.refresh_game_camera_projection()?;
+			project.validate_scene_for(&id, &document)?;
+			if replacements.insert(id, Arc::new(document)).is_some() {
+				return Err("Recovery contains a duplicate scene".into());
+			}
+		}
+		let mut drafts = HashMap::new();
+		for entry in project.scenes.iter() {
+			let id = entry.id();
+			let disk_draft = self
+				.project
+				.scenes
+				.get(id)
+				.ok()
+				.and_then(|_| self.draft(id).ok());
+			let replacement = replacements.remove(id);
+			let draft = match (disk_draft, replacement) {
+				(Some(mut draft), replacement) => {
+					if let Some(document) = replacement {
+						draft.data = document;
+					}
+					draft.selection.clear();
+					draft
+				}
+				(None, Some(document)) => SceneDraft {
+					data: Arc::clone(&document),
+					saved: document,
+					saved_path: None,
+					selection: Vec::new(),
+				},
+				(None, None) => return Err("Recovery lacks a new scene's authored document".into()),
+			};
+			project.validate_scene_for(id, &draft.data)?;
+			drafts.insert(id.clone(), draft);
+		}
+		let active = drafts
+			.remove(&active_id)
+			.ok_or("Recovery active scene is missing")?;
+		let mut costs = DocumentCostCache::default();
+		Self::document_budget(
+			&active_id,
+			&active.data,
+			&active.saved,
+			&drafts,
+			None,
+			&mut costs,
+		)?;
+		self.active_scene_id = active_id;
+		self.data = active.data;
+		self.saved = active.saved;
+		self.saved_path = active.saved_path;
+		self.selection = active.selection;
+		self.drafts = drafts;
+		self.document_costs = costs;
+		self.project = Arc::new(project);
+		self.history = History::default();
+		self.scene_revision += 1;
+		self.bump();
+		Ok(())
+	}
+
 	pub fn mark_scene_saved_by_id(&mut self, id: &SceneId) -> Result<(), String> {
 		self.require_no_transaction()?;
 		self.ensure_revision_capacity()?;

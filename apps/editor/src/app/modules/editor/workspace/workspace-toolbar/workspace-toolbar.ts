@@ -28,6 +28,12 @@ export class WorkspaceToolbar {
     private readonly drafts = inject(WorkspaceDraftReview);
     private readonly viewportEditor = inject(ViewportEditorService, {optional: true});
     protected readonly actionError = signal<string | null>(null);
+    protected readonly saveOutcomes = {
+        written: 'Saved',
+        conflict: 'Changed on disk',
+        failed: 'Could not save',
+        blocked: 'Waiting to save',
+    } as const;
     protected readonly canEditScene = computed(() => {
         const snapshot = this.editorService.snapshot();
         return this.canRunAction() && snapshot?.mode === 'edit' &&
