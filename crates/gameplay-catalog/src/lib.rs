@@ -1,5 +1,7 @@
 //! Project gameplay registration shared by the Player, editor, exporter, and replays.
 
+mod rotation_routine;
+
 use std::sync::Arc;
 
 use engine_core::{
@@ -16,8 +18,10 @@ use engine_core::{
 pub use cinder_oath_gameplay::{self as cinder_oath, CINDER_OATH_ID};
 
 pub const BUNDLED_PROJECT_DIRECTORY: &str = "projects/cinder-oath";
-const OBJECT_SCRIPTS: [ObjectScriptRegistration; 1] =
-	[cinder_oath_gameplay::object_script_registration()];
+const OBJECT_SCRIPTS: [ObjectScriptRegistration; 2] = [
+	cinder_oath_gameplay::object_script_registration(),
+	rotation_routine::registration(),
+];
 
 pub fn descriptors() -> Vec<GameplayModuleDescriptorDto> {
 	vec![cinder_oath_gameplay::descriptor()]

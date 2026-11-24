@@ -25,10 +25,7 @@ impl EditorSession {
 			if !entity.renderable {
 				continue;
 			}
-			let Some(bounds) = self
-				.bounds
-				.get(&(entity.model_path.clone(), entity.mesh_index.unwrap_or(0)))
-			else {
+			let Some(bounds) = self.bounds.get(entity) else {
 				continue;
 			};
 			if !matrix.is_finite() || matrix.determinant() == 0.0 {

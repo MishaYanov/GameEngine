@@ -174,10 +174,7 @@ export const GRAPH_NODES = {
         title: 'Material output',
         domain: 'shader',
         category: 'Output',
-        inputs: [
-            {id: 'color', label: 'Base color', type: 'vector3'},
-            {id: 'roughness', label: 'Roughness', type: 'float'},
-        ],
+        inputs: [{id: 'color', label: 'Base color', type: 'vector3'}],
         outputs: [],
         defaults: {},
     },

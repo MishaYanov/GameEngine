@@ -38,7 +38,7 @@ pub(super) fn align_camera(
 fn selection_bounds(
 	data: &SceneData,
 	selection: &[EntityKey],
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 ) -> Result<Bounds3, String> {
 	let hierarchy = hierarchy(data)?;
 	let roots = selection_roots(&hierarchy, selection)?;
@@ -51,11 +51,7 @@ fn selection_bounds(
 		// not an implicit reference to mesh zero. Frame their descendants.
 		let model_bounds = entity
 			.renderable
-			.then(|| {
-				bounds
-					.get(&(entity.model_path.clone(), entity.mesh_index.unwrap_or(0)))
-					.copied()
-			})
+			.then(|| bounds.get(entity).copied())
 			.flatten();
 		let local = match model_bounds {
 			Some(bounds) => bounds,
@@ -125,7 +121,7 @@ pub(super) fn camera_right(camera: &CameraData) -> Vec3 {
 fn camera_pivot(
 	data: &SceneData,
 	selection: &[EntityKey],
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 ) -> Result<Vec3, String> {
 	if selection.is_empty() {
 		finite_result(
@@ -140,7 +136,7 @@ fn camera_pivot(
 pub(super) fn frame_selection(
 	data: &mut SceneData,
 	selection: &[EntityKey],
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 ) -> Result<(), String> {
 	let bounds = selection_bounds(data, selection, bounds)?;
 	let center = bounds_center(bounds)?;
@@ -160,7 +156,7 @@ pub(super) fn frame_selection(
 pub(super) fn orbit(
 	data: &mut SceneData,
 	selection: &[EntityKey],
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 	yaw: f32,
 	pitch: f32,
 ) -> Result<(), String> {
@@ -189,7 +185,7 @@ pub(super) fn orbit(
 pub(super) fn dolly(
 	data: &mut SceneData,
 	selection: &[EntityKey],
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 	distance: f32,
 ) -> Result<(), String> {
 	finite_scalar(distance, "Dolly distance")?;

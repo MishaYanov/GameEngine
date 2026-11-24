@@ -25,6 +25,7 @@ export interface PropWorkspaceObject {
     readonly name: string;
     readonly parent: EntityKey | null;
     readonly transform: Transform;
+    readonly active?: boolean;
     readonly components: readonly ComponentRecord[];
     readonly level: number;
 }
@@ -385,7 +386,7 @@ export class PropWorkspaceService {
     editPlacement(change: PropObjectEdit): Promise<boolean> {
         const selected = this.selectedPlacement();
         const composition = this.draft()?.prefab.composition;
-        if (!selected || change.key !== `placement:${selected.id}` || !composition) return Promise.resolve(false);
+        if ('active' in change || !selected || change.key !== `placement:${selected.id}` || !composition) return Promise.resolve(false);
         const patch = 'name' in change ? {name: change.name} :
             'parent' in change ? {parent: change.parent ?? selected.parent} : {local: change.transform};
         return this.replacePlacements(composition.placements.map(placement =>

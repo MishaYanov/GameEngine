@@ -63,31 +63,35 @@ export class LayoutPreferencesService {
         key: string,
         defaults: T,
         decode: (value: unknown) => Config<T>,
+        projectScope: string | null = null,
     ): Promise<T> {
         await this.load();
-        return {...defaults, ...decode(structuredClone(this.preferences.components[key]))};
+        const scoped = this.preferences.components[componentKey(key, projectScope)];
+        const preferences = scoped ?? this.preferences.components[key];
+        return {...defaults, ...decode(structuredClone(preferences))};
     }
 
     /** Return the comparison baseline so component owners can reuse this serialization. */
-    saveConfig<T extends object>(key: string, value: T, baseline?: string): string {
+    saveConfig<T extends object>(key: string, value: T, baseline?: string, projectScope: string | null = null): string {
         if (!this.ready()) throw new Error('Initialize layout preferences before changing them.');
         if (!key.trim()) throw new Error('A stable layout preference key is required.');
+        const storageKey = componentKey(key, projectScope);
         const serialized = JSON.stringify(value);
         if (serialized === undefined) throw new Error('Layout config must be a JSON object.');
         if (serialized === baseline) return serialized;
-        let previous = this.serializedComponents.get(key);
-        if (previous === undefined && this.preferences.components[key] !== undefined) {
-            previous = JSON.stringify(this.preferences.components[key]);
-            this.serializedComponents.set(key, previous);
+        let previous = this.serializedComponents.get(storageKey);
+        if (previous === undefined && this.preferences.components[storageKey] !== undefined) {
+            previous = JSON.stringify(this.preferences.components[storageKey]);
+            this.serializedComponents.set(storageKey, previous);
         }
         if (serialized === previous) return serialized;
         const copy: unknown = JSON.parse(serialized);
         if (!isConfigObject(copy)) throw new Error('Layout config must be a JSON object.');
         this.preferences = {
             ...this.preferences,
-            components: {...this.preferences.components, [key]: copy},
+            components: {...this.preferences.components, [storageKey]: copy},
         };
-        this.serializedComponents.set(key, serialized);
+        this.serializedComponents.set(storageKey, serialized);
         this.version += 1;
         this.dirtyState.set(true);
         clearTimeout(this.timer);
@@ -124,4 +128,8 @@ export class LayoutPreferencesService {
             });
         return this.queue;
     }
+}
+
+function componentKey(key: string, projectScope: string | null): string {
+    return projectScope === null ? key : `project:${projectScope}:${key}`;
 }

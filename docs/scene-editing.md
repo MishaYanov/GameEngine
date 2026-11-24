@@ -1,9 +1,8 @@
 # Editor commands and document ownership
 
-The editor uses **Angular controls plus a native game pane**, with runtime logic behind a typed bridge. The current
-workspace composes Hierarchy, transform/Component Inspector, scene/model controls, module/role/input authoring and
-save/export actions. The older [steps 21–35 report](editor-steps-21-35.md) retains its original foundation-only scope;
-read the [Milestone 4–6 review](milestones-4-6-review.md) for component, linked prefab and runtime lifecycle workflows.
+The desktop Editor combines Angular authoring controls with a native scene and game viewport. Hierarchy,
+Inspector, Asset and specialized pane actions submit typed commands to the current workspace.
+[Objects, components and Props](authoring-objects.md) walks through the editing workflow.
 
 ## Authoritative document API
 
@@ -43,7 +42,7 @@ The Windows child viewport has native airspace and lifecycle/DPI/focus constrain
 atop it. Angular keeps Inspector and toolbar controls beside the child window. Native selection, marquee, transform
 gestures and snapping share Rust command/history semantics with numeric edits. The Component Inspector edits typed
 mesh, collider and native behavior records. Assets exposes copied placement, linked source creation/editing and
-explicit Link/Update workflows; nested linked sources and arbitrary script components remain future work.
+explicit Link/Update workflows. Open a nested source in Prop Workspace to edit it.
 
 ## Colliders and interaction settings
 
@@ -63,7 +62,7 @@ The optional Colliders Scene overlay shows selected effective shapes, using dash
 cyan blocking outlines. It is editor-only, cached and bounded; errors and omitted outlines are reported without
 failing scene rendering. Boxes use transformed world AABBs, and spheres conservatively enclose hierarchy scale/shear.
 This is not an oriented-box/rigid-body solver. Sensor contacts feed fixed-step Enter/Stay/Exit trigger delivery and
-native component behavior. See the [trigger lifecycle review](milestones-review.md).
+native component behavior. Sensor enter and exit edges use the native trigger lifecycle.
 
 ## Multi-scene documents and native adapter
 
@@ -79,12 +78,9 @@ Read [project lifecycle](project-lifecycle.md) for the exact commands and persis
 
 The native SceneEditor now delegates to the core session rather than maintaining a competing active history pipeline.
 Source game execution defaults to Development and preserves panels/gizmos/learning controls; installed projects default
-to Player. Legacy CommandHistory/RobotGame APIs remain compatibility leftovers. Angular/Tauri owns future product
-presentation and bindings.
+to Player. Angular and Tauri own workspace presentation and device routing.
 
-## Verification boundaries
+## Check an editor change
 
-Final implementation/review/test results for steps 21–35 are recorded in [testing](testing.md) and
-docs-site/docs-state.json. Automated checks and hidden native examples are distinct from interactive Angular pane
-acceptance. No visual completion, full physics, animated importer, PBR, GPU-utilization percentage, or measured
-instancing speedup is inferred from the code alone.
+Use [Testing and validation](testing.md) for command, workspace and native viewport checks. A revision or history
+regression belongs in the command tests. Validate window focus, gestures and visible frames in a desktop run.

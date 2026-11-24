@@ -25,6 +25,7 @@ pub mod game_session;
 pub mod gameplay_events;
 pub mod input;
 pub mod linked_prefab;
+pub mod material_graph;
 mod native_behavior_runtime;
 pub mod particles;
 pub mod picking;

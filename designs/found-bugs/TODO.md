@@ -22,7 +22,7 @@ The original estimates below are historical planning ranges. The current source 
   The broader allocation/latency profiling and persistent-storage proposal remains open.
 
 These are source capabilities and regression-test targets, not measured performance gains. Current evidence and
-remaining native limits are in the [building-blocks review](../../docs/building-blocks-review.md#optimization-review).
+remaining native limits are in the [building-blocks review](../../history/reviews/building-blocks-review.md#optimization-review).
 
 | Follow-up                                               | Affected project / crate                                             | Estimated changed lines | Estimate margin | Complexity | Regression risk                                      |
 |---------------------------------------------------------|----------------------------------------------------------------------|------------------------:|----------------:|------------|------------------------------------------------------|

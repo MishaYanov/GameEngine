@@ -401,6 +401,15 @@ pub(super) struct History {
 	bytes: usize,
 }
 impl History {
+	pub(super) fn retained_entities(&self) -> impl Iterator<Item = &EntityData> {
+		self.undo
+			.iter()
+			.chain(self.redo.iter())
+			.flat_map(|patch| &patch.changes)
+			.flat_map(|change| change.before.iter().chain(&change.after))
+			.map(|(_, entity)| entity)
+	}
+
 	pub fn target_scene(&self, redo: bool) -> Option<&SceneId> {
 		if redo {
 			self.redo.last()

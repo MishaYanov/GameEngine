@@ -59,8 +59,8 @@ checkout. [Editor desktop host](apps/editor-host/README.md) · [Admin Dashboard]
    created but did not open, use **Open in Editor**.
 3. Open **Game → Scene Information…**, select `scenes/vault.json` in **Scene**, then close the dialog. This scene
    contains the arena.
-4. Choose **Game → Scene Lighting…**. Select **Cold overhead fill (Directional)**, set **Intensity** to `0.9`, and click
-   **Apply**. Close the dialog and click **Save All** in the workspace toolbar.
+4. Select **Cold overhead fill** in **Hierarchy**. In **Inspector → Light → Edit**, set **Intensity** to `0.9`,
+   choose **Apply Component**, then click **Save All** in the workspace toolbar.
 5. To preview the whole game, return to **Game → Scene Information…** and select `scenes/oath.json`. Click **Play** and
    click inside the **Game** view to give it keyboard focus. Watch the introduction or press **Enter** to skip it. Use
    **W**, **A**, **S**, and **D** to move and **F** to attack. Close in on the Warden and land three hits to win. Click
@@ -99,9 +99,10 @@ The export contains the saved project and the same Windows Player that ships wit
 5. To reuse a selection, open its Hierarchy context menu and choose **Create Prop from Selection…**. Choose the
    resulting asset in **Assets** and use **Place Linked Prop…** or **Place as Copy**. Open the asset in **Prop
    Workspace** to edit its source with its own undo history, and use **Show in Assets** to find the source again.
-6. Use **Game → Scene Information…** for the scene camera, environment and other scene settings, and **Game →
-   Scene Lighting…** for lights. Use **Project** for physics layers and input layouts. Choose **Save All** and **Play**
-   to check the result.
+6. Choose **Objects → Point Light** to add a lamp. Place it with **Transform** and use **Inspector → Light → Edit**
+   for color, intensity and range. Use **Game → Scene Information…** for the scene camera and environment, and
+   **Project** for physics layers and input layouts. Choose **Save All** and **Play** to check the result.
+   [Author scene lights](authoring-objects.md#add-a-point-or-directional-light)
 
 You can import your own models through **Objects → Models… → Import GLB…**. Confirm the asset operation, then select
 the model and choose **Add to Scene**. Select the object in Hierarchy and choose **Frame Selection** to position the

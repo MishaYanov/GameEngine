@@ -51,7 +51,7 @@ continues to carry material/draw bits; `flags.y/z` select palette base/count. Pe
 after frame completion. Skinned draws use their own palettes/material primitives and are excluded from ordinary
 opaque static instancing. Conservative joint-envelope bounds follow the accepted CPU pose. These source contracts
 and layout tests are separate from native image/resource acceptance; see
-[Milestone 9](../../milestones-7-9-review.md#milestone-9-bounded-skinned-animation).
+[asset-loading guide](../../graphics-and-assets.md#gltf-and-glb-static-import).
 
 ## Batching and resource reuse
 
@@ -108,5 +108,4 @@ cargo check --workspace --all-targets --locked --offline
 
 Shader/pipeline/light/instance/timestamp contract and native example results are recorded
 in [testing](../../testing.md). No interactive child-window or visual material acceptance is claimed.
-See [steps 31,34,35](../../editor-steps-21-35.md#step-31-directional-and-point-lights)
-and [graphics/assets](../../graphics-and-assets.md).
+See [Lighting, instancing and GPU metrics](../../graphics-and-assets.md#lights-instancing-and-gpu-metrics).

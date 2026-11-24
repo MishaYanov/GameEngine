@@ -1,9 +1,13 @@
 import {Component, computed, DestroyRef, effect, ElementRef, inject, input, signal, viewChild} from '@angular/core';
 import type {ProjectBuildPreparation, ProjectBuildResult} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {ProjectService} from '../../../../core/project/project.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceDraftReview} from '../workspace-draft-review';
+import {
+    discardStagedProjectBuild, type ProjectBuildReadback, readProjectBuildStatus, watchProjectBuildStatus,
+} from './project-build-status';
 
 @Component({
     selector: 'editor-project-build',
@@ -16,21 +20,66 @@ export class ProjectBuild {
     private readonly projects = inject(ProjectService);
     private readonly drafts = inject(WorkspaceDraftReview);
     private readonly editing = inject(SceneEditingService, {optional: true});
-    protected readonly pending = signal<'choose' | 'build' | 'run' | null>(null);
-    protected readonly result = signal<ProjectBuildResult | null>(null);
-    protected readonly retryPreparation = signal<ProjectBuildPreparation | null>(null);
+    private readonly viewport = inject(ViewportEditorService, {optional: true});
+    private readonly nativeGeneration = computed(() => this.viewport?.state()?.workspace_generation ?? null);
+    private readonly readback = signal<ProjectBuildReadback | null>(null);
+    private readonly nativeJob = computed(() => this.readback()?.current ?? null);
+    protected readonly pending = signal<'choose' | 'stage' | 'build' | 'run' | 'discard' | null>(null);
+    private readonly result = signal<ProjectBuildResult | null>(null);
+    private readonly retryPreparation = signal<ProjectBuildPreparation | null>(null);
     protected readonly error = signal<string | null>(null);
     private readonly exportError = signal<string | null>(null);
-    readonly exportFailure = this.exportError.asReadonly();
+    readonly exportFailure = computed(() => this.exportError() ??
+        (this.pending() === null ? this.nativeJob()?.diagnostic?.message ?? null : null));
     private readonly failureMessage = viewChild<ElementRef<HTMLElement>>('failureMessage');
-    protected readonly status = signal<string | null>(null);
+    private readonly status = signal<string | null>(null);
+    protected readonly stagedExport = computed<ProjectBuildPreparation | null>(() => {
+        const job = this.nativeJob();
+        if (!job) return this.retryPreparation();
+        return job.output && (job.phase === 'staged' || job.retryable)
+            ? {...job.output, build_id: job.build_id}
+            : null;
+    });
+    protected readonly visibleResult = computed(() => {
+        const job = this.nativeJob();
+        return this.result() ?? (job?.phase === 'succeeded' ? job.output : null);
+    });
+    protected readonly buildInProgress = computed(() => {
+        const phase = this.nativeJob()?.phase;
+        return this.pending() === 'stage' || this.pending() === 'build' ||
+            (this.readback()?.occupied === true && phase !== 'staged');
+    });
+    protected readonly canUseStagedExport = computed(() =>
+        this.editor.nativeAvailable && !this.opening() && !this.pending() && !this.buildInProgress());
+    protected readonly canDiscard = computed(() => {
+        const job = this.nativeJob();
+        return job?.phase === 'staged' || job?.retryable === true;
+    });
+    protected readonly announcement = computed(() => {
+        switch (this.nativeJob()?.phase) {
+            case 'validating': return 'Checking saved project files…';
+            case 'staging': return 'Copying verified project files…';
+            case 'finishing': return 'Finishing export. You can continue editing and saving.';
+            case 'staged':
+                if (!this.pending()) return 'Staged files are ready to finish.';
+                break;
+            case 'succeeded':
+                if (!this.pending() && !this.status()) return 'Export complete.';
+                break;
+        }
+        if (this.buildInProgress() && this.readback()?.occupied && !this.nativeJob()) {
+            return 'Another project is still exporting.';
+        }
+        return this.status();
+    });
     protected readonly destination = signal('');
     protected readonly unsaved = computed(() => this.editor.dirty() || this.editing?.hasChanges() === true);
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
-        !this.opening() && !this.pending() && !this.drafts.pending() && !this.unsaved() && (this.editing?.ready() ??
+        !this.opening() && !this.pending() && !this.readback()?.occupied && !this.drafts.pending() && !this.unsaved() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
     private readonly projectIdentity = this.editor.workspaceGeneration;
     private destroyed = false;
+    private refreshNativeStatus: (() => void) | null = null;
 
     constructor() {
         effect(() => {
@@ -40,6 +89,38 @@ export class ProjectBuild {
             this.error.set(null);
             this.exportError.set(null);
             this.status.set(null);
+        });
+        effect(onCleanup => {
+            const generation = this.nativeGeneration();
+            const identity = this.projectIdentity();
+            this.readback.set(null);
+            if (!this.editor.nativeAvailable || generation === null) return;
+            let active = true;
+            let readVersion = 0;
+            let unlisten: (() => void) | undefined;
+            const refresh = () => {
+                const version = ++readVersion;
+                void readProjectBuildStatus(generation).then(readback => {
+                    if (active && version === readVersion && generation === this.nativeGeneration() &&
+                        identity === this.projectIdentity()) {
+                        this.readback.set({...readback, current:
+                            readback.current?.workspace_generation === generation ? readback.current : null});
+                    }
+                }).catch(() => undefined);
+            };
+            this.refreshNativeStatus = refresh;
+            void watchProjectBuildStatus(refresh).then(stop => {
+                if (!active) stop();
+                else {
+                    unlisten = stop;
+                    refresh();
+                }
+            }).catch(refresh);
+            onCleanup(() => {
+                active = false;
+                this.refreshNativeStatus = null;
+                unlisten?.();
+            });
         });
         inject(DestroyRef).onDestroy(() => this.destroyed = true);
     }
@@ -66,6 +147,8 @@ export class ProjectBuild {
                     const snapshot = this.editor.snapshot();
                     if (!snapshot || this.opening() || !this.drafts.current(target)) return;
                     if (this.editor.dirty() || this.editor.playing()) throw new Error('Save All and stop Play before exporting.');
+                    this.pending.set('stage');
+                    this.status.set('Checking saved project files…');
                     captured.preparation = await this.editor.prepareBuild(destination, target.generation, snapshot.revision);
                 };
                 if (this.editing && !await this.editing.withCommittedEdit(capture)) {
@@ -82,13 +165,16 @@ export class ProjectBuild {
                 this.status.set(null);
             }
         } finally {
-            if (!this.destroyed) this.pending.set(null);
+            if (!this.destroyed) {
+                this.pending.set(null);
+                this.refreshNativeStatus?.();
+            }
         }
     }
 
     protected async retryExport(): Promise<void> {
-        const preparation = this.retryPreparation();
-        if (!preparation || this.pending() || this.opening() || !this.editor.nativeAvailable) return;
+        const preparation = this.stagedExport();
+        if (!preparation || !this.canUseStagedExport()) return;
         this.pending.set('build');
         this.error.set(null);
         this.exportError.set(null);
@@ -101,7 +187,34 @@ export class ProjectBuild {
                 this.status.set(null);
             }
         } finally {
-            if (!this.destroyed) this.pending.set(null);
+            if (!this.destroyed) {
+                this.pending.set(null);
+                this.refreshNativeStatus?.();
+            }
+        }
+    }
+
+    protected async discardExport(): Promise<void> {
+        const preparation = this.stagedExport();
+        if (!preparation || !this.canDiscard() || !this.canUseStagedExport()) return;
+        const identity = this.projectIdentity();
+        this.pending.set('discard');
+        this.error.set(null);
+        this.exportError.set(null);
+        try {
+            await discardStagedProjectBuild(preparation.build_id);
+            if (!this.destroyed && identity === this.projectIdentity()) {
+                this.retryPreparation.set(null);
+                if (this.nativeJob()?.build_id === preparation.build_id) this.readback.set(null);
+                this.status.set('Staged export released. Its files are still in the output folder.');
+            }
+        } catch (error) {
+            if (!this.destroyed && identity === this.projectIdentity()) this.reportExportFailure(error);
+        } finally {
+            if (!this.destroyed) {
+                this.pending.set(null);
+                this.refreshNativeStatus?.();
+            }
         }
     }
 
@@ -122,8 +235,8 @@ export class ProjectBuild {
     }
 
     protected async runBuild(): Promise<void> {
-        const result = this.result();
-        if (!result || this.pending() || !this.editor.nativeAvailable) return;
+        const result = this.visibleResult();
+        if (!result || this.pending() || this.buildInProgress() || !this.editor.nativeAvailable) return;
         this.pending.set('run');
         this.error.set(null);
         const identity = this.projectIdentity();

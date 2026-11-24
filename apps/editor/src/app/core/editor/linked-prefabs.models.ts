@@ -11,6 +11,7 @@ export interface PrefabSourceEntity {
 	readonly key: string;
 	readonly name: string;
 	readonly transform: Transform;
+	readonly active?: boolean;
 	readonly parent?: string | null;
 	readonly components: readonly ComponentRecord[];
 }
@@ -134,6 +135,7 @@ function nonemptyString(value: unknown): value is string {
 
 export type LinkedPrefabPropertyKind =
     | 'name'
+    | 'presence'
     | 'transform_position'
     | 'transform_rotation'
     | 'transform_scale'
@@ -142,6 +144,7 @@ export type LinkedPrefabPropertyKind =
     | 'character_controller'
     | 'animation'
     | 'particle_emitter'
+    | 'light'
     | 'native_behavior'
     | 'script';
 
@@ -181,6 +184,7 @@ export interface LinkedPrefabOverrideResolution {
 
 export type LinkedPrefabValue =
 	| { readonly kind: 'name'; readonly value: string }
+	| { readonly kind: 'presence'; readonly value: boolean }
 	| { readonly kind: 'vector'; readonly value: Vec3 }
 	| { readonly kind: 'component'; readonly value: ComponentRecord | null };
 

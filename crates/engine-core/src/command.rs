@@ -53,6 +53,26 @@ pub struct TransformEditDto {
 	pub key: String,
 	pub transform: TransformDto,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayTransformChangeDto {
+	pub key: EntityKey,
+	pub name: String,
+	pub before: TransformDto,
+	pub after: TransformDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayTransformReviewDto {
+	pub run_id: String,
+	pub scene_id: SceneId,
+	pub revision: u64,
+	pub scene_revision: u64,
+	pub changes: Vec<PlayTransformChangeDto>,
+	pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransformSpace {
@@ -112,6 +132,10 @@ pub enum EditorCommandDto {
 	},
 	Select {
 		keys: Vec<String>,
+	},
+	SetObjectActive {
+		key: String,
+		active: bool,
 	},
 	Rename {
 		key: String,
@@ -244,6 +268,10 @@ pub enum EditorCommandDto {
 		bindings: Option<BTreeMap<String, crate::EntityKey>>,
 		resolutions: Vec<crate::linked_prefab::LinkedPrefabOverrideResolution>,
 	},
+	RemoveLinkedPrefabLeaf {
+		root_key: String,
+		object_key: String,
+	},
 	RevertLinkedPrefab {
 		root_key: String,
 		property: Option<crate::linked_prefab::LinkedPrefabOverrideTarget>,
@@ -300,6 +328,11 @@ pub enum EditorCommandDto {
 	Redo,
 	StartPlay,
 	StopPlay,
+	ApplyPlayTransforms {
+		run_id: String,
+		scene_revision: u64,
+		keys: Vec<EntityKey>,
+	},
 	SetPaused {
 		paused: bool,
 	},
@@ -430,6 +463,8 @@ pub struct EditorCapabilitiesDto {
 	pub object_scripts: Vec<crate::components::ScriptDescriptor>,
 	#[serde(default)]
 	pub incremental_commands: bool,
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub resumable_changes: bool,
 	#[serde(default)]
 	pub gameplay_modules: Vec<GameplayModuleDescriptorDto>,
 	pub protocol_version: u32,

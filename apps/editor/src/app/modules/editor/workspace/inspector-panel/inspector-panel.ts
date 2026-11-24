@@ -22,6 +22,7 @@ import {type Vector3Change, Vector3Field} from '../../../../shared/components/ve
 import type {InspectorField, TransformFieldEdit} from '../scene-editing.service';
 import {ColliderInspector} from '../collider/collider-inspector';
 import type {ColliderInteractionChange, ColliderKind} from '../collider/collider';
+import {BatchTransformInspector} from './batch-transform-inspector';
 import {SceneComponentInspector} from '../components/scene-component-inspector';
 import {LinkedPrefabInspector} from '../prefabs/linked-prefab-inspector';
 import {
@@ -44,6 +45,7 @@ let nextInspectorId = 0;
         Vector3Field,
         ColliderInspector,
         SceneComponentInspector,
+        BatchTransformInspector,
         LinkedPrefabInspector,
     ],
     templateUrl: './inspector-panel.html',
@@ -51,6 +53,9 @@ let nextInspectorId = 0;
 })
 export class InspectorPanel {
     readonly entity = input<SceneEntity | null>(null);
+    readonly batchSelection = input<readonly SceneEntity[]>([]);
+    readonly batchTransformRequested = output<TransformFieldEdit>();
+    readonly activationRequested = output<boolean>();
     readonly embedded = input(false);
     readonly drawerMaxWidth = input('45%');
     readonly contextKey = input('');
@@ -79,13 +84,40 @@ export class InspectorPanel {
         type.kind === 'collider') === true);
     protected readonly physicsLayersAvailable = computed(() => this.editor?.capabilities()?.commands?.some(command =>
         command.name === 'set_project') === true);
+    protected readonly activationAvailable = computed(() => this.editor?.capabilities()?.commands?.some(command =>
+        command.name === 'set_object_active') === true);
+    protected readonly activationEditable = computed(() => {
+        const selected = this.entity();
+        const snapshot = this.snapshot();
+        return this.editable() && !!selected && !!snapshot &&
+            !linkedInspectorRoot(selected, snapshot.document.entities);
+    });
+    protected readonly inactiveAncestor = computed(() => {
+        const entities = this.snapshot()?.document.entities;
+        const selected = this.entity();
+        if (!entities || !selected?.parent) return null;
+        const lookup = new Map(entities.map(entity => [entity.key, entity]));
+        let ancestor = lookup.get(selected.parent);
+        for (let depth = 0; ancestor && depth < entities.length; depth++) {
+            if (ancestor.active === false) return ancestor.name;
+            ancestor = ancestor.parent ? lookup.get(ancestor.parent) : undefined;
+        }
+        return null;
+    });
+
+    protected setActive(input: HTMLInputElement): void {
+        const active = input.checked;
+        input.checked = this.entity()?.active !== false;
+        this.activationRequested.emit(active);
+    }
+
     protected readonly positionLinked = signal(false);
     protected readonly rotationLinked = signal(false);
     protected readonly scaleLinked = signal(false);
     protected readonly drawerConfig = AUTHORING_DRAWER_CONFIG;
 
     focus(): void {
-        this.element.querySelector<HTMLElement>('[data-reference-entity], .placeholder')?.focus({preventScroll: true});
+        this.element.querySelector<HTMLElement>('[data-reference-entity], .placeholder, [aria-label="Selected objects"]')?.focus({preventScroll: true});
     }
 
     private readonly snapshot = computed(() => this.editor?.snapshot() ?? null);
@@ -122,6 +154,7 @@ export class InspectorPanel {
         const entity = this.entity(), identity = this.selectionIdentity();
         return entity && identity ? [{identity, entity}] : [];
     });
+    protected readonly singleSelection = computed(() => this.batchSelection().length > 1 ? [] : this.selectedEntities());
     protected readonly rotationDegrees = computed<Vec3>(() => {
         const radians = this.entity()?.transform.rotation ?? [0, 0, 0];
         return [radians[0] * 180 / Math.PI, radians[1] * 180 / Math.PI, radians[2] * 180 / Math.PI];

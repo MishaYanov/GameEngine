@@ -6,8 +6,8 @@ use std::{
 	process::Command,
 };
 
-const ROUTE: &str = include_str!("../../../docs/verification/milestone-10-camera-route.json");
-const WALL: &str = include_str!("../../../docs/verification/milestone-10-camera-wall.json");
+const ROUTE: &str = include_str!("../../../history/verification/milestone-10-camera-route.json");
+const WALL: &str = include_str!("../../../history/verification/milestone-10-camera-wall.json");
 
 struct Scratch(PathBuf);
 

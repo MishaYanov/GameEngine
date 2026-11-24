@@ -23,4 +23,4 @@ $exportFolder = (New-Item -ItemType Directory -Path 'D:/Coding/Particle Workbenc
 cargo run --offline --locked -p compiler -- --export apps/headless/tests/fixtures/particle-workbench/project.json $exportFolder
 ```
 
-Resources [Editor access and particles roadmap](../../../../../designs/editor-viewport/editor-access-and-particles-154-162.md).
+Resources [Editor access and particles roadmap](../../../../../history/roadmaps/editor-access-and-particles-154-162.md).

@@ -1,11 +1,71 @@
 use super::{EditorSession, PrefabData};
 use crate::{
-	SceneData,
-	runtime_lifecycle::{PreparedRuntimeSpawn, RuntimeInspectionDto, RuntimeSpawnRequest},
+	EntityKey, SceneData,
+	input::{GamepadSample, InputProfile, PhysicalGamepadSample},
+	runtime_lifecycle::{
+		PreparedRuntimeSpawn, RuntimeEntityHandle, RuntimeInspectionDto, RuntimeSpawnRequest,
+	},
+	simulation_session::LocalInputScope,
 	world::WorldChange,
 };
 
 impl EditorSession {
+	pub fn play_entity_handle(&self, key: &EntityKey) -> Option<RuntimeEntityHandle> {
+		self.play.as_ref()?.active().runtime_handle(key)
+	}
+
+	pub fn play_possession_generation(&self) -> Option<u64> {
+		Some(self.play.as_ref()?.active().local_possession_generation())
+	}
+
+	pub fn local_input_scope(&self) -> Option<LocalInputScope> {
+		self.play.as_ref()?.active().local_input_scope()
+	}
+
+	/// Request the same fixed-step possession change available to gameplay modules.
+	pub fn request_play_possession(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		expected_generation: u64,
+		target: Option<RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		let play = self
+			.play
+			.as_mut()
+			.ok_or("Start Play before transferring control")?;
+		if play.run_id() != run_id || play.scene_generation() != scene_generation {
+			return Err("Possession request belongs to an inactive run or scene".into());
+		}
+		play.active_mut()
+			.request_local_possession(expected_generation, target)
+	}
+
+	pub fn submit_ordered_play_controls_from_codes(
+		&mut self,
+		scope: &LocalInputScope,
+		sequence: u64,
+		keys: &std::collections::HashSet<String>,
+		physical: PhysicalGamepadSample,
+		logical: GamepadSample,
+	) -> Result<bool, String> {
+		let active = self
+			.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.active_mut();
+		if active.input_action_map().is_some() {
+			return active.submit_local_action_codes(scope, sequence, keys, physical);
+		}
+		let defaults = InputProfile::default();
+		let profile = self.project.input_profile.as_ref().unwrap_or(&defaults);
+		active.submit_local_controls(
+			scope,
+			sequence,
+			profile.resolve_controls_from_codes(keys, logical),
+		)
+	}
+
 	pub fn has_runtime_instances(&self) -> bool {
 		self.play
 			.as_ref()

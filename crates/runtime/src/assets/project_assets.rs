@@ -3,7 +3,7 @@
 use crate::scene_io::paths::is_linked;
 use engine_core::{
 	asset_catalog::{
-		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, MeshSignature,
+		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, MeshSubassetId,
 		PersistentAsset,
 	},
 	asset_registry::AssetRef,
@@ -22,6 +22,7 @@ mod animator;
 mod audio_clip;
 mod controls_graph;
 mod input_actions;
+mod mesh_source;
 mod migration;
 mod prefab;
 mod primitive;
@@ -33,6 +34,7 @@ use audio_clip::prepare_binary_import;
 pub use audio_clip::{load_audio_clip, prepare_audio_clip_import};
 pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
+use mesh_source::{hydrate_legacy_meshes, signatures};
 pub use migration::migrate_catalog;
 use prefab::prefab_dependencies;
 pub use primitive::{PreparedPrimitive, prepare_primitive};
@@ -182,16 +184,17 @@ pub(super) fn resolve_asset_with_model<T>(
 ) -> Result<(AssetRef, T), String> {
 	reference.validate()?;
 	let catalog = load_catalog(asset_root)?;
-	match catalog.resolve(
-		reference.asset_id.as_ref(),
-		&reference.path,
-		reference.mesh_index,
-	)? {
-		Some(asset) if asset.kind == AssetKind::Model => Ok((
-			AssetRef::new(&asset.path, reference.mesh_index)?.with_asset_id(Some(asset.id.clone())),
-			use_model(Some(asset)),
-		)),
-		Some(_) => Err("A renderable entity requires a model asset".into()),
+	match catalog.resolve_mesh_reference(reference)? {
+		Some((asset, index)) => {
+			let physical_index =
+				(reference.mesh_index.is_some() || reference.mesh_id.is_some()).then_some(index);
+			Ok((
+				AssetRef::new(&asset.path, physical_index)?
+					.with_asset_id(Some(asset.id.clone()))
+					.with_mesh_id(reference.mesh_id.clone()),
+				use_model(Some(asset)),
+			))
+		}
 		None => Ok((reference.clone(), use_model(None))),
 	}
 }
@@ -240,62 +243,6 @@ pub(crate) fn install_new(source: &Path, target: &Path) -> Result<(), String> {
 	{
 		fs::hard_link(source, target).map_err(|e| e.to_string())
 	}
-}
-fn signatures(
-	path: &Path,
-	asset_root: &Path,
-	self_contained: bool,
-) -> Result<Vec<MeshSignature>, String> {
-	let bytes = read(path, MAX_SOURCE)?;
-	if self_contained && !bytes.starts_with(b"glTF") {
-		return Err("External imports require a binary .glb file".into());
-	}
-	let mut budget = super::import_budget::ImportBudget::new(None);
-	if bytes.starts_with(b"glTF") {
-		let binary = gltf::binary::Glb::from_slice(&bytes).map_err(|e| e.to_string())?;
-		budget
-			.preflight_json(binary.json.as_ref())
-			.map_err(|e| e.to_string())?;
-	} else {
-		budget.preflight_json(&bytes).map_err(|e| e.to_string())?;
-	}
-	let parsed = gltf::Gltf::from_slice(&bytes).map_err(|e| e.to_string())?;
-	if parsed.skins().len() > 0 {
-		// The shared CPU decoder owns skin/clip validation; the static scene
-		// importer deliberately rejects skins and is not used for this path.
-		bridge::animation_asset::decode(&bytes)?;
-	}
-	if self_contained
-		&& (parsed.buffers().any(
-			|b| matches!(b.source(),gltf::buffer::Source::Uri(uri) if !uri.starts_with("data:")),
-		) || parsed.images().any(
-			|i| matches!(i.source(),gltf::image::Source::Uri{uri,..} if !uri.starts_with("data:")),
-		)) {
-		return Err("External GLB imports must embed their buffers and images".into());
-	}
-	let meshes = parsed
-		.meshes()
-		.map(|mesh| MeshSignature {
-			index: mesh.index(),
-			name: mesh.name().unwrap_or("Mesh").to_owned(),
-			primitives: mesh.primitives().len(),
-		})
-		.collect::<Vec<_>>();
-	if meshes.is_empty() || meshes.len() > 10_000 {
-		return Err("Model requires 1–10000 meshes".into());
-	}
-	super::gltf_loader::preflight_meshes(&parsed.document, meshes.iter().map(|mesh| mesh.index))
-		.map_err(|e| e.to_string())?;
-	// Validate every mesh/image, including unreferenced meshes, before publishing.
-	let mut resources =
-		super::gltf_loader::load_resources_in_root(path, asset_root).map_err(|e| e.to_string())?;
-	resources.prepare_all_images().map_err(|e| e.to_string())?;
-	for mesh in &meshes {
-		resources
-			.import_mesh(mesh.index)
-			.map_err(|e| e.to_string())?;
-	}
-	Ok(meshes)
 }
 pub struct PreparedAssetChange {
 	root: PathBuf,
@@ -449,6 +396,7 @@ fn prepare(
 	previous: Option<&PersistentAsset>,
 	move_asset: bool,
 	used: &HashSet<usize>,
+	stable: &HashSet<MeshSubassetId>,
 ) -> Result<PreparedAssetChange, String> {
 	let asset_root = root(asset_root)?;
 	validate_model_path(destination)?;
@@ -514,7 +462,22 @@ fn prepare(
 				asset.aliases.push(old.path.clone());
 				asset.source_path = old.source_path.clone();
 			} else {
-				old.check_reimport(&asset, used)?;
+				let mut old = old.clone();
+				if old.fingerprint != asset.fingerprint {
+					hydrate_legacy_meshes(&asset_root, &mut old)?;
+				}
+				old.preserve_mesh_ids(&mut asset, used)?;
+				let retained: HashSet<_> = asset
+					.meshes
+					.iter()
+					.filter_map(|mesh| mesh.identity.as_ref().map(|identity| &identity.id))
+					.collect();
+				if let Some(missing) = stable.iter().find(|id| !retained.contains(*id)) {
+					return Err(format!(
+						"Reimport would remove or ambiguously replace referenced mesh identity {}",
+						missing.as_str()
+					));
+				}
 			}
 		}
 		catalog.replace(asset.clone())?;
@@ -547,6 +510,7 @@ pub fn prepare_import(
 		None,
 		false,
 		&HashSet::new(),
+		&HashSet::new(),
 	)
 }
 pub fn prepare_reimport(
@@ -556,13 +520,41 @@ pub fn prepare_reimport(
 	expected_fingerprint: &str,
 	used_meshes: &HashSet<usize>,
 ) -> Result<PreparedAssetChange, String> {
+	prepare_reimport_with_references(
+		asset_root,
+		id,
+		source,
+		expected_fingerprint,
+		used_meshes,
+		&HashSet::new(),
+	)
+}
+
+/// Require older numeric slots and explicitly authored mesh identities to
+/// survive before a candidate can replace the current model.
+pub fn prepare_reimport_with_references(
+	asset_root: &Path,
+	id: &AssetId,
+	source: Option<&Path>,
+	expected_fingerprint: &str,
+	used_meshes: &HashSet<usize>,
+	stable_meshes: &HashSet<MeshSubassetId>,
+) -> Result<PreparedAssetChange, String> {
 	let catalog = load_catalog(asset_root)?;
 	let old = catalog.by_id(id).ok_or("Asset identity is unavailable")?;
 	if old.kind != AssetKind::Model || old.fingerprint != expected_fingerprint {
 		return Err("Asset fingerprint changed; refresh before reimporting".into());
 	}
 	let source = source.ok_or("Choose a reimport source")?;
-	prepare(asset_root, source, &old.path, Some(old), false, used_meshes)
+	prepare(
+		asset_root,
+		source,
+		&old.path,
+		Some(old),
+		false,
+		used_meshes,
+		stable_meshes,
+	)
 }
 pub fn prepare_move(
 	asset_root: &Path,
@@ -626,6 +618,7 @@ pub fn prepare_move(
 		Some(old),
 		true,
 		&HashSet::new(),
+		&HashSet::new(),
 	)
 }
 pub fn prepare_prefab(
@@ -670,11 +663,7 @@ pub fn prepare_prefab(
 	// prefab must not publish an incomplete dependency graph or rewrite the scene.
 	for entity in prefab.expanded_entities()?.iter() {
 		if catalog
-			.resolve(
-				entity.asset_id.as_ref(),
-				&entity.model_path,
-				entity.mesh_index,
-			)?
+			.resolve_mesh_reference(&entity.model_reference()?)?
 			.is_some()
 		{
 			continue;

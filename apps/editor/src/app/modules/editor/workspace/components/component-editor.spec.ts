@@ -104,6 +104,56 @@ describe('Interactable Inspector', () => {
         }}]);
     });
 
+    it('keeps an existing mesh index until an author explicitly selects a stable mesh', async () => {
+        const panel = await setup();
+        const meshId = '41111111-4111-4111-8111-411111111111';
+        const existing: ComponentRecord = {id: 'mesh', schema_version: 1, enabled: true, data: {
+            kind: 'mesh_renderer', model_path: 'models/tower.glb', asset_id: 'tower-id', mesh_index: 3,
+        }};
+        panel.fixture.componentRef.setInput('components', [existing]);
+        panel.fixture.componentRef.setInput('models', [{
+            name: 'Tower', path: 'models/tower.glb', asset_id: 'tower-id',
+            meshes: [{id: meshId, index: 8, name: 'Roof'}],
+        }]);
+        await panel.fixture.whenStable();
+        panel.host.querySelector<HTMLButtonElement>('button[aria-label="Edit Mesh Renderer"]')!.click();
+        await panel.fixture.whenStable();
+        expect(panel.field('Mesh index').value).toBe('3');
+        panel.button('Apply Component').click();
+        const legacyEdit = panel.intents[0];
+        const legacy = legacyEdit?.kind === 'replace' ? legacyEdit.component : undefined;
+        expect(legacy?.data).toEqual({...existing.data, material: null});
+
+        const picker = panel.host.querySelector<HTMLSelectElement>('.component-form select')!;
+        expect(picker.value).toBe('');
+        picker.value = meshId;
+        picker.dispatchEvent(new Event('change', {bubbles: true}));
+        await panel.fixture.whenStable();
+        expect(picker.value).toBe(meshId);
+        panel.button('Apply Component').click();
+        const stableEdit = panel.intents[1];
+        const stable = stableEdit?.kind === 'replace' ? stableEdit.component : undefined;
+        expect(stable?.data).toEqual({...existing.data, mesh_index: 8, mesh_id: meshId, material: null});
+        expect(validComponentRecord(stable)).toBe(true);
+    });
+
+    it('edits Point Light settings through the same object component Inspector', async () => {
+        const panel = await setup();
+        const light: ComponentRecord = {id: 'lamp', schema_version: 1, enabled: true, data: {
+            kind: 'light', settings: {kind: 'point', color: [1, 0.75, 0.5], intensity: 1, range: 8},
+        }};
+        panel.fixture.componentRef.setInput('components', [light]);
+        await panel.fixture.whenStable();
+        panel.host.querySelector<HTMLButtonElement>('button[aria-label="Edit Light"]')!.click();
+        await panel.fixture.whenStable();
+        await panel.set('Intensity', '2.5');
+        await panel.set('Range (metres)', '12');
+        panel.button('Apply Component').click();
+        expect(panel.intents).toEqual([{kind: 'replace', expected: JSON.stringify(light), component: {
+            ...light, data: {kind: 'light', settings: {kind: 'point', color: [1, 0.75, 0.5], intensity: 2.5, range: 12}},
+        }}]);
+    });
+
     it('attaches a Box from the catalog without treating a plane mesh as its collision shape', async () => {
         const panel = await setup();
         panel.fixture.componentRef.setInput('types', [{

@@ -357,21 +357,19 @@ impl<'a> Closure<'a> {
 		}
 		let resolved = self
 			.catalog
-			.resolve(
-				entity.asset_id.as_ref(),
-				&entity.model_path,
-				entity.mesh_index,
-			)?
-			.cloned();
-		if let Some(asset) = &resolved {
-			if asset.kind != AssetKind::Model {
-				return Err("Entity references a non-model asset identity".into());
-			}
+			.resolve_mesh_reference(&entity.model_reference()?)?
+			.map(|(asset, index)| (asset.clone(), index));
+		if let Some((asset, _)) = &resolved {
 			self.record(&asset.id)?;
 		}
 		let path = resolved
 			.as_ref()
-			.map_or(entity.model_path.as_str(), |asset| asset.path.as_str());
+			.map_or(entity.model_path.as_str(), |(asset, _)| asset.path.as_str());
+		let mesh_index = if entity.mesh_id.is_some() {
+			resolved.as_ref().map(|(_, index)| *index)
+		} else {
+			entity.mesh_index
+		};
 		// Invisible logical markers may intentionally have no loadable model.
 		if !entity.renderable && resolved.is_none() && !self.root.join(path).is_file() {
 			return Ok(());
@@ -391,7 +389,7 @@ impl<'a> Closure<'a> {
 				entity.model_path
 			));
 		}
-		self.model(relative, entity.mesh_index)
+		self.model(relative, mesh_index)
 			.map_err(|error| format!("Model '{}' preflight failed: {error}", entity.model_path))?;
 		Ok(())
 	}
@@ -423,11 +421,18 @@ impl<'a> Closure<'a> {
 			asset
 		};
 		asset.validate_settings(&component.settings)?;
-		let mesh = self.catalog.by_path(&entity.model_path);
+		let mesh = if entity.mesh_id.is_some() {
+			self.catalog
+				.resolve_mesh_reference(&entity.model_reference()?)?
+		} else {
+			self.catalog
+				.by_path(&entity.model_path)
+				.map(|model| (model, entity.mesh_index.unwrap_or(0)))
+		};
 		if !entity.has_mesh_component()
-			|| mesh.is_none_or(|mesh| &mesh.id != id)
-			|| entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
-			|| entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize
+			|| mesh.is_none_or(|(mesh, index)| {
+				&mesh.id != id || index != asset.skin.mesh_index as usize
+			}) || entity.asset_id.as_ref().is_some_and(|mesh| mesh != id)
 		{
 			return Err(
 				"Animation requires its source model and selected mesh on the same entity".into(),

@@ -57,6 +57,54 @@ fn play_ticks_copy_authored_state_without_invalidating_command_revision_and_paus
 }
 
 #[test]
+fn paused_play_transforms_apply_once_and_undo_as_authored_changes() {
+	let mut session = fixture();
+	let authored = session.authored_document();
+	run(&mut session, Command::StartPlay);
+	run(
+		&mut session,
+		Command::SetPlayInput {
+			movement: [1.0, 0.0, 0.0],
+		},
+	);
+	session.tick(1.0 / 30.0).unwrap();
+	assert!(session.review_play_transforms().is_err());
+	run(&mut session, Command::SetPaused { paused: true });
+
+	let review = session.review_play_transforms().unwrap();
+	assert_eq!(review.changes.len(), 1);
+	let changed = &review.changes[0];
+	assert_eq!(changed.key, key("a"));
+	assert_eq!(session.authored_document(), authored);
+	let command = |source: u64, keys: Vec<_>| Command::ApplyPlayTransforms {
+		run_id: review.run_id.clone(),
+		scene_revision: source,
+		keys,
+	};
+	reject(
+		&mut session,
+		command(review.scene_revision - 1, vec![key("a")]),
+	);
+	reject(
+		&mut session,
+		command(review.scene_revision, vec![key("a"), key("b")]),
+	);
+	assert!(session.is_paused());
+	assert_eq!(session.authored_document(), authored);
+
+	run(&mut session, command(review.scene_revision, vec![key("a")]));
+	assert!(!session.is_playing());
+	assert_eq!(
+		session.authored_document().entities[0].transform.position,
+		changed.after.position
+	);
+	assert!(session.snapshot().unwrap().dirty);
+	run(&mut session, Command::Undo);
+	assert_eq!(session.authored_document(), authored);
+	assert!(!session.snapshot().unwrap().dirty);
+}
+
+#[test]
 fn play_tick_demand_requires_target_and_movement_and_motion_error_pauses_without_partial_edit() {
 	let mut parent = entity("parent", [0.0; 3]);
 	parent.transform.scale = [0.0, 1.0, 1.0];

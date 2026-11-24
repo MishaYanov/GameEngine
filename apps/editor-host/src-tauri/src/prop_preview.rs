@@ -274,7 +274,7 @@ impl EditorWorkspace {
 				Some(Arc::new(PropSceneEnvironment {
 					sky: scene.active_sky().cloned(),
 					environment: scene.environment.clone(),
-					lights: Scene::project_renderer_lights(&scene.lights),
+					lights: Scene::project_renderer_lights(&scene.projected_lights()?),
 				}))
 			}
 		};
@@ -446,9 +446,11 @@ pub(crate) fn visual_entity(entity: &EntityData) -> EntityData {
 		.with_renderable(entity.renderable)
 		.with_material(entity.material.clone())
 		.with_collider(entity.collider.clone())
-		.with_mesh_index(entity.mesh_index);
+		.with_mesh_index(entity.mesh_index)
+		.with_mesh_id(entity.mesh_id.clone());
 	visual.collision_enabled = entity.collision_enabled;
 	visual.audio_source.clone_from(&entity.audio_source);
+	visual.light.clone_from(&entity.light);
 	visual
 }
 

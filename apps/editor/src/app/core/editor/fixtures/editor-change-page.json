@@ -1,0 +1,24 @@
+{
+  "cursor": 2,
+  "resync_required": false,
+  "events": [
+    {
+      "scene_id": null,
+      "sequence": 1,
+      "revision": 10,
+      "scene_revision": 4,
+      "event": {
+        "kind": "project_changed"
+      }
+    },
+    {
+      "scene_id": null,
+      "sequence": 2,
+      "revision": 11,
+      "scene_revision": 4,
+      "event": {
+        "kind": "state_changed"
+      }
+    }
+  ]
+}

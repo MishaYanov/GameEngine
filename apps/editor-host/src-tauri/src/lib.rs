@@ -19,13 +19,14 @@ mod viewport_tools;
 use crate::commands::editor::*;
 use crate::commands::engine::engine_status;
 use crate::commands::preferences::{
-	editor_layout_preferences_load, editor_layout_preferences_save,
+	editor_layout_preferences_load, editor_layout_preferences_project_scope,
+	editor_layout_preferences_save,
 };
 use crate::commands::project::{
 	choose_project_destination, choose_project_manifest, confirm_project_discard, create_project,
 	editor_exit, editor_set_window_close_review,
 };
-use crate::commands::runtime_inspection::editor_runtime_inspect;
+use crate::commands::runtime_inspection::{editor_review_play_transforms, editor_runtime_inspect};
 use state::EditorState;
 use tauri::webview::PageLoadEvent;
 use tauri::Manager;
@@ -76,6 +77,7 @@ pub fn run() {
 			editor_agent_session_start,
 			editor_agent_session_stop,
 			editor_runtime_inspect,
+			editor_review_play_transforms,
 			create_project,
 			choose_project_destination,
 			choose_project_manifest,
@@ -84,7 +86,9 @@ pub fn run() {
 			editor_set_window_close_review,
 			editor_layout_preferences_load,
 			editor_layout_preferences_save,
+			editor_layout_preferences_project_scope,
 			editor_capabilities,
+			editor_compile_material_graph,
 			editor_animation_metadata,
 			editor_animation_preview_open,
 			editor_animation_workspace_open,
@@ -126,6 +130,8 @@ pub fn run() {
 			editor_build_project,
 			editor_prepare_project_build,
 			editor_finish_project_build,
+			editor_project_build_status,
+			editor_discard_project_build,
 			editor_run_build,
 			editor_submit_import,
 			editor_cancel_import,

@@ -4,6 +4,7 @@ use motion::solve;
 
 use crate::{
 	EntityKey,
+	animation::RootMotionDelta,
 	collision::CollisionWorld,
 	components::ComponentId,
 	project::ProjectData,
@@ -174,6 +175,12 @@ pub(crate) struct CharacterRuntime {
 	states: BTreeMap<EntityKey, CharacterState>,
 	inputs: BTreeMap<EntityKey, CharacterInput>,
 }
+pub(crate) struct CharacterStep<'a> {
+	pub tick: u64,
+	pub seconds: f32,
+	pub root_motion: &'a BTreeMap<EntityKey, RootMotionDelta>,
+}
+
 impl CharacterRuntime {
 	pub fn new(world: &RuntimeWorld, project: &ProjectData) -> Result<Self, String> {
 		let mut value = Self::default();
@@ -222,13 +229,6 @@ impl CharacterRuntime {
 	pub fn keys(&self) -> impl Iterator<Item = &EntityKey> {
 		self.states.keys()
 	}
-	pub fn local_input_owner(&self, world: &RuntimeWorld) -> Option<&EntityKey> {
-		self.states.keys().find(|key| {
-			world
-				.entity_index(key)
-				.is_some_and(|index| world.data().entities[index].is_local_player())
-		})
-	}
 	pub fn contains(&self, key: &EntityKey) -> bool {
 		self.states.contains_key(key)
 	}
@@ -272,7 +272,20 @@ impl CharacterRuntime {
 		for input in self.inputs.values_mut() {
 			*input = CharacterInput::default();
 		}
+		for state in self.states.values_mut() {
+			state.jump_buffer_until = None;
+		}
 	}
+
+	pub(crate) fn clear_entity_input(&mut self, key: &EntityKey) {
+		if let Some(input) = self.inputs.get_mut(key) {
+			*input = CharacterInput::default();
+		}
+		if let Some(state) = self.states.get_mut(key) {
+			state.jump_buffer_until = None;
+		}
+	}
+
 	pub fn set_input(
 		&mut self,
 		key: &EntityKey,
@@ -365,8 +378,7 @@ impl CharacterRuntime {
 		&mut self,
 		world: &mut RuntimeWorld,
 		collisions: &mut CollisionWorld,
-		tick: u64,
-		dt: f32,
+		step: CharacterStep<'_>,
 		budget: &mut usize,
 		before: &mut HashMap<EntityKey, EntityData>,
 	) -> Result<WorldChange, String> {
@@ -389,8 +401,9 @@ impl CharacterRuntime {
 				input.movement,
 				press,
 				&settings,
-				tick,
-				dt,
+				step.tick,
+				step.seconds,
+				step.root_motion.get(key).copied(),
 				budget,
 			)?;
 			before

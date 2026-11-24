@@ -66,7 +66,7 @@ fn selection_operations_preserve_hierarchy_error_order_before_mutation_or_noop()
 				&mut candidate,
 				&mut selection,
 				&SnapSettingsDto::default(),
-				&HashMap::new(),
+				&ModelBounds::default(),
 				command,
 			)
 			.unwrap_err();

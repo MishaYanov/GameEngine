@@ -1,7 +1,7 @@
 import {
     type EditorCommandUpdate, type EditorSnapshot, type SceneEntity, isSceneSchemaVersion,
 } from './editor.models';
-import {validCameraComponentSettings, validComponentViews} from './editor-components';
+import {validCameraComponentSettings, validComponentViews, validLightSettings} from './editor-components';
 import {validPlayerControllerSettings} from './player-controller.models';
 import {validAnimatorSettings} from './animator.models';
 import {validSceneEnvironment, validSkyAttachment} from './sky.models';
@@ -68,6 +68,8 @@ function entity(value: unknown): value is SceneEntity {
         (value['camera'] == null || (record(value['camera']) && typeof value['camera']['id'] === 'string' &&
             typeof value['camera']['enabled'] === 'boolean' && validCameraComponentSettings(value['camera']['settings']))) &&
         (value['sky'] == null || validSkyAttachment(value['sky'])) &&
+        (value['light'] == null || (record(value['light']) && typeof value['light']['id'] === 'string' &&
+            typeof value['light']['enabled'] === 'boolean' && validLightSettings(value['light']['settings']))) &&
         (value['particle_emitter'] == null || validParticleEmitterComponent(value['particle_emitter'])) &&
         (controller == null || (record(controller) && typeof controller['id'] === 'string' &&
             typeof controller['enabled'] === 'boolean' && validPlayerControllerSettings(controller['settings']) &&

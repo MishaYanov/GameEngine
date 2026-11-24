@@ -17,10 +17,11 @@ import { ComponentEditor, type ComponentEditIntent } from './component-editor';
 import type {SpecialistAttachment, SpecialistAttachmentChoice} from './add-component-catalog';
 import {ComponentWorkspaceSession} from './component-workspace-session';
 import {ParticleDesignerSession} from '../particle-designer/particle-designer-session';
+import {MaterialGraphDialog} from '../material-graph/material-graph-dialog';
 
 @Component({
 	selector: 'editor-scene-component-inspector',
-	imports: [ComponentEditor, AnimatorInspector, ControlGraphInspector],
+	imports: [ComponentEditor, AnimatorInspector, ControlGraphInspector, MaterialGraphDialog],
 	template: `<editor-component-editor
 		[components]="basicComponents()"
 		[types]="types()"
@@ -56,6 +57,7 @@ import {ParticleDesignerSession} from '../particle-designer/particle-designer-se
 		[acknowledged]="acknowledged()"
 		(actionRequested)="apply($event)"
 	/>
+    <editor-material-graph [entity]="entity()" [subject]="subject()" [editable]="editable()"/>
     @if (animatorSupported() && entity(); as actor) {
         <editor-animator-inspector [subject]="subject()" [actor]="actor" [editable]="editable()"/>
     }

@@ -343,6 +343,7 @@ fn native_prepared_scene_references_preserve_scene_and_geometry() {
 						index: 0,
 						name: "Managed".into(),
 						primitives: 1,
+						identity: None,
 					}],
 				}],
 			};

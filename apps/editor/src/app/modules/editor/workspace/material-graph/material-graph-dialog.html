@@ -1,0 +1,33 @@
+@if (canShow()) {
+    <button type="button" aria-haspopup="dialog" [disabled]="!editable() || opening() || pending()" (click)="show()">
+        {{ entity()?.material?.source_graph ? 'Edit Material Graph' : 'Create Material Graph' }}
+    </button>
+    @if (!target() && error(); as message) {
+        <p role="alert">{{ message }}</p>
+    }
+}
+<editor-dialog title="Material Graph" preferenceKey="material-graph" [config]="dialogConfig" [renderFields]="false"
+               [open]="target() !== null" [closeBlocked]="pending() || dirty()"
+               (openChange)="!$event && close()" (closeAttempted)="reviewClose()">
+    @if (target(); as materialTarget) {
+        <p>Base color for {{ materialTarget.name }}. Set Color and Multiply values from 0 to 1.</p>
+        <editor-graph label="Material nodes" [graph]="graph()" (graphChange)="update($event)"
+                      [allowedNodeKinds]="nodeKinds" [attr.inert]="pending() || confirmDiscard() ? '' : null"/>
+        @if (error(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
+        @if (confirmDiscard()) {
+            <p role="status">Discard the changes to this Material Graph?</p>
+            <button type="button" (click)="confirmDiscard.set(false)">Keep editing</button>
+            <button type="button" (click)="close()">Discard changes</button>
+        }
+    }
+    <ng-container dialog-actions>
+        @if (target()?.material?.source_graph) {
+            <button type="button" [disabled]="pending() || dirty()" (click)="apply(true)">Detach graph</button>
+        }
+        <button class="primary" type="button" [disabled]="pending() || confirmDiscard()" (click)="apply()">
+            {{ pending() ? 'Working…' : 'Apply to Mesh' }}
+        </button>
+    </ng-container>
+</editor-dialog>

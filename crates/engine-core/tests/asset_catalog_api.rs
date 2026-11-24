@@ -1,5 +1,5 @@
 use engine_core::asset_catalog::{
-	AssetCatalog, AssetId, AssetKind, MeshSignature, PersistentAsset,
+	AssetCatalog, AssetId, AssetKind, MeshIdentity, MeshSignature, MeshSubassetId, PersistentAsset,
 };
 use std::collections::HashSet;
 mod support;
@@ -18,6 +18,7 @@ fn model(path: &str) -> PersistentAsset {
 			index: 0,
 			name: "Cube".into(),
 			primitives: 1,
+			identity: None,
 		}],
 		dependencies: vec![],
 	}
@@ -55,6 +56,46 @@ fn stable_identity_and_reserved_legacy_alias_survive_move_and_json_roundtrip() {
 }
 
 #[test]
+fn stable_mesh_references_round_trip_through_scenes_and_props() {
+	use engine_core::{SceneData, editor::PrefabData, scene_data::EntityData};
+
+	let model_id = AssetId::generate();
+	let stable_id = MeshSubassetId::generate();
+	let entity = EntityData::new(support::key("arch"), "Arch", "props/arch.glb")
+		.with_asset_id(Some(model_id.clone()))
+		.with_mesh_index(Some(5))
+		.with_mesh_id(Some(stable_id.clone()));
+	let entity_expected = (Some(model_id), Some(stable_id), Some(5));
+	let check = |entity: &EntityData| {
+		let reference = entity.model_reference().unwrap();
+		assert_eq!(
+			(reference.asset_id, reference.mesh_id, reference.mesh_index),
+			entity_expected
+		);
+	};
+	let scene = support::scene(vec![entity.clone()]);
+	let scene_json = scene.to_json().unwrap();
+	assert!(scene_json.contains("mesh_id"));
+	check(&SceneData::from_json(&scene_json).unwrap().entities[0]);
+	let prefab = PrefabData {
+		schema_version: 3,
+		composition: Default::default(),
+		entities: vec![entity],
+		gameplay: None,
+		reference_slots: Default::default(),
+	};
+	let prefab_json = prefab.to_json().unwrap();
+	check(&PrefabData::from_json(&prefab_json).unwrap().entities[0]);
+
+	let legacy_entity = support::entity("legacy", [0.; 3]).with_mesh_index(Some(3));
+	let legacy_json = support::scene(vec![legacy_entity]).to_json().unwrap();
+	assert!(!legacy_json.contains("mesh_id"));
+	let legacy = SceneData::from_json(&legacy_json).unwrap();
+	assert_eq!(legacy.entities[0].mesh_index, Some(3));
+	assert!(legacy.entities[0].mesh_id.is_none());
+}
+
+#[test]
 fn reimport_requires_referenced_mesh_compatibility_without_changing_the_original() {
 	let original = model("props/cube.glb");
 	let used = HashSet::from([0]);
@@ -67,6 +108,41 @@ fn reimport_requires_referenced_mesh_compatibility_without_changing_the_original
 	next.meshes.clear();
 	assert!(original.check_reimport(&next, &used).is_err());
 	assert_eq!(original.meshes[0].name, "Cube");
+}
+
+#[test]
+fn stable_mesh_ids_validate_uuid_digests_and_unique_source_keys() {
+	let mut asset = model("mesh.glb");
+	assert!(asset.meshes[0].identity.is_none());
+	let id = MeshSubassetId::generate();
+	asset.meshes[0].identity = Some(MeshIdentity {
+		id: id.clone(),
+		source_key: Some("hull-01".into()),
+		geometry_sha256: "d".repeat(64),
+	});
+	let mut catalog = AssetCatalog::default();
+	catalog.replace(asset.clone()).unwrap();
+	let encoded = catalog.to_json().unwrap();
+	let reopened = AssetCatalog::from_json(&encoded).unwrap();
+	assert_eq!(
+		reopened
+			.by_id(&asset.id)
+			.unwrap()
+			.mesh_by_id(&id)
+			.unwrap()
+			.index,
+		0
+	);
+	assert!(AssetCatalog::from_json(&encoded.replace(id.as_str(), "invalid")).is_err());
+
+	let mut repeated = asset.meshes[0].clone();
+	repeated.index = 1;
+	asset.meshes.push(repeated);
+	assert!(asset.validate().is_err());
+	asset.meshes[1].identity.as_mut().unwrap().id = MeshSubassetId::generate();
+	assert!(asset.validate().is_err());
+	asset.meshes[1].identity.as_mut().unwrap().source_key = Some("bad/key".into());
+	assert!(asset.validate().is_err());
 }
 
 #[test]

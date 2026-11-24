@@ -1,7 +1,7 @@
 # Game creation workflows and support agent
 
 Status: proposed product design. The capability map reflects the working tree inspected on 2026-11-15.
-The later [Milestone 4–6 review](../../docs/milestones-4-6-review.md) records implemented component Inspector,
+The later [Milestone 4–6 review](../../history/reviews/milestones-4-6-review.md) records implemented component Inspector,
 linked prefab and runtime lifecycle workflows; proposed capabilities below retain their historical design scope.
 Audience: Engine Developer.
 This chapter defines the game a usable viewport should help someone finish.
@@ -431,7 +431,7 @@ The current Inspector authors those shapes, offsets, dimensions, sensor flags an
 The optional Colliders Scene overlay shows selected effective shapes with dashed sensor and continuous blocking
 outlines. Both participants' layer/mask directions must match; sensors overlap without blocking motion.
 This is implemented overlap classification. Feature 1.4 Enter/Stay/Exit delivery remains unimplemented.
-[Current review and limits](../../docs/building-blocks-review.md#collider-inspector-and-sensorfilter-authoring).
+[Current review and limits](../../history/reviews/building-blocks-review.md#collider-inspector-and-sensorfilter-authoring).
 Collision query or debug-shape support is not proof of a complete character controller.
 The reference game must define which interactions require collision response and which require overlap detection.
 A visible goal marker can initially use an explicit trigger rule rather than a general physics simulation.

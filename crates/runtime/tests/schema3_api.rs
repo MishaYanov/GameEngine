@@ -73,6 +73,7 @@ fn schema3_extras_roundtrip_with_child_before_parent_and_resolve_full_world_trs(
 	child.mesh_index = Some(7);
 	child.material = Some(MaterialOverrideData {
 		base_color_factor: [0.1, 0.2, 0.3, 0.4],
+		source_graph: None,
 	});
 	child.collider = Some(ColliderData::Sphere {
 		interaction: Default::default(),
@@ -138,6 +139,7 @@ fn invalid_material_colliders_and_lights_are_rejected_and_keys_share_one_namespa
 		let mut data = base.clone();
 		data.entities[0].material = Some(MaterialOverrideData {
 			base_color_factor: color,
+			source_graph: None,
 		});
 		assert!(data.validate().is_err());
 	}

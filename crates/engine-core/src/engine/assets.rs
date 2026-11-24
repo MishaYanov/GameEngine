@@ -118,11 +118,8 @@ impl Engine {
 		self.session.clear_model_bounds();
 		for (_, record) in self.assets.iter() {
 			if let Some(bounds) = record.metadata.bounds {
-				self.session.set_model_bounds(
-					record.reference.path.clone(),
-					record.reference.mesh_index.unwrap_or(0),
-					bounds,
-				);
+				self.session
+					.set_model_reference_bounds(&record.reference, bounds);
 			}
 		}
 	}

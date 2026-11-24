@@ -16,6 +16,9 @@ const MAX_PARAMETERS: usize = 64;
 pub struct AnimatorSettings {
 	pub asset_id: AssetId,
 	pub binding: AnimatorBinding,
+	/// Imported glTF node whose planar translation is resolved by the character motor.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub root_motion_source_node: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +125,11 @@ impl AnimatorParameterSource {
 
 impl AnimatorSettings {
 	pub fn validate(&self) -> Result<(), String> {
+		if self.root_motion_source_node.is_some()
+			&& !matches!(self.binding, AnimatorBinding::Imported { .. })
+		{
+			return Err("Root motion requires an imported Animator binding".into());
+		}
 		if let AnimatorBinding::Imported { source } = &self.binding {
 			AnimationClipRef::Imported {
 				source: source.clone(),

@@ -173,6 +173,32 @@ fn installed_layout_returns_cited_keyword_results_and_refreshes_project_metadata
 }
 
 #[test]
+fn installed_help_cites_the_current_object_authoring_guide() {
+	let fixture = Fixture::new();
+	let guide = fixture.0.join("agent/engine-help/authoring-objects.md");
+	fs::write(guide, include_str!("../../../docs/authoring-objects.md")).unwrap();
+	let mut worker = Worker::spawn(&fixture, None);
+	worker.send(json!({
+		"type": "start",
+		"request": {
+			"id": "authoring-guide",
+			"scope": {"project_id":"worker-test","workspace_generation":91,"revision":5},
+			"question": "Rotation Routine JSON"
+		}
+	}));
+	worker.event("authoring-guide", "started");
+	let event = worker.event("authoring-guide", "sources");
+	assert!(event["citations"].as_array().unwrap().iter().any(|hit| {
+		hit["citation"]["source_id"] == "object-components"
+			&& hit["citation"]["corpus"] == "engine-help"
+	}));
+	assert_eq!(
+		worker.event("authoring-guide", "finished")["status"],
+		"retrieval_only"
+	);
+}
+
+#[test]
 fn loopback_model_stream_can_be_stopped_while_the_provider_is_waiting() {
 	let fixture = Fixture::new();
 	let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();

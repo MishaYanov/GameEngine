@@ -91,6 +91,7 @@ impl Worker {
 								if changes.is_empty() {
 									changes.full_resync = true;
 								}
+								let had_light_objects = gpu.scene.has_light_objects();
 								synchronized = if let Some(world) = session.render_world() {
 									{
 										if changes.topology_changed
@@ -115,7 +116,11 @@ impl Worker {
 										&changes,
 									)?
 								};
-								lights_changed = changes.lights_changed || changes.full_resync;
+								lights_changed = changes.lights_changed
+									|| changes.full_resync || ((had_light_objects
+									|| gpu.scene.has_light_objects())
+									&& (!changes.changed_entities.is_empty()
+										|| !changes.removed_entities.is_empty()));
 							}
 							if synchronized {
 								gpu.revision = revision;

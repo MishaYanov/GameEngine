@@ -1,4 +1,4 @@
-import {Component, computed, DestroyRef, effect, ElementRef, inject, input, signal, untracked, viewChild} from '@angular/core';
+import {Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, signal, untracked, viewChild} from '@angular/core';
 import {
     animatorChannelKey, type AnimatorActorValidation, type AnimatorBinding, type AnimatorDocument, type AnimatorParameterSource,
 } from '../../../../core/editor/animator.models';
@@ -33,6 +33,18 @@ export class AnimatorInspector {
     private readonly editor = this.library.editor;
     private readonly editing = inject(SceneEditingService);
     protected readonly selected = signal('');
+    protected readonly rootMotionNode = linkedSignal(() => {
+        const settings = this.actor().animator?.settings;
+        return settings?.asset_id === this.selected() ? settings.root_motion_source_node?.toString() ?? '' : '';
+    });
+    protected readonly rootMotionIssue = computed(() => {
+        const value = this.rootMotionNode();
+        if (this.plan().binding?.kind !== 'imported' || !value) return null;
+        if (!/^[0-9]+$/.test(value) || Number(value) > 0xffffffff) return 'Enter a nonnegative glTF node index.';
+        return this.actor().character_controller?.enabled ||
+            this.actor().component_views?.some(component => component.enabled && component.data.kind === 'character_controller')
+            ? null : 'Root motion requires an enabled Character Controller on this object.';
+    });
     private readonly reviewed = signal<ReviewedAnimator | null>(null);
     protected readonly graph = computed(() => this.reviewed()?.document.graph ?? null);
     protected readonly entry = computed(() => this.graph()?.states.find(state => state.id === this.graph()?.entry));
@@ -181,10 +193,14 @@ export class AnimatorInspector {
         const binding = this.plan().binding;
         const prior = this.actor().animator;
         const key = this.actor().key;
-        if (!this.available() || !document || !binding || this.legacyActive()) return;
+        if (!this.available() || !document || !binding || this.legacyActive() || this.rootMotionIssue()) return;
+        const rootNode = this.rootMotionNode();
+        const settings = binding.kind === 'imported' && rootNode
+            ? {asset_id: document.asset.id, binding, root_motion_source_node: Number(rootNode)}
+            : {asset_id: document.asset.id, binding};
         const component = {
             id: prior?.id ?? crypto.randomUUID(), schema_version: 1, enabled: true,
-            data: {kind: 'animator', settings: {asset_id: document.asset.id, binding}},
+            data: {kind: 'animator', settings},
         } as const;
         await this.mutate({type: prior ? 'replace_component' : 'add_component', key, component}, true);
     }

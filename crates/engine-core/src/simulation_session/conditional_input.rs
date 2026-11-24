@@ -125,6 +125,16 @@ impl ConditionalInputs {
 		self.pending.clear();
 	}
 
+	pub(super) fn retarget(&mut self, owner: Option<RuntimeEntityHandle>) {
+		self.clear();
+		self.selection.owner = Some(owner);
+	}
+
+	pub(super) fn has_held_sample(&self) -> bool {
+		let sample = self.pending.back().unwrap_or(&self.last_sample);
+		!sample.keys.is_empty() || !sample.pad.is_neutral()
+	}
+
 	pub(super) fn has_pending(&self) -> bool {
 		!self.pending.is_empty()
 	}
@@ -231,7 +241,9 @@ impl ConditionalInputs {
 			return Ok(());
 		}
 		if self.pending.len() == MAX_PHYSICAL_ACTION_SAMPLES {
-			return Err("Conditional Input Actions sample budget exceeded".into());
+			return Err(
+				"Conditional Input Actions sample budget exceeded; local input cleared".into(),
+			);
 		}
 		self.pending.push_back(next);
 		Ok(())

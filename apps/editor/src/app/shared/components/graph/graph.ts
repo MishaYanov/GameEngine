@@ -92,6 +92,7 @@ export class EditorGraph {
     readonly graph = model<GraphDocument>(emptyGraph());
     readonly label = input('Node graph');
     readonly clipAssets = input<readonly AnimationClipAsset[]>([]);
+    readonly allowedNodeKinds = input<readonly GraphNodeKind[] | null>(null);
     readonly managed = input(false);
     readonly activeNodes = input<ReadonlySet<string>>(new Set());
     readonly managedRevision = input(0);
@@ -198,7 +199,7 @@ export class EditorGraph {
     );
     protected readonly palette = computed(() =>
         (Object.keys(GRAPH_NODES) as GraphNodeKind[]).filter((kind) =>
-            nodeAllowed(kind, this.graphContext()),
+            (this.allowedNodeKinds()?.includes(kind) ?? true) && nodeAllowed(kind, this.graphContext()),
         ),
     );
     private readonly anchors = signal<ReadonlyMap<string, GraphPoint>>(new Map());

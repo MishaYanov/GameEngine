@@ -37,6 +37,7 @@ import {sameHierarchyScene, type SceneEntitiesModel} from './scene-entities-pane
 import type {HierarchyFolderCommand} from './scene-entities-panel/hierarchy-folder-editor';
 import {SceneEditingService} from './scene-editing.service';
 import {WorkspaceDraftReview} from './workspace-draft-review';
+import {WORKSPACE_LAYOUT_SCOPE_PROVIDER} from './workspace-layout-preferences';
 import {ScopedPaneRequests} from './scoped-pane-request';
 import {SceneActions} from './scene-actions/scene-actions';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
@@ -69,6 +70,7 @@ import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problem
     selector: 'editor-workspace',
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
+        WORKSPACE_LAYOUT_SCOPE_PROVIDER,
         SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
         SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService, AgentDrawerService, AgentAnswerActions,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
@@ -597,7 +599,6 @@ export class EditorWorkspace {
     private async createSceneObject(command: EditorCommand, folder: FolderId | null): Promise<void> {
         const context = this.sceneContext();
         this.hierarchyError.set(null);
-        let light: EntityKey | undefined;
         let emitter: EntityKey | undefined;
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             if (context !== this.sceneContext() || this.workspaceActionBlocked()) return;
@@ -609,10 +610,6 @@ export class EditorWorkspace {
                 ? await this.createInFolder(create, folder, generation, current.revision)
                 : await create(current.revision);
             if (context !== this.sceneContext()) return;
-            if (command.type === 'create_light') {
-                light = snapshot.document.lights.find(item => !current.document.lights.some(previous => previous.key === item.key))?.key;
-                return;
-            }
             const key = snapshot.selection[0];
             if (key) this.hierarchy()?.revealEntity(key);
             if (command.type === 'create_particle_emitter') emitter = key;
@@ -621,7 +618,6 @@ export class EditorWorkspace {
         if (!accepted) {
             this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
         }
-        if (light) this.lights()?.show(light);
         if (emitter) await this.particles.openSelected(emitter);
     }
 

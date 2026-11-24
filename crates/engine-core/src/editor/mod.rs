@@ -1,5 +1,6 @@
 //! CPU document application service. Transport/UI and GPU ownership stay outside.
 mod play;
+mod play_review;
 mod selection;
 mod transaction;
 use selection::validate_selection;
@@ -9,6 +10,8 @@ mod scene_documents;
 pub use factory::{CommandFactory, CommandRequestBuilder};
 use scene_documents::{DocumentCostCache, SceneDraft};
 mod linked_prefab;
+mod model_bounds;
+use model_bounds::ModelBounds;
 mod operations;
 mod prefab;
 mod runtime_lifecycle;
@@ -60,7 +63,7 @@ pub struct EditorSession {
 	snap: SnapSettingsDto,
 	revision: u64,
 	scene_revision: u64,
-	bounds: HashMap<(String, usize), Bounds3>,
+	bounds: ModelBounds,
 }
 struct Transaction {
 	label: String,
@@ -102,7 +105,7 @@ impl EditorSession {
 			snap: SnapSettingsDto::default(),
 			revision: 0,
 			scene_revision: 0,
-			bounds: HashMap::new(),
+			bounds: ModelBounds::default(),
 		})
 	}
 	pub fn project(&self) -> &ProjectData {
@@ -417,9 +420,16 @@ impl EditorSession {
 	}
 
 	pub fn set_model_bounds(&mut self, path: String, mesh: usize, bounds: Bounds3) {
-		self.bounds.insert((path, mesh), bounds);
+		self.bounds.insert_legacy(path, mesh, bounds);
 	}
 
+	pub(crate) fn set_model_reference_bounds(
+		&mut self,
+		reference: &crate::asset_registry::AssetRef,
+		bounds: Bounds3,
+	) {
+		self.bounds.insert_reference(reference, bounds);
+	}
 	pub(crate) fn clear_model_bounds(&mut self) {
 		self.bounds.clear();
 	}
@@ -545,6 +555,13 @@ impl EditorSession {
 			}
 			Command::StartPlay => self.start_play()?,
 			Command::StopPlay => self.stop_play(),
+			Command::ApplyPlayTransforms {
+				run_id,
+				scene_revision,
+				keys,
+			} => {
+				self.apply_play_transforms(&run_id, scene_revision, keys)?;
+			}
 			Command::SetPaused { paused } => self.set_paused(paused)?,
 			Command::SetPlayInput { movement } => self.set_play_input(movement)?,
 			Command::SetCharacterInput {
@@ -595,6 +612,12 @@ impl EditorSession {
 				bindings,
 				resolutions,
 			} => self.update_linked_prefab_reviewed(root_key, source, bindings, resolutions)?,
+			Command::RemoveLinkedPrefabLeaf {
+				root_key,
+				object_key,
+			} => {
+				self.remove_linked_prefab_leaf(root_key, object_key)?;
+			}
 			Command::RevertLinkedPrefab { root_key, property } => {
 				self.revert_linked_prefab(root_key, property)?
 			}

@@ -1,7 +1,10 @@
 //! Committed world-space particle presentation, independent of renderer resources.
 
 use crate::{
-	EntityKey, components::ParticleEmitterSettings, scene_data::EntityData, world::RuntimeWorld,
+	EntityKey,
+	components::{MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterSettings},
+	scene_data::EntityData,
+	world::RuntimeWorld,
 };
 use glam::{EulerRot, Quat, Vec3};
 use std::collections::{BTreeMap, HashMap};
@@ -126,6 +129,23 @@ impl ParticleBank {
 					.insert(entity.key.clone(), Emitter::new(emitter.settings));
 			}
 		}
+	}
+
+	pub(crate) fn sync_runtime_emitter(&mut self, entity: &EntityData) -> Result<bool, String> {
+		let emitter = entity.particle_emitter.as_ref().expect("verified emitter");
+		if emitter.enabled {
+			if self.emitters.len() >= MAX_ENABLED_PARTICLE_EMITTERS {
+				return Err(format!(
+					"Scene exceeds {MAX_ENABLED_PARTICLE_EMITTERS} enabled Particle Emitters"
+				));
+			}
+			self.admit(std::slice::from_ref(entity));
+			return Ok(false);
+		}
+		Ok(self
+			.emitters
+			.remove(&entity.key)
+			.is_some_and(|emitter| !emitter.particles.is_empty()))
 	}
 
 	pub(crate) fn needs_tick(&self) -> bool {

@@ -1,9 +1,12 @@
+import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import {By} from '@angular/platform-browser';
 import {Splitter} from '../splitter/splitter';
 import {LayoutPreferences} from '../../models/config.model';
-import {LAYOUT_PREFERENCES_STORAGE} from '../../services/layout-preferences-storage';
+import {
+    LAYOUT_PREFERENCES_STORAGE, WORKSPACE_LAYOUT_SCOPE, type WorkspaceLayoutScope,
+} from '../../services/layout-preferences-storage';
 import {LayoutPreferencesService} from '../../services/layout-preferences.service';
 import {DEFAULT_DRAWER_SETTINGS} from './drawer-settings';
 import {Drawer} from './drawer';
@@ -14,13 +17,18 @@ describe('Drawer configuration', () => {
     let fixture: ComponentFixture<Drawer>;
     let component: Drawer;
     let preferences: LayoutPreferencesService;
+    const workspaceScope = signal<WorkspaceLayoutScope>(null);
 
     beforeEach(() => {
         load.mockReset().mockResolvedValue(null);
         save.mockReset().mockResolvedValue(undefined);
+        workspaceScope.set(null);
         TestBed.configureTestingModule({
             imports: [Drawer],
-            providers: [{provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load, save}}],
+            providers: [
+                {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load, save}},
+                {provide: WORKSPACE_LAYOUT_SCOPE, useValue: workspaceScope},
+            ],
         });
         fixture = TestBed.createComponent(Drawer);
         component = fixture.componentInstance;
@@ -65,6 +73,59 @@ describe('Drawer configuration', () => {
                 'editor.navigation': {...DEFAULT_DRAWER_SETTINGS, width: '50%', expanded: false},
             },
         });
+    });
+
+    it('switches to each project’s saved layout and keeps the legacy global value as a fallback', async () => {
+        const first = 'a'.repeat(64);
+        const second = 'b'.repeat(64);
+        const key = 'editor.navigation';
+        const legacy = {width: '44%'};
+        workspaceScope.set(first);
+        load.mockResolvedValue({
+            schema_version: 1,
+            components: {
+                [key]: legacy,
+                ['project:' + second + ':' + key]: {width: '70%'},
+            },
+        });
+        await initialize();
+        expect(component.config().width).toBe('44%');
+        component.config.update(config => ({...config, width: '55%', collapsed: true}));
+        fixture.detectChanges();
+
+        workspaceScope.set(undefined);
+        fixture.detectChanges();
+        expect(component.configReady()).toBe(false);
+        workspaceScope.set(second);
+        await initialize();
+        expect(component.config().width).toBe('70%');
+        expect(component.config().collapsed).toBe(DEFAULT_DRAWER_SETTINGS.collapsed);
+        component.config.update(config => ({...config, width: '75%'}));
+        fixture.detectChanges();
+        await preferences.flush();
+        const written = save.mock.calls.at(-1)![0].components;
+        expect(written[key]).toEqual(legacy);
+        expect(written['project:' + first + ':' + key]?.['width']).toBe('55%');
+        expect(written['project:' + second + ':' + key]?.['width']).toBe('75%');
+
+        workspaceScope.set(first);
+        await initialize();
+        expect(component.config().width).toBe('55%');
+        expect(component.config().collapsed).toBe(true);
+    });
+
+    it('shows legacy settings when project identity is unavailable without altering them', async () => {
+        workspaceScope.set(false);
+        load.mockResolvedValue({
+            schema_version: 1,
+            components: {'editor.navigation': {width: '37%'}},
+        });
+        await initialize();
+        expect(component.config().width).toBe('37%');
+        component.config.update(config => ({...config, width: '64%'}));
+        fixture.detectChanges();
+        await preferences.flush();
+        expect(save).not.toHaveBeenCalled();
     });
 
     it('preserves edits made while the backend is loading', async () => {

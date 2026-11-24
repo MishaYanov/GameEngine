@@ -39,15 +39,23 @@ describe('Graph editor', () => {
     });
     it('creates and validates connections using keyboard-accessible port buttons', async () => {
         const {fixture, button, component, element} = await setup();
+        const graph = component.graph();
+        fixture.componentRef.setInput('graph', {
+            ...graph, connections: graph.connections.filter(edge => edge.id !== 'time-factor'),
+        });
+        fixture.detectChanges();
+        await fixture.whenStable();
         button('color Color output, vector3').click();
-        button('material Roughness input, float').click();
+        button('multiply Factor input, float').click();
         fixture.detectChanges();
         expect(element.querySelector('[role="alert"]')?.textContent).toContain('vector3 to float');
         button('time Time output, float').click();
-        button('material Roughness input, float').click();
+        button('multiply Factor input, float').click();
         fixture.detectChanges();
         await fixture.whenStable();
-        expect(component.graph().connections).toHaveLength(4);
+        expect(component.graph().connections).toHaveLength(3);
+        expect(component.graph().connections.some(edge => edge.from.node === 'time' &&
+            edge.to.node === 'multiply' && edge.to.port === 'factor')).toBe(true);
     });
     it('moves a focused node by keyboard and deletes its connections with it', async () => {
         const {fixture, button, component, element} = await setup();

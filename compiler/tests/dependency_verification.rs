@@ -399,6 +399,7 @@ fn catalog_cycles_are_blocked_without_looping_or_losing_the_owner() {
 			index: 0,
 			name: "mesh".into(),
 			primitives: 1,
+			identity: None,
 		}],
 		dependencies: vec![dependency],
 	};

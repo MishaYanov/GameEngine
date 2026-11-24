@@ -23,12 +23,14 @@ validation and creates a new child folder named from the authored project. It do
 there is no `game.exe` in stage-only output. Its README distinguishes staged data from a completed executable export.
 Existing destinations are rejected and incomplete new output is
 retained on failure. This snapshot can be opened or tested with the CPU runner; executable production still uses
-the existing finish/install API or editor export flow. [Replay and parity example](../building-blocks-review.md#headless-replay-and-stage-only-snapshots).
+the existing finish/install API or editor export flow. [Headless replay](../testing.md#headless-replay).
 
-It uses the bundled starter configuration with the `courtyard_run` module, installs without launching, and exits
-0 on success, 1 on preparation/build/install failure or 2 on unsupported argument form. `install_project(name, destination)` remains
-the starter adapter. The editor's New Project uses `create_authoring_project`, which copies the starter scenes and
-behaviors with the generic gameplay default. Application hosts can use:
+The name-and-destination form installs Cinder Oath without launching it. The Editor's New Project dialog
+offers **Blank project** and **Cinder Oath sample**. To build an existing project with the CLI, use
+`--export` with its manifest and destination parent. The CLI exits with 0 on success, 1 on a build
+or install error, and 2 for an unsupported argument form.
+
+Applications call the compiler through these entry points.
 
 - `prepare_project(&project, asset_root)` to validate/capture authored inputs into PreparedProject.
 - `install_authored_project(&project, asset_root, destination)` or
@@ -50,14 +52,9 @@ shared resolver requires
 each scene/model path to resolve to a regular file within the canonical asset root and to belong to that captured list.
 One path index serves the whole catalog pass; scene membership is checked before reading/parsing the file.
 
-Project validation and behavior target indexing are prepared once for the immutable catalog pass. After checking
-target membership and packaged models, a project with a gameplay module prepares a CPU GameSession for each scene.
-This checks the full catalog, including nonstartup scenes, using the same factory as the Player. For Courtyard Run
-that includes required role bindings, positive-speed player movement and the `finish` destination. Both source
-preflight and copied-asset validation perform these checks before compiling the executable.
-
-New authoring projects start with the generic configured-behavior selection. Export preserves the authored module
-selection and packages referenced glTF/GLB models and asset dependencies, including the Courtyard demo's base props.
+Preparation indexes behavior targets and validates every scene, including nonstartup scenes. It prepares each
+scene with the same gameplay resolver as the Player to check required roles, movement and scene destinations.
+The export preserves the selected module and packages the referenced models and their dependencies.
 
 Captured membership identifies paths. Prepared inputs also retain their byte lengths and fingerprints for the
 pre-build recheck and verified copying below. Detailed glTF geometry validation remains with the runtime importer.
@@ -108,8 +105,7 @@ The aggregated scene report retains at most 16 KiB of UTF-8 text. It truncates o
 space for `Further scene diagnostics omitted.`, and continues validating later scenes without adding text after the
 notice. The limit applies to the report string, not temporary error allocations, outer installation messages, Cargo
 output or total process memory. Project validation and asset-collection failures still return before the scene pass.
-Public compiler APIs continue to return string errors; the [typed error design](../../designs/error-handling.md) remains
-a separate proposal.
+Public compiler APIs return diagnostic strings.
 
 ## Packaging bounds and checks
 
@@ -125,7 +121,6 @@ cargo test -p compiler --all-targets --offline --locked
 Focused regressions cover scene context, primary-cause ordering, deterministic multi-scene reports, UTF-8 report limits,
 copied-root validation and captured scene/model membership, alongside project validation, source/output preservation,
 unchanged-input acceptance and stale-input rejection for equal-size, resized, missing and nonregular assets. Copy-time
-fingerprint rejection remains covered. [Testing](../testing.md) records historical evidence; `docs-site/docs-state.json`
-identifies the latest scoped TESTER evidence and documentation checks. Copied-root/file-copy checks and successful
+fingerprint rejection remains covered. [Testing](../testing.md) describes the package and replay checks. Copied-root/file-copy checks and successful
 compilation are
 separate from running the full installer or accepting an installed game.

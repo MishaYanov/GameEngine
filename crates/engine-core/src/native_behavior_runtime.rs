@@ -52,6 +52,7 @@ pub(crate) fn plan(
 							entity: door.clone(),
 							material: Some(MaterialOverrideData {
 								base_color_factor: [0.1, 0.9, 0.25, 1.0],
+								source_graph: None,
 							}),
 						})?;
 						output.push(SimulationAction::SetCollisionEnabled {

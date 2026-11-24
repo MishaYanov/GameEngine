@@ -299,6 +299,7 @@ describe('Workspace live editing flow', () => {
                 return structuredClone(nativeState);
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
+            if (operation === 'editor_layout_preferences_project_scope') return 'a'.repeat(64);
             if (operation === 'editor_check_scenes') return {
                 generation: viewportEditorState.workspace_generation,
                 revision: nativeState.revision,
@@ -589,7 +590,11 @@ describe('Workspace live editing flow', () => {
                     nativeState = {...nativeState, transaction: command.label};
                     break;
                 case 'set_transforms':
-                    nativeState = {...nativeState, dirty: true, document: {...nativeState.document,
+                    if (nativeState.transaction === null) {
+                        undo.push(nativeState.document);
+                        redo = [];
+                    }
+                    nativeState = {...nativeState, dirty: true, can_undo: undo.length > 0, document: {...nativeState.document,
                         entities: nativeState.document.entities.map(entity => {
                             const edit = command.edits.find(edit => edit.key === entity.key);
                             return edit ? {...entity, transform: edit.transform} : entity;
@@ -1427,6 +1432,35 @@ describe('Workspace live editing flow', () => {
         expect(input('Scale Z').valueAsNumber).toBe(-2);
     });
 
+    it('shows mixed local transforms and changes both objects with one undo', async () => {
+        const crate = editor.document()!.entities.find(entity => entity.key === 'crate')!;
+        await editor.execute({type: 'set_transforms', space: 'local', snap: false, edits: [
+            {key: crate.key, transform: {...crate.transform, position: [3, 0, 0]}},
+        ]});
+        const initial = editor.document()!.entities.map(entity => entity.transform);
+        await editing.selectMany(['robot', 'crate']);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        const panel = root.querySelector('editor-batch-transform-inspector')!;
+        expect(panel.textContent).toContain('2 objects selected');
+        const mixed = panel.querySelector<HTMLInputElement>('input[aria-label="Position X"]')!;
+        expect(mixed.placeholder).toBe('Mixed');
+        const before = commands.filter(command => command.type === 'set_transforms').length;
+
+        mixed.value = '7.25';
+        mixed.dispatchEvent(new Event('change', {bubbles: true}));
+        await fixture.whenStable();
+
+        const applied = commands.filter(command => command.type === 'set_transforms').slice(before);
+        expect(applied).toHaveLength(1);
+        expect(applied[0].edits.map(edit => edit.key)).toEqual(['robot', 'crate']);
+        expect(editor.document()!.entities.map(entity => entity.transform)).toEqual(
+            initial.map(transform => ({...transform, position: [7.25, transform.position[1], transform.position[2]]})));
+        action('Undo').click();
+        await fixture.whenStable();
+        expect(editor.document()!.entities.map(entity => entity.transform)).toEqual(initial);
+    });
+
     it('authors collider shapes and values through history, saving and reopening', async () => {
         await selectRobot();
         const shape = () => fixture.nativeElement.querySelector('editor-collider-inspector select') as HTMLSelectElement;
@@ -1590,6 +1624,7 @@ describe('Workspace live editing flow', () => {
     });
 
     it('shares the Inspector size and viewport with Agent and restores Agent after Play', async () => {
+        await fixture.debugElement.injector.get(ViewportEditorService).start();
         await selectRobot();
         const root: HTMLElement = fixture.nativeElement;
         const drawer = () => root.querySelector<HTMLElement>('.workspace-authoring-drawer')!;

@@ -74,6 +74,7 @@ fn aliases_share_exact_mesh_identity_and_cancelled_batches_discard_partial_model
 					index,
 					name: format!("Cube {index}"),
 					primitives: 1,
+					identity: None,
 				})
 				.collect(),
 			dependencies: Vec::new(),

@@ -1,0 +1,33 @@
+@if (supported()) {
+    <button type="button" [disabled]="!ready()" (click)="capture()">Pause and Review Transforms…</button>
+    @if (!review() && error(); as message) { <p role="alert">{{ message }}</p> }
+    <editor-dialog title="Review Play Transforms" [open]="review() !== null" [renderFields]="false"
+                   [closeBlocked]="pending()" closeLabel="Keep Play Paused" (openChange)="!$event && close()">
+        @if (review(); as candidate) {
+            @if (candidate.changes.length) {
+                <p>Select the local transforms to keep. Applying them stops Play and creates one Undo step.</p>
+                <ul>
+                    @for (change of candidate.changes; track change.key) {
+                        <li>
+                            <label>
+                                <input #keep type="checkbox" [checked]="selected().has(change.key)" [disabled]="pending()"
+                                       (change)="toggle(change.key, keep.checked)"/>
+                                {{ change.name }} <small>{{ change.key }}</small>
+                            </label>
+                            <dl>
+                                <dt>Authored</dt><dd>{{ transform(change.before) }}</dd>
+                                <dt>Play</dt><dd>{{ transform(change.after) }}</dd>
+                            </dl>
+                        </li>
+                    }
+                </ul>
+                @if (candidate.truncated) { <p>The review shows the first {{ candidate.changes.length }} changes.</p> }
+            } @else {
+                <p>No existing objects have changed local transforms.</p>
+            }
+        }
+        @if (error(); as message) { <p role="alert">{{ message }}</p> }
+        <button type="button" dialog-actions [disabled]="!ready()" (click)="capture()">Refresh Review</button>
+        <button type="button" dialog-actions [disabled]="!canApply()" (click)="apply()">Stop and Apply Selected</button>
+    </editor-dialog>
+}

@@ -208,13 +208,6 @@ impl Jobs {
 		self.persist();
 		Ok(run)
 	}
-	#[cfg(test)]
-	pub fn set_offline(&mut self, id: &str, offline: bool) {
-		if let Some(run) = self.runs.iter_mut().find(|r| r.id == id) {
-			run.offline = offline;
-		}
-		self.persist();
-	}
 	pub fn interrupt(&mut self) {
 		for run in &mut self.runs {
 			if matches!(run.state, Status::Queued | Status::Running) {

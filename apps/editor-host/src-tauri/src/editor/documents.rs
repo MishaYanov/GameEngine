@@ -84,7 +84,7 @@ impl EditorWorkspace {
 			WorkspaceKind::StandaloneScene => self.backend.session().project().clone(),
 		};
 		let scene_path = resolve_existing(&self.asset_root, project.startup_scene_path()?)?;
-		let data = file_operation("reload_scene", runtime::scene_io::load_data(&scene_path))?.data;
+		let data = read_editor_scene(&scene_path, "reload_scene")?;
 		let documents = load_project_documents(&self.asset_root, &project, &data)?;
 		let mut candidate = runtime::EngineBuilder::new(data, project)
 			.with_scenes(documents)
@@ -148,8 +148,7 @@ impl EditorWorkspace {
 				return Err("Scene file is already registered".into());
 			}
 		}
-		let document =
-			file_operation("register_scene", runtime::scene_io::load_data(&resolved))?.data;
+		let document = read_editor_scene(&resolved, "register_scene")?;
 		let id = SceneId::generate();
 		self.check_compound_capacity()?;
 		self.backend
@@ -430,6 +429,12 @@ fn atomic_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String>
 	Ok(())
 }
 
+pub(super) fn read_editor_scene(path: &Path, operation: &'static str) -> Result<SceneData, String> {
+	let mut scene = file_operation(operation, runtime::scene_io::load_data(path))?.data;
+	scene.migrate_legacy_lights()?;
+	Ok(scene)
+}
+
 pub(super) fn load_project_documents(
 	root: &Path,
 	project: &ProjectData,
@@ -446,7 +451,7 @@ pub(super) fn load_project_documents(
 		let document = if entry.id() == &project.startup_scene_id {
 			Cow::Borrowed(startup)
 		} else {
-			Cow::Owned(file_operation("load_scene", runtime::scene_io::load_data(&path))?.data)
+			Cow::Owned(read_editor_scene(&path, "load_scene")?)
 		};
 		retained_bytes = retained_bytes.saturating_add(
 			document

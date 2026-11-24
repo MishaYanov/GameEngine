@@ -3,7 +3,7 @@ use engine_core::game_camera::{
 };
 use std::{
 	cell::{Ref, RefCell},
-	collections::{BTreeMap, HashMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	sync::Arc,
 };
 
@@ -22,7 +22,7 @@ mod synchronization;
 
 pub use limits::MAX_SCENE_RENDER_OBJECTS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityId(u64);
 
 #[derive(Clone)]
@@ -32,12 +32,14 @@ struct SceneEntry {
 	name: String,
 	model_path: Option<String>,
 	asset_id: Option<engine_core::asset_catalog::AssetId>,
+	active: bool,
 	collision_enabled: bool,
 	instance: ModelInstance,
 	parent: Option<EntityKey>,
 	material: Option<MaterialOverrideData>,
 	collider: Option<ColliderData>,
 	mesh_index: Option<usize>,
+	mesh_id: Option<engine_core::asset_catalog::MeshSubassetId>,
 	renderable: bool,
 	component_ids: BTreeMap<String, engine_core::components::ComponentId>,
 	native_behaviors: Vec<engine_core::components::NativeBehaviorComponent>,
@@ -51,6 +53,7 @@ struct SceneEntry {
 	player_controller: Option<Box<engine_core::components::PlayerControllerComponent>>,
 	audio_source: Option<Box<engine_core::components::AudioSourceComponent>>,
 	sky: Option<Box<engine_core::components::SkyComponent>>,
+	light: Option<Box<engine_core::components::LightComponent>>,
 	particle_emitter: Option<engine_core::components::ParticleEmitterComponent>,
 }
 
@@ -59,6 +62,7 @@ impl SceneEntry {
 		self.model_path.as_deref() == Some(entity.model_path.as_str())
 			&& self.asset_id == entity.asset_id
 			&& self.mesh_index == entity.mesh_index
+			&& self.mesh_id == entity.mesh_id
 			&& self.animation == entity.animation
 			&& self.animator == entity.animator
 	}
@@ -78,6 +82,7 @@ impl SceneEntry {
 	}
 
 	fn apply_document_properties(&mut self, entity: &EntityData) {
+		self.active = entity.active;
 		self.material.clone_from(&entity.material);
 		self.collider.clone_from(&entity.collider);
 		self.collision_enabled = entity.collision_enabled;
@@ -95,6 +100,7 @@ impl SceneEntry {
 		self.player_controller.clone_from(&entity.player_controller);
 		self.audio_source.clone_from(&entity.audio_source);
 		self.sky.clone_from(&entity.sky);
+		self.light.clone_from(&entity.light);
 		self.particle_emitter.clone_from(&entity.particle_emitter);
 	}
 }
@@ -139,6 +145,7 @@ pub struct Scene {
 	environment: SceneEnvironment,
 	next_id: u64,
 	lights: Vec<LightData>,
+	light_objects: BTreeSet<EntityId>,
 	camera_follow: Option<FollowCameraSettings>,
 	camera_orbit: Option<OrbitCameraSettings>,
 	default_game_camera: Option<EntityKey>,
@@ -304,6 +311,7 @@ impl Scene {
 						&& entry.material == saved.material
 						&& entry.collider == saved.collider
 						&& entry.mesh_index == saved.mesh_index
+						&& entry.mesh_id == saved.mesh_id
 						&& entry.renderable == saved.renderable
 						&& entry.component_ids == saved.component_ids
 						&& entry.native_behaviors == saved.native_behaviors
@@ -457,6 +465,7 @@ impl Scene {
 			.ok_or("Scene entity IDs exhausted")?;
 		let index = snapshot.index.min(self.entries.len());
 		self.entries.insert(index, entry.clone());
+		self.track_light(entry.id, entry.light.is_some());
 		for (position, entry) in self.entries.iter().enumerate().skip(index) {
 			self.id_indices.insert(entry.id, position);
 		}
@@ -584,12 +593,14 @@ impl Scene {
 			name,
 			model_path,
 			asset_id: None,
+			active: true,
 			collision_enabled: true,
 			instance,
 			parent: None,
 			material: None,
 			collider: None,
 			mesh_index: None,
+			mesh_id: None,
 			renderable: true,
 			component_ids: BTreeMap::new(),
 			native_behaviors: Vec::new(),
@@ -603,6 +614,7 @@ impl Scene {
 			player_controller: None,
 			audio_source: None,
 			sky: None,
+			light: None,
 			particle_emitter: None,
 		});
 		self.authored_children = None;
@@ -629,6 +641,7 @@ impl Scene {
 			return None;
 		}
 		let entry = self.entries.remove(index);
+		self.light_objects.remove(&id);
 		self.authored_children = None;
 		self.id_indices.remove(&id);
 		for (position, entry) in self.entries.iter().enumerate().skip(index) {
@@ -699,6 +712,7 @@ impl Scene {
 			entities.push(EntityData {
 				key: key.clone(),
 				name: entry.name.clone(),
+				active: entry.active,
 				model_path: model_path.clone(),
 				asset_id: entry.asset_id.clone(),
 				collision_enabled: entry.collision_enabled,
@@ -711,6 +725,7 @@ impl Scene {
 				material: entry.material.clone(),
 				collider: entry.collider.clone(),
 				mesh_index: entry.mesh_index,
+				mesh_id: entry.mesh_id.clone(),
 				renderable: entry.renderable,
 				component_ids: entry.component_ids.clone(),
 				native_behaviors: entry.native_behaviors.clone(),
@@ -724,6 +739,7 @@ impl Scene {
 				player_controller: entry.player_controller.clone(),
 				audio_source: entry.audio_source.clone(),
 				sky: entry.sky.clone(),
+				light: entry.light.clone(),
 				particle_emitter: entry.particle_emitter.clone(),
 			});
 		}
@@ -862,6 +878,7 @@ impl Scene {
 		entry.material = source_metadata.material;
 		entry.collider = source_metadata.collider;
 		entry.mesh_index = source_metadata.mesh_index;
+		entry.mesh_id = source_metadata.mesh_id;
 		entry.renderable = source_metadata.renderable;
 		entry.component_ids = source_metadata.component_ids;
 		entry.native_behaviors = source_metadata.native_behaviors;
@@ -884,10 +901,13 @@ impl Scene {
 		entry.player_controller = source_metadata.player_controller;
 		entry.audio_source = source_metadata.audio_source;
 		entry.sky = source_metadata.sky;
+		entry.light = source_metadata.light;
 		entry.particle_emitter = source_metadata.particle_emitter;
 		if let Some(controller) = &mut entry.player_controller {
 			controller.settings.local = false;
 		}
+		let has_light = entry.light.is_some();
+		self.track_light(id, has_light);
 		Ok(id)
 	}
 
@@ -906,7 +926,9 @@ impl Scene {
 			self.organization.root_membership.remove(&data.key);
 		}
 		entry.mesh_index = data.mesh_index;
+		entry.mesh_id.clone_from(&data.mesh_id);
 		entry.apply_document_properties(data);
+		self.track_light(id, data.light.is_some());
 		self.authored_children = None;
 		*self.world_cache.get_mut() = None;
 		Ok(())
@@ -918,7 +940,20 @@ impl Scene {
 			path: entry.model_path.clone()?,
 			asset_id: entry.asset_id.clone(),
 			mesh_index: entry.mesh_index,
+			mesh_id: entry.mesh_id.clone(),
 		})
+	}
+
+	fn track_light(&mut self, id: EntityId, present: bool) {
+		if present {
+			self.light_objects.insert(id);
+		} else {
+			self.light_objects.remove(&id);
+		}
+	}
+
+	pub fn has_light_objects(&self) -> bool {
+		!self.light_objects.is_empty()
 	}
 
 	pub fn lights(&self) -> &[LightData] {

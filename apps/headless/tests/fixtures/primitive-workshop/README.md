@@ -26,4 +26,4 @@ The integration test stages the project with the compiler, then runs the source 
 cargo test --locked --offline -p engine-headless --test primitive_workshop
 ```
 
-[Object authoring roadmap](../../../../../designs/editor-viewport/object-authoring-roadmap-163-202.md#190-build-one-playable-workshop-from-a-blank-project)
+[Object authoring roadmap](../../../../../history/roadmaps/object-authoring-roadmap-163-202.md#190-build-one-playable-workshop-from-a-blank-project)

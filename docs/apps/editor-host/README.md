@@ -28,13 +28,13 @@ M7–M9 add native machine descriptors, Character Controller and Animation compo
 metadata/preview IPC. Preview open captures the applied component's source pin, workspace generation and revision;
 scrub samples a separate immutable pose. It neither advances Play nor edits the document. Stale tokens and invalid
 times reject without replacing the last accepted pose. The renderer consumes the active native preview in Scene
-view; Angular owns clip/time controls. See the [M7–M9 review](../../milestones-7-9-review.md) for the exact boundaries.
+view; Angular owns clip/time controls. See the [asset-loading guide](../../graphics-and-assets.md) for the exact boundaries.
 
 `editor_capabilities` includes the native gameplay-module catalog and module-owned role hints. The Angular selector
-uses this data rather than a hardcoded Courtyard list. `set_collider` continues through the ordinary core command path;
+uses these role descriptors for the active scene. `set_collider` continues through the ordinary core command path;
 collider presence changes use full snapshots and interaction/dimension changes use authoritative entity deltas.
 `collider_visuals.rs` adds cached selected-shape outlines with bounded line/hierarchy work and nonfatal diagnostics;
-continuous cyan blocking outlines and dashed pink sensor outlines remain Scene-only. [Implementation review](../../building-blocks-review.md).
+continuous cyan blocking outlines and dashed pink sensor outlines remain Scene-only.
 
 | Commands                                                                                          | Scope                                                                                |
 |---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
@@ -108,7 +108,7 @@ fingerprint. If the source changes after review, reopen it before applying the o
 incremental and receipt commands reject caller-supplied `InstantiateLinkedPrefab` and `UpdateLinkedPrefab` source
 DTOs. Dedicated host paths validate before applying the source; trusted core Rust callers retain the typed commands.
 See the
-[linked prefab workflow](../../milestones-4-6-review.md#milestone-5-linked-prefab-authoring).
+[linked placement workflow](../../authoring-objects.md#update-a-linked-placement).
 
 ## Guarded project replacement and native dialogs
 
@@ -154,7 +154,6 @@ packaged Editor uses those resources for Export and Open Sample. The default bui
 which offers the optional Admin Dashboard on a fresh interactive install. Pass `-PortableOnly` to produce the Editor
 folder without building the Dashboard. Keep the `release` resource directory alongside the Editor executable.
 Pass `-Offline` to use the local Cargo cache. See the
-[Step 1 walkthrough](../../../designs/editor-viewport/windows-release-step-1.md) for the clean-machine checks.
+[Windows quickstart](../../windows-editor-quickstart.md) for the clean-machine checks.
 
-Read [steps 21–35](../../editor-steps-21-35.md) for examples and learning resources, and [testing](../../testing.md) for
-exact verification. An implemented command path or passing fake-driver test does not itself establish visible child-window/GPU acceptance or installed-player execution.
+Use [Desktop and release acceptance](../../testing.md#desktop-and-release-acceptance) to check the visible child viewport and installed Player.

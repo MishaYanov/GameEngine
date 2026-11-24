@@ -1,4 +1,6 @@
+mod activation;
 mod hierarchy;
+mod lights;
 mod organization;
 pub use crate::collider::{ColliderData, ColliderInteraction};
 pub use crate::components::SceneEnvironment;
@@ -42,6 +44,8 @@ pub struct EntityData {
 	pub asset_id: Option<crate::asset_catalog::AssetId>,
 	pub transform: TransformData,
 	#[serde(default = "default_renderable")]
+	pub active: bool,
+	#[serde(default = "default_renderable")]
 	pub renderable: bool,
 	/// Runtime actions mutate the Play copy; Stop/Restart restores this authored value.
 	#[serde(default = "default_renderable")]
@@ -54,6 +58,8 @@ pub struct EntityData {
 	pub collider: Option<ColliderData>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub mesh_index: Option<usize>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub mesh_id: Option<crate::asset_catalog::MeshSubassetId>,
 	#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
 	pub component_ids: BTreeMap<String, crate::components::ComponentId>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -77,12 +83,14 @@ pub struct EntityData {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub sky: Option<Box<crate::components::SkyComponent>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub light: Option<Box<crate::components::LightComponent>>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub particle_emitter: Option<crate::components::ParticleEmitterComponent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub linked_prefab: Option<crate::linked_prefab::LinkedPrefabInstance>,
 }
 
-fn default_renderable() -> bool {
+pub(crate) fn default_renderable() -> bool {
 	true
 }
 
@@ -95,12 +103,14 @@ impl EntityData {
 			model_path: model_path.into(),
 			asset_id: None,
 			transform: TransformData::default(),
+			active: true,
 			renderable: true,
 			collision_enabled: true,
 			parent: None,
 			material: None,
 			collider: None,
 			mesh_index: None,
+			mesh_id: None,
 			component_ids: BTreeMap::new(),
 			native_behaviors: Vec::new(),
 			scripts: Vec::new(),
@@ -112,6 +122,7 @@ impl EntityData {
 			player_controller: None,
 			audio_source: None,
 			sky: None,
+			light: None,
 			particle_emitter: None,
 			linked_prefab: None,
 		}
@@ -140,6 +151,16 @@ impl EntityData {
 		self.mesh_index = mesh_index;
 		self
 	}
+	pub fn with_mesh_id(mut self, mesh_id: Option<crate::asset_catalog::MeshSubassetId>) -> Self {
+		self.mesh_id = mesh_id;
+		self
+	}
+	pub fn model_reference(&self) -> Result<crate::asset_registry::AssetRef, String> {
+		crate::asset_registry::AssetRef::new(&self.model_path, self.mesh_index)?
+			.with_asset_id(self.asset_id.clone())
+			.with_mesh_id(self.mesh_id.clone())
+			.canonical()
+	}
 	pub fn with_renderable(mut self, renderable: bool) -> Self {
 		self.renderable = renderable;
 		self
@@ -153,6 +174,8 @@ struct EntityProjection {
 	name: String,
 	model_path: String,
 	transform: TransformData,
+	#[serde(default = "default_renderable")]
+	active: bool,
 	#[serde(default)]
 	asset_id: Option<crate::asset_catalog::AssetId>,
 	#[serde(default = "default_renderable")]
@@ -167,6 +190,8 @@ struct EntityProjection {
 	collider: Option<ColliderData>,
 	#[serde(default)]
 	mesh_index: Option<usize>,
+	#[serde(default)]
+	mesh_id: Option<crate::asset_catalog::MeshSubassetId>,
 	#[serde(default)]
 	component_ids: BTreeMap<String, crate::components::ComponentId>,
 	#[serde(default)]
@@ -189,6 +214,8 @@ struct EntityProjection {
 	audio_source: Option<Box<crate::components::AudioSourceComponent>>,
 	#[serde(default)]
 	sky: Option<Box<crate::components::SkyComponent>>,
+	#[serde(default)]
+	light: Option<Box<crate::components::LightComponent>>,
 	#[serde(default)]
 	particle_emitter: Option<crate::components::ParticleEmitterComponent>,
 	#[serde(default)]
@@ -214,12 +241,14 @@ impl TryFrom<EntityProjection> for EntityData {
 			model_path: value.model_path,
 			asset_id: value.asset_id,
 			transform: value.transform,
+			active: value.active,
 			renderable: value.renderable,
 			collision_enabled: value.collision_enabled,
 			parent: value.parent,
 			material: value.material,
 			collider: value.collider,
 			mesh_index: value.mesh_index,
+			mesh_id: value.mesh_id,
 			component_ids: value.component_ids,
 			native_behaviors: value.native_behaviors,
 			scripts: value.scripts,
@@ -231,6 +260,7 @@ impl TryFrom<EntityProjection> for EntityData {
 			player_controller: value.player_controller,
 			audio_source: value.audio_source,
 			sky: value.sky,
+			light: value.light,
 			particle_emitter: value.particle_emitter,
 			linked_prefab: value.linked_prefab,
 		})
@@ -244,6 +274,9 @@ impl Serialize for EntityData {
 		map.serialize_entry("name", &self.name)?;
 		map.serialize_entry("model_path", &self.model_path)?;
 		map.serialize_entry("transform", &self.transform)?;
+		if !self.active {
+			map.serialize_entry("active", &self.active)?;
+		}
 		map.serialize_entry("renderable", &self.renderable)?;
 		map.serialize_entry("collision_enabled", &self.collision_enabled)?;
 		if let Some(value) = &self.asset_id {
@@ -260,6 +293,9 @@ impl Serialize for EntityData {
 		}
 		if let Some(value) = &self.mesh_index {
 			map.serialize_entry("mesh_index", value)?;
+		}
+		if let Some(value) = &self.mesh_id {
+			map.serialize_entry("mesh_id", value)?;
 		}
 		if !self.component_ids.is_empty() {
 			map.serialize_entry("component_ids", &self.component_ids)?;
@@ -291,6 +327,9 @@ impl Serialize for EntityData {
 		if let Some(value) = &self.audio_source {
 			map.serialize_entry("audio_source", value)?;
 		}
+		if let Some(value) = &self.light {
+			map.serialize_entry("light", value)?;
+		}
 		if let Some(value) = &self.sky {
 			map.serialize_entry("sky", value)?;
 		}
@@ -309,6 +348,29 @@ impl Serialize for EntityData {
 #[serde(deny_unknown_fields)]
 pub struct MaterialOverrideData {
 	pub base_color_factor: [f32; 4],
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub source_graph: Option<Box<crate::material_graph::MaterialGraph>>,
+}
+
+impl MaterialOverrideData {
+	pub fn validate(&self) -> Result<(), String> {
+		if !self
+			.base_color_factor
+			.iter()
+			.all(|value| (0.0..=1.0).contains(value))
+		{
+			return Err("Material color must be finite and within 0 to 1".into());
+		}
+		if let Some(graph) = &self.source_graph {
+			let color = graph
+				.compile_base_color()
+				.map_err(|error| error.to_string())?;
+			if color[..3] != self.base_color_factor[..3] {
+				return Err("Material color differs from the compiled Material Graph".into());
+			}
+		}
+		Ok(())
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -470,7 +532,7 @@ impl SceneData {
 				"A scene supports at most {MAX_SCENE_ENTITIES} entities"
 			));
 		}
-		if self.lights.len() > MAX_SCENE_LIGHTS {
+		if self.light_count() > MAX_SCENE_LIGHTS {
 			return Err(format!(
 				"A scene supports at most {MAX_SCENE_LIGHTS} lights"
 			));
@@ -537,12 +599,16 @@ impl SceneData {
 				return Err(format!("{context}: transform values must all be finite"));
 			}
 			if let Some(material) = &entity.material
-				&& !material
-					.base_color_factor
-					.iter()
-					.all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+				&& !entity.has_mesh_component()
 			{
-				return Err(format!("{context}: material color must be within 0..=1"));
+				if material.source_graph.is_some() {
+					return Err(format!(
+						"{context}: a Material Graph requires a Mesh Renderer"
+					));
+				}
+				material
+					.validate()
+					.map_err(|error| format!("{context}: {error}"))?;
 			}
 			if let Some(collider) = &entity.collider {
 				collider

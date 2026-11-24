@@ -1,6 +1,7 @@
-use super::*;
+use super::{root_motion::RootMotionPlan, *};
 use crate::{
-	EntityKey, components::ComponentId, runtime_lifecycle::RuntimeEntityHandle, world::RuntimeWorld,
+	EntityKey, components::ComponentId, runtime_lifecycle::RuntimeEntityHandle,
+	scene_data::EntityData, world::RuntimeWorld,
 };
 use glam::{Quat, Vec3};
 use serde::Serialize;
@@ -23,6 +24,40 @@ pub type PreparedAnimatorBindings = BTreeMap<EntityKey, Arc<PreparedAnimator>>;
 pub struct PreparedAnimator {
 	pub graph: Arc<AnimatorGraph>,
 	pub clips: PreparedAnimatorClips,
+}
+
+impl PreparedAnimator {
+	pub fn validate_root_motion(
+		&self,
+		actor: &EntityData,
+		settings: &AnimatorSettings,
+	) -> Result<(), String> {
+		self.root_motion(actor, settings).map(|_| ())
+	}
+
+	fn root_motion(
+		&self,
+		actor: &EntityData,
+		settings: &AnimatorSettings,
+	) -> Result<Option<RootMotionPlan>, String> {
+		let Some(source_node) = settings.root_motion_source_node else {
+			return Ok(None);
+		};
+		if actor
+			.character_controller
+			.as_ref()
+			.is_none_or(|component| !component.enabled)
+		{
+			return Err(
+				"Animator root motion requires an enabled Character Controller on the same object"
+					.into(),
+			);
+		}
+		let PreparedAnimatorClips::Imported(asset) = &self.clips else {
+			return Err("Animator root motion requires prepared imported clips".into());
+		};
+		RootMotionPlan::prepare(source_node, &self.graph, asset).map(Some)
+	}
 }
 
 pub enum PreparedAnimatorClips {
@@ -79,6 +114,7 @@ struct AnimatorInstance {
 	component_id: ComponentId,
 	prepared: Arc<PreparedAnimator>,
 	machine: AnimatorMachine,
+	root_motion: Option<Arc<RootMotionPlan>>,
 	pose: Pose,
 	fade_start: Option<Pose>,
 }
@@ -229,7 +265,18 @@ impl AnimatorBank {
 				.ok_or("Animator owner has no runtime handle")?
 				.clone();
 			let machine = AnimatorMachine::new(&prepared.graph)?;
-			let pose = sample(world, &owner.key, &prepared, &machine, fixed_hz, 0)?;
+			let root_motion = prepared
+				.root_motion(entity, &component.settings)?
+				.map(Arc::new);
+			let pose = sample(
+				world,
+				&owner.key,
+				&prepared,
+				&machine,
+				root_motion.as_deref(),
+				fixed_hz,
+				0,
+			)?;
 			instances.insert(
 				entity.key.clone(),
 				AnimatorInstance {
@@ -237,6 +284,7 @@ impl AnimatorBank {
 					component_id: component.id.clone(),
 					prepared,
 					machine,
+					root_motion,
 					pose,
 					fade_start: None,
 				},
@@ -359,6 +407,70 @@ impl AnimatorBank {
 			.collect()
 	}
 
+	pub(crate) fn has_root_motion(&self) -> bool {
+		self.instances
+			.values()
+			.any(|instance| instance.root_motion.is_some())
+	}
+
+	/// Advance opted-in machines before the motor using previously committed motion.
+	pub(crate) fn prepare_root_motion(
+		&mut self,
+		input: &AnimatorTick<'_>,
+	) -> Result<BTreeMap<EntityKey, RootMotionDelta>, String> {
+		let mut requested = BTreeMap::new();
+		let no_actions = HashSet::new();
+		if input.fixed_hz == 0 {
+			return Err("Animator root motion fixed rate cannot be zero".into());
+		}
+		for (key, instance) in &mut self.instances {
+			if instance.root_motion.is_none() {
+				continue;
+			}
+			let before_ticks = instance.machine.state_ticks;
+			let transition =
+				instance.advance(&input.for_instance(key, &instance.owner, &no_actions))?;
+			if transition {
+				continue;
+			}
+			let plan = instance
+				.root_motion
+				.as_deref()
+				.expect("checked root motion");
+			let state = &instance.prepared.graph.states[instance.machine.index];
+			let (
+				PreparedAnimatorClips::Imported(asset),
+				AnimationClipRef::Imported { clip_index, .. },
+			) = (&instance.prepared.clips, &state.clip)
+			else {
+				return Err("Animator root motion lost its prepared imported clip".into());
+			};
+			let rate = f64::from(input.fixed_hz);
+			let Some(displacement) = plan.delta(
+				asset,
+				*clip_index,
+				before_ticks as f64 / rate,
+				instance.machine.state_ticks as f64 / rate,
+				state.looping,
+			)?
+			else {
+				continue;
+			};
+			let motor_weight = instance
+				.machine
+				.blend_clock
+				.map_or(1.0, |(age, duration)| f32::from(age) / f32::from(duration));
+			requested.insert(
+				key.clone(),
+				RootMotionDelta {
+					displacement,
+					motor_weight,
+				},
+			);
+		}
+		Ok(requested)
+	}
+
 	pub(crate) fn step(
 		&mut self,
 		world: &RuntimeWorld,
@@ -366,42 +478,32 @@ impl AnimatorBank {
 		revision: u64,
 		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
 	) -> Result<Vec<EntityKey>, String> {
-		let AnimatorTick {
-			motions,
-			jumped,
-			local_player,
-			accepted_actions,
-			cosmetic,
-			fixed_hz,
-			tick,
-		} = input;
 		let no_actions = HashSet::new();
 		let mut changed = BTreeSet::new();
 		for (key, instance) in &mut self.instances {
 			if world.entity_index(key).is_none() {
 				continue;
 			}
-			let local = local_player == Some(key);
-			let input = AnimatorStepInputs {
-				motion: motions
-					.get(key)
-					.filter(|motion| motion.entity == instance.owner),
-				jumped: jumped.contains(key),
-				accepted_actions: if local { accepted_actions } else { &no_actions },
-				cosmetic: local.then_some(cosmetic),
-			};
-			let before_ticks = instance.machine.state_ticks;
-			let transition = instance.machine.advance(&instance.prepared.graph, &input)?;
-			instance.record_marker(world, tick, fixed_hz, before_ticks, transition, onsets);
-			if transition && instance.machine.blend_clock.is_some() {
-				instance.fade_start = Some(instance.pose.clone());
+			if instance.root_motion.is_none() {
+				let before_ticks = instance.machine.state_ticks;
+				let transition =
+					instance.advance(&input.for_instance(key, &instance.owner, &no_actions))?;
+				instance.record_marker(
+					world,
+					input.tick,
+					input.fixed_hz,
+					before_ticks,
+					transition,
+					onsets,
+				);
 			}
 			let mut pose = sample(
 				world,
 				key,
 				&instance.prepared,
 				&instance.machine,
-				fixed_hz,
+				instance.root_motion.as_deref(),
+				input.fixed_hz,
 				revision,
 			)?;
 			if let Some((age, duration)) = instance.machine.blend_clock
@@ -439,7 +541,39 @@ impl AnimatorBank {
 		Ok(changed.into_iter().collect())
 	}
 }
+impl AnimatorTick<'_> {
+	fn for_instance<'a>(
+		&'a self,
+		key: &EntityKey,
+		owner: &RuntimeEntityHandle,
+		no_actions: &'a HashSet<String>,
+	) -> AnimatorStepInputs<'a> {
+		let local = self.local_player == Some(key);
+		AnimatorStepInputs {
+			motion: self
+				.motions
+				.get(key)
+				.filter(|motion| &motion.entity == owner),
+			jumped: self.jumped.contains(key),
+			accepted_actions: if local {
+				self.accepted_actions
+			} else {
+				no_actions
+			},
+			cosmetic: local.then_some(self.cosmetic),
+		}
+	}
+}
+
 impl AnimatorInstance {
+	fn advance(&mut self, input: &AnimatorStepInputs<'_>) -> Result<bool, String> {
+		let transition = self.machine.advance(&self.prepared.graph, input)?;
+		if transition && self.machine.blend_clock.is_some() {
+			self.fade_start = Some(self.pose.clone());
+		}
+		Ok(transition)
+	}
+
 	fn record_marker(
 		&self,
 		world: &RuntimeWorld,
@@ -556,6 +690,7 @@ fn sample(
 	key: &EntityKey,
 	prepared: &PreparedAnimator,
 	machine: &AnimatorMachine,
+	root_motion: Option<&RootMotionPlan>,
 	fixed_hz: u32,
 	revision: u64,
 ) -> Result<Pose, String> {
@@ -571,11 +706,14 @@ fn sample(
 				.ok_or("Animator clip disappeared")?
 				.duration_seconds;
 			let seconds = machine.state_ticks as f64 / f64::from(fixed_hz);
-			let local = sample_local(
+			let mut local = sample_local(
 				asset,
 				*clip_index as usize,
 				clip_time(seconds, duration, state.looping)?,
 			)?;
+			if let Some(plan) = root_motion {
+				plan.remove_pose_translation(&mut local);
+			}
 			let placement = world.world_matrices()[world
 				.entity_index(key)
 				.ok_or("Animator object is missing")?];

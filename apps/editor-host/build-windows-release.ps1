@@ -103,9 +103,9 @@ try
         'authoring-agent-worker.exe' = Join-Path $buildDirectory 'authoring-agent-worker.exe'
         'bundle.json' = Join-Path $root 'agent-profiles/game-development-support/bundle.json'
         'engine-help/editor-workspace.md' = Join-Path $root 'docs/editor-workspace.md'
-        'engine-help/0002-object-composition-and-components.md' = Join-Path $root 'docs/adr/0002-object-composition-and-components.md'
-        'engine-help/0004-authoring-play-and-editor-state.md' = Join-Path $root 'docs/adr/0004-authoring-play-and-editor-state.md'
-        'engine-help/game-creation-workflows.md' = Join-Path $root 'designs/editor-viewport/game-creation-workflows.md'
+        'engine-help/authoring-objects.md' = Join-Path $root 'docs/authoring-objects.md'
+        'engine-help/scene-editing.md' = Join-Path $root 'docs/scene-editing.md'
+        'engine-help/project-lifecycle.md' = Join-Path $root 'docs/project-lifecycle.md'
     }
 
     $sampleManifest = Join-Path $root 'projects\cinder-oath\project.json'

@@ -13,6 +13,7 @@
 			<button type="button" [disabled]="!available()" (click)="refresh()">
 				{{ pending() ? 'Refreshing runtime…' : 'Refresh Runtime' }}
 			</button>
+			<editor-play-transform-review/>
 			@if (error(); as message) {
 				<p role="alert" class="error">{{ message }}</p>
 			}

@@ -49,6 +49,7 @@ export interface ComponentDraft {
 	model_path: string;
 	script: ScriptDraft;
 	mesh_index: string;
+	mesh_id: string;
 	tint: boolean;
 	color: { r: string; g: string; b: string; a: string };
 	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner' | 'state_machine';
@@ -58,6 +59,7 @@ export interface ComponentDraft {
 	animation: AnimationSettings | null;
 	camera: CameraComponentDraft;
 	sky: SkyComponentDraft;
+	light: {kind: 'directional' | 'point'; color: Record<'red' | 'green' | 'blue', string>; intensity: string; range: string};
     particle: Record<ParticleNumberKey | 'r' | 'g' | 'b', string>;
     audioSource: {
         clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus;
@@ -94,6 +96,7 @@ export function componentDraft(
 		model_path: '',
 		script: scriptDraft(),
 		mesh_index: '',
+		mesh_id: '',
 		tint: false,
 		color: { r: '1', g: '1', b: '1', a: '1' },
 		behavior_kind: 'key_door',
@@ -108,6 +111,7 @@ export function componentDraft(
 		animation: null,
 		camera: cameraComponentDraft(),
 		sky: skyComponentDraft(),
+		light: {kind: 'point', color: {red: '1', green: '1', blue: '1'}, intensity: '0.75', range: '10'},
         particle: particleDraft(value?.data.kind === 'particle_emitter' ? value.data.settings : DEFAULT_PARTICLE_EMITTER),
         audioSource: {clipId: '', gain: '1', loop: false, playback: 'on_scene_enter', bus: 'effects',
             spatial: 'two_d', near: '1', far: '20', eventKind: 'none', signal: 'activated',
@@ -131,6 +135,7 @@ export function componentDraft(
 	if (value.data.kind === 'mesh_renderer') {
 		draft.model_path = value.data.model_path;
 		draft.mesh_index = value.data.mesh_index == null ? '' : String(value.data.mesh_index);
+		draft.mesh_id = value.data.mesh_id ?? '';
 		draft.tint = !!value.data.material;
 		const color = value.data.material?.base_color_factor ?? [1, 1, 1, 1];
 		draft.color = {
@@ -168,6 +173,9 @@ export function componentDraft(
             eventMarker: event?.kind === 'animation_marker' ? event.marker : '', replacesCue: replaces_cue ?? ''};
 	} else if (value.data.kind === 'camera') {
 		draft.camera = cameraComponentDraft(value.data.settings);
+    } else if (value.data.kind === 'light') {
+        const {kind, color: [r, g, b], intensity, range} = value.data.settings;
+        draft.light = {kind, color: {red: String(r), green: String(g), blue: String(b)}, intensity: String(intensity), range: String(range)};
 	} else if (value.data.kind === 'sky') {
 		draft.sky = skyComponentDraft(value.data.settings);
     } else if (value.data.kind === 'interactable') {
@@ -262,6 +270,18 @@ function finite(value: string, label: string, min: number, max: number): number 
 	return number;
 }
 
+export function selectedModelAsset(
+	models: readonly ModelAsset[],
+	path: string,
+	previous?: ComponentRecord,
+): ModelAsset | undefined {
+	const existing = previous?.data;
+	const retainedId = existing?.kind === 'mesh_renderer' && existing.model_path === path
+		? existing.asset_id : null;
+	return models.find(model => (!model.kind || model.kind === 'model') &&
+		(retainedId ? model.asset_id === retainedId : model.path === path));
+}
+
 export function componentFromDraft(
 	draft: ComponentDraft,
 	collider: Collider,
@@ -283,6 +303,15 @@ export function componentFromDraft(
         data = {kind: 'script', settings: scriptSettings(draft.script, scriptTypes, targets, previous, scriptSlots)};
     } else if (draft.kind === 'particle_emitter') {
         data = {kind: 'particle_emitter', settings: particleSettings(draft.particle)};
+    } else if (draft.kind === 'light') {
+        const {kind, color: {red, green, blue}, intensity, range: rangeText} = draft.light;
+        const parsedRange = parseF32(rangeText);
+        const range = parsedRange != null && parsedRange > 0 ? parsedRange : null;
+        if (kind === 'point' && range == null) throw new Error('Light range must be positive.');
+        data = {kind: 'light', settings: {
+            kind, color: [finite(red, 'Red', 0, 1), finite(green, 'Green', 0, 1), finite(blue, 'Blue', 0, 1)],
+            intensity: finite(intensity, 'Intensity', 0, 1_000_000), range: range ?? 10,
+        }};
     } else if (draft.kind === 'sky') {
 		data = {kind: 'sky', settings: skyComponentFromDraft(draft.sky)};
 	} else if (draft.kind === 'audio_source') {
@@ -308,7 +337,12 @@ export function componentFromDraft(
     } else if (draft.kind === 'mesh_renderer') {
 		if (!relativeAssetPath(draft.model_path) || draft.model_path === '__no_mesh__')
 			throw new Error('Choose an asset-relative model path.');
-		const color: Vec4 = draft.tint
+		const sourceMaterial = original?.data.kind === 'mesh_renderer' && original.data.material?.source_graph
+			? original.data.material : null;
+		const color: Vec4 = sourceMaterial
+			? [sourceMaterial.base_color_factor[0], sourceMaterial.base_color_factor[1],
+				sourceMaterial.base_color_factor[2], finite(draft.color.a, 'Material A', 0, 1)]
+			: draft.tint
 			? [
 					finite(draft.color.r, 'Material R', 0, 1),
 					finite(draft.color.g, 'Material G', 0, 1),
@@ -316,22 +350,25 @@ export function componentFromDraft(
 					finite(draft.color.a, 'Material A', 0, 1),
 				]
 			: [1, 1, 1, 1];
-		const previous =
-			original?.data.kind === 'mesh_renderer' && original.data.model_path === draft.model_path
-				? original.data.asset_id
-				: null;
+		const previous = original?.data.kind === 'mesh_renderer' && original.data.model_path === draft.model_path
+			? original.data : undefined;
+		const model = selectedModelAsset(models, draft.model_path, original);
+		const mesh = model?.meshes?.find(candidate => candidate.id === draft.mesh_id);
+		const assetId = model?.asset_id ?? previous?.asset_id ?? null;
+		if (draft.mesh_id && (!assetId || (!mesh && draft.mesh_id !== previous?.mesh_id)))
+			throw new Error('Choose a mesh from the selected model.');
 		data = {
 			kind: 'mesh_renderer',
 			model_path: draft.model_path,
-			asset_id:
-				models.find((model) => (!model.kind || model.kind === 'model') && model.path === draft.model_path)
-					?.asset_id ??
-				previous ??
-				null,
-			mesh_index: draft.mesh_index.trim()
+			asset_id: assetId,
+			mesh_index: mesh?.index ?? (draft.mesh_index.trim()
 				? uint(draft.mesh_index, 'Mesh index', 0, 1_000_000)
-				: null,
-			material: draft.tint ? { base_color_factor: color } : null,
+				: null),
+			...(draft.mesh_id ? {mesh_id: draft.mesh_id} : {}),
+			material: sourceMaterial ? {
+				base_color_factor: color,
+				source_graph: sourceMaterial.source_graph,
+			} : draft.tint ? {base_color_factor: color} : null,
 		};
 	} else if (draft.kind === 'collider') data = { kind: 'collider', collider };
 	else if (draft.kind === 'character_controller') {

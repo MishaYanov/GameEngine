@@ -26,7 +26,7 @@ import {
 	type ColliderInteractionChange,
 	type ColliderKind,
 } from '../collider/collider';
-import { componentDraft, componentFromDraft, type ComponentTarget } from './component-draft';
+import { componentDraft, componentFromDraft, selectedModelAsset, type ComponentTarget } from './component-draft';
 import type {ScriptDescriptor, ScriptField, ScriptReferenceField} from '../../../../core/editor/object-scripts.models';
 import {scriptDraft, servesScriptReference} from './script-component-draft';
 import { MachineEditor } from './machine-editor';
@@ -119,6 +119,10 @@ export class ComponentEditor {
 	protected readonly original = signal<ComponentRecord | undefined>(undefined);
 	protected readonly axes = ['x', 'y', 'z'] as const;
 	protected readonly colors = ['r', 'g', 'b', 'a'] as const;
+	protected readonly draftUsesMaterialGraph = computed(() => {
+		const material = this.original()?.data;
+		return material?.kind === 'mesh_renderer' && !!material.material?.source_graph;
+	});
 	protected readonly controllerFields = CONTROLLER_FIELDS;
 	protected readonly previewSourceMatches = computed(() => {
 		const original = this.original();
@@ -150,6 +154,10 @@ export class ComponentEditor {
     protected readonly meshModelOptions = computed(() => this.meshModels().map(model => ({
         id: model.path, label: model.name, description: model.path,
     })));
+    protected readonly modelMeshOptions = computed(() =>
+        selectedModelAsset(this.meshModels(), this.draft().model_path, this.original())?.meshes ?? []);
+    protected readonly meshSelectionUnavailable = computed(() =>
+        !!this.draft().mesh_id && !this.modelMeshOptions().some(mesh => mesh.id === this.draft().mesh_id));
 	protected readonly available = computed(() => this.editable() && !this.pending());
     protected readonly choices = computed(() => addComponentCatalog(
         this.types(), this.components(), kind => this.pinned(kind), this.specialistAttachments(),
@@ -293,6 +301,7 @@ export class ComponentEditor {
 		if (component.data.kind === 'audio_source') return 'Audio Source';
 		if (component.data.kind === 'camera') return 'Camera';
 		if (component.data.kind === 'sky') return 'Sky';
+        if (component.data.kind === 'light') return 'Light';
         if (component.data.kind === 'particle_emitter') return 'Particle Emitter';
 		if (component.data.kind === 'player_controller') return 'Player Controller';
         if (component.data.kind === 'script') {
@@ -338,7 +347,16 @@ export class ComponentEditor {
     protected chooseMeshModel(path: string): void {
         if (!this.available() || !this.open() || this.draft().kind !== 'mesh_renderer' ||
             !this.meshModels().some(model => model.path === path) || path === this.draft().model_path) return;
-        this.draft.update(value => ({...value, model_path: path, mesh_index: ''}));
+        this.draft.update(value => ({...value, model_path: path, mesh_index: '', mesh_id: ''}));
+    }
+
+    protected chooseMeshIdentity(id: string): void {
+        if (!this.available() || !this.open() || this.draft().kind !== 'mesh_renderer') return;
+        const mesh = this.modelMeshOptions().find(candidate => candidate.id === id);
+        if (id && !mesh) return;
+        this.draft.update(value => ({
+            ...value, mesh_id: id, mesh_index: mesh ? String(mesh.index) : value.mesh_index,
+        }));
     }
 
     protected scriptAssignment(id: string): string {

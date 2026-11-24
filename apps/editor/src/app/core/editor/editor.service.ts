@@ -5,7 +5,7 @@ import {
     type ControlGraphProbe, readControlGraphCatalog, readControlGraphDocument, readControlGraphProbe,
 } from './controls-graph.models';
 import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
-import {invoke, isTauri} from '@tauri-apps/api/core';
+import {EDITOR_TRANSPORT} from './editor-transport';
 import type {UnlistenFn} from '@tauri-apps/api/event';
 import {
     type AnimatorActorValidation, type AnimatorAsset, type AnimatorAssetCapture, type AnimatorDocument, type AnimatorGraph,
@@ -17,6 +17,7 @@ import {
     readInputActionsAsset, readInputActionsCatalog, readInputActionsDocument,
 } from '../game-input/input-actions.models';
 import {applyEditorUpdate} from './editor-updates';
+import {editorReceiptCursor, readEditorChangePage} from './editor-change-feed';
 import {ViewportAttachment} from './viewport/viewport-attachment';
 import {validGameplayModules} from './gameplay-modules';
 import {validScriptDescriptors} from './object-scripts.models';
@@ -72,6 +73,7 @@ import type {
     EntityKey,
     ModelAsset,
     Prefab,
+    PlayTransformReviewDto,
     ProjectBuildPreparation,
     ProjectBuildResult,
     SceneId,
@@ -96,10 +98,31 @@ export interface WorkspaceAssetScope {
 }
 export type InputActionsScope = WorkspaceAssetScope;
 
+export interface EditorCommandOutcome {
+    readonly id: number;
+    readonly command: EditorCommand['type'];
+    readonly workspaceGeneration: number;
+    readonly expectedRevision: number | null;
+    readonly acceptedRevision: number | null;
+    readonly outcome: 'accepted' | 'rejected';
+}
+
+const COMMAND_OUTCOME_LIMIT = 64;
+
 /** One authoritative document queue. UI drafts and input bindings stay in their owners. */
 @Service()
 export class EditorService {
-    readonly nativeAvailable = typeof window !== 'undefined' && isTauri();
+    private readonly transport = inject(EDITOR_TRANSPORT);
+    readonly nativeAvailable = this.transport.available;
+    private readonly commandOutcomeState = signal<readonly EditorCommandOutcome[]>([]);
+    readonly commandOutcomes = this.commandOutcomeState.asReadonly();
+    private nextCommandId = 0;
+    private changesCursor = 0;
+    private changesGeneration = 0;
+    private resumePending: Promise<EditorSnapshot> | null = null;
+    private deferredChangeWake: {generation: number; cursor: number} | null = null;
+    private stopWatchingChanges: (() => void) | null = null;
+    private startingChangeWatch = false;
     private readonly destroyRef = inject(DestroyRef);
     private readonly snapshotState = signal<EditorSnapshot | null>(null);
     readonly snapshot = this.snapshotState.asReadonly();
@@ -124,7 +147,7 @@ export class EditorService {
         sample: async (token, nextSample, intent) => readCameraPreview(
             await this.native<unknown>('editor_camera_preview_sample', {token, nextSample, intent})),
         // An in-flight Open can finish during service teardown; its token still needs to be closed.
-        close: token => invoke<void>('editor_camera_preview_close', {token}),
+        close: token => this.transport.invoke<void>('editor_camera_preview_close', {token}),
     });
     private readonly viewportAttachment = new ViewportAttachment({
         nativeAvailable: this.nativeAvailable,
@@ -147,6 +170,7 @@ export class EditorService {
     constructor() {
         this.destroyRef.onDestroy(() => {
             this.cameraPreview.close();
+            this.stopWatchingChanges?.();
             this.destroyed = true;
             this.viewportAttachment.destroy();
         });
@@ -182,6 +206,7 @@ export class EditorService {
                     throw new EditorClientError('backend', 'editor_capabilities', 'The native state-machine definition is incompatible with this frontend.');
                 }
                 this.capabilitiesState.set(capabilities);
+                this.watchChanges();
                 return capabilities;
             })
             .catch((cause: unknown) => {
@@ -346,27 +371,101 @@ export class EditorService {
         );
     }
 
+    resumeChanges(): Promise<EditorSnapshot> {
+        if (this.resumePending) return this.resumePending;
+        const generation = this.workspaceGeneration();
+        const result = this.enqueue('editor_changes', async () => {
+            const previous = this.snapshotState();
+            if (!previous) throw new Error('Open a project before catching up on changes.');
+            const after = this.changesGeneration === generation ? this.changesCursor : 0;
+            try {
+                const page = readEditorChangePage(await this.native<unknown>('editor_changes', {cursor: after}), after);
+                this.requireGeneration(generation);
+                const snapshot = this.snapshotState() ?? previous;
+                const reachedRevision = page.revisions.reduce((latest, revision) => Math.max(latest, revision), snapshot.revision);
+                let accepted = snapshot;
+                if (page.resyncRequired || reachedRevision > snapshot.revision) {
+                    const current = await this.native<EditorSnapshot>('editor_snapshot');
+                    this.requireGeneration(generation);
+                    accepted = this.accept(current);
+                }
+                this.changesGeneration = generation;
+                this.changesCursor = page.cursor;
+                return accepted;
+            } catch (cause) {
+                this.requireGeneration(generation);
+                this.changesGeneration = generation;
+                this.changesCursor = 0;
+                try {
+                    const current = await this.native<EditorSnapshot>('editor_snapshot');
+                    this.requireGeneration(generation);
+                    return this.accept(current);
+                } catch {
+                    throw cause;
+                }
+            }
+        }, false, generation);
+        this.resumePending = result;
+        const complete = () => {
+            if (this.resumePending !== result) return;
+            this.resumePending = null;
+            const wake = this.deferredChangeWake;
+            this.deferredChangeWake = null;
+            if (wake && wake.generation === this.workspaceGeneration() && wake.cursor > this.changesCursor &&
+                !this.destroyed && this.snapshotState()) {
+                void this.resumeChanges().catch(() => undefined);
+            }
+        };
+        void result.then(complete, complete);
+        return result;
+    }
+
+    private watchChanges(): void {
+        if (!this.transport.onChangeReady || !this.capabilities()?.resumable_changes ||
+            this.startingChangeWatch || this.stopWatchingChanges || this.destroyed) return;
+        this.startingChangeWatch = true;
+        void this.transport.onChangeReady(cursor => {
+            if (this.destroyed || !this.snapshot() || !Number.isSafeInteger(cursor) || cursor < 0) return;
+            if (this.changesGeneration === this.workspaceGeneration() && cursor <= this.changesCursor) return;
+            if (this.resumePending) {
+                const generation = this.workspaceGeneration();
+                const deferred = this.deferredChangeWake;
+                if (deferred?.generation !== generation || cursor > deferred.cursor) this.deferredChangeWake = {generation, cursor};
+                return;
+            }
+            void this.resumeChanges().catch(() => undefined);
+        }).then(unsubscribe => {
+            if (this.destroyed) {
+                unsubscribe();
+                return;
+            }
+            this.stopWatchingChanges = unsubscribe;
+            if (this.snapshot()) void this.resumeChanges().catch(() => undefined);
+        }).catch(() => undefined).finally(() => {
+            this.startingChangeWatch = false;
+        });
+    }
+
     execute(
         command: EditorCommand,
         expectedGeneration?: number,
         expectedRevision?: number,
     ): Promise<EditorSnapshot> {
-        return this.enqueue(
+        const id = ++this.nextCommandId;
+        const workspaceGeneration = expectedGeneration ?? this.workspaceGeneration();
+        let sentRevision = expectedRevision ?? null;
+        const requestOutcome = this.enqueue(
             'editor_execute_incremental',
             async () => {
-                if (
-                    expectedGeneration !== undefined &&
-                    expectedGeneration !== this.workspaceGeneration()
-                ) {
-                    throw new Error(
-                        'The workspace changed. Select the gameplay setting again.'
-                    );
+                if (workspaceGeneration !== this.workspaceGeneration()) {
+                    throw new Error('The workspace changed. Select the object or action again.');
                 }
 
                 const request: EditorCommandRequest = {
                     expected_revision: expectedRevision ?? this.revision(),
                     command,
                 };
+                sentRevision = request.expected_revision;
                 const capabilities = await this.loadCapabilities();
                 if (!capabilities.incremental_commands) {
                     try {
@@ -377,11 +476,33 @@ export class EditorService {
                 }
                 const previous = this.snapshotState()!;
                 const update = await this.native<unknown>('editor_execute_incremental', {request});
-                return this.accept(applyEditorUpdate(previous, update));
+                const snapshot = applyEditorUpdate(previous, update);
+                const cursor = editorReceiptCursor(update);
+                if (cursor !== null) {
+                    this.changesGeneration = this.workspaceGeneration();
+                    this.changesCursor = cursor;
+                }
+                return this.accept(snapshot);
             },
             true,
-            expectedGeneration,
+            workspaceGeneration,
         );
+        const record = (outcome: EditorCommandOutcome['outcome'], acceptedRevision: number | null) => {
+            this.commandOutcomeState.update(previous => [...previous.slice(-(COMMAND_OUTCOME_LIMIT - 1)), {
+                id, command: command.type, workspaceGeneration, expectedRevision: sentRevision, acceptedRevision, outcome,
+            }]);
+        };
+        return requestOutcome.then(snapshot => {
+            record('accepted', snapshot.revision);
+            return snapshot;
+        }, cause => {
+            record('rejected', null);
+            throw cause;
+        });
+    }
+
+    reviewPlayTransforms(expectedGeneration: number, expectedRevision: number): Promise<PlayTransformReviewDto> {
+        return this.native<PlayTransformReviewDto>('editor_review_play_transforms', {expectedGeneration, expectedRevision});
     }
 
     save(expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
@@ -1158,6 +1279,7 @@ export class EditorService {
 
     private accept(snapshot: EditorSnapshot): EditorSnapshot {
         this.snapshotState.set(snapshot);
+        this.watchChanges();
         this.collisionsState.set(null);
         return snapshot;
     }
@@ -1219,7 +1341,7 @@ export class EditorService {
         } catch (cause: unknown) {
             return Promise.reject(cause);
         }
-        return invoke<T>(operation, args);
+        return this.transport.invoke<T>(operation, args);
     }
 
     private assertNative(operation: string): void {

@@ -349,6 +349,31 @@ impl RuntimeLifecycle {
 			.map(|timer| timer.target.clone())
 			.collect()
 	}
+	pub(crate) fn validate_reparent(
+		&self,
+		target: &RuntimeEntityHandle,
+		parent: Option<&RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		self.validate_handle(target)?;
+		if let Some(parent) = parent {
+			self.validate_handle(parent)?;
+			let owner = self.instance_for(&parent.key);
+			if owner.is_some() && owner != self.instance_for(&target.key) {
+				return Err("Runtime parent must share the child's spawned lifetime".into());
+			}
+		}
+		Ok(())
+	}
+
+	pub(crate) fn advance_topology(&mut self) -> Result<(), String> {
+		self.topology_revision = self
+			.topology_revision
+			.checked_add(1)
+			.filter(|value| *value <= MAX_COUNTER)
+			.ok_or("Runtime topology counter exhausted")?;
+		Ok(())
+	}
+
 	pub fn removal(&self, handle: &RuntimeEntityHandle) -> Result<HashSet<EntityKey>, String> {
 		self.validate_handle(handle)?;
 		let id = self
@@ -373,11 +398,7 @@ impl RuntimeLifecycle {
 		Ok(keys)
 	}
 	pub fn removed(&mut self, keys: &HashSet<EntityKey>) -> Result<(), String> {
-		self.topology_revision = self
-			.topology_revision
-			.checked_add(1)
-			.filter(|value| *value <= MAX_COUNTER)
-			.ok_or("Runtime topology counter exhausted")?;
+		self.advance_topology()?;
 		Arc::make_mut(&mut self.generations).retain(|key, _| !keys.contains(key));
 		let removed: BTreeSet<_> = keys
 			.iter()

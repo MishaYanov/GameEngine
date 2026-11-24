@@ -14,7 +14,7 @@
 5. Stop Play, set the Player–Trigger cell to Ignore and apply the change. Play again and walk into the first sensor.
    The door stays closed. Undo the matrix edit to restore the interaction.
 
-**Resources.** See the [authoring roadmap](../../../../../designs/editor-viewport/authoring-roadmap-134-153.md) for
+**Resources.** See the [authoring roadmap](../../../../../history/roadmaps/authoring-roadmap-134-153.md) for
 the input conditions, script registration and collision rules. The test below provides a repeatable route.
 
 ## Automated checks

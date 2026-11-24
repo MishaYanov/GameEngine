@@ -67,17 +67,30 @@ test('spaces separate existing developer documentation from the empty game app s
   landing.window.close();developer.window.close();game.window.close();
 });
 
-test('milestone review publishes its linked verification JSON unchanged', async () => {
-  const route = 'docs/milestones-4-6-review.html';
-  const dom = new JSDOM(await readFile(new URL('./dist/' + route, import.meta.url), 'utf8'));
-  try {
-    const link = dom.window.document.querySelector('a[href$="milestones-4-6-tests-2026-11-20.json"]');
-    assert.ok(link);
-    const published = new URL(link.getAttribute('href'), new URL('./dist/' + route, import.meta.url));
-    const actual = await readFile(published, 'utf8');
-    assert.equal(actual, await readFile(new URL('../docs/verification/milestones-4-6-tests-2026-11-20.json', import.meta.url), 'utf8'));
-    assert.match(JSON.parse(actual).inspected_head, /^[0-9a-f]{40}$/);
-  } finally {dom.window.close();}
+test('publishes teaching guides and keeps project history out of pages, links and search', async () => {
+  const routes = search.map(entry => entry.route);
+  assert.ok(routes.includes('docs/authoring-objects.html'));
+  assert.ok(routes.includes('docs/editor-flow.html'));
+  assert.ok(routes.every(route => !/(?:^|\/)(?:adr|verification|history|designs)(?:\/|$)/.test(route)));
+  for (const entry of search) {
+    assert.doesNotMatch(entry.title, /\b(?:milestones?|ADR-\d+|roadmap|handoff)\b/i);
+    assert.doesNotMatch(entry.text, /\b(?:milestones?|ADR[- ]\d{4})\b/i, entry.route);
+    const html = await readFile(new URL('./dist/' + entry.route, import.meta.url), 'utf8');
+    const dom = new JSDOM(html);
+    try {
+      for (const link of dom.window.document.querySelectorAll('a[href]')) {
+        assert.doesNotMatch(link.getAttribute('href'), /(?:^|\/)(?:adr|verification|history|designs)(?:\/|$)/);
+      }
+    } finally { dom.window.close(); }
+  }
+  for (const route of ['docs/adr/README.html', 'docs/milestones-4-6-review.html',
+    'designs/editor-viewport/adr-implementation-203-222.html', 'history/README.html',
+    'docs/verification/milestone-10-camera-route.json', 'history/verification/milestone-10-camera-route.json']) {
+    await assert.rejects(readFile(new URL('./dist/' + route, import.meta.url)), {code: 'ENOENT'});
+  }
+  assert.match(await readFile(new URL('../history/adr/README.md', import.meta.url), 'utf8'), /Decision register/);
+  assert.match(await readFile(new URL('../history/roadmaps/adr-implementation-203-222.md', import.meta.url), 'utf8'),
+    /Milestones 203–222/);
 });
 
 test('Mermaid fences publish local diagrams with complete source fallback and valid syntax', async () => {

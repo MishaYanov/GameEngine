@@ -201,6 +201,7 @@ fn material_collider_and_light_changes_are_validated_and_undoable() {
 			key: "a".into(),
 			material: Some(runtime::scene_data::MaterialOverrideData {
 				base_color_factor: [0.2, 0.3, 0.4, 1.0],
+				source_graph: None,
 			}),
 		},
 	);
@@ -228,6 +229,7 @@ fn material_collider_and_light_changes_are_validated_and_undoable() {
 			key: "a".into(),
 			material: Some(runtime::scene_data::MaterialOverrideData {
 				base_color_factor: [2.0, 0.0, 0.0, 1.0],
+				source_graph: None,
 			}),
 		},
 	);

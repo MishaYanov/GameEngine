@@ -1,22 +1,22 @@
 # Scene data, save, and reload
 
 Scene documents are owned by engine-core and exposed through runtime adapters. Current authoring retains multiple drafts
-under project schema 3, while scene saves use schema 5. Read [project lifecycle](project-lifecycle.md) for scene IDs,
+under project schema 3, while scene saves use schema 8. Read [project lifecycle](project-lifecycle.md) for scene IDs,
 project opening, per-scene dirty state, Save As, register, reload policies and catalog-wide build checks. Native visual
 acceptance remains separate.
 
-## Schema version 5 and persistent identity
+## Scene schema and persistent identity
 
-Current saves use version **5**, retaining entity keys/bindings/transforms/camera, optional parent keys and scene
+Current saves use version **8**, retaining entity keys/bindings/transforms/camera, optional parent keys and scene
 lights.
-Version 5 adds the optional `camera.orbit` definition. Its target is a persistent entity key. The arm's authored
+The scene format supports an optional `camera.orbit` definition. Its target is a persistent entity key. The arm's authored
 distance limits, pivot offset, response times, probe radius and obstruction mask survive save/reopen. Play keeps
 the changing eye position, current blocker and recovery progress in runtime state. A camera can use fixed, follow
 or orbit behavior. [Orbit camera obstruction](timing-input-camera.md#orbit-camera-obstruction).
 
 **Game Camera…** edits one complete definition. Preview samples live in an edit-only native session. Apply uses the
 existing scene revision and undo history, and Save All persists the accepted
-defaults. [Camera-room walkthrough](milestone-10-camera-review.md)
+defaults. [Camera setup](timing-input-camera.md#orbit-camera-obstruction).
 
 Objects store typed component arrays for mesh rendering, material overrides, colliders and native behaviors. Existing
 flat internal adapters and computed transport views preserve the runtime/editor boundary.
@@ -29,9 +29,9 @@ default settings serialize omitted. Both filters must match for detection, and s
 These remain authored component fields, participate in ordinary undo/save/reopen and are separate from editor-only
 outline visibility. Sensor edges drive the implemented trigger lifecycle. [Collider reference](scene-editing.md#colliders-and-interaction-settings).
 
-Versions 1–4 migrate in memory to v5. V1 receives deterministic legacy keys, V2 preserves keys and bindings, and
-V1/V2 receive legacy lighting. Older scene versions keep their supported fixed/follow behavior. Declaring
-`camera.orbit` requires version 5. Reading leaves the existing file in place. The next save writes v5.
+Supported legacy scenes migrate in memory. Version 1 receives deterministic legacy keys. Version 2 preserves
+keys and bindings. Both receive legacy lighting defaults. Loading leaves the existing file in place, and the next
+save writes the current scene schema.
 
 Validation rejects malformed identities/paths, duplicates, missing/cyclic parents, invalid world transforms, non-finite
 values, projection errors, and invalid materials/colliders/lights. The ceiling is 32 MiB scene JSON, 100,000 entities
@@ -45,12 +45,11 @@ commands. It provides multi-key selection, grouped transactions and bounded patc
 Save/reload reject an active transaction; commit/cancel is explicit. Authored content is separate from the temporary
 Play copy and saving never implicitly adopts simulated changes.
 
-Canonical prefab files use schema 3, migrating legacy versions 1/2. They retain bounded entity subtrees, typed
+Canonical Prop files use schema 4 and accept older supported prefab documents. They retain bounded entity subtrees, typed
 components, optional legacy gameplay data and explicit external reference slots. Copy export detaches external
 roots; copy instantiation creates new keys and remaps parents as one edit. Linked instances separately retain a
 source identity/version and typed overrides with explicit update/revert/unpack. See the
-[current prefab workflow](milestones-4-6-review.md#milestone-5-linked-prefab-authoring); the
-[steps 21–35](editor-steps-21-35.md) remain the historical introduction.
+[linked Prop workflow](authoring-objects.md#reuse-a-group-as-a-prop).
 
 Native SceneEditor delegates authored edits/history to the core session. Scene/EntityId and GPU snapshots remain
 resource adapters; transient IDs are not persistent scene/entity identities.
@@ -89,4 +88,6 @@ cargo check -p game --all-targets --offline --locked
 cargo run -p game --example scene_io_smoke --offline --locked
 ```
 
-Schema tests, filesystem save/replacement tests, game selection tests, and app error/command tests cover focused behavior. The new native `scene_io_smoke` example uses a hidden GPU window and temporary scene files. It is separate from `renderer_smoke` and is not automatically added to the current `test_all.py --native` list. Native save/reload, visible controls, generated output, and installed execution require their own results. Earlier renderer extraction checks do not certify this new feature.
+The native test runner includes `scene_io_smoke`. It opens a hidden Vulkan window and exercises saving and
+reopening temporary scene files. Follow [desktop acceptance](testing.md#desktop-and-release-acceptance) to
+verify visible editing and installed package execution.

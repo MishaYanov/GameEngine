@@ -81,7 +81,9 @@ impl WorldChange {
 			environment_changed: before.environment != after.environment,
 			..Self::default()
 		};
+		let mut has_object_lights = false;
 		for entity in &after.entities {
+			has_object_lights |= entity.light.is_some();
 			if old.get(&entity.key).is_none_or(|old| **old != *entity) {
 				change.push_key(&entity.key, false);
 			}
@@ -89,16 +91,22 @@ impl WorldChange {
 				old.parent != entity.parent
 					|| old.model_path != entity.model_path
 					|| old.mesh_index != entity.mesh_index
+					|| old.mesh_id != entity.mesh_id
 					|| old.renderable != entity.renderable
 					|| old.collider.is_some() != entity.collider.is_some()
 			});
 		}
 		for entity in &before.entities {
+			has_object_lights |= entity.light.is_some();
 			if !new.contains_key(&entity.key) {
 				change.push_key(&entity.key, true);
 				change.topology_changed = true;
 			}
 		}
+		change.lights_changed |= has_object_lights
+			&& (change.full_resync
+				|| !change.changed_entities.is_empty()
+				|| !change.removed_entities.is_empty());
 		change
 	}
 	fn push_key(&mut self, key: &EntityKey, removed: bool) {

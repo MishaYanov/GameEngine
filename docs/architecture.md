@@ -1,22 +1,16 @@
 # Workspace architecture
 
-The intended product is one Angular editor with controls and a game pane. engine-core owns CPU editing/game logic,
-runtime supplies GPU adapters, bridge re-exports transport contracts, and Tauri supplies project/native ownership. The current workspace connects a subset of editor actions; read [usage](usage.md) and [editor workspace](editor-workspace.md) for present wiring and limits. Earlier step reports retain their milestone context.
+The Angular Editor handles authoring controls and presentation. The Tauri host owns the open project and the
+native child viewport. Engine Core owns authored documents, validation, command history and fixed-step simulation.
+Runtime connects those CPU systems to assets, graphics and windowed apps.
 
-Current project schema 3 and editor protocol 2 support retained multi-scene authoring and reusable behavior settings.
-GameSession adds explicit prepared replacement of a running simulation and game-owned in-memory progress across scene
-changes. It does not retain outgoing simulation worlds or write progress save files.
-See [project lifecycle](project-lifecycle.md) for the current contract; earlier step reports describe historical
-milestones.
+Each project can retain several scene drafts. Entering Play creates a simulation from the active draft. Authored
+scene data stays available during Play, and opening another project establishes a new workspace generation.
+The Player and headless runner use the same simulation code. The headless runner can validate a project and
+replay inputs without a window or GPU.
 
-For a method-level walkthrough with diagrams, read [Editor flow: startup to project builds](editor-flow.md).
-It distinguishes the current setup UI, the partially connected editor workspace, available native APIs, and admin Cargo rebuild jobs.
-
-Current Angular workspace wiring includes guarded project creation/opening, Scene/Game views, Hierarchy and Inspector
-editing, module/role/input configuration, scene/model placement, Save All and staged export/retry/run controls.
-The Collider Inspector authors shapes, sensors and symmetric collision filters through the existing command path.
-See the [workspace guide](editor-workspace.md) and [five building-blocks review](building-blocks-review.md) for the
-combined committed and current working-tree scope; broader component/script editors remain future work.
+[Editor command flow](editor-flow.md) follows requests through these layers. [Project lifecycle](project-lifecycle.md)
+describes the project, scene and editor protocol versions.
 
 ## Projects and boundaries
 
@@ -26,7 +20,7 @@ combined committed and current working-tree scope; broader component/script edit
 | apps/editor-host/src-tauri | Project CPU workspace, async IPC, on-demand Windows child viewport                                                           | [Host](apps/editor-host/README.md)        |
 | crates/bridge              | Editor/engine DTOs, capabilities, input-independent command contracts                                                        | [Bridge](crates/bridge/README.md)         |
 | crates/engine-core         | CPU coordinator, commands/history, project/scene documents, shared simulation, world/collision caches and bounded asset jobs | [Project lifecycle](project-lifecycle.md) |
-| apps/headless              | CPU-only project/scene execution and bounded replay                                                                          | [Backend handoff](project3-handoff.md)    |
+| apps/headless              | CPU-only project/scene execution and bounded replay                                                                          | [Testing and replay](testing.md#headless-replay)    |
 | crates/runtime             | Core re-exports, GPU scene synchronization, asset import/cache, native SceneEditor adapter and GraphicsProbe                 | [Runtime](crates/runtime/README.md)       |
 | crates/renderer            | WindowRenderer, lights, actual GPU queries, batching/instancing, device/presentation lifecycle                               | [Renderer](crates/renderer/README.md)     |
 | apps/game                  | Development learning harness from source; installed projects use Player                                                      | [Game](apps/game/README.md)               |
@@ -54,35 +48,29 @@ actual presentation GPU lifetime rather than retaining a second permanent headle
 
 ## Game pane and ownership
 
-EngineViewportDirective can attach an existing Angular element, observe bounds/visibility, and detach on destruction. No
-new pane layout/template was composed. The eventual UI owner chooses editor controls and game pane in the same Angular
-app.
+The Scene and Game views host a native Windows child viewport through the Angular viewport directive. The directive
+observes bounds and visibility and releases its attachment on destruction. The render worker owns native surface
+state and Vulkan resources. It reconciles scene changes, resize, minimization, DPI and focus.
 
-Embedding currently uses a Windows native child with airspace constraints; unsupported platforms report capabilities.
-The render worker owns native/Vulkan state and reconciles scene/cache changes. Idle Edit waits for invalidation;
-inactive Play input need not force continuous work. Parent close, minimization, bounds, DPI, attach/detach and worker
-shutdown are explicit lifecycle concerns, not proof of interactive correctness.
-
-The source game defaults to Development, preserving existing native controls/panels/gizmos through a core-delegating
-SceneEditor adapter. Installed projects default to Player; explicit --development/--player flags select mode. The
-Angular app remains the future product editor.
+The source game has a Development mode for the engine's native examples. Exported projects start in Player mode.
+Read [Editor viewport](viewport-implementation.md) and [Player modes](apps/game/README.md#modes-and-authored-gameplay).
 
 ## Scene, simulation, and rendering
 
-Schema3 extends persistent keyed scenes with parenting, transform-only nodes, selected mesh, tint, colliders and lights.
-V1/V2 migrate in memory; prefabs remap isolated subtree identities. Static glTF import traverses a selected scene and
-mesh nodes while rejecting unsupported dynamic behavior.
+The [scene format](scene-persistence.md) stores object keys, hierarchy, components, the default game camera
+and scene settings. Runtime uses current handles to execute this data. Props keep authored source identity and
+give placed objects their own scene keys.
 
-Default fixed steps are 60 Hz with bounded catch-up. Conservative collision queries and swept AABB movement are a
-foundation, not rigid-body physics. Renderer world transforms, material tints and light uniforms feed compatible opaque
-instancing. Optional asynchronous GPU time belongs to a completed command range; unsupported/no sample is not zero GPU
-cost, and no speedup/utilization claim is made.
+The shared engine advances simulation at 60 Hz with bounded catch-up and uses collision queries to constrain
+movement. Runtime sends current transforms, meshes, materials and lighting to the renderer. Compatible opaque
+models can share instanced draws. [Timing](timing-input-camera.md) describes the fixed step, and
+[graphics](graphics-and-assets.md) covers meshes, materials and asynchronous GPU statistics.
 
 ## Installation and diagnostics
 
-Compiler and admin generation now include bounded validated asset JSON alongside model/image dependencies, fixing the
-earlier scene allowlist omission. Generation remains a separate source-workspace flow from installing a release
-executable. Successful copying/compilation does not prove installed runtime acceptance.
+The compiler packages validated scene data and referenced model and image dependencies with the Player.
+The Admin Dashboard generates editable source workspaces and manages development jobs. Use the Editor's
+Export Game… action when shipping an authored project.
 
 Executables initialize logger guards; libraries emit through them. Separate processes communicate diagnostics through
 persisted session records, and admin owns its managed process lifecycle. Keep authored saves separate from simulation

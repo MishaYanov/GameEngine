@@ -94,7 +94,7 @@ Select an entity from Hierarchy or the viewport, then edit its name/local transf
 The Collider Inspector adds Box/Sphere shapes, local offset/size, sensor mode and collision layers/masks. Colliders
 toggles selected Scene outlines; sensor outlines are dashed pink and blocking outlines continuous cyan. Module
 selection and module-aware Gameplay Roles live in the scene controls. These changes support Undo and the normal
-scene/project saves. [Five building-blocks review](building-blocks-review.md).
+scene/project saves.
 
 Assets opens registered scenes and loads/refreshes models explicitly. Add to Scene places a selected model at the origin; dragging it into Scene uses a native preview and asynchronous adoption. Escape/cancellation ends a pending gesture. Native selection and placement currently approximate model bounds. Read [native scene editor implementation](viewport-implementation.md) for the complete workflow and limits, including Windows airspace and the desktop acceptance checklist.
 
@@ -136,7 +136,7 @@ A browser-only preview cannot perform native project creation/opening, Vulkan ed
 5. If export fails after staging, **Retry Export** continues from the same staged files.
 6. Choose **Run Exported Game** to launch the result in Player mode. Keep the executable and assets together.
 
-See the [Windows release walkthrough](../designs/editor-viewport/windows-release-step-1.md#step-1-walkthrough) for the
+See the [Windows editor quickstart](windows-editor-quickstart.md) for the
 install and export checks.
 
 ## 4. Launch the admin dashboard
@@ -166,7 +166,7 @@ healthy app. **Cancel remaining** leaves already started apps running. **Stop ap
 Select a running Editor or Engine Admin and use **Open in Chrome** after its server is ready. The launcher checks
 the application's HTML identity marker on the expected port; Chrome previews lack native desktop features and stay
 open independently. The dashboard preview uses sample data. Occupied dev-server ports are rejected instead of attaching
-to another server. See [launcher details](../designs/terminal-launcher.md) for groups, ownership and CLI behavior.
+to another server. See [Admin Dashboard](apps/admin-dashboard/README.md) for application and process ownership.
 
 To start Editor and Engine Admin together, use `.\dev.ps1 workspace` or `python launcher.py --run workspace`.
 `all` adds Game. Group commands retain their parent terminal; Ctrl+C stops the owned app trees.
@@ -263,4 +263,4 @@ Keep the generated workspace layout and read its generated README for details. T
 | Game exits or cannot initialize Vulkan           | Check console/dashboard logs and GPU driver support; confirm assets remain alongside the installed runtime.                  |
 | Frontend development port is occupied            | Stop the earlier development session; editor uses 4200 and admin dashboard uses 4301. The launcher rejects an occupied port. |
 
-Additional references: [launcher details](../designs/terminal-launcher.md), [installation pipeline](../designs/project-installation.md), and [admin dashboard technical notes](apps/admin-dashboard/README.md).
+See [Admin Dashboard](apps/admin-dashboard/README.md) for job and process ownership.

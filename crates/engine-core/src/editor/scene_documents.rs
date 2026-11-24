@@ -35,6 +35,25 @@ impl EditorSession {
 		self.draft_data(id).map(Arc::clone)
 	}
 
+	/// Asset replacement must protect references in working, saved and restorable scenes.
+	pub fn try_for_each_retained_entity(
+		&self,
+		mut visit: impl FnMut(&crate::scene_data::EntityData) -> Result<(), String>,
+	) -> Result<(), String> {
+		let scenes = std::iter::once((&self.data, &self.saved)).chain(
+			self.drafts
+				.values()
+				.map(|draft| (&draft.data, &draft.saved)),
+		);
+		for (working, saved) in scenes {
+			working.entities.iter().try_for_each(&mut visit)?;
+			if !Arc::ptr_eq(working, saved) {
+				saved.entities.iter().try_for_each(&mut visit)?;
+			}
+		}
+		self.history.retained_entities().try_for_each(visit)
+	}
+
 	pub fn scene_states(&self) -> Vec<SceneStateDto> {
 		let mut states: Vec<_> = self
 			.project

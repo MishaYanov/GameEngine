@@ -37,6 +37,7 @@ fn model_record(source: &Path, path: &str, bundled: &str) -> PersistentAsset {
 				index: mesh.index(),
 				name: mesh.name().unwrap_or("Mesh").into(),
 				primitives: mesh.primitives().len(),
+				identity: None,
 			})
 			.collect(),
 		dependencies: Vec::new(),

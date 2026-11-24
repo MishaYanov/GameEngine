@@ -1,7 +1,9 @@
 //! CPU world owned by a running authored project. GPU resources never live here.
 mod changes;
+mod hierarchy;
 pub(crate) use changes::ChangeAccumulator;
 pub use changes::{MAX_CHANGE_KEYS, WorldChange};
+pub use hierarchy::RuntimeReparentMode;
 
 use crate::game_camera::CameraTargetSnapshot;
 use crate::runtime_lifecycle::RuntimeEntityHandle;
@@ -89,8 +91,7 @@ impl RuntimeWorld {
 					.all(|key| !keys.contains(*key))
 			});
 		}
-		let next = Self::new(Arc::new(data))?;
-		*self = next;
+		*self = self.rebuild_runtime_document(Arc::new(data))?;
 		let mut removed: Vec<_> = keys.iter().cloned().collect();
 		removed.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 		Ok(WorldChange {
@@ -104,7 +105,9 @@ impl RuntimeWorld {
 		let index = self
 			.entity_index(key)
 			.ok_or("Visibility target is missing")?;
-		if self.document.entities[index].renderable == visible {
+		if !self.document.entities[index].active
+			|| self.document.entities[index].renderable == visible
+		{
 			return Ok(WorldChange::default());
 		}
 		Arc::make_mut(&mut self.document).entities[index].renderable = visible;
@@ -122,7 +125,9 @@ impl RuntimeWorld {
 		let index = self
 			.entity_index(key)
 			.ok_or("Collision target is missing")?;
-		if self.document.entities[index].collision_enabled == enabled {
+		if !self.document.entities[index].active
+			|| self.document.entities[index].collision_enabled == enabled
+		{
 			return Ok(WorldChange::default());
 		}
 		Arc::make_mut(&mut self.document).entities[index].collision_enabled = enabled;

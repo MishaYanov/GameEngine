@@ -5,6 +5,7 @@ import type {PropWorkspaceObject} from './prop-workspace.service';
 
 export type PropObjectEdit =
     | {readonly key: EntityKey; readonly name: string}
+    | {readonly key: EntityKey; readonly active: boolean}
     | {readonly key: EntityKey; readonly parent: EntityKey | null}
     | {readonly key: EntityKey; readonly transform: Transform};
 
@@ -17,6 +18,13 @@ export type PropObjectEdit =
             <label>Prop object name
                 <input #name [value]="object().name" (change)="rename(name)" type="text"/>
             </label>
+            @if (!requireParent()) {
+                <label>
+                    <input #active type="checkbox" [checked]="object().active !== false"
+                           (change)="setActive(active)"/>
+                    Active in Play
+                </label>
+            }
             <label>Prop parent
                 <select #parent [value]="object().parent ?? ''" (change)="reparent(parent.value)">
                     @if (!requireParent()) {
@@ -73,6 +81,13 @@ export class PropObjectEditor {
     readonly requireParent = input(false);
     readonly maxNameBytes = input(1_024);
     readonly edited = output<PropObjectEdit>();
+
+    protected setActive(input: HTMLInputElement): void {
+        const object = this.object();
+        const active = input.checked;
+        input.checked = object.active !== false;
+        this.edited.emit({key: object.key, active});
+    }
 
     protected readonly transform = linkedSignal(() => this.object().transform);
     protected readonly displayTransform = computed(() => {

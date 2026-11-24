@@ -34,6 +34,7 @@ function sourceEntity(value: unknown): boolean {
 	return (
 		typeof value['key'] === 'string' &&
 		typeof value['name'] === 'string' &&
+		(value['active'] === undefined || typeof value['active'] === 'boolean') &&
 		(value['parent'] == null || typeof value['parent'] === 'string') &&
 		validTransform(value['transform']) &&
 		validComponentViews(value['components'])

@@ -4,6 +4,12 @@ const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
 // Keep half of the default 256 MiB broker available for a user import.
 const BOUNDS_RESERVATION_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
+#[derive(Default)]
+pub struct ModelReferenceUsage {
+	pub legacy: HashSet<usize>,
+	pub stable: HashSet<runtime::asset_catalog::MeshSubassetId>,
+}
+
 pub(super) enum PendingAsset {
 	Bounds(AssetRef),
 	Import { position: [f32; 3], revision: u64 },
@@ -50,11 +56,12 @@ impl EditorWorkspace {
 			.iter()
 			.filter(|e| e.renderable)
 			.filter_map(|entity| {
-				AssetRef::new(
-					entity.model_path.clone(),
-					Some(entity.mesh_index.unwrap_or(0)),
-				)
-				.ok()
+				let mut reference = entity.model_reference().ok()?;
+				reference.mesh_index = Some(reference.mesh_index.unwrap_or(0));
+				if reference.mesh_id.is_none() {
+					reference.asset_id = None;
+				}
+				Some(reference)
 			})
 			.collect();
 		for (id, purpose) in &self.pending {
@@ -187,9 +194,10 @@ impl EditorWorkspace {
 						}
 						self.adopt_import(&completed.reference.path, &asset.value, position)
 							.map_err(|message| ("adoption_rejected", message))?;
-					} else {
-						self.cache_imported_bounds(&completed.reference.path, &asset.value)
-							.map_err(|message| ("metadata_rejected", message))?;
+					} else if let PendingAsset::Bounds(reference) = purpose {
+						self.backend
+							.register_assets(vec![(reference, asset.metadata)])
+							.map_err(|error| ("metadata_rejected", error.to_string()))?;
 					}
 					Ok(())
 				});
@@ -223,16 +231,6 @@ impl EditorWorkspace {
 		self.refill_bounds();
 		completions
 	}
-	fn cache_imported_bounds(
-		&mut self,
-		path: &str,
-		imported: &ImportedScene,
-	) -> Result<(), String> {
-		self.backend
-			.register_assets(Self::imported_metadata(path, imported)?)
-			.map_err(|e| e.to_string())?;
-		Ok(())
-	}
 	fn imported_metadata(
 		path: &str,
 		imported: &ImportedScene,
@@ -256,29 +254,45 @@ impl EditorWorkspace {
 			})
 			.collect()
 	}
-	pub fn used_asset_meshes(
+	pub fn used_model_references(
 		&self,
 		id: &runtime::asset_catalog::AssetId,
-	) -> Result<HashSet<usize>, String> {
+	) -> Result<ModelReferenceUsage, String> {
 		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
-		let mut used = HashSet::new();
-		for entry in self.backend.session().project().scenes.iter() {
-			let scene = self.backend.session().scene_document(entry.id())?;
-			for entity in &scene.entities {
-				if catalog
-					.resolve(
-						entity.asset_id.as_ref(),
-						&entity.model_path,
-						entity.mesh_index,
-					)?
-					.is_some_and(|asset| &asset.id == id)
-				{
-					used.insert(entity.mesh_index.unwrap_or(0));
+		let asset = catalog.by_id(id).ok_or("Asset identity is unavailable")?;
+		let model_paths: HashSet<_> = std::iter::once(&asset.path)
+			.chain(&asset.aliases)
+			.map(|path| path.to_lowercase())
+			.collect();
+		let mut usage = ModelReferenceUsage::default();
+		let mut record = |entity: &EntityData| {
+			if let Some(entity_asset) = &entity.asset_id {
+				if entity_asset != id {
+					return;
 				}
+			} else if !model_paths.contains(&entity.model_path.to_lowercase()) {
+				return;
 			}
-		}
-		// Prefabs are authored dependants too; compatibility must not depend on
-		// whether one happens to be instantiated in the currently open scene.
+			if let Some(mesh_id) = &entity.mesh_id {
+				usage.stable.insert(mesh_id.clone());
+			} else {
+				usage.legacy.insert(entity.mesh_index.unwrap_or(0));
+			}
+		};
+		self.backend
+			.session()
+			.try_for_each_retained_entity(|entity| {
+				record(entity);
+				// A placement override can hide the source mesh until Revert.
+				if let Some(link) = &entity.linked_prefab {
+					link.source
+						.prefab
+						.expanded_entities()?
+						.iter()
+						.for_each(&mut record);
+				}
+				Ok(())
+			})?;
 		for asset in catalog
 			.assets
 			.iter()
@@ -288,20 +302,11 @@ impl EditorWorkspace {
 			let bytes = read_bounded(&path, PrefabData::MAX_JSON_BYTES as u64)?;
 			let prefab =
 				PrefabData::from_json(std::str::from_utf8(&bytes).map_err(|e| e.to_string())?)?;
-			for entity in &prefab.entities {
-				if catalog
-					.resolve(
-						entity.asset_id.as_ref(),
-						&entity.model_path,
-						entity.mesh_index,
-					)?
-					.is_some_and(|asset| &asset.id == id)
-				{
-					used.insert(entity.mesh_index.unwrap_or(0));
-				}
+			for entity in prefab.expanded_entities()?.iter() {
+				record(entity);
 			}
 		}
-		Ok(used)
+		Ok(usage)
 	}
 	pub fn asset_published(&mut self) -> Result<EditorSnapshotDto, String> {
 		self.scene_warming.invalidate_assets();
@@ -349,9 +354,14 @@ impl EditorWorkspace {
 		imported: &ImportedScene,
 		position: [f32; 3],
 	) -> Result<(), String> {
-		let asset_id = runtime::assets::project_assets::load_catalog(&self.asset_root)?
-			.by_path(path)
-			.map(|asset| asset.id.clone());
+		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+		let model = catalog.by_path(path);
+		let asset_id = model.map(|asset| asset.id.clone());
+		let mesh_ids: std::collections::HashMap<_, _> = model
+			.into_iter()
+			.flat_map(|asset| &asset.meshes)
+			.filter_map(|mesh| Some((mesh.index, &mesh.identity.as_ref()?.id)))
+			.collect();
 		let remap: std::collections::HashMap<_, _> = imported
 			.nodes
 			.iter()
@@ -380,6 +390,9 @@ impl EditorWorkspace {
 				.with_renderable(node.mesh_index.is_some());
 			entity.parent = parent;
 			entity.mesh_index = node.mesh_index;
+			entity.mesh_id = node
+				.mesh_index
+				.and_then(|index| mesh_ids.get(&index).map(|id| (*id).clone()));
 			entity.transform = runtime::scene_data::TransformData {
 				position: transform.position,
 				rotation: transform.rotation,
@@ -387,13 +400,15 @@ impl EditorWorkspace {
 			};
 			entities.push(entity);
 		}
+		let mut metadata = Self::imported_metadata(path, imported)?;
+		for (reference, _) in &mut metadata {
+			if let Some(mesh) = reference.mesh_index.and_then(|index| mesh_ids.get(&index)) {
+				reference.asset_id.clone_from(&asset_id);
+				reference.mesh_id = Some((*mesh).clone());
+			}
+		}
 		self.backend
-			.replace_entities_with_assets(
-				entities,
-				selection,
-				"Import glTF scene",
-				Self::imported_metadata(path, imported)?,
-			)
+			.replace_entities_with_assets(entities, selection, "Import glTF scene", metadata)
 			.map_err(|e| e.to_string())?;
 		self.cache_bounds();
 		engine_logger::info!(target: "editor", "Model scene imported: generation={}, nodes={}, meshes={}", self.generation, imported.nodes.len(), imported.mesh_bounds.len());

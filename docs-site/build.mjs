@@ -1,4 +1,4 @@
-import {copyFile, lstat, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {marked} from 'marked';
@@ -8,15 +8,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(here);
 const out = path.join(here, 'dist');
 const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const slash = value => value.split(path.sep).join('/');
-async function collect(dir) {
-  const entries = await readdir(path.join(root, dir), { withFileTypes: true });
-  const groups = await Promise.all(entries.map(e => e.isDirectory() ? collect(path.join(dir, e.name)) : e.name.endsWith('.md') ? [slash(path.join(dir, e.name))] : []));
-  return groups.flat();
-}
-const files = [...await collect('docs'), ...await collect('designs')].sort();
+const guideGroups = [
+  ['Start here', ['docs/main.md', 'docs/usage.md', 'docs/windows-editor-quickstart.md']],
+  ['Editor workflows', ['docs/editor-workspace.md', 'docs/authoring-objects.md', 'docs/viewport-implementation.md',
+    'docs/editor-flow.md', 'docs/scene-editing.md', 'docs/project-lifecycle.md', 'docs/scene-persistence.md']],
+  ['Engine development', ['docs/architecture.md', 'docs/pipeline.md', 'docs/graphics-and-assets.md',
+    'docs/timing-input-camera.md', 'docs/performance-baseline.md', 'docs/testing.md']],
+  ['Applications', ['docs/apps/editor/README.md', 'docs/apps/editor-host/README.md',
+    'docs/apps/game/README.md', 'docs/apps/admin-dashboard/README.md']],
+  ['Tools', ['docs/compiler/README.md', 'docs/static-site.md']],
+  ['Shared crates', ['docs/crates/bridge/README.md', 'docs/crates/logger/README.md',
+    'docs/crates/renderer/README.md', 'docs/crates/runtime/README.md']],
+];
+const sections = new Map(guideGroups.flatMap(([label, guides]) => guides.map(file => [file, label])));
+const files = [...sections.keys()];
 const routes = new Map(files.map(file => [file, file === 'docs/main.md' ? 'developer/index.html' : file.replace(/\.md$/, '.html')]));
-const verificationArtifacts = new Set();
 const documents = await Promise.all(files.map(async file => {
   const markdown = await readFile(path.join(root, file), 'utf8');
   const title = markdown.match(/^# (.+)$/m)?.[1] ?? path.basename(file, '.md');
@@ -24,8 +30,15 @@ const documents = await Promise.all(files.map(async file => {
   return { file, title, markdown, description, route: routes.get(file) };
 }));
 const relative = (from, to) => path.posix.relative(path.posix.dirname(from), to) || path.posix.basename(to);
-const group = file => file.startsWith('designs/') ? 'Design references' : file.startsWith('docs/apps/') ? 'Applications' : file.startsWith('docs/crates/') ? 'Shared crates' : file.startsWith('docs/compiler/') ? 'Tools' : 'Start here';
-const groups = ['Start here', 'Applications', 'Tools', 'Shared crates', 'Design references'];
+const group = file => sections.get(file);
+const groups = guideGroups.map(([label]) => label);
+const generated = await lstat(out).catch(error => {
+  if (error.code === 'ENOENT') return null;
+  throw error;
+});
+if (generated && (!generated.isDirectory() || generated.isSymbolicLink())) {
+  throw new Error('The documentation output must be an ordinary directory.');
+}
 await rm(out, { recursive: true, force: true });
 await mkdir(path.join(out, 'assets'), { recursive: true });
 await copyFile(path.join(here, 'styles.css'), path.join(out, 'assets/styles.css'));
@@ -66,27 +79,15 @@ for (const doc of documents) {
     const [href, fragment] = token.href.split('#');
     const target = path.posix.normalize(path.posix.join(path.posix.dirname(doc.file), decodeURIComponent(href)));
     if (routes.has(target)) token.href = relative(doc.route, routes.get(target)) + (fragment ? '#' + fragment : '');
-    else if (token.type === 'link' && !fragment && /^docs\/verification\/[A-Za-z0-9_.-]+\.json$/.test(target)) {
-      verificationArtifacts.add(target);
-      token.href = relative(doc.route, target);
-    }
     else throw new Error(`Unmapped local link in ${doc.file}: ${token.href}`);
   }});
   const nav = groups.map(label => `<div class="nav-group"><p>${label}</p>${documents.filter(d => group(d.file) === label).sort((a,b) => a.file === 'docs/main.md' ? -1 : b.file === 'docs/main.md' ? 1 : a.title.localeCompare(b.title)).map(d => `<a href="${relative(doc.route,d.route)}" ${d.file === doc.file ? 'aria-current="page"' : ''}>${escape(d.file === 'docs/main.md' ? 'Documentation home' : d.title)}</a>`).join('')}</div>`).join('');
   const home = doc.file === 'docs/main.md';
   const cards = home ? `<div class="quick-links"><a href="${relative(doc.route, routes.get('docs/usage.md'))}"><span>01 / GET STARTED</span><strong>Run the engine</strong><p>Setup, launch, and common workflows.</p><b>Read the guide →</b></a><a href="${relative(doc.route, routes.get('docs/architecture.md'))}"><span>02 / UNDERSTAND</span><strong>Explore the architecture</strong><p>Follow the path from editor to GPU.</p><b>See how it fits →</b></a><a href="${relative(doc.route, routes.get('docs/graphics-and-assets.md'))}"><span>03 / BUILD</span><strong>Work with graphics</strong><p>Assets, shaders, and resource ownership.</p><b>Start developing →</b></a></div>` : '';
-  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escape(doc.description.replace(/[`*]/g,''))}"><title>${escape(doc.title)} · Game Engine</title><link rel="stylesheet" href="${relative(doc.route,'assets/styles.css')}"><link rel="stylesheet" href="${relative(doc.route,'assets/highlight.css')}"></head><body data-base="${relative(doc.route,'index.html').replace(/index\.html$/,'')}"><a class="skip" href="#content">Skip to content</a><aside class="sidebar" id="navigation"><a class="brand" href="${relative(doc.route,'index.html')}"><span class="brand-mark">△</span><span>GAME ENGINE<small>DEVELOPER DOCUMENTATION</small></span></a><nav class="space-switch" aria-label="Spaces"><a href="${relative(doc.route,'developer/index.html')}" aria-current="true">Engine Developer</a><a href="${relative(doc.route,'game-app-developer/index.html')}">Game App Developer</a><a class="all-spaces" href="${relative(doc.route,'index.html')}">All spaces ↗</a></nav><nav aria-label="Documentation">${nav}</nav><div class="sidebar-footer">Built from repository Markdown<br>Native graphics. Shared foundations.</div></aside><div class="page"><header class="topbar"><button id="menu-toggle" aria-controls="navigation" aria-expanded="false" aria-label="Toggle navigation">☰</button><div class="breadcrumb">Engine Developer <span>/</span> ${escape(group(doc.file))}</div><button id="search-open"><span>⌕</span> Search documentation <kbd>Ctrl K</kbd></button></header><div class="reading-layout"><main id="content" tabindex="-1"><div class="eyebrow">${home ? 'THE ENGINE WORKSPACE' : escape(group(doc.file).toUpperCase())}</div>${home ? '<div class="intro-label">From first launch to the rendering loop.</div>' : ''}${cards}<article>${html}</article><footer class="doc-footer"><span>Source: ${escape(doc.file)}</span><a href="${relative(doc.route,'developer/index.html')}">Developer home ↑</a></footer></main><aside class="toc" aria-label="On this page"><p>ON THIS PAGE</p>${toc.map(t=>`<a class="level-${t.depth}" href="#${t.id}">${escape(t.title)}</a>`).join('')}</aside></div></div><dialog id="search-dialog"><div class="search-header"><label class="sr-only" for="search-input">Search documentation</label><input id="search-input" type="search" placeholder="Search projects, commands, APIs…" autocomplete="off"><button id="search-close" aria-label="Close search">Esc</button></div><div id="search-results" aria-live="polite"></div><div class="search-hint">Search across every guide and design reference.</div></dialog><script src="${relative(doc.route,'assets/app.js')}" defer></script></body></html>`;
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escape(doc.description.replace(/[`*]/g,''))}"><title>${escape(doc.title)} · Game Engine</title><link rel="stylesheet" href="${relative(doc.route,'assets/styles.css')}"><link rel="stylesheet" href="${relative(doc.route,'assets/highlight.css')}"></head><body data-base="${relative(doc.route,'index.html').replace(/index\.html$/,'')}"><a class="skip" href="#content">Skip to content</a><aside class="sidebar" id="navigation"><a class="brand" href="${relative(doc.route,'index.html')}"><span class="brand-mark">△</span><span>GAME ENGINE<small>DEVELOPER DOCUMENTATION</small></span></a><nav class="space-switch" aria-label="Spaces"><a href="${relative(doc.route,'developer/index.html')}" aria-current="true">Engine Developer</a><a href="${relative(doc.route,'game-app-developer/index.html')}">Game App Developer</a><a class="all-spaces" href="${relative(doc.route,'index.html')}">All spaces ↗</a></nav><nav aria-label="Documentation">${nav}</nav><div class="sidebar-footer">Built from repository Markdown<br>Native graphics. Shared foundations.</div></aside><div class="page"><header class="topbar"><button id="menu-toggle" aria-controls="navigation" aria-expanded="false" aria-label="Toggle navigation">☰</button><div class="breadcrumb">Engine Developer <span>/</span> ${escape(group(doc.file))}</div><button id="search-open"><span>⌕</span> Search documentation <kbd>Ctrl K</kbd></button></header><div class="reading-layout"><main id="content" tabindex="-1"><div class="eyebrow">${home ? 'THE ENGINE WORKSPACE' : escape(group(doc.file).toUpperCase())}</div>${home ? '<div class="intro-label">From first launch to the rendering loop.</div>' : ''}${cards}<article>${html}</article><footer class="doc-footer"><span>Source: ${escape(doc.file)}</span><a href="${relative(doc.route,'developer/index.html')}">Developer home ↑</a></footer></main><aside class="toc" aria-label="On this page"><p>ON THIS PAGE</p>${toc.map(t=>`<a class="level-${t.depth}" href="#${t.id}">${escape(t.title)}</a>`).join('')}</aside></div></div><dialog id="search-dialog"><div class="search-header"><label class="sr-only" for="search-input">Search documentation</label><input id="search-input" type="search" placeholder="Search projects, commands, APIs…" autocomplete="off"><button id="search-close" aria-label="Close search">Esc</button></div><div id="search-results" aria-live="polite"></div><div class="search-hint">Search the developer guides.</div></dialog><script src="${relative(doc.route,'assets/app.js')}" defer></script></body></html>`;
   await mkdir(path.dirname(path.join(out,doc.route)), {recursive:true});
   const diagramScripts = diagramCount ? `<script src="${relative(doc.route, 'assets/mermaid.tiny.js')}" defer></script><script src="${relative(doc.route, 'assets/diagrams.js')}" defer></script>` : '';
   await writeFile(path.join(out, doc.route), page.replace('</body>', `${diagramScripts}</body>`));
-}
-for (const artifact of verificationArtifacts) {
-  const source = path.join(root, artifact);
-  const metadata = await lstat(source);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`Verification artifact must be a regular file: ${artifact}`);
-  JSON.parse(await readFile(source, 'utf8'));
-  await mkdir(path.dirname(path.join(out, artifact)), {recursive: true});
-  await copyFile(source, path.join(out, artifact));
 }
 // Space pages deliberately contain no documentation from the other audience.
 function spacePage(route, empty = false) {

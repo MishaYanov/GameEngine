@@ -36,7 +36,7 @@ Rust layout, vertex attributes, descriptor interfaces and both shaders must chan
 crates/renderer/shaders/triangle.vert and triangle.frag, compiled/embedded during rebuild. Overlay shader attribute
 reuse does not imply every draw is a lit scene object.
 
-## Procedural primitives — in progress
+## Procedural primitives
 
 The working tree extracts shape builders into private modules under `crates/runtime/src/assets/primitives`. Use the public `runtime::assets::MeshData` constructors, rather than importing those implementation modules. These builders create CPU vertex/index data; GPU upload still goes through `AssetManager::load_mesh(&renderer, id, &data)`.
 
@@ -95,9 +95,8 @@ mesh_index distinguishes source meshes.
 
 Static import rejects unsupported skins/morph behavior and does not provide animation playback. Validation for that
 path remains unchanged. A separate `bridge::animation_asset` decoder and `engine_core::animation`
-runtime now support the bounded embedded-GLB skinning subset described in
-[Milestone 9](milestones-7-9-review.md#milestone-9-bounded-skinned-animation). Static import should not be used to
-flatten an animated asset into a substitute for its authored Animation component. Geometry/image/resource
+runtime support bounded embedded-GLB skinning through the authored Animation component. Use that component
+to keep the original clip, skeleton and skin binding together. [Animation authoring](authoring-objects.md). Geometry/image/resource
 budgets, containment checks and graph validation apply. Selected unique meshes have a 256 MiB decoded-geometry preflight
 limit including expanded indices. AssetManager caps logical GPU resources at 512 MiB and 8,192 resources, accounting for
 externally retained references through a weak-reference ledger. Scene draw expansion is capped at 65,536 render objects
@@ -107,7 +106,30 @@ not be described as full dynamic glTF support, every material extension, or unre
 Positions/indices, normals, UV and image validation remain part of mesh import. Imported normals are finite/nonzero and
 normalized; missing normals use area-weighted generation. Source images support decoded RGB8/RGBA8 and preserve imported
 row order. Material overrides are optional per-entity tint data rather than destructive edits to shared textures.
-See [steps 29–31](editor-steps-21-35.md#step-29-static-gltf-scenes-nodes-and-meshes).
+
+
+### Stable mesh references and reimport
+
+A managed model can contain several meshes. New GLB imports assign an identity to each mesh, and **Add to Scene**
+keeps those identities when it expands a model's hierarchy. For an existing object, open **Inspector → Mesh Renderer
+→ Edit** and choose a mesh by name under **Mesh**. Existing bindings keep their earlier **Mesh index** until you
+apply a named selection. To add mesh choices to a previously registered GLB, reimport the original or a compatible
+replacement through **Assets**.
+
+A GLB exporter can put a unique name in each glTF mesh's `extras.game_engine_mesh_id`. Keep the value stable across
+export revisions, even when the mesh moves within the file or its display name changes.
+
+```json
+{"extras": {"game_engine_mesh_id": "tower-roof"}}
+```
+
+Reimport preserves a mesh identity when it can prove the match. A legacy numeric binding also needs its physical slot
+to stay the same. When a reimport would move a numeric binding, choose the named mesh in the affected Scene or Prop
+and save the changes. Reopen the project before retrying if Undo still retains the old binding. Reimport checks saved
+Props, linked source versions, inactive scenes and retained edits.
+
+The importer extracts mesh identity in `crates/runtime/src/assets/project_assets/mesh_source.rs`.
+See [Performance checks](performance-baseline.md) for ways to measure asset preparation.
 
 ### Models, instances, and GPU caches
 
@@ -140,7 +162,7 @@ so larger valid documents may still require splitting to meet distribution bound
 
 Keep external model dependencies under the asset root and inspect source-generation preview. Successful copying or
 generation compilation is not an installed-runtime acceptance test.
-See [packaging step22](editor-steps-21-35.md#step-22-json-aware-packaging).
+See [Compiler packaging](compiler/README.md).
 
 ## Troubleshooting and manual checks
 
@@ -157,17 +179,19 @@ root/link/depth/entry limits. Repeated panel placements cache and share a templa
 Scene::render_visible uses transformed model AABBs and six Vulkan clip planes, retaining unknown/invalid bounds
 conservatively. F7 toggles culling. Draw and triangle totals include enabled selection/gizmo/panel overlays; wall FRAME
 and CPU UPDATE averages are not GPU profiling. UI/gizmo geometry is batched into reused host-coherent buffers with fence
-completion before updates; this avoids per-frame GPU allocation, not every CPU allocation. See
-the [steps 11–20 report](editor-steps-11-20.md) for API/file mapping and evidence.
+completion before updates, reusing the GPU allocation across frames.
 
 ## Lights, instancing, and GPU metrics
 
-Scene3 supports directional/point lights and per-entity tint. Renderer set_lights validates bounded light input before
-mutation. Compatible opaque draws use reusable instance matrix/tint data at binding 1; overlays/unlit/alpha paths
+The Scene and Player use up to 16 directional or point lights. The native adapter projects a light object's
+world transform to renderer input and keeps support for older scene light records. Renderer `set_lights`
+validates the projected list before replacing its input. [Author scene lights](authoring-objects.md#add-a-point-or-directional-light)
+
+Compatible opaque draws use reusable instance matrix/tint data at binding 1; overlays/unlit/alpha paths
 preserve ordering barriers. Buffers can grow up to an explicit limit, so reuse does not mean no allocation during
 capacity growth.
 
 GPU timestamps are read asynchronously from a completed range using device period/valid bits and availability, with no
 extra query WAIT. Unsupported/not-ready values remain optional. The measured range excludes CPU work, acquisition,
 presentation and display pacing. No speedup or utilization claim follows from instancing alone.
-See [steps 34–35](editor-steps-21-35.md#step-34-asynchronous-gpu-timestamps-and-submission-metrics).
+See [Performance checks](performance-baseline.md).

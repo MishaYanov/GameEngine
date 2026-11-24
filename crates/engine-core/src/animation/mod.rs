@@ -4,6 +4,7 @@ mod animator_runtime;
 mod asset;
 mod authored_clip;
 mod instance;
+mod root_motion;
 mod sample;
 mod settings;
 pub use asset::*;
@@ -19,3 +20,4 @@ pub use animator_runtime::{
 	AnimatorInspection, AnimatorResolver, AnimatorStepInputs, PreparedAnimator,
 	PreparedAnimatorBindings, PreparedAnimatorClips,
 };
+pub(crate) use root_motion::RootMotionDelta;

@@ -48,13 +48,24 @@ fn object_menu_commands_create_real_undoable_scene_objects() {
 	)
 	.unwrap();
 	let with_light = session.authored_document();
-	assert_eq!(with_light.lights[0].kind, LightKind::Point);
-	assert_eq!(session.selection(), [empty]);
-	assert_ne!(with_light.lights[0].key, with_light.entities[0].key);
+	let light = &with_light.projected_lights().unwrap()[0];
+	assert_eq!(light.kind, LightKind::Point);
+	assert_eq!(session.selection(), std::slice::from_ref(&light.key));
+	assert_ne!(light.key, empty);
+	assert!(with_light.lights.is_empty());
 	execute(&mut session, Command::Undo).unwrap();
-	assert!(session.authored_document().lights.is_empty());
+	assert!(
+		session
+			.authored_document()
+			.projected_lights()
+			.unwrap()
+			.is_empty()
+	);
 	execute(&mut session, Command::Redo).unwrap();
-	assert_eq!(session.authored_document().lights, with_light.lights);
+	assert_eq!(
+		session.authored_document().projected_lights().unwrap(),
+		vec![light.clone()]
+	);
 
 	for _ in 1..MAX_SCENE_LIGHTS {
 		execute(
@@ -76,7 +87,70 @@ fn object_menu_commands_create_real_undoable_scene_objects() {
 		.is_err()
 	);
 	assert_eq!(session.revision(), before);
-	assert_eq!(session.authored_document().lights.len(), MAX_SCENE_LIGHTS);
+	assert_eq!(
+		session
+			.authored_document()
+			.projected_lights()
+			.unwrap()
+			.len(),
+		MAX_SCENE_LIGHTS
+	);
+}
+
+#[test]
+fn legacy_scene_lights_keep_identity_and_rendered_pose_after_edit_and_save() {
+	use engine_core::scene_data::LightData;
+
+	let mut original = scene(vec![]);
+	let mut point = LightData::new(key("room-lamp"), "Room Lamp", LightKind::Point);
+	point.position = [3.0, 2.0, 1.0];
+	point.color = [0.25, 0.5, 1.0];
+	let mut sun = LightData::new(key("sun"), "Sun", LightKind::Directional);
+	sun.direction = [2.0, -1.0, 3.0];
+	original.lights = vec![point.clone(), sun.clone()];
+	let mut loaded = SceneData::from_json(&original.to_json().unwrap()).unwrap();
+	loaded.migrate_legacy_lights().unwrap();
+	let mut session = EditorSession::new(loaded).unwrap();
+	let snapshot = session.authored_document();
+	assert_eq!(snapshot.entities[0].key, point.key);
+	assert_eq!(snapshot.entities[1].key, sun.key);
+	assert!(snapshot.lights.is_empty());
+	let initial = snapshot.projected_lights().unwrap();
+	assert_eq!(initial[0].position, point.position);
+	assert_eq!(initial[0].color, point.color);
+	let direction = glam::Vec3::from_array(initial[1].direction);
+	assert!((glam::Vec3::from_array(sun.direction).normalize() - direction).length() < 1.0e-5);
+
+	let mut changed = initial[0].clone();
+	changed.color = [0.3, 0.6, 1.0];
+	changed.position = [4.0, 4.0, 2.0];
+	execute(
+		&mut session,
+		Command::UpsertLight {
+			light: changed.clone(),
+		},
+	)
+	.unwrap();
+	let edited = session.authored_document();
+	assert_eq!(edited.projected_lights().unwrap()[0], changed);
+	let authored: serde_json::Value = serde_json::from_str(&edited.to_json().unwrap()).unwrap();
+	assert_eq!(authored["lights"], json!([]));
+	assert_eq!(
+		authored["entities"][0]["components"][0]["data"]["kind"],
+		"light"
+	);
+	assert_eq!(
+		SceneData::from_json(&authored.to_string())
+			.unwrap()
+			.projected_lights()
+			.unwrap()[0],
+		changed
+	);
+	execute(&mut session, Command::Undo).unwrap();
+	assert_eq!(
+		session.authored_document().projected_lights().unwrap(),
+		initial
+	);
 }
 
 #[test]
@@ -148,6 +222,78 @@ fn particle_emitter_round_trips_in_v8_and_rejects_invalid_or_legacy_payloads() {
 		session.authored_document().entities[0].component_records(),
 		expected
 	);
+}
+
+#[test]
+fn linked_light_values_round_trip_as_instance_overrides() {
+	use engine_core::components::LightSettings;
+
+	let mut source = entity("bulb", [0.; 3]);
+	let original = ComponentRecord {
+		id: ComponentId::new("bulb").unwrap(),
+		schema_version: 1,
+		enabled: true,
+		data: ComponentData::Light {
+			settings: LightSettings {
+				kind: LightKind::Point,
+				color: [1.; 3],
+				intensity: 1.0,
+				range: 5.0,
+			},
+		},
+	};
+	source.put_component(original.clone(), false).unwrap();
+	let mut session = EditorSession::new(scene(vec![])).unwrap();
+	session
+		.instantiate_linked_prefab(
+			LinkedPrefabSource {
+				source_id: AssetId::generate(),
+				path: "prefabs/lamp.json".into(),
+				fingerprint: "1".repeat(64),
+				prefab: PrefabData {
+					schema_version: 4,
+					entities: vec![source],
+					composition: Default::default(),
+					gameplay: None,
+					reference_slots: Default::default(),
+				},
+			},
+			[0.; 3],
+			Default::default(),
+		)
+		.unwrap();
+	let document = session.authored_document();
+	let link = document
+		.entities
+		.iter()
+		.find_map(|entity| entity.linked_prefab.as_ref())
+		.unwrap();
+	let member = &link.entity_map[&key("bulb")];
+	let mut changed = original;
+	let ComponentData::Light { settings } = &mut changed.data else {
+		unreachable!()
+	};
+	settings.intensity = 4.0;
+	execute(
+		&mut session,
+		Command::ReplaceComponent {
+			key: member.as_str().into(),
+			component: changed,
+		},
+	)
+	.unwrap();
+	let text = session.authored_document().to_json().unwrap();
+	let reopened = SceneData::from_json(&text).unwrap();
+	let link = reopened
+		.entities
+		.iter()
+		.find_map(|entity| entity.linked_prefab.as_ref())
+		.unwrap();
+	assert!(link.overrides.contains(&LinkedPrefabOverrideTarget {
+		source_entity: key("bulb"),
+		property: LinkedPrefabProperty::Light,
+	}));
+	assert_eq!(reopened.projected_lights().unwrap()[0].intensity, 4.0);
 }
 
 #[test]

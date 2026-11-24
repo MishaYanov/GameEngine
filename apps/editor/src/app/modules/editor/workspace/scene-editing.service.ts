@@ -92,6 +92,12 @@ export class SceneEditingService {
         if (selected && preview?.key === selected.key) return {...selected, transform: preview.transform};
         return draft?.entity.key === selected?.key ? draft?.entity ?? selected : selected;
     });
+    readonly batchSelection = computed(() => {
+        const snapshot = this.editor.snapshot();
+        if (!snapshot || snapshot.selection.length < 2) return [];
+        const selected = new Set(snapshot.selection);
+        return snapshot.document.entities.filter(entity => selected.has(entity.key));
+    });
     readonly ownsTransaction = computed(() => this.owner() !== null);
     readonly hasChanges = computed(() => this.draft()?.edit.changed ?? false);
     readonly ready = computed(() => {
@@ -180,6 +186,50 @@ export class SceneEditingService {
             key: edit.entity.key,
             transform: edit.entity.transform
         }], 'local'));
+    }
+
+    batchTransform(change: TransformFieldEdit): Promise<boolean> {
+        const capture = this.editor.snapshot();
+        const generation = this.editor.workspaceGeneration();
+        const value = Math.fround(change.value);
+        if (!capture || capture.selection.length < 2 || !Number.isFinite(value)) return Promise.resolve(false);
+        return this.withCommittedEdit(async () => {
+            const latest = this.editor.snapshot();
+            if (!latest || latest.mode !== 'edit' || latest.transaction !== null ||
+                generation !== this.editor.workspaceGeneration() || latest.active_scene_id !== capture.active_scene_id ||
+                latest.selection.length !== capture.selection.length ||
+                latest.selection.some((key, index) => key !== capture.selection[index])) {
+                throw new Error('The selected objects changed. Select the objects and edit the transform again.');
+            }
+            const selection = this.batchSelection();
+            if (selection.length !== latest.selection.length) {
+                throw new Error('An object is no longer available for this transform edit.');
+            }
+            const edits = selection.flatMap(object => {
+                const vector = object.transform[change.field];
+                if (vector[change.axis] === value) return [];
+                const edited: [number, number, number] = [...vector];
+                edited[change.axis] = value;
+                return [{key: object.key, transform: {...object.transform, [change.field]: edited}}];
+            });
+            if (edits.length) await this.execute(CommandBuilder.transforms(edits, 'local'), generation);
+            this.errorState.set(null);
+        });
+    }
+
+    setActive(active: boolean): Promise<boolean> {
+        const capture = this.editor.snapshot();
+        const key = capture?.selection[0];
+        const generation = this.editor.workspaceGeneration();
+        if (!capture || !key || !this.editable()) return Promise.resolve(false);
+        return this.withCommittedEdit(async () => {
+            const snapshot = this.editor.snapshot();
+            if (generation !== this.editor.workspaceGeneration() || snapshot?.mode !== 'edit' ||
+                snapshot.active_scene_id !== capture.active_scene_id || snapshot.transaction !== null ||
+                snapshot.selection.length !== 1 || snapshot.selection[0] !== key) return;
+            await this.execute({type: 'set_object_active', key, active}, generation);
+            this.errorState.set(null);
+        });
     }
 
     resetTransform(field: TransformField | 'all' = 'all'): Promise<boolean> {

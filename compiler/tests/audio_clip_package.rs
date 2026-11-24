@@ -56,6 +56,7 @@ fn packaging_copies_only_reachable_verified_audio_clips() {
 		index: 0,
 		name: "cube".into(),
 		primitives: 1,
+		identity: None,
 	});
 	let mut cube = EntityData::new(EntityKey::new("cube").unwrap(), "Cube", "cube.glb")
 		.with_asset_id(Some(model.id.clone()));

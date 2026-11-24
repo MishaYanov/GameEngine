@@ -147,6 +147,13 @@ export class LinkedPrefabInspector {
 	protected readonly available = computed(
 		() => this.editable() && !this.pending() && !!this.status(),
 	);
+	protected readonly canRemoveLeaf = computed(() => {
+		const address = this.selectedAddress();
+		const key = this.entity()?.key;
+		return !!key && address?.kind === 'object' && !address.placement_path.length &&
+			this.editor.capabilities()?.commands.some(command => command.name === 'remove_linked_prefab_leaf') === true &&
+			!this.entities().some(entity => entity.parent === key) && !this.visibleOverrides().length;
+	});
 	protected readonly canSelectPropAsset = computed(() => {
 		const status = this.status();
 		return !!this.propAssets && !!status && !status.source_error && !this.pending();
@@ -286,7 +293,9 @@ export class LinkedPrefabInspector {
 		this.choices.update(prior => {
 			const next = new Map(prior);
 			const key = this.overrideKey(row);
-			if (value === 'use_source' || (value === 'keep_local' && row.incoming !== null)) next.set(key, value);
+			if (value === 'use_source' || (value === 'keep_local' && row.incoming !== null && row.target.property.kind !== 'presence')) {
+				next.set(key, value);
+			}
 			else next.delete(key);
 			return next;
 		});
@@ -393,6 +402,16 @@ export class LinkedPrefabInspector {
 		if (current() && this.updateSource()?.draft_id === draft.draft_id) {
 			this.review.set({ draftId: draft.draft_id, revision, bindings, rows });
 		}
+	}
+
+	protected async removeLeaf(): Promise<void> {
+		const status = this.status();
+		const object = this.entity()?.key;
+		if (!status || !object || !this.canRemoveLeaf()) return;
+		await this.run(async (generation, revision) => {
+			await this.editor.execute({type: 'remove_linked_prefab_leaf', root_key: status.root_key,
+				object_key: object}, generation, revision);
+		});
 	}
 
 	protected async revert(property: LinkedPrefabOverrideTarget | null): Promise<void> {
@@ -514,6 +533,7 @@ export class LinkedPrefabInspector {
 	protected property(target: LinkedPrefabOverrideTarget): string {
 		return {
 			name: 'Name',
+			presence: 'Object presence',
 			transform_position: 'Position',
 			transform_rotation: 'Rotation',
 			transform_scale: 'Scale',
@@ -523,11 +543,13 @@ export class LinkedPrefabInspector {
 			animation: 'Animation',
 			native_behavior: 'Native Behavior',
 			script: 'Script',
+            light: 'Light',
             particle_emitter: 'Particle Emitter',
 		}[target.property.kind];
 	}
 	protected value(value: LinkedPrefabValue): string {
 		if (value.kind === 'name') return value.value;
+		if (value.kind === 'presence') return value.value ? 'Present' : 'Removed from this instance';
 		if (value.kind === 'vector') return value.value.join(', ');
 		const component = value.value;
 		if (!component) return 'Component removed';
@@ -547,6 +569,7 @@ export class LinkedPrefabInspector {
         if (data.kind === 'audio_source') return `${enabled} · ${data.settings.clip?.asset ?? 'No Audio Clip'}`;
         if (data.kind === 'animator') return `${enabled} · Animator ${data.settings.asset_id}`;
         if (data.kind === 'sky') return `${enabled} · Sky`;
+        if (data.kind === 'light') return `${enabled} ${data.settings.kind === 'point' ? 'Point Light' : 'Directional Light'}`;
         if (data.kind === 'particle_emitter') return `${enabled} · ${data.settings.rate_per_second} / s`;
 		if (data.kind === 'script') return `${enabled} · ${data.settings.script_id}`;
 		return `${enabled} · ${data.behavior.kind.replaceAll('_', ' ')} · ${JSON.stringify(data.behavior)}`;

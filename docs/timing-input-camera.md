@@ -1,10 +1,8 @@
 # Timing, input, and camera
 
-The low-level clock/key/camera APIs remain shared. Core fixed-step simulation, authored project input profiles,
-the Angular Game Input Manager and native Scene/Game focus routing build on them. Older native-demo details below
-retain their milestone context; the [building-blocks review](building-blocks-review.md) records current input,
-course/restart and verification scope. Automated and hidden native focus tests remain distinct from visible desktop
-interaction.
+The Editor and standalone Player use shared fixed-step simulation, authored input layouts and camera behavior.
+The native viewport routes input according to focus and the active Scene or Game view. Use the Controls menu
+to author bindings and conditional layouts for the current project.
 
 ## Orbit camera obstruction
 
@@ -50,7 +48,7 @@ pose and orbit state. Use `user_distance`, `last_allowed_distance`, `effective_d
 `obstruction.blocker` to distinguish a zoom request, the current safe limit, the displayed arm, and the wall
 that set the limit. The editor's **Preview Orbit** action opens this frozen rig and samples it from a toolbar above the
 native viewport.
-[Author, preview and play the camera room](milestone-10-camera-review.md).
+[Edit and preview the game camera](viewport-implementation.md).
 [Run the camera regression tests](testing.md#orbit-camera-obstruction-checks).
 
 ## time.rs: FrameClock
@@ -82,15 +80,15 @@ InputState itself.
 
 ## Authored game input
 
-Project input profiles map four movement directions and bounded named actions to serialized physical key names.
-The Game Input Manager supplies binding selection/key capture and a held-key movement/action preview. Apply uses
-the current reviewed workspace generation/revision and preserves unrelated current project settings; a changed
-input profile requires reopening/review rather than overwriting it. Save All/Save Project persists the accepted
-profile. Scene/project replacement and late responses cannot apply stale settings or feedback to a new workspace.
+Open **Controls** and use **Controls and Input Layouts…** to assign actions for the current project. A layout
+maps device inputs to named actions. Choose a default layout and add a conditional layout for a scene or a
+grounded state. The runtime takes the first matching conditional layout and falls back to the default.
+Use **Save All** to persist the project settings.
 
-Core resolves native codes and Player keys through the same input profile. Focus loss and the existing pause,
-mode, scene activation and restart boundaries clear or suppress held input. This is configured keyboard routing,
-not a general gamepad/possession system or animation player. [Input persistence review](building-blocks-review.md#input-and-project-authoring).
+Editor Play and Player sample keyboard, pointer and supported gamepad inputs through the shared action
+path. The current local player receives the ordered samples for its possession epoch. Possession handoff,
+focus loss, Stop and scene replacement clear held state. [Project settings](project-lifecycle.md) ·
+[Replay checks](testing.md#headless-replay).
 
 ## camera.rs: Camera
 
@@ -117,8 +115,7 @@ pane, while focused native Scene tools own spatial shortcuts and Game routes aut
 
 The earlier WASD/Tab/QE/RF/F-key native demonstration controls apply only when GAME_ENGINE_NATIVE_EDITOR_DEMO=1, not
 normal game launch or default EditorSession policy. Normal game mode is overlay-free.
-See [current editor guide](scene-editing.md) and the historical [steps11–20](editor-steps-11-20.md) rather than treating
-old key examples as current product bindings.
+See [Editor commands](scene-editing.md) for authoring settings and [Editor viewport controls](viewport-implementation.md) for desktop bindings.
 
 ## Fixed simulation step
 
@@ -127,8 +124,7 @@ time at0.25seconds, reports dropped time and interpolation, and resets on pause.
 capped redraw delta and FIFO display pacing. Editor Play ticks apply validated movement intent, not keyboard codes;
 conservative collision can block motion or pause/reset after error.
 
-See [steps23–25 and32](editor-steps-21-35.md#step-23-frame-orbit-pan-and-dolly-camera-commands) for concrete
-command/settings examples. Fixed stepping does not establish networking determinism or a complete physics engine.
+See [Editor viewport controls](viewport-implementation.md) for camera gesture and framing examples.
 
 ## Checks and remaining verification
 
@@ -141,5 +137,5 @@ cargo run -p game --offline --locked
 Unit tests cover clock precision/capping/reset/backwards timestamps, key transitions/repeats/reset, camera direction math, yaw wrapping, pitch limits, and reusable controller movement/mouse math. Game tests cover selection and robot behavior; scene-I/O checks are described separately. They do not prove native cursor capture, focus handling, perceived speed, or movement during minimize/restore.
 
 Visible acceptance should still verify diagonal speed, held/released keys, focus loss, capture fallback/error behavior,
-Escape release, minimized/resumed timing and camera orientation. Fixed-step gameplay and keyboard binding
-configuration are implemented; broader input devices remain future work. See [testing](testing.md) and [pipeline](pipeline.md).
+Escape release, minimized/resumed timing and camera orientation. Exercise a physical controller when changing device
+routing or reconnect behavior. See [testing](testing.md) and [pipeline](pipeline.md).

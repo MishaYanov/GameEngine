@@ -1,6 +1,6 @@
 # Repeatable engine performance baseline
 
-Milestone 3.6 uses one reproducible scene for CPU simulation and hidden native
+The performance baseline uses one reproducible scene for CPU simulation and hidden native
 rendering. Measurements describe this machine and build configuration; the budgets
 are local regression limits, not hardware-independent frame-rate guarantees.
 
@@ -56,7 +56,7 @@ Five release runs on 2026-11-20, Windows 10.0.26200, Intel Family 6 Model 183,
 | Serialized scene / world-matrix payload | 274,345 / 38,912 bytes | Recorded separately from process memory |
 
 The detailed machine-readable evidence is `target/performance/core-series.json`;
-the committed CPU and native report is `docs/verification/milestones-performance-2026-11-20.json`.
+record CPU and native results separately.
 `-EnforceBudget` fails if any run exceeds a budget, memory cannot be observed, or
 steady simulation rebuilds the collision cache. Measurements should be repeated
 after the final source changes and on intended target hardware.
@@ -114,4 +114,3 @@ native rendering and GPU ownership measurements separate from CPU simulation.
 - `crates/engine-core/src/collision.rs`
 - `target/performance/core-series.json`
 - `apps/game/tests/unit/tests_performance.rs`
-- `docs/verification/milestones-performance-2026-11-20.json`

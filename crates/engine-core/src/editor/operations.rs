@@ -21,6 +21,7 @@ use transform::{
 	snapping, transform_from_dto, world_target_locals,
 };
 
+use super::ModelBounds;
 use crate::command::{
 	EditorCommandDto, SceneBindingTarget, SnapSettingsDto, TransformDto, TransformSpace,
 };
@@ -38,10 +39,25 @@ pub(super) fn apply(
 	data: &mut SceneData,
 	selection: &mut Vec<EntityKey>,
 	snap: &SnapSettingsDto,
-	bounds: &HashMap<(String, usize), Bounds3>,
+	bounds: &ModelBounds,
 	command: EditorCommandDto,
 ) -> Result<(), String> {
 	match command {
+		EditorCommandDto::SetObjectActive { key, active } => {
+			let index = entity_index(data, &key)?;
+			let key = &data.entities[index].key;
+			if data.entities.iter().any(|anchor| {
+				anchor
+					.linked_prefab
+					.as_ref()
+					.is_some_and(|link| link.entity_map.values().any(|member| member == key))
+			}) {
+				return Err(
+					"Change activation in the Prop source or on the whole linked placement".into(),
+				);
+			}
+			data.entities[index].active = active;
+		}
 		EditorCommandDto::Rename { key, name } => {
 			let index = entity_index(data, &key)?;
 			data.entities[index].name = name;
@@ -79,7 +95,7 @@ pub(super) fn apply(
 			*selection = vec![scene_objects::create_object(data, false)?]
 		}
 		EditorCommandDto::CreateLight { light_kind } => {
-			scene_objects::create_light(data, light_kind)?
+			*selection = vec![scene_objects::create_light(data, light_kind)?];
 		}
 		EditorCommandDto::CreateParticleEmitter => {
 			*selection = vec![scene_objects::create_object(data, true)?];
@@ -363,21 +379,8 @@ pub(super) fn apply(
 			data.entities[index].set_component_enabled(&component_id, enabled)?;
 			data.clear_disabled_game_camera();
 		}
-		EditorCommandDto::UpsertLight { light } => {
-			if let Some(existing) = data.lights.iter_mut().find(|entry| entry.key == light.key) {
-				*existing = light;
-			} else {
-				data.lights.push(light);
-			}
-		}
-		EditorCommandDto::RemoveLight { key } => {
-			let index = data
-				.lights
-				.iter()
-				.position(|light| light.key.as_str() == key)
-				.ok_or_else(|| format!("Light key {key:?} does not exist"))?;
-			data.lights.remove(index);
-		}
+		EditorCommandDto::UpsertLight { light } => scene_objects::upsert_light(data, light)?,
+		EditorCommandDto::RemoveLight { key } => scene_objects::remove_light(data, &key)?,
 		EditorCommandDto::SetCamera { camera } => data.set_authored_game_camera(camera)?,
 		EditorCommandDto::SetDefaultGameCamera { key } => data.select_game_camera(key)?,
 		EditorCommandDto::FrameSelection => frame_selection(data, selection, bounds)?,

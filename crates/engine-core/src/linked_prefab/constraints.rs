@@ -14,6 +14,7 @@ pub(crate) fn is_transform_only_anchor(entity: &EntityData) -> bool {
 		&& entity.audio_source.is_none()
 		&& entity.sky.is_none()
 		&& entity.particle_emitter.is_none()
+		&& entity.light.is_none()
 }
 
 pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
@@ -74,6 +75,18 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 					"Linked instance members must be distinct and belong to one instance".into(),
 				);
 			}
+			if link.leaf_removed(source) {
+				if entities.contains_key(key)
+					|| scene.lights.iter().any(|light| &light.key == key)
+					|| !link.supports_leaf_removal(source, &expanded)
+				{
+					return Err(
+						"A removed Prop object must be an inherited leaf with a reserved scene key"
+							.into(),
+					);
+				}
+				continue;
+			}
 			let member = entities.get(key).ok_or(
 				"A linked member was removed; delete the whole instance or Unpack it first",
 			)?;
@@ -94,6 +107,11 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 			if !source_keys.contains(&target.source_entity) {
 				return Err("Override targets an entity outside its pinned source".into());
 			}
+			if target.property != LinkedPrefabProperty::Presence
+				&& link.leaf_removed(&target.source_entity)
+			{
+				return Err("A removed Prop object cannot have other local overrides".into());
+			}
 		}
 		for target in link.bindings.values() {
 			if !entities.contains_key(target) {
@@ -104,7 +122,13 @@ pub fn validate_scene_links(scene: &SceneData) -> Result<(), String> {
 		}
 		let base = materialized_from(link, &expanded, &anchor.key)?;
 		for (source, expected) in &base {
+			if link.leaf_removed(source) {
+				continue;
+			}
 			let actual = entities[&link.entity_map[source]];
+			if actual.active != expected.active {
+				return Err("Linked member activation belongs to the Prop source".into());
+			}
 			if actual.camera != expected.camera {
 				return Err(
 					"Linked Camera is owned by the Prop source; edit the source or Unpack first"

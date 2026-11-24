@@ -596,3 +596,152 @@ fn linked_interactable_roundtrips_and_requires_source_or_unpack_to_change() {
 			.enabled
 	);
 }
+
+#[test]
+fn removed_leaf_keeps_its_identity_across_scene_reload_source_updates_and_revert() {
+	let original = source();
+	let mut session = session();
+	let (first, body) = instantiate(&mut session, original.clone());
+	session
+		.instantiate_linked_prefab(original.clone(), [5.0, 0.0, 0.0], BTreeMap::new())
+		.unwrap();
+	let document = session.authored_document();
+	let (second, second_child) = document
+		.entities
+		.iter()
+		.find(|entity| entity.key != first && entity.linked_prefab.is_some())
+		.map(|entity| {
+			(
+				&entity.key,
+				&entity.linked_prefab.as_ref().unwrap().entity_map[&key("child")],
+			)
+		})
+		.unwrap();
+	let second = second.clone();
+	let second_child = second_child.clone();
+	let child = document
+		.entities
+		.iter()
+		.find(|entity| entity.key == first)
+		.unwrap()
+		.linked_prefab
+		.as_ref()
+		.unwrap()
+		.entity_map[&key("child")]
+		.clone();
+	let remove = |object: &EntityKey| Command::RemoveLinkedPrefabLeaf {
+		root_key: first.as_str().into(),
+		object_key: object.as_str().into(),
+	};
+	assert!(
+		execute(&mut session, remove(&body))
+			.unwrap_err()
+			.contains("without children")
+	);
+	execute(&mut session, remove(&child)).unwrap();
+	assert!(
+		!session
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.key == child)
+	);
+	assert!(
+		session
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.key == second_child)
+	);
+	let saved = session.authored_document().to_json().unwrap();
+	let saved = engine_core::SceneData::from_json(&saved).unwrap();
+	let status = engine_core::linked_prefab::override_status(&saved, &first).unwrap();
+	assert_eq!(status[0].target.property, LinkedPrefabProperty::Presence);
+	assert!(!status[0].can_apply_to_root_source);
+	assert!(
+		engine_core::linked_prefab::override_status(&saved, &second)
+			.unwrap()
+			.is_empty()
+	);
+
+	let mut changed = original.clone();
+	changed.fingerprint = "2".repeat(64);
+	changed.prefab.entities[1].name = "Renamed child".into();
+	update(
+		&mut session,
+		&first,
+		changed.clone(),
+		PrefabConflictResolution::Reject,
+	)
+	.unwrap();
+	assert!(
+		!session
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.key == child)
+	);
+
+	let mut branch = changed.clone();
+	branch.fingerprint = "3".repeat(64);
+	branch
+		.prefab
+		.entities
+		.push(entity("grandchild", [2.0, 0.0, 0.0]).with_parent(Some(key("child"))));
+	assert!(
+		update(
+			&mut session,
+			&first,
+			branch.clone(),
+			PrefabConflictResolution::Reject
+		)
+		.unwrap_err()
+		.contains("conflicts")
+	);
+	assert!(
+		update(
+			&mut session,
+			&first,
+			branch.clone(),
+			PrefabConflictResolution::KeepLocal
+		)
+		.unwrap_err()
+		.contains("Use Source")
+	);
+
+	execute(
+		&mut session,
+		Command::RevertLinkedPrefab {
+			root_key: first.as_str().into(),
+			property: Some(status[0].target.clone()),
+		},
+	)
+	.unwrap();
+	assert!(
+		session
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.key == child && entity.name == "Renamed child")
+	);
+	execute(&mut session, remove(&child)).unwrap();
+	update(
+		&mut session,
+		&first,
+		branch,
+		PrefabConflictResolution::UseSource,
+	)
+	.unwrap();
+	assert!(
+		session
+			.authored_document()
+			.entities
+			.iter()
+			.any(|entity| entity.parent.as_ref() == Some(&child))
+	);
+	assert!(
+		engine_core::linked_prefab::override_status(&session.authored_document(), &first)
+			.unwrap()
+			.is_empty()
+	);
+}

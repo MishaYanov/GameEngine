@@ -1,0 +1,20 @@
+<section aria-label="Selected objects" tabindex="-1">
+    <h3>{{ objects().length }} objects selected</h3>
+    <p>Transform values use each object's local space.</p>
+    @for (property of fields(); track property.key) {
+        <fieldset [disabled]="!editable()">
+            <legend>{{ property.label }}{{ property.key === 'rotation' ? ' (degrees)' : '' }}</legend>
+            @for (axis of property.axes; track axis.index) {
+                <label>
+                    <span>{{ axis.label }}</span>
+                    <input #value type="text" inputmode="decimal" [maxLength]="maxLength"
+                           [attr.aria-label]="property.label + ' ' + axis.label"
+                           [value]="axis.display" [placeholder]="axis.mixed ? 'Mixed' : ''"
+                           (change)="apply(property.key, axis.index, value, axis.display)"
+                           (keydown.enter)="value.blur()" (keydown.escape)="reset(value, axis.display)"/>
+                </label>
+            }
+        </fieldset>
+    }
+    @if (error(); as message) { <p role="alert" class="error">{{ message }}</p> }
+</section>

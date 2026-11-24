@@ -1,5 +1,7 @@
 use super::{CharacterControllerSettings, CharacterState};
-use crate::{EntityKey, collision::CollisionWorld, world::RuntimeWorld};
+use crate::{
+	EntityKey, animation::RootMotionDelta, collision::CollisionWorld, world::RuntimeWorld,
+};
 use glam::Vec3;
 
 fn deadline(tick: u64, window: u32) -> Result<u64, String> {
@@ -39,6 +41,7 @@ pub(super) fn solve(
 	s: &CharacterControllerSettings,
 	tick: u64,
 	dt: f32,
+	root_motion: Option<RootMotionDelta>,
 	budget: &mut usize,
 ) -> Result<(Vec3, CharacterState), String> {
 	let mut next = old.clone();
@@ -78,7 +81,14 @@ pub(super) fn solve(
 	}
 	velocity.y = (velocity.y - s.gravity * dt).max(-s.max_fall_speed);
 	let impact = (-velocity.y).max(0.);
-	let requested = velocity * dt;
+	let mut requested = velocity * dt;
+	if let Some(motion) = root_motion {
+		// Root displacement contributes only to this cast. The motor retains its own acceleration history.
+		requested.x =
+			requested.x * (1.0 - motion.motor_weight) + motion.displacement.x * motion.motor_weight;
+		requested.z =
+			requested.z * (1.0 - motion.motor_weight) + motion.displacement.y * motion.motor_weight;
+	}
 	let (mut applied, contacts) = collisions.slide_body(world, key, requested, budget)?;
 	let wall = contacts.iter().any(|c| c.normal[1].abs() < 0.01);
 	for contact in &contacts {

@@ -80,7 +80,7 @@ fn persistent_assets_and_gameplay_prefab_copies_save_reopen_and_follow_supported
 	assert_eq!(prefab.dependencies, vec![model.id.clone()]);
 	let prefab_id = prefab.id.clone();
 	assert_eq!(
-		w.used_asset_meshes(&model.id).unwrap(),
+		w.used_model_references(&model.id).unwrap().legacy,
 		std::collections::HashSet::from([0])
 	);
 	let authored = w.backend.session().authored_document();
@@ -208,7 +208,7 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 	);
 	assert!(w.backend.session().authored_document().entities.is_empty());
 	assert_eq!(
-		w.used_asset_meshes(&model.id).unwrap(),
+		w.used_model_references(&model.id).unwrap().legacy,
 		std::collections::HashSet::from([0])
 	);
 	let prefab = runtime::editor::PrefabData {
@@ -244,7 +244,7 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 		.unwrap()
 		.entities
 		.is_empty()));
-	let used = w.used_asset_meshes(&model.id).unwrap();
+	let used = w.used_model_references(&model.id).unwrap().legacy;
 	assert_eq!(
 		used,
 		std::collections::HashSet::from([0]),
@@ -255,8 +255,9 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 	let json_bytes = u32::from_le_bytes(original[12..16].try_into().unwrap()) as usize;
 	let mut value: serde_json::Value =
 		serde_json::from_slice(&original[20..20 + json_bytes]).unwrap();
-	value["meshes"][0]["name"] =
-		serde_json::json!(format!("{}-Incompatible", model.meshes[0].name));
+	let mut duplicate = value["meshes"][0].clone();
+	duplicate["name"] = serde_json::json!("Ambiguous duplicate");
+	value["meshes"].as_array_mut().unwrap().push(duplicate);
 	let mut json = value.to_string().into_bytes();
 	while !json.len().is_multiple_of(4) {
 		json.push(b' ');
@@ -290,6 +291,49 @@ fn reimport_compatibility_includes_hidden_inactive_scenes_and_uninstantiated_pre
 	assert_eq!(w.backend.session().revision(), revision);
 	assert_eq!(w.backend.change_cursor(), cursor);
 	assert_eq!(w.backend.session().authored_document(), document);
+}
+
+#[test]
+fn reimport_compatibility_protects_undo_until_reopened() {
+	let fixture = Fixture::new();
+	let model = runtime::assets::project_assets::migrate_catalog(&fixture.0)
+		.unwrap()
+		.by_path("models/triangle.glb")
+		.unwrap()
+		.clone();
+	let mut workspace = fixture.open();
+	assert_eq!(
+		workspace.used_model_references(&model.id).unwrap().legacy,
+		std::collections::HashSet::from([0])
+	);
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	run(&mut workspace, Command::DeleteSelection);
+	workspace
+		.save_all(workspace.backend.session().revision())
+		.unwrap();
+	assert!(workspace
+		.backend
+		.session()
+		.authored_document()
+		.entities
+		.is_empty());
+	assert_eq!(
+		workspace.used_model_references(&model.id).unwrap().legacy,
+		std::collections::HashSet::from([0])
+	);
+
+	drop(workspace);
+	let reopened = fixture.open();
+	assert!(reopened
+		.used_model_references(&model.id)
+		.unwrap()
+		.legacy
+		.is_empty());
 }
 
 #[test]

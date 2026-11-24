@@ -6,36 +6,29 @@ behavior and scene semantics.
 
 ## Run
 
-From the repository root, build and launch the bundled Courtyard Run in Player mode. [Setup](../../usage.md).
+From the repository root, launch the bundled Cinder Oath game in Player mode. [Setup](../../usage.md).
 
 ```powershell
 cargo run --locked --offline -p game -- --player
 ```
 
-The native runtime needs Vulkan 1.3, a supported driver, shader compiler, and debug validation layers. The source
-launch loads `apps/game/project.json` and `apps/game/assets`. A `project.json` beside the executable takes precedence,
-and a legacy adjacent `project-name.txt` also selects installed assets if the manifest is absent. Run from a clean Cargo
-target directory if a previously installed project occupies the executable directory. Keep the manifest, scenes,
-models and their dependencies together in a distribution.
+The source launch opens ``projects/cinder-oath/project.json``. An installed Player opens the ``project.json``
+beside the executable. Keep that manifest and its ``assets`` directory together. Development builds need
+Vulkan 1.3 and the Vulkan shader compiler.
 
 ## Runtime foundations
 
-Steps 21–35 add hierarchy/world transforms, scene schema3, static glTF node/mesh import, per-instance tint,
-directional/point lights, bounded fixed steps and conservative collision movement. Renderer submission adds asynchronous
-GPU timestamps and compatible opaque instancing. Actual model/material/scene inputs remain validated and bounded.
+The Player resolves object hierarchy, model and material assets, and lighting from the saved project. It advances
+gameplay with bounded fixed steps. Runtime synchronizes the accepted state with the renderer and updates the
+window, native input and audio. [Scene, simulation and rendering pipeline](../../pipeline.md).
 
-### Event, controller and animation samples
+### Open an authored project
 
-Additional authored manifests are `apps/game/event-demo.json`, `controller-demo.json` and `animation-demo.json`.
-Open the selected manifest in the editor, use the CPU runner with `--project`, or export that manifest with the
-compiler's `--export` form and run the resulting package. The source Player launch above still selects the bundled
-default project; it does not accept these manifests as a `--project` argument.
-
-The event lab demonstrates independent timed doors and one-shot pickup/completion; Controller Room uses WASD and
-Space for upright box movement; Animated Character Room adds Idle/Walk/Air plus an independent looping companion.
-Gameplay, event queues, movement and animation share the accepted fixed-step transaction. See the
-[M7–M9 walkthrough and commands](../../milestones-7-9-review.md#run-and-verify) for asset restrictions, native
-preview, source pins, replay diagnostics and acceptance boundaries.
+Use **File → Open Project…** in the Editor to open a project manifest. The standalone Player opens the manifest
+in its own package. Export a project from the Editor or use the compiler's `--export` command.
+For development checks, open the Primitive Workshop or Conditional Authoring fixture under
+`apps/headless/tests/fixtures`. Use the [headless runner](../../testing.md#headless-replay) to exercise
+the same simulation paths from an automated replay.
 
 ## Modes and authored gameplay
 
@@ -49,18 +42,15 @@ editor Play. Both paths resolve the manifest's optional `gameplay_module` throug
 starts. An omitted selector uses configured behaviors. GameSession owns the current simulation and explicit
 replacement boundary. RobotGame and older
 CommandHistory APIs remain compatibility helpers, not the normal GameApp behavior pipeline.
-See [project lifecycle](../../project-lifecycle.md), [backend handoff](../../project3-handoff.md)
+See [project lifecycle](../../project-lifecycle.md), [workspace architecture](../../architecture.md)
 and [runtime](../../crates/runtime/README.md).
 
 Keep the manifest, scenes, models and asset dependencies together in an installed project.
 
 ## Player scene switching
 
-The authored exit in the bundled course requests the `finish` scene. During an incomplete run, **F8** also cycles
-to the next catalog scene in lexicographic scene-ID order and wraps at the end. It has an effect when there are at
-least two scenes and gameplay input leaves that shortcut available. With a failed transition pending, F8 retries
-the requested destination. The Courtyard, Finish and Robot Demo actors share `player_move` settings and have their
-own entity keys and runtime worlds.
+The selected gameplay module can request a scene transition. Cinder Oath moves from the introduction into
+the vault after the introduction finishes or the player skips it. The destination comes from the project catalog.
 
 The switch resolves the catalog path canonically inside the asset root, parses the document and prepares a CPU
 simulation candidate. A separate AssetManager and GPU scene/camera are then built. The old scene stays installed
@@ -72,26 +62,15 @@ A failed preparation preserves the installed scene and reports an update error. 
 world for the destination and retains the run's game-owned progress. The manifest's startup scene and the authored
 documents keep their existing values.
 
-## Demo progress and New Game
+## Play and restart Cinder Oath
 
-The bundled manifest selects `courtyard_run` and starts in Courtyard. The same role-based rules run in Editor Play,
-headless Play, and the standalone Player. The default movement keys are W, A, S and D.
+Start at the introduction. Press **Enter** to skip to the vault. Use **W**, **A**, **S** and **D** to move,
+and press **F** to attack when close to the Warden. Three landed hits finish the encounter.
+In Editor Play, focus the Game view and use **Restart Run** to return to the startup scene with fresh progress.
+Use **Stop** to return to authoring.
 
-1. Move the capsule with **A** toward the green exit at X = −1.5. The title reports **Exit: locked** while the key is
-   missing.
-2. Move with **D** toward the yellow key sphere at X = 1.5. Entering its 0.35-unit proximity awards one point, records
-   the key and unlocks the exit.
-3. Return with **A** to the green exit. The game loads Finish automatically. Release the movement key before moving
-   again so input starts fresh in the new scene.
-4. Move with **D** toward the blue Finish cube at X = 1.5. Approaching it after taking the courtyard exit completes
-   the run and freezes gameplay movement. The title displays **Complete! F10 to restart**.
-5. Press **F10** to start a fresh run in Courtyard with score zero and the exit locked.
-
-The title reports runtime scene, score, key ownership and exit state when the scene has an exit role. **F7** adds one
-debug point during an incomplete campaign run. New Game prepares fresh progress and a startup simulation before
-adopting CPU/GPU state. Ordinary scene travel retains the run's in-memory progress. The demo's capsule, cube and
-sphere are packaged as reusable glTF models under
-`apps/game/assets/props`. [Typed progress contract](../../crates/runtime/README.md#game-progress).
+The shared GameSession retains game-owned progress during a scene transition.
+[Typed progress](../../crates/runtime/README.md#game-progress) · [Windows quickstart](../../windows-editor-quickstart.md).
 
 ## Movement input profiles
 
@@ -136,8 +115,7 @@ The standalone game schedules continuous redraws with WaitUntil at update-start 
 FIFO draw time in that deadline. Input and resize can wake it immediately; paused/static, unfocused, occluded and
 minimized states wait. This is scheduling policy, not measured hardware cadence or a speedup result.
 
-Compiler and admin source generation now include bounded validated asset JSON. This fixes the prior missing robots.json
-allowlist gap, but installed execution and full distribution acceptance require their own results.
+See [Compiler packaging](../../compiler/README.md) for the files the Player uses at startup.
 
 ## Checks
 
@@ -146,7 +124,4 @@ cargo check --workspace --all-targets --locked --offline
 cargo test -p runtime -p game -p renderer --all-targets --locked --offline
 ```
 
-A Windows smoke placed the route markers at their respective player spawns in a copied export. The Player
-displayed the Finish marker and completion in the title. After restoring the exported Courtyard document in
-the copy, F10 returned to Courtyard with score zero and the exit locked. Automated checks cover the full route
-and restart from authored and staged data. [Repository testing](../../testing.md).
+Use [Testing and validation](../../testing.md) for replay and windowed acceptance.

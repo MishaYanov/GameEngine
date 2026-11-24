@@ -16,6 +16,8 @@ pub struct AssetRef {
 	pub asset_id: Option<crate::asset_catalog::AssetId>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub mesh_index: Option<usize>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub mesh_id: Option<crate::asset_catalog::MeshSubassetId>,
 }
 
 impl AssetRef {
@@ -24,11 +26,16 @@ impl AssetRef {
 			path: path.into(),
 			asset_id: None,
 			mesh_index,
+			mesh_id: None,
 		}
 		.canonical()
 	}
 	pub fn with_asset_id(mut self, asset_id: Option<crate::asset_catalog::AssetId>) -> Self {
 		self.asset_id = asset_id;
+		self
+	}
+	pub fn with_mesh_id(mut self, mesh_id: Option<crate::asset_catalog::MeshSubassetId>) -> Self {
+		self.mesh_id = mesh_id;
 		self
 	}
 	/// Compact direct Rust inputs as well as validating their logical form.
@@ -42,6 +49,9 @@ impl AssetRef {
 	/// Filesystem canonicalization/containment belongs to the importer adapter.
 	pub fn validate(&self) -> Result<(), String> {
 		validate_model_path(&self.path)?;
+		if self.mesh_id.is_some() && self.asset_id.is_none() {
+			return Err("A stable mesh reference requires its model asset ID".into());
+		}
 		if self.mesh_index.is_some_and(|index| index > 1_000_000) {
 			return Err("Asset mesh index exceeds 1000000".into());
 		}
@@ -451,6 +461,9 @@ fn metadata_cost(reference: &AssetRef) -> Result<usize, String> {
 				.as_ref()
 				.map_or(0, |id| id.as_str().len()),
 		)
+		.and_then(|bytes| {
+			bytes.checked_add(reference.mesh_id.as_ref().map_or(0, |id| id.as_str().len()))
+		})
 		.ok_or("Asset metadata size overflow")?
 		.checked_mul(2)
 		.and_then(|bytes| bytes.checked_add(192))

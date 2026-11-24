@@ -99,6 +99,7 @@ fn one_animator_asset_validates_each_actors_visual_children() {
 					enabled: true,
 					data: ComponentData::Animator {
 						settings: AnimatorSettings {
+							root_motion_source_node: None,
 							asset_id: asset.id.clone(),
 							binding: AnimatorBinding::Visual {
 								targets: vec![AnimatorVisualTarget {

@@ -6,6 +6,8 @@ mod input;
 mod motion;
 #[path = "character_controller_api/player.rs"]
 mod player_authoring;
+#[path = "character_controller_api/possession.rs"]
+mod possession;
 mod support;
 use engine_core::{
 	Key,

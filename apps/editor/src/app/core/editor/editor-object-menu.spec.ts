@@ -13,6 +13,6 @@ describe('Object catalog availability', () => {
             expect(entry.action.kind).toBe('primitive');
             expect(allowsFolder(entry)).toBe(true);
         }
-        expect(allowsFolder(objectMenuEntry('create_point_light')!)).toBe(false);
+        expect(allowsFolder(objectMenuEntry('create_point_light')!)).toBe(true);
     });
 });

@@ -5,7 +5,7 @@ use crate::editor::asset_sources::AssetSourceKind;
 use runtime::asset_catalog::AssetId;
 use runtime::assets::project_assets::{self, PreparedAssetChange, PreparedPrimitive};
 use runtime::PrimitiveKind;
-use std::{collections::HashSet, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
@@ -250,8 +250,8 @@ async fn operate(
 					w.validate_asset_destination(destination)?;
 				}
 				let used = match &change {
-					Change::Reimport { id, .. } => w.used_asset_meshes(id)?,
-					_ => HashSet::new(),
+					Change::Reimport { id, .. } => w.used_model_references(id)?,
+					_ => Default::default(),
 				};
 				(w.asset_root.clone(), w.generation, used)
 			};
@@ -296,12 +296,13 @@ async fn operate(
 					id,
 					source,
 					fingerprint,
-				} => project_assets::prepare_reimport(
+				} => project_assets::prepare_reimport_with_references(
 					&root,
 					&id,
 					Some(&source),
 					&fingerprint,
-					&used,
+					&used.legacy,
+					&used.stable,
 				)?,
 				Change::Move { id, destination } => {
 					project_assets::prepare_move(&root, &id, &destination)?

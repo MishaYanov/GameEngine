@@ -22,7 +22,7 @@ use crate::project_location::ProjectLocation;
 use assets::PendingAsset;
 pub use assets::{AssetCompletion, AssetTicket};
 use bridge::editor::{EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto};
-use documents::{load_project_documents, read_bounded, resolve_existing};
+use documents::{load_project_documents, read_bounded, read_editor_scene, resolve_existing};
 use runtime::scene_catalog::SceneId;
 use runtime::{
 	asset_jobs::{AssetJobError, AssetJobId, AssetJobLimits},
@@ -115,7 +115,7 @@ impl EditorWorkspace {
 		}
 		let relative_scene = scene_path;
 		let scene_path = resolve_existing(&asset_root, relative_scene)?;
-		let parsed = file_operation("load_scene", runtime::scene_io::load_data(&scene_path))?;
+		let scene = read_editor_scene(&scene_path, "load_scene")?;
 		let project_path = asset_root
 			.parent()
 			.ok_or("Assets need a project directory")?
@@ -136,12 +136,12 @@ impl EditorWorkspace {
 			(project, WorkspaceKind::ManifestBacked)
 		} else {
 			(
-				ProjectData::for_scene("Untitled", relative_scene, &parsed.data)?,
+				ProjectData::for_scene("Untitled", relative_scene, &scene)?,
 				WorkspaceKind::StandaloneScene,
 			)
 		};
-		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
-		let backend = runtime::EngineBuilder::new(parsed.data, project)
+		let documents = load_project_documents(&asset_root, &project, &scene)?;
+		let backend = runtime::EngineBuilder::new(scene, project)
 			.with_scenes(documents)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
@@ -182,10 +182,10 @@ impl EditorWorkspace {
 
 		let scene_path = resolve_existing(location.assets(), project.startup_scene_path()?)?;
 
-		let parsed = file_operation("load_scene", runtime::scene_io::load_data(&scene_path))?;
+		let scene = read_editor_scene(&scene_path, "load_scene")?;
 
-		let documents = load_project_documents(&asset_root, &project, &parsed.data)?;
-		let backend = runtime::EngineBuilder::new(parsed.data, project)
+		let documents = load_project_documents(&asset_root, &project, &scene)?;
+		let backend = runtime::EngineBuilder::new(scene, project)
 			.with_scenes(documents)
 			.module_resolver(Arc::new(gameplay_catalog::resolve))
 			.animation_resolver(animation_resolver(&asset_root))
@@ -266,7 +266,16 @@ impl EditorWorkspace {
 			state: self.backend.session().state(),
 			entities,
 			camera: receipt.changes.camera_changed.then(|| after.camera.clone()),
-			lights: receipt.changes.lights_changed.then(|| after.lights.clone()),
+			lights: receipt
+				.changes
+				.lights_changed
+				.then(|| after.projected_lights())
+				.transpose()
+				.map_err(|message| runtime::BackendError {
+					code: runtime::BackendErrorCode::Internal,
+					message,
+					current_revision: Some(receipt.revision),
+				})?,
 			organization: receipt
 				.organization_changed
 				.then(|| after.organization.clone()),
@@ -437,7 +446,8 @@ impl EditorWorkspace {
 		for entry in disk.scenes.iter() {
 			let scene = resolve_existing(&self.asset_root, entry.asset_path())?;
 			let document = self.backend.session().scene_document(entry.id())?;
-			if runtime::scene_io::load_data(&scene)?.data != *document {
+			let disk_scene = read_editor_scene(&scene, "prepare_build_scene")?;
+			if disk_scene != *document {
 				return Err("Project scene changed on disk; reload before building".into());
 			}
 		}

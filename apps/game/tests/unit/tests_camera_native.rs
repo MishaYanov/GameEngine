@@ -50,7 +50,7 @@ fn hidden_player(
 
 fn route_checkpoints(project: &Path, dir: &Path) -> Vec<Value> {
 	let route: Value = serde_json::from_slice(include_bytes!(
-		"../../../../docs/verification/milestone-10-camera-route.json"
+		"../../../../history/verification/milestone-10-camera-route.json"
 	))
 	.unwrap();
 	let actions = route["actions"].as_array().unwrap();

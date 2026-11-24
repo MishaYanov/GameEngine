@@ -1,7 +1,8 @@
 use engine_core::{
 	EntityKey, PrimitiveKind, SceneData,
 	asset_catalog::{
-		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MeshSignature, PersistentAsset,
+		AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MeshIdentity, MeshSignature,
+		MeshSubassetId, PersistentAsset,
 	},
 	editor::{EditorSession, PrefabData},
 	linked_prefab::LinkedPrefabSource,
@@ -70,7 +71,7 @@ fn asset(path: String, kind: AssetKind, bytes: &[u8]) -> PersistentAsset {
 }
 
 #[test]
-fn primitives_survive_pinned_prop_two_scenes_and_export() {
+fn primitives_and_stable_meshes_survive_pinned_prop_two_scenes_and_export() {
 	let fixture = Fixture::new();
 	let assets = fixture.0.join("assets");
 	let output = fixture.0.join("exports");
@@ -88,6 +89,7 @@ fn primitives_survive_pinned_prop_two_scenes_and_export() {
 	let mut catalog = AssetCatalog::default();
 	let mut entities = Vec::new();
 	let mut expected = Vec::new();
+	let sphere_mesh = MeshSubassetId::generate();
 	for (kind, bytes) in meshes {
 		let path = format!("models/primitives/v1/{}.glb", kind.as_str());
 		fs::write(assets.join(&path), bytes).unwrap();
@@ -96,6 +98,11 @@ fn primitives_survive_pinned_prop_two_scenes_and_export() {
 			index: 0,
 			name: kind.display_name().into(),
 			primitives: 1,
+			identity: (kind == PrimitiveKind::Sphere).then(|| MeshIdentity {
+				id: sphere_mesh.clone(),
+				geometry_sha256: "a".repeat(64),
+				source_key: None,
+			}),
 		});
 		entities.push(
 			EntityData::new(
@@ -114,8 +121,12 @@ fn primitives_survive_pinned_prop_two_scenes_and_export() {
 		"Imported Cube",
 		"imported-cube.glb",
 	);
-	let [plane, cube, sphere, capsule] = entities.try_into().ok().unwrap();
+	let [plane, cube, sphere, capsule]: [_; 4] = entities.try_into().ok().unwrap();
 	let sphere_id = sphere.asset_id.clone().unwrap();
+	// The authored compatibility hint is stale; packaging must resolve ID first.
+	let sphere = sphere
+		.with_mesh_index(Some(5))
+		.with_mesh_id(Some(sphere_mesh.clone()));
 	let prefab = PrefabData {
 		schema_version: 3,
 		entities: vec![sphere],
@@ -171,12 +182,9 @@ fn primitives_survive_pinned_prop_two_scenes_and_export() {
 	let exported_main =
 		SceneData::from_json(&fs::read_to_string(staged_assets.join("scenes/main.json")).unwrap())
 			.unwrap();
-	assert!(
-		exported_main
-			.entities
-			.iter()
-			.any(|entity| { entity.renderable && entity.model_path == expected[2].0 })
-	);
+	assert!(exported_main.entities.iter().any(|entity| entity.renderable
+		&& entity.model_path == expected[2].0
+		&& entity.mesh_id.as_ref() == Some(&sphere_mesh)));
 
 	let capsule_path = &expected[3].0;
 	fs::remove_file(assets.join(capsule_path)).unwrap();

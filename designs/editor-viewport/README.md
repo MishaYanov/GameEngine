@@ -5,7 +5,7 @@ is implemented. The [implementation guide](../../docs/viewport-implementation.md
 records the shipped scope, contracts, verification and remaining boundaries.
 This design remains the broader roadmap; requirements below are not all completed.
 
-The [2026-11-20 building-blocks review](../../docs/building-blocks-review.md) records the completed playable slice,
+The [2026-11-20 building-blocks review](../../history/reviews/building-blocks-review.md) records the completed playable slice,
 module-aware role configuration, Collider Inspector and sensor/filter authoring. Trigger lifecycle events remain a
 teaching proposal; the researched chapters below must not be read as proof that every proposed feature is available.
 
@@ -27,7 +27,7 @@ Authored entities, gameplay cameras, and project settings belong to game data.
 | [Scene view interactions](scene-view-interactions.md) | Navigation, grid, selection, transform tools, asset placement, and input behavior. |
 | [Runtime and rendering](runtime-and-rendering.md) | State ownership, native rendering, bridge contracts, grid/gizmo implementation, and responsiveness. |
 | [Game creation workflows](game-creation-workflows.md) | Concrete game-building tasks, feature dependencies, and support-agent responsibilities. |
-| [Object authoring roadmap, Milestones 163–202](object-authoring-roadmap-163-202.md) | Create, Inspector and specialist panes, Prop authoring, and the future contextual Agent. |
+| [Object authoring roadmap, Milestones 163–202](../../history/roadmaps/object-authoring-roadmap-163-202.md) | Create, Inspector and specialist panes, Prop authoring, and the future contextual Agent. |
 
 The interactive preview supplied with this design demonstrates the proposed
 layout and gestures. It is a local concept simulation, not a Vulkan renderer
@@ -387,9 +387,9 @@ It does not autonomously commit, publish, modify documentation, or schedule work
 ## Related engine references
 
 - [Current editor workspace](../../docs/editor-workspace.md).
-- [Editor command architecture](../../docs/adr/0001-editor-command-pipeline.md).
-- [Object composition and inspector subjects](../../docs/adr/0002-object-composition-and-components.md).
-- [Rust and TypeScript contracts](../../docs/adr/0003-rust-typescript-bridge.md).
+- [Editor command architecture](../../history/adr/0001-editor-command-pipeline.md).
+- [Object composition and inspector subjects](../../history/adr/0002-object-composition-and-components.md).
+- [Rust and TypeScript contracts](../../history/adr/0003-rust-typescript-bridge.md).
 - [Scene data and persistence](../../docs/scene-persistence.md).
 - [Project lifecycle](../../docs/project-lifecycle.md).
 

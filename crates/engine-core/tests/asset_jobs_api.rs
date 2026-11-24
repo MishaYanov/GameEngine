@@ -208,7 +208,8 @@ fn job_byte_and_reference_budgets_reject_submission_atomically() {
 			AssetRef {
 				asset_id: None,
 				path: "../outside.glb".into(),
-				mesh_index: None
+				mesh_index: None,
+				mesh_id: None,
 			},
 			1
 		),

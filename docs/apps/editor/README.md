@@ -4,7 +4,7 @@ Source: `apps/editor`. The Angular 22 app supplies project creation/opening, Sce
 
 Read [Angular editor workspace](../../editor-workspace.md) for the desktop workflow, exact connected controls, project replacement guards, component generators and remaining UI gaps. [Editor flow](../../editor-flow.md) traces the underlying methods.
 The [native scene editor implementation](../../viewport-implementation.md) documents the new viewport gestures, grid/handle rendering, pointer-captured placement and current limits.
-The [components, linked prefabs and runtime review](../../milestones-4-6-review.md) covers the current component
+The [Objects, components and Props guide](../../authoring-objects.md) covers the current component
 Inspector, guarded source drafts, instance overrides/update/revert/unpack and read-only Runtime Inspector.
 
 ## Run
@@ -71,8 +71,7 @@ active scene; `saveProject()` persists only the manifest. `reload()` explicitly 
 See [project lifecycle](../../project-lifecycle.md) for the data model. The workspace now exposes scene switching, startup selection, registration and Save As, plus selectable model/scene catalogue entries and origin/native-drag model placement.
 
 **Gameplay Module** selects the generic configured behavior or a host-advertised native module. **Gameplay Roles**
-uses that module's default or per-scene role descriptors; Courtyard advertises Player/Key/Exit and Player/Finish in
-its `finish` scene. **Unassigned** clears a role. Module selection is a project edit; assignments are scene edits.
+uses the selected module's role descriptors for the active scene. **Unassigned** clears a role. Module selection is a project edit; assignments are scene edits.
 Both support history and persist through the appropriate save action. Unknown saved modules remain visible for repair.
 [Scene role requirements](../../project-lifecycle.md#gameplay-role-bindings).
 
@@ -93,7 +92,7 @@ read-only Runtime Inspector with explicit bounded Refresh; Scene still exposes d
 **Restart Run** prepares the configured startup scene and fresh progress. The button is disabled until the viewport
 is attached and has current Play status, and stays disabled while work is pending. The current run remains visible
 until the restart succeeds. Stop returns to the retained authoring
-state. [Courtyard Run steps](../../viewport-implementation.md#15-scene-and-game-share-one-surface).
+state. [Cinder Oath preview](../../viewport-implementation.md#15-scene-and-game-share-one-surface).
 
 ## Pane boundary and platform limits
 
@@ -108,11 +107,7 @@ overlay above the Vulkan child. Non-Windows capability limits must be surfaced. 
 
 ## Contracts and learning report
 
-[Steps 21–35](../../editor-steps-21-35.md) explain the complete runtime/host/frontend split, camera commands, snapping,
-multi-selection, hierarchy, scene3, prefabs, static scene import, tints/lights, simulation/collision, GPU timing, and
-instancing. These are APIs for the Angular editor plus game pane, not a second native authoring product. The source game
-defaults to Development mode with the existing native learning harness; installed projects default to Player. The native
-harness delegates to the shared core session and is not the future Angular editor.
+[Editor command flow](../../editor-flow.md) explains the runtime, host and frontend boundaries.
 
 ## Build and checks
 

@@ -230,6 +230,239 @@ fn reimport_is_compatible_and_rolls_back_asset_and_catalog_on_publication_failur
 	);
 }
 #[test]
+fn stable_mesh_reimport_follows_ids_and_rejects_retargeting_legacy_slots() {
+	let f = Fixture::new();
+	let root = f.root();
+	let source = f.0.join("first.glb");
+	let replacement = f.0.join("second.glb");
+	let assign_stable_keys = |value: &mut serde_json::Value, keys: [&str; 2]| {
+		let mesh = value["meshes"][0].clone();
+		value["meshes"] = serde_json::Value::Array(
+			keys.into_iter()
+				.map(|key| {
+					let mut mesh = mesh.clone();
+					mesh["extras"]["game_engine_mesh_id"] = serde_json::json!(key);
+					mesh
+				})
+				.collect(),
+		);
+	};
+	fs::write(
+		&source,
+		changed_json(&glb("Piece", 1.), |value| {
+			assign_stable_keys(value, ["hull", "cap"]);
+		}),
+	)
+	.unwrap();
+	let first = prepare_import(&root, &source, "model.glb")
+		.unwrap()
+		.publish()
+		.unwrap();
+	let hull = &first.meshes[0].identity.as_ref().unwrap().id;
+	let cap = &first.meshes[1].identity.as_ref().unwrap().id;
+
+	fs::write(
+		&replacement,
+		changed_json(&glb("Renamed", 2.), |value| {
+			assign_stable_keys(value, ["hull", "cap"]);
+		}),
+	)
+	.unwrap();
+	let edited = prepare_reimport(
+		&root,
+		&first.id,
+		Some(&replacement),
+		&first.fingerprint,
+		&HashSet::from([0, 1]),
+	)
+	.unwrap()
+	.publish()
+	.unwrap();
+	assert_eq!(edited.mesh_by_id(hull).unwrap().index, 0);
+	assert_eq!(edited.mesh_by_id(cap).unwrap().index, 1);
+	let before = fs::read(root.join("model.glb")).unwrap();
+	let catalog_before = fs::read(root.join(CATALOG_FILE)).unwrap();
+
+	fs::write(
+		&replacement,
+		changed_json(&glb("Reordered", 3.), |value| {
+			assign_stable_keys(value, ["cap", "hull"]);
+		}),
+	)
+	.unwrap();
+	let rejected = prepare_reimport(
+		&root,
+		&first.id,
+		Some(&replacement),
+		&edited.fingerprint,
+		&HashSet::from([0]),
+	);
+	assert!(rejected.err().unwrap().contains("referenced mesh 0"));
+	assert_eq!(fs::read(root.join("model.glb")).unwrap(), before);
+	assert_eq!(fs::read(root.join(CATALOG_FILE)).unwrap(), catalog_before);
+
+	let stable_usage = HashSet::from([hull.clone()]);
+	let reordered = prepare_reimport_with_references(
+		&root,
+		&first.id,
+		Some(&replacement),
+		&edited.fingerprint,
+		&HashSet::new(),
+		&stable_usage,
+	)
+	.unwrap()
+	.publish()
+	.unwrap();
+	let current = load_catalog(&root).unwrap();
+	assert_eq!(current.by_id(&first.id), Some(&reordered));
+	assert_eq!(reordered.mesh_by_id(hull).unwrap().index, 1);
+	assert_eq!(reordered.mesh_by_id(cap).unwrap().index, 0);
+	let legacy = AssetRef::new("model.glb", Some(0)).unwrap();
+	let stable = AssetRef::new("old-path.glb", Some(0))
+		.unwrap()
+		.with_asset_id(Some(first.id.clone()))
+		.with_mesh_id(Some(hull.clone()));
+	assert_eq!(resolve_asset(&root, &legacy).unwrap().mesh_index, Some(0));
+	let resolved = resolve_asset(&root, &stable).unwrap();
+	assert_eq!(resolved.mesh_index, Some(1));
+	assert_eq!(resolved.mesh_id.as_ref(), Some(hull));
+	assert_eq!(resolved.path, "model.glb");
+
+	let before = fs::read(root.join("model.glb")).unwrap();
+	let catalog_before = fs::read(root.join(CATALOG_FILE)).unwrap();
+	fs::write(
+		&replacement,
+		changed_json(&glb("Only cap", 3.), |value| {
+			value["meshes"][0]["extras"]["game_engine_mesh_id"] = serde_json::json!("cap");
+		}),
+	)
+	.unwrap();
+	let rejected = prepare_reimport_with_references(
+		&root,
+		&first.id,
+		Some(&replacement),
+		&reordered.fingerprint,
+		&HashSet::new(),
+		&stable_usage,
+	);
+	assert!(rejected.err().unwrap().contains("referenced mesh identity"));
+	assert_eq!(fs::read(root.join("model.glb")).unwrap(), before);
+	assert_eq!(fs::read(root.join(CATALOG_FILE)).unwrap(), catalog_before);
+}
+
+#[test]
+fn changed_multimesh_reimport_rejects_duplicate_untagged_meshes_and_exporter_keys() {
+	let f = Fixture::new();
+	let root = f.root();
+	let source = f.0.join("first.glb");
+	let replacement = f.0.join("second.glb");
+	let glb_mesh = || serde_json::json!({"name":"Piece","primitives":[{"attributes":{"POSITION":0},"indices":1,"mode":4}]});
+	let anonymous = |version: &str| {
+		changed_json(&glb("Piece", 1.), |value| {
+			value["asset"]["generator"] = serde_json::json!(version);
+			value["meshes"].as_array_mut().unwrap().push(glb_mesh());
+		})
+	};
+	fs::write(&source, anonymous("one")).unwrap();
+	let first = prepare_import(&root, &source, "model.glb")
+		.unwrap()
+		.publish()
+		.unwrap();
+	fs::write(&replacement, anonymous("two")).unwrap();
+	let used = HashSet::from([0]);
+	assert!(
+		prepare_reimport(
+			&root,
+			&first.id,
+			Some(&replacement),
+			&first.fingerprint,
+			&used
+		)
+		.is_err()
+	);
+	assert_eq!(
+		fs::read(root.join("model.glb")).unwrap(),
+		fs::read(&source).unwrap()
+	);
+	fs::write(
+		&replacement,
+		changed_json(&anonymous("duplicate"), |value| {
+			for model in value["meshes"].as_array_mut().unwrap() {
+				model["extras"]["game_engine_mesh_id"] = serde_json::json!("duplicate");
+			}
+		}),
+	)
+	.unwrap();
+	let rejected = prepare_reimport(
+		&root,
+		&first.id,
+		Some(&replacement),
+		&first.fingerprint,
+		&HashSet::new(),
+	);
+	assert!(
+		rejected
+			.err()
+			.unwrap()
+			.contains("duplicates extras.game_engine_mesh_id")
+	);
+}
+
+#[test]
+fn legacy_catalog_reopen_keeps_numeric_meshes_until_explicit_reimport() {
+	let f = Fixture::new();
+	let root = f.root();
+	let source = f.source("source.glb", "Legacy", 1.);
+	let original = prepare_import(&root, &source, "legacy.glb")
+		.unwrap()
+		.publish()
+		.unwrap();
+	let mut old_catalog = load_catalog(&root).unwrap();
+	old_catalog.assets[0].meshes[0].identity = None;
+	fs::write(root.join(CATALOG_FILE), old_catalog.to_json().unwrap()).unwrap();
+	assert!(
+		load_catalog(&root).unwrap().assets[0].meshes[0]
+			.identity
+			.is_none()
+	);
+
+	assert_eq!(migrate_catalog(&root).unwrap(), old_catalog);
+	let reimported = prepare_reimport(
+		&root,
+		&original.id,
+		Some(&source),
+		&original.fingerprint,
+		&HashSet::from([0]),
+	)
+	.unwrap()
+	.publish()
+	.unwrap();
+	let mesh = reimported.meshes[0].identity.as_ref().unwrap();
+	assert_eq!(
+		mesh.geometry_sha256,
+		original.meshes[0]
+			.identity
+			.as_ref()
+			.unwrap()
+			.geometry_sha256
+	);
+	assert_eq!(
+		migrate_catalog(&root).unwrap().by_id(&original.id),
+		Some(&reimported)
+	);
+	assert_eq!(
+		fs::read(root.join("legacy.glb")).unwrap(),
+		fs::read(&source).unwrap()
+	);
+	assert_eq!(
+		resolve_asset(&root, &AssetRef::new("legacy.glb", Some(0)).unwrap())
+			.unwrap()
+			.mesh_index,
+		Some(0)
+	);
+}
+
+#[test]
 fn stale_candidate_conflicts_and_invalid_source_leave_authored_assets_untouched() {
 	let f = Fixture::new();
 	let source = f.source("source.glb", "Triangle", 1.);

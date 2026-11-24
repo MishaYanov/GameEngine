@@ -177,16 +177,9 @@ fn validate_model_references(
 	let catalog = dependencies::read_catalog(root)?;
 
 	for entity in scene.entities.iter().filter(|entity| entity.renderable) {
-		let resolved = catalog.resolve(
-			entity.asset_id.as_ref(),
-			&entity.model_path,
-			entity.mesh_index,
-		)?;
-		if resolved.is_some_and(|asset| asset.kind != engine_core::asset_catalog::AssetKind::Model)
-		{
-			return Err("Renderable entity references a non-model asset identity".into());
-		}
-		let model_path = resolved.map_or(entity.model_path.as_str(), |asset| asset.path.as_str());
+		let resolved = catalog.resolve_mesh_reference(&entity.model_reference()?)?;
+		let model_path =
+			resolved.map_or(entity.model_path.as_str(), |(asset, _)| asset.path.as_str());
 		if !checked.insert(model_path) {
 			continue;
 		}

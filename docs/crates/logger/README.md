@@ -95,7 +95,7 @@ The background writer uses a bounded queue and buffered output. Queue overload d
 Memory history and the writer queue share immutable `Arc<LogEntry>` records; public snapshot pages still return owned
 entries. The writer reuses a bounded serialization buffer and encodes each record once for ordinary/error streams.
 These allocation changes retain existing redaction, ordering, record limits, independent stream failure and flush
-semantics. Historical timing measurements below do not measure their effect.
+semantics. Measure storage overhead with the queue size and verbosity used by the application.
 
 Old inactive sessions are pruned at session startup. Session locks protect active applications from deletion. Active sessions can temporarily exceed the session retention count; subsequent starts prune them once inactive. Cleanup only removes recognized numeric segment files and logger-owned session directories. Unknown files cause cleanup to report an error rather than delete unrelated data.
 
@@ -150,16 +150,6 @@ cargo run -p engine-logger --example measure --release --offline --locked
 
 Tests cover serialization, filtering, pagination gaps and session resets, concurrent sequence ordering, text bounds and redaction, bounded cause extraction, panic capture and recursive panic safety, storage failure, rotation, session retention, queue overload, and bounded shutdown. Global initialization tests run in separate integration-test executables.
 
-On October 3, 2026, a local Windows measurement with Rust 1.97.1, persistence enabled, console disabled, and an 8,192-record queue produced these results. These are single-run observations, not production targets:
-
-| Workload | Debug build | Release build |
-| --- | --- | --- |
-| 5,000 ordinary records | 14.17 ms | 7.37 ms |
-| One error with trace | 19.93 ms | 12.08 ms |
-| 20,000 records across four burst threads | 87.60 ms | 61.09 ms |
-| Total dropped disk records across the run | 8,391 | 0 |
-
-Both runs reported zero dropped memory records and no storage errors. Burst overload remains possible; choose queue
-sizes and verbosity using measurements from the actual client workload. These historical measurements predate resource
-snapshots and do not measure their overhead. Engine Admin now consumes the persisted diagnostics and resource snapshots
-separately.
+Run the release measurement example with realistic record volume to tune verbosity and disk queue size.
+Check dropped records and storage health alongside elapsed time. Engine Admin reads persisted diagnostics
+and resource snapshots independently.

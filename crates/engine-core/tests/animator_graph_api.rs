@@ -113,6 +113,7 @@ fn two_objects_can_store_one_animator_and_legacy_playback_is_unaffected_until_ad
 		})
 	};
 	let settings = AnimatorSettings {
+		root_motion_source_node: None,
 		asset_id: AssetId::generate(),
 		binding: AnimatorBinding::Imported { source },
 	};

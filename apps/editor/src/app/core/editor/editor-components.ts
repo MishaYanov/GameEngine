@@ -1,7 +1,7 @@
 import {validAudioSourceSettings, type AudioSourceSettings} from './audio-source.models';
 import {validSkySettings, type SkySettings} from './sky.models';
 import {validParticleEmitterSettings, type ParticleEmitterSettings} from './particle-emitter.models';
-import type { CameraComponentSettings, Collider, MaterialOverride, Vec3 } from './editor.models';
+import type { CameraComponentSettings, Collider, Light, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
 	validControllerSettings,
@@ -50,13 +50,17 @@ export type NativeBehaviorSpec =
 			readonly bindings: Readonly<Record<string, string>>;
 	  };
 
+export type LightSettings = Pick<Light, 'kind' | 'color' | 'intensity' | 'range'>;
+
 export type ComponentData =
+    | { readonly kind: 'light'; readonly settings: LightSettings }
     | { readonly kind: 'audio_source'; readonly settings: AudioSourceSettings }
 	| {
 			readonly kind: 'mesh_renderer';
 			readonly model_path: string;
 			readonly asset_id?: string | null;
 			readonly mesh_index?: number | null;
+			readonly mesh_id?: string | null;
 			readonly material?: MaterialOverride | null;
 	  }
 	| { readonly kind: 'collider'; readonly collider: Collider }
@@ -189,6 +193,15 @@ function collider(value: unknown): boolean {
 				Number.isFinite(Math.fround(value['radius']));
 }
 
+export function validLightSettings(value: unknown): value is LightSettings {
+    if (!record(value) || Object.keys(value).length !== 4) return false;
+    return (value['kind'] === 'point' || value['kind'] === 'directional') &&
+        vector(value['color'], 3, 0, 1) &&
+        typeof value['intensity'] === 'number' && value['intensity'] >= 0 && value['intensity'] <= 1_000_000 &&
+        typeof value['range'] === 'number' && Number.isFinite(Math.fround(value['range'])) &&
+        Math.fround(value['range']) > 0;
+}
+
 export function validComponentRecord(value: unknown): value is ComponentRecord {
 	if (
 		!record(value) ||
@@ -202,14 +215,19 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 	const data = value['data'];
 	if (data['kind'] === 'mesh_renderer') {
 		const material = data['material'];
+		const meshId = data['mesh_id'];
 		return (
 			nonempty(data['model_path']) &&
 			(data['asset_id'] == null || nonempty(data['asset_id'])) &&
 			(data['mesh_index'] == null || integer(data['mesh_index'], 0, 1_000_000)) &&
+			(meshId == null || (nonempty(data['asset_id']) && typeof meshId === 'string' &&
+				/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(meshId) &&
+				meshId !== '00000000-0000-0000-0000-000000000000')) &&
 			(material == null || (record(material) && vector(material['base_color_factor'], 4, 0, 1)))
 		);
 	}
 	if (data['kind'] === 'audio_source') return validAudioSourceSettings(data['settings']);
+    if (data['kind'] === 'light') return Object.keys(data).length === 2 && validLightSettings(data['settings']);
 	if (data['kind'] === 'sky') return validSkySettings(data['settings']);
     if (data['kind'] === 'particle_emitter') return Object.keys(data).length === 2 && validParticleEmitterSettings(data['settings']);
 	if (data['kind'] === 'script') return validScriptSettings(data['settings']);
@@ -278,6 +296,7 @@ export function validComponentViews(value: unknown): value is readonly Component
 		value.filter((component) => component.data.kind === 'animator').length <= 1 &&
 		value.filter((component) => component.data.kind === 'camera').length <= 1 &&
         value.filter((component) => component.data.kind === 'particle_emitter').length <= 1 &&
+        value.filter((component) => component.data.kind === 'light').length <= 1 &&
         value.filter((component) => component.data.kind === 'interactable').length <= 1 &&
 		value.filter((component) => component.data.kind === 'script').length <= 8 &&
 		value.filter((component) => component.data.kind === 'native_behavior').length <= 8
@@ -303,6 +322,7 @@ export function validComponentTypes(value: unknown): value is readonly Component
 					'animator',
 					'camera',
 					'sky',
+                    'light',
                     'particle_emitter',
                     'interactable',
 				].includes(String(item['kind'])) &&

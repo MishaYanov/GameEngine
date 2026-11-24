@@ -2,12 +2,14 @@ use super::InputFrame;
 use crate::{
 	EntityKey,
 	collision::CollisionWorld,
+	components::ComponentId,
 	game_progress::{GameProgress, ProgressAction, ProgressState, ProgressView},
 	project::{BehaviorSettings, BehaviorSpace, ProjectData, ResolvedBehavior},
+	runtime_lifecycle::RuntimeEntityHandle,
 	scene_catalog::SceneId,
 	scene_data::{MaterialOverrideData, SceneData, TransformData},
 	triggers::{TriggerEvent, TriggerView},
-	world::RuntimeWorld,
+	world::{RuntimeReparentMode, RuntimeWorld},
 };
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -15,11 +17,33 @@ use std::sync::Arc;
 
 pub enum SimulationAction {
 	Despawn {
-		handle: crate::runtime_lifecycle::RuntimeEntityHandle,
+		handle: RuntimeEntityHandle,
+	},
+	/// Change the parent of a live object without changing its handle.
+	Reparent {
+		target: RuntimeEntityHandle,
+		parent: Option<RuntimeEntityHandle>,
+		mode: RuntimeReparentMode,
+	},
+	/// Turn one live emitter on or off, discarding existing particles when disabled.
+	SetParticleEmitterEnabled {
+		target: RuntimeEntityHandle,
+		component_id: ComponentId,
+		enabled: bool,
 	},
 	Progress(ProgressAction),
 	RequestScene {
 		scene_id: SceneId,
+	},
+	/// Transfer or release local control at the end of this fixed step.
+	SetLocalPossession {
+		target: Option<RuntimeEntityHandle>,
+	},
+	/// Set motor intent for an actor without local control on the next step.
+	DriveCharacter {
+		target: RuntimeEntityHandle,
+		movement_xz: [f32; 2],
+		jump_held: bool,
 	},
 	Move {
 		entity: EntityKey,
@@ -89,6 +113,52 @@ impl ActionWriter<'_> {
 		})
 	}
 
+	pub fn reparent_runtime(
+		&mut self,
+		target: RuntimeEntityHandle,
+		parent: Option<RuntimeEntityHandle>,
+		mode: RuntimeReparentMode,
+	) -> Result<(), String> {
+		self.push(SimulationAction::Reparent {
+			target,
+			parent,
+			mode,
+		})
+	}
+
+	pub fn set_particle_emitter_enabled(
+		&mut self,
+		target: RuntimeEntityHandle,
+		component_id: ComponentId,
+		enabled: bool,
+	) -> Result<(), String> {
+		self.push(SimulationAction::SetParticleEmitterEnabled {
+			target,
+			component_id,
+			enabled,
+		})
+	}
+
+	pub fn set_local_possession(
+		&mut self,
+		target: Option<RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		self.push(SimulationAction::SetLocalPossession { target })
+	}
+
+	pub fn drive_character(
+		&mut self,
+		target: RuntimeEntityHandle,
+		movement_xz: [f32; 2],
+		jump_held: bool,
+	) -> Result<(), String> {
+		self.push(SimulationAction::DriveCharacter {
+			target,
+			movement_xz,
+			jump_held,
+		})
+	}
+
 	pub fn push(&mut self, action: SimulationAction) -> Result<(), String> {
 		if self.actions.len() >= Self::MAX_ACTIONS {
 			return Err("Simulation action budget exceeded".into());
@@ -144,6 +214,14 @@ pub struct GameplayContext<'a> {
 	/// Edges sampled before this fixed step's actions. Exit precedes Enter.
 	pub triggers: &'a [TriggerEvent],
 	pub trigger_overlaps: TriggerView<'a>,
+	pub(super) lifecycle: &'a crate::runtime_lifecycle::RuntimeLifecycle,
+}
+
+impl GameplayContext<'_> {
+	/// Resolve an actor within the world this fixed step is planning against.
+	pub fn runtime_handle(&self, key: &EntityKey) -> Option<RuntimeEntityHandle> {
+		self.lifecycle.handle(key)
+	}
 }
 
 pub trait GameModule: Send {
@@ -349,8 +427,7 @@ impl GameModule for ProjectModule {
 				}
 				BehaviorSettings::AcceptAction { action } => {
 					if input.action_pressed(action)
-						&& world
-							.data()
+						&& input
 							.local_player()
 							.is_some_and(|actor| &actor.key == entity)
 					{

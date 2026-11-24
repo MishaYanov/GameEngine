@@ -27,9 +27,9 @@ pub(super) fn apply_local_player(
 	if !inputs.controller_owned {
 		return Ok(());
 	}
-	let Some(index) = characters
-		.local_input_owner(world)
-		.and_then(|key| world.entity_index(key))
+	let Some(index) = inputs
+		.local_player()
+		.and_then(|owner| world.entity_index(&owner.key))
 	else {
 		return Ok(());
 	};
@@ -167,7 +167,7 @@ impl SimulationSession {
 		let Some(input) = &mut self.conditional_input else {
 			return Ok(false);
 		};
-		let actor = characters.local_input_owner(&self.world);
+		let actor = self.inputs.local_player().map(|owner| &owner.key);
 		let grounded = actor
 			.and_then(|actor| characters.state(actor))
 			.and_then(crate::character_controller::CharacterState::committed_grounded);
@@ -204,15 +204,20 @@ impl SimulationSession {
 		keyboard: &InputState,
 		physical: PhysicalGamepadSample,
 	) -> Result<bool, String> {
-		if let Some(input) = &mut self.conditional_input {
-			if !self.paused {
-				input.sample_keys(keyboard, physical)?;
-			}
-			return Ok(true);
-		}
 		let Some(map) = &self.input_action_map else {
 			return Ok(false);
 		};
+		if self.paused
+			|| self.inputs.awaiting_neutral
+				&& !self.inputs.allow_local_sample(
+					physical.is_neutral() && !map.keys().any(|key| keyboard.is_held(key)),
+				) {
+			return Ok(true);
+		}
+		if let Some(input) = &mut self.conditional_input {
+			let result = input.sample_keys(keyboard, physical);
+			return self.handle_physical_samples(result);
+		}
 		let frame = map.resolve(keyboard, physical, [0.0; 2]);
 		self.sample_input_actions(frame)?;
 		Ok(true)
@@ -223,25 +228,41 @@ impl SimulationSession {
 		keyboard: &HashSet<String>,
 		physical: PhysicalGamepadSample,
 	) -> Result<bool, String> {
-		if let Some(input) = &mut self.conditional_input {
-			if !self.paused {
-				input.sample_codes(keyboard, physical)?;
-			}
-			return Ok(true);
-		}
 		let Some(map) = &self.input_action_map else {
 			return Ok(false);
 		};
+		if self.paused
+			|| self.inputs.awaiting_neutral
+				&& !self.inputs.allow_local_sample(
+					physical.is_neutral()
+						&& !map
+							.keys()
+							.any(|key| keyboard.contains(&key.physical_code())),
+				) {
+			return Ok(true);
+		}
+		if let Some(input) = &mut self.conditional_input {
+			let result = input.sample_codes(keyboard, physical);
+			return self.handle_physical_samples(result);
+		}
 		let frame = map.resolve_codes(keyboard, physical, [0.0; 2]);
 		self.sample_input_actions(frame)?;
 		Ok(true)
+	}
+
+	fn handle_physical_samples(&mut self, result: Result<(), String>) -> Result<bool, String> {
+		if result.is_err() {
+			self.inputs.awaiting_neutral = self.inputs.possession_managed;
+			self.clear_input();
+		}
+		result.map(|()| true)
 	}
 
 	fn sample_input_actions(
 		&mut self,
 		mut frame: crate::input::ResolvedInputActions,
 	) -> Result<(), String> {
-		if self.paused {
+		if self.paused || self.inputs.possession_managed && self.inputs.local_player().is_none() {
 			return Ok(());
 		}
 		let movement = frame.vectors.get("move").copied().unwrap_or_default();

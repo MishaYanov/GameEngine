@@ -27,6 +27,7 @@ fn hidden_model_availability_uses_resolved_extension_and_keeps_logical_markers_o
 			index: 0,
 			name: "Mesh".into(),
 			primitives: 1,
+			identity: None,
 		}],
 		dependencies: vec![],
 	};

@@ -1,13 +1,11 @@
 # Project lifecycle and multi-scene authoring
 
-The current working tree adds project-root ownership and multi-scene authoring to the CPU backend, host and Angular
-service. This guide describes the inspected source, including uncommitted changes; it does not certify native
-interaction or the current engine test results. [PROJECT3 handoff](project3-handoff.md) remains the historical steps
-36–45 report and original next-step prompt.
+An Editor workspace owns one project, its scene catalog and each scene's retained draft. Open a project to read
+its manifest and entry scene. Switch scenes to work on another draft. Save All writes the changes to the project
+and its scenes. Export Game… stages a standalone Player from the saved project.
 
-For the method-by-method path from UI startup through save/reload and packaging, see
-[Editor flow: startup to project builds](editor-flow.md) preserves the earlier method trace. For current component,
-linked prefab and runtime inspection workflows, see the [Milestone 4–6 review](milestones-4-6-review.md).
+See [Editor command flow](editor-flow.md) for request ownership and [object authoring](authoring-objects.md) for
+working with objects, components and linked Props.
 
 ## Project format and scene identity
 
@@ -80,7 +78,7 @@ roles to be complete immediately; scene-specific preparation validates them on P
 
 The selected factory supplies both the scene module and its initial progress. Ordinary runtime scene replacement
 retains that progress, while New Game initializes fresh progress. The module ID is authored project data. Play state
-lives in memory. See [the game demo](apps/game/README.md#demo-progress-and-new-game) for its current rule.
+lives in memory. See [the game demo](apps/game/README.md#play-and-restart-cinder-oath) for its current rule.
 
 ## Open a project or standalone scene
 
@@ -128,19 +126,11 @@ not contribute to scene/project dirty flags or change saved baselines.
 
 ## Gameplay role bindings
 
-A scene's `bindings` map stores role names and entity keys in that authored document. In Edit,
-**Gameplay Roles** presents the selected module's advertised roles for the active scene. The host catalog supplies
-default roles and explicit per-scene overrides; an empty override intentionally presents no roles. Courtyard's
-course roles are **Player**, **Key** and **Exit**, with **Player** and **Finish** for `finish`. Choose **Unassigned**
-to clear a role. Each change is an undoable scene command; Save Scene or Save All writes it. The generic module
-does not invent Courtyard roles, and changing modules preserves the binding map. Entity deletion can clear its
-bindings, so check the selected module's requirements before Play or export.
-
-For `courtyard_run`, a scene with Key or Exit needs Player, Key and Exit bound to distinct entities. Player needs
-a controlled movement behavior with positive speed. The catalog needs the scene ID `finish`; that scene needs
-distinct Player and Finish bindings and a movable Player. A scene without Key or Exit roles and with an ID other
-than `finish` can keep configured movement and spin. Role requirements come from the selected module.
-[Play the bundled route](apps/game/README.md#demo-progress-and-new-game).
+A scene's `bindings` map links gameplay roles to object keys. In Edit, use **Gameplay Roles** to view the
+selected module's roles for the active scene and assign an object. Choose **Unassigned** to clear a role.
+Save Scene or Save All persists the assignments. The module checks required roles at Play or export.
+For example, the Cinder Oath vault uses a Player, Cinder Warden and First-Person Sword and requires a game camera
+targeting the Player. [Play Cinder Oath](apps/game/README.md#play-and-restart-cinder-oath).
 
 ## Editor Play and simulation scene identity
 
@@ -220,8 +210,7 @@ await editor.saveProject();
 Additional service helpers are `saveSceneAs(path)` and `saveProject()`. `set_startup_scene`, `remove_scene`,
 `change_scene_path` and `set_project` use the typed `execute` path and its revision checks. Host command registration
 includes register/Save As. Structured backend errors already exist in the coordinator, but many host boundaries still
-return strings; the [error-handling design](../designs/error-handling.md) is a proposal, not a completed workspace-wide
-migration.
+return diagnostic strings. Native editor command failures can also return structured errors, including revision conflicts.
 
 ## Build and player/headless behavior
 
@@ -245,7 +234,7 @@ summary shows `active_scene_id` and, while playing, `play_scene_id` plus generic
 completion, run identity and pending destination). Replay's `{"type":"restart_run"}` requires Play and uses the
 same startup/fresh-progress preparation as the native restart. Stop omits Play status. A standalone headless scene
 gets a stable transient ID for comparable diagnostic hashes. The hash still covers only project and rendered scene;
-random run IDs and timing/status diagnostics are not part of that hash. [Replay example](building-blocks-review.md#headless-replay-and-stage-only-snapshots).
+random run IDs and timing/status diagnostics are not part of that hash. [Headless replay](testing.md#headless-replay).
 
 ## Source map and verification
 
@@ -261,4 +250,4 @@ random run IDs and timing/status diagnostics are not part of that hash. [Replay 
 
 Existing tests cover multi-scene history, project format, host lifecycle/path/persistence, frontend contract and
 headless/compiler behavior. See the checkpoint in `docs-site/docs-state.json` for checks against the inspected working
-tree and their limits; historical handoff test counts are not current-tree certification.
+tree and their limits.

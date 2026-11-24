@@ -156,7 +156,7 @@ uses arrows; SceneEditor's Play input defaults to WASD and accepts a replacement
 schema version 1 and four keyboard movement bindings as bounded JSON, rejecting unknown fields, unsupported versions
 and input over 4 KiB. The native game exposes [profile loading](../../apps/game/README.md#movement-input-profiles).
 Mouse support in InputState does not make mouse buttons valid movement-profile keys. General action mapping,
-contexts, gamepad support and possession remain proposed in ADR-0010.
+layouts and typed keyboard, pointer and gamepad actions use the shared input path.
 
 ## Runtime entity lifecycle
 
@@ -168,7 +168,7 @@ transition, restart and Stop retire the relevant ownership and resources without
 Ownership records and their entity/owner/component indexes share one `Arc` across unchanged tick snapshots.
 Structural writes use copy-on-write, keeping failed candidates isolated. Indexed queries avoid repeated ownership
 scans; spawning and removal still validate/rebuild scene state. This is a source-level optimization, not a measured
-frame-time claim. See the [runtime lifecycle review](../../milestones-4-6-review.md#milestone-6-runtime-entities-and-lifecycle).
+frame-time claim. See the [workspace architecture](../../architecture.md).
 
 ## Scene and asset modules
 
@@ -203,7 +203,6 @@ implied by constructor availability.
 
 ## Learning and checks
 
-[Steps 21–35](../../editor-steps-21-35.md) explains the exact source map, examples and
-resources; [editor commands](../../scene-editing.md) describes the frontend boundary. Run runtime tests offline/locked
+[Editor commands](../../scene-editing.md) describes the frontend boundary. Run runtime tests offline/locked
 and use [testing](../../testing.md) for final evidence. Interactive Angular layout/child-pane acceptance, full
 material/physics/import feature support and measured performance remain explicit limits.

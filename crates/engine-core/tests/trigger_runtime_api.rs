@@ -198,6 +198,7 @@ impl GameModule for Actions {
 					entity: key("sensor"),
 					material: Some(MaterialOverrideData {
 						base_color_factor: [0.0, 1.0, 0.0, 1.0],
+						source_graph: None,
 					}),
 				})?;
 			} else if self.0.load(Ordering::Relaxed) {
@@ -360,7 +361,8 @@ fn runtime_material_validation_is_atomic_and_visibility_does_not_disable_collisi
 			.set_material(
 				&key("actor"),
 				Some(MaterialOverrideData {
-					base_color_factor: [f32::NAN, 0.0, 0.0, 1.0]
+					base_color_factor: [f32::NAN, 0.0, 0.0, 1.0],
+					source_graph: None,
 				})
 			)
 			.is_err()

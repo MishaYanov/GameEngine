@@ -40,6 +40,10 @@ pub struct RuntimeInspectionDto {
 	pub scene_id: crate::scene_catalog::SceneId,
 	pub tick: u64,
 	pub topology_revision: u64,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub local_player: Option<RuntimeEntityHandle>,
+	#[serde(skip_serializing_if = "zero")]
+	pub possession_generation: u64,
 	pub total_entities: usize,
 	pub entities: Vec<RuntimeEntityDto>,
 	pub timer_count: usize,
@@ -55,6 +59,10 @@ pub struct RuntimeInspectionDto {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub control_graph: Option<ControlGraphStepDto>,
 	pub last_error: Option<String>,
+}
+
+fn zero(value: &u64) -> bool {
+	*value == 0
 }
 
 impl RuntimeLifecycle {

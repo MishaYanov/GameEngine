@@ -16,6 +16,9 @@ pub(crate) fn properties(entities: &[&EntityData]) -> BTreeSet<LinkedPrefabPrope
 		if entity.particle_emitter.is_some() {
 			properties.insert(ParticleEmitter);
 		}
+		if entity.light.is_some() {
+			properties.insert(Light);
+		}
 		for component in &entity.native_behaviors {
 			properties.insert(NativeBehavior {
 				component_id: component.id.clone(),
@@ -45,6 +48,12 @@ pub(crate) fn value(entity: &EntityData, property: &LinkedPrefabProperty) -> Lin
 				.into_iter()
 				.find(|r| r.type_id() == crate::components::ANIMATION_TYPE),
 		),
+		Light => LinkedPrefabValue::Component(
+			entity
+				.component_records()
+				.into_iter()
+				.find(|record| record.type_id() == crate::components::LIGHT_TYPE),
+		),
 		ParticleEmitter => LinkedPrefabValue::Component(
 			entity
 				.component_records()
@@ -52,6 +61,7 @@ pub(crate) fn value(entity: &EntityData, property: &LinkedPrefabProperty) -> Lin
 				.find(|record| record.type_id() == crate::components::PARTICLE_EMITTER_TYPE),
 		),
 		Name => LinkedPrefabValue::Name(entity.name.clone()),
+		Presence => LinkedPrefabValue::Presence(true),
 		TransformPosition => LinkedPrefabValue::Vector(entity.transform.position),
 		TransformRotation => LinkedPrefabValue::Vector(entity.transform.rotation),
 		TransformScale => LinkedPrefabValue::Vector(entity.transform.scale),
@@ -109,6 +119,7 @@ pub(crate) fn apply_value(
 					Animation => component.type_id() == crate::components::ANIMATION_TYPE,
 					MeshRenderer => component.type_id() == crate::components::MESH_TYPE,
 					Collider => component.type_id() == crate::components::COLLIDER_TYPE,
+					Light => component.type_id() == crate::components::LIGHT_TYPE,
 					ParticleEmitter => {
 						component.type_id() == crate::components::PARTICLE_EMITTER_TYPE
 					}
@@ -143,7 +154,8 @@ pub(crate) fn supports_source_override(
 	use LinkedPrefabProperty::*;
 	match address {
 		PropAddress::Object { placement_path, .. } => {
-			placement_path.is_empty() && !matches!(property, NativeBehavior { .. } | Script { .. })
+			placement_path.is_empty()
+				&& !matches!(property, NativeBehavior { .. } | Script { .. } | Presence)
 		}
 		PropAddress::Placement { placement_path } => {
 			placement_path.len() == 1
@@ -236,9 +248,14 @@ pub fn override_status(
 			let expected = base
 				.get(&target.source_entity)
 				.ok_or("Override source entity is missing")?;
-			let actual = entities
-				.get(&link.entity_map[&target.source_entity])
-				.ok_or("Linked member is missing")?;
+			let local = if target.property == LinkedPrefabProperty::Presence {
+				LinkedPrefabValue::Presence(false)
+			} else {
+				let actual = entities
+					.get(&link.entity_map[&target.source_entity])
+					.ok_or("Linked member is missing")?;
+				value(actual, &target.property)
+			};
 			let address = projection
 				.addresses
 				.get(&target.source_entity)
@@ -248,7 +265,7 @@ pub fn override_status(
 				address: address.clone(),
 				can_apply_to_root_source: supports_source_override(address, &target.property),
 				base: value(expected, &target.property),
-				value: value(actual, &target.property),
+				value: local,
 			})
 		})
 		.collect()
@@ -298,9 +315,8 @@ pub(crate) fn prepare_linked_source_update(
 		.iter()
 		.map(|entity| (&entity.key, entity))
 		.collect();
-	let entity_map = source
-		.prefab
-		.expanded_entities()?
+	let expanded = source.prefab.expanded_entities()?.into_owned();
+	let entity_map = expanded
 		.iter()
 		.map(|entity| {
 			let key = old
@@ -321,7 +337,7 @@ pub(crate) fn prepare_linked_source_update(
 		bindings,
 		overrides: old.overrides.clone(),
 	};
-	let members = materialized(&link, anchor)?;
+	let members = materialized_from(&link, &expanded, anchor)?;
 	let reviews = old
 		.overrides
 		.iter()
@@ -339,15 +355,26 @@ pub(crate) fn prepare_linked_source_update(
 				.entity_map
 				.get(source_entity)
 				.ok_or("Linked member map is missing")?;
-			let local = actual.get(scene_key).ok_or("Linked member is missing")?;
+			let removed = property == &LinkedPrefabProperty::Presence;
+			let local = if removed {
+				LinkedPrefabValue::Presence(false)
+			} else {
+				value(
+					actual.get(scene_key).ok_or("Linked member is missing")?,
+					property,
+				)
+			};
 			let base = value(base, property);
-			let local = value(local, property);
 			let incoming = members
 				.get(source_entity)
 				.map(|entity| value(entity, property));
-			let conflict = incoming
-				.as_ref()
-				.is_none_or(|incoming| incoming != &base && incoming != &local);
+			let conflict = if removed {
+				!link.supports_leaf_removal(source_entity, &expanded)
+			} else {
+				incoming
+					.as_ref()
+					.is_none_or(|incoming| incoming != &base && incoming != &local)
+			};
 			Ok(LinkedPrefabOverrideReviewDto {
 				target: target.clone(),
 				address: address.clone(),

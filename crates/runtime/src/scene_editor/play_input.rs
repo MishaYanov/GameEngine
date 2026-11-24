@@ -17,6 +17,19 @@ pub type PersonalInputLayoutReader =
 	Arc<dyn Fn(&AssetId) -> Result<Option<InputActionLayout>, String> + Send + Sync>;
 
 impl SceneEditor {
+	pub fn request_play_possession(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		expected_generation: u64,
+		target: Option<engine_core::runtime_lifecycle::RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.request_play_possession(run_id, scene_generation, expected_generation, target)
+	}
+
 	pub fn set_play_input(&mut self, movement: [f32; 3]) -> Result<(), String> {
 		self.execute_core(Command::SetPlayInput { movement })?;
 		Ok(())

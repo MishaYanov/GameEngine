@@ -40,9 +40,9 @@ export const OBJECT_MENU_GROUPS = [
     ],
     [
         {id: 'create_point_light', label: 'Point Light', capability: 'create_light',
-            action: {kind: 'create', command: {type: 'create_light', light_kind: 'point'}, allowFolder: false}},
+            action: {kind: 'create', command: {type: 'create_light', light_kind: 'point'}, allowFolder: true}},
         {id: 'create_directional_light', label: 'Directional Light', capability: 'create_light',
-            action: {kind: 'create', command: {type: 'create_light', light_kind: 'directional'}, allowFolder: false}},
+            action: {kind: 'create', command: {type: 'create_light', light_kind: 'directional'}, allowFolder: true}},
         {id: 'edit_lights', label: 'Edit Lights…', capability: 'upsert_light', action: {kind: 'scene-settings'}},
     ],
 ] as const satisfies readonly (readonly CreateEntry[])[];

@@ -5,16 +5,8 @@ use std::sync::{
 
 use bridge::EngineStatusDto;
 
-pub struct PendingProjectBuild {
-	pub id: u64,
-	pub staged: compiler::StagedProject,
-}
-
-#[derive(Default)]
-pub struct ProjectBuildState {
-	pub latest_id: u64,
-	pub pending: Option<PendingProjectBuild>,
-}
+pub(crate) mod project_build;
+use project_build::ProjectBuildState;
 
 #[derive(Default)]
 pub(crate) struct WindowCloseReview {
@@ -101,8 +93,7 @@ pub struct EditorState {
 	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
 	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
 	pub(crate) exit: Arc<EditorExitState>,
-	pub last_build: Arc<Mutex<Option<compiler::InstalledProject>>>,
-	pub pending_build: Arc<Mutex<ProjectBuildState>>,
+	pub(crate) project_build: Arc<Mutex<ProjectBuildState>>,
 }
 
 impl Default for EditorState {
@@ -117,8 +108,7 @@ impl Default for EditorState {
 			editor,
 			viewport,
 			exit: Arc::new(EditorExitState::default()),
-			last_build: Arc::new(Mutex::new(None)),
-			pending_build: Arc::new(Mutex::new(ProjectBuildState::default())),
+			project_build: Arc::new(Mutex::new(ProjectBuildState::default())),
 		}
 	}
 }

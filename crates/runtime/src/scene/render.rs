@@ -159,25 +159,64 @@ impl Scene {
 	}
 
 	pub fn renderer_lights(&self) -> Vec<renderer::vulkan::Light> {
-		Self::project_renderer_lights(&self.lights)
+		let mut output = Self::project_renderer_lights(&self.lights);
+		if !self.has_light_objects() {
+			return output;
+		}
+		if let Ok(matrices) = self.cached_world_matrices() {
+			output.extend(self.light_objects.iter().filter_map(|id| {
+				let index = *self.id_indices.get(id)?;
+				let entry = &self.entries[index];
+				let light = entry.light.as_ref().filter(|light| light.enabled)?;
+				let mut ancestor = Some(entry);
+				while let Some(current) = ancestor {
+					if !current.active {
+						return None;
+					}
+					ancestor = current
+						.parent
+						.as_ref()
+						.and_then(|key| self.key_ids.get(key))
+						.and_then(|id| self.id_indices.get(id))
+						.and_then(|&index| self.entries.get(index));
+				}
+				let settings = light.settings;
+				let matrix = matrices[index];
+				Some(match settings.kind {
+					LightKind::Directional => renderer::vulkan::Light::Directional {
+						direction: engine_core::components::LightSettings::world_direction(matrix),
+						color: settings.color,
+						intensity: settings.intensity,
+					},
+					LightKind::Point => renderer::vulkan::Light::Point {
+						position: matrix.w_axis.truncate().to_array(),
+						color: settings.color,
+						intensity: settings.intensity,
+						range: settings.range,
+					},
+				})
+			}));
+		}
+		output
 	}
 
 	pub fn project_renderer_lights(lights: &[LightData]) -> Vec<renderer::vulkan::Light> {
-		lights
-			.iter()
-			.map(|light| match light.kind {
-				LightKind::Directional => renderer::vulkan::Light::Directional {
-					direction: light.direction,
-					color: light.color,
-					intensity: light.intensity,
-				},
-				LightKind::Point => renderer::vulkan::Light::Point {
-					position: light.position,
-					color: light.color,
-					intensity: light.intensity,
-					range: light.range,
-				},
-			})
-			.collect()
+		lights.iter().map(renderer_light).collect()
+	}
+}
+
+fn renderer_light(light: &LightData) -> renderer::vulkan::Light {
+	match light.kind {
+		LightKind::Directional => renderer::vulkan::Light::Directional {
+			direction: light.direction,
+			color: light.color,
+			intensity: light.intensity,
+		},
+		LightKind::Point => renderer::vulkan::Light::Point {
+			position: light.position,
+			color: light.color,
+			intensity: light.intensity,
+			range: light.range,
+		},
 	}
 }

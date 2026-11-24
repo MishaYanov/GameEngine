@@ -1,12 +1,19 @@
 import {computed, signal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
+import {invoke} from '@tauri-apps/api/core';
+import {listen} from '@tauri-apps/api/event';
 import {vi} from 'vitest';
 import type {EditorSnapshot, ProjectBuildResult} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {ProjectService} from '../../../../core/project/project.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {ProjectBuild} from './project-build';
+import type {ProjectBuildReadback} from './project-build-status';
+
+vi.mock('@tauri-apps/api/core', () => ({invoke: vi.fn(), isTauri: vi.fn(() => true)}));
+vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 
 const output: ProjectBuildResult = {path: 'D:\\Exports\\Demo', asset_count: 7, asset_bytes: 1572864};
 const prepared = {...output, build_id: 17};
@@ -30,7 +37,27 @@ function snapshot(): EditorSnapshot {
     };
 }
 
-async function createBuild() {
+async function createBuild(nativeReadback?: ProjectBuildReadback) {
+    const nativeScope = signal(nativeReadback ? {workspace_generation: 23} : null);
+    let currentReadback = nativeReadback ?? {occupied: false, current: null};
+    let notify: (() => void) | undefined;
+    vi.mocked(listen).mockReset().mockImplementation(async (event, refresh) => {
+        notify = () => refresh({event, id: 1, payload: undefined});
+        return () => undefined;
+    });
+    vi.mocked(invoke).mockReset().mockImplementation(async command => {
+        if (command === 'editor_project_build_status') return currentReadback;
+        if (command === 'editor_discard_project_build') {
+            currentReadback = {occupied: false, current: null};
+            notify?.();
+            return undefined;
+        }
+        throw new Error('Unexpected project build command ' + command);
+    });
+    const receive = (readback: ProjectBuildReadback) => {
+        currentReadback = readback;
+        notify?.();
+    };
     const current = signal(snapshot());
     const busy = signal(false);
     const hasChanges = signal(false);
@@ -57,6 +84,7 @@ async function createBuild() {
             dirty: computed(() => current().dirty), prepareBuild, finishBuild, runBuild,
         }},
         {provide: ProjectService, useValue: {chooseDestination}},
+        {provide: ViewportEditorService, useValue: {state: nativeScope}},
         {provide: SceneEditingService, useValue: {
             ready: computed(() => !reserved() && !busy() && current().mode === 'edit' && current().transaction === null),
             hasChanges, error: signal<string | null>(null), withCommittedEdit,
@@ -80,6 +108,8 @@ async function createBuild() {
         prepareBuild,
         finishBuild,
         runBuild,
+        receive,
+        nativeScope,
         withCommittedEdit,
         exportButton,
         runButton
@@ -297,6 +327,42 @@ describe('ProjectBuild', () => {
         await fixture.whenStable();
         expect(prepareBuild).not.toHaveBeenCalled();
         expect(exportButton().disabled).toBe(false);
+    });
+
+    it('recovers a staged native export and releases it without preparing new files', async () => {
+        const staged = {build_id: prepared.build_id, workspace_generation: 23, source_revision: 1,
+            phase: 'staged' as const, output, diagnostic: null, retryable: false};
+        const {fixture, root, receive, prepareBuild, finishBuild, exportButton} = await createBuild({
+            occupied: true, current: {...staged, phase: 'staging'},
+        });
+        await vi.waitFor(() => expect(root.textContent).toContain('Copying verified project files'));
+        expect(exportButton().disabled).toBe(true);
+        receive({occupied: true, current: staged});
+        await vi.waitFor(() => expect(root.textContent).toContain('Finish Staged Export'));
+        [...root.querySelectorAll('button')].find(button => button.textContent?.includes('Discard Staged Export'))!.click();
+        await fixture.whenStable();
+        expect(invoke).toHaveBeenCalledWith('editor_discard_project_build', {buildId: prepared.build_id});
+        expect(prepareBuild).not.toHaveBeenCalled();
+        expect(finishBuild).not.toHaveBeenCalled();
+        expect(exportButton().disabled).toBe(false);
+        expect(root.textContent).toContain('Its files are still in the output folder');
+    });
+
+    it('discards an old project status reply when a new native workspace arrives', async () => {
+        const {fixture, root, nativeScope, workspaceGeneration, receive} = await createBuild({
+            occupied: false, current: null,
+        });
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_project_build_status', {workspaceGeneration: 23}));
+        let reply!: (value: ProjectBuildReadback) => void;
+        vi.mocked(invoke).mockImplementationOnce(() => new Promise(resolve => reply = resolve));
+        receive({occupied: false, current: null});
+        workspaceGeneration.update(value => value + 1);
+        nativeScope.set({workspace_generation: 24});
+        await vi.waitFor(() => expect(invoke).toHaveBeenLastCalledWith('editor_project_build_status', {workspaceGeneration: 24}));
+        reply({occupied: false, current: {build_id: prepared.build_id, workspace_generation: 23, source_revision: 1,
+            phase: 'succeeded', output, diagnostic: null, retryable: false}});
+        await fixture.whenStable();
+        expect(root.querySelector('.output')).toBeNull();
     });
 
     it('disables exporting during Play', async () => {

@@ -1,4 +1,5 @@
 import type {GameInputProfile} from '../game-input/game-input.models';
+import type {GraphDocument} from '../../shared/components/graph/graph.models';
 import type {PhysicsLayers} from './physics-layers.models';
 import type {ComponentRecord, ComponentTypeDescriptor, NativeBehaviorAttachment} from './editor-components';
 import type {
@@ -118,6 +119,7 @@ export interface CameraComponentSettings {
 
 export interface MaterialOverride {
     readonly base_color_factor: Vec4;
+    readonly source_graph?: GraphDocument;
 }
 
 export interface ColliderInteraction {
@@ -136,12 +138,14 @@ export interface SceneEntity {
     readonly model_path: string;
     readonly asset_id?: string | null;
     readonly renderable: boolean;
+    readonly active?: boolean;
     readonly collision_enabled?: boolean;
     readonly transform: Transform;
     readonly parent?: EntityKey | null;
     readonly material?: MaterialOverride | null;
     readonly collider?: Collider | null;
     readonly mesh_index?: number | null;
+    readonly mesh_id?: string | null;
     readonly component_views?: readonly ComponentRecord[];
     readonly component_ids?: Readonly<Record<string, string>>;
     readonly native_behaviors?: readonly NativeBehaviorAttachment[];
@@ -152,6 +156,7 @@ export interface SceneEntity {
     readonly camera?: {readonly id: string; readonly enabled: boolean; readonly settings: CameraComponentSettings} | null;
     readonly sky?: import('./sky.models').SkyAttachment | null;
     readonly particle_emitter?: ParticleEmitterComponent | null;
+    readonly light?: {readonly id: string; readonly enabled: boolean; readonly settings: import('./editor-components').LightSettings} | null;
     readonly linked_prefab?: LinkedPrefabReferenceView | null;
 }
 
@@ -228,6 +233,7 @@ export interface SnapSettings {
 
 /** Intent has no dependency on key bindings, panels, tools, or mouse buttons. */
 export type EditorCommand =
+    | {readonly type: "set_object_active"; readonly key: EntityKey; readonly active: boolean}
     | {
     readonly type: 'add_scene';
     readonly id: SceneId;
@@ -296,6 +302,7 @@ export type EditorCommand =
     | { readonly type: 'replace_component'; readonly key: EntityKey; readonly component: ComponentRecord }
     | { readonly type: 'remove_component'; readonly key: EntityKey; readonly component_id: string }
     | { readonly type: 'set_component_enabled'; readonly key: EntityKey; readonly component_id: string; readonly enabled: boolean }
+    | { readonly type: 'remove_linked_prefab_leaf'; readonly root_key: EntityKey; readonly object_key: EntityKey }
     | { readonly type: 'revert_linked_prefab'; readonly root_key: EntityKey; readonly property?: LinkedPrefabOverrideTarget | null }
     | { readonly type: 'unpack_linked_prefab'; readonly root_key: EntityKey }
     | { readonly type: 'unpack_linked_prefab_outer'; readonly root_key: EntityKey }
@@ -327,6 +334,8 @@ export type EditorCommand =
     | { readonly type: 'redo' }
     | { readonly type: 'start_play' }
     | { readonly type: 'stop_play' }
+    | { readonly type: 'apply_play_transforms'; readonly run_id: string; readonly scene_revision: number;
+        readonly keys: readonly EntityKey[] }
     | { readonly type: 'set_paused'; readonly paused: boolean }
     | { readonly type: 'set_play_input'; readonly movement: Vec3 }
     | PlayCameraInputCommand
@@ -336,6 +345,15 @@ export type EditorCommand =
     readonly name: string;
     readonly target: SceneBindingTarget;
 };
+
+export interface PlayTransformReviewDto {
+    readonly run_id: string;
+    readonly scene_id: SceneId;
+    readonly revision: number;
+    readonly scene_revision: number;
+    readonly changes: readonly {readonly key: EntityKey; readonly name: string; readonly before: Transform; readonly after: Transform}[];
+    readonly truncated: boolean;
+}
 
 export interface EditorCommandRequest {
     readonly expected_revision: number;
@@ -437,6 +455,7 @@ export interface EditorCapabilities {
     readonly scene_warming_supported?: boolean;
     readonly scene_verification_supported?: boolean;
     readonly incremental_commands?: boolean;
+    readonly resumable_changes?: boolean;
     readonly gameplay_modules?: readonly GameplayModuleDescriptor[];
     readonly component_types?: readonly ComponentTypeDescriptor[];
     readonly object_scripts?: readonly import('./object-scripts.models').ScriptDescriptor[];
@@ -456,6 +475,12 @@ export interface GameplayModuleDescriptor {
     readonly scene_roles: Readonly<Record<SceneId, readonly GameplayRoleDescriptor[]>>;
 }
 
+export interface ModelMesh {
+    readonly id: string;
+    readonly index: number;
+    readonly name: string;
+}
+
 export interface ModelAsset {
     readonly name: string;
     readonly path: string;
@@ -465,6 +490,7 @@ export interface ModelAsset {
     readonly revision?: number | null;
     readonly source_path?: string | null;
     readonly mesh_count?: number | null;
+    readonly meshes?: readonly ModelMesh[];
 }
 
 export type PrimitiveKind = 'plane' | 'cube' | 'sphere' | 'capsule';

@@ -53,6 +53,7 @@ export type AnimatorBinding =
 export interface AnimatorSettings {
     readonly asset_id: string;
     readonly binding: AnimatorBinding;
+    readonly root_motion_source_node?: number;
 }
 export interface AnimatorAttachment {
     readonly id: string;
@@ -93,8 +94,11 @@ export function starterAnimator(clip: AnimatorClipRef): AnimatorGraph {
 export function validAnimatorSettings(value: unknown): value is AnimatorSettings {
     if (!record(value) || !validInputActionsId(value['asset_id']) || !record(value['binding'])) return false;
     const binding = value['binding'];
-    if (binding['kind'] === 'imported') return validSource(binding['source']);
-    if (binding['kind'] !== 'visual') return false;
+    const rootNode = value['root_motion_source_node'];
+    if (binding['kind'] === 'imported') {
+        return validSource(binding['source']) && (rootNode === undefined || integer(rootNode, 0, 0xffffffff));
+    }
+    if (binding['kind'] !== 'visual' || rootNode !== undefined) return false;
     const targets = binding['targets'];
     if (targets === undefined) return true;
     if (!Array.isArray(targets) || targets.length > 128) return false;

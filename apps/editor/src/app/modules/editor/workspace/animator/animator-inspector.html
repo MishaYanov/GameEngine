@@ -59,13 +59,23 @@
                 }
             </fieldset>
         }
+        @if (plan().binding?.kind === 'imported') {
+            <label>Root motion source node
+                <input #rootNode type="text" inputmode="numeric" placeholder="Off"
+                       [value]="rootMotionNode()" [disabled]="!available()"
+                       (input)="rootMotionNode.set(rootNode.value)">
+            </label>
+            @if (rootMotionIssue(); as issue) {
+                <p role="status">{{ issue }}</p>
+            }
+        }
         @if (plan().issue; as issue) {
             <p role="status">{{ issue }}</p>
         }
         @if (legacyActive()) {
             <p>Disable the Animation component before enabling an Animator on this actor.</p>
         }
-        <button type="button" (click)="assign()" [disabled]="!available() || !plan().binding || legacyActive()">
+        <button type="button" (click)="assign()" [disabled]="!available() || !plan().binding || legacyActive() || !!rootMotionIssue()">
             {{ actor().animator ? 'Apply Animator Binding' : 'Attach Animator' }}
         </button>
     }

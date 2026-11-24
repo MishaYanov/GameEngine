@@ -25,7 +25,7 @@ impl Engine {
 				return Err(self.error(BackendErrorCode::SimulationRejected, message));
 			}
 		};
-		if outcome.progress_changed {
+		if outcome.progress_changed || outcome.possession_changed {
 			self.publish_runtime(BackendEventKind::StateChanged)?;
 		}
 		if outcome.steps > 0 {
@@ -59,6 +59,29 @@ impl Engine {
 
 	pub fn play_status(&self) -> Option<PlayStatusDto> {
 		self.session.play_status()
+	}
+
+	pub fn request_play_possession(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		expected_generation: u64,
+		target: Option<crate::runtime_lifecycle::RuntimeEntityHandle>,
+	) -> Result<(), String> {
+		self.session
+			.request_play_possession(run_id, scene_generation, expected_generation, target)
+	}
+
+	pub fn submit_ordered_play_controls_from_codes(
+		&mut self,
+		scope: &crate::simulation_session::LocalInputScope,
+		sequence: u64,
+		keys: &HashSet<String>,
+		physical: crate::input::PhysicalGamepadSample,
+		logical: GamepadSample,
+	) -> Result<bool, String> {
+		self.session
+			.submit_ordered_play_controls_from_codes(scope, sequence, keys, physical, logical)
 	}
 
 	pub fn pending_runtime_spawns(&self) -> Vec<crate::runtime_lifecycle::RuntimeSpawnRequest> {

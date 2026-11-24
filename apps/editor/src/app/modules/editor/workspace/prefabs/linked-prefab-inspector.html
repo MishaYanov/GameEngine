@@ -25,6 +25,9 @@
 			<p>{{ status.source_changed ? 'Source update available.' : 'Source is current.' }}</p>
 		}
 		<div class="actions">
+			@if (canRemoveLeaf()) {
+				<button type="button" [disabled]="!available()" (click)="removeLeaf()">Remove Object from This Instance</button>
+			}
 			@if (propWorkspace) {
 				<button type="button" [disabled]="!editable() || !propWorkspace.canOpen()" (click)="openPropWorkspace()">Open Prop Workspace</button>
 			}
@@ -90,7 +93,7 @@
 					<div class="actions">
 						<button type="button" [disabled]="!available()" (click)="revert(override.target)"
 							[attr.aria-label]="'Revert ' + property(override.target) + ' for ' + addressLabel(override.address)">
-							Revert Property
+							{{ override.target.property.kind === 'presence' ? 'Restore Object' : 'Revert Property' }}
 						</button>
 						@if (override.can_apply_to_root_source) {
 							<button type="button" [disabled]="!available() || !!status.source_error"
@@ -155,7 +158,7 @@
 							<select #choice [disabled]="pending()" [value]="choices().get(overrideKey(row)) ?? ''"
 								(change)="chooseResolution(row, choice.value)">
 								<option value="">Choose a resolution</option>
-								@if (row.incoming !== null) {
+								@if (row.incoming !== null && row.target.property.kind !== 'presence') {
 									<option value="keep_local">Keep local value</option>
 								}
 								<option value="use_source">{{ row.incoming === null ? 'Accept source removal' : 'Use source value' }}</option>

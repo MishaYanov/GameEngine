@@ -20,7 +20,7 @@ export interface SpecialistAttachmentChoice {
 
 const capacity = 16;
 const groups: Partial<Record<ComponentKind | SpecialistAttachment, ComponentGroup>> = {
-    mesh_renderer: 'Rendering', sky: 'Rendering', particle_emitter: 'Rendering',
+    mesh_renderer: 'Rendering', light: 'Rendering', sky: 'Rendering', particle_emitter: 'Rendering',
     collider: 'Physics', character_controller: 'Physics',
     audio_source: 'Audio', animation: 'Animation', animator: 'Animation',
 };

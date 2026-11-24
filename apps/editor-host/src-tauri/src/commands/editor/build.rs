@@ -1,22 +1,24 @@
-use super::*;
-use crate::release_resources::EditorResources;
+//! Trusted native commands for staging, finishing, and inspecting a standalone export.
 
-#[derive(Serialize)]
-pub struct ProjectBuildDto {
-	path: String,
-	asset_count: usize,
-	asset_bytes: u64,
-}
+use super::*;
+use crate::{
+	release_resources::EditorResources,
+	state::project_build::{
+		BuildDiagnosticCode, BuildReservation, ProjectBuildOutput, ProjectBuildReadback,
+	},
+};
+use std::path::PathBuf;
+
+const BUILD_CHANGED: &str = "editor://project-build-changed";
+
+pub type ProjectBuildDto = ProjectBuildOutput;
 
 #[derive(Serialize)]
 pub struct PreparedBuildDto {
 	build_id: u64,
-	path: String,
-	asset_count: usize,
-	asset_bytes: u64,
+	#[serde(flatten)]
+	output: ProjectBuildOutput,
 }
-
-static NEXT_BUILD_ID: AtomicU64 = AtomicU64::new(1);
 
 #[tauri::command]
 pub async fn editor_prepare_project_build(
@@ -27,37 +29,19 @@ pub async fn editor_prepare_project_build(
 ) -> Result<PreparedBuildDto, String> {
 	trusted_window(&window)?;
 	let resources = EditorResources::for_window(&window)?;
-	let pending_build = Arc::clone(&state.pending_build);
-	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
-		w.prepare_build(expected_revision)
-	})
+	let (reservation, staged, _) = stage_build(
+		&window,
+		state,
+		resources,
+		expected_revision,
+		destination,
+		false,
+	)
 	.await?;
-	tauri::async_runtime::spawn_blocking(move || {
-		resources.player()?;
-		let mut pending = pending_build
-			.lock()
-			.map_err(|_| "Build state lock failed")?;
-		let staged = stage_project_build(&prepared, &destination)?;
-		let build_id = NEXT_BUILD_ID
-			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-			.map_err(|_| "Build token space is exhausted")?;
-		let result = PreparedBuildDto {
-			build_id,
-			path: staged.path().to_string_lossy().into_owned(),
-			asset_count: staged.asset_count(),
-			asset_bytes: staged.asset_bytes(),
-		};
-		// Only one unclaimed token is retained. New preparation supersedes an
-		// abandoned token; its already-created output remains available to inspect.
-		pending.latest_id = build_id;
-		pending.pending = Some(PendingProjectBuild {
-			id: build_id,
-			staged,
-		});
-		Ok(result)
+	Ok(PreparedBuildDto {
+		build_id: reservation.id(),
+		output: ProjectBuildOutput::from(&staged),
 	})
-	.await
-	.map_err(|error| format!("Project staging worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -68,79 +52,45 @@ pub async fn editor_finish_project_build(
 ) -> Result<ProjectBuildDto, String> {
 	trusted_window(&window)?;
 	let resources = EditorResources::for_window(&window)?;
-	let pending_build = Arc::clone(&state.pending_build);
-	let last_build = Arc::clone(&state.last_build);
-	tauri::async_runtime::spawn_blocking(move || {
-		finish_prepared_build(&pending_build, build_id, |staged| {
-			finish_project_build(staged, resources.player()?.as_deref(), &last_build)
-		})
+	let builds = Arc::clone(&state.project_build);
+	let (reservation, staged) = workspace(state, false, None, move |workspace| {
+		BuildReservation::finish(builds, build_id, workspace.generation)
 	})
-	.await
-	.map_err(|error| format!("Project build worker failed: {error}"))?
+	.await?;
+	finish_build(&window, reservation, staged, move || resources.player()).await
 }
 
-fn finish_prepared_build(
-	pending_build: &Mutex<ProjectBuildState>,
+#[tauri::command]
+pub async fn editor_project_build_status(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	workspace_generation: u64,
+) -> Result<ProjectBuildReadback, String> {
+	trusted_window(&window)?;
+	let builds = state
+		.project_build
+		.lock()
+		.map_err(|_| "Build state lock failed")?;
+	Ok(builds.readback(workspace_generation))
+}
+
+#[tauri::command]
+pub async fn editor_discard_project_build(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
 	build_id: u64,
-	finish: impl FnOnce(compiler::StagedProject) -> Result<ProjectBuildDto, String>,
-) -> Result<ProjectBuildDto, String> {
-	let staged = {
-		let mut state = pending_build
+) -> Result<(), String> {
+	trusted_window(&window)?;
+	let builds = Arc::clone(&state.project_build);
+	workspace(state, false, None, move |workspace| {
+		builds
 			.lock()
-			.map_err(|_| "Build state lock failed")?;
-		if state.pending.as_ref().map(|build| build.id) != Some(build_id) {
-			return Err("Prepared build is missing, superseded, or already compiling".into());
-		}
-		state.pending.take().expect("matched pending build").staged
-	};
-	let retry = staged.clone();
-	let result = finish(staged);
-	if result.is_err() {
-		let mut state = pending_build
-			.lock()
-			.map_err(|_| "Build state lock failed")?;
-		if state.latest_id == build_id && state.pending.is_none() {
-			state.pending = Some(PendingProjectBuild {
-				id: build_id,
-				staged: retry,
-			});
-		}
-	}
-	result
-}
-
-fn stage_project_build(
-	prepared: &compiler::PreparedProject,
-	destination: &str,
-) -> Result<compiler::StagedProject, String> {
-	compiler::stage_prepared_project(prepared, destination).inspect_err(|_| {
-		engine_logger::error!(target: "project_build", "Build failed: operation=stage_prepared_project");
+			.map_err(|_| "Build state lock failed")?
+			.discard(workspace.generation, build_id)
 	})
-}
-
-fn finish_project_build(
-	staged: compiler::StagedProject,
-	player: Option<&Path>,
-	last_build: &Mutex<Option<compiler::InstalledProject>>,
-) -> Result<ProjectBuildDto, String> {
-	let asset_count = staged.asset_count();
-	let asset_bytes = staged.asset_bytes();
-	engine_logger::info!(target:"project_build","Build started: assets={asset_count}, bytes={asset_bytes}");
-	let result = match player {
-		Some(executable) => compiler::complete_staged_project_with_player(staged, executable),
-		None => compiler::complete_staged_project(staged),
-	};
-	let installed = result.inspect_err(|_| {
-		engine_logger::error!(target:"project_build","Build failed: operation=finish_staged_project");
-	})?;
-	let path = installed.path().to_string_lossy().into_owned();
-	*last_build.lock().map_err(|_| "Build state lock failed")? = Some(installed);
-	engine_logger::info!(target:"project_build","Build completed: assets={asset_count}, bytes={asset_bytes}");
-	Ok(ProjectBuildDto {
-		path,
-		asset_count,
-		asset_bytes,
-	})
+	.await?;
+	notify(&window);
+	Ok(())
 }
 
 #[tauri::command]
@@ -152,24 +102,138 @@ pub async fn editor_build_project(
 ) -> Result<ProjectBuildDto, String> {
 	trusted_window(&window)?;
 	let resources = EditorResources::for_window(&window)?;
-	let last_build = Arc::clone(&state.last_build);
-	let prepared = workspace(state, false, Some("prepare_build"), move |w| {
-		w.prepare_build(expected_revision)
-	})
+	let (reservation, staged, player) = stage_build(
+		&window,
+		state,
+		resources,
+		expected_revision,
+		destination,
+		true,
+	)
 	.await?;
-	tauri::async_runtime::spawn_blocking(move || {
-		let player = resources.player()?;
-		let staged = stage_project_build(&prepared, &destination)?;
-		finish_project_build(staged, player.as_deref(), &last_build)
-	})
-	.await
-	.map_err(|e| format!("Project build worker failed: {e}"))?
+	finish_build(&window, reservation, staged, move || Ok(player)).await
 }
 
 #[derive(Serialize)]
 pub struct ProjectRunDto {
 	path: String,
 	process_id: u32,
+}
+
+#[tauri::command]
+pub async fn editor_run_build(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_path: String,
+) -> Result<ProjectRunDto, String> {
+	trusted_window(&window)?;
+	let builds = Arc::clone(&state.project_build);
+	let installed = workspace(state, false, None, move |workspace| {
+		let builds = builds.lock().map_err(|_| "Build state lock failed")?;
+		Ok(builds.installed(workspace.generation))
+	})
+	.await?;
+	tauri::async_runtime::spawn_blocking(move || {
+		let mut command = build_launch_command(installed.as_ref(), Path::new(&expected_path))?;
+		let child = command.spawn().map_err(|error| {
+			engine_logger::error!(target: "project_build", "Built game launch failed: operation=spawn, kind={:?}", error.kind());
+			format!("Could not run built game: {error}")
+		})?;
+		Ok(ProjectRunDto { path: expected_path, process_id: child.id() })
+	})
+	.await
+	.map_err(|error| format!("Game launch worker failed: {error}"))?
+}
+
+async fn stage_build(
+	window: &WebviewWindow,
+	state: State<'_, EditorState>,
+	resources: EditorResources,
+	expected_revision: u64,
+	destination: String,
+	finish_immediately: bool,
+) -> Result<(BuildReservation, compiler::StagedProject, Option<PathBuf>), String> {
+	let builds = Arc::clone(&state.project_build);
+	let reporter = window.clone();
+	let validated = workspace(state, false, Some("prepare_build"), move |workspace| {
+		let mut reservation =
+			BuildReservation::start(builds, workspace.generation, expected_revision)?;
+		notify(&reporter);
+		let prepared = workspace
+			.prepare_build(expected_revision)
+			.map_err(|message| reservation.fail(BuildDiagnosticCode::ValidationFailed, message))?;
+		Ok((reservation, prepared))
+	})
+	.await;
+	let (mut reservation, prepared) = match validated {
+		Ok(validated) => validated,
+		Err(error) => {
+			notify(window);
+			return Err(error);
+		}
+	};
+	reservation.begin_staging()?;
+	notify(window);
+	let result = tauri::async_runtime::spawn_blocking(move || {
+		let player = resources
+			.player()
+			.map_err(|message| reservation.fail(BuildDiagnosticCode::PlayerUnavailable, message))?;
+		let staged = compiler::stage_prepared_project(&prepared, &destination).map_err(|message| {
+			engine_logger::error!(target: "project_build", "Build failed: operation=stage_prepared_project");
+			reservation.fail(BuildDiagnosticCode::StagingFailed, message)
+		})?;
+		reservation.record_staged(&staged, finish_immediately)?;
+		Ok((reservation, staged, player))
+	})
+	.await;
+	notify(window);
+	result.map_err(|error| format!("Project staging worker failed: {error}"))?
+}
+
+async fn finish_build(
+	window: &WebviewWindow,
+	mut reservation: BuildReservation,
+	staged: compiler::StagedProject,
+	player: impl FnOnce() -> Result<Option<PathBuf>, String> + Send + 'static,
+) -> Result<ProjectBuildDto, String> {
+	notify(window);
+	let result = tauri::async_runtime::spawn_blocking(move || {
+		let player = player()
+			.map_err(|message| reservation.fail(BuildDiagnosticCode::PlayerUnavailable, message))?;
+		complete_export(reservation, staged, player.as_deref())
+	})
+	.await;
+	notify(window);
+	result.map_err(|error| format!("Project build worker failed: {error}"))?
+}
+
+fn complete_export(
+	mut reservation: BuildReservation,
+	staged: compiler::StagedProject,
+	player: Option<&Path>,
+) -> Result<ProjectBuildDto, String> {
+	let output = ProjectBuildOutput::from(&staged);
+	let ProjectBuildOutput {
+		asset_count,
+		asset_bytes,
+		..
+	} = output;
+	engine_logger::info!(target: "project_build", "Build started: assets={asset_count}, bytes={asset_bytes}");
+	let installed = match player {
+		Some(executable) => compiler::complete_staged_project_with_player(staged, executable),
+		None => compiler::complete_staged_project(staged),
+	}
+	.map_err(|message| {
+		engine_logger::error!(target: "project_build", "Build failed: operation=finish_staged_project");
+		reservation.fail(BuildDiagnosticCode::FinishFailed, message)
+	})?;
+	reservation.record_success(installed)?;
+	engine_logger::info!(target: "project_build", "Build completed: assets={asset_count}, bytes={asset_bytes}");
+	Ok(output)
+}
+
+fn notify(window: &WebviewWindow) {
+	let _ = window.emit(BUILD_CHANGED, ());
 }
 
 fn build_launch_command(
@@ -183,32 +247,6 @@ fn build_launch_command(
 	let mut command = Command::new(build.verified_executable()?);
 	command.current_dir(build.path()).arg("--player");
 	Ok(command)
-}
-
-#[tauri::command]
-pub async fn editor_run_build(
-	window: WebviewWindow,
-	state: State<'_, EditorState>,
-	expected_path: String,
-) -> Result<ProjectRunDto, String> {
-	trusted_window(&window)?;
-	let last_build = Arc::clone(&state.last_build);
-	tauri::async_runtime::spawn_blocking(move || {
-		let latest = last_build.lock().map_err(|_| "Build state lock failed")?;
-		let mut command = build_launch_command(latest.as_ref(), Path::new(&expected_path))?;
-		let child = command
-			.spawn()
-			.map_err(|error| {
-				engine_logger::error!(target: "project_build", "Built game launch failed: operation=spawn, kind={:?}", error.kind());
-				format!("Could not run built game: {error}")
-			})?;
-		Ok(ProjectRunDto {
-			path: expected_path,
-			process_id: child.id(),
-		})
-	})
-		.await
-		.map_err(|error| format!("Game launch worker failed: {error}"))?
 }
 
 #[cfg(test)]

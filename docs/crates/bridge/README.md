@@ -7,7 +7,7 @@ reads and fingerprint validation for the three hosts; it prepares prefab data wi
 `animation_asset` also provides bounded CPU GLB decoding, catalog/source-pin validation, clip metadata and shared
 per-scene immutable bindings. Editor, player, headless and compiler consume the same supported subset. Images are
 decoded for the animated material subset; uploading them remains a runtime/renderer responsibility. See the
-[animation asset contract](../../milestones-7-9-review.md#supported-asset-and-material-subset).
+[GLB asset contract](../../graphics-and-assets.md#gltf-and-glb-static-import).
 
 ## Editor protocol
 
@@ -30,7 +30,7 @@ not hardcode backend assumptions.
 
 The optional `gameplay_modules` capability catalog defaults to empty for older hosts. Descriptors contain module IDs,
 display text, default role descriptors and per-scene overrides. Core defines this generic metadata shape; the shared
-gameplay crate supplies Courtyard's entries and the host publishes them. It does not change the module's native-code
+gameplay catalog supplies these descriptors to the host. It does not change the module's native-code
 execution model or permit arbitrary code loading.
 
 Box/Sphere collider DTOs accept optional `interaction` objects with `sensor`, u32 `layers` and u32 `mask`.
@@ -63,4 +63,4 @@ cargo test -p bridge --locked --offline
 
 Serialization and contract tests help keep Rust/TypeScript in agreement; integration and visual acceptance remain
 separate. See [Angular editor](../../apps/editor/README.md), [runtime](../runtime/README.md),
-and [steps 21–35](../../editor-steps-21-35.md).
+and [Editor command flow](../../editor-flow.md).

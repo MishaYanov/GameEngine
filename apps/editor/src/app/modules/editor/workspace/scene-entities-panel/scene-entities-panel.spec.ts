@@ -126,18 +126,20 @@ describe('SceneEntitiesPanel hierarchy', () => {
         const lightAtRoot = contextAction(action('Create'), 'hierarchy.create_directional_light');
         const emptyInFolder = contextAction(folder('floor'), 'hierarchy.create_empty');
         expect(emptyAtRoot.label).toBe(emptyInFolder.label);
-        expect(() => contextAction(folder('floor'), 'hierarchy.create_directional_light')).toThrow();
+        const lightInFolder = contextAction(folder('floor'), 'hierarchy.create_directional_light');
         await lightAtRoot.execute();
         await emptyInFolder.execute();
+        await lightInFolder.execute();
         expect(created.mock.calls).toEqual([
             [{action: 'create_directional_light', folder: null}],
             [{action: 'create_empty', folder: 'floor'}],
+            [{action: 'create_directional_light', folder: 'floor'}],
         ]);
 
         fixture.componentRef.setInput('contextKey', 'replacement-scene');
         await fixture.whenStable();
         await emptyInFolder.execute();
-        expect(created).toHaveBeenCalledTimes(2);
+        expect(created).toHaveBeenCalledTimes(3);
     });
 
     it('opens primitive creation from the keyboard and keeps the root creation scope', async () => {

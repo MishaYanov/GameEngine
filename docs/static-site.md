@@ -1,6 +1,7 @@
 # Static documentation site
 
-The site builder lives in `docs-site`. Markdown in `docs` and `designs` remains the content source. The build generates one HTML page per document, a project sidebar, section links, highlighted code with copy buttons, and a full-text search index. The homepage selects between Engine Developer and Game App Developer spaces. `docs/main.md` becomes the Engine Developer home; all existing documentation and search belong to that space. The Game App Developer space is empty.
+The site publishes the engine developer guides in [the guide index](main.md). Its generated articles include
+section links, navigable examples, local diagrams and full-text search.
 
 ## Install, build, and preview
 
@@ -16,13 +17,11 @@ Open `http://127.0.0.1:4173/`. Stop the preview with Ctrl+C. Set `$env:PORT` to 
 
 ## Update documentation
 
-Edit the Markdown sources, then rebuild. The builder discovers all `.md` files under `docs` and `designs` and groups navigation by source directory. Add introductions to `docs/main.md` for new guides. Relative Markdown links are rewritten to generated HTML paths. Unmapped local links and missing generated targets fail the build rather than silently producing broken navigation.
+Edit a guide in `docs`. To add a guide, register its source and navigation group in `guideGroups` in
+`docs-site/build.mjs` and link it from a related guide. Use relative Markdown links between pages.
+The build checks page targets, and the tests verify section anchors and search.
 
-Relative links to JSON evidence directly under `docs/verification` publish that artifact at the matching site path.
-The copier accepts regular files with simple `.json` names, parses them as JSON and preserves their bytes. Other
-non-Markdown local links remain unsupported. The site tests verify that the milestone evidence matches its source.
-
-The build writes only `docs-site/dist`. It clears that generated directory before rebuilding; do not put hand-edited content there. Dependencies and build output are ignored by Git. The Markdown files, builder, styles, scripts, and package lockfile are the maintained sources.
+The build regenerates `docs-site/dist`. Keep authored Markdown, styles and scripts in their source directories.
 
 ## Flow diagrams
 

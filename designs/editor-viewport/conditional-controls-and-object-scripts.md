@@ -94,8 +94,8 @@ Use the same resolver in Editor Play, the standalone Player, and the headless re
 | Resolve during Play and export | Route raw samples from `crates/runtime/src/scene_editor/play_input.rs` through `crates/engine-core/src/simulation_session/player_control.rs` and `crates/engine-core/src/simulation_session/input.rs`. Reuse the loader in `crates/bridge/src/input_actions.rs` and the checks in `compiler/src/preflight.rs`. |
 | Acceptance | Exercise the menu with keyboard only. Test fallback, overlapping conditions in saved order, v1 imports, and competing bindings. Test the Space/A transition, a short tap, a held unchanged binding, and loss of focus. Replay the same raw trace with different frame grouping in Editor Play, headless, and an exported Player. Observe the same layout changes and logical action edges. |
 
-Resources [Input actions and possession](../../docs/adr/0010-input-actions-and-possession.md) ·
-[Runtime state and scheduling](../../docs/adr/0005-runtime-lifecycle-and-scheduling.md) ·
+Resources [Input actions and possession](../../history/adr/0010-input-actions-and-possession.md) ·
+[Runtime state and scheduling](../../history/adr/0005-runtime-lifecycle-and-scheduling.md) ·
 [Editor modal and viewport ownership](runtime-and-rendering.md#102-modal-behavior).
 
 ## 2. Scripts attached to objects
@@ -236,10 +236,10 @@ The other lifecycle hooks can default to doing nothing. The adapter validates an
 | Register and verify project scripts | Follow the injected registry pattern in `crates/gameplay-catalog/src/lib.rs`. Supply the shared registry to `apps/editor-host/src-tauri/src/editor.rs`, `apps/game/src/main.rs` and `apps/headless/src/replay.rs`. Check the script ID, API version, config, reference constraints and declared asset dependencies in `compiler/src/preflight.rs`. Put the sample implementation in project gameplay code. |
 | Acceptance | Attach Open Door on Trigger, assign its sensor, and enter it in Play. Save, reopen, and verify the same setup in the standalone Player and headless. Duplicate a Prop with its own sensor, then activate only one copy. Test invalid and stale refs, independent state, invalid commands leaving the last committed state intact, Stop, and Restart. |
 
-Resources [Game modules and scripting](../../docs/adr/0008-game-modules-and-scripting.md) ·
-[Object composition and components](../../docs/adr/0002-object-composition-and-components.md) ·
-[Authoring and Play ownership](../../docs/adr/0004-authoring-play-and-editor-state.md) ·
-[Typed Rust and TypeScript bridge](../../docs/adr/0003-rust-typescript-bridge.md).
+Resources [Game modules and scripting](../../history/adr/0008-game-modules-and-scripting.md) ·
+[Object composition and components](../../history/adr/0002-object-composition-and-components.md) ·
+[Authoring and Play ownership](../../history/adr/0004-authoring-play-and-editor-state.md) ·
+[Typed Rust and TypeScript bridge](../../history/adr/0003-rust-typescript-bridge.md).
 
 ## First two working examples
 

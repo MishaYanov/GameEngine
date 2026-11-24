@@ -22,12 +22,9 @@ use std::{
 
 const ENGINE_HELP: &[(&str, &str)] = &[
 	("editor-workspace", "editor-workspace.md"),
-	(
-		"object-components",
-		"0002-object-composition-and-components.md",
-	),
-	("authoring-play", "0004-authoring-play-and-editor-state.md"),
-	("game-workflows", "game-creation-workflows.md"),
+	("object-components", "authoring-objects.md"),
+	("authoring-play", "scene-editing.md"),
+	("game-workflows", "project-lifecycle.md"),
 ];
 const TOOL_SCHEMA_VERSION: u32 = 1;
 const MAX_BUNDLE_BYTES: u64 = 8 * 1024;

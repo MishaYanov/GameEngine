@@ -105,6 +105,7 @@ impl CommandFactory {
 					);
 				}
 			}
+			EditorCommandDto::SetObjectActive { key, .. } => validate_key(key)?,
 			EditorCommandDto::Rename { key, name } => {
 				validate_key(key)?;
 				validate_name(name, 1024)?;
@@ -138,6 +139,21 @@ impl CommandFactory {
 				}
 				if entity.mesh_index.is_some_and(|index| index > 1_000_000) {
 					return Err("Mesh index exceeds the supported limit".into());
+				}
+			}
+			EditorCommandDto::ApplyPlayTransforms { run_id, keys, .. } => {
+				if uuid::Uuid::parse_str(run_id).is_err()
+					|| keys.is_empty()
+					|| keys.len() > super::play_review::MAX_PLAY_TRANSFORM_CHANGES
+				{
+					return Err("Invalid Play transform review or selection size".into());
+				}
+				let mut unique = HashSet::with_capacity(keys.len());
+				for key in keys {
+					validate_key(key.as_str())?;
+					if !unique.insert(key) {
+						return Err("A Play transform may be applied only once per object".into());
+					}
 				}
 			}
 			EditorCommandDto::SetTransforms { edits, .. } => {
@@ -195,13 +211,8 @@ impl CommandFactory {
 			EditorCommandDto::MoveFolder { .. } | EditorCommandDto::RemoveFolder { .. } => {}
 			EditorCommandDto::SetMaterial { key, material } => {
 				validate_key(key)?;
-				if let Some(material) = material
-					&& !material
-						.base_color_factor
-						.iter()
-						.all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-				{
-					return Err("Material color must be finite and within 0..=1".into());
+				if let Some(material) = material {
+					material.validate()?;
 				}
 			}
 			EditorCommandDto::SetCollider { key, collider } => {
@@ -277,6 +288,13 @@ impl CommandFactory {
 				if let Some(bindings) = bindings {
 					validate_slot_bindings(bindings)?;
 				}
+			}
+			EditorCommandDto::RemoveLinkedPrefabLeaf {
+				root_key,
+				object_key,
+			} => {
+				validate_key(root_key)?;
+				validate_key(object_key)?;
 			}
 			EditorCommandDto::RevertLinkedPrefab { root_key, .. }
 			| EditorCommandDto::UnpackLinkedPrefab { root_key }
@@ -511,6 +529,13 @@ impl CommandFactory {
 				false,
 			),
 			(
+				"remove_linked_prefab_leaf",
+				"Remove object from linked Prop",
+				"prefab",
+				true,
+				false,
+			),
+			(
 				"revert_linked_prefab",
 				"Revert linked overrides",
 				"prefab",
@@ -548,6 +573,13 @@ impl CommandFactory {
 			("select", "Select entities", "selection", false, true),
 			("pick_selection", "Pick entity", "selection", false, false),
 			("rename", "Rename", "entity", true, false),
+			(
+				"set_object_active",
+				"Set object activation",
+				"entity",
+				true,
+				false,
+			),
 			("spawn", "Create entity", "entity", true, false),
 			("set_transforms", "Set transforms", "transform", true, false),
 			(
@@ -654,6 +686,13 @@ impl CommandFactory {
 			("start_play", "Play", "simulation", false, false),
 			("stop_play", "Stop", "simulation", false, true),
 			("set_paused", "Pause simulation", "simulation", false, true),
+			(
+				"apply_play_transforms",
+				"Apply reviewed Play transforms",
+				"simulation",
+				true,
+				true,
+			),
 			(
 				"set_play_camera_input",
 				"Set orbit camera input",

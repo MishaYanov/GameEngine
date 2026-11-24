@@ -51,10 +51,21 @@ fn cargo_fixture_build_and_test_outcomes() {
 	.unwrap();
 	let mut jobs = Jobs::new(&data);
 	let mut processes = Processes::new(&data);
-	jobs.queue(&data, Kind::Build, "compiler".into(), "dev".into())
+	let queue = |jobs: &mut Jobs, kind| {
+		jobs.queue_with(
+			&data,
+			kind,
+			"compiler".into(),
+			"dev".into(),
+			QueueOptions {
+				offline: true,
+				local_artifacts: true,
+			},
+		)
 		.unwrap();
-	jobs.queue(&data, Kind::Test, "compiler".into(), "dev".into())
-		.unwrap();
+	};
+	queue(&mut jobs, Kind::Build);
+	queue(&mut jobs, Kind::Test);
 	for _ in 0..400 {
 		processes.poll();
 		for mut entry in processes.output() {
@@ -86,8 +97,7 @@ fn cargo_fixture_build_and_test_outcomes() {
 		),
 	] {
 		std::fs::write(data.join("src/lib.rs"), source).unwrap();
-		jobs.queue(&data, kind, "compiler".into(), "dev".into())
-			.unwrap();
+		queue(&mut jobs, kind);
 		for _ in 0..400 {
 			processes.poll();
 			for mut entry in processes.output() {

@@ -29,7 +29,7 @@ pub fn short_slerp(a: [f32; 4], b: [f32; 4], t: f32) -> Result<[f32; 4], String>
 	};
 	Ok(q.to_array())
 }
-fn interval(times: &[f32], t: f64) -> Result<(usize, usize, f32), String> {
+pub(super) fn interval(times: &[f32], t: f64) -> Result<(usize, usize, f32), String> {
 	if times.is_empty() || !t.is_finite() {
 		return Err("Invalid sample time/keys".into());
 	}

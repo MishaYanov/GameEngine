@@ -245,6 +245,17 @@ impl AnimationBank {
 		Ok(())
 	}
 
+	pub(crate) fn has_root_motion(&self) -> bool {
+		self.animators.has_root_motion()
+	}
+
+	pub(crate) fn prepare_root_motion(
+		&mut self,
+		input: &AnimatorTick<'_>,
+	) -> Result<BTreeMap<EntityKey, RootMotionDelta>, String> {
+		self.animators.prepare_root_motion(input)
+	}
+
 	pub fn has_animators(&self) -> bool {
 		!self.animators.is_empty()
 	}

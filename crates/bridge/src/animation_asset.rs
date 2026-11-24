@@ -163,9 +163,14 @@ pub fn prepare_scene_with_pins(
 			};
 			&default
 		};
-		let entry = catalog
-			.by_path(&entity.model_path)
-			.ok_or("Animated mesh is not catalogued")?;
+		let resolved = if entity.mesh_id.is_some() {
+			catalog.resolve_mesh_reference(&entity.model_reference()?)?
+		} else {
+			catalog
+				.by_path(&entity.model_path)
+				.map(|entry| (entry, entity.mesh_index.unwrap_or(0)))
+		};
+		let (entry, mesh_index) = resolved.ok_or("Animated mesh is not catalogued")?;
 		if entry.id != s.source.asset_id
 			|| entity
 				.asset_id
@@ -198,7 +203,7 @@ pub fn prepare_scene_with_pins(
 			}
 		};
 		asset.validate_settings(s)?;
-		if entity.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize {
+		if mesh_index != asset.skin.mesh_index as usize {
 			return Err("Animated mesh selection does not match skin mesh".into());
 		}
 		bindings.insert(entity.key.clone(), asset);

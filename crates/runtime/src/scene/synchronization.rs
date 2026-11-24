@@ -32,9 +32,13 @@ impl Scene {
 				}) {
 			return false;
 		}
+		self.light_objects.clear();
 		for (entry, entity) in self.entries.iter_mut().zip(&data.entities) {
 			entry.parent.clone_from(&entity.parent);
 			entry.apply_document_values(entity);
+			if entry.light.is_some() {
+				self.light_objects.insert(entry.id);
+			}
 		}
 		self.authored_children = None;
 		self.bindings.clone_from(&data.bindings);
@@ -152,6 +156,8 @@ impl Scene {
 			let entity = &data.entities[index];
 			let entry = &mut self.entries[index];
 			entry.apply_document_values(entity);
+			let id = entry.id;
+			self.track_light(id, entity.light.is_some());
 		}
 		if let Some(cache) = self.world_cache.get_mut() {
 			for (index, matrix) in matrices {
@@ -241,6 +247,8 @@ impl Scene {
 			let entry = &mut self.entries[gpu_index];
 			entry.parent.clone_from(&entity.parent);
 			entry.apply_document_values(entity);
+			let id = entry.id;
+			self.track_light(id, entity.light.is_some());
 			self.world_cache
 				.get_mut()
 				.as_mut()
@@ -330,12 +338,14 @@ impl Scene {
 					name: entity.name.clone(),
 					model_path: Some(entity.model_path.clone()),
 					asset_id: entity.asset_id.clone(),
+					active: entity.active,
 					collision_enabled: entity.collision_enabled,
 					instance,
 					parent: entity.parent.clone(),
 					material: entity.material.clone(),
 					collider: entity.collider.clone(),
 					mesh_index: entity.mesh_index,
+					mesh_id: entity.mesh_id.clone(),
 					renderable: entity.renderable,
 					component_ids: entity.component_ids.clone(),
 					native_behaviors: entity.native_behaviors.clone(),
@@ -349,6 +359,7 @@ impl Scene {
 					player_controller: entity.player_controller.clone(),
 					audio_source: entity.audio_source.clone(),
 					sky: entity.sky.clone(),
+					light: entity.light.clone(),
 					particle_emitter: entity.particle_emitter.clone(),
 				}
 			};
@@ -364,6 +375,7 @@ impl Scene {
 			}
 			next.id_indices.insert(entry.id, next.entries.len());
 			next.key_ids.insert(entity.key.clone(), entry.id);
+			next.track_light(entry.id, entry.light.is_some());
 			next.entries.push(entry);
 		}
 		*next.world_cache.get_mut() = Some(world);

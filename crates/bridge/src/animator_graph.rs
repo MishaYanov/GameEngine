@@ -98,16 +98,14 @@ pub fn prepare_actor_assets(
 	graph.validate_binding(&settings.binding)?;
 	let clips = match &settings.binding {
 		AnimatorBinding::Imported { source } => {
-			let rendered =
-				catalog.resolve(actor.asset_id.as_ref(), &actor.model_path, actor.mesh_index)?;
-			if !actor.renderable
-				|| !actor.has_mesh_component()
-				|| rendered.is_none_or(|model| model.id != source.asset_id)
-			{
+			let (model, mesh_index) = catalog
+				.resolve_mesh_reference(&actor.model_reference()?)?
+				.ok_or("Animator rig must be the rendered model on the same actor")?;
+			if !actor.renderable || !actor.has_mesh_component() || model.id != source.asset_id {
 				return Err("Animator rig must be the rendered model on the same actor".into());
 			}
 			let asset = crate::animation_asset::load(&root, source)?;
-			if actor.mesh_index.unwrap_or(0) != asset.skin.mesh_index as usize {
+			if mesh_index != asset.skin.mesh_index as usize {
 				return Err("Animator rig targets a different mesh selection".into());
 			}
 			for state in &graph.states {
@@ -168,7 +166,9 @@ pub fn prepare_actor_assets(
 			PreparedAnimatorClips::Visual(clips)
 		}
 	};
-	Ok(PreparedAnimator { graph, clips })
+	let prepared = PreparedAnimator { graph, clips };
+	prepared.validate_root_motion(actor, settings)?;
+	Ok(prepared)
 }
 
 pub fn validate_actor_audio_marker(

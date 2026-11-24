@@ -5,7 +5,7 @@ use crate::{
 	components::NO_MESH_PATH,
 	linked_prefab::{
 		self, LinkedPrefabInstance, LinkedPrefabOverrideResolution, LinkedPrefabOverrideTarget,
-		LinkedPrefabSource, PrefabConflictResolution,
+		LinkedPrefabProperty, LinkedPrefabSource, PrefabConflictResolution,
 	},
 	scene_data::EntityData,
 };
@@ -53,6 +53,60 @@ impl EditorSession {
 		self.commit(next, vec![anchor], "Instantiate linked prefab")
 	}
 
+	pub fn remove_linked_prefab_leaf(
+		&mut self,
+		root: String,
+		object: String,
+	) -> Result<(), String> {
+		self.require_edit()?;
+		self.require_no_transaction()?;
+		let root = EntityKey::new(root)?;
+		let object = EntityKey::new(object)?;
+		let mut next = (*self.data).clone();
+		let link = next
+			.entities
+			.iter_mut()
+			.find(|entity| entity.key == root)
+			.and_then(|entity| entity.linked_prefab.as_mut())
+			.ok_or("Select a linked Prop instance")?;
+		let source = link
+			.entity_map
+			.iter()
+			.find(|(_, target)| *target == &object)
+			.map(|(source, _)| source.clone())
+			.ok_or("Select an inherited object in this Prop instance")?;
+		if !link.supports_leaf_removal(&source, &link.source.prefab.expanded_entities()?) {
+			return Err("Only direct inherited objects without children can be removed from this Prop instance".into());
+		}
+		if link
+			.overrides
+			.iter()
+			.any(|target| target.source_entity == source)
+		{
+			return Err(
+				"Revert this object's local overrides before removing it from the Prop instance"
+					.into(),
+			);
+		}
+		link.overrides.insert(LinkedPrefabOverrideTarget {
+			source_entity: source,
+			property: LinkedPrefabProperty::Presence,
+		});
+		next.entities.retain(|entity| entity.key != object);
+		let selection = self
+			.selection
+			.iter()
+			.filter(|key| *key != &object)
+			.cloned()
+			.collect::<Vec<_>>();
+		let selection = if selection.is_empty() {
+			vec![root]
+		} else {
+			selection
+		};
+		self.commit(next, selection, "Remove object from linked Prop")
+	}
+
 	pub fn revert_linked_prefab(
 		&mut self,
 		root_key: String,
@@ -79,18 +133,26 @@ impl EditorSession {
 			let expected = base
 				.get(&target.source_entity)
 				.ok_or("Override source entity is missing")?;
-			let actual = next
-				.entities
-				.iter_mut()
-				.find(|entity| entity.key == link.entity_map[&target.source_entity])
-				.ok_or("Linked member is missing")?;
-			linked_prefab::apply_value(
-				actual,
-				&target.property,
-				linked_prefab::value(expected, &target.property),
-			)?;
+			if target.property == LinkedPrefabProperty::Presence {
+				next.entities.push(expected.clone());
+			} else {
+				let actual = next
+					.entities
+					.iter_mut()
+					.find(|entity| entity.key == link.entity_map[&target.source_entity])
+					.ok_or("Linked member is missing")?;
+				linked_prefab::apply_value(
+					actual,
+					&target.property,
+					linked_prefab::value(expected, &target.property),
+				)?;
+			}
 		} else {
 			for (source, expected) in base {
+				if link.leaf_removed(&source) {
+					next.entities.push(expected);
+					continue;
+				}
 				let actual = next
 					.entities
 					.iter_mut()
@@ -262,6 +324,13 @@ impl EditorSession {
 				if conflicts.len() < 16 {
 					conflicts.push(format!("{:?} {:?}", review.address, target.property));
 				}
+				continue;
+			}
+			if target.property == LinkedPrefabProperty::Presence {
+				if review.conflict {
+					return Err("The source changed this removed leaf's structure. Choose Use Source to restore it".into());
+				}
+				update.members.remove(&target.source_entity);
 				continue;
 			}
 			let incoming = update

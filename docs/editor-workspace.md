@@ -1,9 +1,10 @@
 # Angular editor workspace: create, edit and preview
 
-The main `/editor` route connects project creation/opening, entity and Inspector editing, native Vulkan tools, scene/model actions, saving, Play and staged standalone export. The [native scene editor implementation](viewport-implementation.md) gives the complete control reference, ownership model, source map and verification boundaries. The [historical reports](project3-handoff.md) describe older milestones.
-
-The [authoring polish guide](editor-authoring-polish.md) covers workspace tab navigation, Assets and Hierarchy search,
-Inspector reset, graph framing, and Timeline and exit review. It includes step-by-step checks and the source files to edit.
+The desktop Editor opens and creates projects, edits scenes in a native Vulkan viewport, and exports a standalone
+Player. Use the Hierarchy to select objects, the Inspector to edit components, and the workspace tabs to switch
+between scene authoring, game preview and specialized tools. [Objects, components and Props](authoring-objects.md)
+walks through object creation, editing, reuse and Play. [Scene viewport](viewport-implementation.md) lists viewport
+controls and native ownership.
 
 ## Open a desktop project
 
@@ -43,10 +44,10 @@ The expected revision is null when no workspace is open. A direct caller replaci
 The overall dirty flag can include project settings or inactive drafts. Therefore an enabled Save Scene button does not promise that the whole workspace will become clean. Use Save All before Export Game. [Project lifecycle](project-lifecycle.md) defines the separate saved baselines.
 
 Gameplay options and role requirements come from the host module catalog, including per-scene overrides. The generic
-module uses configured behaviors without inventing Courtyard roles. Collider fields and discrete sensor/layer changes
+module uses configured behaviors with the authored behavior settings. Collider fields and discrete sensor/layer changes
 share the existing edit reservation, history and Save/Play barriers. Colliders is a view-only toggle: continuous cyan
 outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlaps provide fixed-step Enter/Stay/Exit
-events. See the [Milestone 4–6 workflow](milestones-4-6-review.md) for component editing, source review and runtime inspection.
+events. See [Objects, components and Props](authoring-objects.md) for component editing, source review and runtime inspection.
 
 ## Inspector and Agent
 
@@ -112,8 +113,5 @@ npm.cmd run generate:panel -- scene-tools-panel
 | `apps/editor-host/src-tauri/src/viewport{,_interaction,_tools}.rs` | Native window/render ownership, tool state and spatial math |
 | `apps/editor/projects/editor-schematics/` | Local generator collection, name schema and external-file templates |
 
-Frontend paths after the first row are relative to `apps/editor/src/app`. The 2026-11-20 reconciliation inspects
-commit `e0f2148` plus staged, unstaged and new working-tree files. Source inspection, automated checks and visible
-desktop acceptance are separately attributed in the [review](building-blocks-review.md#validation-evidence-and-limits).
-
-Documentation maintenance rebuilds and checks the site. The feature's implementation checks and current evidence belong in [native scene editor implementation](viewport-implementation.md) and the completion report; a site build does not establish GPU or cross-HWND acceptance. See `docs-site/docs-state.json` for the inspection baseline and verification limits. The Game App Developer space remains empty.
+Frontend paths after the first row are relative to `apps/editor/src/app`.
+Use the [desktop acceptance guide](testing.md#desktop-and-release-acceptance) to check focus, gestures and export.

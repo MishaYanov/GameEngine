@@ -45,6 +45,7 @@ pub struct LinkedPrefabSource {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LinkedPrefabProperty {
 	Name,
+	Presence,
 	TransformPosition,
 	TransformRotation,
 	TransformScale,
@@ -53,6 +54,7 @@ pub enum LinkedPrefabProperty {
 	CharacterController,
 	Animation,
 	ParticleEmitter,
+	Light,
 	NativeBehavior { component_id: ComponentId },
 	Script { component_id: ComponentId },
 }
@@ -116,12 +118,42 @@ impl LinkedPrefabSource {
 }
 
 impl LinkedPrefabInstance {
+	pub(crate) fn leaf_removed(&self, source: &EntityKey) -> bool {
+		self.overrides.contains(&LinkedPrefabOverrideTarget {
+			source_entity: source.clone(),
+			property: LinkedPrefabProperty::Presence,
+		})
+	}
+
+	pub(crate) fn supports_leaf_removal(
+		&self,
+		source: &EntityKey,
+		expanded: &[EntityData],
+	) -> bool {
+		self.source
+			.prefab
+			.entities
+			.iter()
+			.any(|entity| &entity.key == source)
+			&& !expanded
+				.iter()
+				.any(|entity| entity.parent.as_ref() == Some(source))
+	}
+
 	pub fn remap_instance(&mut self, remap: &HashMap<EntityKey, EntityKey>) -> Result<(), String> {
-		for key in self.entity_map.values_mut() {
-			*key = remap
-				.get(key)
-				.cloned()
-				.ok_or("Duplicate the whole linked instance or Unpack it first")?;
+		for (source, key) in &mut self.entity_map {
+			let removed = self.overrides.contains(&LinkedPrefabOverrideTarget {
+				source_entity: source.clone(),
+				property: LinkedPrefabProperty::Presence,
+			});
+			*key = if removed {
+				EntityKey::generate()
+			} else {
+				remap
+					.get(key)
+					.cloned()
+					.ok_or("Duplicate the whole linked instance or Unpack it first")?
+			};
 		}
 		for target in self.bindings.values_mut() {
 			if let Some(key) = remap.get(target) {
@@ -136,6 +168,7 @@ impl LinkedPrefabInstance {
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum LinkedPrefabValue {
 	Name(String),
+	Presence(bool),
 	Vector([f32; 3]),
 	Component(Option<ComponentRecord>),
 }

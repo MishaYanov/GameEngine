@@ -4,7 +4,7 @@ use super::{
 	source::{Source, read_bounded, source},
 };
 use engine_core::{
-	Bounds3, Engine, EngineBuilder,
+	Bounds3, Engine, EngineBuilder, EntityKey,
 	camera_input::CameraIntent,
 	command::{EditorCommandDto, EditorCommandRequest},
 	input::{ControllerBindings, GamepadSample, PhysicalGamepadSample},
@@ -39,6 +39,9 @@ struct Replay {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ReplayAction {
 	RestartRun {},
+	SetLocalPossession {
+		target: Option<EntityKey>,
+	},
 	Mark {
 		label: String,
 	},
@@ -82,13 +85,16 @@ enum ReplayAction {
 
 impl Replay {
 	fn validate(&self, extra_steps: u32) -> Result<(), String> {
-		if !matches!(self.schema_version, 1..=5) {
-			return Err("Supported replay schema versions are 1 through 5".into());
+		if !matches!(self.schema_version, 1..=6) {
+			return Err("Supported replay schema versions are 1 through 6".into());
 		}
 		let mut labels = HashSet::new();
 		let mut total = extra_steps;
 		for action in &self.actions {
 			match action {
+				ReplayAction::SetLocalPossession { .. } if self.schema_version < 6 => {
+					return Err("set_local_possession requires replay schema version 6".into());
+				}
 				ReplayAction::Mark { label } => {
 					if self.schema_version < 5 {
 						return Err("mark requires replay schema version 5".into());
@@ -251,14 +257,27 @@ impl Measurements {
 
 #[derive(Default)]
 struct ReplayControls {
+	sequence: u64,
 	keyboard: HashSet<String>,
 	gamepad: GamepadSample,
 	physical: PhysicalGamepadSample,
 }
 
 impl ReplayControls {
-	fn submit(&self, engine: &mut Engine) -> Result<(), String> {
-		engine.set_action_controls_from_codes(&self.keyboard, self.physical, self.gamepad)
+	fn submit(&mut self, engine: &mut Engine) -> Result<(), String> {
+		if let Some(scope) = engine.session().local_input_scope() {
+			self.sequence += 1;
+			engine.submit_ordered_play_controls_from_codes(
+				&scope,
+				self.sequence,
+				&self.keyboard,
+				self.physical,
+				self.gamepad,
+			)?;
+			Ok(())
+		} else {
+			engine.set_action_controls_from_codes(&self.keyboard, self.physical, self.gamepad)
+		}
 	}
 }
 
@@ -368,6 +387,31 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 					};
 					controls.gamepad = ControllerBindings::default().resolve(controls.physical);
 					controls.submit(&mut engine)?;
+					measures.commands += 1;
+				}
+				ReplayAction::SetLocalPossession { target } => {
+					let status = engine
+						.play_status()
+						.ok_or("set_local_possession requires Play mode")?;
+					let target = target
+						.as_ref()
+						.map(|key| {
+							engine
+								.session()
+								.play_entity_handle(key)
+								.ok_or("Possession target does not exist in this replay scene")
+						})
+						.transpose()?;
+					let generation = engine
+						.session()
+						.play_possession_generation()
+						.ok_or("set_local_possession requires Play mode")?;
+					engine.request_play_possession(
+						&status.run_id,
+						status.scene_generation,
+						generation,
+						target,
+					)?;
 					measures.commands += 1;
 				}
 				ReplayAction::RestartRun {} => {

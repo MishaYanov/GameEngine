@@ -3,8 +3,23 @@ use super::*;
 impl EntityData {
 	pub fn component_retained_bytes(&self) -> usize {
 		let mut bytes = self.component_ids.len().saturating_mul(128);
+		if let Some(mesh_id) = &self.mesh_id {
+			bytes = bytes.saturating_add(mesh_id.as_str().len());
+		}
+		if let Some(graph) = self
+			.material
+			.as_ref()
+			.and_then(|material| material.source_graph.as_deref())
+		{
+			bytes = bytes.saturating_add(graph.retained_bytes());
+		}
 		if let Some(emitter) = &self.particle_emitter {
 			bytes = bytes.saturating_add(emitter.id.as_str().len());
+		}
+		if let Some(light) = &self.light {
+			bytes = bytes
+				.saturating_add(std::mem::size_of_val(light.as_ref()))
+				.saturating_add(light.id.as_str().len());
 		}
 		if let Some(sky) = &self.sky {
 			bytes = bytes
@@ -125,6 +140,16 @@ impl EntityData {
 				},
 			});
 		}
+		if let Some(light) = &self.light {
+			records.push(ComponentRecord {
+				id: light.id.clone(),
+				schema_version: 1,
+				enabled: light.enabled,
+				data: ComponentData::Light {
+					settings: light.settings,
+				},
+			});
+		}
 		if let Some(sky) = &self.sky {
 			records.push(ComponentRecord {
 				id: sky.id.clone(),
@@ -214,6 +239,7 @@ impl EntityData {
 					model_path: self.model_path.clone(),
 					asset_id: self.asset_id.clone(),
 					mesh_index: self.mesh_index,
+					mesh_id: self.mesh_id.clone(),
 					material: self.material.clone(),
 				},
 			});
@@ -316,6 +342,13 @@ impl EntityData {
 					settings,
 				});
 			}
+			ComponentData::Light { settings } => {
+				self.light = Some(Box::new(LightComponent {
+					id: component.id,
+					enabled: component.enabled,
+					settings,
+				}));
+			}
 			ComponentData::Sky { settings } => {
 				self.sky = Some(Box::new(SkyComponent {
 					id: component.id,
@@ -377,11 +410,13 @@ impl EntityData {
 				model_path,
 				asset_id,
 				mesh_index,
+				mesh_id,
 				material,
 			} => {
 				self.model_path = model_path;
 				self.asset_id = asset_id;
 				self.mesh_index = mesh_index;
+				self.mesh_id = mesh_id;
 				self.material = material;
 				self.renderable = component.enabled;
 				self.component_ids.insert(MESH_TYPE.into(), component.id);
@@ -432,6 +467,7 @@ impl EntityData {
 		match record.data {
 			ComponentData::AudioSource { .. } => self.audio_source = None,
 			ComponentData::Sky { .. } => self.sky = None,
+			ComponentData::Light { .. } => self.light = None,
 			ComponentData::ParticleEmitter { .. } => self.particle_emitter = None,
 			ComponentData::PlayerController { .. } => self.player_controller = None,
 			ComponentData::Camera { .. } => self.camera = None,
@@ -443,6 +479,7 @@ impl EntityData {
 				self.model_path = NO_MESH_PATH.into();
 				self.asset_id = None;
 				self.mesh_index = None;
+				self.mesh_id = None;
 				self.material = None;
 				self.renderable = false;
 				self.component_ids.remove(MESH_TYPE);

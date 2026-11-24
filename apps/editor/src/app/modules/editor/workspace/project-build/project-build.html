@@ -1,23 +1,28 @@
-<section aria-label="Standalone build" [attr.aria-busy]="pending() !== null">
+<section aria-label="Standalone build" [attr.aria-busy]="pending() !== null || buildInProgress()">
     <button type="button" [disabled]="!available()" (click)="exportProject()">
-        {{ pending() === 'choose' ? 'Choosing output…' : pending() === 'build' ? 'Exporting…' : 'Export Game…' }}
+        {{ pending() === 'choose' ? 'Choosing output…' : buildInProgress() ? 'Exporting…' : 'Export Game…' }}
     </button>
     @if (unsaved()) {
         <span class="hint warning">Save All before exporting.</span>
     }
-    @if (retryPreparation(); as staged) {
-        @if (error()) {
-            <button type="button" [disabled]="pending() !== null || opening()" (click)="retryExport()">Retry Export</button>
+    @if (stagedExport(); as staged) {
+        @if (error() ?? exportFailure()) {
+            <button type="button" [disabled]="!canUseStagedExport()" (click)="retryExport()">Retry Export</button>
             <span class="hint">Retry the staged files in {{ staged.path }}.</span>
+        } @else {
+            <button type="button" [disabled]="!canUseStagedExport()" (click)="retryExport()">Finish Staged Export</button>
+        }
+        @if (canDiscard()) {
+            <button type="button" [disabled]="!canUseStagedExport()" (click)="discardExport()">Discard Staged Export</button>
         }
     }
-    @if (result(); as build) {
+    @if (visibleResult(); as build) {
         <span class="output" [title]="build.path">{{ build.path }}</span>
         <span class="hint">{{ build.asset_count }} assets · {{ (build.asset_bytes / 1048576).toFixed(1) }} MiB</span>
-        <button type="button" [disabled]="pending() !== null" (click)="runBuild()">{{ pending() === 'run' ? 'Starting…' : 'Run Exported Game' }}</button>
+        <button type="button" [disabled]="pending() !== null || buildInProgress()" (click)="runBuild()">{{ pending() === 'run' ? 'Starting…' : 'Run Exported Game' }}</button>
     }
-    @if (status(); as message) {
-        <p [class.progress]="pending() === 'build'" [class.success]="result() && pending() !== 'build'"
+    @if (announcement(); as message) {
+        <p [class.progress]="buildInProgress()" [class.success]="visibleResult() && !buildInProgress()"
            role="status">{{ message }}</p>
     }
     @if (error() ?? exportFailure(); as failure) {

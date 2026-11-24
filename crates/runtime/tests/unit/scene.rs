@@ -25,6 +25,66 @@ fn removal_does_not_reuse_ids_or_change_other_entities() {
 }
 
 #[test]
+fn object_light_uses_world_transform_and_inherited_activation() {
+	use crate::scene_data::LightKind;
+	use engine_core::components::{ComponentId, LightComponent, LightSettings, NO_MESH_PATH};
+	use renderer::vulkan::Light;
+
+	let model = Arc::new(Model::new(Vec::new()));
+	let mut scene = Scene::default();
+	let parent_key = EntityKey::new("lamp-stand").unwrap();
+	let light_key = EntityKey::new("bulb").unwrap();
+	let parent = scene
+		.spawn_keyed_model(
+			parent_key.clone(),
+			"Lamp Stand",
+			NO_MESH_PATH,
+			instance(&model),
+		)
+		.unwrap();
+	let light = scene
+		.spawn_keyed_model(light_key.clone(), "Bulb", NO_MESH_PATH, instance(&model))
+		.unwrap();
+	scene.get_mut(parent).unwrap().transform_mut().position = [3.0, 0.0, 1.0];
+	scene.get_mut(light).unwrap().transform_mut().position = [0.0, 2.0, 0.0];
+	let mut light_data =
+		EntityData::new(light_key, "Bulb", NO_MESH_PATH).with_parent(Some(parent_key.clone()));
+	light_data.light = Some(Box::new(LightComponent {
+		id: ComponentId::new("bulb").unwrap(),
+		enabled: true,
+		settings: LightSettings {
+			kind: LightKind::Point,
+			color: [1.0; 3],
+			intensity: 2.0,
+			range: 5.0,
+		},
+	}));
+	scene.set_entity_metadata(light, &light_data).unwrap();
+	assert!(matches!(
+		scene.renderer_lights().as_slice(),
+		[Light::Point {
+			position: [3.0, 2.0, 1.0],
+			intensity: 2.0,
+			..
+		}]
+	));
+
+	let mut authoring_parent = EntityData::new(parent_key, "Lamp Stand", NO_MESH_PATH);
+	authoring_parent.active = false;
+	scene
+		.set_entity_metadata(parent, &authoring_parent)
+		.unwrap();
+	assert!(scene.renderer_lights().is_empty());
+	authoring_parent.active = true;
+	scene
+		.set_entity_metadata(parent, &authoring_parent)
+		.unwrap();
+	assert_eq!(scene.renderer_lights().len(), 1);
+	assert!(scene.remove(light).is_some());
+	assert!(scene.renderer_lights().is_empty());
+}
+
+#[test]
 fn shared_model_instances_have_independent_transforms() {
 	let model = Arc::new(Model::new(Vec::new()));
 	let mut first = instance(&model);

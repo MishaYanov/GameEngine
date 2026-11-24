@@ -128,6 +128,40 @@ fn two_scene_project() -> (Fixture, runtime::project::ProjectData, SceneId) {
 }
 
 #[test]
+fn desktop_workspace_maps_legacy_light_keys_and_only_writes_on_save() {
+	use runtime::scene_data::{LightData, LightKind};
+
+	let fixture = Fixture::new();
+	let path = fixture.0.join("scenes/main.json");
+	let mut legacy = runtime::scene_io::load_data(&path).unwrap().data;
+	let key = EntityKey::new("room-light").unwrap();
+	let mut light = LightData::new(key.clone(), "Room light", LightKind::Point);
+	light.position = [3.0, 4.0, 5.0];
+	legacy.lights.push(light.clone());
+	let original = legacy.to_json().unwrap();
+	fs::write(&path, &original).unwrap();
+
+	let mut workspace = fixture.open();
+	let scene = workspace.backend.session().authored_document();
+	let entity = scene
+		.entities
+		.iter()
+		.find(|entity| entity.key == key)
+		.unwrap();
+	assert_eq!(entity.transform.position, light.position);
+	assert!(entity.light.is_some());
+	assert!(scene.lights.is_empty());
+	assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+	workspace
+		.save(workspace.backend.session().revision())
+		.unwrap();
+	let disk = runtime::scene_io::load_data(&path).unwrap().data;
+	assert_eq!(disk.projected_lights().unwrap()[0].key, key);
+	assert!(disk.lights.is_empty());
+}
+
+#[test]
 fn legacy_scene_opens_without_writing_and_explicit_save_publishes_its_camera_object() {
 	let fixture = Fixture::new();
 	let path = fixture.0.join("scenes/main.json");

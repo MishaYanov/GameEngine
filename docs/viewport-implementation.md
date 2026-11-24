@@ -1,17 +1,11 @@
 # Native scene editor implementation
 
-The desktop editor now provides a native Vulkan scene-authoring viewport with an
-editor camera, a depth-tested construction grid, selection, transform handles,
-and model placement from Assets. Angular supplies the surrounding controls;
-the native worker handles spatial input and rendering without sending camera
-movement through the authored scene command queue.
+The native Vulkan scene viewport provides an editor camera, construction grid, picking, transform handles and
+placement from Assets. Angular supplies the surrounding controls. The native viewport handles spatial input and
+renders camera movement independently of authored scene edits.
 
-This guide describes the current implementation in the combined working tree.
-The [viewport design](../designs/editor-viewport/README.md) remains the broader
-product proposal; features such as visibility/layer tools,
-triangle-accurate picking, and arbitrary editor extensions have separate scope.
-The [Milestone 4–6 review](milestones-4-6-review.md) documents the implemented Component Inspector, linked source
-authoring and Runtime Inspector alongside this viewport reference.
+Use [Objects, components and Props](authoring-objects.md) to learn the accompanying Hierarchy, Inspector and
+linked Prop workflows.
 
 ## 1. Start the editor
 
@@ -34,7 +28,7 @@ A browser-only Angular session can exercise interface layout but cannot create
 the native child window, issue native editor actions, or certify GPU behavior.
 
 Open **File → Open Project…** and choose an authored `project.json`.
-The bundled development fixture is `apps/game/project.json`.
+The bundled sample is `projects/cinder-oath/project.json`.
 The chooser and replacement guard retain the current project after cancellation.
 Replacing dirty state requires the reviewed discard decision and revision.
 
@@ -399,18 +393,13 @@ Click Game to focus its input, then use W/A/S/D with the shared movement binding
 Releasing a key updates movement; Escape or focus loss clears held play input.
 Scene view preferences and camera bookmarks remain separate from runtime movement.
 
-To play the bundled course, open `apps/game/project.json` and select
-`scenes/courtyard.json` before clicking Play. In Game, focus the viewport and
-move with **A** toward the green locked exit, **D** to the yellow key, then **A**
-back to the exit. Game status shows the objective and score. The unlocked exit
-loads `finish` and the panel displays the runtime scene while the Scene selector
-retains Courtyard. Release the movement key, then move with **D** to the blue
-marker. The panel displays **Completed** and movement stops.
+For Cinder Oath, open `projects/cinder-oath/project.json` and choose `scenes/oath.json` in
+**Game → Scene Information…**. Click **Play** and focus Game. Watch the introduction or press **Enter** to reach the
+vault. Use **W**, **A**, **S** and **D** to move and **F** to attack. The runtime status follows the active Play scene,
+while the Scene view retains the authored draft.
 
-Click **Restart Run** to return to the configured startup scene with fresh progress.
-Click **Stop** to return to the authored scene, selection and drafts.
-The editor and Player resolve the bundled `courtyard_run` selection through the
-same module. [Gameplay module selection](project-lifecycle.md#gameplay-module-selection).
+Use **Restart Run** to load the configured startup scene with fresh progress and **Stop** to return to authoring.
+[Gameplay module selection](project-lifecycle.md#gameplay-module-selection).
 
 ## 16. Save scenes and project settings
 
@@ -668,48 +657,8 @@ npm.cmd run check:production
 npm.cmd test -- --watch=false
 ```
 
-The Courtyard Run update passed 317 editor tests, including Game status, Restart Run,
-and the startup scene chooser regression. The production bundle and custom-protocol
-host builds passed. On Windows, a generic-project smoke displayed the base props and
-exercised Game status, Restart Run and Stop. Campaign objectives and completion in
-Editor Game were verified in host and Angular tests. The full desktop walkthrough
-below lists the broader spatial and campaign checks to record.
-
-The following results describe the earlier viewport implementation.
-
-The new math/interaction checks exercise projection conventions, rays, selection,
-constraints, transaction cancellation, parent transforms and stale/lifecycle cases.
-Renderer checks exercise editor data validation, clipping, capacity growth and
-failure recovery. Fake-driver execution is not a physical-GPU image comparison.
-
-Frontend tests cover camera/document notification separation, action coalescing,
-queue limits, stale native state, normalized aperture coordinates, pointer capture,
-drop/Escape/blur cancellation, async placement status, Play guards and toolbar AXE
-semantics. Their mocked DOM cannot prove cross-HWND mouse delivery.
-
-The final aggregate Angular run passed 277 tests across 38 files, including all
-13 viewport service checks. After the narrow generic placement-message change,
-the eight drag checks and exact default optimized production check passed again.
-The production exclusion check, design build, five design-registry checks and
-three schematic checks passed; production optimization was not weakened.
-
-The final Rust app run passed 108 checks: 62 library plus 46 integration checks,
-including the publication-deadline regression. The 47 math/interaction checks are
-included in that result. Bridge/runtime/renderer/compiler passed 255 checks with
-one intentional Vulkan-hardware check ignored. Workspace-local TEMP/TMP were
-required for native layout-preference fixtures under the filesystem sandbox.
-The final embedded host build with `--features custom-protocol` also passed.
-
-Desktop smoke checked authoring creation/opening, Hierarchy-to-Inspector
-selection, orthographic projection, and Play/Game/Stop returning to Scene with
-the projection retained. Save/Undo stayed disabled after view-only changes.
-The isolated fixture lives under `target/viewport-native-smoke`; sample sources
-were not edited. An RTX 4070 renderer reported 1,515 frames and a final frame of
-three draws, two instances and 100,085 triangles with an empty error log. These
-are smoke counters, not a performance benchmark. The captured child was black, so this
-does not establish visible grid/handle quality. Full spatial interaction, actual
-cross-HWND drag delivery, desktop DPI, exported-player execution and another-machine
-export remain separately recorded acceptance tasks.
+Use these tests to check camera projection, pointer capture, transactional transforms, queue limits and lifecycle
+behavior. Use the desktop walkthrough to check Windows input delivery, focus and visible rendering.
 
 ## 26. Desktop acceptance walkthrough
 
@@ -725,7 +674,7 @@ export remain separately recorded acceptance tasks.
 10. Drag a model from Assets, cancel it, and confirm no new entity exists.
 11. Drop a model at a valid point and wait for adoption.
 12. Confirm one undoable creation and a clean end to asset-loading state.
-13. Play the Courtyard route in Game and observe the objective, scene change and completion.
+13. Play Cinder Oath and confirm the transition to the vault, sword input and victory condition.
 14. Restart Run, then Stop and confirm authored transforms, roles and Scene viewpoint.
 15. Save All, close/reopen, export, and repeat the route with the player outside the repository.
 
@@ -747,5 +696,4 @@ for the complete native authoring workflow.
 
 These boundaries keep the next work concrete: resolve observed authoring friction
 in a small playable project, then extend the relevant tool or contract.
-The [game development workflow](../designs/editor-viewport/game-creation-workflows.md)
-provides the corresponding reference-game and support-agent criteria.
+[Objects, components and Props](authoring-objects.md) gives a workflow you can reproduce in a project.

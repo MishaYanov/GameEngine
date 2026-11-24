@@ -5,6 +5,7 @@ import {
 	runtimeHandleKey,
 	type RuntimeInspection,
 } from '../../../../core/editor/runtime-inspection';
+import {PlayTransformReview} from './play-transform-review';
 import {ControlGraphOutputView} from '../control-graph/control-graph-output';
 import { Drawer } from '../../../../shared/components/drawer/drawer';
 import { EditorPane } from '../../../../shared/components/pane/pane';
@@ -13,7 +14,7 @@ import type { Config } from '../../../../shared/models/config.model';
 
 @Component({
 	selector: 'editor-runtime-inspector',
-	imports: [Drawer, EditorPane, ControlGraphOutputView],
+	imports: [Drawer, EditorPane, ControlGraphOutputView, PlayTransformReview],
 	templateUrl: './runtime-inspector.html',
 	styleUrl: './runtime-inspector.scss',
 })

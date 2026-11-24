@@ -32,11 +32,7 @@ pub(super) fn prefab_dependencies(
 			}
 			dependencies.insert(asset.id.clone());
 		}
-		if let Some(asset) = catalog.resolve(
-			entity.asset_id.as_ref(),
-			&entity.model_path,
-			entity.mesh_index,
-		)? {
+		if let Some((asset, _)) = catalog.resolve_mesh_reference(&entity.model_reference()?)? {
 			dependencies.insert(asset.id.clone());
 		}
 	}

@@ -3,6 +3,7 @@ use crate::{
 	EntityKey,
 	camera_input::CameraIntent,
 	input::{GameKeyboardInput, HeldGameActions, MAX_GAME_INPUT_ACTIONS},
+	runtime_lifecycle::RuntimeEntityHandle,
 	simulation::FixedStepper,
 };
 use std::collections::{HashMap, HashSet};
@@ -23,8 +24,40 @@ pub struct InputFrame {
 	pub(super) controller_movement: [f32; 2],
 	pub(super) controller_look: [f32; 2],
 	pub(super) control_sample: super::control_graph::ControlSample,
+	pub(super) local_player: Option<RuntimeEntityHandle>,
+	pub(super) possession_managed: bool,
+	pub(super) awaiting_neutral: bool,
 }
 impl InputFrame {
+	/// The actor currently receiving this local player's actions.
+	pub fn local_player(&self) -> Option<&RuntimeEntityHandle> {
+		self.local_player.as_ref()
+	}
+
+	pub(super) fn reset_local_controls(
+		&mut self,
+		owner: Option<RuntimeEntityHandle>,
+		possession_managed: bool,
+		awaiting_neutral: bool,
+		control_graph: bool,
+	) {
+		*self = Self {
+			local_player: owner,
+			possession_managed,
+			awaiting_neutral,
+			..Self::default()
+		};
+		self.control_sample.clear(control_graph);
+	}
+
+	pub(super) fn allow_local_sample(&mut self, is_neutral: bool) -> bool {
+		if self.awaiting_neutral && !is_neutral {
+			return false;
+		}
+		self.awaiting_neutral = false;
+		true
+	}
+
 	pub fn movement(&self, entity: &EntityKey) -> [f32; 3] {
 		self.movement.get(entity).copied().unwrap_or([0.0; 3])
 	}
@@ -50,20 +83,25 @@ impl InputFrame {
 
 impl SimulationSession {
 	pub fn clear_input(&mut self) {
+		let awaiting_neutral = self.inputs.awaiting_neutral
+			|| self.possession.managed
+				&& (!self.inputs.is_idle()
+					|| self
+						.conditional_input
+						.as_ref()
+						.is_some_and(super::conditional_input::ConditionalInputs::has_held_sample));
 		if let Some(input) = &mut self.conditional_input {
-			input.clear();
+			input.retarget(self.possession.owner.clone());
 		}
 		self.characters.clear_input();
 		self.camera_input.clear();
-		self.inputs.movement.clear();
-		self.inputs.game_actions = HeldGameActions::default();
-		self.inputs.action_presses.clear();
-		self.inputs.controller_owned = false;
-		self.inputs.controller_movement = [0.0; 2];
-		self.inputs.controller_look = [0.0; 2];
-		self.inputs
-			.control_sample
-			.clear(self.control_graph.is_some());
+		self.possession.reset_context();
+		self.inputs.reset_local_controls(
+			self.possession.owner.clone(),
+			self.possession.managed,
+			awaiting_neutral,
+			self.control_graph.is_some(),
+		);
 		self.control_graph_step = None;
 		self.clock.reset();
 	}
@@ -111,6 +149,14 @@ impl SimulationSession {
 		if self.paused {
 			return Ok(());
 		}
+		if matches!(target, MovementTarget::AllControlled)
+			&& (!self
+				.inputs
+				.allow_local_sample(input.movement == [0.0; 2] && input.actions.ids.is_empty())
+				|| self.inputs.possession_managed && self.inputs.local_player().is_none())
+		{
+			return Ok(());
+		}
 		let available = MAX_GAME_INPUT_ACTIONS - self.inputs.action_presses.len();
 		let pressed: Vec<_> = input
 			.actions
@@ -121,15 +167,32 @@ impl SimulationSession {
 			.cloned()
 			.collect();
 		if pressed.len() > available {
-			return Err("Game action press budget exceeded".into());
+			self.clear_input();
+			return Err("Game action press budget exceeded; local input cleared".into());
+		}
+		let mut released = Vec::new();
+		if self.control_graph.is_some() || self.conditional_input.is_some() {
+			let releases = &self.inputs.control_sample.releases;
+			let available = MAX_GAME_INPUT_ACTIONS.saturating_sub(releases.len());
+			released.extend(
+				self.inputs
+					.game_actions
+					.ids
+					.difference(&input.actions.ids)
+					.filter(|id| !releases.contains(*id))
+					.take(available + 1)
+					.cloned(),
+			);
+			if released.len() > available {
+				self.clear_input();
+				return Err("Game action release budget exceeded; local input cleared".into());
+			}
 		}
 		let [x, y] = input.movement;
 		// The legacy controlled mover uses XY; upright characters use XZ.
 		// Route each target once so the legacy path cannot overwrite character Z.
 		match target {
-			MovementTarget::AllControlled
-				if self.characters.local_input_owner(&self.world).is_some() =>
-			{
+			MovementTarget::AllControlled if self.inputs.local_player().is_some() => {
 				self.inputs.controller_owned = true;
 				self.inputs.controller_movement = input.movement;
 			}
@@ -157,19 +220,7 @@ impl SimulationSession {
 			}
 		}
 		self.inputs.action_presses.extend(pressed);
-		if self.control_graph.is_some() || self.conditional_input.is_some() {
-			let releases = &mut self.inputs.control_sample.releases;
-			let available = MAX_GAME_INPUT_ACTIONS.saturating_sub(releases.len());
-			let mut released: Vec<_> = self
-				.inputs
-				.game_actions
-				.ids
-				.difference(&input.actions.ids)
-				.filter(|id| !releases.contains(*id))
-				.collect();
-			released.sort_unstable();
-			releases.extend(released.into_iter().take(available).cloned());
-		}
+		self.inputs.control_sample.releases.extend(released);
 		self.inputs.game_actions = input.actions;
 		Ok(())
 	}
@@ -200,10 +251,16 @@ impl SimulationSession {
 
 	pub fn set_controlled_input(&mut self, movement: [f32; 3]) -> Result<bool, String> {
 		let movement = normalized_input(movement)?;
-		if let Some(local) = self.characters.local_input_owner(&self.world).cloned() {
+		if !self.inputs.allow_local_sample(movement == [0.0; 3]) {
+			return Ok(false);
+		}
+		if let Some(local) = self.inputs.local_player() {
 			self.characters
-				.set_movement(&local, [movement[0], movement[2]])?;
+				.set_movement(&local.key, [movement[0], movement[2]])?;
 			return Ok(true);
+		}
+		if self.inputs.possession_managed {
+			return Ok(false);
 		}
 		let character_keys = self
 			.characters

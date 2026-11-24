@@ -1,5 +1,9 @@
 <ng-template #content>
-    @for (selection of selectedEntities(); track selection.identity) {
+    @if (batchSelection().length > 1) {
+        <editor-batch-transform-inspector [objects]="batchSelection()" [editable]="editable()"
+                                          (edited)="batchTransformRequested.emit($event)"/>
+    }
+    @for (selection of singleSelection(); track selection.identity) {
         @let selected = selection.entity;
         <div class="inspector-content">
             <section aria-label="Object identity" class="object-identity">
@@ -25,6 +29,16 @@
                 </label>
                 @if (invalidName()) {
                     <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
+                }
+                @if (activationAvailable()) {
+                    <label>
+                        <input #activeInput type="checkbox" [checked]="selected.active !== false"
+                               [disabled]="!activationEditable()" (change)="setActive(activeInput)"/>
+                        Active in Play
+                    </label>
+                    @if (inactiveAncestor(); as ancestor) {
+                        <p class="read-only">Inactive in Play because {{ ancestor }} is inactive.</p>
+                    }
                 }
                 <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
                     <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
@@ -100,7 +114,9 @@
             }
         </div>
     } @empty {
-        <p class="placeholder" tabindex="-1">Select an entity to inspect its properties.</p>
+        @if (batchSelection().length < 2) {
+            <p class="placeholder" tabindex="-1">Select an entity to inspect its properties.</p>
+        }
     }
     @if (editError(); as error) {
         <div class="edit-error" role="alert">

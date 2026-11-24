@@ -14,6 +14,11 @@ fn catalog_dto_carries_stable_identity_and_format_kind() {
 			index: 0,
 			name: "Mesh".into(),
 			primitives: 1,
+			identity: Some(runtime::asset_catalog::MeshIdentity {
+				id: runtime::asset_catalog::MeshSubassetId::generate(),
+				geometry_sha256: "a".repeat(64),
+				source_key: None,
+			}),
 		}],
 		dependencies: vec![],
 	};
@@ -23,6 +28,14 @@ fn catalog_dto_carries_stable_identity_and_format_kind() {
 	assert_eq!(model["fingerprint"], asset.fingerprint);
 	assert_eq!(model["revision"], 1);
 	assert_eq!(model["mesh_count"], 1);
+	assert_eq!(
+		model["meshes"],
+		serde_json::json!([{
+			"id": asset.meshes[0].identity.as_ref().unwrap().id.as_str(),
+			"index": 0,
+			"name": "Mesh",
+		}])
+	);
 	assert!(model["source_path"].is_null());
 	asset.path = "assembly.json".into();
 	asset.kind = runtime::asset_catalog::AssetKind::Prefab;
@@ -32,6 +45,7 @@ fn catalog_dto_carries_stable_identity_and_format_kind() {
 	assert_eq!(prefab["asset_id"], asset.id.as_str());
 	assert_eq!(prefab["path"], "assembly.json");
 	assert!(prefab["mesh_count"].is_null());
+	assert!(prefab.get("meshes").is_none());
 	assert!(prefab["source_path"].is_null());
 	asset.path = "audio/bell.wav".into();
 	asset.kind = runtime::asset_catalog::AssetKind::AudioClip;

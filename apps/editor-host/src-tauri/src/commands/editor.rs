@@ -1,7 +1,7 @@
 use crate::project_location::ProjectLocation;
 use crate::{
 	editor::{EditorWorkspace, ReloadPolicy},
-	state::{EditorState, PendingProjectBuild, ProjectBuildState},
+	state::EditorState,
 };
 use bridge::editor::{
 	EditorCapabilitiesDto, EditorCommandRequest, EditorSnapshotDto, ViewportBoundsDto,
@@ -59,7 +59,9 @@ pub use camera::*;
 mod prop_preview;
 pub use prop_preview::*;
 mod build;
+mod material_graph;
 pub use build::*;
+pub use material_graph::editor_compile_material_graph;
 mod documents;
 pub use documents::*;
 mod scene_verification;
@@ -142,6 +144,7 @@ fn capabilities() -> EditorCapabilitiesDto {
 		component_types: runtime::components::descriptors(),
 		object_scripts: gameplay_catalog::script_descriptors(),
 		incremental_commands: true,
+		resumable_changes: true,
 		protocol_version: 2,
 		scene_schema_version: runtime::scene_data::CURRENT_SCHEMA_VERSION,
 		commands: CommandFactory::capabilities(),
@@ -288,7 +291,17 @@ pub struct ModelAssetDto {
 	revision: Option<u64>,
 	source_path: Option<String>,
 	mesh_count: Option<usize>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	meshes: Vec<ModelMeshDto>,
 }
+
+#[derive(Serialize)]
+struct ModelMeshDto {
+	id: runtime::asset_catalog::MeshSubassetId,
+	index: usize,
+	name: String,
+}
+
 impl ModelAssetDto {
 	fn from_asset(asset: &runtime::asset_catalog::PersistentAsset) -> Self {
 		Self {
@@ -310,6 +323,18 @@ impl ModelAssetDto {
 			source_path: asset.source_path.clone(),
 			mesh_count: (asset.kind == runtime::asset_catalog::AssetKind::Model)
 				.then_some(asset.meshes.len()),
+			meshes: asset
+				.meshes
+				.iter()
+				.filter_map(|mesh| {
+					let identity = mesh.identity.as_ref()?;
+					Some(ModelMeshDto {
+						id: identity.id.clone(),
+						index: mesh.index,
+						name: mesh.name.clone(),
+					})
+				})
+				.collect(),
 		}
 	}
 }

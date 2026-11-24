@@ -25,8 +25,11 @@ mod gameplay;
 mod input;
 mod object_scripts;
 mod player_control;
+mod possession;
+pub use crate::world::RuntimeReparentMode;
 pub use control_graph::ControlGraphResolver;
 pub use player_control::InputActionsResolver;
+pub use possession::LocalInputScope;
 
 pub use gameplay::{
 	ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameModuleResolver,
@@ -73,6 +76,9 @@ pub struct TickOutcome {
 	pub accepted_action_presses: Vec<CommittedInputAction>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub audio_onsets: Vec<crate::scene_audio::CommittedAudioOnset>,
+	/// Local input ownership changed during an accepted fixed step.
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub possession_changed: bool,
 }
 pub struct SimulationSession {
 	animations: crate::animation::AnimationBank,
@@ -89,6 +95,8 @@ pub struct SimulationSession {
 	clock: FixedStepper,
 	module: Box<dyn GameModule>,
 	inputs: InputFrame,
+	possession: possession::LocalPossession,
+	pending_possession: Option<possession::PossessionChange>,
 	paused: bool,
 	tick: u64,
 	actions: Vec<SimulationAction>,
@@ -116,6 +124,7 @@ impl Drop for SimulationSession {
 impl SimulationSession {
 	pub const MAX_ACTIONS_PER_TICK: usize = ActionWriter::MAX_ACTIONS;
 	pub const MAX_MATRIX_UPDATES_PER_TICK: u64 = 1_000_000;
+	const MAX_STRUCTURAL_WORK_PER_TICK: usize = 1_000_000;
 	pub const MAX_COLLISION_CANDIDATES_PER_TICK: usize = 1_000_000;
 
 	pub fn new(project: ProjectData, document: Arc<SceneData>) -> Result<Self, String> {
@@ -147,25 +156,43 @@ impl SimulationSession {
 		document: Arc<SceneData>,
 		factory: &dyn GameModuleFactory,
 	) -> Result<Self, String> {
-		let behaviors = project.resolved_behaviors_for(&scene_id)?;
+		let mut behaviors = project.resolved_behaviors_for(&scene_id)?;
 		document.validate()?;
-		let runtime_document = if crate::linked_prefab::needs_runtime_projection(&document) {
+		let mut runtime_document = if crate::linked_prefab::needs_runtime_projection(&document) {
 			Arc::new(crate::linked_prefab::resolve_scene(&document))
 		} else {
 			document
 		};
+		if runtime_document
+			.entities
+			.iter()
+			.any(|entity| !entity.active)
+		{
+			Arc::make_mut(&mut runtime_document).project_runtime_activation();
+		}
 		let matrix = InteractionMatrix::compile(project.physics_layers.as_ref())?;
 		if project.physics_layers.is_some() {
 			crate::project::validate_required_physics_contacts(&runtime_document, &matrix)?;
 		}
 		let world = RuntimeWorld::new(runtime_document)?;
+		behaviors.retain(|behavior| {
+			world
+				.entity_index(&behavior.entity)
+				.is_none_or(|index| world.data().entities[index].active)
+		});
 		let characters = crate::character_controller::CharacterRuntime::new(&world, &project)?;
+		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
+		let possession = possession::LocalPossession::new(&world, &lifecycle);
 		let mut controlled_targets = Vec::new();
 		let mut seen = HashSet::new();
 
 		for (index, behavior) in behaviors.iter().enumerate() {
 			if matches!(&behavior.settings, BehaviorSettings::AcceptAction { .. }) {
-				if characters.local_input_owner(&world) != Some(&behavior.entity) {
+				if !possession
+					.owner
+					.as_ref()
+					.is_some_and(|owner| owner.key == behavior.entity)
+				{
 					return Err(
 						"Accept Action behavior must target the local Player Controller".into(),
 					);
@@ -197,7 +224,6 @@ impl SimulationSession {
 		let collisions = CollisionWorld::with_matrix(&world, matrix)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
-		let lifecycle = crate::runtime_lifecycle::RuntimeLifecycle::new(&world);
 		let object_scripts =
 			object_scripts::ObjectScripts::prepare(&world, &lifecycle, factory.object_scripts())?;
 		let mut camera_exclusions = None;
@@ -232,7 +258,13 @@ impl SimulationSession {
 			collisions,
 			clock,
 			module,
-			inputs: InputFrame::default(),
+			inputs: InputFrame {
+				local_player: possession.owner.clone(),
+				possession_managed: possession.managed,
+				..InputFrame::default()
+			},
+			possession,
+			pending_possession: None,
 			paused: false,
 			tick: 0,
 			actions: Vec::new(),
@@ -317,6 +349,9 @@ impl SimulationSession {
 	/// state. The visible world and project remain separate host hash inputs.
 	pub fn native_replay_state(&self) -> serde_json::Value {
 		let mut state = serde_json::json!({"schema_version":1,"lifecycle":self.lifecycle.replay_state(),"characters":self.characters.replay_state(),"animations":self.animations.replay_state()});
+		if self.possession.generation > 0 {
+			state["local_possession"] = self.possession.replay_state(self.inputs.awaiting_neutral);
+		}
 		if self.animations.has_animators() {
 			state["animators"] = serde_json::Value::Array(self.animations.animator_inspection().into_iter().map(|entry| {
 				serde_json::json!({"key":entry.entity.key,"component":entry.component_id,"state":entry.state_id,"ticks":entry.state_ticks,
@@ -344,6 +379,7 @@ impl SimulationSession {
 				|| self.inputs.control_sample.needs_tick()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
+				|| self.pending_possession.is_some()
 				|| self.module.needs_tick(&self.inputs))
 	}
 	pub(crate) fn gameplay_status(&self, progress: ProgressView<'_>) -> Option<GameplayStatus> {
@@ -371,6 +407,7 @@ impl SimulationSession {
 				|| self.inputs.control_sample.needs_tick()
 				|| self.camera_input.has_pending()
 				|| self.camera.needs_tick(&self.world)
+				|| self.pending_possession.is_some()
 				|| self
 					.module
 					.needs_tick_with_progress(&self.world, &self.inputs, progress))
@@ -470,16 +507,24 @@ impl SimulationSession {
 		&self,
 		prepared: &crate::runtime_lifecycle::PreparedRuntimeSpawn,
 	) -> Result<SceneData, String> {
-		self.lifecycle.candidate(&self.world, prepared)
+		let mut document = self.lifecycle.candidate(&self.world, prepared)?;
+		if prepared.entities.iter().any(|entity| !entity.active) {
+			document.project_runtime_activation();
+		}
+		Ok(document)
 	}
 	pub fn commit_runtime_spawn(
 		&mut self,
-		prepared: crate::runtime_lifecycle::PreparedRuntimeSpawn,
+		mut prepared: crate::runtime_lifecycle::PreparedRuntimeSpawn,
 	) -> Result<WorldChange, String> {
 		if self.paused {
 			return Err("Resume Play before admitting runtime entities".into());
 		}
 		let data = self.runtime_spawn_document(&prepared)?;
+		if prepared.entities.iter().any(|entity| !entity.active) {
+			let first = data.entities.len() - prepared.entities.len();
+			prepared.entities.clone_from_slice(&data.entities[first..]);
+		}
 		if self.project.physics_layers.is_some() {
 			crate::project::validate_required_physics_contacts(&data, &self.collisions.matrix())?;
 		}
@@ -603,6 +648,8 @@ impl SimulationSession {
 			scene_id: self.scene_id.clone(),
 			tick: self.tick,
 			topology_revision: self.lifecycle.topology_revision,
+			local_player: self.local_player().cloned(),
+			possession_generation: self.local_possession_generation(),
 			total_entities: self.world.data().entities.len(),
 			entities: self.lifecycle.entities(&self.world, offset, limit),
 			timer_count: self.lifecycle.timer_count(),
@@ -657,6 +704,8 @@ impl SimulationSession {
 		let mut structural_before: Option<Arc<SceneData>> = None;
 		let mut structural_work = 0usize;
 		let mut lifecycle = self.lifecycle.clone();
+		let mut possession = self.possession.clone();
+		let mut host_possession = self.pending_possession.take();
 		let mut characters = self.characters.clone();
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
@@ -691,6 +740,7 @@ impl SimulationSession {
 		let mut view_attachments = Vec::new();
 		let result = (|| -> Result<(), String> {
 			for _ in 0..report.steps {
+				let mut requested_possession = host_possession.take();
 				let event_start = trigger_events.len();
 				if triggers.sample_needed {
 					let contacts = self
@@ -735,7 +785,12 @@ impl SimulationSession {
 					camera_delta.yaw_delta = 0.0;
 					camera_delta.pitch_delta = 0.0;
 				}
-				let controls = self.evaluate_control_graph(camera_delta);
+				let controls =
+					if self.inputs.possession_managed && self.inputs.local_player().is_none() {
+						None
+					} else {
+						self.evaluate_control_graph(camera_delta)
+					};
 				let routed = controls
 					.as_ref()
 					.map(|(graph, _)| self.inputs.with_control_output(graph.intent));
@@ -751,7 +806,7 @@ impl SimulationSession {
 						tick: self.tick + u64::from(steps) + 1,
 						step_seconds: report.step_seconds,
 						input: step_input,
-						local_owner: characters.local_input_owner(&self.world),
+						local_owner: step_input.local_player().map(|target| &target.key),
 					},
 					&mut ActionWriter {
 						actions: &mut self.actions,
@@ -769,6 +824,7 @@ impl SimulationSession {
 						progress: progress_transaction.view(),
 						triggers: &trigger_events[event_start..],
 						trigger_overlaps: triggers.view(),
+						lifecycle: &lifecycle,
 					},
 					&mut ActionWriter {
 						actions: &mut self.actions,
@@ -781,7 +837,7 @@ impl SimulationSession {
 					camera.camera(),
 					controls.as_ref().map(|(graph, _)| graph.intent.jump),
 				)?;
-				let owner = characters.local_input_owner(&self.world);
+				let owner = step_input.local_player().map(|target| &target.key);
 				let mut acknowledged = HashSet::new();
 				for action in &self.actions {
 					if let SimulationAction::AcceptAction { actor, action } = action {
@@ -798,25 +854,63 @@ impl SimulationSession {
 				if controls.is_some() {
 					step_actions = acknowledged;
 				}
-				// Structural removals become visible at the end of this step, after
 				let count = characters.keys().count();
 				actions_applied += count;
 				if actions_applied > Self::MAX_ACTIONS_PER_TICK {
 					return Err("Character action budget exceeded".into());
 				}
 				let tick = self.tick + u64::from(steps) + 1;
+				let no_cosmetics = std::collections::BTreeMap::new();
+				let cosmetics = controls
+					.as_ref()
+					.map_or(&no_cosmetics, |(graph, _)| &graph.presentation);
+				let root_motion = if animations.has_root_motion() {
+					let previous_motion = animation_motion(&characters, &lifecycle);
+					let previous_jumps: HashSet<_> = characters
+						.keys()
+						.filter(|key| {
+							characters
+								.state(key)
+								.is_some_and(|state| state.jumped_at_tick == Some(tick - 1))
+						})
+						.cloned()
+						.collect();
+					let local_player = self.inputs.local_player().map(|target| &target.key);
+					let mut actions = step_actions.clone();
+					if self.inputs.controller_owned {
+						actions.remove("jump");
+						if local_player.is_some_and(|key| previous_jumps.contains(key)) {
+							actions.insert("jump".into());
+						}
+					}
+					animations.prepare_root_motion(&crate::animation::AnimatorTick {
+						motions: &previous_motion,
+						jumped: &previous_jumps,
+						local_player,
+						accepted_actions: &actions,
+						cosmetic: cosmetics,
+						fixed_hz: self.project.fixed_hz,
+						tick,
+					})?
+				} else {
+					std::collections::BTreeMap::new()
+				};
 				let character_change = characters.step(
 					&mut self.world,
 					&mut self.collisions,
-					tick,
-					report.step_seconds,
+					crate::character_controller::CharacterStep {
+						tick,
+						seconds: report.step_seconds,
+						root_motion: &root_motion,
+					},
 					&mut collision_candidates_remaining,
 					&mut before,
 				)?;
 				if controls.is_some()
-					&& characters
-						.local_input_owner(&self.world)
-						.and_then(|key| characters.state(key))
+					&& self
+						.inputs
+						.local_player()
+						.and_then(|target| characters.state(&target.key))
 						.is_some_and(|state| state.jumped_at_tick == Some(tick))
 				{
 					step_actions.insert("jump".into());
@@ -842,10 +936,13 @@ impl SimulationSession {
 				{
 					return Err("Character matrix update budget exceeded".into());
 				}
-				// Structural removals become visible at the end of this step, after
-				// all systems have planned against the same stable world.
-				self.actions
-					.sort_by_key(|action| matches!(action, SimulationAction::Despawn { .. }));
+				// Execute structural actions in submitted order after ordinary actions; despawn last.
+				self.actions.sort_by_key(|action| match action {
+					SimulationAction::Despawn { .. } => 2,
+					SimulationAction::Reparent { .. }
+					| SimulationAction::SetParticleEmitterEnabled { .. } => 1,
+					_ => 0,
+				});
 				let mut removed_handles = HashSet::new();
 				for action in self.actions.drain(..) {
 					let forbidden = match &action {
@@ -885,7 +982,7 @@ impl SimulationSession {
 							let keys = lifecycle.removal(&handle)?;
 							structural_work =
 								structural_work.saturating_add(self.world.data().entities.len());
-							if structural_work > 1_000_000 {
+							if structural_work > Self::MAX_STRUCTURAL_WORK_PER_TICK {
 								return Err("Runtime structural work budget exceeded".into());
 							}
 							for key in &keys {
@@ -893,8 +990,17 @@ impl SimulationSession {
 									removed_handles.insert(handle);
 								}
 							}
-							structural_before.get_or_insert_with(|| self.world.document());
+							structural_before
+								.get_or_insert_with(|| restore_entities(&self.world, &mut before));
 							let change = self.world.remove_runtime_entities(&keys)?;
+							if self
+								.world
+								.matrix_updates()
+								.saturating_sub(initial_matrix_updates)
+								> Self::MAX_MATRIX_UPDATES_PER_TICK
+							{
+								return Err("Runtime despawn matrix update budget exceeded".into());
+							}
 							self.collisions =
 								CollisionWorld::with_matrix(&self.world, self.collisions.matrix())?;
 							lifecycle.removed(&keys)?;
@@ -903,6 +1009,104 @@ impl SimulationSession {
 							lifecycle.prune_states(&self.world);
 							triggers.invalidate();
 							changes.merge(change);
+							continue;
+						}
+						SimulationAction::Reparent {
+							target,
+							parent,
+							mode,
+						} => {
+							lifecycle.validate_reparent(&target, parent.as_ref())?;
+							structural_work =
+								structural_work.saturating_add(self.world.data().entities.len());
+							if structural_work > Self::MAX_STRUCTURAL_WORK_PER_TICK {
+								return Err("Runtime structural work budget exceeded".into());
+							}
+							let Some(next) = self.world.reparent_candidate(
+								&target.key,
+								parent.as_ref().map(|parent| &parent.key),
+								mode,
+							)?
+							else {
+								continue;
+							};
+							if next.matrix_updates().saturating_sub(initial_matrix_updates)
+								> Self::MAX_MATRIX_UPDATES_PER_TICK
+							{
+								return Err("Runtime reparent matrix update budget exceeded".into());
+							}
+							characters.reconcile(&next, &self.project)?;
+							let collisions =
+								CollisionWorld::with_matrix(&next, self.collisions.matrix())?;
+							lifecycle.advance_topology()?;
+							structural_before
+								.get_or_insert_with(|| restore_entities(&self.world, &mut before));
+							let camera_changed = next.data().camera != self.world.data().camera;
+							self.world = next;
+							self.collisions = collisions;
+							triggers.invalidate();
+							changes.merge(WorldChange {
+								topology_changed: true,
+								full_resync: true,
+								camera_changed,
+								..WorldChange::default()
+							});
+							continue;
+						}
+						SimulationAction::SetParticleEmitterEnabled {
+							target,
+							component_id,
+							enabled,
+						} => {
+							lifecycle.validate_handle(&target)?;
+							structural_work =
+								structural_work.saturating_add(self.world.data().entities.len());
+							if structural_work > Self::MAX_STRUCTURAL_WORK_PER_TICK {
+								return Err("Runtime structural work budget exceeded".into());
+							}
+							let index = self
+								.world
+								.entity_index(&target.key)
+								.ok_or("Runtime particle emitter object is missing")?;
+							before
+								.entry(target.key.clone())
+								.or_insert_with(|| self.world.data().entities[index].clone());
+							let Some(entity) = self.world.set_runtime_emitter_enabled(
+								index,
+								&component_id,
+								enabled,
+							)?
+							else {
+								continue;
+							};
+							let particles =
+								staged_particles.get_or_insert_with(|| self.particles.clone());
+							particles_changed |= particles.sync_runtime_emitter(entity)?;
+							lifecycle.advance_topology()?;
+							changes.merge(WorldChange {
+								changed_entities: vec![target.key],
+								..WorldChange::default()
+							});
+							continue;
+						}
+						SimulationAction::SetLocalPossession { target } => {
+							let change = possession::PossessionChange { target };
+							possession.validate(&change, &self.world, &lifecycle, &characters)?;
+							possession::LocalPossession::stage(&mut requested_possession, change)?;
+							continue;
+						}
+						SimulationAction::DriveCharacter {
+							target,
+							movement_xz,
+							jump_held,
+						} => {
+							lifecycle.validate_handle(&target)?;
+							if possession.owner.as_ref() == Some(&target) {
+								return Err(
+									"Local input already owns the requested character motor".into(),
+								);
+							}
+							characters.set_input(&target.key, movement_xz, jump_held)?;
 							continue;
 						}
 						SimulationAction::Progress(action) => {
@@ -964,6 +1168,10 @@ impl SimulationSession {
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
 						| SimulationAction::SelectCamera { .. }
+						| SimulationAction::SetLocalPossession { .. }
+						| SimulationAction::DriveCharacter { .. }
+						| SimulationAction::Reparent { .. }
+						| SimulationAction::SetParticleEmitterEnabled { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -993,6 +1201,10 @@ impl SimulationSession {
 						| SimulationAction::PlayAnimation { .. }
 						| SimulationAction::AttachToView { .. }
 						| SimulationAction::SelectCamera { .. }
+						| SimulationAction::SetLocalPossession { .. }
+						| SimulationAction::DriveCharacter { .. }
+						| SimulationAction::Reparent { .. }
+						| SimulationAction::SetParticleEmitterEnabled { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -1032,6 +1244,10 @@ impl SimulationSession {
 						}
 						SimulationAction::SetVisible { entity, visible } => {
 							if visible
+								&& self
+									.world
+									.entity_index(&entity)
+									.is_none_or(|index| self.world.data().entities[index].active)
 								&& self
 									.visibility_capabilities
 									.as_ref()
@@ -1163,22 +1379,7 @@ impl SimulationSession {
 						changes.merge(self.world.set_transform(&entity, transform)?);
 					}
 				}
-				let motions = characters
-					.keys()
-					.filter_map(|key| {
-						let state = characters.state(key)?;
-						Some((
-							key.clone(),
-							crate::animation::AnimationMotion {
-								entity: lifecycle.handle(key)?,
-								tick: state.tick,
-								grounded: state.grounded,
-								planar_speed: state.planar_speed,
-								vertical_speed: state.velocity[1],
-							},
-						))
-					})
-					.collect();
+				let motions = animation_motion(&characters, &lifecycle);
 				if animations.step(
 					&self.world,
 					&motions,
@@ -1201,11 +1402,11 @@ impl SimulationSession {
 						})
 						.cloned()
 						.collect();
-					let local_player = characters.local_input_owner(&self.world);
-					let no_cosmetics = std::collections::BTreeMap::new();
-					let cosmetics = controls
-						.as_ref()
-						.map_or(&no_cosmetics, |(graph, _)| &graph.presentation);
+					let local_player = self
+						.inputs
+						.local_player()
+						.map(|target| &target.key)
+						.filter(|key| characters.contains(key));
 					let animated = animations.step_animators(
 						&self.world,
 						crate::animation::AnimatorTick {
@@ -1225,7 +1426,7 @@ impl SimulationSession {
 					});
 				}
 				control_graph_step = controls.and_then(|sample| {
-					let owner = characters.local_input_owner(&self.world)?;
+					let owner = &self.inputs.local_player()?.key;
 					let previous = control_graph_step
 						.as_ref()
 						.or(self.control_graph_step.as_ref());
@@ -1238,6 +1439,18 @@ impl SimulationSession {
 						previous,
 					)
 				});
+				if (requested_possession.is_some() || !removed_handles.is_empty())
+					&& let Some(previous) =
+						possession.finish_step(requested_possession, &lifecycle)?
+				{
+					self.commit_possession_input(
+						previous.target.as_ref().map(|target| &target.key),
+						&possession,
+						&mut characters,
+					);
+					camera_input.clear();
+					control_graph_step = None;
+				}
 				if let Some(particles) = &mut staged_particles {
 					particles_changed |= particles.step(&self.world, self.project.fixed_hz);
 				}
@@ -1260,16 +1473,10 @@ impl SimulationSession {
 		if let Err(error) = result {
 			// Cold failure path restores only entities touched by planned
 			// actions. A full document copy is never retained per steady tick.
-			let mut restored = structural_before
-				.as_deref()
-				.unwrap_or(self.world.data())
-				.clone();
-			for entity in &mut restored.entities {
-				if let Some(original) = before.remove(&entity.key) {
-					*entity = original;
-				}
-			}
-			self.world = RuntimeWorld::new(Arc::new(restored))?;
+			let restored =
+				structural_before.unwrap_or_else(|| restore_entities(&self.world, &mut before));
+			self.world
+				.restore_runtime_document(restored, initial_matrix_updates)?;
 			self.collisions = CollisionWorld::with_matrix(&self.world, self.collisions.matrix())?;
 			if let Some((input, layout)) = self.conditional_input.as_mut().zip(input_layout) {
 				input.restore_selection(layout);
@@ -1309,6 +1516,8 @@ impl SimulationSession {
 			available.retain(|key| self.world.entity_index(key).is_some());
 		}
 		self.lifecycle = lifecycle;
+		outcome.possession_changed = self.possession.generation != possession.generation;
+		self.possession = possession;
 		self.object_scripts = object_scripts;
 		retired_scripts.stop();
 		self.characters = characters;
@@ -1332,6 +1541,41 @@ impl SimulationSession {
 		Ok(outcome)
 	}
 }
+fn animation_motion(
+	characters: &crate::character_controller::CharacterRuntime,
+	lifecycle: &crate::runtime_lifecycle::RuntimeLifecycle,
+) -> std::collections::BTreeMap<EntityKey, crate::animation::AnimationMotion> {
+	characters
+		.keys()
+		.filter_map(|key| {
+			let state = characters.state(key)?;
+			Some((
+				key.clone(),
+				crate::animation::AnimationMotion {
+					entity: lifecycle.handle(key)?,
+					tick: state.tick,
+					grounded: state.grounded,
+					planar_speed: state.planar_speed,
+					vertical_speed: state.velocity[1],
+				},
+			))
+		})
+		.collect()
+}
+
+fn restore_entities(
+	world: &RuntimeWorld,
+	before: &mut HashMap<EntityKey, EntityData>,
+) -> Arc<SceneData> {
+	let mut restored = world.data().clone();
+	for entity in &mut restored.entities {
+		if let Some(original) = before.remove(&entity.key) {
+			*entity = original;
+		}
+	}
+	Arc::new(restored)
+}
+
 fn camera_pose_changed(before: &crate::Camera, after: &crate::Camera) -> bool {
 	before.position != after.position
 		|| before.yaw != after.yaw

@@ -38,6 +38,10 @@
                             (assign)="revealReference(component.id, 'Audio Clip')"/>
                     }
                 }
+                @case ('light') {
+                    <p class="binding">{{ component.data.settings.kind === 'directional' ? 'Directional' : 'Point' }}
+                        · Intensity {{ component.data.settings.intensity }}</p>
+                }
                 @case ('camera') {
                     <p class="binding">{{ component.data.settings.rig.mode.replaceAll('_', ' ') }}</p>
                 }
@@ -230,6 +234,27 @@
 					<editor-camera-rig-fields [draft]="draft().camera.rig" [fields]="fields.camera.rig"
 					                          [targets]="cameraOptions()" [disabled]="!available()"/>
 				}
+                @case ('light') {
+                    <label>Light type
+                        <select [formField]="fields.light.kind">
+                            <option value="point">Point</option>
+                            <option value="directional">Directional</option>
+                        </select>
+                    </label>
+                    <div class="vector">
+                        @for (channel of skyChannels; track channel.key) {
+                            <label>{{ channel.label }}
+                                <input inputmode="decimal" [formField]="fields.light.color[channel.key]"/>
+                            </label>
+                        }
+                    </div>
+                    <label>Intensity<input inputmode="decimal" [formField]="fields.light.intensity"/></label>
+                    @if (draft().light.kind === 'point') {
+                        <label>Range (metres)<input inputmode="decimal" [formField]="fields.light.range"/></label>
+                    } @else {
+                        <p>Rotate the object to aim the light.</p>
+                    }
+                }
 				@case ('sky') {
 					<fieldset>
 						<legend>Zenith color (linear RGB)</legend>
@@ -253,27 +278,41 @@
                     <editor-search-picker label="Model asset" placeholder="Search project models…"
                                           [options]="meshModelOptions()" [value]="draft().model_path || null"
                                           [disabled]="!available()" (picked)="chooseMeshModel($event)"/>
-					<label
-						>Mesh index<input
-							[formField]="fields.mesh_index"
-							inputmode="numeric"
-							placeholder="Default mesh"
-					/></label>
-					<label class="check"
-						><input type="checkbox" [formField]="fields.tint" />Override material color</label
-					>
-					@if (draft().tint) {
-						<div class="vector">
-							@for (channel of colors; track channel) {
-								<label
-									>{{ channel.toUpperCase()
-									}}<input
-										[formField]="fields.color[channel]"
-										inputmode="decimal"
-										[attr.aria-label]="'Material ' + channel.toUpperCase()"
-								/></label>
-							}
-						</div>
+                    @if (modelMeshOptions().length || draft().mesh_id) {
+                        <label>Mesh
+                            <select #meshSelection [disabled]="!available()" (change)="chooseMeshIdentity(meshSelection.value)">
+                                <option value="" [selected]="!draft().mesh_id">Use mesh index</option>
+                                @if (meshSelectionUnavailable()) {
+                                    <option [value]="draft().mesh_id" [selected]="true" disabled>Unavailable mesh</option>
+                                }
+                                @for (mesh of modelMeshOptions(); track mesh.id) {
+                                    <option [value]="mesh.id" [selected]="mesh.id === draft().mesh_id">
+                                        {{mesh.name || 'Mesh'}} ({{mesh.index}})
+                                    </option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (!draft().mesh_id) {
+                        <label>Mesh index
+                            <input [formField]="fields.mesh_index" inputmode="numeric" placeholder="Default mesh"/>
+                        </label>
+                    }
+					@if (draftUsesMaterialGraph()) {
+						<p>Material Graph controls RGB.</p>
+						<label>Opacity <input [formField]="fields.color.a" inputmode="decimal" aria-label="Material A"/></label>
+					} @else {
+						<label class="check"><input type="checkbox" [formField]="fields.tint"/>Override material color</label>
+						@if (draft().tint) {
+							<div class="vector">
+								@for (channel of colors; track channel) {
+									<label>{{ channel.toUpperCase() }}
+										<input [formField]="fields.color[channel]" inputmode="decimal"
+											   [attr.aria-label]="'Material ' + channel.toUpperCase()"/>
+									</label>
+								}
+							</div>
+						}
 					}
 				}
 				@case ('collider') {

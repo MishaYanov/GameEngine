@@ -166,9 +166,17 @@ impl<'a> CatalogLookup<'a> {
 			Some(id) => self.by_id.get(id),
 			None => self.by_path.get(&reference.path.to_lowercase()),
 		}?;
-		let mesh_index = reference.mesh_index.unwrap_or(0);
+		let mesh_index = if let Some(mesh_id) = &reference.mesh_id {
+			asset.mesh_by_id(mesh_id)?.index
+		} else {
+			let index = reference.mesh_index.unwrap_or(0);
+			asset
+				.meshes
+				.iter()
+				.any(|mesh| mesh.index == index)
+				.then_some(index)?
+		};
 		(asset.kind == AssetKind::Model
-			&& asset.meshes.iter().any(|mesh| mesh.index == mesh_index)
 			&& Path::new(&asset.path)
 				.extension()
 				.and_then(|extension| extension.to_str())

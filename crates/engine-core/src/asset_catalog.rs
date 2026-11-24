@@ -5,6 +5,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::scene_data::validate_model_path;
 
+mod mesh;
+
+use mesh::reimport_mesh_matches;
+pub use mesh::{MeshIdentity, MeshSignature, MeshSubassetId};
+
 pub const CATALOG_FILE: &str = "asset-catalog.json";
 pub const MAX_CATALOG_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_CATALOG_ASSETS: usize = 4096;
@@ -52,14 +57,6 @@ pub enum AssetKind {
 	SkyPanorama,
 	Texture,
 	AnimationClip,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MeshSignature {
-	pub index: usize,
-	pub name: String,
-	pub primitives: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,6 +169,8 @@ impl PersistentAsset {
 			return Err("Asset source path is oversized or contains control characters".into());
 		}
 		let mut indices = HashSet::new();
+		let mut mesh_ids = HashSet::new();
+		let mut source_keys = HashSet::new();
 		for mesh in &self.meshes {
 			if mesh.index > 1_000_000
 				|| mesh.name.len() > 256
@@ -181,6 +180,17 @@ impl PersistentAsset {
 				|| !indices.insert(mesh.index)
 			{
 				return Err("Asset mesh signature is invalid or duplicated".into());
+			}
+			if let Some(identity) = &mesh.identity {
+				identity.validate()?;
+				if !mesh_ids.insert(&identity.id)
+					|| identity
+						.source_key
+						.as_deref()
+						.is_some_and(|key| !source_keys.insert(key))
+				{
+					return Err("Model has a duplicate mesh identity or source key".into());
+				}
 			}
 		}
 		if self.kind == AssetKind::AnimationClip
@@ -196,11 +206,49 @@ impl PersistentAsset {
 		}
 		Ok(())
 	}
+	/// Resolve a durable mesh ID to the mesh index in this exact source revision.
+	pub fn mesh_by_id(&self, id: &MeshSubassetId) -> Option<&MeshSignature> {
+		self.meshes.iter().find(|mesh| {
+			mesh.identity
+				.as_ref()
+				.is_some_and(|identity| &identity.id == id)
+		})
+	}
+
 	pub fn check_reimport(
 		&self,
 		replacement: &Self,
 		used_meshes: &HashSet<usize>,
 	) -> Result<(), String> {
+		self.validated_mesh_matches(replacement, used_meshes)
+			.map(|_| ())
+	}
+
+	/// Carry proven mesh identities into a prepared replacement. Existing
+	/// path/index references still require their matched mesh to keep its slot.
+	pub fn preserve_mesh_ids(
+		&self,
+		replacement: &mut Self,
+		used_meshes: &HashSet<usize>,
+	) -> Result<(), String> {
+		let matches = self.validated_mesh_matches(replacement, used_meshes)?;
+		for (mesh, previous) in replacement.meshes.iter_mut().zip(matches) {
+			if let (Some(candidate), Some(identity)) = (
+				mesh.identity.as_mut(),
+				previous.and_then(|previous| previous.identity.as_ref()),
+			) {
+				candidate.id = identity.id.clone();
+			}
+		}
+		Ok(())
+	}
+
+	fn validated_mesh_matches<'a>(
+		&'a self,
+		replacement: &Self,
+		used_meshes: &HashSet<usize>,
+	) -> Result<Vec<Option<&'a MeshSignature>>, String> {
+		self.validate()?;
 		replacement.validate()?;
 		if self.id != replacement.id
 			|| self.kind != replacement.kind
@@ -208,24 +256,23 @@ impl PersistentAsset {
 		{
 			return Err("Reimport must preserve asset identity, kind and destination".into());
 		}
-		for index in used_meshes {
-			let old = self
-				.meshes
-				.iter()
-				.find(|mesh| mesh.index == *index)
-				.ok_or("Referenced original mesh is unavailable")?;
-			let next = replacement
-				.meshes
-				.iter()
-				.find(|mesh| mesh.index == *index)
-				.ok_or_else(|| format!("Reimport removed referenced mesh {index}"))?;
-			if old.name != next.name || old.primitives != next.primitives {
-				return Err(format!(
-					"Reimport changed the identity/layout of referenced mesh {index}"
-				));
-			}
+		let matches = reimport_mesh_matches(self, replacement);
+		let retained = replacement
+			.meshes
+			.iter()
+			.zip(&matches)
+			.filter_map(|(mesh, previous)| {
+				previous
+					.filter(|previous| previous.index == mesh.index)
+					.map(|_| mesh.index)
+			})
+			.collect::<HashSet<_>>();
+		if let Some(index) = used_meshes.difference(&retained).min() {
+			return Err(format!(
+				"Reimport cannot prove that referenced mesh {index} retains its identity and index. Keep its index and stable source key, or assign the mesh explicitly."
+			));
 		}
-		Ok(())
+		Ok(matches)
 	}
 }
 
@@ -360,6 +407,42 @@ impl AssetCatalog {
 			));
 		}
 		Ok(asset)
+	}
+	/// Resolve the exact source index for a model reference. An explicit mesh
+	/// ID is authoritative even when its compatibility index is stale.
+	pub fn resolve_mesh_reference(
+		&self,
+		reference: &crate::asset_registry::AssetRef,
+	) -> Result<Option<(&PersistentAsset, usize)>, String> {
+		reference.validate()?;
+		let resolved = if let Some(mesh_id) = &reference.mesh_id {
+			let asset_id = reference
+				.asset_id
+				.as_ref()
+				.ok_or("A stable mesh reference requires its model asset ID")?;
+			let asset = self
+				.by_id(asset_id)
+				.ok_or_else(|| format!("Persistent asset {} is unavailable", asset_id.as_str()))?;
+			let mesh = asset.mesh_by_id(mesh_id).ok_or_else(|| {
+				format!(
+					"Model {} no longer contains mesh identity {}",
+					asset.path,
+					mesh_id.as_str()
+				)
+			})?;
+			Some((asset, mesh.index))
+		} else {
+			self.resolve(
+				reference.asset_id.as_ref(),
+				&reference.path,
+				reference.mesh_index,
+			)?
+			.map(|asset| (asset, reference.mesh_index.unwrap_or(0)))
+		};
+		if resolved.is_some_and(|(asset, _)| asset.kind != AssetKind::Model) {
+			return Err("A mesh reference requires a model asset".into());
+		}
+		Ok(resolved)
 	}
 	pub fn replace(&mut self, record: PersistentAsset) -> Result<(), String> {
 		let mut candidate = self.clone();

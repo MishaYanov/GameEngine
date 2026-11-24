@@ -54,6 +54,8 @@ struct StoredEntity {
 	key: EntityKey,
 	name: String,
 	transform: TransformData,
+	#[serde(default = "super::scene_data::default_renderable")]
+	active: bool,
 	#[serde(default)]
 	parent: Option<EntityKey>,
 	components: Vec<ComponentRecord>,
@@ -73,6 +75,7 @@ impl StoredEntity {
 		for component in self.components {
 			entity.put_component(component, false)?;
 		}
+		entity.active = self.active;
 		entity.component_ids = ids;
 		entity.linked_prefab = self.linked_prefab;
 		Ok(entity)
@@ -106,7 +109,8 @@ impl Serialize for SceneData {
 		if let Some(default) = &self.default_game_camera {
 			map.serialize_entry("default_game_camera", default)?;
 		}
-		map.serialize_entry("lights", &self.lights)?;
+		let lights = self.projected_lights().map_err(serde::ser::Error::custom)?;
+		map.serialize_entry("lights", &lights)?;
 		if !self.organization.is_empty() {
 			map.serialize_entry("organization", &self.organization)?;
 		}
@@ -158,8 +162,18 @@ pub(crate) fn decode_scene(value: serde_json::Value, version: u64) -> Result<Sce
 			environment: stored.environment,
 		}
 	} else {
-		let projection: ProjectionScene =
+		let mut projection: ProjectionScene =
 			serde_json::from_value(value).map_err(|error| error.to_string())?;
+		// The editor projection includes object lights in both the entity and the compatibility list.
+		let typed_keys = projection
+			.entities
+			.iter()
+			.filter(|entity| entity.light.is_some())
+			.map(|entity| &entity.key)
+			.collect::<HashSet<_>>();
+		projection
+			.lights
+			.retain(|light| !typed_keys.contains(&light.key));
 		if projection.schema_version == 3
 			&& projection.entities.iter().any(|entity| {
 				!entity.native_behaviors.is_empty()
@@ -257,6 +271,9 @@ impl Serialize for StoredEntityRef<'_> {
 		map.serialize_entry("key", &entity.key)?;
 		map.serialize_entry("name", &entity.name)?;
 		map.serialize_entry("transform", &entity.transform)?;
+		if !entity.active {
+			map.serialize_entry("active", &entity.active)?;
+		}
 		if let Some(parent) = &entity.parent {
 			map.serialize_entry("parent", parent)?;
 		}

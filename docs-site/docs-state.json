@@ -1,6 +1,6 @@
 {
-  "last_checked_commit": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
-  "last_checked_date": "2026-11-23",
+  "last_checked_commit": "ad909d9de3cc25a2b714ad7489c0103624bede0d",
+  "last_checked_date": "2026-11-24",
   "last_documentation_update_commit": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The object authoring roadmap uses the inspected editor and engine working tree. Older entries retain their original verification evidence.",
@@ -6005,6 +6005,20 @@
     "verification_limits": [
       "The installer package was built and its resource layout checked. Clean-machine installed UI and a downloaded Ollama model remain separate acceptance runs.",
       "The normal packaged Agent uses lexical search. Optional hybrid ranking and streamed local-provider cancellation have deterministic test coverage."
+    ]
+  },
+  "published_developer_guides": {
+    "inspected_head": "ad909d9de3cc25a2b714ad7489c0103624bede0d",
+    "source": "docs/main.md",
+    "archive_index": "history/README.md",
+    "scope": "Developer site guide-only navigation and search, current editing and system walkthroughs, and packaged Agent guide sources.",
+    "verification": [
+      "The site built and checked 28 pages across two spaces.",
+      "All eight site tests passed, covering links, search, archive exclusion, navigation, copying and Mermaid diagrams."
+    ],
+    "verification_limits": [
+      "Prior entries preserve their source paths and verification for their original Git snapshots.",
+      "This checkpoint covers the local documentation build. Publication and installer acceptance use separate workflows."
     ]
   }
 }

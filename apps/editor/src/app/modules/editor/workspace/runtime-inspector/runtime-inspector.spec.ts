@@ -54,7 +54,7 @@ async function setup() {
 				provide: LAYOUT_PREFERENCES_STORAGE,
 				useValue: { load: async () => null, save: async () => undefined },
 			},
-			{ provide: EditorService, useValue: { workspaceGeneration: generation, inspectRuntime } },
+			{ provide: EditorService, useValue: { workspaceGeneration: generation, capabilities: () => null, inspectRuntime } },
 			{ provide: ViewportEditorService, useValue: { gameStatus } },
 		],
 	});

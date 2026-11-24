@@ -2,6 +2,7 @@
 mod audio_source;
 mod entity;
 mod interactable;
+mod light;
 mod native_behavior;
 mod particle_emitter;
 mod player_controller;
@@ -21,6 +22,7 @@ pub use audio_source::{
 pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
+pub use light::{LightComponent, LightSettings};
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
 pub use particle_emitter::{
 	MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterComponent, ParticleEmitterSettings,
@@ -55,6 +57,7 @@ pub const INTERACTABLE_TYPE: &str = "engine.interactable";
 pub const CAMERA_TYPE: &str = "engine.camera";
 pub const PLAYER_CONTROLLER_TYPE: &str = "engine.player_controller";
 pub const AUDIO_SOURCE_TYPE: &str = "engine.audio_source";
+pub const LIGHT_TYPE: &str = "engine.light";
 pub const SKY_TYPE: &str = "engine.sky";
 pub const PARTICLE_EMITTER_TYPE: &str = "engine.particle_emitter";
 pub const NO_MESH_PATH: &str = "__no_mesh__";
@@ -93,6 +96,9 @@ impl<'de> Deserialize<'de> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComponentData {
+	Light {
+		settings: LightSettings,
+	},
 	ParticleEmitter {
 		settings: ParticleEmitterSettings,
 	},
@@ -126,6 +132,8 @@ pub enum ComponentData {
 		asset_id: Option<AssetId>,
 		#[serde(default)]
 		mesh_index: Option<usize>,
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		mesh_id: Option<crate::asset_catalog::MeshSubassetId>,
 		#[serde(default)]
 		material: Option<MaterialOverrideData>,
 	},
@@ -151,6 +159,7 @@ impl ComponentRecord {
 	pub fn type_id(&self) -> &'static str {
 		match self.data {
 			ComponentData::Sky { .. } => SKY_TYPE,
+			ComponentData::Light { .. } => LIGHT_TYPE,
 			ComponentData::ParticleEmitter { .. } => PARTICLE_EMITTER_TYPE,
 			ComponentData::AudioSource { .. } => AUDIO_SOURCE_TYPE,
 			ComponentData::PlayerController { .. } => PLAYER_CONTROLLER_TYPE,
@@ -172,6 +181,7 @@ impl ComponentRecord {
 		}
 		match &self.data {
 			ComponentData::Sky { settings } => settings.validate(),
+			ComponentData::Light { settings } => settings.validate(),
 			ComponentData::ParticleEmitter { settings } => settings.validate(),
 			ComponentData::AudioSource { settings } => settings.validate(),
 			ComponentData::PlayerController { settings } if settings.local && !self.enabled => {
@@ -185,23 +195,21 @@ impl ComponentRecord {
 			ComponentData::Interactable { settings } => settings.validate(),
 			ComponentData::MeshRenderer {
 				model_path,
+				asset_id,
 				mesh_index,
+				mesh_id,
 				material,
-				..
 			} => {
 				validate_model_path(model_path)?;
 				if model_path == NO_MESH_PATH || mesh_index.is_some_and(|index| index > 1_000_000) {
 					return Err("Invalid mesh component asset or mesh index".into());
 				}
-				if material.as_ref().is_some_and(|material| {
-					!material
-						.base_color_factor
-						.iter()
-						.all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-				}) {
-					return Err("Mesh material requires finite 0–1 color components".into());
+				if mesh_id.is_some() && asset_id.is_none() {
+					return Err("A stable mesh reference requires its model asset ID".into());
 				}
-				Ok(())
+				material
+					.as_ref()
+					.map_or(Ok(()), MaterialOverrideData::validate)
 			}
 			ComponentData::Collider { collider } => collider.validate(),
 			ComponentData::NativeBehavior { behavior } => behavior.validate(),
@@ -226,6 +234,13 @@ pub fn descriptors() -> Vec<ComponentTypeDescriptor> {
 			"particle_emitter",
 			"Particle Emitter",
 			"Emits visual particles during Play.",
+			1,
+		),
+		(
+			LIGHT_TYPE,
+			"light",
+			"Light",
+			"Directional or point lighting from this object's transform.",
 			1,
 		),
 		(

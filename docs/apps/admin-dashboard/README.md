@@ -73,11 +73,11 @@ The Board provides Backlog, In Progress, Blocked and Done. Create/edit/delete ca
 The scene JSON asset allowlist gap is now fixed: bounded validated asset JSON is included with native model/image
 dependencies. Traversal is sorted and capped; unsafe/secret-like JSON and links are rejected rather than copying
 arbitrary metadata. Generated compilation remains separate from installed/runtime acceptance.
-See [packaging step22](../../editor-steps-21-35.md#step-22-json-aware-packaging).
+See [Compiler packaging](../../compiler/README.md).
 
 Project Builder v1 creates an independent **native game workspace on Windows**. It does not generate the Angular editor/client host. Enter a name, source and new absolute destination outside the source workspace; the destination parent must already exist. Preview the allowlisted sources/assets, then generate. Offline validation uses cached Cargo dependencies by default; disable the checkbox to permit downloads. Rust and Vulkan SDK/glslc are required.
 
-The builder copies game sources/assets and engine-core, logger, renderer, runtime, bridge, and courtyard-gameplay
+The builder copies game sources/assets and engine-core, logger, renderer, runtime, bridge, gameplay-catalog and cinder-oath-gameplay
 into sibling staging. It preserves the project manifest's gameplay module selection, writes a fresh root workspace,
 and queues validation. Only success publishes the destination with a Windows move that
 cannot replace an existing path. Preview fingerprints detect changed files; template symlinks are rejected. Failure,
@@ -103,7 +103,7 @@ cargo test -p engine-admin --offline real_native_template_validation -- --ignore
 cargo clippy -p engine-admin --all-targets --features desktop --offline -- -D warnings
 ```
 
-The full native template smoke test is opt-in because it compiles Vulkan/game dependencies and retains generated temporary output for inspection. Native Tauri interaction, interactive game rendering and installer smoke checks remain manual. See [automation and logging design](../../../designs/automation-and-logging-prd.md) for implementation status and future Angular-client templates.
+The full native template smoke test is opt-in because it compiles Vulkan/game dependencies and retains generated temporary output for inspection. Native Tauri interaction, interactive game rendering and installer smoke checks remain manual.
 
 For step-by-step CLI, editor and dashboard instructions, see [the usage guide](../../usage.md).
 

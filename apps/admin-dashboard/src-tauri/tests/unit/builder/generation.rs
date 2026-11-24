@@ -259,14 +259,8 @@ fn error_to_card_failed_job_rerun_and_generated_client() {
 		fs::write(source.join("apps/game/src/main.rs"), source_text).unwrap();
 		let job = service
 			.jobs
-			.queue(
-				&source,
-				crate::jobs::Kind::Build,
-				"game".into(),
-				"dev".into(),
-			)
+			.queue_generated_validation(&source, "dev".into(), true)
 			.unwrap();
-		service.jobs.set_offline(&job.id, true);
 		service.board.link(&card.id, &job.id).unwrap();
 		for _ in 0..400 {
 			service.tick();

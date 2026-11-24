@@ -65,9 +65,7 @@ pub(super) fn validate_layout(document: &SceneData) -> Result<(), String> {
 }
 
 pub(super) fn reference(entity: &engine_core::scene_data::EntityData) -> Result<AssetRef, String> {
-	Ok(AssetRef::new(
-		entity.model_path.clone(),
-		Some(entity.mesh_index.unwrap_or(0)),
-	)?
-	.with_asset_id(entity.asset_id.clone()))
+	let mut reference = entity.model_reference()?;
+	reference.mesh_index = Some(reference.mesh_index.unwrap_or(0));
+	Ok(reference)
 }

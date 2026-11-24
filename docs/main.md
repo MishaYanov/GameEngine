@@ -1,108 +1,30 @@
 # Game Engine documentation
 
-To build the Windows installer, open the Editor, and export a playable game, follow
-the [Windows Editor quickstart](windows-editor-quickstart.md).
+Start with the [Windows Editor quickstart](windows-editor-quickstart.md) to build the
+installer, open an editable project, and export a standalone game. For a development
+checkout, follow [setup and usage](usage.md).
 
-For development setup and command-line workflows, see [setup and usage](usage.md) and [architecture](architecture.md).
-Project guides follow the source layout under `apps`, `crates`, and `compiler`. Run commands from the directory stated
-in each guide.
+## Work in the Editor
 
-Read the [five building-blocks review](building-blocks-review.md) for the current playable proof of concept,
-module/role authoring, Collider Inspector, sensors/filtering, optimization boundaries and attributed verification.
+- [Editor workspace](editor-workspace.md) explains where to edit objects, assets, controls, and scene settings.
+- [Objects, components, and Props](authoring-objects.md) shows how to assemble a scene and reuse objects.
+- [Native scene viewport](viewport-implementation.md) covers camera navigation, transform handles, picking, and rendering ownership.
+- [Editor command flow](editor-flow.md) follows requests from Angular through the native host to saved projects and game export.
 
-The [Milestones 7–9 implementation review](milestones-7-9-review.md) records typed state-machine gameplay,
-character controllers, skinned animation, native preview and the separate native-component replay hash.
-Its verification scope is distinct from the earlier [Milestones 4–6](milestones-4-6-review.md) baseline.
+## Develop the engine
 
-The [Milestone 10 camera review](milestone-10-camera-review.md) includes a playable camera room, steps for authoring a
-rig, and measured results across editor, headless and player.
+- [Workspace architecture](architecture.md) maps the applications, crates, and boundaries.
+- [Editor commands](scene-editing.md) describes validation, transactions, selection, and undo.
+- [Project lifecycle](project-lifecycle.md) explains the manifest, multiple scenes, save scopes, and packaging.
+- [Scene format](scene-persistence.md) describes serialized scene data and migrations.
+- [Graphics and assets](graphics-and-assets.md) explains imports, model resources, shaders, and GPU lifetimes.
+- [Timing, input, and camera](timing-input-camera.md) explains the fixed step, game input, and camera behavior.
+- [Testing and validation](testing.md) explains which tests to run for each subsystem.
 
-## Workspace and development
+## Applications and libraries
 
-- [Vulkan scene editor design](../designs/editor-viewport/README.md): Researched navigation, grid, selection, transform tools, native asset placement, rendering architecture, and a game-creation support profile. Proposed viewport work is distinguished from current implementation.
-
-- [Vulkan scene editor implementation](viewport-implementation.md): Native camera, analytic grid, selection, transform gestures, asynchronous asset placement, Hierarchy, rendering contracts, verification and current limits.
-
-- [Angular editor workspace](editor-workspace.md): Guarded File Open, Scene/Game viewport, Hierarchy, live Inspector, assets, component generators and remaining UI limits.
-
-- [Editor flow: startup to project builds](editor-flow.md): Ten method-level graphs trace startup, setup creation,
-  project opening, command queues, save/reload, native rendering, Play, packaging, and admin rebuilds. Marks current
-  UI wiring separately from available backend APIs.
-
-- [Resolved architecture decisions](adr/resolved/README.md): Accepted core lifetimes/prepared activation, serial
-  scheduling/rollback and native typed game progress; implementation and verification are separately scoped.
-
-- [Architecture decisions: reading guide and dependencies](adr/README.md):
-  Start here for the engine parts, the ADR register, the proposed decision sequence, and unresolved choices.
-
-- [ADR-0002: Scene objects, components, presets, and inspector subjects](adr/0002-object-composition-and-components.md):
-  Proposed common object model, capability composition, naming, defaults, and migration from existing scene data.
-
-- [ADR-0003: Lightweight Rust–TypeScript contracts and transport](adr/0003-rust-typescript-bridge.md):
-  Research and proposed JSON/typed IPC architecture, generated contracts, binary alternatives, and measurement plan.
-
-- [ADR-0001: Typed editor commands, change messages, and project builds](adr/0001-editor-command-pipeline.md):
-  Accepted architecture for the editor client, recorded UI intent, runtime synchronization, and explicit build jobs;
-  implementation is partial; substantial editing/build UI and protocol work remains.
-
-- [Project lifecycle and multi-scene authoring](project-lifecycle.md): Project schema 3, protocol 2, shared settings,
-  scene IDs, retained
-  drafts/history, save/reload policies, Angular helpers and all-scene build validation.
-
-- [PROJECT3 backend handoff](project3-handoff.md): Authored project-to-player workflow, steps 36–45 foundations, limits,
-  and a copy-ready teaching-first prompt for proposed steps 46–55.
-
-- [Angular editor and engine foundations: steps 21–35](editor-steps-21-35.md): Typed integration without UI composition,
-  camera/snapping/group history, hierarchy/schema3/prefabs, static import, materials/lights, simulation/collision, GPU
-  timestamps, instancing, examples and resources.
-
-- [Editor and rendering changes: steps 11–20](editor-steps-11-20.md): Responsibility, reasoning, exact file map,
-  controls, examples, resources, and automated/native evidence for the native editing prototype.
-
-- [CLI and dashboard usage](usage.md): Prerequisites, setup, installation, editor/launcher startup, dashboard workflows, and troubleshooting.
-- [Workspace architecture](architecture.md): Project responsibilities, dependencies, command flow, rendering ownership, installation, and source generation.
-- [Graphics and assets](graphics-and-assets.md): Caches, shader contracts, GPU lifetimes, adding assets, glTF/GLB import, and material limitations.
-- [Testing and validation](testing.md): Aggregate/focused checks, coverage, build limitations, and manual desktop/GPU validation.
-
-- [Static documentation site](static-site.md): Build, preview, update, test, and host the Markdown-based website.
-
-- Learn how the Play camera responds to moving walls, which colliders block the eye, and how to diagnose a rejected
-  pose. [Timing, input, and camera](timing-input-camera.md#orbit-camera-obstruction).
-
-- Find the current scene format, v1–4 migration, orbit settings, persistent identity, hierarchy and prefab storage.
-  [Scene data, save, and reload](scene-persistence.md).
-
-- [Scene editing](scene-editing.md): Typed editor commands, Edit/Play, selection, transactions, hierarchy, assets, and
-  legacy demo limits.
-
-## Applications
-
-- [Editor frontend](apps/editor/README.md): Setup screen, typed editor service/models, viewport directive,
-  desktop/browser limits, and builds.
-- [Editor desktop host](apps/editor-host/README.md): Tauri configuration, engine state, native commands, launch, and packaging.
-- [Native game demo](apps/game/README.md): Multi-primitive GLB models, scene instances, development/installed modes, packaging limits, and renderer lifecycle.
-- [Engine Admin](apps/admin-dashboard/README.md): Logs, processes, jobs, board, source generation, storage limits, and verification.
-
-## Tools
-
-- [Starter compiler and installer](compiler/README.md): CLI/library contracts, validation, release build/install behavior, and limits.
-
-## Shared crates
-
-- [Bridge](crates/bridge/README.md): Status and typed editor DTOs, protocol/schema versions, consumers, and contract
-  changes.
-- [Logger](crates/logger/README.md): Diagnostics, records, configuration, storage, redaction, panic/shutdown behavior, and measurements.
-- [Renderer](crates/renderer/README.md): Vulkan requirements, probe, APIs, shader builds, ownership, and verification.
-- [Runtime](crates/runtime/README.md): Shared scenes, models, assets, transforms, status engine, and verification.
-
-## Existing design and tool references
-
-These documents remain in `designs`. Requirements can describe future work; consult project guides and implementation status for current behavior.
-
-- [Error handling design and implementation plan](../designs/error-handling.md): Proposed typed errors, Tauri contracts,
-  recovery rules, and implementation steps for every app, crate, and repository tool.
-
-- [Automation and logging PRD](../designs/automation-and-logging-prd.md): Requirements, delivery steps, status, and future decisions.
-- [Project installation pipeline](../designs/project-installation.md): Editor/compiler installation sequence and starter behavior.
-- [Terminal launcher](../designs/terminal-launcher.md): Launcher actions, terminal/process lifetimes, and verification.
-- [Repository test notes](../designs/testing.md): Original aggregate-runner instructions and coverage limits.
+- [Angular Editor](apps/editor/README.md) and [desktop Editor host](apps/editor-host/README.md)
+- [Native Player](apps/game/README.md) and [Admin Dashboard](apps/admin-dashboard/README.md)
+- [Project compiler](compiler/README.md)
+- [Bridge](crates/bridge/README.md), [Runtime](crates/runtime/README.md), [Renderer](crates/renderer/README.md), and [Logger](crates/logger/README.md)
+- [Documentation site](static-site.md)
