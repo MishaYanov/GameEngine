@@ -2,6 +2,7 @@
 
 mod bundle;
 pub mod knowledge;
+pub mod mcp_wire;
 pub mod session;
 mod tools;
 

@@ -9,6 +9,7 @@ mod camera_preview;
 mod commands;
 mod editor;
 mod layout_preferences;
+mod mcp_access;
 mod project_location;
 mod release_resources;
 mod state;
@@ -45,6 +46,7 @@ pub fn run() {
 			if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Started) {
 				let state = webview.state::<EditorState>();
 				state.agent_sessions.invalidate();
+				state.mcp_access.invalidate();
 				state.exit.reset_window_close_page();
 			}
 		})
@@ -76,6 +78,8 @@ pub fn run() {
 			editor_agent_context,
 			editor_agent_session_start,
 			editor_agent_session_stop,
+			editor_mcp_grant,
+			editor_mcp_revoke,
 			editor_runtime_inspect,
 			editor_review_play_transforms,
 			create_project,

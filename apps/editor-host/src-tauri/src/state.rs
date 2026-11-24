@@ -89,6 +89,7 @@ impl EditorExitState {
 
 pub struct EditorState {
 	pub(crate) agent_sessions: Arc<crate::agent_session::AgentSessions>,
+	pub(crate) mcp_access: Arc<crate::mcp_access::Access>,
 	pub engine_status: Arc<Mutex<Option<EngineStatusDto>>>,
 	pub editor: Arc<Mutex<Option<crate::editor::EditorWorkspace>>>,
 	pub viewport: Arc<Mutex<crate::viewport::ViewportHost>>,
@@ -104,6 +105,7 @@ impl Default for EditorState {
 		))));
 		Self {
 			agent_sessions: Arc::new(crate::agent_session::AgentSessions::default()),
+			mcp_access: Arc::new(crate::mcp_access::Access::default()),
 			engine_status: Arc::new(Mutex::new(None)),
 			editor,
 			viewport,

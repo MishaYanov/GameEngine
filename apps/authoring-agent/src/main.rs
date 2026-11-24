@@ -1,5 +1,6 @@
 //! Stdio transport for one explicitly scoped local authoring worker.
 
+mod mcp;
 mod ollama;
 
 use authoring_agent::{
@@ -161,7 +162,17 @@ fn engine_sources() -> Result<Vec<ApprovedSource>, &'static str> {
 }
 
 fn main() {
-	let outcome = Options::parse(env::args_os().skip(1)).and_then(run);
+	let mut args = env::args_os().skip(1).peekable();
+	let outcome = if args.peek().is_some_and(|arg| arg == "--mcp") {
+		args.next();
+		if args.next().is_some() {
+			Err("MCP mode uses the connection configuration in the process environment")
+		} else {
+			mcp::run()
+		}
+	} else {
+		Options::parse(args).and_then(run)
+	};
 	if let Err(message) = outcome {
 		eprintln!("{message}");
 		std::process::exit(1);

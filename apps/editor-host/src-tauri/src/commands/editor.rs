@@ -26,6 +26,8 @@ mod agent_context;
 pub use agent_context::*;
 mod agent_session;
 pub use agent_session::*;
+mod mcp_access;
+pub use mcp_access::*;
 mod asset_authoring;
 pub use asset_authoring::*;
 mod audio_audition;

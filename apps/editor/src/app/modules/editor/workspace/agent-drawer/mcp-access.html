@@ -1,0 +1,20 @@
+@if (enabled()) {
+    <details>
+        <summary>External MCP access</summary>
+        <p>Allow a local MCP client to read the scene selection and project asset details.</p>
+        @if (configuration(); as current) {
+            <p>Use this configuration in your client. Keep the token private. Access expires after 10 minutes.</p>
+            <label>
+                MCP server configuration
+                <textarea readonly rows="7" [value]="current"></textarea>
+            </label>
+        }
+        <button type="button" [attr.aria-disabled]="pending()" (click)="toggle()">
+            {{ configuration() ? 'Revoke access' : 'Allow read access' }}
+        </button>
+        <p aria-live="polite">{{ status() }}</p>
+        @if (failure(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
+    </details>
+}
