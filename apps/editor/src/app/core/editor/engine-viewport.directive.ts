@@ -32,9 +32,11 @@ export class EngineViewportDirective {
     private releaseViewport: (() => void) | null = null;
     private frame: number | null = null;
     private latestBounds: ViewportBounds | null = null;
+    private pendingHide: ViewportBounds | null = null;
     private lastBounds: ViewportBounds | null = null;
     private flushing = false;
     private attached = false;
+    private acceptsInput = false;
     private intersecting = false;
     private ready = false;
     private destroyed = false;
@@ -88,7 +90,8 @@ export class EngineViewportDirective {
             this.ready = true;
             void this.editor
                 .listenViewportInput((event) => {
-                    if (!this.destroyed && this.attached) this.engineViewportInput.emit(event);
+                    if (!this.destroyed && this.acceptsInput && this.engineViewport() && this.intersecting &&
+                        this.document.visibilityState !== 'hidden') this.engineViewportInput.emit(event);
                 })
                 .then((unlisten) => {
                     if (this.destroyed) unlisten();
@@ -106,12 +109,13 @@ export class EngineViewportDirective {
 
     private schedule(): void {
         if (!this.ready || this.destroyed || this.failed || !this.view) return;
-        // Hidden documents throttle animation frames. Hide the native child
-        // immediately on visibility changes so it can stop allocating frame work.
-        if (this.document.visibilityState === 'hidden') {
+        // Preserve a hide even if a pending visible bounds call delays native input cleanup.
+        if (!this.engineViewport() || this.document.visibilityState === 'hidden') {
+            this.acceptsInput = false;
             if (this.frame !== null) this.view.cancelAnimationFrame(this.frame);
             this.frame = null;
-            this.latestBounds = {...(this.lastBounds ?? this.measure()), visible: false};
+            this.latestBounds = null;
+            this.pendingHide = {...(this.lastBounds ?? this.measure()), visible: false};
             void this.flush();
             return;
         }
@@ -198,9 +202,11 @@ export class EngineViewportDirective {
         if (this.flushing || this.destroyed || this.failed) return;
         this.flushing = true;
         try {
-            while (this.latestBounds && !this.destroyed) {
-                const bounds = this.latestBounds;
-                this.latestBounds = null;
+            while (!this.destroyed) {
+                const bounds = this.pendingHide ?? this.latestBounds;
+                if (!bounds) break;
+                if (this.pendingHide) this.pendingHide = null;
+                else this.latestBounds = null;
                 if (this.lastBounds && sameBounds(this.lastBounds, bounds)) continue;
                 if (!this.attached) {
                     await this.editor.attachViewport(bounds);
@@ -209,9 +215,12 @@ export class EngineViewportDirective {
                     await this.editor.updateViewportBounds(bounds);
                 }
                 this.lastBounds = bounds;
+                this.acceptsInput = bounds.visible && !this.pendingHide;
             }
         } catch (cause: unknown) {
             this.failed = true;
+            this.acceptsInput = false;
+            this.pendingHide = null;
             this.latestBounds = null;
             this.report(cause);
             // A rejected resize must not leave an old visible game surface running
@@ -221,7 +230,7 @@ export class EngineViewportDirective {
             this.lastBounds = null;
         } finally {
             this.flushing = false;
-            if (this.latestBounds && !this.failed && !this.destroyed) void this.flush();
+            if ((this.pendingHide || this.latestBounds) && !this.failed && !this.destroyed) void this.flush();
         }
     }
 
@@ -245,6 +254,7 @@ export class EngineViewportDirective {
         this.ready = false;
         if (this.frame !== null && this.view) this.view.cancelAnimationFrame(this.frame);
         this.frame = null;
+        this.pendingHide = null;
         this.latestBounds = null;
         this.resizeObserver?.disconnect();
         this.intersectionObserver?.disconnect();

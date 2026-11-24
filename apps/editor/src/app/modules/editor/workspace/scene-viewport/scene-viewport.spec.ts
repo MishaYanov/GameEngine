@@ -129,6 +129,43 @@ describe('Scene viewport', () => {
         querySpy.mockRestore();
     });
 
+    it('hides the surface for an HTML popover used by the top menu', async () => {
+        TestBed.configureTestingModule({
+            providers: [{provide: EditorService, useValue: {nativeAvailable: true}}],
+        });
+        TestBed.overrideComponent(SceneViewport, {
+            remove: {imports: [EngineViewportDirective]},
+            add: {imports: [ViewportStub]},
+        });
+        vi.stubGlobal('CSS', {supports: (feature: string) => feature === 'selector(:popover-open)'});
+        const popover = document.createElement('div');
+        const query = document.querySelector.bind(document);
+        let open = false;
+        const querySpy = vi.spyOn(document, 'querySelector').mockImplementation(selector =>
+            selector === ':popover-open' ? (open ? popover : null) :
+                query(selector === 'dialog:modal' ? 'dialog[open]' : selector));
+        document.body.append(popover);
+        try {
+            const fixture = TestBed.createComponent(SceneViewport);
+            await fixture.whenStable();
+            const directive = fixture.debugElement.query(By.directive(ViewportStub)).injector.get(ViewportStub);
+
+            open = true;
+            popover.dispatchEvent(new Event('toggle'));
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(false);
+
+            open = false;
+            popover.dispatchEvent(new Event('toggle'));
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(true);
+        } finally {
+            popover.remove();
+            querySpy.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('hides the native surface for context menus and respects disabled and modal state when they close', async () => {
         TestBed.configureTestingModule({
             providers: [{provide: EditorService, useValue: {nativeAvailable: true}}],
@@ -186,6 +223,37 @@ describe('Scene viewport', () => {
             fixture.detectChanges();
             expect(directive.engineViewport()).toBe(true);
         });
+
+        document.body.append(modal);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(false);
+        });
+        openMenu();
+        modal.remove();
+        await fixture.whenStable();
+        fixture.detectChanges();
+        expect(directive.engineViewport()).toBe(false);
+
+        const actions = vi.fn();
+        const inputs = vi.fn();
+        fixture.componentInstance.editorActionRequested.subscribe(actions);
+        fixture.componentInstance.viewportInput.subscribe(inputs);
+        const saveInput: ViewportInput = {
+            kind: 'key_down', code: 'KeyS', repeat: false, position: null, extent: [640, 480], button: null, delta: null,
+            modifiers: {shift: false, control: true, alt: false, super_key: false},
+        };
+        directive.engineViewportInput.emit(saveInput);
+        expect(inputs).not.toHaveBeenCalled();
+        expect(actions).not.toHaveBeenCalled();
+        menu.close(false);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(directive.engineViewport()).toBe(true);
+        });
+        directive.engineViewportInput.emit(saveInput);
+        expect(inputs).toHaveBeenCalledExactlyOnceWith(saveInput);
+        expect(actions).toHaveBeenCalledExactlyOnceWith('document.save');
         querySpy.mockRestore();
     });
 });

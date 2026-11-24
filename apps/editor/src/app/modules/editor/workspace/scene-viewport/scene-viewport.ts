@@ -36,47 +36,54 @@ export class SceneViewport {
     readonly viewportError = output<EditorClientError>();
     protected readonly nativeAvailable = inject(EditorService).nativeAvailable;
     protected readonly error = signal<string | null>(null);
-    private readonly modalOpen = signal(false);
+    private readonly domOverlayOpen = signal(false);
     private readonly contextMenu = inject(ContextMenuService);
-    protected readonly active = computed(() => this.enabled() && !this.modalOpen() && !this.contextMenu.request());
+    protected readonly active = computed(() => this.enabled() && !this.domOverlayOpen() && !this.contextMenu.request());
     private readonly viewport = viewChild<EngineViewportDirective>('viewport');
     private readonly surface = viewChild<ElementRef<HTMLElement>>('surface');
     private readonly viewTools = inject(ViewportEditorService, {optional: true});
     private releaseSurface: (() => void) | null = null;
     private readonly document = inject(DOCUMENT);
     private observer: MutationObserver | undefined;
+    private readonly updateDomOverlays = (): void => {
+        const popoversSupported = this.document.defaultView?.CSS?.supports('selector(:popover-open)');
+        this.domOverlayOpen.set(!!this.document.querySelector('dialog:modal') ||
+            (popoversSupported === true && !!this.document.querySelector(':popover-open')));
+    };
 
     constructor() {
         afterNextRender(() => {
             if (!this.nativeAvailable) return;
             const surface = this.surface();
             if (surface) this.releaseSurface = this.viewTools?.registerSurface(surface.nativeElement) ?? null;
-            // Native child surfaces sit above WebView content. Hide them for menus and modal dialogs.
-            const update = () => this.modalOpen.set(!!this.document.querySelector('dialog:modal'));
-            update();
+            // Native child surfaces sit above WebView dialogs and popovers.
+            this.updateDomOverlays();
+            this.document.addEventListener('toggle', this.updateDomOverlays, true);
+            const overlaySelector = 'dialog, [popover]';
             this.observer = new MutationObserver((records) => {
                 if (
                     records.some(
                         (record) =>
-                            (record.type === 'attributes' && record.target instanceof HTMLDialogElement) ||
+                            (record.type === 'attributes' && (record.attributeName === 'popover' || record.target instanceof HTMLDialogElement)) ||
                             [...record.addedNodes, ...record.removedNodes].some(
                                 (node) =>
                                     node instanceof Element &&
-                                    (node.matches('dialog') || !!node.querySelector('dialog')),
+                                    (node.matches(overlaySelector) || !!node.querySelector(overlaySelector)),
                             ),
                     )
                 )
-                    update();
+                    this.updateDomOverlays();
             });
             this.observer.observe(this.document.body, {
                 subtree: true,
                 childList: true,
                 attributes: true,
-                attributeFilter: ['open'],
+                attributeFilter: ['open', 'popover'],
             });
         });
         inject(DestroyRef).onDestroy(() => {
             this.observer?.disconnect();
+            this.document.removeEventListener('toggle', this.updateDomOverlays, true);
             this.releaseSurface?.();
         });
     }
@@ -87,6 +94,7 @@ export class SceneViewport {
     }
 
     protected inputReceived(input: ViewportInput): void {
+        if (!this.active()) return;
         this.viewportInput.emit(input);
         const action = resolveNativeEditorShortcut(input);
         if (action) this.editorActionRequested.emit(action);
