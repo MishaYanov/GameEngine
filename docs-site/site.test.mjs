@@ -84,7 +84,7 @@ test('publishes teaching guides and keeps project history out of pages, links an
     } finally { dom.window.close(); }
   }
   for (const route of ['docs/adr/README.html', 'docs/milestones-4-6-review.html',
-    'designs/editor-viewport/adr-implementation-203-222.html', 'history/README.html',
+    'designs/editor-viewport/adr-implementation-203-222.html', 'history/README.html', 'history/roadmaps/adr-implementation-223-232.html',
     'docs/verification/milestone-10-camera-route.json', 'history/verification/milestone-10-camera-route.json']) {
     await assert.rejects(readFile(new URL('./dist/' + route, import.meta.url)), {code: 'ENOENT'});
   }

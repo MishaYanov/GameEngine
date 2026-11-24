@@ -1,7 +1,8 @@
 # Architecture decisions: reading guide and dependencies
 
 For the current code and acceptance scope for decisions 0001–0010, see the
-[implementation record](../reviews/architecture-implementation.md).
+[implementation record](../reviews/architecture-implementation.md). For decisions 0011–0014, see the
+[persistence, viewport, Blender and MCP verification](../reviews/persistence-viewport-blender-mcp.md).
 
 This guide explains which part of the engine each ADR covers, which decisions to read first, and what still needs
 evidence. ADR-0001 records accepted direction with partial workspace implementation; substantial UI/protocol/build work remains. On 2026-10-29, core

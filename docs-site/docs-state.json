@@ -1,7 +1,7 @@
 {
-  "last_checked_commit": "ad909d9de3cc25a2b714ad7489c0103624bede0d",
+  "last_checked_commit": "879050c4fb5b17ad331b6b9c79058a7fb5e0fa1a",
   "last_checked_date": "2026-11-24",
-  "last_documentation_update_commit": "eb4d7fa533a2a3081d8de7ccf680fd2d8ab96bc1",
+  "last_documentation_update_commit": "d1ceea447b06f9c81aa045c0dba1e64586ae08f4",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The object authoring roadmap uses the inspected editor and engine working tree. Older entries retain their original verification evidence.",
   "conditional_controls_and_object_scripts_proposal": {
@@ -6019,6 +6019,24 @@
     "verification_limits": [
       "Prior entries preserve their source paths and verification for their original Git snapshots.",
       "This checkpoint covers the local documentation build. Publication and installer acceptance use separate workflows."
+    ]
+  },
+  "persistence_viewport_blender_mcp_guides": {
+    "inspected_head": "879050c4fb5b17ad331b6b9c79058a7fb5e0fa1a",
+    "paths": [
+      "docs/project-lifecycle.md",
+      "docs/viewport-implementation.md",
+      "docs/graphics-and-assets.md",
+      "docs/editor-workspace.md"
+    ],
+    "scope": "Save and recovery, Windows viewport overlays, Blender static GLB export and reimport, and the Agent external MCP workflow.",
+    "verification": [
+      "The site built and link-checked 28 pages. All eight site tests passed, including the history exclusion.",
+      "The Windows host restored the native viewport across overlays, minimize and restore, and a move from 120 to 96 DPI.",
+      "Blender 4.0.2 and 5.3.0 outputs passed native import and reimport. A separate MCP worker passed the native protocol tests."
+    ],
+    "verification_limits": [
+      "Manual installed MCP consent and clean-machine installer acceptance were outside this run."
     ]
   }
 }

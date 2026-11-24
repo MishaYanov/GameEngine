@@ -131,6 +131,32 @@ Props, linked source versions, inactive scenes and retained edits.
 The importer extracts mesh identity in `crates/runtime/src/assets/project_assets/mesh_source.rs`.
 See [Performance checks](performance-baseline.md) for ways to measure asset preparation.
 
+### Export static meshes from Blender
+
+From the engine repository, zip the add-on directory with its folder included.
+
+```powershell
+New-Item -ItemType Directory -Force .\target | Out-Null
+Compress-Archive -LiteralPath .\integrations\blender\game_engine_export -DestinationPath .\target\game-engine-blender.zip
+```
+
+1. In Blender Preferences, use **Add-ons → Install…** or **Install from Disk…** in the Extensions menu.
+   Select the ZIP and enable **Game Engine Static GLB**.
+2. In Object Mode, select the meshes and their parents, including Empty objects. Use a scene Unit Scale of 1.
+   Apply all modifiers to a copy of the geometry before exporting.
+3. Choose **File → Export → Game Engine (.glb)**. Write the GLB to an export folder outside the project's
+   managed asset directory. Save the Blender file after the first successful export to keep its mesh IDs.
+4. Use **Assets → Import GLB…** for the first version. When updating an existing asset, select it and use
+   **Reimport GLB…**. Scene and Prop references keep their mesh IDs when the exporter supplies the same IDs.
+
+The static profile accepts triangle meshes, transforms, normals, the first UV map, and opaque base color.
+Use a supported PNG or JPEG for base-color textures. Apply or remove unsupported modifiers, shape keys,
+other material maps, animation, cameras, and lights before using this static path. The exported GLB includes
+the profile version and source provenance. The installed Player loads the GLB and its embedded resources.
+
+Keep the add-on in `integrations/blender/game_engine_export`. The fixture generator in
+`integrations/blender/build_static_fixture.py` produces two revisions for the managed reimport check.
+
 ### Models, instances, and GPU caches
 
 `AssetManager::load_model` resolves a path inside its canonical root and returns a `Model` containing one `ModelPart`

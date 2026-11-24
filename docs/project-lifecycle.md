@@ -188,6 +188,21 @@ later catalog commit fails; it preserves the old file/authored state on that fai
 history, not physical disk writes. After Save As, save the manifest separately. Save dirty scenes individually before a
 build; saving the manifest alone cannot make those documents clean.
 
+## Protect and recover unsaved work
+
+The Editor records the disk contents when it opens each project file. If a scene or manifest has changed
+externally, Save blocks replacement. Review the changes before reloading the file. **Save All results**
+lists written files, conflicts and files still waiting to be saved. After a partial failure, earlier successful
+saves remain recorded and the remaining drafts stay dirty.
+
+The Editor periodically checkpoints committed scene and project drafts while editing. On Open, **Recover
+unsaved drafts** shows the affected files. Click **Restore drafts** to reopen them as unsaved edits. The project
+files keep their existing contents until you Save. **Keep disk version** discards the selected recovery checkpoint.
+If a checkpoint conflicts with newer disk contents, the Editor shows the conflict and keeps the current files.
+
+Recovery is scoped to the project's current location. It covers scene and manifest drafts up to the checkpoint
+size limit. Commit an active edit before relying on recovery. Undo history starts fresh after recovery.
+
 ## Angular and host contract
 
 The host advertises editor protocol 2 and scene schema 8. `EditorService.loadCapabilities()` requires protocol 2 and

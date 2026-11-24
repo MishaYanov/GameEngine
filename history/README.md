@@ -11,6 +11,7 @@ The [developer guides](../docs/main.md) cover using and maintaining the current 
 
 ## Roadmaps
 
+- [Milestones 223–232 · Persistence, viewport, Blender and Agent](roadmaps/adr-implementation-223-232.md)
 - [Milestones 203–222 · Architecture implementation](roadmaps/adr-implementation-203-222.md)
 - [Milestones 163–202 · Object authoring and Agent](roadmaps/object-authoring-roadmap-163-202.md)
 - [Milestones 154–162 · Editor access and particles](roadmaps/editor-access-and-particles-154-162.md)
@@ -19,6 +20,8 @@ The [developer guides](../docs/main.md) cover using and maintaining the current 
 - [Windows release refactors](roadmaps/windows-release-step-1.md)
 
 ## Implementation records
+
+- [Persistence, viewport, Blender and MCP verification](reviews/persistence-viewport-blender-mcp.md)
 
 - [Architecture implementation verification](reviews/architecture-implementation.md)
 - [Derived asset cache measurements](reviews/milestone-216-derived-cache.md)

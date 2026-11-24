@@ -613,8 +613,9 @@ boundaries retain their own cleanup rules.
 
 Ordinary HTML cannot be relied on to float above the native child HWND.
 The toolstrip stays outside its aperture; spatial grid/handles/markers are Vulkan.
-WebView modal dialogs suppress the native child through the existing wrapper.
-Native file dialogs remain parented host dialogs.
+WebView modal dialogs, header popovers and shared context menus suppress the native child.
+The surface returns when the last overlay closes. While an overlay owns the screen,
+late native shortcuts are ignored. Native file dialogs remain parented host dialogs.
 Multi-monitor DPI, external capture loss, and driver/device failure require desktop
 acceptance beyond DOM and math tests.
 

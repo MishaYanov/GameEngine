@@ -66,6 +66,17 @@ generated answers, run an already installed local Ollama model and set `ENGINE_A
 launch environment. The worker accepts a loopback port through `ENGINE_AGENT_OLLAMA_PORT`.
 [Agent package acceptance](testing.md#object-authoring-and-agent-package-acceptance)
 
+### Let a local MCP client inspect the Editor
+
+1. Open the right drawer's **Agent** view and expand **External MCP access**.
+2. Choose **Allow read access** and approve the native Editor dialog.
+3. Add the displayed server entry to a local client's stdio MCP configuration. Keep the connection token
+   in that client configuration. Use the path shown for the packaged Agent worker.
+4. Use `editor.inspect` to read the current authored selection and `assets.query` for project catalog details.
+
+The grant lasts ten minutes. **Revoke access** ends it early. Changing projects ends the old connection and
+requires a new grant for that workspace. Stop Play and finish any grouped edit before requesting inspection.
+
 ## One native surface, two views
 
 `EditorWorkspace` owns `WorkspaceViewKind` (`scene-viewport` or `game-preview`) and mounts one persistent `SceneViewport` after a snapshot exists. Scene remains visible during Play, using the editor camera with read-only authoring tools. Game uses the runtime camera and hides editor decoration. Game while stopped shows explanatory empty content. Switching these tabs creates neither a second renderer nor a second simulation.
